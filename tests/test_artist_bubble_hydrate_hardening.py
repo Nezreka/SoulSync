@@ -15,6 +15,8 @@ error so the next report carries the cause.
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -127,9 +129,11 @@ def test_downloads_sections_filter_malformed_bubbles():
     assert _HELPERS_JS.count("Array.isArray(artistDownloadBubbles[artistId].downloads)") >= 2
 
 
-def test_library_init_toast_names_the_real_error():
-    fn = _LIBRARY_JS.split("function initializeLibraryPage")[1].split("function initializeLibrarySearch")[0]
-    assert "error.message" in fn, "the toast should carry the underlying error"
+# initializeLibraryPage's opaque-toast fix retired with the function itself when
+# React took over /library. The equivalent guarantee — a failed artist load
+# surfaces a toast rather than a blank page — is pinned by the Library v2 page's
+# own error state (webui/src/routes/library/-ui/library-v2-page.tsx), which
+# renders the failure instead of blanking the route.
 
 
 def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
@@ -140,7 +144,41 @@ def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
     fn = _HELPERS_JS.split("function showLibraryDownloadsSection")[1].split("function createArtistBubbleCard")[0]
     assert "getElementById('library-artists-grid')" in fn
     assert "artistGrid.parentElement" in fn
-    assert "document.querySelector" not in fn    # the ambiguous global query is gone
-    # the ambiguity is real: both sides carry the class (video first)
+    # The ambiguity is still real: index.html carries the VIDEO library's
+    # .library-content, and a class query could still hit it. The music side is
+    # Library v2 now — it is CSS-module scoped and owns no global class at all,
+    # so the only safe anchor left is the data attribute asserted below.
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    assert index.count('class="library-content"') >= 2
+    react_page = (
+        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-v2-page.tsx"
+    ).read_text(encoding="utf-8")
+    assert index.count('class="library-content"') >= 1, "video library lost its .library-content"
+    assert "data-library-downloads-host" in react_page, "music library lost the bubbles host"
+
+    # The React library page renders a dedicated host and is preferred when
+    # present, so a querySelector is no longer disqualifying on its own — but it
+    # must target a selector that CANNOT match the video side. Anything matching
+    # by class (.library-content and friends) reopens #1038.
+    queried = re.findall(r"document\.querySelector\((['\"])(.+?)\1\)", fn)
+    assert [sel for _, sel in queried] == ["[data-library-downloads-host]"], (
+        f"only the unique React host may be queried here, got {queried}"
+    )
+
+
+def test_react_library_downloads_host_is_unique_to_the_music_page():
+    """The anchor above is only safe while exactly one page renders the host —
+    a second one (notably a video-side copy) would recreate #1038 with a
+    different selector."""
+    hosts = [
+        path
+        for path in _ROOT.joinpath("webui").rglob("*")
+        if path.suffix in {".tsx", ".jsx", ".js", ".html"}
+        and "node_modules" not in path.parts
+        and "dist" not in path.parts
+        and not path.name.endswith(".test.tsx")
+        and "data-library-downloads-host" in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    rendered = [p for p in hosts if p.name != "shared-helpers.js"]
+    assert [p.name for p in rendered] == ["library-v2-page.tsx"], (
+        f"the host must be rendered by the music library page alone, got {rendered}"
+    )

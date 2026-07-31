@@ -102,6 +102,7 @@ import {
   type LibraryV2MatchRelease,
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
+import { useLibraryChanged } from '../-library-v2.live';
 import {
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2AlbumDetail,
@@ -3675,6 +3676,7 @@ export function UnifiedFileRemovalDialog({
 
 export function LibraryV2Page() {
   useReactPageShell('library');
+  useLibraryChanged();
   const search = Route.useSearch();
   const enabledQuery = useQuery(libraryV2EnabledQueryOptions());
 
@@ -3811,6 +3813,18 @@ function ArtistIndexView() {
   const pagination = artistsQuery.data?.pagination;
   const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;
 
+  // showLibraryDownloadsSection (shared-helpers.js) renders the per-artist
+  // download bubbles on the library page. It is bound to `artistDownloadBubbles`
+  // — module state in core.js, fed by download events, not by page load — so it
+  // cannot move in here. It appends into this host, which is rendered with NO
+  // React children so the vanilla function owns the subtree outright and React
+  // never reconciles it away. Kept from the vanilla library page that this page
+  // replaced; tests/test_artist_bubble_hydrate_hardening.py guards the seam.
+  const downloadsHost = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    window.showLibraryDownloadsSection?.();
+  }, []);
+
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -3888,6 +3902,10 @@ function ArtistIndexView() {
           <ArtistTableOptionsMenu columns={artistTableColumns} columnOrder={artistColumnOrder} />
         ) : null}
       </div>
+
+      {/* Host for the vanilla download bubbles — see the note above. Sits
+          directly above the artist list, where the vanilla page put it. */}
+      <div ref={downloadsHost} data-library-downloads-host="" />
 
       {artistsQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>

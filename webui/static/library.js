@@ -1,0 +1,7718 @@
+// LIBRARY PAGE FUNCTIONALITY
+
+function _handoffLibrarySearchToEnhancedSearch(query) {
+    if (typeof navigateToPage !== 'function') return;
+    navigateToPage('search');
+    setTimeout(() => {
+        const input = document.getElementById('enhanced-search-input');
+        if (input && query) {
+            input.value = query;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }, 300);
+}
+
+async function openWatchAllUnwatchedModal() {
+    if (document.getElementById('watch-all-modal-overlay')) return;
+
+    const sourceIdField = currentMusicSourceName === 'iTunes' ? 'itunes_artist_id'
+        : currentMusicSourceName === 'Deezer' ? 'deezer_id' : 'spotify_artist_id';
+    const sourceName = currentMusicSourceName || 'Spotify';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'watch-all-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeWatchAllUnwatchedModal(); };
+
+    overlay.innerHTML = `
+        <div class="watch-all-modal">
+            <div class="watch-all-header">
+                <div class="watch-all-header-content">
+                    <div class="watch-all-header-icon">&#128065;</div>
+                    <div>
+                        <h2 class="watch-all-title">Watch All Unwatched</h2>
+                        <p class="watch-all-subtitle">Add unwatched artists with ${_esc(sourceName)} IDs to your watchlist</p>
+                    </div>
+                </div>
+                <button class="watch-all-close" onclick="closeWatchAllUnwatchedModal()">&times;</button>
+            </div>
+            <div class="watch-all-body">
+                <div class="watch-all-loading-state">
+                    <div class="watch-all-loading-spinner"></div>
+                    <div class="watch-all-loading-text">Loading unwatched artists...</div>
+                    <div class="watch-all-loading-count" id="watch-all-load-count"></div>
+                </div>
+            </div>
+            <div class="watch-all-footer">
+                <button class="watch-all-btn watch-all-btn-cancel" onclick="closeWatchAllUnwatchedModal()">Cancel</button>
+                <button class="watch-all-btn watch-all-btn-primary" id="watch-all-confirm-btn" disabled>Watch All</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Fetch all unwatched artists paginated (SQLite variable limit safe)
+    try {
+        const eligible = [];
+        const ineligible = [];
+        let page = 1;
+        const pageSize = 400;
+        const countEl = document.getElementById('watch-all-load-count');
+
+        while (true) {
+            if (!document.getElementById('watch-all-modal-overlay')) return;
+            if (countEl) countEl.textContent = `${eligible.length + ineligible.length} artists loaded...`;
+
+            const params = new URLSearchParams({ search: '', letter: 'all', page, limit: pageSize, watchlist: 'unwatched' });
+            const response = await fetch(`/api/library/artists?${params}`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'Failed to load artists');
+
+            for (const a of (data.artists || [])) {
+                if (a[sourceIdField]) eligible.push(a);
+                else ineligible.push(a);
+            }
+
+            if (!data.pagination.has_next) break;
+            page++;
+        }
+
+        _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName);
+    } catch (error) {
+        console.error('Error loading unwatched artists:', error);
+        const body = overlay.querySelector('.watch-all-body');
+        if (body) body.innerHTML = `<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#9888;</div><div>Failed to load artists</div><a href="#" onclick="closeWatchAllUnwatchedModal(); openWatchAllUnwatchedModal(); return false;" class="watch-all-retry-link">Retry</a></div>`;
+    }
+}
+
+function _renderWatchAllModalContent(overlay, eligible, ineligible, sourceName) {
+    const body = overlay.querySelector('.watch-all-body');
+    const confirmBtn = overlay.querySelector('#watch-all-confirm-btn');
+
+    if (eligible.length === 0 && ineligible.length === 0) {
+        body.innerHTML = '<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#127925;</div><div>No unwatched artists found</div></div>';
+        return;
+    }
+
+    // Store data for search filtering
+    overlay._watchAllEligible = eligible;
+    overlay._watchAllIneligible = ineligible;
+
+    let html = '';
+
+    // Summary bar (sticky)
+    html += '<div class="watch-all-stats">';
+    html += `<div class="watch-all-stat-card eligible"><div class="watch-all-stat-value">${eligible.length}</div><div class="watch-all-stat-label">Ready to watch</div></div>`;
+    html += `<div class="watch-all-stat-card ineligible"><div class="watch-all-stat-value">${ineligible.length}</div><div class="watch-all-stat-label">No ${_esc(sourceName)} ID</div></div>`;
+    html += `<div class="watch-all-stat-card total"><div class="watch-all-stat-value">${eligible.length + ineligible.length}</div><div class="watch-all-stat-label">Total unwatched</div></div>`;
+    html += '</div>';
+
+    // Search filter
+    if (eligible.length > 10) {
+        html += '<div class="watch-all-search-wrap"><input type="text" class="watch-all-search" id="watch-all-search" placeholder="Filter artists…" oninput="_filterWatchAllList(this.value)"></div>';
+    }
+
+    // Eligible grid
+    if (eligible.length > 0) {
+        html += '<div class="watch-all-section-label">Artists to be watched</div>';
+        html += '<div class="watch-all-grid" id="watch-all-eligible-grid">';
+        html += _buildWatchAllRows(eligible, false);
+        html += '</div>';
+    }
+
+    // Ineligible section
+    if (ineligible.length > 0) {
+        html += `<div class="watch-all-ineligible">
+            <div class="watch-all-ineligible-header" onclick="this.parentElement.classList.toggle('expanded')">
+                <div class="watch-all-ineligible-label">
+                    <span class="watch-all-ineligible-icon">&#9888;</span>
+                    <span>${ineligible.length} artist${ineligible.length !== 1 ? 's' : ''} without ${_esc(sourceName)} ID</span>
+                </div>
+                <span class="watch-all-chevron">&#9660;</span>
+            </div>
+            <div class="watch-all-ineligible-body">
+                <div class="watch-all-ineligible-hint">These artists haven't been matched to ${_esc(sourceName)} yet. The background enrichment worker will match them over time.</div>
+                <div class="watch-all-grid" id="watch-all-ineligible-grid">${_buildWatchAllRows(ineligible, true)}</div>
+            </div>
+        </div>`;
+    }
+
+    if (eligible.length === 0) {
+        html += `<div class="watch-all-empty-state"><div class="watch-all-empty-icon">&#128268;</div><div>None of your unwatched artists have a ${_esc(sourceName)} ID yet</div><div class="watch-all-empty-hint">The background enrichment worker will match them over time.</div></div>`;
+    }
+
+    body.innerHTML = html;
+
+    if (eligible.length > 0 && confirmBtn) {
+        confirmBtn.textContent = `Watch All (${eligible.length})`;
+        confirmBtn.disabled = false;
+        confirmBtn.onclick = () => _confirmWatchAllUnwatched(overlay, eligible.length);
+    }
+}
+
+function _buildWatchAllRows(artists, dimmed) {
+    let html = '';
+    for (const a of artists) {
+        const img = a.image_url
+            ? `<img src="${_esc(a.image_url)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'" loading="lazy"><div class="watch-all-cell-placeholder" style="display:none">&#127925;</div>`
+            : `<div class="watch-all-cell-placeholder">&#127925;</div>`;
+        html += `<div class="watch-all-cell${dimmed ? ' dimmed' : ''}" data-name="${_esc(a.name.toLowerCase())}">
+            <div class="watch-all-cell-img">${img}</div>
+            <div class="watch-all-cell-name" title="${_esc(a.name)}">${_esc(a.name)}</div>
+            <div class="watch-all-cell-meta">${a.track_count || 0} tracks</div>
+        </div>`;
+    }
+    return html;
+}
+
+function _filterWatchAllList(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('#watch-all-eligible-grid .watch-all-cell').forEach(cell => {
+        cell.style.display = !q || cell.dataset.name.includes(q) ? '' : 'none';
+    });
+}
+
+async function _confirmWatchAllUnwatched(overlay, expectedCount) {
+    const confirmBtn = overlay.querySelector('#watch-all-confirm-btn');
+    const cancelBtn = overlay.querySelector('.watch-all-btn-cancel');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Adding...'; }
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/library/watchlist-all-unwatched', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            const body = overlay.querySelector('.watch-all-body');
+            body.innerHTML = `<div class="watch-all-results">
+                <div class="watch-all-results-icon">&#10003;</div>
+                <div class="watch-all-results-title">Added ${data.added} artist${data.added !== 1 ? 's' : ''} to watchlist</div>
+                ${data.skipped_already > 0 ? `<div class="watch-all-results-detail">${data.skipped_already} already watched</div>` : ''}
+                ${data.skipped_no_id > 0 ? `<div class="watch-all-results-detail">${data.skipped_no_id} skipped (no external ID)</div>` : ''}
+            </div>`;
+
+            if (confirmBtn) confirmBtn.style.display = 'none';
+            if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.textContent = 'Close'; }
+            overlay.dataset.needsRefresh = 'true';
+        } else {
+            throw new Error(data.error || 'Failed to add artists');
+        }
+    } catch (error) {
+        console.error('Error in watch all:', error);
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = `Watch All (${expectedCount})`; }
+        if (cancelBtn) cancelBtn.disabled = false;
+        showToast('Failed to add artists to watchlist', 'error');
+    }
+}
+
+function closeWatchAllUnwatchedModal() {
+    const overlay = document.getElementById('watch-all-modal-overlay');
+    if (!overlay) return;
+    const needsRefresh = overlay.dataset.needsRefresh === 'true';
+    overlay.remove();
+    if (!needsRefresh) return;
+    // This modal is the last vanilla thing that changes the artist list, and
+    // the list is React now — announcing it is the whole refresh path.
+    window.dispatchEvent(new CustomEvent('ss:library-changed'));
+}
+
+// ===============================================
+// Artist Detail Page Functions
+// ===============================================
+
+// Artist detail page state
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
+// Stack of origins for the back-button label. Each entry: {type:'page', pageId}
+// or {type:'artist', name}. Pushed on forward navigation, popped on back.
+// Separate from browser history — only used for the label display.
+let _artistDetailLabelStack = [];
+let _artistDetailGoingBack = false;
+
+// Exported for the React artist-detail page, which renders the back button now.
+// Arrivals from a still-vanilla page (search, label detail, enrichment) push
+// onto this stack here, so React has to read the SAME array to label the button
+// "Back to Search" rather than a bare "Back".
+if (typeof window !== 'undefined') {
+    window.artistDetailBackLabels = _ARTIST_DETAIL_BACK_LABELS;
+    window.artistDetailLabelStack = _artistDetailLabelStack;
+}
+
+let artistDetailPageState = {
+    isInitialized: false,
+    currentArtistId: null,
+    currentArtistName: null,
+    currentArtistSource: null,
+    enhancedView: false,
+    enhancedData: null,
+    expandedAlbums: new Set(),
+    selectedTracks: new Set(),
+    editingCell: null,
+    enhancedTrackSort: {}
+};
+
+// Exported for the React artist-detail page. `let` at the top level of a
+// classic script is a global LEXICAL binding and never lands on window, so a
+// module cannot see it — yet a dozen functions here (playArtistRadio,
+// openArtistArtPicker, openDiscographyModal, deleteLibraryAlbum, runEnrichment,
+// …) read this object when the React page invokes them. Same object, not a
+// copy, so both sides stay in step.
+if (typeof window !== 'undefined') window.artistDetailPageState = artistDetailPageState;
+
+function clearArtistDetailPageState() {
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+        artistDetailPageState.completionController = null;
+    }
+
+    artistDetailPageState.currentArtistId = null;
+    artistDetailPageState.currentArtistName = null;
+    artistDetailPageState.currentArtistSource = null;
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener(PAGE_WILL_CHANGE_EVENT, (event) => {
+        const detail = event.detail || {};
+        if (detail.fromPageId === 'artist-detail' && detail.toPageId !== 'artist-detail') {
+            clearArtistDetailPageState();
+        }
+    });
+}
+
+
+// Maximum visible characters of an artist name in the sidebar Library
+// breadcrumb. Names longer than this get truncated with an ellipsis so the
+// nav button width stays consistent across the rest of the sidebar.
+const _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN = 14;
+
+
+function _updateSidebarLibraryBreadcrumb() {
+    // Rewrite the Library nav button label between plain "Library" and a
+    // "Library / <Artist>" breadcrumb depending on whether the user is on
+    // the artist-detail pseudo-page. Pure visual — touches no app state.
+    const btn = document.querySelector('[data-page="library"]');
+    if (!btn) return;
+    const textEl = btn.querySelector('.nav-text');
+    if (!textEl) return;
+
+    const onArtistDetail = (typeof currentPage === 'string' && currentPage === 'artist-detail');
+    const artistName = onArtistDetail ? (artistDetailPageState.currentArtistName || '') : '';
+
+    if (!onArtistDetail || !artistName) {
+        // Default state: plain "Library" label. Use textContent so we wipe
+        // any previously-injected breadcrumb spans cleanly.
+        textEl.textContent = 'Library';
+        textEl.removeAttribute('data-breadcrumb');
+        return;
+    }
+
+    // Truncate long names so the button width stays consistent.
+    let display = artistName;
+    if (display.length > _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN) {
+        display = display.slice(0, _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN - 1).trimEnd() + '…';
+    }
+
+    // Render via inline spans so CSS can style the root / separator / context
+    // independently. Escape via textContent on individual spans.
+    textEl.setAttribute('data-breadcrumb', '1');
+    textEl.textContent = '';
+    const root = document.createElement('span');
+    root.className = 'nav-text-root';
+    root.textContent = 'Library';
+    const sep = document.createElement('span');
+    sep.className = 'nav-text-sep';
+    sep.textContent = ' / ';
+    const ctx = document.createElement('span');
+    ctx.className = 'nav-text-context';
+    ctx.textContent = display;
+    ctx.title = artistName;  // full name on hover
+    textEl.appendChild(root);
+    textEl.appendChild(sep);
+    textEl.appendChild(ctx);
+}
+
+// Expose so init.js navigateToPage can call it without a circular import.
+if (typeof window !== 'undefined') {
+    window._updateSidebarLibraryBreadcrumb = _updateSidebarLibraryBreadcrumb;
+}
+
+
+function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
+    const normalizedSource = sourceOverride || null;
+
+    // Skip reload if already on this exact artist/source (prevents double-fetch
+    // when the router fires activateLegacyPath after navigating to an
+    // /artist-detail/:source/:id URL).
+    if (artistId &&
+            String(artistId) === String(artistDetailPageState.currentArtistId) &&
+            String(normalizedSource || '') === String(artistDetailPageState.currentArtistSource || '')) {
+        if (currentPage !== 'artist-detail') {
+            navigateToPage('artist-detail', {
+                artistId,
+                artistSource: normalizedSource,
+                skipRouteChange: options.skipRouteChange === true
+            });
+        }
+        return;
+    }
+    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
+
+    // Maintain the label stack. Back navigations pop; forward navigations push.
+    // Only treat the flag as a back-nav signal when we're still on artist-detail —
+    // if history.back() landed on a non-artist page first, the flag is stale.
+    if (_artistDetailGoingBack && currentPage === 'artist-detail') {
+        _artistDetailLabelStack.pop();
+        _artistDetailGoingBack = false;
+    } else {
+        _artistDetailGoingBack = false; // clear any stale flag
+        if (currentPage !== 'artist-detail') {
+            // Cleared IN PLACE, not reassigned: window.artistDetailLabelStack
+            // holds this same array for the React page, and swapping the
+            // binding would leave React reading a detached copy.
+            _artistDetailLabelStack.length = 0; // fresh chain from a non-artist page
+        }
+        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistName) {
+            _artistDetailLabelStack.push({ type: 'artist', name: artistDetailPageState.currentArtistName });
+        } else {
+            const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
+                ? currentPage : 'library';
+            _artistDetailLabelStack.push({ type: 'page', pageId });
+        }
+    }
+
+    // Abort any in-progress completion stream
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+        artistDetailPageState.completionController = null;
+    }
+
+    // Cancel any active inline edit and close manual match modal before resetting state
+    cancelInlineEdit();
+    const existingMatchOverlay = document.getElementById('enhanced-manual-match-overlay');
+    if (existingMatchOverlay) existingMatchOverlay.remove();
+
+    // Store current artist info and reset enhanced view state
+    artistDetailPageState.currentArtistId = artistId;
+    artistDetailPageState.currentArtistName = artistName;
+    artistDetailPageState.currentArtistSource = normalizedSource;
+    artistDetailPageState.enhancedData = null;
+    artistDetailPageState.expandedAlbums = new Set();
+    // Cleared IN PLACE: React mirrors its selection into this same Set, and the
+    // vanilla track-delete path deletes from it. Swapping the object out would
+    // leave both writing somewhere nobody reads.
+    artistDetailPageState.selectedTracks.clear();
+    artistDetailPageState.enhancedTrackSort = {};
+    artistDetailPageState.enhancedView = false;
+
+    // Hand off. React owns this route outright now — this function's remaining
+    // job is the state written above, which a dozen globals over in
+    // stats-automations.js and the Enhanced modals read back out.
+    //
+    // What used to follow here (resetting the legacy view chrome, then
+    // initializeArtistDetailPage + loadArtistDetailData) rendered the vanilla
+    // page on top of the React one: both target the same ids, so
+    // applyDiscographyFilters hid React's .release-card elements using legacy
+    // filter state and the discography vanished. It ran behind a manifest
+    // check; with the vanilla page deleted there is nothing left to run.
+    navigateToPage('artist-detail', {
+        artistId,
+        artistSource: normalizedSource,
+        skipRouteChange: options.skipRouteChange === true
+    });
+}
+
+
+async function playTrackByMetadata(title, artist, album = '') {
+    // 1. Try the library first — fastest and best quality if owned.
+    try {
+        const resp = await fetch('/api/stats/resolve-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, artist }),
+        });
+        const data = await resp.json();
+        if (data.success && data.track) {
+            const track = data.track;
+            playLibraryTrack(
+                {
+                    id: track.id,
+                    title: track.title,
+                    file_path: track.file_path,
+                    bitrate: track.bitrate,
+                    artist_id: track.artist_id,
+                    album_id: track.album_id,
+                    _stats_image: track.image_url || null,
+                },
+                track.album_title || album || '',
+                track.artist_name || artist || '',
+            );
+            return;
+        }
+    } catch (e) {
+        console.debug('Library resolve failed, will try streaming fallback:', e);
+    }
+
+    // 2. Library miss — fall back to streaming via the enhanced-search streamer.
+    if (typeof showLoadingOverlay === 'function') {
+        showLoadingOverlay(`Searching for ${title}...`);
+    }
+    try {
+        const streamResp = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album,
+                duration_ms: 0,
+            }),
+        });
+        const streamData = await streamResp.json();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+
+        if (streamData.success && streamData.result) {
+            if (typeof startStream === 'function') {
+                await startStream(streamData.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(streamData.error || 'Track not found in library or any source', 'error');
+        }
+    } catch (e) {
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+        showToast('Failed to play track', 'error');
+        console.error('Stream fallback failed:', e);
+    }
+}
+
+
+// ── discography gap-fill (#1067): "show me what my source is missing" ───────
+// A VIEW option (on-page chip, persisted per browser — same pattern as the
+// chat SoulSync-only filter). The base discography renders untouched; this
+// only ever APPENDS a section of releases other sources know, each card
+// carrying its owning source so clicks flow through the existing per-source
+// machinery (see the _gap_source override in the card click handler).
+
+function _gapFillEnabled() {
+    try { return localStorage.getItem('discog_gapfill') === '1'; } catch (e) { return false; }
+}
+
+// JS mirror of the backend's conservative same-release rule (title normalized
+// with edition parens KEPT + year within ±1 or unknown) — used for the final
+// client-side dedup against the page's library-merged discography.
+function _gapNorm(t) {
+    return String(t || '').toLowerCase().replace(/[^\w\s()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function _gapYear(card) {
+    let y = card.year;
+    if (y == null && card.release_date) y = String(card.release_date).slice(0, 4);
+    y = parseInt(y, 10);
+    return (y >= 1000 && y <= 3000) ? y : null;
+}
+function _gapSameRelease(a, b) {
+    const ta = _gapNorm(a.title || a.name), tb = _gapNorm(b.title || b.name);
+    if (!ta || ta !== tb) return false;
+    const ya = _gapYear(a), yb = _gapYear(b);
+    if (ya == null || yb == null) return true;
+    return Math.abs(ya - yb) <= 1;
+}
+
+
+/**
+ * Helper function to get artist image from the current artist detail page
+ */
+function getArtistImageFromPage() {
+    try {
+        // Try to get from artist detail image element
+        const artistDetailImage = document.getElementById('artist-detail-image');
+        if (artistDetailImage && artistDetailImage.src && artistDetailImage.src !== window.location.href) {
+            return artistDetailImage.src;
+        }
+
+        // Try to get from artist hero image
+        const artistImage = document.getElementById('artist-image');
+        if (artistImage) {
+            const bgImage = window.getComputedStyle(artistImage).backgroundImage;
+            if (bgImage && bgImage !== 'none') {
+                // Extract URL from CSS background-image
+                const urlMatch = bgImage.match(/url\(["']?(.*?)["']?\)/);
+                if (urlMatch && urlMatch[1]) {
+                    return urlMatch[1];
+                }
+            }
+        }
+
+        return null;
+    } catch (error) {
+        console.warn('Error getting artist image from page:', error);
+        return null;
+    }
+}
+
+// ================================================================================================
+// LIBRARY COMPLETION STREAMING - Two-phase lazy-load pattern
+// ================================================================================================
+
+
+// ===============================================
+// Discography Filter Functions
+// ===============================================
+
+
+// ==================== Download Discography Modal ====================
+
+async function openDiscographyModal() {
+    // Support both Artists search page and Library artist detail page
+    let artist = artistsPageState.selectedArtist;
+    let discography = artistsPageState.artistDiscography;
+    let completionCache = artistsPageState.cache.completionData;
+
+    // Fallback to Library page state if Artists page has no data for THIS artist
+    const libId = artistDetailPageState.currentArtistId;
+    const libName = artistDetailPageState.currentArtistName;
+    const isLibraryPage = libId && libName;
+    const artistsPageMatchesLibrary = artist && isLibraryPage && artist.name?.toLowerCase() === libName?.toLowerCase();
+
+    if (isLibraryPage && (!artist || !discography || !artistsPageMatchesLibrary)) {
+        // On library page — don't trust stale artistsPageState from a previous Artists page search
+        artist = { id: libId, name: libName, image_url: document.getElementById('artist-detail-image')?.src || '' };
+        discography = null;
+
+        let metadataArtistId = null;
+        try {
+            showToast('Loading discography...', 'info');
+
+            // Fetch the artist's metadata IDs from the DB (enhanced view may not be loaded)
+            let lookupId = libId;
+            try {
+                const idRes = await fetch(`/api/library/artist/${libId}/enhanced`);
+                const idData = await idRes.json();
+                if (idData.success && idData.artist) {
+                    const a = idData.artist;
+                    metadataArtistId = a.spotify_artist_id || a.itunes_artist_id || a.deezer_id || null;
+                    lookupId = metadataArtistId || libId;
+                }
+            } catch (e) {
+                console.debug('[Discography] Could not fetch artist IDs, using DB id');
+            }
+
+            const res = await fetch(`/api/artist/${encodeURIComponent(lookupId)}/discography?artist_name=${encodeURIComponent(libName)}`);
+            const data = await res.json();
+
+            if (!data.error) {
+                discography = { albums: data.albums || [], eps: data.eps || [], singles: data.singles || [] };
+                if (discography.albums.length > 0 || discography.eps.length > 0 || discography.singles.length > 0) {
+                    artistsPageState.artistDiscography = discography;
+                    artistsPageState.sourceOverride = data.source || artistsPageState.sourceOverride || null;
+                    // Use metadata source ID for the modal (needed for download API calls)
+                    if (metadataArtistId) artist.id = metadataArtistId;
+                    artist.source = data.source || null;
+                    artistsPageState.selectedArtist = artist;
+                } else {
+                    discography = null;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load discography:', e);
+        }
+    }
+
+    if (!artist || !discography) {
+        showToast('No discography found. Try searching this artist from the Search page instead.', 'error');
+        return;
+    }
+
+    const completionData = (completionCache || {})[artist.id] || {};
+    const allReleases = [
+        ...(discography.albums || []).map(a => ({ ...a, _type: 'album' })),
+        ...(discography.eps || []).map(a => ({ ...a, _type: 'ep' })),
+        ...(discography.singles || []).map(a => ({ ...a, _type: 'single' })),
+    ];
+
+    // Gap-fill (#1067): when '+ Other sources' is on, the Download Discography
+    // modal includes those releases too — each keeps its own source, which the
+    // backend already honors per entry (entry['source']).
+    if (typeof _gapFillEnabled === 'function' && _gapFillEnabled()) {
+        try {
+            const gp = new URLSearchParams();
+            if (artist.name) gp.set('artist_name', artist.name);
+            if (artist.source) gp.set('base_source', artist.source);
+            const gres = await fetch(`/api/artist/${encodeURIComponent(artist.id)}/discography/gap-fill?${gp}`);
+            const gdata = await gres.json().catch(() => ({}));
+            if (gres.ok && gdata.success) {
+                const gaps = gdata.gaps || {};
+                const gapReleases = [
+                    ...(gaps.albums || []).map(g => ({ ...g, _type: 'album' })),
+                    ...(gaps.eps || []).map(g => ({ ...g, _type: 'ep' })),
+                    ...(gaps.singles || []).map(g => ({ ...g, _type: 'single' })),
+                ];
+                for (const g of gapReleases) {
+                    if (allReleases.some(r => _gapSameRelease(g, r))) continue;
+                    allReleases.push({
+                        ...g,
+                        name: g.title || g.name || 'Unknown Release',
+                        _gap_source: g.gap_source,
+                    });
+                }
+            }
+        } catch (e) {
+            console.debug('discog modal gap-fill skipped:', e);
+        }
+    }
+
+    // Build modal
+    const overlay = document.createElement('div');
+    overlay.className = 'discog-modal-overlay';
+    overlay.id = 'discog-modal-overlay';
+
+    const artistImg = artist.image_url || '';
+
+    overlay.innerHTML = `
+        <div class="discog-modal">
+            <div class="discog-modal-hero" ${artistImg ? `style="background-image:url('${artistImg}')"` : ''}>
+                <div class="discog-modal-hero-overlay"></div>
+                <div class="discog-modal-hero-content">
+                    <h2 class="discog-modal-title">Download Discography</h2>
+                    <p class="discog-modal-artist">${_esc(artist.name)}</p>
+                </div>
+                <button class="discog-modal-close" onclick="closeDiscographyModal()">&times;</button>
+            </div>
+            <div class="discog-filter-bar">
+                <div class="discog-filters">
+                    <button class="discog-filter active" data-type="album" onclick="toggleDiscogFilter(this)">Albums</button>
+                    <button class="discog-filter active" data-type="ep" onclick="toggleDiscogFilter(this)">EPs</button>
+                    <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
+                    <button class="discog-filter active" data-content="live" onclick="toggleDiscogFilter(this)">Live</button>
+                    <button class="discog-filter active" data-content="compilations" onclick="toggleDiscogFilter(this)">Compilations</button>
+                    <button class="discog-filter active" data-content="featured" onclick="toggleDiscogFilter(this)">Featured</button>
+                </div>
+                <div class="discog-select-actions">
+                    <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
+                    <button class="discog-select-btn" onclick="discogSelectAll(false)">Deselect All</button>
+                </div>
+            </div>
+            <div class="discog-grid" id="discog-grid">
+                ${allReleases.map((r, i) => _renderDiscogCard(r, i, completionData)).join('')}
+            </div>
+            <div class="discog-progress" id="discog-progress" style="display:none;"></div>
+            <div class="discog-footer" id="discog-footer">
+                <div class="discog-footer-info" id="discog-footer-info"></div>
+                <div class="discog-footer-actions">
+                    <button class="discog-cancel-btn" onclick="closeDiscographyModal()">Cancel</button>
+                    <button class="discog-submit-btn" id="discog-submit-btn">
+                        <span class="discog-submit-icon">⬇</span>
+                        <span id="discog-submit-text">Add to Wishlist</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    _updateDiscogFooterCount();
+
+    // Bind submit button (avoids onclick being intercepted by helper system)
+    document.getElementById('discog-submit-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startDiscographyDownload();
+    });
+}
+
+function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// #877: single source of truth for content-type classification, shared by the
+// Artist Detail cards and the Download Discography modal so they can't drift.
+function _classifyReleaseContent(release) {
+    const t = (release && (release.title || release.name)) || '';
+    // Title-based classification, shared by all sources and the download modal.
+    // On MusicBrainz artist pages the data-is-live attribute is recomputed
+    // authoritatively from secondary_types in populateDiscographySections (MB tags
+    // live/non-studio reliably), so this title heuristic only governs non-MB here.
+    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
+    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+    return {
+        isLive: livePattern.test(t),
+        isCompilation: (release && release.album_type === 'compilation') || compilationPattern.test(t),
+        isFeatured: featuredPattern.test(t),
+    };
+}
+
+function _renderDiscogCard(release, index, completionData) {
+    const comp = completionData?.albums?.find(c => c.id === release.id) || completionData?.singles?.find(c => c.id === release.id);
+    const status = comp?.status || 'unknown';
+    const isOwned = status === 'completed';
+    const isPartial = status === 'partial' || status === 'nearly_complete';
+    const year = release.release_date ? release.release_date.substring(0, 4) : '';
+    const tracks = release.total_tracks || release.track_count || 0;
+    const img = release.image_url || '';
+    const cc = _classifyReleaseContent(release);
+    const checked = !isOwned;
+    const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
+    const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
+
+    const albumName = release.name || release.title || '';
+    return `
+        <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" data-gap-source="${_esc(release._gap_source || '')}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <div class="discog-card-art">
+                ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
+                ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
+            </div>
+            <div class="discog-card-info">
+                <div class="discog-card-title">${_esc(albumName)}${release.explicit === true ? ' <span class="explicit-badge">E</span>' : ''}</div>
+                <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}${release._gap_source ? ` · <span class="discog-gap-src">${_esc(release._gap_source)}</span>` : ''}</div>
+            </div>
+            <div class="discog-card-check"></div>
+        </label>
+    `;
+}
+
+function toggleDiscogFilter(btn) {
+    btn.classList.toggle('active');
+    _applyDiscogFilters();
+}
+
+// #877: combined category (Albums/EPs/Singles) + content (Live/Compilations/
+// Featured) filtering, mirroring the Artist Detail filter logic. A card is
+// hidden if its category is off OR any active content exclusion applies — and
+// because the download payload is built from VISIBLE checked cards, every
+// toggle now actually changes what gets downloaded.
+function _applyDiscogFilters() {
+    const typeActive = {};
+    document.querySelectorAll('.discog-filter[data-type]').forEach(b => {
+        typeActive[b.dataset.type] = b.classList.contains('active');
+    });
+    const contentActive = {};
+    document.querySelectorAll('.discog-filter[data-content]').forEach(b => {
+        contentActive[b.dataset.content] = b.classList.contains('active');
+    });
+    document.querySelectorAll('.discog-card').forEach(card => {
+        let hidden = typeActive[card.getAttribute('data-type')] === false;
+        if (!hidden && contentActive.live === false && card.getAttribute('data-is-live') === 'true') hidden = true;
+        if (!hidden && contentActive.compilations === false && card.getAttribute('data-is-compilation') === 'true') hidden = true;
+        if (!hidden && contentActive.featured === false && card.getAttribute('data-is-featured') === 'true') hidden = true;
+        card.style.display = hidden ? 'none' : '';
+    });
+    _updateDiscogFooterCount();
+}
+
+function discogSelectAll(select) {
+    document.querySelectorAll('.discog-card-cb').forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            cb.checked = select;
+        }
+    });
+    _updateDiscogFooterCount();
+}
+
+function _updateDiscogFooterCount() {
+    const checked = document.querySelectorAll('.discog-card-cb:checked');
+    let releases = 0, tracks = 0;
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            releases++;
+            tracks += parseInt(cb.dataset.tracks) || 0;
+        }
+    });
+    const info = document.getElementById('discog-footer-info');
+    const btn = document.getElementById('discog-submit-text');
+    if (info) info.textContent = `${releases} release${releases !== 1 ? 's' : ''} · ${tracks} tracks`;
+    if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases';
+    const submitBtn = document.getElementById('discog-submit-btn');
+    if (submitBtn) submitBtn.disabled = releases === 0;
+}
+
+async function startDiscographyDownload() {
+    let artist = artistsPageState.selectedArtist;
+    // Fallback to library page state
+    if (!artist && artistDetailPageState.currentArtistId) {
+        artist = { id: artistDetailPageState.currentArtistId, name: artistDetailPageState.currentArtistName || 'Unknown' };
+    }
+    if (!artist || !artist.id) {
+        showToast('No artist data available', 'error');
+        return;
+    }
+
+    const checked = document.querySelectorAll('.discog-card-cb:checked');
+    const albumEntries = [];
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            albumEntries.push({
+                id: cb.dataset.albumId,
+                name: cb.dataset.albumName || '',
+                tracks: parseInt(cb.dataset.tracks) || 0,
+                // gap-fill releases resolve from THEIR source (#1067)
+                gapSource: cb.dataset.gapSource || null
+            });
+        }
+    });
+    // Sort by track count descending — process Deluxe/expanded editions first
+    // so their tracks get added before standard editions (which then get deduped)
+    albumEntries.sort((a, b) => b.tracks - a.tracks);
+
+    if (albumEntries.length === 0) return;
+
+    // Switch to progress view
+    const grid = document.getElementById('discog-grid');
+    const progress = document.getElementById('discog-progress');
+    const footer = document.getElementById('discog-footer');
+    const filterBar = document.querySelector('.discog-filter-bar');
+
+    if (grid) grid.style.display = 'none';
+    if (filterBar) filterBar.style.display = 'none';
+    if (progress) {
+        progress.style.display = '';
+        progress.innerHTML = '';
+    }
+
+    // Build progress items
+    const albumMap = {};
+    checked.forEach(cb => {
+        if (cb.closest('.discog-card').style.display !== 'none') {
+            const card = cb.closest('.discog-card');
+            const id = cb.dataset.albumId;
+            const title = card.querySelector('.discog-card-title')?.textContent || '';
+            const img = card.querySelector('.discog-card-art img')?.src || '';
+            albumMap[id] = { title, img };
+
+            const item = document.createElement('div');
+            item.className = 'discog-progress-item';
+            item.id = `discog-prog-${id}`;
+            item.innerHTML = `
+                <div class="discog-prog-art">${img ? `<img src="${img}">` : '🎵'}</div>
+                <div class="discog-prog-info">
+                    <div class="discog-prog-title">${_esc(title)}</div>
+                    <div class="discog-prog-status">Waiting...</div>
+                </div>
+                <div class="discog-prog-icon"><div class="discog-spinner"></div></div>
+            `;
+            progress.appendChild(item);
+        }
+    });
+
+    // Update footer
+    const submitBtn = document.getElementById('discog-submit-btn');
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (footer) {
+        const info = document.getElementById('discog-footer-info');
+        if (info) info.textContent = 'Processing... this may take a moment';
+    }
+
+    // Mark all items as active
+    document.querySelectorAll('.discog-progress-item').forEach(item => item.classList.add('active'));
+
+    // Per-album metadata so the backend can resolve each album through its
+    // own source — fixes albums whose IDs come from a fallback/provider-specific
+    // source (e.g. Deezer-formatted IDs surfaced via Hydrabase).
+    const sourceForBatch = (artist.source || artistsPageState.sourceOverride || '').toString().toLowerCase() || null;
+    const albumsPayload = albumEntries.map(e => ({
+        id: e.id,
+        name: e.name,
+        artist_name: artist.name,
+        // a gap-fill release must resolve from ITS source, not the batch's
+        // (#1067) — the backend honors source per entry
+        source: e.gapSource || sourceForBatch,
+    }));
+
+    try {
+        const response = await fetch(`/api/artist/${artist.id}/download-discography`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                albums: albumsPayload,
+                artist_name: artist.name,
+                source: sourceForBatch,
+            })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+
+                    if (data.status === 'complete') {
+                        _handleDiscogProgress({ type: 'complete', total_added: data.total_added, total_skipped: data.total_skipped });
+                    } else {
+                        // Per-album update
+                        const item = document.getElementById(`discog-prog-${data.album_id}`);
+                        if (!item) continue;
+
+                        const statusEl = item.querySelector('.discog-prog-status');
+                        const iconEl = item.querySelector('.discog-prog-icon');
+                        item.classList.remove('active');
+
+                        if (data.status === 'done') {
+                            statusEl.textContent = _discogItemStatus(data);
+                            iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
+                            item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
+                        } else if (data.status === 'error') {
+                            statusEl.textContent = data.message || 'Error';
+                            iconEl.innerHTML = '<span class="discog-error">✗</span>';
+                            item.classList.add('error');
+                        }
+                    }
+                } catch (e) { /* skip malformed line */ }
+            }
+        }
+    } catch (err) {
+        showToast(`Discography download failed: ${err.message}`, 'error');
+    }
+}
+
+// Build a clear per-album status from the discography stream payload. The
+// backend already reports WHY tracks weren't added — other-artist credit,
+// already owned/queued, or content-filtered — so surface that instead of a
+// misleading "No new tracks" (#830: collab tracks dropped for "artist mismatch"
+// looked identical to "you already have it").
+function _discogItemStatus(data) {
+    const parts = [];
+    const added = data.tracks_added || 0;
+    if (added > 0) parts.push(`${added} added`);
+    if ((data.tracks_skipped_owned || 0) > 0) parts.push(`${data.tracks_skipped_owned} already owned`);
+    if ((data.tracks_skipped || 0) > 0) parts.push(`${data.tracks_skipped} already queued`);
+    if ((data.tracks_skipped_artist || 0) > 0) parts.push(`${data.tracks_skipped_artist} by other artists`);
+    if ((data.tracks_skipped_filter || 0) > 0) parts.push(`${data.tracks_skipped_filter} filtered out`);
+    return parts.join(', ') || 'No tracks';
+}
+
+function _handleDiscogProgress(data) {
+    if (data.type === 'album') {
+        const item = document.getElementById(`discog-prog-${data.album_id}`);
+        if (!item) return;
+
+        const statusEl = item.querySelector('.discog-prog-status');
+        const iconEl = item.querySelector('.discog-prog-icon');
+
+        if (data.status === 'processing') {
+            statusEl.textContent = `Processing ${data.tracks_total} tracks...`;
+            item.classList.add('active');
+        } else if (data.status === 'done') {
+            statusEl.textContent = _discogItemStatus(data);
+            iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
+            item.classList.remove('active');
+            item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
+        } else if (data.status === 'error') {
+            statusEl.textContent = data.message || 'Error';
+            iconEl.innerHTML = '<span class="discog-error">✗</span>';
+            item.classList.add('error');
+        }
+    } else if (data.type === 'complete') {
+        const info = document.getElementById('discog-footer-info');
+        if (info) info.textContent = `Done — ${data.total_added} tracks added, ${data.total_skipped} skipped`;
+
+        // Show "Process Wishlist" button
+        const footer = document.querySelector('.discog-footer-actions');
+        if (footer && data.total_added > 0) {
+            footer.innerHTML = `
+                <button class="discog-cancel-btn" onclick="closeDiscographyModal()">Close</button>
+                <button class="discog-submit-btn" onclick="closeDiscographyModal();fetch('/api/wishlist/process',{method:'POST'});showToast('Wishlist processing started','success')">
+                    <span class="discog-submit-icon">🚀</span>
+                    <span>Process Wishlist Now</span>
+                </button>
+            `;
+        } else if (footer) {
+            footer.innerHTML = '<button class="discog-cancel-btn" onclick="closeDiscographyModal()">Close</button>';
+        }
+    }
+}
+
+function closeDiscographyModal() {
+    const overlay = document.getElementById('discog-modal-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 300);
+    }
+}
+
+// ==================== Enhanced Library Management View ====================
+
+function isEnhancedAdmin() {
+    return currentProfile && currentProfile.is_admin;
+}
+
+
+async function loadEnhancedViewData(artistId) {
+    const container = document.getElementById('enhanced-view-container');
+    if (!container) return;
+
+    container.innerHTML = '<div class="enhanced-loading">Loading library data...</div>';
+
+    try {
+        const response = await fetch(`/api/library/artist/${artistId}/enhanced`);
+        const data = await response.json();
+
+        if (!data.success) throw new Error(data.error || 'Failed to load enhanced data');
+
+        artistDetailPageState.enhancedData = data;
+        artistDetailPageState.expandedAlbums = new Set();
+        artistDetailPageState.selectedTracks = new Set();
+        artistDetailPageState.enhancedTrackSort = {};
+        artistDetailPageState.serverType = data.server_type || null;
+        _tagPreviewServerType = data.server_type || null;
+        _rebuildAlbumMap();
+        renderEnhancedView();
+
+    } catch (error) {
+        console.error('Error loading enhanced view data:', error);
+        container.innerHTML = `<div class="enhanced-loading" style="color: #ff6b6b;">Failed to load: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function renderEnhancedView() {
+    const container = document.getElementById('enhanced-view-container');
+    const data = artistDetailPageState.enhancedData;
+    if (!container || !data) return;
+
+    container.innerHTML = '';
+
+    // Artist metadata card (visual + editable)
+    container.appendChild(renderArtistMetaPanel(data.artist));
+
+    // Library stats summary bar
+    container.appendChild(renderEnhancedStatsBar(data));
+
+    // Group albums by type
+    const grouped = { album: [], ep: [], single: [] };
+    (data.albums || []).forEach(album => {
+        const type = (album.record_type || 'album').toLowerCase();
+        if (grouped[type]) grouped[type].push(album);
+        else grouped[type] = [album];
+    });
+
+    const sectionLabels = { album: 'Albums', ep: 'EPs', single: 'Singles' };
+    for (const [type, label] of Object.entries(sectionLabels)) {
+        const albums = grouped[type] || [];
+        if (albums.length === 0) continue;
+        container.appendChild(renderEnhancedSection(type, label, albums));
+    }
+}
+
+function renderEnhancedStatsBar(data) {
+    const bar = document.createElement('div');
+    bar.className = 'enhanced-stats-bar';
+
+    const albums = data.albums || [];
+    const totalAlbums = albums.filter(a => (a.record_type || 'album') === 'album').length;
+    const totalEps = albums.filter(a => a.record_type === 'ep').length;
+    const totalSingles = albums.filter(a => a.record_type === 'single').length;
+    const totalTracks = albums.reduce((s, a) => s + (a.tracks ? a.tracks.length : 0), 0);
+
+    // Calculate total duration
+    let totalDurationMs = 0;
+    albums.forEach(a => (a.tracks || []).forEach(t => { totalDurationMs += (t.duration || 0); }));
+    const totalHours = Math.floor(totalDurationMs / 3600000);
+    const totalMins = Math.floor((totalDurationMs % 3600000) / 60000);
+
+    // Calculate format breakdown
+    const formatCounts = {};
+    albums.forEach(a => (a.tracks || []).forEach(t => {
+        const fmt = extractFormat(t.file_path);
+        if (fmt !== '-') formatCounts[fmt] = (formatCounts[fmt] || 0) + 1;
+    }));
+
+    const statsItems = [
+        { value: totalAlbums, label: 'Albums', icon: '&#128191;' },
+        { value: totalEps, label: 'EPs', icon: '&#128192;' },
+        { value: totalSingles, label: 'Singles', icon: '&#9834;' },
+        { value: totalTracks, label: 'Tracks', icon: '&#127925;' },
+        { value: totalHours > 0 ? `${totalHours}h ${totalMins}m` : `${totalMins}m`, label: 'Duration', icon: '&#9202;' },
+    ];
+
+    let statsHtml = statsItems.map(s =>
+        `<div class="enhanced-stat-item">
+            <span class="enhanced-stat-value">${s.value}</span>
+            <span class="enhanced-stat-label">${s.label}</span>
+        </div>`
+    ).join('');
+
+    // Format badges
+    const formatBadges = Object.entries(formatCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([fmt, count]) => {
+            const cls = fmt === 'FLAC' ? 'flac' : (fmt === 'MP3' ? 'mp3' : 'other');
+            return `<span class="enhanced-format-badge ${cls}">${fmt} (${count})</span>`;
+        }).join('');
+
+    bar.innerHTML = `
+        <div class="enhanced-stats-items">${statsHtml}</div>
+        <div class="enhanced-stats-formats">${formatBadges}</div>
+    `;
+
+    return bar;
+}
+
+function renderArtistMetaPanel(artist) {
+    const panel = document.createElement('div');
+    panel.className = 'enhanced-artist-meta';
+    panel.id = 'enhanced-artist-meta';
+
+    // Build using DOM to avoid innerHTML escaping issues
+    const header = document.createElement('div');
+    header.className = 'enhanced-artist-meta-header';
+
+    // Left side: artist image + name display
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'enhanced-artist-meta-header-left';
+
+    if (artist.thumb_url) {
+        const img = document.createElement('img');
+        img.className = 'enhanced-artist-meta-image';
+        img.src = artist.thumb_url;
+        img.alt = artist.name || '';
+        img.onerror = function () { this.style.display = 'none'; };
+        headerLeft.appendChild(img);
+    }
+
+    const headerInfo = document.createElement('div');
+    headerInfo.className = 'enhanced-artist-meta-info';
+    const artistTitle = document.createElement('div');
+    artistTitle.className = 'enhanced-artist-meta-name';
+    artistTitle.textContent = artist.name || 'Unknown Artist';
+    headerInfo.appendChild(artistTitle);
+
+    // ID badges row (clickable links)
+    const idBadges = document.createElement('div');
+    idBadges.className = 'enhanced-artist-id-badges';
+    const idSources = filterJiosaavnServiceEntries([
+        { key: 'spotify_artist_id', label: 'Spotify', svc: 'spotify' },
+        { key: 'musicbrainz_id', label: 'MusicBrainz', svc: 'musicbrainz' },
+        { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
+        { key: 'jiosaavn_id', label: 'JioSaavn', svc: 'jiosaavn' },
+        { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
+        { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
+        { key: 'itunes_artist_id', label: 'iTunes', svc: 'itunes' },
+        { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
+        { key: 'genius_url', label: 'Genius', svc: 'genius' },
+        { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
+        { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
+        { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
+    ], 'svc');
+    idSources.forEach(src => {
+        if (artist[src.key]) {
+            idBadges.appendChild(makeClickableBadge(src.svc, 'artist', artist[src.key], src.label));
+        }
+    });
+    headerInfo.appendChild(idBadges);
+    headerLeft.appendChild(headerInfo);
+    header.appendChild(headerLeft);
+
+    // Right side: admin actions
+    const headerRight = document.createElement('div');
+    headerRight.className = 'enhanced-artist-meta-actions';
+
+    // Live reorganize-queue status — sits first so the user sees what's
+    // happening before any of the action buttons.
+    mountReorganizeStatusPanel(headerRight, String(artist.id));
+
+    if (isEnhancedAdmin()) {
+        const editToggle = document.createElement('button');
+        editToggle.className = 'enhanced-meta-edit-toggle';
+        editToggle.textContent = 'Edit Metadata';
+        editToggle.onclick = () => {
+            const form = document.getElementById('enhanced-artist-meta-form');
+            if (form) {
+                const isVisible = !form.classList.contains('hidden');
+                form.classList.toggle('hidden');
+                editToggle.textContent = isVisible ? 'Edit Metadata' : 'Hide Editor';
+                editToggle.classList.toggle('active', !isVisible);
+            }
+        };
+        headerRight.appendChild(editToggle);
+
+        // Enrich dropdown button
+        const enrichWrap = document.createElement('div');
+        enrichWrap.className = 'enhanced-enrich-wrap';
+        const enrichBtn = document.createElement('button');
+        enrichBtn.className = 'enhanced-enrich-btn';
+        enrichBtn.textContent = 'Enrich ▾';
+        enrichBtn.onclick = (e) => {
+            e.stopPropagation();
+            enrichMenu.classList.toggle('visible');
+        };
+        enrichWrap.appendChild(enrichBtn);
+
+        const enrichMenu = document.createElement('div');
+        enrichMenu.className = 'enhanced-enrich-menu';
+        const services = filterJiosaavnServiceEntries([
+            { id: 'spotify', label: 'Spotify', icon: '🟢' },
+            { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+            { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
+            { id: 'discogs', label: 'Discogs', icon: '🟤' },
+            { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
+            { id: 'itunes', label: 'iTunes', icon: '🔴' },
+            { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+            { id: 'genius', label: 'Genius', icon: '🟡' },
+            { id: 'tidal', label: 'Tidal', icon: '⬛' },
+            { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
+            // Bandcamp intentionally omitted: this is the artist-level enrich
+            // menu and Bandcamp has no artist pass (album/track only). The
+            // album-level menu below still offers it.
+        ], 'id');
+        services.forEach(svc => {
+            const item = document.createElement('div');
+            item.className = 'enhanced-enrich-menu-item';
+            item.textContent = `${svc.icon} ${svc.label}`;
+            item.onclick = (e) => {
+                e.stopPropagation();
+                enrichMenu.classList.remove('visible');
+                runEnrichment('artist', artist.id, svc.id, artist.name, '', artist.id);
+            };
+            enrichMenu.appendChild(item);
+        });
+        enrichWrap.appendChild(enrichMenu);
+        headerRight.appendChild(enrichWrap);
+    }
+
+    // Sync / Validate button
+    const syncBtn = document.createElement('button');
+    syncBtn.className = 'enhanced-sync-btn';
+    syncBtn.innerHTML = '&#x1f504; Sync';
+    syncBtn.title = 'Validate files — removes stale entries for tracks no longer on disk';
+    syncBtn.onclick = async (e) => {
+        e.stopPropagation();
+        syncBtn.disabled = true;
+        syncBtn.textContent = 'Syncing...';
+        try {
+            const res = await fetch(`/api/library/artist/${artist.id}/sync`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                if (data.removal_skipped) {
+                    // Couldn't get a trustworthy server view — we deliberately did NOT delete.
+                    const parts = [];
+                    if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                    if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                    if (data.name_updated) parts.push('name updated');
+                    const added = parts.length ? ` (${parts.join(', ')})` : '';
+                    showToast(`${data.artist_name}: couldn't fully confirm against your media server — skipped removing tracks to be safe${added}.`, 'warning');
+                } else {
+                    const parts = [];
+                    if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                    if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                    if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale removed`);
+                    if (data.empty_albums_removed > 0) parts.push(`${data.empty_albums_removed} empty albums cleaned`);
+                    if (data.name_updated) parts.push('name updated');
+                    if (parts.length === 0) parts.push('Already in sync');
+                    showToast(`${data.artist_name}: ${parts.join(', ')}`, 'success');
+                }
+                // Refresh enhanced view if anything changed (additions OR removals)
+                if (data.new_albums > 0 || data.new_tracks > 0 || data.stale_removed > 0 || data.empty_albums_removed > 0) {
+                    loadEnhancedViewData(artist.id);
+                }
+            } else {
+                showToast(`Sync failed: ${data.error}`, 'error');
+            }
+        } catch (err) {
+            showToast(`Sync failed: ${err.message}`, 'error');
+        }
+        syncBtn.disabled = false;
+        syncBtn.innerHTML = '&#x1f504; Sync';
+    };
+    headerRight.appendChild(syncBtn);
+
+    const reorgAllBtn = document.createElement('button');
+    reorgAllBtn.className = 'enhanced-sync-btn';
+    reorgAllBtn.innerHTML = '&#128193; Reorganize All';
+    reorgAllBtn.title = 'Reorganize all albums for this artist using your configured download template';
+    reorgAllBtn.onclick = () => _showReorganizeAllModal();
+    headerRight.appendChild(reorgAllBtn);
+
+    header.appendChild(headerRight);
+
+    panel.appendChild(header);
+
+    // Match status row (clickable to rematch)
+    const statusRow = document.createElement('div');
+    statusRow.className = 'enhanced-match-status-row';
+    const statusServices = filterJiosaavnServiceEntries([
+        { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
+        { key: 'musicbrainz_match_status', label: 'MusicBrainz', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
+        { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
+        { key: 'jiosaavn_match_status', label: 'JioSaavn', attempted: 'jiosaavn_last_attempted', svc: 'jiosaavn' },
+        { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
+        { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
+        { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
+        { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },
+        { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
+        { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
+    ], 'svc');
+    statusServices.forEach(s => {
+        const status = artist[s.key];
+        const attempted = artist[s.attempted];
+        const chip = document.createElement('span');
+        chip.className = `enhanced-match-chip clickable ${status === 'matched' ? 'matched' : (status === 'not_found' ? 'not-found' : 'pending')}`;
+        chip.textContent = `${s.label}: ${status || 'pending'}`;
+        const tipParts = [];
+        if (attempted) tipParts.push(`Last: ${new Date(attempted).toLocaleString()}`);
+        tipParts.push('Click to rematch');
+        chip.title = tipParts.join(' · ');
+        chip.onclick = () => openManualMatchModal('artist', artist.id, s.svc, artist.name, artist.id);
+        statusRow.appendChild(chip);
+    });
+    panel.appendChild(statusRow);
+
+    // Collapsible edit form (hidden by default)
+    const form = document.createElement('div');
+    form.className = 'enhanced-artist-meta-form hidden';
+    form.id = 'enhanced-artist-meta-form';
+
+    const editableFields = [
+        { key: 'name', label: 'Artist Name', type: 'text' },
+        { key: 'genres', label: 'Genres (comma separated)', type: 'text', isArray: true },
+        { key: 'label', label: 'Label', type: 'text' },
+        { key: 'style', label: 'Style', type: 'text' },
+        { key: 'mood', label: 'Mood', type: 'text' },
+        { key: 'summary', label: 'Summary / Bio', type: 'textarea', wide: true },
+    ];
+
+    const grid = document.createElement('div');
+    grid.className = 'enhanced-artist-meta-grid';
+
+    editableFields.forEach(f => {
+        const fieldDiv = document.createElement('div');
+        fieldDiv.className = 'enhanced-meta-field' + (f.wide ? ' wide' : '');
+
+        const label = document.createElement('label');
+        label.className = 'enhanced-meta-field-label';
+        label.textContent = f.label;
+        fieldDiv.appendChild(label);
+
+        const val = f.isArray
+            ? (Array.isArray(artist[f.key]) ? artist[f.key].join(', ') : (artist[f.key] || ''))
+            : (artist[f.key] || '');
+
+        if (f.type === 'textarea') {
+            const ta = document.createElement('textarea');
+            ta.className = 'enhanced-meta-field-input';
+            ta.dataset.field = f.key;
+            ta.placeholder = f.label + '...';
+            ta.textContent = val;
+            fieldDiv.appendChild(ta);
+        } else {
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.className = 'enhanced-meta-field-input';
+            inp.dataset.field = f.key;
+            inp.value = val;
+            inp.placeholder = f.label + '...';
+            fieldDiv.appendChild(inp);
+        }
+
+        grid.appendChild(fieldDiv);
+    });
+
+    form.appendChild(grid);
+
+    // Save/revert buttons
+    const formActions = document.createElement('div');
+    formActions.className = 'enhanced-artist-form-actions';
+    const revertBtn = document.createElement('button');
+    revertBtn.className = 'enhanced-meta-cancel-btn';
+    revertBtn.textContent = 'Revert';
+    revertBtn.onclick = () => revertArtistMetadata();
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'enhanced-meta-save-btn';
+    saveBtn.textContent = 'Save Changes';
+    saveBtn.onclick = () => saveArtistMetadata();
+    formActions.appendChild(revertBtn);
+    formActions.appendChild(saveBtn);
+    form.appendChild(formActions);
+
+    panel.appendChild(form);
+
+    return panel;
+}
+
+function renderEnhancedSection(type, label, albums) {
+    const section = document.createElement('div');
+    section.className = 'enhanced-section';
+
+    const totalTracks = albums.reduce((sum, a) => sum + (a.tracks ? a.tracks.length : 0), 0);
+
+    const sectionHeader = document.createElement('div');
+    sectionHeader.className = 'enhanced-section-header';
+    sectionHeader.innerHTML = `
+        <span class="enhanced-section-title">${label}</span>
+        <span class="enhanced-section-count">${albums.length} release${albums.length !== 1 ? 's' : ''} &middot; ${totalTracks} tracks</span>
+    `;
+    section.appendChild(sectionHeader);
+
+    const grid = document.createElement('div');
+    grid.className = 'enhanced-album-grid';
+
+    albums.forEach(album => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'enhanced-album-wrapper';
+        wrapper.id = `enhanced-album-wrapper-${album.id}`;
+        const isExpanded = artistDetailPageState.expandedAlbums.has(album.id);
+        if (isExpanded) wrapper.classList.add('expanded');
+
+        wrapper.appendChild(renderAlbumRow(album, type));
+
+        const tracksPanel = document.createElement('div');
+        tracksPanel.className = 'enhanced-tracks-panel';
+        tracksPanel.id = `enhanced-tracks-panel-${album.id}`;
+        if (isExpanded) tracksPanel.classList.add('visible');
+        const inner = document.createElement('div');
+        inner.className = 'enhanced-tracks-panel-inner';
+        if (isExpanded) {
+            inner.dataset.rendered = 'true';
+            inner.appendChild(renderExpandedAlbumHeader(album));
+            inner.appendChild(renderAlbumMetaRow(album));
+            inner.appendChild(renderTrackTable(album));
+        }
+        tracksPanel.appendChild(inner);
+        wrapper.appendChild(tracksPanel);
+
+        grid.appendChild(wrapper);
+    });
+    section.appendChild(grid);
+
+    return section;
+}
+
+function renderAlbumRow(album, type) {
+    const row = document.createElement('div');
+    row.className = 'enhanced-album-row';
+    row.id = `enhanced-album-row-${album.id}`;
+
+    if (artistDetailPageState.expandedAlbums.has(album.id)) row.classList.add('expanded');
+
+    const trackCount = album.tracks ? album.tracks.length : 0;
+    const typeClass = (type || 'album').toLowerCase();
+
+    // Total duration for this album
+    let albumDurMs = 0;
+    (album.tracks || []).forEach(t => { albumDurMs += (t.duration || 0); });
+    const albumDur = formatDurationMs(albumDurMs);
+
+    // Format breakdown for this album
+    const fmts = {};
+    (album.tracks || []).forEach(t => {
+        const f = extractFormat(t.file_path);
+        if (f !== '-') fmts[f] = (fmts[f] || 0) + 1;
+    });
+    const primaryFormat = Object.keys(fmts).sort((a, b) => fmts[b] - fmts[a])[0] || '';
+
+    // Build with DOM for safety
+    const expandIcon = document.createElement('span');
+    expandIcon.className = 'enhanced-album-expand-icon';
+    expandIcon.innerHTML = '&#9654;';
+    row.appendChild(expandIcon);
+
+    // Album art - larger, prominent
+    const artWrap = document.createElement('div');
+    artWrap.className = 'enhanced-album-art-wrap';
+    if (album.thumb_url) {
+        const img = document.createElement('img');
+        img.className = 'enhanced-album-thumb';
+        img.src = album.thumb_url;
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = function () {
+            const fallback = document.createElement('div');
+            fallback.className = 'enhanced-album-thumb-fallback';
+            fallback.innerHTML = '&#127925;';
+            this.replaceWith(fallback);
+        };
+        artWrap.appendChild(img);
+    } else {
+        const fallback = document.createElement('div');
+        fallback.className = 'enhanced-album-thumb-fallback';
+        fallback.innerHTML = '&#127925;';
+        artWrap.appendChild(fallback);
+    }
+    row.appendChild(artWrap);
+
+    // Info block (title + meta line)
+    const infoBlock = document.createElement('div');
+    infoBlock.className = 'enhanced-album-info-block';
+
+    const titleEl = document.createElement('span');
+    titleEl.className = 'enhanced-album-title';
+    titleEl.textContent = album.title || 'Unknown';
+    titleEl.title = album.title || '';
+    infoBlock.appendChild(titleEl);
+
+    const metaLine = document.createElement('span');
+    metaLine.className = 'enhanced-album-meta-line';
+    const metaParts = [];
+    if (album.year) metaParts.push(String(album.year));
+    metaParts.push(`${trackCount} track${trackCount !== 1 ? 's' : ''}`);
+    if (albumDur !== '-') metaParts.push(albumDur);
+    if (album.label) metaParts.push(album.label);
+    metaLine.textContent = metaParts.join(' \u00B7 ');
+    infoBlock.appendChild(metaLine);
+
+    row.appendChild(infoBlock);
+
+    // Type badge
+    const badge = document.createElement('span');
+    badge.className = `enhanced-album-type-badge ${typeClass}`;
+    badge.textContent = type;
+    row.appendChild(badge);
+
+    // Format badge inline
+    if (primaryFormat) {
+        const fmtBadge = document.createElement('span');
+        const fmtClass = primaryFormat === 'FLAC' ? 'flac' : (primaryFormat === 'MP3' ? 'mp3' : 'other');
+        fmtBadge.className = `enhanced-format-badge ${fmtClass}`;
+        fmtBadge.textContent = primaryFormat;
+        row.appendChild(fmtBadge);
+    }
+
+    row.addEventListener('click', () => toggleAlbumExpand(album.id));
+
+    return row;
+}
+
+function toggleAlbumExpand(albumId) {
+    const row = document.getElementById(`enhanced-album-row-${albumId}`);
+    const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+    const wrapper = document.getElementById(`enhanced-album-wrapper-${albumId}`);
+    if (!row || !panel) return;
+
+    const isExpanded = artistDetailPageState.expandedAlbums.has(albumId);
+
+    if (isExpanded) {
+        artistDetailPageState.expandedAlbums.delete(albumId);
+        row.classList.remove('expanded');
+        panel.classList.remove('visible');
+        if (wrapper) wrapper.classList.remove('expanded');
+    } else {
+        artistDetailPageState.expandedAlbums.add(albumId);
+        row.classList.add('expanded');
+        panel.classList.add('visible');
+        if (wrapper) wrapper.classList.add('expanded');
+
+        // Lazy render
+        const inner = panel.querySelector('.enhanced-tracks-panel-inner');
+        if (inner && !inner.dataset.rendered) {
+            const album = findEnhancedAlbum(albumId);
+            if (album) {
+                inner.innerHTML = '';
+                inner.appendChild(renderExpandedAlbumHeader(album));
+                inner.appendChild(renderAlbumMetaRow(album));
+                inner.appendChild(renderTrackTable(album));
+                inner.dataset.rendered = 'true';
+                ensureEnhancedAlbumCanonicalTracks(album).then(updated => {
+                    if (!updated || !artistDetailPageState.expandedAlbums.has(albumId)) return;
+                    rerenderEnhancedAlbumPanel(album.id);
+                });
+            }
+        }
+    }
+}
+
+function rerenderEnhancedAlbumPanel(albumId) {
+    const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+    const inner = panel?.querySelector('.enhanced-tracks-panel-inner');
+    const album = findEnhancedAlbum(albumId);
+    if (!inner || !album) return;
+    inner.innerHTML = '';
+    inner.appendChild(renderExpandedAlbumHeader(album));
+    inner.appendChild(renderAlbumMetaRow(album));
+    inner.appendChild(renderTrackTable(album));
+    inner.dataset.rendered = 'true';
+}
+
+function findEnhancedAlbum(albumId) {
+    // Use cached map for O(1) lookups instead of O(n) array scan
+    if (artistDetailPageState._albumMap) {
+        return artistDetailPageState._albumMap.get(String(albumId)) || null;
+    }
+    const data = artistDetailPageState.enhancedData;
+    if (!data || !data.albums) return null;
+    return data.albums.find(a => String(a.id) === String(albumId));
+}
+
+function _rebuildAlbumMap() {
+    const data = artistDetailPageState.enhancedData;
+    if (!data || !data.albums) { artistDetailPageState._albumMap = null; return; }
+    const map = new Map();
+    data.albums.forEach(a => map.set(String(a.id), a));
+    artistDetailPageState._albumMap = map;
+}
+
+function openAlbumArtPicker(album) {
+    if (!album || !album.id) return;
+    const artist = (typeof artistDetailPageState !== 'undefined' && artistDetailPageState.currentArtistName) || '';
+    const albumTitle = album.title || '';
+
+    const _closeSvg = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const _checkSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    const old = document.getElementById('art-picker-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'art-picker-overlay';
+    overlay.className = 'art-picker-overlay';
+    let skeleton = '';
+    for (let i = 0; i < 10; i++) skeleton += '<div class="art-picker-skel"></div>';
+    overlay.innerHTML =
+        '<div class="art-picker-modal" role="dialog" aria-modal="true">' +
+          '<div class="art-picker-header">' +
+            '<div class="art-picker-titles">' +
+              '<div class="art-picker-title">Choose cover art</div>' +
+              '<div class="art-picker-subtitle">' + _esc(albumTitle) + (artist ? ' · ' + _esc(artist) : '') + '</div>' +
+            '</div>' +
+            '<button class="art-picker-close" aria-label="Close">' + _closeSvg + '</button>' +
+          '</div>' +
+          '<div class="art-picker-body"><div class="art-picker-grid loading">' + skeleton + '</div></div>' +
+          '<div class="art-picker-footer">' +
+            '<div class="art-picker-count"></div>' +
+            '<div class="art-picker-actions">' +
+              '<button class="art-picker-btn art-picker-cancel">Cancel</button>' +
+              '<button class="art-picker-btn art-picker-apply" disabled>Apply</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+    const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc);
+    overlay.querySelector('.art-picker-close').onclick = close;
+    overlay.querySelector('.art-picker-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const body = overlay.querySelector('.art-picker-body');
+    const applyBtn = overlay.querySelector('.art-picker-apply');
+    const countEl = overlay.querySelector('.art-picker-count');
+    let selectedUrl = null;
+
+    const q = '?artist=' + encodeURIComponent(artist) + '&album=' + encodeURIComponent(albumTitle);
+    fetch('/api/album/' + encodeURIComponent(album.id) + '/art-options' + q)
+        .then(r => r.json())
+        .then(data => {
+            const cands = (data && data.candidates) || [];
+            if (!cands.length) {
+                body.innerHTML = '<div class="art-picker-empty">No alternative covers found for this album.</div>';
+                return;
+            }
+            countEl.textContent = cands.length + ' option' + (cands.length === 1 ? '' : 's');
+            const grid = document.createElement('div');
+            grid.className = 'art-picker-grid';
+            cands.forEach(c => {
+                const tile = document.createElement('button');
+                tile.className = 'art-picker-tile';
+                tile.innerHTML =
+                    '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
+                    '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
+                    '<span class="art-picker-check">' + _checkSvg + '</span>';
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
+                tile.onclick = () => {
+                    grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                    tile.classList.add('selected');
+                    selectedUrl = c.url;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(tile);
+            });
+            body.innerHTML = '';
+            body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
+        })
+        .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load cover options.</div>'; });
+
+    applyBtn.onclick = () => {
+        if (!selectedUrl) return;
+        applyBtn.disabled = true;
+        applyBtn.classList.add('loading');
+        applyBtn.textContent = 'Applying…';
+        fetch('/api/album/' + encodeURIComponent(album.id) + '/art', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: selectedUrl })
+        }).then(r => r.json()).then(res => {
+            if (res && res.success) {
+                album.thumb_url = selectedUrl;
+                const headerImg = document.querySelector('.enhanced-expanded-art');
+                if (headerImg) { headerImg.src = selectedUrl; headerImg.style.visibility = 'visible'; }
+                if (typeof showToast === 'function') showToast('Cover art updated', 'success');
+                close();
+            } else {
+                applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Failed to update art', 'error');
+            }
+        }).catch(() => {
+            applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+            if (typeof showToast === 'function') showToast('Failed to update art', 'error');
+        });
+    };
+}
+
+// Custom-URL row for the artist photo picker: paste a link → instant preview
+// tile → click it → Apply. The preview <img> is the validation (a bad link
+// shows its own error); the backend re-validates bytes before applying.
+// NB: module scope — the pickers' _checkSvg consts are function-LOCAL, so
+// this needs its own (referencing theirs was a silent ReferenceError).
+const _ART_CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+function _artPickerCustomRow(body, grid, onSelect) {
+    const row = document.createElement('div');
+    row.className = 'art-picker-custom';
+    row.innerHTML =
+        '<input type="url" class="art-picker-url" placeholder="…or paste an image URL" autocomplete="off">' +
+        '<div class="art-picker-custom-slot"></div>';
+    const input = row.querySelector('.art-picker-url');
+    const slot = row.querySelector('.art-picker-custom-slot');
+    let timer = null;
+    input.addEventListener('input', () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            const url = input.value.trim();
+            slot.innerHTML = '';
+            if (!/^https?:\/\//i.test(url)) return;
+            const tile = document.createElement('button');
+            tile.className = 'art-picker-tile art-picker-tile--custom';
+            tile.innerHTML =
+                '<img loading="lazy" src="' + _esc(url) + '" alt="">' +
+                '<span class="art-picker-badge">custom</span>' +
+                '<span class="art-picker-check">' + _ART_CHECK_SVG + '</span>';
+            tile.querySelector('img').onerror = () => {
+                slot.innerHTML = '<div class="art-picker-custom-err">Couldn\'t load that image.</div>';
+            };
+            tile.onclick = () => {
+                document.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                tile.classList.add('selected');
+                onSelect(url);
+            };
+            slot.appendChild(tile);
+        }, 350);
+    });
+    body.appendChild(row);
+}
+
+function openArtistArtPicker() {
+    // Artist twin of openAlbumArtPicker: candidates from every CONNECTED
+    // metadata source; applying writes the pick to the SoulSync DB, the
+    // active media server, and artist.jpg on disk (what Navidrome reads) —
+    // so a wrong photo from an old mis-match gets corrected everywhere.
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        if (typeof showToast === 'function') showToast('No artist selected', 'error');
+        return;
+    }
+
+    const _closeSvg = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+    const _checkSvg = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+    const old = document.getElementById('art-picker-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'art-picker-overlay';
+    overlay.className = 'art-picker-overlay';
+    let skeleton = '';
+    for (let i = 0; i < 8; i++) skeleton += '<div class="art-picker-skel"></div>';
+    overlay.innerHTML =
+        '<div class="art-picker-modal" role="dialog" aria-modal="true">' +
+          '<div class="art-picker-header">' +
+            '<div class="art-picker-titles">' +
+              '<div class="art-picker-title">Choose artist photo</div>' +
+              '<div class="art-picker-subtitle">' + _esc(artistName) + ' · applies to SoulSync, your server, and artist.jpg on disk</div>' +
+            '</div>' +
+            '<button class="art-picker-close" aria-label="Close">' + _closeSvg + '</button>' +
+          '</div>' +
+          '<div class="art-picker-body"><div class="art-picker-grid loading">' + skeleton + '</div></div>' +
+          '<div class="art-picker-footer">' +
+            '<div class="art-picker-count"></div>' +
+            '<div class="art-picker-actions">' +
+              '<button class="art-picker-btn art-picker-cancel">Cancel</button>' +
+              '<button class="art-picker-btn art-picker-apply" disabled>Apply</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+    const onEsc = (e) => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+    document.addEventListener('keydown', onEsc);
+    overlay.querySelector('.art-picker-close').onclick = close;
+    overlay.querySelector('.art-picker-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    const body = overlay.querySelector('.art-picker-body');
+    const applyBtn = overlay.querySelector('.art-picker-apply');
+    const countEl = overlay.querySelector('.art-picker-count');
+    let selectedUrl = null;
+
+    fetch('/api/artist/' + encodeURIComponent(artistId) + '/art-options')
+        .then(r => r.json())
+        .then(data => {
+            const cands = (data && data.candidates) || [];
+            if (!cands.length) {
+                body.innerHTML = '<div class="art-picker-empty">No photos found on your connected sources for this artist.</div>';
+                _artPickerCustomRow(body, null, tileUrl => {
+                    selectedUrl = tileUrl;
+                    applyBtn.disabled = false;
+                });
+                return;
+            }
+            countEl.textContent = cands.length + ' source' + (cands.length === 1 ? '' : 's');
+            const grid = document.createElement('div');
+            grid.className = 'art-picker-grid';
+            // the CURRENT photo leads the grid as a reference tile — read from
+            // the page (the DB often stores a local cache path, which must
+            // never be re-applied as if it were a source URL). Display-only.
+            const curImg = document.getElementById('artist-detail-image');
+            if (curImg && curImg.src && curImg.style.display !== 'none') {
+                const cur = document.createElement('div');
+                cur.className = 'art-picker-tile art-picker-tile--current';
+                cur.innerHTML =
+                    '<img loading="lazy" src="' + _esc(curImg.src) + '" alt="">' +
+                    '<span class="art-picker-badge art-picker-badge--current">current</span>';
+                cur.querySelector('img').onerror = () => cur.remove();
+                grid.appendChild(cur);
+            }
+            cands.forEach(c => {
+                const tile = document.createElement('button');
+                tile.className = 'art-picker-tile';
+                tile.innerHTML =
+                    '<img loading="lazy" src="' + _esc(c.url) + '" alt="">' +
+                    '<span class="art-picker-badge">' + _esc(c.source) + '</span>' +
+                    '<span class="art-picker-check">' + _checkSvg + '</span>';
+                tile.querySelector('img').onerror = () => {
+                    // a dead image URL removes its tile — but a grid that
+                    // empties out must SAY so, not sit silently blank
+                    tile.remove();
+                    if (!grid.querySelector('.art-picker-tile')) {
+                        body.innerHTML = '<div class="art-picker-empty">Sources returned photos, ' +
+                            'but none of the images would load — try again in a minute.</div>';
+                    } else {
+                        countEl.textContent = grid.querySelectorAll('.art-picker-tile').length + ' available';
+                    }
+                };
+                tile.onclick = () => {
+                    grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                    tile.classList.add('selected');
+                    selectedUrl = c.url;
+                    applyBtn.disabled = false;
+                };
+                grid.appendChild(tile);
+            });
+            body.innerHTML = '';
+            body.appendChild(grid);
+            // custom-URL row BELOW the grid (and after the innerHTML reset,
+            // which would otherwise wipe it)
+            _artPickerCustomRow(body, grid, tileUrl => {
+                grid.querySelectorAll('.art-picker-tile.selected').forEach(t => t.classList.remove('selected'));
+                selectedUrl = tileUrl;
+                applyBtn.disabled = false;
+            });
+        })
+        .catch(() => { body.innerHTML = '<div class="art-picker-empty">Couldn\'t load photo options.</div>'; });
+
+    applyBtn.onclick = () => {
+        if (!selectedUrl) return;
+        applyBtn.disabled = true;
+        applyBtn.classList.add('loading');
+        applyBtn.textContent = 'Applying…';
+        fetch('/api/artist/' + encodeURIComponent(artistId) + '/art', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: selectedUrl })
+        }).then(r => r.json()).then(res => {
+            if (res && res.success) {
+                const heroImg = document.getElementById('artist-detail-image');
+                if (heroImg) { heroImg.src = selectedUrl; heroImg.style.display = ''; }
+                const fallback = document.getElementById('artist-detail-image-fallback');
+                if (fallback) fallback.style.display = 'none';
+                const parts = [];
+                if (res.server_updated) parts.push('server');
+                if (res.disk_written) parts.push('artist.jpg');
+                const extra = parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '';
+                if (typeof showToast === 'function') showToast('Artist photo updated' + extra, 'success');
+                close();
+            } else {
+                applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+                if (typeof showToast === 'function') showToast((res && res.error) || 'Failed to update photo', 'error');
+            }
+        }).catch(() => {
+            applyBtn.disabled = false; applyBtn.classList.remove('loading'); applyBtn.textContent = 'Apply';
+            if (typeof showToast === 'function') showToast('Failed to update photo', 'error');
+        });
+    };
+}
+
+function renderExpandedAlbumHeader(album) {
+    const header = document.createElement('div');
+    header.className = 'enhanced-expanded-header';
+
+    // Large album art — click to open the cover-art picker.
+    const artWrap = document.createElement('div');
+    artWrap.className = 'enhanced-expanded-art-wrap';
+    artWrap.title = 'Change cover art';
+    const img = document.createElement('img');
+    img.className = 'enhanced-expanded-art';
+    if (album.thumb_url) img.src = album.thumb_url;
+    img.alt = album.title || '';
+    img.onerror = function () { this.style.visibility = 'hidden'; };
+    artWrap.appendChild(img);
+    const editOverlay = document.createElement('div');
+    editOverlay.className = 'enhanced-art-edit-overlay';
+    editOverlay.innerHTML = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>Change cover</span>';
+    artWrap.appendChild(editOverlay);
+    artWrap.addEventListener('click', () => openAlbumArtPicker(album));
+    header.appendChild(artWrap);
+
+    const info = document.createElement('div');
+    info.className = 'enhanced-expanded-info';
+
+    const title = document.createElement('div');
+    title.className = 'enhanced-expanded-title';
+    title.textContent = album.title || 'Unknown';
+    info.appendChild(title);
+
+    const meta = document.createElement('div');
+    meta.className = 'enhanced-expanded-meta';
+
+    const details = [];
+    if (album.year) details.push(String(album.year));
+    const ownedTrackCount = album.tracks ? album.tracks.length : 0;
+    const visibleTrackRows = _getEnhancedAlbumTrackRows(album);
+    const expectedTrackCount = Math.max(
+        ownedTrackCount,
+        visibleTrackRows.length,
+        Number(album.api_track_count || album.track_count || 0)
+    );
+    const missingCount = visibleTrackRows.filter(t => t._missingExpected).length;
+    if (album._canonicalTracksLoading) details.push('checking tracklist');
+    if (expectedTrackCount > ownedTrackCount) {
+        details.push(`${ownedTrackCount}/${expectedTrackCount} tracks`);
+    } else {
+        details.push(`${ownedTrackCount} track${ownedTrackCount !== 1 ? 's' : ''}`);
+    }
+    if (missingCount > 0) details.push(`${missingCount} missing`);
+    let durMs = 0;
+    (album.tracks || []).forEach(t => { durMs += (t.duration || 0); });
+    if (durMs > 0) details.push(formatDurationMs(durMs));
+    if (album.label) details.push(album.label);
+    if (album.record_type) details.push(album.record_type.toUpperCase());
+
+    meta.textContent = details.join(' \u00B7 ');
+    info.appendChild(meta);
+
+    // Genre tags
+    const genres = Array.isArray(album.genres) ? album.genres : [];
+    if (genres.length > 0) {
+        const genreRow = document.createElement('div');
+        genreRow.className = 'enhanced-expanded-genres';
+        genres.forEach(g => {
+            const tag = document.createElement('span');
+            tag.className = 'enhanced-genre-tag';
+            tag.textContent = g;
+            genreRow.appendChild(tag);
+        });
+        info.appendChild(genreRow);
+    }
+
+    // External ID badges (clickable links)
+    const ids = document.createElement('div');
+    ids.className = 'enhanced-expanded-ids';
+    const idFields = filterJiosaavnServiceEntries([
+        { key: 'spotify_album_id', label: 'Spotify', svc: 'spotify' },
+        { key: 'musicbrainz_release_id', label: 'MusicBrainz', svc: 'musicbrainz' },
+        { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
+        { key: 'jiosaavn_id', label: 'JioSaavn', svc: 'jiosaavn' },
+        { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
+        { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
+        { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
+        { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
+        { key: 'bandcamp_url', label: 'Bandcamp', svc: 'bandcamp' },
+    ], 'svc');
+    idFields.forEach(f => {
+        if (album[f.key]) {
+            ids.appendChild(makeClickableBadge(f.svc, 'album', album[f.key], f.label));
+        }
+    });
+    if (ids.children.length > 0) info.appendChild(ids);
+
+    // Resolve artist name for enrichment calls
+    const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+
+    // Match status chips (clickable to rematch)
+    const statusRow = document.createElement('div');
+    statusRow.className = 'enhanced-match-status-row compact';
+    const statusSvcs = filterJiosaavnServiceEntries([
+        { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
+        { key: 'musicbrainz_match_status', label: 'MB', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
+        { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
+        { key: 'jiosaavn_match_status', label: 'JioSaavn', attempted: 'jiosaavn_last_attempted', svc: 'jiosaavn' },
+        { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
+        { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
+        { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
+        { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
+        { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
+        { key: 'bandcamp_match_status', label: 'Bandcamp', attempted: 'bandcamp_last_attempted', svc: 'bandcamp' },
+    ], 'svc');
+    statusSvcs.forEach(s => {
+        const status = album[s.key];
+        const attempted = album[s.attempted];
+        const chip = document.createElement('span');
+        chip.className = `enhanced-match-chip clickable ${status === 'matched' ? 'matched' : (status === 'not_found' ? 'not-found' : 'pending')}`;
+        chip.textContent = `${s.label}: ${status || '—'}`;
+        const tipParts = [];
+        if (attempted) tipParts.push(`Last: ${new Date(attempted).toLocaleString()}`);
+        tipParts.push('Click to rematch');
+        chip.title = tipParts.join(' · ');
+        chip.onclick = (e) => {
+            e.stopPropagation();
+            const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : '';
+            openManualMatchModal('album', album.id, s.svc, album.title || '', aId);
+        };
+        statusRow.appendChild(chip);
+    });
+    info.appendChild(statusRow);
+
+    // Action buttons row
+    const enrichRow = document.createElement('div');
+    enrichRow.className = 'enhanced-expanded-actions';
+
+    if (isEnhancedAdmin()) {
+        const albumEnrichWrap = document.createElement('div');
+        albumEnrichWrap.className = 'enhanced-enrich-wrap';
+        const albumEnrichBtn = document.createElement('button');
+        albumEnrichBtn.className = 'enhanced-enrich-btn small';
+        albumEnrichBtn.textContent = 'Enrich Album ▾';
+        albumEnrichBtn.onclick = (e) => { e.stopPropagation(); albumEnrichMenu.classList.toggle('visible'); };
+        albumEnrichWrap.appendChild(albumEnrichBtn);
+        const albumEnrichMenu = document.createElement('div');
+        albumEnrichMenu.className = 'enhanced-enrich-menu';
+        filterJiosaavnServiceEntries([
+            { id: 'spotify', label: 'Spotify', icon: '🟢' },
+            { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
+            { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'jiosaavn', label: 'JioSaavn', icon: '🎵' },
+            { id: 'discogs', label: 'Discogs', icon: '🟤' },
+            { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
+            { id: 'itunes', label: 'iTunes', icon: '🔴' },
+            { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+            { id: 'genius', label: 'Genius', icon: '🟡' },
+            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
+        ], 'id').forEach(svc => {
+            const item = document.createElement('div');
+            item.className = 'enhanced-enrich-menu-item';
+            item.textContent = `${svc.icon} ${svc.label}`;
+            item.onclick = (e) => {
+                e.stopPropagation();
+                albumEnrichMenu.classList.remove('visible');
+                const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : '';
+                runEnrichment('album', album.id, svc.id, album.title || '', artistName, aId);
+            };
+            albumEnrichMenu.appendChild(item);
+        });
+        albumEnrichWrap.appendChild(albumEnrichMenu);
+        enrichRow.appendChild(albumEnrichWrap);
+
+        const writeTagsBtn = document.createElement('button');
+        writeTagsBtn.className = 'enhanced-write-tags-album-btn';
+        writeTagsBtn.innerHTML = '&#9998; Write All Tags';
+        writeTagsBtn.title = 'Write DB metadata to file tags for all tracks in this album';
+        writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
+        enrichRow.appendChild(writeTagsBtn);
+
+        const rgAlbumBtn = document.createElement('button');
+        rgAlbumBtn.className = 'enhanced-rg-album-btn';
+        rgAlbumBtn.innerHTML = '&#9835; ReplayGain';
+        rgAlbumBtn.title = 'Analyze ReplayGain for all tracks in this album (writes track + album gain)';
+        rgAlbumBtn.dataset.albumId = album.id;
+        rgAlbumBtn.onclick = (e) => { e.stopPropagation(); analyzeAlbumReplayGain(album.id, rgAlbumBtn); };
+        enrichRow.appendChild(rgAlbumBtn);
+
+        const reorganizeBtn = document.createElement('button');
+        reorganizeBtn.className = 'enhanced-reorganize-album-btn';
+        reorganizeBtn.innerHTML = '&#128193; Reorganize';
+        reorganizeBtn.title = 'Reorganize album files using your configured download template';
+        reorganizeBtn.dataset.albumId = String(album.id);
+        reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
+        enrichRow.appendChild(reorganizeBtn);
+
+        const redownloadBtn = document.createElement('button');
+        redownloadBtn.className = 'enhanced-redownload-album-btn';
+        redownloadBtn.innerHTML = '&#8635; Redownload';
+        redownloadBtn.title = 'Redownload this album (opens Download Missing modal with force-download)';
+        redownloadBtn.onclick = (e) => {
+            e.stopPropagation();
+            const aName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            redownloadLibraryAlbum(album, aName, redownloadBtn);
+        };
+        enrichRow.appendChild(redownloadBtn);
+
+        const deleteAlbumBtn = document.createElement('button');
+        deleteAlbumBtn.className = 'enhanced-delete-album-btn';
+        deleteAlbumBtn.textContent = 'Delete Album';
+        deleteAlbumBtn.onclick = (e) => { e.stopPropagation(); deleteLibraryAlbum(album.id); };
+        enrichRow.appendChild(deleteAlbumBtn);
+    }
+
+    // Report Issue button (available to all users)
+    const reportBtn = document.createElement('button');
+    reportBtn.className = 'enhanced-report-issue-btn';
+    reportBtn.innerHTML = '&#9873; Report Issue';
+    reportBtn.title = 'Report a problem with this album';
+    reportBtn.onclick = (e) => {
+        e.stopPropagation();
+        const aName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+        showReportIssueModal('album', album.id, album.title || '', aName);
+    };
+    enrichRow.appendChild(reportBtn);
+
+    info.appendChild(enrichRow);
+
+    header.appendChild(info);
+    return header;
+}
+
+function renderAlbumMetaRow(album) {
+    const row = document.createElement('div');
+    row.className = 'enhanced-album-meta-row';
+    row.id = `enhanced-album-meta-${album.id}`;
+
+    const fields = [
+        { key: 'title', label: 'Title', value: album.title || '' },
+        { key: 'year', label: 'Year', value: album.year || '', type: 'number' },
+        { key: 'release_date', label: 'Release Date', value: album.release_date || '', placeholder: 'YYYY-MM-DD' },
+        { key: 'genres', label: 'Genres', value: Array.isArray(album.genres) ? album.genres.join(', ') : (album.genres || '') },
+        { key: 'label', label: 'Label', value: album.label || '' },
+        { key: 'style', label: 'Style', value: album.style || '' },
+        { key: 'mood', label: 'Mood', value: album.mood || '' },
+        { key: 'record_type', label: 'Type', value: album.record_type || 'album' },
+        { key: 'explicit', label: 'Explicit', value: album.explicit ? '1' : '0' },
+    ];
+
+    const admin = isEnhancedAdmin();
+    fields.forEach(f => {
+        const fieldDiv = document.createElement('div');
+        fieldDiv.className = 'enhanced-album-meta-field';
+        const label = document.createElement('label');
+        label.className = 'enhanced-album-meta-label';
+        label.textContent = f.label;
+        fieldDiv.appendChild(label);
+        if (admin) {
+            const input = document.createElement('input');
+            input.className = 'enhanced-album-meta-input';
+            input.type = f.type || 'text';
+            if (f.placeholder) input.placeholder = f.placeholder;
+            input.dataset.albumId = album.id;
+            input.dataset.field = f.key;
+            input.value = String(f.value);
+            input.addEventListener('click', e => e.stopPropagation());
+            fieldDiv.appendChild(input);
+        } else {
+            const span = document.createElement('span');
+            span.className = 'enhanced-album-meta-value';
+            span.textContent = String(f.value) || '—';
+            fieldDiv.appendChild(span);
+        }
+        row.appendChild(fieldDiv);
+    });
+
+    if (admin) {
+        const saveDiv = document.createElement('div');
+        saveDiv.className = 'enhanced-album-meta-field';
+        const spacer = document.createElement('label');
+        spacer.className = 'enhanced-album-meta-label';
+        spacer.innerHTML = '&nbsp;';
+        saveDiv.appendChild(spacer);
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'enhanced-album-save-btn';
+        saveBtn.textContent = 'Save Album';
+        saveBtn.onclick = (e) => { e.stopPropagation(); saveAlbumMetadata(album.id); };
+        saveDiv.appendChild(saveBtn);
+        row.appendChild(saveDiv);
+    }
+
+    return row;
+}
+
+function _trackSlotKey(track) {
+    const disc = Number(track.disc_number || track.expected_disc_number || 1);
+    const num = Number(track.track_number || track.expected_track_number || 0);
+    return `${disc}:${num}`;
+}
+
+function _normalizeExpectedMissingTrack(source, album) {
+    const title = source.title || source.name || `Track ${source.track_number || '?'}`;
+    const sourceTrackId = source.track_id || source.id || source.source_track_id || '';
+    const hasActionableContext = !!(
+        title &&
+        source.track_number &&
+        (sourceTrackId || source.spotify_track_id || source.deezer_id || source.itunes_track_id || source.musicbrainz_recording_id)
+    );
+    return {
+        id: `missing-${album.id}-${source.disc_number || 1}-${source.track_number || ''}`,
+        title,
+        track_number: source.track_number || source.position || '',
+        disc_number: source.disc_number || 1,
+        duration: source.duration || source.duration_ms || 0,
+        spotify_track_id: source.spotify_track_id || (source.source === 'spotify' ? sourceTrackId : ''),
+        deezer_id: source.deezer_id || (source.source === 'deezer' ? sourceTrackId : ''),
+        itunes_track_id: source.itunes_track_id || (source.source === 'itunes' ? sourceTrackId : ''),
+        musicbrainz_recording_id: source.musicbrainz_recording_id || (source.source === 'musicbrainz' ? sourceTrackId : ''),
+        source: source.source || source.metadata_source || '',
+        track_id: sourceTrackId,
+        album_id: source.album_id || source.source_album_id || '',
+        artists: source.artists || source.artist_names || [],
+        _hasActionableContext: hasActionableContext,
+        _missingExpected: true,
+        _sourceTrack: source,
+    };
+}
+
+function _getEnhancedAlbumCanonicalSource(album) {
+    const priority = [
+        ['spotify', 'spotify_album_id'],
+        ['deezer', 'deezer_id'],
+        ['itunes', 'itunes_album_id'],
+        ['musicbrainz', 'musicbrainz_release_id'],
+        ['discogs', 'discogs_id'],
+        ['tidal', 'tidal_id'],
+        ['qobuz', 'qobuz_id'],
+    ];
+    for (const [source, key] of priority) {
+        if (album[key]) return { source, id: album[key] };
+    }
+    return null;
+}
+
+async function ensureEnhancedAlbumCanonicalTracks(album) {
+    if (!album || album._canonicalTracksLoaded || album._canonicalTracksLoading) return false;
+
+    const canonicalSource = _getEnhancedAlbumCanonicalSource(album);
+    if (!canonicalSource) {
+        album._canonicalTracksLoaded = true;
+        return false;
+    }
+
+    album._canonicalTracksLoading = true;
+    try {
+        const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+        const params = new URLSearchParams({
+            name: album.title || '',
+            artist: artistName,
+            source: canonicalSource.source,
+        });
+        const response = await fetch(`/api/album/${encodeURIComponent(canonicalSource.id)}/tracks?${params}`);
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to load canonical tracklist');
+        }
+
+        const canonicalTracks = Array.isArray(data.tracks) ? data.tracks : [];
+        album.canonical_tracks = canonicalTracks.map((track, index) => ({
+            ...track,
+            title: track.title || track.name || `Track ${track.track_number || index + 1}`,
+            name: track.name || track.title || `Track ${track.track_number || index + 1}`,
+            track_number: track.track_number || index + 1,
+            disc_number: track.disc_number || 1,
+            duration: track.duration || track.duration_ms || 0,
+            source: data.source || canonicalSource.source,
+            track_id: track.id || track.track_id || '',
+            id: track.id || track.track_id || `${canonicalSource.source}:${canonicalSource.id}:${track.disc_number || 1}:${track.track_number || index + 1}`,
+        }));
+        album.api_track_count = Math.max(Number(album.api_track_count || 0), album.canonical_tracks.length);
+        album.missing_tracks = _deriveEnhancedMissingTracks(album, album.canonical_tracks);
+        album._canonicalTracksLoaded = true;
+        return true;
+    } catch (error) {
+        album._canonicalTracksError = error.message;
+        album._canonicalTracksLoaded = true;
+        console.debug('Failed to load canonical album tracks:', album.title, error);
+        return false;
+    } finally {
+        album._canonicalTracksLoading = false;
+    }
+}
+
+// Loose title key for owned<->canonical matching. Mirrors the Reorganize
+// matcher (core.library_reorganize._normalize_title), which already maps these
+// same multi-disc tracks correctly: drop only the featured-artist credit, then
+// treat every other separator (brackets, dashes, slashes, punctuation) as
+// whitespace — so "X (Main Theme)" and "X - Main Theme" collapse to the same key
+// while "(feat. Y)" is removed. Keeping bracket CONTENT (not deleting it) is what
+// makes editions line up.
+function _normTitleForMatch(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[([]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]/g, ' ')  // (feat. Y) / [ft Y]
+        .replace(/\s+(?:feat|ft|featuring)\b\.?\s.*$/g, ' ')          // trailing  feat. Y …
+        .replace(/[^a-z0-9]+/g, ' ')                                  // all other separators -> space (KEEP content)
+        .trim();
+}
+
+function _deriveEnhancedMissingTracks(album, canonicalTracks) {
+    // #916: multi-disc albums store disc_number = 1 for EVERY track in the library
+    // (the scanner doesn't split discs), so a strict disc:track slot match flags every
+    // canonical disc-2+ track as missing. Match each canonical track to an owned track
+    // by slot FIRST, then fall back to title — consuming each owned track once so genuine
+    // missings and duplicate titles still count correctly.
+    const owned = (album.tracks || []).map(t => ({
+        slot: _trackSlotKey(t),
+        title: _normTitleForMatch(t.title || t.name),
+        used: false,
+    }));
+    const slotIndex = new Map();
+    owned.forEach((o, i) => { if (o.slot !== '1:0' && !slotIndex.has(o.slot)) slotIndex.set(o.slot, i); });
+
+    const missing = [];
+    (canonicalTracks || []).forEach(track => {
+        const key = _trackSlotKey(track);
+        const normalized = _normalizeExpectedMissingTrack(track, album);
+        if (key === '1:0' || !normalized._hasActionableContext) return;
+
+        // 1) exact disc:track slot
+        const si = slotIndex.get(key);
+        if (si != null && !owned[si].used) { owned[si].used = true; return; }
+
+        // 2) fallback: title vs any UNUSED owned track (handles the disc_number=1 collapse)
+        const nt = _normTitleForMatch(track.name || track.title);
+        if (nt) {
+            const m = owned.find(o => !o.used && o.title === nt);
+            if (m) { m.used = true; return; }
+        }
+
+        missing.push({
+            ...track,
+            name: track.name || track.title,
+            duration_ms: track.duration_ms || track.duration || 0,
+        });
+    });
+    return missing;
+}
+
+function _getEnhancedAlbumTrackRows(album) {
+    const ownedTracks = Array.isArray(album.tracks) ? album.tracks : [];
+    const rowsBySlot = new Map();
+    const ownedSlots = new Set();
+    ownedTracks.forEach(track => {
+        // #1051: every owned track is a real physical file — key by its unique id,
+        // NEVER by disc:track slot. Multi-disc albums whose tags all claim disc 1
+        // (or the scanner's #916 disc collapse) make disc1-trackN and disc2-trackN
+        // share a slot; keying the render Map by slot silently overwrote one with
+        // the other, so a disc-2 track rendered in a disc-1 row (some tracks vanished).
+        // Keying by id renders every owned file; ownedSlots still drives the
+        // "is this slot already owned?" check for the missing-track merge below.
+        rowsBySlot.set(`owned:${track.id}`, track);
+        ownedSlots.add(_trackSlotKey(track));
+    });
+
+    const explicitMissing = Array.isArray(album.missing_tracks) ? album.missing_tracks : [];
+    explicitMissing.forEach(missing => {
+        const row = _normalizeExpectedMissingTrack(missing, album);
+        const key = _trackSlotKey(row);
+        if (row._hasActionableContext && !ownedSlots.has(key) && !rowsBySlot.has(`missing:${key}`)) {
+            rowsBySlot.set(`missing:${key}`, row);
+        }
+    });
+
+    return Array.from(rowsBySlot.values()).sort((a, b) => {
+        const discDelta = Number(a.disc_number || 1) - Number(b.disc_number || 1);
+        if (discDelta !== 0) return discDelta;
+        const trackDelta = Number(a.track_number || 0) - Number(b.track_number || 0);
+        if (trackDelta !== 0) return trackDelta;
+        return String(a.title || '').localeCompare(String(b.title || ''));
+    });
+}
+
+function _buildTrackRow(track, album, admin) {
+    const tr = document.createElement('tr');
+    tr.dataset.trackId = track.id;
+    tr.dataset.albumId = album.id;
+    tr._enhancedTrack = track;
+    tr._enhancedAlbum = album;
+    if (track._missingExpected) tr.classList.add('enhanced-missing-track-row');
+    if (artistDetailPageState.selectedTracks.has(String(track.id))) tr.classList.add('selected');
+
+    // Checkbox (admin only)
+    if (admin) {
+        const cbTd = document.createElement('td');
+        if (!track._missingExpected) {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'enhanced-track-checkbox';
+            cb.checked = artistDetailPageState.selectedTracks.has(String(track.id));
+            cbTd.appendChild(cb);
+        }
+        tr.appendChild(cbTd);
+    }
+
+    // Play button
+    const playTd = document.createElement('td');
+    playTd.className = 'col-play';
+    const playBtn = document.createElement('button');
+    playBtn.className = 'enhanced-play-btn';
+    playBtn.innerHTML = track._missingExpected ? '&mdash;' : '&#9654;';
+    playBtn.title = track.file_path ? 'Play track' : 'No file available';
+    if (!track.file_path) playBtn.disabled = true;
+    playTd.appendChild(playBtn);
+    tr.appendChild(playTd);
+
+    // Track number
+    const numTd = document.createElement('td');
+    numTd.className = 'col-num' + (admin ? ' editable' : '');
+    numTd.textContent = track.track_number || '-';
+    tr.appendChild(numTd);
+
+    // Disc number
+    const discTd = document.createElement('td');
+    discTd.className = 'col-disc' + (admin ? ' editable' : '');
+    discTd.textContent = track.disc_number || '-';
+    // Disc # describes a real file's tags — like the title cell (and unlike a
+    // phantom "Missing" row), it's only editable for owned tracks. #1051
+    if (track._missingExpected) discTd.classList.remove('editable');
+    tr.appendChild(discTd);
+
+    // Title
+    const titleTd = document.createElement('td');
+    titleTd.className = 'col-title' + (admin ? ' editable' : '');
+    titleTd.textContent = track.title || 'Unknown';
+    if (track._missingExpected) {
+        titleTd.classList.remove('editable');
+        const status = document.createElement('span');
+        status.className = 'enhanced-missing-track-badge';
+        status.textContent = 'Missing';
+        titleTd.appendChild(status);
+    }
+    tr.appendChild(titleTd);
+
+    // Duration
+    const durTd = document.createElement('td');
+    durTd.className = 'col-duration';
+    durTd.textContent = formatDurationMs(track.duration);
+    tr.appendChild(durTd);
+
+    // Format
+    const fmtTd = document.createElement('td');
+    fmtTd.className = 'col-format';
+    if (track._missingExpected) {
+        fmtTd.textContent = '-';
+    } else {
+        const format = extractFormat(track.file_path);
+        const fmtSpan = document.createElement('span');
+        const fmtClass = format === 'FLAC' ? 'flac' : (format === 'MP3' ? 'mp3' : 'other');
+        fmtSpan.className = `enhanced-format-badge ${fmtClass}`;
+        fmtSpan.textContent = format;
+        fmtTd.appendChild(fmtSpan);
+    }
+    tr.appendChild(fmtTd);
+
+    // Bitrate
+    const brTd = document.createElement('td');
+    brTd.className = 'col-bitrate';
+    const brSpan = document.createElement('span');
+    const brClass = (track.bitrate || 0) >= 320 ? 'high' : ((track.bitrate || 0) >= 192 ? 'medium' : 'low');
+    brSpan.className = `enhanced-bitrate ${brClass}`;
+    brSpan.textContent = track.bitrate ? track.bitrate + ' kbps' : '-';
+    brTd.appendChild(brSpan);
+    tr.appendChild(brTd);
+
+    // BPM
+    const bpmTd = document.createElement('td');
+    bpmTd.className = 'col-bpm' + (admin ? ' editable' : '');
+    bpmTd.textContent = track.bpm || '-';
+    tr.appendChild(bpmTd);
+
+    // File path
+    const pathTd = document.createElement('td');
+    pathTd.className = 'col-path';
+    const filePath = track.file_path || '-';
+    const fileName = track._missingExpected
+        ? 'Missing from library'
+        : (filePath !== '-' ? filePath.split(/[\\/]/).pop() : '-');
+    pathTd.textContent = fileName;
+    pathTd.title = filePath;
+    tr.appendChild(pathTd);
+
+    // Match status chips
+    const matchTd = document.createElement('td');
+    matchTd.className = 'col-match';
+    const matchCell = document.createElement('div');
+    matchCell.className = 'enhanced-track-match-cell';
+    const trackServices = filterJiosaavnServiceEntries([
+        { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
+        { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
+        { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
+        { svc: 'jiosaavn', col: 'jiosaavn_id', label: 'JS' },
+        { svc: 'audiodb', col: 'audiodb_id', label: 'ADB' },
+        { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
+        { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
+        { svc: 'genius', col: 'genius_id', label: 'Gen' },
+        { svc: 'bandcamp', col: 'bandcamp_url', label: 'BC' },
+    ], 'svc');
+    trackServices.forEach(s => {
+        const hasId = !!track[s.col];
+        const chip = document.createElement('span');
+        chip.className = 'enhanced-track-match-chip' + (hasId ? ' matched' : ' not-found');
+        chip.textContent = s.label;
+        chip.title = hasId ? `${s.svc}: ${track[s.col]}` : `${s.svc}: no match`;
+        chip.dataset.service = s.svc;
+        matchCell.appendChild(chip);
+    });
+    matchTd.appendChild(matchCell);
+    tr.appendChild(matchTd);
+
+    // Add to Queue button
+    const queueTd = document.createElement('td');
+    queueTd.className = 'col-queue';
+    if (!track._missingExpected && track.file_path) {
+        const playNextBtn = document.createElement('button');
+        playNextBtn.className = 'enhanced-playnext-btn';
+        // Play-next glyph (queue-with-arrow feel)
+        playNextBtn.innerHTML = '&#8677;';   // ⇥
+        playNextBtn.title = 'Play next';
+        queueTd.appendChild(playNextBtn);
+
+        const queueBtn = document.createElement('button');
+        queueBtn.className = 'enhanced-queue-btn';
+        queueBtn.innerHTML = '&#43;';
+        queueBtn.title = 'Add to queue';
+        queueTd.appendChild(queueBtn);
+    }
+    tr.appendChild(queueTd);
+
+    if (admin) {
+        // Write Tags button (admin only)
+        const tagTd = document.createElement('td');
+        tagTd.className = 'col-writetag';
+        if (track.file_path && !track._missingExpected) {
+            const tagBtn = document.createElement('button');
+            tagBtn.className = 'enhanced-write-tag-btn';
+            tagBtn.innerHTML = '&#9998;';
+            tagBtn.title = 'Write tags to file';
+            tagTd.appendChild(tagBtn);
+
+            const rgBtn = document.createElement('button');
+            rgBtn.className = 'enhanced-rg-btn';
+            rgBtn.textContent = 'RG';
+            rgBtn.title = 'Analyze & write ReplayGain (track gain)';
+            tagTd.appendChild(rgBtn);
+        }
+        tr.appendChild(tagTd);
+
+        // Track actions cell: source info, redownload, delete, or missing-track actions.
+        const actionsTd = document.createElement('td');
+        actionsTd.className = 'col-track-actions';
+        if (track._missingExpected) {
+            actionsTd.innerHTML = `
+                <div class="enhanced-track-actions-group visible">
+                    <button class="enhanced-missing-manage-btn" data-action="manage-missing" title="Manage this missing album track">Manage</button>
+                </div>
+            `;
+        } else {
+            actionsTd.innerHTML = `
+                <div class="enhanced-track-actions-group">
+                    <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
+                    <button class="enhanced-reidentify-btn" title="Re-identify — file this track under a different release">&#8644;</button>
+                    <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
+                    <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
+                </div>
+            `;
+        }
+        tr.appendChild(actionsTd);
+    } else {
+        // Report Issue button per track (non-admin)
+        const reportTd = document.createElement('td');
+        reportTd.className = 'col-report';
+        if (track._missingExpected) {
+            const manageBtn = document.createElement('button');
+            manageBtn.className = 'enhanced-missing-manage-btn';
+            manageBtn.textContent = 'Manage';
+            manageBtn.dataset.action = 'manage-missing';
+            reportTd.appendChild(manageBtn);
+        } else {
+            const reportBtn = document.createElement('button');
+            reportBtn.className = 'enhanced-track-report-btn';
+            reportBtn.innerHTML = '&#9873;';
+            reportBtn.title = 'Report issue with this track';
+            reportTd.appendChild(reportBtn);
+        }
+        tr.appendChild(reportTd);
+    }
+
+    // Mobile actions column (visible only on mobile via CSS)
+    const mobileTd = document.createElement('td');
+    mobileTd.className = 'col-mobile-actions';
+    const mobileBtn = document.createElement('button');
+    mobileBtn.className = 'enhanced-mobile-actions-btn';
+    mobileBtn.innerHTML = '⋯';
+    mobileBtn.title = 'Actions';
+    mobileTd.appendChild(mobileBtn);
+    tr.appendChild(mobileTd);
+
+    return tr;
+}
+
+function _getTrackDataFromRow(tr) {
+    if (tr._enhancedTrack && tr._enhancedAlbum) {
+        return {
+            track: tr._enhancedTrack,
+            album: tr._enhancedAlbum,
+            trackId: tr._enhancedTrack.id,
+            albumId: tr._enhancedAlbum.id
+        };
+    }
+    const trackId = tr.dataset.trackId;
+    const albumId = tr.dataset.albumId;
+    const album = findEnhancedAlbum(albumId);
+    if (!album) return null;
+    const track = (album.tracks || []).find(t => String(t.id) === String(trackId));
+    return track ? { track, album, trackId, albumId } : null;
+}
+
+function _attachTableDelegation(table, album) {
+    // Single click handler for the entire table — replaces 12-16 per-row handlers
+    const admin = isEnhancedAdmin();
+    table.addEventListener('click', (e) => {
+        const target = e.target;
+        const tr = target.closest('tr[data-track-id]');
+
+        // Header checkbox (select all)
+        if (target.closest('thead') && target.classList.contains('enhanced-track-checkbox')) {
+            toggleSelectAllTracks(album.id, target.checked);
+            return;
+        }
+
+        // Sort header click
+        const th = target.closest('th[data-sort-field]');
+        if (th) {
+            cancelInlineEdit();
+            const sortField = th.dataset.sortField;
+            const current = artistDetailPageState.enhancedTrackSort[album.id];
+            const ascending = current && current.field === sortField ? !current.ascending : true;
+            artistDetailPageState.enhancedTrackSort[album.id] = { field: sortField, ascending };
+            sortEnhancedTracks(album, sortField, ascending);
+            _rebuildTbody(table, album);
+            // Update header sort indicators
+            table.querySelectorAll('th[data-sort-field]').forEach(h => {
+                const sf = h.dataset.sortField;
+                const baseLabel = h.dataset.label || '';
+                const sort = artistDetailPageState.enhancedTrackSort[album.id];
+                h.textContent = sort && sort.field === sf ? baseLabel + (sort.ascending ? ' \u25B2' : ' \u25BC') : baseLabel;
+            });
+            return;
+        }
+
+        if (!tr) return;
+        const info = _getTrackDataFromRow(tr);
+        if (!info) return;
+        const { track, trackId } = info;
+
+        const manageAction = target.closest('.enhanced-missing-manage-btn');
+        if (manageAction && track._missingExpected) {
+            e.stopPropagation();
+            openMissingTrackManageModal(track, album);
+            return;
+        }
+
+        // Checkbox
+        if (target.classList.contains('enhanced-track-checkbox')) {
+            toggleTrackSelection(String(trackId));
+            return;
+        }
+
+        // Play button
+        if (target.closest('.enhanced-play-btn')) {
+            e.stopPropagation();
+            if (track.file_path) {
+                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+                playLibraryTrack(track, album.title || '', artistName);
+            }
+            return;
+        }
+
+        // Inline editable cells (admin)
+        if (admin) {
+            const cell = target.closest('td.editable');
+            if (cell) {
+                e.stopPropagation();
+                if (cell.classList.contains('col-num')) {
+                    startInlineEdit(cell, 'track', track.id, 'track_number', track.track_number || '');
+                } else if (cell.classList.contains('col-disc')) {
+                    startInlineEdit(cell, 'track', track.id, 'disc_number', track.disc_number || '');
+                } else if (cell.classList.contains('col-title')) {
+                    startInlineEdit(cell, 'track', track.id, 'title', track.title || '');
+                } else if (cell.classList.contains('col-bpm')) {
+                    startInlineEdit(cell, 'track', track.id, 'bpm', track.bpm || '');
+                }
+                return;
+            }
+        }
+
+        // Match chip click (admin — open manual match modal)
+        if (admin) {
+            const chip = target.closest('.enhanced-track-match-chip');
+            if (chip) {
+                e.stopPropagation();
+                const svc = chip.dataset.service;
+                const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
+                // Bandcamp only: include the album name alongside the track title
+                // so its release-page search has more to narrow down on (a bare
+                // track title is ambiguous — compilations, remixes, covers share
+                // titles across releases). Other services take a track ID directly
+                // and searched better with just the bare title, so leave them be.
+                const trackDefaultQuery = svc === 'bandcamp'
+                    ? [album.title, track.title].filter(Boolean).join(' ')
+                    : (track.title || '');
+                openManualMatchModal('track', track.id, svc, trackDefaultQuery, aId);
+                return;
+            }
+        }
+
+        // Queue / Play-next buttons (share the same track payload)
+        const isQueueBtn = target.closest('.enhanced-queue-btn');
+        const isPlayNextBtn = target.closest('.enhanced-playnext-btn');
+        if (isQueueBtn || isPlayNextBtn) {
+            e.stopPropagation();
+            if (track.file_path) {
+                const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+                let albumArt = album.thumb_url || null;
+                if (!albumArt && artistDetailPageState.enhancedData) {
+                    albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
+                }
+                const payload = {
+                    title: track.title || 'Unknown Track',
+                    artist: artistName || 'Unknown Artist',
+                    album: album.title || 'Unknown Album',
+                    file_path: track.file_path,
+                    filename: track.file_path,
+                    is_library: true,
+                    image_url: albumArt,
+                    id: track.id,
+                    artist_id: artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null,
+                    album_id: album.id,
+                    bitrate: track.bitrate,
+                    sample_rate: track.sample_rate
+                };
+                if (isPlayNextBtn && typeof playNext === 'function') playNext(payload);
+                else addToQueue(payload);
+            }
+            return;
+        }
+
+        // Write tags button (admin)
+        if (target.closest('.enhanced-write-tag-btn')) {
+            e.stopPropagation();
+            showTagPreview(track.id);
+            return;
+        }
+
+        // ReplayGain analyze button (admin)
+        if (target.closest('.enhanced-rg-btn')) {
+            e.stopPropagation();
+            analyzeTrackReplayGain(track.id, target.closest('.enhanced-rg-btn'));
+            return;
+        }
+
+        // Source info button (admin)
+        if (target.closest('.enhanced-source-info-btn')) {
+            e.stopPropagation();
+            showTrackSourceInfo(track, target.closest('.enhanced-source-info-btn'));
+            return;
+        }
+
+        // Re-identify button (admin) — #889
+        if (target.closest('.enhanced-reidentify-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            openReidentifyModal(track.id, track.title || 'Unknown', artistName,
+                                album.title || '', album.thumb_url || '');
+            return;
+        }
+
+        // Redownload button (admin)
+        if (target.closest('.enhanced-redownload-btn')) {
+            e.stopPropagation();
+            showTrackRedownloadModal(track, album);
+            return;
+        }
+
+        // Delete button (admin)
+        if (target.closest('.enhanced-delete-btn')) {
+            e.stopPropagation();
+            deleteLibraryTrack(track.id, album.id);
+            return;
+        }
+
+        // Report button (non-admin)
+        if (target.closest('.enhanced-track-report-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            showReportIssueModal('track', track.id, track.title || 'Unknown', artistName, album.title || '');
+            return;
+        }
+
+        // Mobile actions button (⋯)
+        if (target.closest('.enhanced-mobile-actions-btn')) {
+            e.stopPropagation();
+            _showMobileTrackActions(track, album);
+            return;
+        }
+    });
+}
+
+function _showMobileTrackActions(track, album) {
+    // Remove any existing popover
+    document.querySelectorAll('.mobile-popover-overlay, .enhanced-mobile-actions-popover').forEach(el => el.remove());
+
+    const overlay = document.createElement('div');
+    overlay.className = 'mobile-popover-overlay';
+
+    const popover = document.createElement('div');
+    popover.className = 'enhanced-mobile-actions-popover';
+
+    const title = document.createElement('div');
+    title.className = 'popover-title';
+    title.textContent = track.title || 'Track';
+    popover.appendChild(title);
+
+    const admin = isEnhancedAdmin();
+    const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+    const albumArt = album.thumb_url || (artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist?.thumb_url : null);
+
+    const actions = [];
+    if (track.file_path) {
+        actions.push({
+            icon: '▶', label: 'Play', action: () => {
+                playLibraryTrack({ id: track.id, title: track.title, file_path: track.file_path, bitrate: track.bitrate, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id }, album.title || '', artistName);
+            }
+        });
+        actions.push({
+            icon: '+', label: 'Add to Queue', action: () => {
+                addToQueue({ title: track.title || 'Unknown', artist: artistName, album: album.title || '', file_path: track.file_path, filename: track.file_path, is_library: true, image_url: albumArt, id: track.id, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id, bitrate: track.bitrate });
+            }
+        });
+    }
+    if (admin && track.file_path) {
+        actions.push({ icon: '✎', label: 'Write Tags', action: () => showTagPreview(track.id) });
+    }
+    if (admin) {
+        actions.push({ icon: 'ℹ', label: 'Source Info', action: () => showTrackSourceInfo(track, null) });
+        actions.push({ icon: '↻', label: 'Redownload Track', action: () => showTrackRedownloadModal(track, album) });
+        actions.push({ icon: '✕', label: 'Delete Track', cls: 'popover-delete', action: () => deleteLibraryTrack(track.id, album.id) });
+    }
+
+    actions.forEach(a => {
+        const btn = document.createElement('button');
+        if (a.cls) btn.className = a.cls;
+        btn.innerHTML = `<span class="popover-icon">${a.icon}</span>${a.label}`;
+        btn.addEventListener('click', () => { close(); a.action(); });
+        popover.appendChild(btn);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'popover-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', close);
+    popover.appendChild(cancelBtn);
+
+    function close() {
+        overlay.remove();
+        popover.remove();
+    }
+    overlay.addEventListener('click', close);
+
+    document.body.appendChild(overlay);
+    document.body.appendChild(popover);
+}
+
+function _rebuildTbody(table, album) {
+    // Replace only the tbody — keeps thead and event delegation intact
+    const admin = isEnhancedAdmin();
+    const oldTbody = table.querySelector('tbody');
+    const newTbody = document.createElement('tbody');
+    _getEnhancedAlbumTrackRows(album).forEach(track => {
+        newTbody.appendChild(_buildTrackRow(track, album, admin));
+    });
+    if (oldTbody) table.replaceChild(newTbody, oldTbody);
+    else table.appendChild(newTbody);
+}
+
+function renderTrackTable(album) {
+    const wrapper = document.createElement('div');
+
+    // Re-apply stored sort order if any
+    const activeSort = artistDetailPageState.enhancedTrackSort[album.id];
+    if (activeSort) {
+        sortEnhancedTracks(album, activeSort.field, activeSort.ascending);
+    }
+    const tracks = _getEnhancedAlbumTrackRows(album);
+
+    if (tracks.length === 0) {
+        wrapper.innerHTML = '<div class="enhanced-no-tracks">No tracks in database</div>';
+        return wrapper;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'enhanced-track-table';
+    table.dataset.albumId = album.id;
+
+    const admin = isEnhancedAdmin();
+    // Clear stale selections for non-admin to prevent ghost state
+    if (!admin) {
+        artistDetailPageState.selectedTracks.clear();
+    }
+
+    // Header
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    if (admin) {
+        const selectAllTh = document.createElement('th');
+        const selectAllCb = document.createElement('input');
+        selectAllCb.type = 'checkbox';
+        selectAllCb.className = 'enhanced-track-checkbox';
+        selectAllTh.appendChild(selectAllCb);
+        headRow.appendChild(selectAllTh);
+    }
+
+    const columns = [
+        { label: '', cls: 'col-play' },
+        { label: '#', cls: 'col-num', sortField: 'track_number' },
+        { label: 'Disc', cls: 'col-disc', sortField: 'disc_number' },
+        { label: 'Title', cls: 'col-title', sortField: 'title' },
+        { label: 'Duration', cls: 'col-duration', sortField: 'duration' },
+        { label: 'Format', cls: 'col-format', sortField: 'format' },
+        { label: 'Bitrate', cls: 'col-bitrate', sortField: 'bitrate' },
+        { label: 'BPM', cls: 'col-bpm', sortField: 'bpm' },
+        { label: 'File', cls: 'col-path' },
+        { label: 'Match', cls: 'col-match' },
+        { label: '', cls: 'col-queue' },
+        ...(admin ? [
+            { label: '', cls: 'col-writetag' },
+            { label: '', cls: 'col-delete' },
+        ] : [
+            { label: '', cls: 'col-report' },
+        ]),
+        { label: '', cls: 'col-mobile-actions' },
+    ];
+    const currentSort = artistDetailPageState.enhancedTrackSort[album.id];
+    columns.forEach(col => {
+        const th = document.createElement('th');
+        th.className = col.cls;
+        if (col.sortField) {
+            let headerText = col.label;
+            if (currentSort && currentSort.field === col.sortField) {
+                headerText += currentSort.ascending ? ' \u25B2' : ' \u25BC';
+            }
+            th.textContent = headerText;
+            th.style.cursor = 'pointer';
+            th.dataset.sortField = col.sortField;
+            th.dataset.label = col.label;
+        } else {
+            th.textContent = col.label;
+        }
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement('tbody');
+    tracks.forEach(track => {
+        tbody.appendChild(_buildTrackRow(track, album, admin));
+    });
+    table.appendChild(tbody);
+
+    // Single delegated event listener for the whole table
+    _attachTableDelegation(table, album);
+
+    wrapper.appendChild(table);
+    return wrapper;
+}
+
+function sortEnhancedTracks(album, field, ascending) {
+    const tracks = album.tracks || [];
+    tracks.sort((a, b) => {
+        let valA, valB;
+        if (field === 'format') {
+            valA = extractFormat(a.file_path);
+            valB = extractFormat(b.file_path);
+        } else {
+            valA = a[field];
+            valB = b[field];
+        }
+        if (valA == null) return 1;
+        if (valB == null) return -1;
+        if (['track_number', 'disc_number', 'bpm', 'bitrate', 'duration'].includes(field)) {
+            return ascending ? (Number(valA) - Number(valB)) : (Number(valB) - Number(valA));
+        }
+        valA = String(valA).toLowerCase();
+        valB = String(valB).toLowerCase();
+        return ascending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    });
+}
+
+async function deleteLibraryTrack(trackId, albumId) {
+    cancelInlineEdit();
+
+    // Smart delete dialog — three options
+    const choice = await _showSmartDeleteDialog();
+    if (!choice) return;
+
+    const params = new URLSearchParams();
+    if (choice === 'delete_file') params.set('delete_file', 'true');
+
+    try {
+        const response = await fetch(`/api/library/track/${trackId}?${params}`, { method: 'DELETE' });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        let msg = 'Track removed from library';
+        let toastType = 'success';
+        if (result.file_deleted) {
+            msg = 'Track deleted from library and disk';
+        } else if (result.file_error) {
+            msg = 'Track removed from library but file could not be deleted';
+            toastType = 'warning';
+        }
+        if (result.blacklisted) msg += ' (source blacklisted)';
+        showToast(msg, toastType);
+        if (result.file_error) {
+            showToast(result.file_error, 'error', 8000);
+        }
+
+        if (artistDetailPageState.enhancedData) {
+            const albums = artistDetailPageState.enhancedData.albums || [];
+            const album = albums.find(a => a.id === albumId);
+            if (album) {
+                album.tracks = (album.tracks || []).filter(t => t.id !== trackId);
+            }
+        }
+        artistDetailPageState.selectedTracks.delete(String(trackId));
+        renderEnhancedView();
+    } catch (error) {
+        showToast(`Delete failed: ${error.message}`, 'error');
+    }
+}
+
+function _showSmartDeleteDialog() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.onclick = e => { if (e.target === overlay) close(null); };
+
+        overlay.innerHTML = `
+            <div class="smart-delete-modal">
+                <div class="smart-delete-header">
+                    <h3>Delete Track</h3>
+                    <button class="smart-delete-close">&times;</button>
+                </div>
+                <p class="smart-delete-desc">How should this track be deleted?</p>
+                <div class="smart-delete-options">
+                    <button class="smart-delete-option" data-choice="db_only">
+                        <div class="smart-delete-option-icon">📋</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Remove from Library</div>
+                            <div class="smart-delete-option-desc">Remove the database entry only. File stays on disk.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option destructive" data-choice="delete_file">
+                        <div class="smart-delete-option-icon">🗑️</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Delete File Too</div>
+                            <div class="smart-delete-option-desc">Remove from library and delete the audio file from disk.</div>
+                        </div>
+                    </button>
+                    <!-- Blacklisting is done from Source Info (ℹ) where real download source data is available -->
+                </div>
+            </div>
+        `;
+
+        overlay.querySelectorAll('.smart-delete-option').forEach(btn => {
+            btn.addEventListener('click', () => close(btn.dataset.choice));
+        });
+        overlay.querySelector('.smart-delete-close').addEventListener('click', () => close(null));
+
+        // Escape to close
+        const escHandler = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(null); } };
+        document.addEventListener('keydown', escHandler);
+
+        document.body.appendChild(overlay);
+    });
+}
+
+// ==================================================================================
+// TRACK SOURCE INFO — View download provenance and blacklist sources
+// ==================================================================================
+
+async function showTrackSourceInfo(track, anchorEl) {
+    // Remove existing popover
+    const existing = document.getElementById('source-info-popover');
+    if (existing) existing.remove();
+
+    const popover = document.createElement('div');
+    popover.id = 'source-info-popover';
+    popover.className = 'source-info-popover';
+    popover.innerHTML = '<div class="source-info-loading"><div class="server-search-spinner"></div>Loading source info...</div>';
+
+    document.body.appendChild(popover);
+
+    // Position near the button or center on mobile
+    if (anchorEl) {
+        const rect = anchorEl.getBoundingClientRect();
+        const popW = 360;
+        let left = rect.left - popW - 8;
+        if (left < 10) left = rect.right + 8;
+        let top = rect.top - 20;
+        if (top + 300 > window.innerHeight) top = window.innerHeight - 310;
+        popover.style.left = `${left}px`;
+        popover.style.top = `${Math.max(10, top)}px`;
+    } else {
+        popover.style.left = '50%';
+        popover.style.top = '50%';
+        popover.style.transform = 'translate(-50%, -50%)';
+    }
+
+    requestAnimationFrame(() => popover.classList.add('visible'));
+
+    // Close on outside click
+    const closeHandler = e => {
+        if (!popover.contains(e.target) && e.target !== anchorEl) {
+            popover.remove();
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
+
+    // Escape to close
+    const escH = e => { if (e.key === 'Escape') { popover.remove(); document.removeEventListener('keydown', escH); document.removeEventListener('click', closeHandler); } };
+    document.addEventListener('keydown', escH);
+
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/source-info`);
+        const data = await res.json();
+
+        if (!data.success || !data.downloads || data.downloads.length === 0) {
+            popover.innerHTML = `
+                <div class="source-info-header">
+                    <span class="source-info-title">Source Info</span>
+                    <button class="source-info-close" onclick="document.getElementById('source-info-popover')?.remove()">&times;</button>
+                </div>
+                <div class="source-info-empty">No download source data available for this track. Source tracking starts with new downloads.</div>
+            `;
+            return;
+        }
+
+        const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer: '💜', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', auto_import: '📥', staging: '📥', torrent: '🧲', usenet: '📰' };
+        const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer: 'Deezer', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', auto_import: 'Auto-Import', staging: 'Staging', torrent: 'Torrent', usenet: 'Usenet' };
+
+        const dl = data.downloads[0]; // Most recent download
+        const icon = serviceIcons[dl.source_service] || '📦';
+        const label = serviceLabels[dl.source_service] || dl.source_service;
+        const displayFile = dl.source_filename ? dl.source_filename.replace(/\\/g, '/').split('/').pop() : 'Unknown';
+        const sizeStr = dl.source_size ? `${(dl.source_size / 1048576).toFixed(1)} MB` : '';
+        const dateStr = dl.created_at ? timeAgo(dl.created_at) : '';
+
+        popover.innerHTML = `
+            <div class="source-info-header">
+                <span class="source-info-title">Source Info</span>
+                <button class="source-info-close" onclick="document.getElementById('source-info-popover')?.remove()">&times;</button>
+            </div>
+            <div class="source-info-body">
+                <div class="source-info-row">
+                    <span class="source-info-label">Service</span>
+                    <span class="source-info-value">${icon} ${label}</span>
+                </div>
+                ${dl.source_service === 'soulseek' && dl.source_username ? `<div class="source-info-row">
+                    <span class="source-info-label">User</span>
+                    <span class="source-info-value source-info-mono">${_esc(dl.source_username)}</span>
+                </div>` : ''}
+                <div class="source-info-row">
+                    <span class="source-info-label">Original File</span>
+                    <span class="source-info-value source-info-mono source-info-ellipsis" title="${_esc(dl.source_filename || '')}">${_esc(displayFile)}</span>
+                </div>
+                ${sizeStr ? `<div class="source-info-row">
+                    <span class="source-info-label">Size</span>
+                    <span class="source-info-value">${sizeStr}</span>
+                </div>` : ''}
+                ${dl.audio_quality ? `<div class="source-info-row">
+                    <span class="source-info-label">Quality</span>
+                    <span class="source-info-value">${_esc(dl.audio_quality)}</span>
+                </div>` : ''}
+                ${dl.bit_depth || dl.sample_rate || dl.bitrate ? `<div class="source-info-row">
+                    <span class="source-info-label">Audio</span>
+                    <span class="source-info-value">${[dl.bit_depth ? `${dl.bit_depth}-bit` : '', dl.sample_rate ? `${(dl.sample_rate / 1000).toFixed(1)}kHz` : '', dl.bitrate ? `${Math.round(dl.bitrate / 1000)}kbps` : ''].filter(Boolean).join(' · ')}</span>
+                </div>` : ''}
+                ${dateStr ? `<div class="source-info-row">
+                    <span class="source-info-label">Downloaded</span>
+                    <span class="source-info-value">${dateStr}</span>
+                </div>` : ''}
+                ${dl.status !== 'completed' ? `<div class="source-info-row">
+                    <span class="source-info-label">Status</span>
+                    <span class="source-info-value" style="color:#ef5350">${dl.status}</span>
+                </div>` : ''}
+            </div>
+            ${dl.source_username && dl.source_filename ? `
+            <div class="source-info-actions">
+                <button class="source-info-blacklist-btn" id="source-info-blacklist-btn">⛔ Blacklist This Source</button>
+            </div>` : ''}
+            ${data.downloads.length > 1 ? `<div class="source-info-history">${data.downloads.length} download records for this track</div>` : ''}
+        `;
+
+        // Blacklist button handler
+        const blBtn = document.getElementById('source-info-blacklist-btn');
+        if (blBtn) {
+            blBtn.addEventListener('click', async () => {
+                if (!await showConfirmDialog({ title: 'Blacklist Source', message: `Blacklist "${displayFile}" from ${dl.source_service === 'soulseek' ? dl.source_username : label}? This source will be skipped in future downloads.`, confirmText: 'Blacklist', destructive: true })) return;
+
+                try {
+                    const db_res = await fetch('/api/library/blacklist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            track_title: dl.track_title || track.title,
+                            track_artist: dl.track_artist || '',
+                            blocked_filename: dl.source_filename,
+                            blocked_username: dl.source_username,
+                            reason: 'user_rejected'
+                        })
+                    });
+                    const result = await db_res.json();
+                    if (result.success) {
+                        showToast('Source blacklisted', 'success');
+                        blBtn.disabled = true;
+                        blBtn.textContent = '⛔ Blacklisted';
+                    } else {
+                        showToast(result.error || 'Failed to blacklist', 'error');
+                    }
+                } catch (e) {
+                    showToast('Error: ' + e.message, 'error');
+                }
+            });
+        }
+
+    } catch (e) {
+        popover.innerHTML = `<div class="source-info-empty">Error loading source info: ${_esc(e.message)}</div>`;
+    }
+}
+
+
+// ==================================================================================
+// TRACK REDOWNLOAD MODAL — Multi-step: metadata selection → source selection → download
+// ==================================================================================
+
+async function showTrackRedownloadModal(track, album) {
+    const overlay = document.createElement('div');
+    overlay.id = 'redownload-overlay';
+    overlay.className = 'redownload-overlay';
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || '';
+    const ext = (track.file_path || '').split('.').pop().toUpperCase();
+    const fmt = ['FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV'].includes(ext) ? ext : '';
+
+    overlay.innerHTML = `
+        <div class="redownload-modal">
+            <div class="redownload-header">
+                <div>
+                    <h3>Redownload Track</h3>
+                    <p class="redownload-header-sub">Find the correct version and download from your preferred source</p>
+                </div>
+                <button class="redownload-close" onclick="document.getElementById('redownload-overlay')?.remove()">&times;</button>
+            </div>
+            <div class="redownload-current" id="redownload-current">
+                <div class="redownload-current-art" id="redownload-current-art">
+                    <div class="redownload-art-empty">🎵</div>
+                </div>
+                <div class="redownload-current-info">
+                    <div class="redownload-current-title">${_esc(track.title)}</div>
+                    <div class="redownload-current-meta">${_esc(artistName)} · ${_esc(album?.title || '')}</div>
+                </div>
+                <div class="redownload-current-badges">
+                    ${fmt ? `<span class="redownload-badge fmt">${fmt}</span>` : ''}
+                    ${track.bitrate ? `<span class="redownload-badge bitrate">${track.bitrate}k</span>` : ''}
+                </div>
+            </div>
+            <div class="redownload-steps">
+                <div class="redownload-step active" data-step="1"><span class="redownload-step-num">1</span> Choose Metadata</div>
+                <div class="redownload-step-line"></div>
+                <div class="redownload-step" data-step="2"><span class="redownload-step-num">2</span> Choose Source</div>
+                <div class="redownload-step-line"></div>
+                <div class="redownload-step" data-step="3"><span class="redownload-step-num">3</span> Downloading</div>
+            </div>
+            <div class="redownload-body" id="redownload-body">
+                <div class="redownload-loading">
+                    <div class="server-search-spinner"></div>
+                    Searching metadata sources...
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Escape to close
+    const escH = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escH); overlay.remove(); } };
+    document.addEventListener('keydown', escH);
+
+    document.body.appendChild(overlay);
+
+    // Auto-search metadata
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/redownload/search-metadata`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        // Set album art in header if available
+        const artEl = document.getElementById('redownload-current-art');
+        if (artEl && data.current_track?.thumb_url) {
+            artEl.innerHTML = `<img src="${data.current_track.thumb_url}" alt="">`;
+        }
+
+        _renderRedownloadStep1(overlay, track, data);
+    } catch (e) {
+        document.getElementById('redownload-body').innerHTML = `<div class="redownload-error">Error: ${_esc(e.message)}</div>`;
+    }
+}
+
+function _renderRedownloadStep1(overlay, track, data) {
+    const body = document.getElementById('redownload-body');
+    if (!body) return;
+
+    const sources = Object.keys(data.metadata_results);
+    if (sources.length === 0) {
+        body.innerHTML = '<div class="redownload-error">No metadata sources available. Check your Spotify/iTunes/Deezer connections.</div>';
+        return;
+    }
+
+    const bestSource = data.best_match?.source || sources[0];
+    const sourceIcons = { spotify: '🟢', itunes: '🍎', deezer: '🟣', hydrabase: '🔷' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
+
+    // Build columns — one per source, side by side
+    const columnsHtml = sources.map(source => {
+        const results = data.metadata_results[source] || [];
+        const icon = sourceIcons[source] || '📋';
+        const label = sourceLabels[source] || source;
+
+        let itemsHtml;
+        if (results.length === 0) {
+            itemsHtml = `<div class="redownload-col-empty">No results</div>`;
+        } else {
+            itemsHtml = results.slice(0, 8).map((r, i) => {
+                const pct = Math.round((r.match_score || 0) * 100);
+                const cls = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
+                const dur = r.duration_ms ? `${Math.floor(r.duration_ms / 60000)}:${String(Math.floor((r.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+                const checked = (source === bestSource && i === 0) ? 'checked' : '';
+                return `
+                    <label class="redownload-result" data-source="${source}" data-index="${i}">
+                        <input type="radio" name="metadata-choice" value="${source}|${i}" ${checked}>
+                        <div class="redownload-result-art">${r.image_url ? `<img src="${r.image_url}" loading="lazy">` : '<div class="redownload-art-empty"></div>'}</div>
+                        <div class="redownload-result-info">
+                            <div class="redownload-result-title">${_esc(r.name)}${r.is_current_match ? ' <span class="redownload-current-badge">current</span>' : ''}</div>
+                            <div class="redownload-result-meta">${_esc(r.artist)}${r.album ? ` · ${_esc(r.album)}` : ''}</div>
+                        </div>
+                        <div class="redownload-result-right">
+                            <div class="redownload-result-score ${cls}">${pct}%</div>
+                            ${dur ? `<div class="redownload-result-dur">${dur}</div>` : ''}
+                        </div>
+                    </label>`;
+            }).join('');
+        }
+
+        return `
+            <div class="redownload-source-col">
+                <div class="redownload-col-header">
+                    <span class="redownload-col-icon">${icon}</span>
+                    <span class="redownload-col-label">${label}</span>
+                    <span class="redownload-col-count">${results.length}</span>
+                </div>
+                <div class="redownload-col-results">${itemsHtml}</div>
+            </div>`;
+    }).join('');
+
+    body.innerHTML = `<div class="redownload-columns">${columnsHtml}</div>`;
+
+    // Add sticky footer for Step 1
+    const modal = overlay.querySelector('.redownload-modal');
+    const oldFooter = modal.querySelector('.redownload-sticky-footer');
+    if (oldFooter) oldFooter.remove();
+    const footer = document.createElement('div');
+    footer.className = 'redownload-sticky-footer';
+    footer.innerHTML = `
+        <div class="redownload-actions">
+            <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+            <button class="redownload-btn primary" id="redownload-next-btn">Search Download Sources →</button>
+        </div>
+    `;
+    modal.appendChild(footer);
+
+    // Next button
+    document.getElementById('redownload-next-btn').addEventListener('click', async () => {
+        const checked = body.querySelector('input[name="metadata-choice"]:checked');
+        if (!checked) { showToast('Select a metadata source first', 'error'); return; }
+        const [source, idx] = checked.value.split('|');
+        selectedMeta = data.metadata_results[source][parseInt(idx)];
+        selectedMeta._source = source;
+
+        // Update step indicator
+        overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+        overlay.querySelector('.redownload-step[data-step="2"]').classList.add('active');
+
+        // Stream results from all download sources — columns appear as each source responds
+        // Body gets the scrollable content, footer is sticky outside the scroll
+        body.innerHTML = `
+            <div class="rdl-src-columns" id="rdl-src-columns">
+                <div class="redownload-loading" id="rdl-src-loading"><div class="server-search-spinner"></div>Searching download sources...</div>
+            </div>
+        `;
+        // Add sticky footer outside the scrollable body
+        const existingFooter = overlay.querySelector('.redownload-sticky-footer');
+        if (existingFooter) existingFooter.remove();
+        const modal = overlay.querySelector('.redownload-modal');
+        const footer = document.createElement('div');
+        footer.className = 'redownload-sticky-footer';
+        footer.innerHTML = `
+            <label class="redownload-delete-old">
+                <input type="checkbox" id="redownload-delete-old-check" checked>
+                Delete old file after successful download
+            </label>
+            <div class="redownload-actions">
+                <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+                <button class="redownload-btn primary" id="redownload-start-btn" disabled>Waiting for results...</button>
+            </div>
+        `;
+        modal.appendChild(footer);
+
+        // Wire up download button IMMEDIATELY (before streaming starts)
+        // so it works as soon as results appear
+        window._redownloadCandidates = [];
+        window._redownloadMetadata = selectedMeta;
+        document.getElementById('redownload-start-btn').addEventListener('click', async () => {
+            const checked = document.querySelector('input[name="source-choice"]:checked');
+            if (!checked) { showToast('Select a download source', 'error'); return; }
+            const cand = window._redownloadCandidates[parseInt(checked.value)];
+            if (!cand) { showToast('Invalid selection', 'error'); return; }
+            const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
+
+            overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+            overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
+
+            // Remove sticky footer for step 3
+            const ft = overlay.querySelector('.redownload-sticky-footer');
+            if (ft) ft.remove();
+
+            const body = document.getElementById('redownload-body');
+            body.innerHTML = `
+                <div class="redownload-progress">
+                    <div class="redownload-progress-title">Downloading: ${_esc(cand.display_name)}</div>
+                    <div class="redownload-progress-from">from ${_esc(cand.source_service === 'soulseek' ? cand.username : (cand.source_service || 'unknown'))}</div>
+                    <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
+                    <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ metadata: window._redownloadMetadata, candidate: cand, delete_old_file: deleteOld })
+                });
+                const startData = await res.json();
+                if (!startData.success) throw new Error(startData.error);
+                _pollRedownloadProgress(startData.task_id, overlay);
+            } catch (e) {
+                body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
+            }
+        });
+
+        _streamRedownloadSources(overlay, track, selectedMeta);
+    });
+}
+
+async function _streamRedownloadSources(overlay, track, metadata) {
+    const columnsEl = document.getElementById('rdl-src-columns');
+    const loadingEl = document.getElementById('rdl-src-loading');
+    const startBtn = document.getElementById('redownload-start-btn');
+    if (!columnsEl) return;
+
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', torrent: '🧲', usenet: '📰' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', torrent: 'Torrent', usenet: 'Usenet' };
+
+    let allCandidates = [];
+    let firstResult = true;
+    let bestGlobalIdx = -1;
+
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/redownload/search-sources`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ metadata })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete line
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+                    if (data.done) continue;
+
+                    const svc = data.source;
+                    const candidates = data.candidates || [];
+
+                    // Remove loading spinner on first result
+                    if (firstResult && loadingEl) { loadingEl.remove(); firstResult = false; }
+
+                    // Assign global indices
+                    const startIdx = allCandidates.length;
+                    candidates.forEach((c, i) => { c._globalIdx = startIdx + i; });
+                    allCandidates.push(...candidates);
+                    window._redownloadCandidates = allCandidates; // Keep global ref updated for button handler
+
+                    // Find best overall candidate
+                    bestGlobalIdx = -1;
+                    let bestConf = 0;
+                    allCandidates.forEach((c, i) => {
+                        if (!c.blacklisted && c.confidence > bestConf) { bestConf = c.confidence; bestGlobalIdx = i; }
+                    });
+
+                    // Render column for this source
+                    const icon = serviceIcons[svc] || '📦';
+                    const label = serviceLabels[svc] || svc;
+
+                    const itemsHtml = candidates.length === 0
+                        ? '<div class="rdl-src-col-empty">No results</div>'
+                        : candidates.slice(0, 10).map(c => {
+                            const confPct = Math.round((c.confidence || 0) * 100);
+                            const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+                            const isRec = c._globalIdx === bestGlobalIdx;
+                            const blClass = c.blacklisted ? ' blacklisted' : '';
+                            const dur = c.duration ? `${Math.floor(c.duration / 60000)}:${String(Math.floor((c.duration % 60000) / 1000)).padStart(2, '0')}` : '';
+                            return `
+                                <label class="rdl-src-item${blClass}${isRec ? ' recommended' : ''}">
+                                    ${c.blacklisted ? '<div class="rdl-src-radio-placeholder"></div>' : `<input type="radio" name="source-choice" value="${c._globalIdx}" ${isRec ? 'checked' : ''}>`}
+                                    <div class="rdl-src-item-body">
+                                        <div class="rdl-src-item-top">
+                                            <div class="rdl-src-item-name" title="${_esc(c.filename)}">${_esc(c.display_name)}</div>
+                                            ${isRec ? '<span class="rdl-src-recommended">Best</span>' : ''}
+                                        </div>
+                                        <div class="rdl-src-item-details">
+                                            ${c.quality ? `<span class="rdl-src-fmt">${c.quality}</span>` : ''}
+                                            ${c.bitrate ? `<span class="rdl-src-detail">${c.bitrate}k</span>` : ''}
+                                            <span class="rdl-src-detail">${c.size_display}</span>
+                                            ${dur ? `<span class="rdl-src-detail">${dur}</span>` : ''}
+                                            ${svc === 'soulseek' ? `<span class="rdl-src-detail rdl-src-user">${_esc(c.username)}</span>` : ''}
+                                            ${svc === 'soulseek' && c.free_upload_slots != null ? `<span class="rdl-src-detail">${c.free_upload_slots} slots</span>` : ''}
+                                        </div>
+                                        <div class="rdl-src-conf-bar"><div class="rdl-src-conf-fill ${confCls}" style="width:${confPct}%"></div></div>
+                                    </div>
+                                    <div class="rdl-src-conf-pct ${confCls}">${confPct}%</div>
+                                    ${c.blacklisted ? '<span class="rdl-src-bl">Blacklisted</span>' : ''}
+                                </label>`;
+                        }).join('');
+
+                    const colEl = document.createElement('div');
+                    colEl.className = 'rdl-src-col';
+                    colEl.style.animation = 'fadeSlideUp 0.3s ease both';
+                    colEl.innerHTML = `
+                        <div class="rdl-src-col-header">
+                            <span class="rdl-src-col-icon">${icon}</span>
+                            <span class="rdl-src-col-label">${label}</span>
+                            <span class="rdl-src-col-count">${candidates.length}</span>
+                        </div>
+                        <div class="rdl-src-col-body">${itemsHtml}</div>
+                    `;
+                    columnsEl.appendChild(colEl);
+
+                    // Enable the download button
+                    if (startBtn && allCandidates.some(c => !c.blacklisted)) {
+                        startBtn.disabled = false;
+                        startBtn.textContent = 'Download Selected';
+                    }
+
+                } catch (e) { /* skip malformed lines */ }
+            }
+        }
+    } catch (e) {
+        if (loadingEl) loadingEl.innerHTML = `<div class="redownload-error">Error: ${_esc(e.message)}</div>`;
+    }
+
+    // If no results at all
+    if (allCandidates.length === 0 && loadingEl) {
+        loadingEl.innerHTML = '<div class="rdl-src-col-empty">No download sources found for this track.</div>';
+    }
+
+    // Update the shared candidates array (button handler reads from window._redownloadCandidates)
+    window._redownloadCandidates = allCandidates;
+}
+
+/* _renderRedownloadStep2 removed — replaced by _streamRedownloadSources above */
+if (false) {
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡', lidarr: '📦', amazon: '🛒', soundcloud: '☁️', torrent: '🧲', usenet: '📰' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto', lidarr: 'Lidarr', amazon: 'Amazon Music', soundcloud: 'SoundCloud', torrent: 'Torrent', usenet: 'Usenet' };
+
+    // Group candidates by source service
+    const grouped = {};
+    candidates.forEach((c, i) => {
+        c._origIdx = i; // preserve original index for radio value
+        const svc = c.source_service || 'unknown';
+        if (!grouped[svc]) grouped[svc] = [];
+        grouped[svc].push(c);
+    });
+
+    // Build columns — one per source
+    const sourceColumnsHtml = Object.entries(grouped).map(([svc, items]) => {
+        const icon = serviceIcons[svc] || '📦';
+        const label = serviceLabels[svc] || svc;
+
+        const itemsHtml = items.slice(0, 10).map(c => {
+            const confPct = Math.round((c.confidence || 0) * 100);
+            const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+            const isRecommended = c._origIdx === bestIdx && !c.blacklisted;
+            const checked = isRecommended ? 'checked' : '';
+            const blClass = c.blacklisted ? ' blacklisted' : '';
+            const dur = c.duration ? `${Math.floor(c.duration / 60000)}:${String(Math.floor((c.duration % 60000) / 1000)).padStart(2, '0')}` : '';
+
+            return `
+                <label class="rdl-src-item${blClass}${isRecommended ? ' recommended' : ''}" data-index="${c._origIdx}">
+                    ${c.blacklisted ? '<div class="rdl-src-radio-placeholder"></div>' : `<input type="radio" name="source-choice" value="${c._origIdx}" ${checked}>`}
+                    <div class="rdl-src-item-body">
+                        <div class="rdl-src-item-top">
+                            <div class="rdl-src-item-name" title="${_esc(c.filename)}">${_esc(c.display_name)}</div>
+                            ${isRecommended ? '<span class="rdl-src-recommended">Best Match</span>' : ''}
+                        </div>
+                        <div class="rdl-src-item-details">
+                            ${c.quality ? `<span class="rdl-src-fmt">${c.quality}</span>` : ''}
+                            ${c.bitrate ? `<span class="rdl-src-detail">${c.bitrate}k</span>` : ''}
+                            <span class="rdl-src-detail">${c.size_display}</span>
+                            ${dur ? `<span class="rdl-src-detail">${dur}</span>` : ''}
+                            ${svc === 'soulseek' ? `<span class="rdl-src-detail rdl-src-user">${_esc(c.username)}</span>` : ''}
+                            ${svc === 'soulseek' ? `<span class="rdl-src-detail">${c.free_upload_slots || 0} slots</span>` : ''}
+                        </div>
+                        <div class="rdl-src-conf-bar">
+                            <div class="rdl-src-conf-fill ${confCls}" style="width:${confPct}%"></div>
+                        </div>
+                    </div>
+                    <div class="rdl-src-conf-pct ${confCls}">${confPct}%</div>
+                    ${c.blacklisted ? '<span class="rdl-src-bl">Blacklisted</span>' : ''}
+                </label>`;
+        }).join('');
+
+        return `
+            <div class="rdl-src-col">
+                <div class="rdl-src-col-header">
+                    <span class="rdl-src-col-icon">${icon}</span>
+                    <span class="rdl-src-col-label">${label}</span>
+                    <span class="rdl-src-col-count">${items.length}</span>
+                </div>
+                <div class="rdl-src-col-body">${itemsHtml}</div>
+            </div>`;
+    }).join('');
+
+    body.innerHTML = `
+        <div class="rdl-src-columns">${sourceColumnsHtml}</div>
+        <label class="redownload-delete-old">
+            <input type="checkbox" id="redownload-delete-old-check" checked>
+            Delete old file after successful download
+        </label>
+        <div class="redownload-actions">
+            <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+            <button class="redownload-btn primary" id="redownload-start-btn">Download Selected</button>
+        </div>
+    `;
+
+    document.getElementById('redownload-start-btn').addEventListener('click', async () => {
+        const checked = body.querySelector('input[name="source-choice"]:checked');
+        if (!checked) { showToast('Select a download source', 'error'); return; }
+        const candidate = candidates[parseInt(checked.value)];
+        const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
+
+        // Update step indicator
+        overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+        overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
+
+        body.innerHTML = `
+            <div class="redownload-progress">
+                <div class="redownload-progress-title">Downloading: ${_esc(candidate.display_name)}</div>
+                <div class="redownload-progress-from">from ${_esc(candidate.username)}</div>
+                <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
+                <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
+            </div>
+        `;
+
+        try {
+            const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOld })
+            });
+            const startData = await res.json();
+            if (!startData.success) throw new Error(startData.error);
+
+            // Poll for progress
+            _pollRedownloadProgress(startData.task_id, overlay);
+        } catch (e) {
+            body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
+        }
+    });
+}
+
+function _pollRedownloadProgress(taskId, overlay) {
+    let completed = false;
+
+    const poll = setInterval(async () => {
+        if (completed) return;
+
+        // Get fresh DOM references every tick (in case DOM was rebuilt)
+        const bar = document.getElementById('redownload-progress-bar');
+        const status = document.getElementById('redownload-progress-status');
+
+        try {
+            // Poll real download progress from /api/downloads/status
+            const dlRes = await fetch('/api/downloads/status');
+            const dlData = await dlRes.json();
+            const transfers = dlData.transfers || [];
+
+            // Find any active transfer
+            let bestTransfer = null;
+            for (const t of transfers) {
+                const st = (t.state || '').toLowerCase();
+                if (st.includes('inprogress') || st.includes('queued') || st.includes('initializing')) {
+                    bestTransfer = t;
+                    break;
+                }
+            }
+
+            if (bestTransfer) {
+                const pct = bestTransfer.percentComplete || 0;
+                const transferred = bestTransfer.bytesTransferred || 0;
+                const total = bestTransfer.size || 0;
+                const transferredMB = (transferred / 1048576).toFixed(1);
+                const totalMB = (total / 1048576).toFixed(1);
+
+                if (bar) bar.style.width = `${Math.min(95, pct)}%`;
+                if (status) {
+                    status.textContent = total > 0
+                        ? `Downloading... ${Math.round(pct)}% (${transferredMB} / ${totalMB} MB)`
+                        : `Downloading... ${Math.round(pct)}%`;
+                }
+            } else {
+                // No active slskd transfer — streaming source or post-processing
+                if (bar) bar.style.width = '80%';
+                if (status) status.textContent = 'Processing...';
+            }
+
+            // Check for batch completion
+            const procRes = await fetch('/api/active-processes');
+            const procData = await procRes.json();
+            const procs = procData.active_processes || [];
+            const ourBatch = procs.find(p => p.batch_id && p.batch_id.includes('redownload_batch_'));
+
+            if (!ourBatch) {
+                completed = true;
+                clearInterval(poll);
+                if (bar) bar.style.width = '100%';
+                if (status) status.textContent = 'Complete! File replaced successfully.';
+                showToast('Track redownloaded successfully', 'success');
+                setTimeout(() => {
+                    overlay.remove();
+                    if (artistDetailPageState.enhancedData?.artist?.id) {
+                        loadEnhancedViewData(artistDetailPageState.enhancedData.artist.id);
+                    }
+                }, 2000);
+            }
+        } catch (e) { /* ignore poll errors */ }
+    }, 1500);
+
+    // Safety timeout — 5 minutes
+    setTimeout(() => {
+        if (!completed) {
+            clearInterval(poll);
+            const status = document.getElementById('redownload-progress-status');
+            if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
+        }
+    }, 300000);
+}
+
+async function redownloadLibraryAlbum(album, artistName, btn) {
+    const albumName = album.title || '';
+    const spotifyAlbumId = album.spotify_album_id || '';
+    const itunesAlbumId = album.itunes_album_id || '';
+    // #911 — the album's CANONICAL source (the same one the Enhanced view tags + displays it as)
+    // wins. Redownload must pull THAT exact edition, not a fresh search that can resolve to a
+    // different one (issue: matched the 66-track 'Original Soundtrack Collection', a search got
+    // the 19-track 'Volume 1'). _getEnhancedAlbumCanonicalSource is the single source of truth
+    // for which source identifies this album, across spotify/deezer/itunes/musicbrainz/…
+    const canonical = _getEnhancedAlbumCanonicalSource(album);
+
+    if (!canonical && !spotifyAlbumId && !itunesAlbumId && !albumName) {
+        showToast('No album ID or name available for redownload', 'warning');
+        return;
+    }
+
+    // Fetch a specific album edition by its source id (the Spotify/iTunes endpoints both return
+    // a Spotify-shaped payload, so downstream handling is identical).
+    const fetchAlbumBySource = (source, id, name, artist) => {
+        const params = new URLSearchParams({ name: name || albumName, artist: artist || artistName || '' });
+        const base = source === 'itunes' ? '/api/itunes/album/' : '/api/spotify/album/';
+        return fetch(`${base}${encodeURIComponent(id)}?${params}`);
+    };
+
+    const origText = btn ? btn.innerHTML : '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+        let albumData = null;
+
+        // 1) Primary: the canonical tagged source (any source), via the SAME
+        //    /api/album/<id>/tracks endpoint the Enhanced view uses for its canonical tracklist —
+        //    so a redownload is always the album the user is actually looking at.
+        if (canonical) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '', source: canonical.source });
+            const r = await fetch(`/api/album/${encodeURIComponent(canonical.id)}/tracks?${params}`);
+            if (r.ok) {
+                const data = await r.json();
+                if (data && data.success && Array.isArray(data.tracks) && data.tracks.length) {
+                    albumData = { ...data.album, tracks: data.tracks };   // normalize to {…, tracks:[]}
+                }
+            }
+        }
+
+        // 2) Fallback: the stored spotify/iTunes id, then a last-resort search.
+        if (!albumData) {
+            let response;
+            if (spotifyAlbumId) {
+                response = await fetchAlbumBySource('spotify', spotifyAlbumId);
+            } else if (itunesAlbumId) {
+                response = await fetchAlbumBySource('itunes', itunesAlbumId);
+            }
+
+            if (!response || !response.ok) {
+                const query = `${artistName || ''} ${albumName}`.trim();
+                const searchResp = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                if (!searchResp.ok) throw new Error('Album search failed');
+                const searchData = await searchResp.json();
+                const spotHit = searchData.spotify_albums?.[0];
+                const found = spotHit || searchData.itunes_albums?.[0];
+                if (!found || !found.id) {
+                    showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                    return;
+                }
+                // Fetch from the MATCHING source endpoint — the old fallback always hit Spotify,
+                // which is wrong for an iTunes search hit.
+                response = await fetchAlbumBySource(spotHit ? 'spotify' : 'itunes', found.id, found.name, found.artist);
+            }
+
+            if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+            albumData = await response.json();
+        }
+
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            showToast(`No tracks found for "${albumName}"`, 'warning');
+            return;
+        }
+
+        const resolvedId = albumData.id || spotifyAlbumId || album.id;
+        const virtualPlaylistId = `library_redownload_${resolvedId}`;
+        const playlistName = `[${artistName || 'Unknown'}] ${albumData.name}`;
+
+        const enrichedTracks = albumData.tracks.map(track => ({
+            ...track,
+            album: {
+                name: albumData.name,
+                id: albumData.id,
+                album_type: albumData.album_type || 'album',
+                images: albumData.images || [],
+                release_date: albumData.release_date,
+                total_tracks: albumData.total_tracks
+            }
+        }));
+
+        const enhancedArtist = artistDetailPageState.enhancedData?.artist;
+        const artistObject = {
+            id: artistDetailPageState.currentArtistId || `library_${artistName || album.id}`,
+            name: artistName || '',
+            image_url: enhancedArtist?.thumb_url || ''
+        };
+        const fullAlbumObject = {
+            name: albumData.name,
+            id: albumData.id,
+            album_type: albumData.album_type || 'album',
+            images: albumData.images || [],
+            image_url: albumData.images?.[0]?.url || null,
+            release_date: albumData.release_date,
+            total_tracks: albumData.total_tracks,
+            artists: albumData.artists || [{ name: artistName || '' }]
+        };
+
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, enrichedTracks, fullAlbumObject, artistObject, true
+        );
+
+        const albumType = fullAlbumObject.album_type || 'album';
+        registerArtistDownload(artistObject, fullAlbumObject, virtualPlaylistId, albumType);
+
+    } catch (error) {
+        console.error('Redownload album error:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+    }
+}
+
+async function deleteLibraryAlbum(albumId) {
+    const choice = await _showAlbumDeleteDialog();
+    if (!choice) return;
+
+    const deleteFiles = choice === 'delete_files';
+    const params = deleteFiles ? '?delete_files=true' : '';
+
+    try {
+        const response = await fetch(`/api/library/album/${albumId}${params}`, { method: 'DELETE' });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        let msg = `Album removed from library (${result.tracks_deleted || 0} tracks)`;
+        let toastType = 'success';
+        if (deleteFiles) {
+            if (result.files_deleted > 0) {
+                msg = `Album deleted — ${result.files_deleted} files removed from disk`;
+            }
+            if (result.files_failed > 0) {
+                msg += ` (${result.files_failed} files could not be deleted)`;
+                toastType = 'warning';
+            }
+        }
+        showToast(msg, toastType);
+
+        if (artistDetailPageState.enhancedData) {
+            const album = (artistDetailPageState.enhancedData.albums || []).find(a => a.id === albumId);
+            if (album && album.tracks) {
+                album.tracks.forEach(t => artistDetailPageState.selectedTracks.delete(String(t.id)));
+            }
+            artistDetailPageState.enhancedData.albums = (artistDetailPageState.enhancedData.albums || []).filter(a => a.id !== albumId);
+            _rebuildAlbumMap();
+        }
+        artistDetailPageState.expandedAlbums.delete(albumId);
+        delete artistDetailPageState.enhancedTrackSort[albumId];
+        renderEnhancedView();
+    } catch (error) {
+        showToast(`Delete failed: ${error.message}`, 'error');
+    }
+}
+
+function _showAlbumDeleteDialog() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.onclick = e => { if (e.target === overlay) close(null); };
+
+        overlay.innerHTML = `
+            <div class="smart-delete-modal">
+                <div class="smart-delete-header">
+                    <h3>Delete Album</h3>
+                    <button class="smart-delete-close">&times;</button>
+                </div>
+                <p class="smart-delete-desc">How should this album be deleted?</p>
+                <div class="smart-delete-options">
+                    <button class="smart-delete-option" data-choice="db_only">
+                        <div class="smart-delete-option-icon">📋</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Remove from Library</div>
+                            <div class="smart-delete-option-desc">Remove the album and all tracks from the database. Files on disk are not affected.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option destructive" data-choice="delete_files">
+                        <div class="smart-delete-option-icon">🗑️</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Delete Files Too</div>
+                            <div class="smart-delete-option-desc">Remove from library and delete all audio files from disk. Empty album folder will be cleaned up.</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelectorAll('.smart-delete-option').forEach(btn => {
+            btn.addEventListener('click', () => close(btn.dataset.choice));
+        });
+        overlay.querySelector('.smart-delete-close').addEventListener('click', () => close(null));
+
+        const escHandler = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(null); } };
+        document.addEventListener('keydown', escHandler);
+
+        document.body.appendChild(overlay);
+    });
+}
+
+function extractFormat(filePath) {
+    if (!filePath) return '-';
+    const ext = filePath.split('.').pop().toLowerCase();
+    const formatMap = { mp3: 'MP3', flac: 'FLAC', m4a: 'AAC', ogg: 'OGG', opus: 'OPUS', wav: 'WAV', wma: 'WMA', aac: 'AAC' };
+    return formatMap[ext] || ext.toUpperCase();
+}
+
+function formatDurationMs(ms) {
+    if (!ms) return '-';
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function getServiceUrl(service, entityType, id) {
+    if (!id) return null;
+    const urls = {
+        spotify: {
+            artist: `https://open.spotify.com/artist/${id}`,
+            album: `https://open.spotify.com/album/${id}`,
+            track: `https://open.spotify.com/track/${id}`,
+        },
+        musicbrainz: {
+            artist: `https://musicbrainz.org/artist/${id}`,
+            album: `https://musicbrainz.org/release/${id}`,
+            track: `https://musicbrainz.org/recording/${id}`,
+        },
+        deezer: {
+            artist: `https://www.deezer.com/artist/${id}`,
+            album: `https://www.deezer.com/album/${id}`,
+            track: `https://www.deezer.com/track/${id}`,
+        },
+        audiodb: {
+            artist: `https://www.theaudiodb.com/artist/${id}`,
+            album: `https://www.theaudiodb.com/album/${id}`,
+            track: `https://www.theaudiodb.com/track/${id}`,
+        },
+        itunes: {
+            artist: `https://music.apple.com/artist/${id}`,
+            album: `https://music.apple.com/album/${id}`,
+            track: `https://music.apple.com/song/${id}`,
+        },
+        lastfm: {
+            artist: id,  // lastfm_url is already a full URL
+            album: id,
+            track: id,
+        },
+        genius: {
+            artist: id,  // genius_url is already a full URL
+            track: id,   // genius_url on tracks is already a full URL
+        },
+        tidal: {
+            artist: `https://tidal.com/browse/artist/${id}`,
+            album: `https://tidal.com/browse/album/${id}`,
+            track: `https://tidal.com/browse/track/${id}`,
+        },
+        qobuz: {
+            artist: `https://www.qobuz.com/artist/${id}`,
+            album: `https://www.qobuz.com/album/${id}`,
+            track: `https://www.qobuz.com/track/${id}`,
+        },
+        discogs: {
+            artist: `https://www.discogs.com/artist/${id}`,
+            album: `https://www.discogs.com/release/${id}`,
+        },
+        amazon: {
+            album: `https://music.amazon.com/albums/${id}`,
+            track: `https://music.amazon.com/tracks/${id}`,
+        },
+        bandcamp: {
+            artist: id,  // derived artist page origin, already a full URL
+            album: id,   // bandcamp_url is already a full URL
+            track: id,
+        },
+    };
+    return urls[service] && urls[service][entityType] || null;
+}
+
+function makeClickableBadge(service, entityType, id, label) {
+    const url = getServiceUrl(service, entityType, id);
+    if (url) {
+        const a = document.createElement('a');
+        a.className = `enhanced-id-badge ${service === 'musicbrainz' ? 'mb' : service}`;
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = label;
+        a.title = `${label}: ${id} (click to open)`;
+        a.onclick = (e) => e.stopPropagation();
+        return a;
+    }
+    const span = document.createElement('span');
+    span.className = `enhanced-id-badge ${service === 'musicbrainz' ? 'mb' : service}`;
+    span.textContent = label;
+    span.title = `${label}: ${id}`;
+    return span;
+}
+
+// ---- Inline Editing ----
+
+function startInlineEdit(cell, type, id, field, currentValue) {
+    if (cell.querySelector('.enhanced-inline-input')) return;
+    cancelInlineEdit();
+
+    const isNumeric = ['track_number', 'disc_number', 'bpm'].includes(field);
+    const originalContent = cell.innerHTML;
+    cell.dataset.originalContent = originalContent;
+
+    const input = document.createElement('input');
+    input.type = isNumeric ? 'number' : 'text';
+    input.className = 'enhanced-inline-input' + (isNumeric ? ' num' : '');
+    input.value = currentValue || '';
+    if (field === 'bpm') input.step = '0.1';
+    if (field === 'track_number' || field === 'disc_number') { input.min = '1'; input.step = '1'; }
+
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+
+    artistDetailPageState.editingCell = { cell, type, id, field, originalContent };
+
+    input.addEventListener('click', e => e.stopPropagation());
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveInlineEdit(type, id, field, input.value);
+        } else if (e.key === 'Escape') {
+            cancelInlineEdit();
+        }
+        e.stopPropagation();
+    });
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            if (artistDetailPageState.editingCell && artistDetailPageState.editingCell.cell === cell) {
+                saveInlineEdit(type, id, field, input.value);
+            }
+        }, 150);
+    });
+}
+
+async function saveInlineEdit(type, id, field, newValue) {
+    const editInfo = artistDetailPageState.editingCell;
+    if (!editInfo) return;
+    artistDetailPageState.editingCell = null;
+
+    let parsedValue = newValue;
+    if (field === 'track_number' || field === 'disc_number') parsedValue = parseInt(newValue) || null;
+    else if (field === 'bpm') parsedValue = parseFloat(newValue) || null;
+    else if (field === 'explicit') parsedValue = parseInt(newValue) || 0;
+
+    const url = type === 'track' ? `/api/library/track/${id}` : `/api/library/album/${id}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [field]: parsedValue })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        const displayValue = parsedValue !== null && parsedValue !== '' ? String(parsedValue) : '-';
+        editInfo.cell.textContent = displayValue;
+        updateLocalEnhancedData(type, id, field, parsedValue);
+        showToast(`Updated ${field}`, 'success');
+    } catch (error) {
+        console.error('Failed to save inline edit:', error);
+        editInfo.cell.innerHTML = editInfo.originalContent;
+        showToast(`Failed to update: ${error.message}`, 'error');
+    }
+}
+
+function cancelInlineEdit() {
+    const editInfo = artistDetailPageState.editingCell;
+    if (!editInfo) return;
+    editInfo.cell.innerHTML = editInfo.originalContent;
+    artistDetailPageState.editingCell = null;
+}
+
+function updateLocalEnhancedData(type, id, field, value) {
+    const data = artistDetailPageState.enhancedData;
+    if (!data) return;
+
+    if (type === 'track') {
+        for (const album of data.albums) {
+            const track = (album.tracks || []).find(t => String(t.id) === String(id));
+            if (track) { track[field] = value; break; }
+        }
+    } else if (type === 'album') {
+        const album = data.albums.find(a => String(a.id) === String(id));
+        if (album) album[field] = value;
+    } else if (type === 'artist') {
+        data.artist[field] = value;
+    }
+}
+
+// ---- Track Selection & Bulk Operations ----
+
+function toggleTrackSelection(trackId) {
+    trackId = String(trackId);
+    if (artistDetailPageState.selectedTracks.has(trackId)) {
+        artistDetailPageState.selectedTracks.delete(trackId);
+    } else {
+        artistDetailPageState.selectedTracks.add(trackId);
+    }
+    const row = document.querySelector(`tr[data-track-id="${trackId}"]`);
+    if (row) row.classList.toggle('selected', artistDetailPageState.selectedTracks.has(trackId));
+    updateBulkBar();
+}
+
+function toggleSelectAllTracks(albumId, checked) {
+    const album = findEnhancedAlbum(albumId);
+    if (!album || !album.tracks) return;
+
+    // Batch update state
+    album.tracks.forEach(track => {
+        const tid = String(track.id);
+        if (checked) artistDetailPageState.selectedTracks.add(tid);
+        else artistDetailPageState.selectedTracks.delete(tid);
+    });
+
+    // Scoped DOM query — only search within this album's panel, not entire document
+    const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+    if (panel) {
+        panel.querySelectorAll('tr[data-track-id]').forEach(row => {
+            row.classList.toggle('selected', checked);
+            const cb = row.querySelector('.enhanced-track-checkbox');
+            if (cb) cb.checked = checked;
+        });
+    }
+    updateBulkBar();
+}
+
+function clearTrackSelection() {
+    // Scoped batch clear — query the container once instead of per-track
+    const container = document.getElementById('enhanced-view-container');
+    if (container) {
+        container.querySelectorAll('tr[data-track-id].selected').forEach(row => {
+            row.classList.remove('selected');
+            const cb = row.querySelector('.enhanced-track-checkbox');
+            if (cb) cb.checked = false;
+        });
+        container.querySelectorAll('.enhanced-track-table thead .enhanced-track-checkbox').forEach(cb => cb.checked = false);
+    }
+    artistDetailPageState.selectedTracks.clear();
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const bar = document.getElementById('enhanced-bulk-bar');
+    const count = document.getElementById('enhanced-bulk-count');
+    if (!bar || !count) return;
+    if (!isEnhancedAdmin()) {
+        bar.classList.remove('visible');
+        return;
+    }
+    const n = artistDetailPageState.selectedTracks.size;
+    count.textContent = n;
+    bar.classList.toggle('visible', n > 0);
+}
+
+function showBulkEditModal() {
+    const overlay = document.getElementById('enhanced-bulk-edit-overlay');
+    const body = document.getElementById('enhanced-bulk-modal-body');
+    const title = document.getElementById('enhanced-bulk-modal-title');
+    if (!overlay || !body) return;
+
+    const count = artistDetailPageState.selectedTracks.size;
+    title.textContent = `Batch Edit ${count} Track${count !== 1 ? 's' : ''}`;
+
+    body.innerHTML = `
+        <div class="enhanced-bulk-modal-field">
+            <label>Track Number (leave blank to skip)</label>
+            <input type="number" id="bulk-edit-track-number" placeholder="Track number..." min="1">
+        </div>
+        <div class="enhanced-bulk-modal-field">
+            <label>BPM (leave blank to skip)</label>
+            <input type="number" id="bulk-edit-bpm" placeholder="BPM..." step="0.1">
+        </div>
+        <div class="enhanced-bulk-modal-field">
+            <label>Style (leave blank to skip)</label>
+            <input type="text" id="bulk-edit-style" placeholder="Style...">
+        </div>
+        <div class="enhanced-bulk-modal-field">
+            <label>Mood (leave blank to skip)</label>
+            <input type="text" id="bulk-edit-mood" placeholder="Mood...">
+        </div>
+        <div class="enhanced-bulk-modal-field">
+            <label>Explicit</label>
+            <select id="bulk-edit-explicit">
+                <option value="">-- No change --</option>
+                <option value="0">No</option>
+                <option value="1">Yes</option>
+            </select>
+        </div>
+    `;
+
+    overlay.classList.remove('hidden');
+}
+
+function closeBulkEditModal() {
+    const overlay = document.getElementById('enhanced-bulk-edit-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function executeBulkEdit() {
+    const trackIds = Array.from(artistDetailPageState.selectedTracks);
+    if (trackIds.length === 0) return;
+
+    const updates = {};
+    const trackNum = document.getElementById('bulk-edit-track-number');
+    const bpm = document.getElementById('bulk-edit-bpm');
+    const style = document.getElementById('bulk-edit-style');
+    const mood = document.getElementById('bulk-edit-mood');
+    const explicit = document.getElementById('bulk-edit-explicit');
+
+    if (trackNum && trackNum.value !== '') updates.track_number = parseInt(trackNum.value);
+    if (bpm && bpm.value !== '') updates.bpm = parseFloat(bpm.value);
+    if (style && style.value !== '') updates.style = style.value;
+    if (mood && mood.value !== '') updates.mood = mood.value;
+    if (explicit && explicit.value !== '') updates.explicit = parseInt(explicit.value);
+
+    if (Object.keys(updates).length === 0) {
+        showToast('No changes to apply', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/library/tracks/batch', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds, updates })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        showToast(`Updated ${result.updated_count} tracks`, 'success');
+        closeBulkEditModal();
+
+        for (const [field, val] of Object.entries(updates)) {
+            trackIds.forEach(tid => updateLocalEnhancedData('track', tid, field, val));
+        }
+
+        reRenderExpandedPanels();
+        clearTrackSelection();
+
+    } catch (error) {
+        console.error('Bulk edit failed:', error);
+        showToast(`Bulk edit failed: ${error.message}`, 'error');
+    }
+}
+
+// ---- Save Artist / Album Metadata ----
+
+async function saveArtistMetadata() {
+    const form = document.getElementById('enhanced-artist-meta-form');
+    if (!form) return;
+
+    const inputs = form.querySelectorAll('.enhanced-meta-field-input');
+    const updates = {};
+    const original = artistDetailPageState.enhancedData.artist;
+
+    inputs.forEach(input => {
+        const field = input.dataset.field;
+        if (!field) return;
+        let value = (input.tagName === 'TEXTAREA' ? input.value : input.value).trim();
+
+        let origVal = original[field];
+        if (field === 'genres') {
+            const newGenres = value ? value.split(',').map(g => g.trim()).filter(Boolean) : [];
+            const origGenres = Array.isArray(origVal) ? origVal : [];
+            if (JSON.stringify(newGenres) !== JSON.stringify(origGenres)) updates[field] = newGenres;
+        } else {
+            if ((value || '') !== (origVal || '')) updates[field] = value || null;
+        }
+    });
+
+    if (Object.keys(updates).length === 0) {
+        showToast('No changes to save', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/library/artist/${original.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        for (const [field, value] of Object.entries(updates)) {
+            artistDetailPageState.enhancedData.artist[field] = value;
+        }
+
+        // Update the display name in the header
+        if (updates.name) {
+            const nameEl = document.querySelector('.enhanced-artist-meta-name');
+            if (nameEl) nameEl.textContent = updates.name;
+        }
+
+        showToast(`Artist metadata saved (${(result.updated_fields || []).join(', ')})`, 'success');
+    } catch (error) {
+        console.error('Failed to save artist metadata:', error);
+        showToast(`Failed to save: ${error.message}`, 'error');
+    }
+}
+
+function revertArtistMetadata() {
+    const data = artistDetailPageState.enhancedData;
+    if (!data) return;
+
+    const panel = document.getElementById('enhanced-artist-meta');
+    if (!panel) return;
+
+    const parent = panel.parentNode;
+    const newPanel = renderArtistMetaPanel(data.artist);
+    parent.replaceChild(newPanel, panel);
+    showToast('Reverted to saved values', 'success');
+}
+
+async function saveAlbumMetadata(albumId) {
+    const metaRow = document.getElementById(`enhanced-album-meta-${albumId}`);
+    if (!metaRow) return;
+
+    const album = findEnhancedAlbum(albumId);
+    if (!album) return;
+
+    const inputs = metaRow.querySelectorAll('.enhanced-album-meta-input');
+    const updates = {};
+    let invalidDate = false;
+
+    inputs.forEach(input => {
+        const field = input.dataset.field;
+        if (!field) return;
+        let value = input.value.trim();
+
+        if (field === 'genres') {
+            const newGenres = value ? value.split(',').map(g => g.trim()).filter(Boolean) : [];
+            const origGenres = Array.isArray(album.genres) ? album.genres : [];
+            if (JSON.stringify(newGenres) !== JSON.stringify(origGenres)) updates[field] = newGenres;
+        } else if (field === 'year' || field === 'explicit' || field === 'track_count') {
+            const numVal = value !== '' ? parseInt(value) : null;
+            if (numVal !== (album[field] || null)) updates[field] = numVal;
+        } else if (field === 'release_date') {
+            // Accept empty, YYYY, YYYY-MM or YYYY-MM-DD (#824 full release dates).
+            if (value && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(value)) { invalidDate = true; return; }
+            if ((value || '') !== (album.release_date || '')) updates[field] = value || null;
+        } else {
+            if ((value || '') !== (album[field] || '')) updates[field] = value || null;
+        }
+    });
+
+    if (invalidDate) {
+        showToast('Release Date must be YYYY-MM-DD (or just YYYY)', 'error');
+        return;
+    }
+
+    if (Object.keys(updates).length === 0) {
+        showToast('No album changes to save', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/library/album/${albumId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        for (const [field, value] of Object.entries(updates)) {
+            album[field] = value;
+        }
+
+        // Update album row display
+        const albumRow = document.getElementById(`enhanced-album-row-${albumId}`);
+        if (albumRow) {
+            if (updates.title) {
+                const titleEl = albumRow.querySelector('.enhanced-album-title');
+                if (titleEl) { titleEl.textContent = updates.title; titleEl.title = updates.title; }
+            }
+            if (updates.year !== undefined) {
+                const yearEl = albumRow.querySelector('.enhanced-album-year');
+                if (yearEl) yearEl.textContent = updates.year || '-';
+            }
+        }
+
+        showToast(`Album metadata saved (${(result.updated_fields || []).join(', ')})`, 'success');
+    } catch (error) {
+        console.error('Failed to save album metadata:', error);
+        showToast(`Failed to save: ${error.message}`, 'error');
+    }
+}
+
+function reRenderExpandedPanels() {
+    artistDetailPageState.expandedAlbums.forEach(albumId => {
+        const panel = document.getElementById(`enhanced-tracks-panel-${albumId}`);
+        if (!panel) return;
+        const inner = panel.querySelector('.enhanced-tracks-panel-inner');
+        if (!inner) return;
+
+        const album = findEnhancedAlbum(albumId);
+        if (album) {
+            inner.innerHTML = '';
+            inner.appendChild(renderExpandedAlbumHeader(album));
+            inner.appendChild(renderAlbumMetaRow(album));
+            inner.appendChild(renderTrackTable(album));
+        }
+    });
+}
+
+// ---- Manual Match Modal ----
+
+function openManualMatchModal(entityType, entityId, service, defaultQuery, artistId) {
+    // Remove existing modal if any
+    const existing = document.getElementById('enhanced-manual-match-overlay');
+    if (existing) existing.remove();
+
+    const serviceLabels = {
+        spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
+        audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music', bandcamp: 'Bandcamp'
+    };
+
+    const overlay = document.createElement('div');
+    overlay.id = 'enhanced-manual-match-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'enhanced-manual-match-modal';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'enhanced-bulk-modal-header';
+    const title = document.createElement('h3');
+    title.textContent = `Match ${entityType} on ${serviceLabels[service] || service}`;
+    header.appendChild(title);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'enhanced-bulk-modal-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.onclick = () => overlay.remove();
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    // Search bar
+    const searchRow = document.createElement('div');
+    searchRow.className = 'enhanced-match-search-row';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'enhanced-match-search-input';
+    searchInput.placeholder = service === 'musicbrainz'
+        ? `Search ${serviceLabels[service]}… or paste a MusicBrainz ID/URL`
+        : `Search ${serviceLabels[service] || service}...`;
+    searchInput.value = defaultQuery;
+    searchRow.appendChild(searchInput);
+    const searchBtn = document.createElement('button');
+    searchBtn.className = 'enhanced-enrich-btn';
+    searchBtn.textContent = 'Search';
+    searchBtn.onclick = () => doManualMatchSearch(service, entityType, searchInput.value, resultsContainer, entityId, artistId);
+    searchRow.appendChild(searchBtn);
+
+    // Clear Match button — lets user revert a wrong match to not_found
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'enhanced-enrich-btn';
+    clearBtn.style.cssText = 'background:rgba(255,80,80,0.12);color:#ff6b6b;margin-left:6px';
+    clearBtn.textContent = 'Clear Match';
+    clearBtn.title = 'Remove the current match — reverts to Not Found';
+    clearBtn.onclick = async () => {
+        if (!confirm(`Clear ${serviceLabels[service] || service} match for this ${entityType}? It will revert to "Not Found".`)) return;
+        try {
+            const res = await fetch('/api/library/clear-match', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_type: entityType, entity_id: entityId, service, artist_id: artistId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Cleared ${serviceLabels[service] || service} match`, 'success');
+                overlay.remove();
+                if (data.updated_data) {
+                    artistDetailPageState.enhancedData = data.updated_data;
+                    renderEnhancedArtistView(data.updated_data, true);
+                }
+            } else {
+                showToast(data.error || 'Failed to clear match', 'error');
+            }
+        } catch (e) {
+            showToast('Error clearing match', 'error');
+        }
+    };
+    searchRow.appendChild(clearBtn);
+
+    modal.appendChild(searchRow);
+
+    // Handle Enter key
+    searchInput.onkeydown = (e) => {
+        if (e.key === 'Enter') searchBtn.click();
+    };
+
+    // Results container
+    const resultsContainer = document.createElement('div');
+    resultsContainer.className = 'enhanced-match-results';
+    resultsContainer.innerHTML = '<div class="enhanced-match-results-hint">Press Search or Enter to find matches</div>';
+    modal.appendChild(resultsContainer);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Auto-search on open
+    searchInput.focus();
+    searchBtn.click();
+}
+
+async function doManualMatchSearch(service, entityType, query, container, entityId, artistId) {
+    if (!query.trim()) {
+        container.innerHTML = '<div class="enhanced-match-results-hint">Enter a search term</div>';
+        return;
+    }
+
+    container.innerHTML = '<div class="enhanced-loading">Searching...</div>';
+
+    try {
+        const response = await fetch('/api/library/search-service', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service, entity_type: entityType, query: query.trim() })
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error);
+
+        const results = data.results || [];
+        container.innerHTML = '';
+
+        if (results.length === 0) {
+            container.innerHTML = '<div class="enhanced-match-results-hint">No results found. Try a different search.</div>';
+            return;
+        }
+
+        results.forEach(result => {
+            const row = document.createElement('div');
+            row.className = 'enhanced-match-result-row';
+
+            if (result.image) {
+                const img = document.createElement('img');
+                img.className = 'enhanced-match-result-img';
+                img.src = result.image;
+                img.alt = '';
+                img.onerror = function () { this.style.display = 'none'; };
+                row.appendChild(img);
+            } else {
+                const placeholder = document.createElement('div');
+                placeholder.className = 'enhanced-match-result-img-placeholder';
+                placeholder.innerHTML = '&#127925;';
+                row.appendChild(placeholder);
+            }
+
+            const info = document.createElement('div');
+            info.className = 'enhanced-match-result-info';
+            const name = document.createElement('div');
+            name.className = 'enhanced-match-result-name';
+            name.textContent = result.name || 'Unknown';
+            info.appendChild(name);
+            if (result.extra) {
+                const extra = document.createElement('div');
+                extra.className = 'enhanced-match-result-extra';
+                extra.textContent = result.extra;
+                info.appendChild(extra);
+            }
+            const idLine = document.createElement('div');
+            idLine.className = 'enhanced-match-result-id';
+            const providerLabel = result.provider && result.provider !== service ? ` (${result.provider})` : '';
+            idLine.textContent = `ID: ${result.id}${providerLabel}`;
+            info.appendChild(idLine);
+            row.appendChild(info);
+
+            const matchBtn = document.createElement('button');
+            matchBtn.className = 'enhanced-meta-save-btn';
+            matchBtn.textContent = 'Match';
+            matchBtn.onclick = () => applyManualMatch(entityType, entityId, result.provider || service, result.id, artistId);
+            row.appendChild(matchBtn);
+
+            container.appendChild(row);
+        });
+
+    } catch (error) {
+        container.innerHTML = `<div class="enhanced-match-results-hint" style="color:#ff6b6b;">Error: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+async function applyManualMatch(entityType, entityId, service, serviceId, artistId) {
+    try {
+        showToast(`Matching ${entityType} to ${service}...`, 'info');
+
+        const response = await fetch('/api/library/manual-match', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_type: entityType,
+                entity_id: entityId,
+                service: service,
+                service_id: serviceId,
+                artist_id: artistId
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        showToast(`Manually matched to ${service} ID: ${serviceId}`, 'success');
+
+        // Close modal
+        const overlay = document.getElementById('enhanced-manual-match-overlay');
+        if (overlay) overlay.remove();
+
+        // Update view with fresh data
+        if (result.updated_data && result.updated_data.success) {
+            artistDetailPageState.enhancedData = result.updated_data;
+            _rebuildAlbumMap();
+            renderEnhancedView();
+        } else if (artistDetailPageState.currentArtistId) {
+            await loadEnhancedViewData(artistDetailPageState.currentArtistId);
+        }
+
+    } catch (error) {
+        showToast(`Match failed: ${error.message}`, 'error');
+    }
+}
+
+async function wishlistEnhancedMissingTrack(track, album, downloadNow = false) {
+    if (!track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be wishlisted or downloaded.', 'error');
+        return;
+    }
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const artist = {
+        id: artistDetailPageState.enhancedData?.artist?.id || artistDetailPageState.currentArtistId || '',
+        name: artistName,
+        image_url: artistDetailPageState.enhancedData?.artist?.thumb_url || getArtistImageFromPage() || '',
+    };
+    const albumData = {
+        id: album.id,
+        name: album.title || 'Unknown Album',
+        title: album.title || 'Unknown Album',
+        image_url: album.thumb_url || '',
+        release_date: album.year ? `${album.year}-01-01` : '',
+        album_type: album.record_type || 'album',
+        total_tracks: Number(album.api_track_count || album.track_count || album.tracks?.length || 1),
+    };
+    const wishlistTrack = {
+        id: track.spotify_track_id || track.deezer_id || track.itunes_track_id || track.musicbrainz_recording_id || track.id,
+        name: track.title || `Track ${track.track_number || ''}`,
+        title: track.title || `Track ${track.track_number || ''}`,
+        artists: [{ name: artistName }],
+        duration_ms: track.duration || 0,
+        track_number: track.track_number || 1,
+        disc_number: track.disc_number || 1,
+        album: albumData,
+    };
+
+    if (typeof openAddToWishlistModal !== 'function') {
+        showToast('Wishlist modal is not available on this page', 'error');
+        return;
+    }
+
+    await openAddToWishlistModal(albumData, artist, [wishlistTrack], albumData.album_type, { [wishlistTrack.name]: false });
+    if (downloadNow && typeof handleWishlistDownloadNow === 'function') {
+        setTimeout(() => handleWishlistDownloadNow(), 150);
+    }
+}
+
+function openMissingTrackManageModal(track, album) {
+    if (track._missingExpected && !track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be managed.', 'error');
+        return;
+    }
+
+    const existing = document.getElementById('enhanced-missing-manage-overlay');
+    if (existing) existing.remove();
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const overlay = document.createElement('div');
+    overlay.id = 'enhanced-missing-manage-overlay';
+    overlay.className = 'modal-overlay';
+    let isImporting = false;
+    overlay.onclick = (e) => { if (e.target === overlay && !isImporting) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal enhanced-missing-manage-modal';
+    modal.innerHTML = `
+        <div class="confirm-modal-header">
+            <h2>Manage Missing Track</h2>
+            <button class="confirm-modal-close" type="button">&times;</button>
+        </div>
+        <div class="confirm-modal-body enhanced-missing-manage-body">
+            <div class="enhanced-missing-manage-target">
+                <div class="enhanced-have-target-label">Missing album slot</div>
+                <div class="enhanced-have-target-title">#${escapeHtml(String(track.track_number || '?'))} ${escapeHtml(track.title || 'Unknown Track')}</div>
+                <div class="enhanced-have-target-meta">${escapeHtml(artistName)} &middot; ${escapeHtml(album.title || '')}</div>
+            </div>
+            <div class="enhanced-missing-manage-options">
+                <button class="enhanced-missing-option primary" data-action="library">
+                    <span class="enhanced-missing-option-icon">+</span>
+                    <span>
+                        <span class="enhanced-missing-option-title">Add to Library</span>
+                        <span class="enhanced-missing-option-desc">Open the normal library-add flow with this exact track context.</span>
+                    </span>
+                </button>
+                <button class="enhanced-missing-option" data-action="have">
+                    <span class="enhanced-missing-option-icon">OK</span>
+                    <span>
+                        <span class="enhanced-missing-option-title">I Have This</span>
+                        <span class="enhanced-missing-option-desc">Copy an existing file and process it into this album slot. The original stays untouched.</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+        <div class="confirm-modal-actions">
+            <button class="modal-button modal-button--secondary" type="button" data-action="cancel">Cancel</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    modal.querySelector('.confirm-modal-close').onclick = close;
+    modal.querySelector('[data-action="cancel"]').onclick = close;
+    modal.querySelectorAll('.enhanced-missing-option').forEach(button => {
+        button.onclick = async () => {
+            const action = button.dataset.action;
+            close();
+            if (action === 'library') {
+                await wishlistEnhancedMissingTrack(track, album, false);
+            } else if (action === 'have') {
+                openHaveMissingTrackModal(track, album);
+            }
+        };
+    });
+}
+
+function openHaveMissingTrackModal(track, album) {
+    if (track._missingExpected && !track._hasActionableContext) {
+        showToast('This missing track needs metadata context before it can be imported.', 'error');
+        return;
+    }
+    const existing = document.getElementById('enhanced-have-track-overlay');
+    if (existing) existing.remove();
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || artistDetailPageState.currentArtistName || '';
+    const overlay = document.createElement('div');
+    overlay.id = 'enhanced-have-track-overlay';
+    overlay.className = 'modal-overlay';
+    let isImporting = false;
+    overlay.onclick = (e) => { if (e.target === overlay && !isImporting) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.className = 'enhanced-manual-match-modal enhanced-have-track-modal';
+    modal.innerHTML = `
+        <div class="enhanced-bulk-modal-header">
+            <div>
+                <h3>I Have This Track</h3>
+                <div class="enhanced-have-subtitle">Use an existing file as the source audio. SoulSync will copy it into this album.</div>
+            </div>
+            <button class="enhanced-bulk-modal-close" type="button">&times;</button>
+        </div>
+        <div class="enhanced-have-target">
+            <div class="enhanced-have-target-label">Missing album slot</div>
+            <div class="enhanced-have-target-title">#${escapeHtml(String(track.track_number || '?'))} ${escapeHtml(track.title || 'Unknown Track')}</div>
+            <div class="enhanced-have-target-meta">${escapeHtml(artistName)} &middot; ${escapeHtml(album.title || '')}</div>
+        </div>
+        <div class="enhanced-match-search-row">
+            <input class="enhanced-match-search-input" id="enhanced-have-track-search" type="text" value="${escapeHtml(`${track.title || ''} ${artistName}`.trim())}" placeholder="Search your library...">
+            <button class="enhanced-enrich-btn" id="enhanced-have-track-search-btn" type="button">Search</button>
+        </div>
+        <div class="enhanced-match-results" id="enhanced-have-track-results">
+            <div class="enhanced-match-results-hint">Searching your library...</div>
+        </div>
+        <div class="enhanced-have-selected" id="enhanced-have-selected" hidden>
+            <span>Selected</span>
+            <strong></strong>
+        </div>
+        <div class="enhanced-have-note">The selected file stays in its current album/folder. SoulSync copies it, writes the missing track's tags, and places the copy in this album.</div>
+        <div class="enhanced-have-import-status" id="enhanced-have-import-status" hidden>
+            <div class="enhanced-have-import-status-top">
+                <span class="enhanced-have-import-spinner"></span>
+                <span class="enhanced-have-import-title">Preparing import...</span>
+                <span class="enhanced-have-import-time">0s</span>
+            </div>
+            <div class="enhanced-have-import-detail">Waiting to start.</div>
+        </div>
+        <div class="enhanced-bulk-modal-footer">
+            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" type="button" id="enhanced-have-cancel">Cancel</button>
+            <button class="btn btn--sm btn--primary enhanced-bulk-btn" type="button" id="enhanced-have-confirm" disabled>Import Track</button>
+        </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    let selectedTrackId = null;
+    let selectedTrackSummary = '';
+    let importTimer = null;
+    const searchResultsById = new Map();
+    const searchInput = modal.querySelector('#enhanced-have-track-search');
+    const resultsEl = modal.querySelector('#enhanced-have-track-results');
+    const selectedEl = modal.querySelector('#enhanced-have-selected');
+    const selectedText = selectedEl.querySelector('strong');
+    const confirmBtn = modal.querySelector('#enhanced-have-confirm');
+    const cancelBtn = modal.querySelector('#enhanced-have-cancel');
+    const closeBtn = modal.querySelector('.enhanced-bulk-modal-close');
+    const searchBtn = modal.querySelector('#enhanced-have-track-search-btn');
+    const statusEl = modal.querySelector('#enhanced-have-import-status');
+    const statusTitle = statusEl.querySelector('.enhanced-have-import-title');
+    const statusDetail = statusEl.querySelector('.enhanced-have-import-detail');
+    const statusTime = statusEl.querySelector('.enhanced-have-import-time');
+
+    const close = () => {
+        if (isImporting) return;
+        if (importTimer) clearInterval(importTimer);
+        overlay.remove();
+    };
+    closeBtn.onclick = close;
+    cancelBtn.onclick = close;
+    searchBtn.onclick = () => runSearch();
+    searchInput.onkeydown = (e) => { if (e.key === 'Enter' && !isImporting) runSearch(); };
+
+    function selectResultRow(row) {
+        if (isImporting || !row) return;
+        const trackId = row.dataset.trackId;
+        const result = searchResultsById.get(String(trackId));
+        if (!trackId || !result) return;
+        resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(r => {
+            r.classList.remove('selected');
+            r.setAttribute('aria-pressed', 'false');
+        });
+        row.classList.add('selected');
+        row.setAttribute('aria-pressed', 'true');
+        selectedTrackId = trackId;
+        selectedTrackSummary = `${result.title || 'Unknown'}${result.album_title ? ` from ${result.album_title}` : ''}`;
+        selectedText.textContent = selectedTrackSummary;
+        selectedEl.hidden = false;
+        confirmBtn.disabled = false;
+    }
+
+    resultsEl.addEventListener('click', (event) => {
+        const row = event.target.closest('.enhanced-have-result-row');
+        if (!row || !resultsEl.contains(row)) return;
+        event.preventDefault();
+        selectResultRow(row);
+    });
+
+    resultsEl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const row = event.target.closest('.enhanced-have-result-row');
+        if (!row) return;
+        event.preventDefault();
+        selectResultRow(row);
+    });
+
+    function setImportStatus(title, detail, tone = 'working') {
+        statusEl.hidden = false;
+        statusEl.classList.toggle('error', tone === 'error');
+        statusEl.classList.toggle('success', tone === 'success');
+        statusTitle.textContent = title;
+        statusDetail.textContent = detail;
+    }
+
+    function startImportTimer() {
+        const start = Date.now();
+        const stages = [
+            { after: 0, text: 'Copying selected file into staging.' },
+            { after: 4, text: 'Verifying audio and writing the missing track tags.' },
+            { after: 10, text: 'Post-processing can take a moment for FLAC files, lyrics, ReplayGain, and metadata.' },
+            { after: 20, text: 'Still working. Waiting for the backend to finish and return the refreshed library row.' },
+        ];
+        if (importTimer) clearInterval(importTimer);
+        importTimer = setInterval(() => {
+            const elapsed = Math.floor((Date.now() - start) / 1000);
+            statusTime.textContent = `${elapsed}s`;
+            const stage = [...stages].reverse().find(item => elapsed >= item.after);
+            if (stage) statusDetail.textContent = stage.text;
+        }, 250);
+    }
+
+    async function runSearch() {
+        const query = searchInput.value.trim();
+        if (!query) {
+            resultsEl.innerHTML = '<div class="enhanced-match-results-hint">Enter a title or artist to search.</div>';
+            return;
+        }
+        selectedTrackId = null;
+        selectedTrackSummary = '';
+        selectedEl.hidden = true;
+        confirmBtn.disabled = true;
+        resultsEl.innerHTML = '<div class="enhanced-loading">Searching...</div>';
+        searchResultsById.clear();
+        try {
+            const res = await fetch(`/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=12`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Search failed');
+            const tracks = data.tracks || [];
+            if (tracks.length === 0) {
+                resultsEl.innerHTML = '<div class="enhanced-match-results-hint">No library tracks found. Try a different search.</div>';
+                return;
+            }
+            resultsEl.innerHTML = '';
+            tracks.forEach(result => {
+                if (!result.id) return;
+                searchResultsById.set(String(result.id), result);
+                const row = document.createElement('div');
+                row.className = 'enhanced-have-result-row';
+                row.dataset.trackId = String(result.id);
+                row.setAttribute('role', 'button');
+                row.setAttribute('tabindex', '0');
+                row.setAttribute('aria-pressed', 'false');
+                const fileName = result.file_path ? result.file_path.split(/[\\/]/).pop() : 'No file path';
+                row.innerHTML = `
+                    <span class="enhanced-have-radio"></span>
+                    <span class="enhanced-have-result-main">
+                        <span class="enhanced-have-result-title">${escapeHtml(result.title || 'Unknown')}</span>
+                        <span class="enhanced-have-result-meta">${escapeHtml(result.artist_name || '')}${result.album_title ? ` &middot; ${escapeHtml(result.album_title)}` : ''}</span>
+                        <span class="enhanced-have-result-file">${escapeHtml(fileName)}</span>
+                    </span>
+                    <span class="enhanced-have-result-side">
+                        ${result.duration ? `<span>${formatDurationMs(result.duration)}</span>` : ''}
+                        ${result.bitrate ? `<span>${result.bitrate} kbps</span>` : ''}
+                    </span>
+                `;
+                resultsEl.appendChild(row);
+            });
+        } catch (error) {
+            resultsEl.innerHTML = `<div class="enhanced-match-results-hint" style="color:#ff6b6b;">Error: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    confirmBtn.onclick = async () => {
+        if (!selectedTrackId) return;
+        isImporting = true;
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Importing...';
+        cancelBtn.disabled = true;
+        closeBtn.disabled = true;
+        searchBtn.disabled = true;
+        searchInput.disabled = true;
+        resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(row => {
+            row.setAttribute('aria-disabled', 'true');
+            row.classList.add('disabled');
+        });
+        setImportStatus(
+            'Importing selected file',
+            selectedTrackSummary ? `Using ${selectedTrackSummary}.` : 'Using the selected library track.'
+        );
+        startImportTimer();
+        try {
+            const sourceTrack = track._sourceTrack || track;
+            const expectedTrack = {
+                title: track.title || sourceTrack.title || sourceTrack.name || '',
+                name: track.title || sourceTrack.title || sourceTrack.name || '',
+                track_number: track.track_number || sourceTrack.track_number,
+                disc_number: track.disc_number || sourceTrack.disc_number || 1,
+                duration: track.duration || sourceTrack.duration || sourceTrack.duration_ms || 0,
+                duration_ms: track.duration || sourceTrack.duration_ms || sourceTrack.duration || 0,
+                source: track.source || sourceTrack.source || '',
+                track_id: track.track_id || sourceTrack.track_id || sourceTrack.id || '',
+                id: track.track_id || sourceTrack.track_id || sourceTrack.id || '',
+                album_id: track.album_id || sourceTrack.album_id || '',
+                spotify_track_id: track.spotify_track_id || sourceTrack.spotify_track_id || '',
+                deezer_id: track.deezer_id || sourceTrack.deezer_id || '',
+                itunes_track_id: track.itunes_track_id || sourceTrack.itunes_track_id || '',
+                musicbrainz_recording_id: track.musicbrainz_recording_id || sourceTrack.musicbrainz_recording_id || '',
+                artists: track.artists || sourceTrack.artists || [artistName],
+            };
+            const discs = (album.canonical_tracks || album.tracks || []).map(t => Number(t.disc_number || 1));
+            const res = await fetch(`/api/library/album/${album.id}/import-existing-track`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    source_track_id: selectedTrackId,
+                    expected_track: expectedTrack,
+                    album_source_id: album.spotify_album_id || album.deezer_id || album.itunes_album_id || album.musicbrainz_release_id || album.discogs_id || album.tidal_id || album.qobuz_id || '',
+                    total_discs: Math.max(1, ...discs),
+                }),
+            });
+            setImportStatus('Finalizing import', 'Backend finished. Refreshing the enhanced library view...');
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Failed to import track');
+            if (importTimer) clearInterval(importTimer);
+            statusTime.textContent = statusTime.textContent || 'done';
+            setImportStatus('Import complete', 'The copied file is now being shown in this album.', 'success');
+            showToast('Track imported. Original file was left untouched.', 'success');
+            if (data.updated_data && data.updated_data.success) {
+                artistDetailPageState.enhancedData = data.updated_data;
+                _rebuildAlbumMap();
+                renderEnhancedView();
+            } else if (artistDetailPageState.currentArtistId) {
+                await loadEnhancedViewData(artistDetailPageState.currentArtistId);
+            }
+            setTimeout(() => overlay.remove(), 650);
+        } catch (error) {
+            if (importTimer) clearInterval(importTimer);
+            isImporting = false;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Import Track';
+            cancelBtn.disabled = false;
+            closeBtn.disabled = false;
+            searchBtn.disabled = false;
+            searchInput.disabled = false;
+            resultsEl.querySelectorAll('.enhanced-have-result-row').forEach(row => {
+                row.setAttribute('aria-disabled', 'false');
+                row.classList.remove('disabled');
+            });
+            setImportStatus('Import failed', error.message, 'error');
+            showToast(`Import failed: ${error.message}`, 'error');
+        }
+    };
+
+    searchInput.focus();
+    runSearch();
+}
+
+// ---- Enrichment ----
+
+let _enrichmentInFlight = false;
+
+async function runEnrichment(entityType, entityId, service, name, artistName, artistId) {
+    if (_enrichmentInFlight) {
+        showToast('An enrichment is already in progress', 'error');
+        return;
+    }
+
+    _enrichmentInFlight = true;
+
+    // Add loading class to all match chips for this service
+    const chipPrefixes = {
+        'spotify': ['spotify', 'sp'],
+        'musicbrainz': ['musicbrainz', 'mb'],
+        'deezer': ['deezer', 'dz'],
+        'audiodb': ['audiodb', 'adb'],
+        'itunes': ['itunes', 'it'],
+        'lastfm': ['last.fm', 'lfm'],
+        'genius': ['genius', 'gen'],
+        'bandcamp': ['bandcamp', 'bc'],
+    };
+    const prefixes = chipPrefixes[service] || [service];
+    document.querySelectorAll('.enhanced-match-chip').forEach(chip => {
+        const chipText = chip.textContent.toLowerCase();
+        if (prefixes.some(p => chipText.startsWith(p))) {
+            chip.classList.add('loading');
+        }
+    });
+
+    showToast(`Enriching ${entityType} from ${service}...`, 'info');
+
+    try {
+        const response = await fetch('/api/library/enrich', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_type: entityType,
+                entity_id: entityId,
+                service: service,
+                name: name,
+                artist_name: artistName,
+                artist_id: artistId
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.status === 429) {
+            showToast(result.error || 'Another enrichment is in progress', 'error');
+            return;
+        }
+
+        if (!result.success) {
+            throw new Error(result.error || 'Enrichment failed');
+        }
+
+        // Show per-service results
+        const results = result.results || {};
+        const successes = Object.entries(results).filter(([, r]) => r.success).map(([s]) => s);
+        const failures = Object.entries(results).filter(([, r]) => !r.success).map(([s, r]) => `${s}: ${r.error}`);
+
+        if (successes.length > 0) {
+            showToast(`Enriched from: ${successes.join(', ')}`, 'success');
+        }
+        if (failures.length > 0) {
+            showToast(`Failed: ${failures.join('; ')}`, 'error');
+        }
+
+        // Update local data with fresh response and re-render (preserves expanded state)
+        if (result.updated_data && result.updated_data.success) {
+            artistDetailPageState.enhancedData = result.updated_data;
+            _rebuildAlbumMap();
+            renderEnhancedView();
+        } else if (artistDetailPageState.currentArtistId) {
+            await loadEnhancedViewData(artistDetailPageState.currentArtistId);
+        }
+
+    } catch (error) {
+        console.error('Enrichment error:', error);
+        showToast(`Enrichment error: ${error.message}`, 'error');
+    } finally {
+        _enrichmentInFlight = false;
+        document.querySelectorAll('.enhanced-match-chip.loading').forEach(c => c.classList.remove('loading'));
+    }
+}
+
+// Close enrich dropdowns when clicking outside (early bail when enhanced view isn't active)
+document.addEventListener('click', (e) => {
+    if (!artistDetailPageState.enhancedView) return;
+    if (!e.target.closest('.enhanced-enrich-wrap')) {
+        document.querySelectorAll('.enhanced-enrich-menu.visible').forEach(m => m.classList.remove('visible'));
+    }
+});
+
+// ---- Write Tags to File ----
+
+let _tagPreviewTrackId = null;
+let _tagPreviewServerType = null;
+
+async function showTagPreview(trackId) {
+    _tagPreviewTrackId = trackId;
+    _tagPreviewServerType = null;
+    const overlay = document.getElementById('tag-preview-overlay');
+    const body = document.getElementById('tag-preview-body');
+    const title = document.getElementById('tag-preview-title');
+    if (!overlay || !body) return;
+
+    title.textContent = 'Write Tags to File';
+    body.innerHTML = '<div class="tag-preview-loading">Loading tag comparison...</div>';
+    overlay.classList.remove('hidden');
+
+    // Hide sync checkbox until we know server type
+    const syncLabel = document.getElementById('tag-preview-sync-label');
+    if (syncLabel) syncLabel.classList.add('hidden');
+
+    try {
+        const response = await fetch(`/api/library/track/${trackId}/tag-preview`);
+        const result = await response.json();
+        if (!result.success) {
+            body.innerHTML = `<div class="tag-preview-error">${escapeHtml(result.error)}</div>`;
+            return;
+        }
+
+        const diff = result.diff || [];
+        const hasChanges = result.has_changes;
+
+        // Show server sync checkbox if a server is connected (not navidrome — it auto-detects)
+        _tagPreviewServerType = result.server_type || null;
+        if (syncLabel && _tagPreviewServerType && _tagPreviewServerType !== 'navidrome') {
+            const syncText = document.getElementById('tag-preview-sync-text');
+            if (syncText) syncText.textContent = `Sync to ${_tagPreviewServerType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            syncLabel.classList.remove('hidden');
+        }
+
+        let html = '<table class="tag-preview-table"><thead><tr>';
+        html += '<th>Field</th><th>Current File Tag</th><th></th><th>DB Value</th>';
+        html += '</tr></thead><tbody>';
+
+        diff.forEach(d => {
+            const rowClass = d.changed ? 'tag-diff-changed' : 'tag-diff-same';
+            const arrow = d.changed ? '<span class="tag-diff-arrow">&rarr;</span>' : '<span class="tag-diff-check">&#10003;</span>';
+            html += `<tr class="${rowClass}">`;
+            html += `<td class="tag-field-name">${d.field}</td>`;
+            html += `<td class="tag-file-value">${escapeHtml(d.file_value) || '<span class="tag-empty">empty</span>'}</td>`;
+            html += `<td class="tag-diff-indicator">${arrow}</td>`;
+            html += `<td class="tag-db-value">${escapeHtml(d.db_value) || '<span class="tag-empty">empty</span>'}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+
+        if (!hasChanges) {
+            html += '<div class="tag-preview-no-changes">File tags already match DB metadata</div>';
+        }
+
+        body.innerHTML = html;
+
+        const writeBtn = document.getElementById('tag-preview-write-btn');
+        if (writeBtn) {
+            writeBtn.disabled = !hasChanges && !document.getElementById('tag-preview-embed-cover')?.checked;
+        }
+
+    } catch (error) {
+        body.innerHTML = `<div class="tag-preview-error">Failed to load preview: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function closeTagPreviewModal() {
+    const overlay = document.getElementById('tag-preview-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _tagPreviewTrackId = null;
+}
+
+async function executeWriteTags() {
+    if (!_tagPreviewTrackId) return;
+
+    const writeBtn = document.getElementById('tag-preview-write-btn');
+    if (writeBtn) {
+        writeBtn.disabled = true;
+        writeBtn.textContent = 'Writing...';
+    }
+
+    const embedCover = document.getElementById('tag-preview-embed-cover')?.checked ?? true;
+    const syncToServer = document.getElementById('tag-preview-sync-server')?.checked && _tagPreviewServerType && _tagPreviewServerType !== 'navidrome';
+
+    try {
+        const response = await fetch(`/api/library/track/${_tagPreviewTrackId}/write-tags`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embed_cover: embedCover, sync_to_server: syncToServer })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        const fieldCount = (result.written_fields || []).length;
+        let msg = `Tags written successfully (${fieldCount} fields)`;
+        if (result.server_sync) {
+            const ss = result.server_sync;
+            if (ss.synced > 0) msg += ` — synced to ${_tagPreviewServerType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            else if (ss.failed > 0) msg += ` — server sync failed`;
+        }
+        showToast(msg, 'success');
+        closeTagPreviewModal();
+
+    } catch (error) {
+        showToast(`Failed to write tags: ${error.message}`, 'error');
+    } finally {
+        if (writeBtn) {
+            writeBtn.disabled = false;
+            writeBtn.textContent = 'Write Tags';
+        }
+    }
+}
+
+async function writeAlbumTags(albumId) {
+    const album = findEnhancedAlbum(albumId);
+    if (!album) return;
+
+    const tracks = (album.tracks || []).filter(t => t.file_path);
+    if (tracks.length === 0) {
+        showToast('No tracks with files in this album', 'error');
+        return;
+    }
+
+    await showBatchTagPreview(tracks.map(t => t.id), album.title);
+}
+
+async function batchWriteTagsSelected() {
+    const trackIds = Array.from(artistDetailPageState.selectedTracks);
+    if (trackIds.length === 0) return;
+
+    await showBatchTagPreview(trackIds, null);
+}
+
+async function showBatchTagPreview(trackIds, albumTitle) {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    const body = document.getElementById('batch-tag-preview-body');
+    const titleEl = document.getElementById('batch-tag-preview-title');
+    const summary = document.getElementById('batch-tag-preview-summary');
+    const writeBtn = document.getElementById('batch-tag-preview-write-btn');
+    if (!overlay || !body) return;
+
+    titleEl.textContent = albumTitle ? `Write Tags — ${albumTitle}` : `Write Tags — ${trackIds.length} Tracks`;
+    body.innerHTML = '<div class="tag-preview-loading">Loading tag previews...</div>';
+    summary.innerHTML = '';
+    writeBtn.disabled = true;
+    overlay.classList.remove('hidden');
+
+    // Hide sync checkbox until we know server type
+    const syncLabel = document.getElementById('batch-tag-preview-sync-label');
+    if (syncLabel) syncLabel.classList.add('hidden');
+
+    try {
+        const response = await fetch('/api/library/tracks/tag-preview-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds })
+        });
+        const result = await response.json();
+        if (!result.success) {
+            body.innerHTML = `<div class="tag-preview-error">${escapeHtml(result.error)}</div>`;
+            return;
+        }
+
+        const tracks = result.tracks || [];
+        const serverType = result.server_type || null;
+
+        // Show sync checkbox if server connected
+        if (syncLabel && serverType && serverType !== 'navidrome') {
+            const syncText = document.getElementById('batch-tag-preview-sync-text');
+            if (syncText) syncText.textContent = `Sync to ${serverType === 'plex' ? 'Plex' : 'Jellyfin'}`;
+            syncLabel.classList.remove('hidden');
+        }
+
+        // Categorize tracks
+        const withChanges = tracks.filter(t => t.has_changes);
+        const noChanges = tracks.filter(t => !t.error && !t.has_changes);
+        const errors = tracks.filter(t => t.error);
+
+        // Summary bar
+        let summaryHtml = '<div class="batch-tag-summary">';
+        if (withChanges.length > 0) summaryHtml += `<span class="batch-tag-stat changed">${withChanges.length} with changes</span>`;
+        if (noChanges.length > 0) summaryHtml += `<span class="batch-tag-stat unchanged">${noChanges.length} unchanged</span>`;
+        if (errors.length > 0) summaryHtml += `<span class="batch-tag-stat errored">${errors.length} unavailable</span>`;
+        summaryHtml += '</div>';
+        summary.innerHTML = summaryHtml;
+
+        // Build track accordion
+        let html = '';
+
+        // Tracks with changes (expanded by default)
+        withChanges.forEach(track => {
+            html += _renderBatchTrackDiff(track, true);
+        });
+
+        // Errors
+        errors.forEach(track => {
+            html += `<div class="batch-tag-track error">`;
+            html += `<div class="batch-tag-track-header">`;
+            html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+            html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+            html += `<span class="batch-tag-track-status error">${escapeHtml(track.error)}</span>`;
+            html += `</div></div>`;
+        });
+
+        // Unchanged tracks (collapsed)
+        if (noChanges.length > 0) {
+            html += `<div class="batch-tag-unchanged-group">`;
+            html += `<div class="batch-tag-unchanged-header" onclick="this.parentElement.classList.toggle('expanded')">`;
+            html += `<span>${noChanges.length} track${noChanges.length !== 1 ? 's' : ''} already up to date</span>`;
+            html += `<span class="batch-tag-chevron">&#9662;</span>`;
+            html += `</div>`;
+            html += `<div class="batch-tag-unchanged-list">`;
+            noChanges.forEach(track => {
+                html += `<div class="batch-tag-track-row unchanged">`;
+                html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+                html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+                html += `<span class="batch-tag-track-status ok">✓ Tags match</span>`;
+                html += `</div>`;
+            });
+            html += `</div></div>`;
+        }
+
+        if (withChanges.length === 0 && errors.length === 0) {
+            html += '<div class="tag-preview-no-changes">All file tags already match DB metadata</div>';
+        }
+
+        body.innerHTML = html;
+
+        // Store state for write action
+        overlay._batchTrackIds = trackIds;
+        overlay._batchServerType = serverType;
+        writeBtn.disabled = withChanges.length === 0;
+
+    } catch (error) {
+        body.innerHTML = `<div class="tag-preview-error">Failed to load previews: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function _renderBatchTrackDiff(track, expanded) {
+    let html = `<div class="batch-tag-track${expanded ? ' expanded' : ''}">`;
+    html += `<div class="batch-tag-track-header" onclick="this.parentElement.classList.toggle('expanded')">`;
+    html += `<span class="batch-tag-track-number">${track.track_number || '—'}</span>`;
+    html += `<span class="batch-tag-track-title">${escapeHtml(track.title)}</span>`;
+    html += `<span class="batch-tag-track-status changed">${track.changed_count} field${track.changed_count !== 1 ? 's' : ''} changed</span>`;
+    html += `<span class="batch-tag-chevron">&#9662;</span>`;
+    html += `</div>`;
+    html += `<div class="batch-tag-track-diff">`;
+    html += '<table class="tag-preview-table"><thead><tr>';
+    html += '<th>Field</th><th>Current File</th><th></th><th>New Value</th>';
+    html += '</tr></thead><tbody>';
+
+    (track.diff || []).forEach(d => {
+        if (!d.changed) return; // Only show changed fields in batch view
+        html += `<tr class="tag-diff-changed">`;
+        html += `<td class="tag-field-name">${d.field}</td>`;
+        html += `<td class="tag-file-value">${escapeHtml(d.file_value) || '<span class="tag-empty">empty</span>'}</td>`;
+        html += `<td class="tag-diff-indicator"><span class="tag-diff-arrow">&rarr;</span></td>`;
+        html += `<td class="tag-db-value">${escapeHtml(d.db_value) || '<span class="tag-empty">empty</span>'}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    return html;
+}
+
+function closeBatchTagPreviewModal() {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+        overlay._batchTrackIds = null;
+        overlay._batchServerType = null;
+    }
+}
+
+async function executeBatchWriteTags() {
+    const overlay = document.getElementById('batch-tag-preview-overlay');
+    const trackIds = overlay?._batchTrackIds;
+    if (!trackIds || trackIds.length === 0) return;
+
+    const writeBtn = document.getElementById('batch-tag-preview-write-btn');
+    if (writeBtn) {
+        writeBtn.disabled = true;
+        writeBtn.textContent = 'Writing...';
+    }
+
+    const embedCover = document.getElementById('batch-tag-preview-embed-cover')?.checked ?? true;
+    const serverType = overlay._batchServerType;
+    const syncToServer = document.getElementById('batch-tag-preview-sync-server')?.checked && serverType && serverType !== 'navidrome';
+
+    closeBatchTagPreviewModal();
+    await _startBatchWriteTags(trackIds, embedCover, syncToServer);
+
+    if (writeBtn) {
+        writeBtn.disabled = false;
+        writeBtn.textContent = 'Write Tags';
+    }
+}
+
+async function _startBatchWriteTags(trackIds, embedCover, syncToServer = false) {
+    try {
+        const response = await fetch('/api/library/tracks/write-tags-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds, embed_cover: embedCover, sync_to_server: syncToServer })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        showToast(`Writing tags for ${trackIds.length} tracks...`, 'info');
+        _pollBatchWriteTagsStatus();
+
+    } catch (error) {
+        showToast(`Failed to start tag write: ${error.message}`, 'error');
+    }
+}
+
+let _batchWriteTagsPollTimer = null;
+
+function _pollBatchWriteTagsStatus() {
+    if (_batchWriteTagsPollTimer) clearTimeout(_batchWriteTagsPollTimer);
+
+    async function poll() {
+        try {
+            const response = await fetch('/api/library/tracks/write-tags-batch/status');
+            const state = await response.json();
+
+            if (state.status === 'running') {
+                if (state.sync_phase === 'syncing') {
+                    const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
+                    showToast(`Syncing to ${serverName}...`, 'info');
+                } else {
+                    const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                    showToast(`Writing tags: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                }
+                _batchWriteTagsPollTimer = setTimeout(poll, 1000);
+            } else if (state.status === 'done') {
+                let msg = `Tags written: ${state.written} updated`;
+                if ((state.skipped || 0) > 0) msg += `, ${state.skipped} unchanged`;
+                if (state.failed > 0) msg += `, ${state.failed} failed`;
+                if (state.sync_phase === 'done') {
+                    const serverName = state.sync_server === 'plex' ? 'Plex' : state.sync_server === 'jellyfin' ? 'Jellyfin' : state.sync_server;
+                    if (state.sync_synced > 0 && state.sync_failed === 0) {
+                        msg += ` — synced to ${serverName}`;
+                    } else if (state.sync_failed > 0) {
+                        msg += ` — ${serverName} sync: ${state.sync_synced} synced, ${state.sync_failed} failed`;
+                    }
+                }
+                // Surface the first error reason so users can diagnose (e.g. "File not found")
+                if (state.failed > 0 && state.errors && state.errors.length > 0) {
+                    const firstErr = state.errors[0].error || 'Unknown error';
+                    msg += ` (${firstErr})`;
+                }
+                showToast(msg, state.failed > 0 || state.sync_failed > 0 ? 'warning' : 'success');
+                _batchWriteTagsPollTimer = null;
+            }
+        } catch (error) {
+            console.error('Poll write-tags status failed:', error);
+            _batchWriteTagsPollTimer = null;
+        }
+    }
+
+    _batchWriteTagsPollTimer = setTimeout(poll, 800);
+}
+
+// ── ReplayGain Analysis ──
+
+let _rgBatchPollTimer = null;
+let _rgAlbumPollTimer = null;
+
+/**
+ * Analyze a single track and write track-level ReplayGain tags.
+ * Synchronous on the server side (~1–3 s). Shows spinner on the button.
+ */
+async function analyzeTrackReplayGain(trackId, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+    }
+    try {
+        const res = await fetch(`/api/library/track/${trackId}/analyze-replaygain`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`ReplayGain written: ${data.track_gain} (${data.lufs} LUFS)`, 'success');
+        } else {
+            showToast(`ReplayGain failed: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('ReplayGain analysis failed', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'RG';
+        }
+    }
+}
+
+/**
+ * Analyze all tracks in an album and write track + album ReplayGain tags.
+ * Kicks off a background job; polls for progress.
+ */
+async function analyzeAlbumReplayGain(albumId, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '&#9835; Analyzing…';
+    }
+    try {
+        const res = await fetch(`/api/library/album/${albumId}/analyze-replaygain`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(`ReplayGain: ${data.error}`, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+            return;
+        }
+        showToast('Album ReplayGain analysis started…', 'info');
+        _pollAlbumRgStatus(albumId, btn);
+    } catch (err) {
+        showToast('Failed to start album ReplayGain analysis', 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+    }
+}
+
+function _pollAlbumRgStatus(albumId, btn) {
+    if (_rgAlbumPollTimer) clearTimeout(_rgAlbumPollTimer);
+
+    async function poll() {
+        try {
+            const res = await fetch(`/api/library/album/${albumId}/analyze-replaygain/status`);
+            const state = await res.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`ReplayGain: ${state.processed}/${state.total} tracks (${pct}%)`, 'info');
+                _rgAlbumPollTimer = setTimeout(poll, 1200);
+            } else if (state.status === 'done') {
+                const msg = `ReplayGain done: ${state.analyzed} analyzed, ${state.failed} failed`;
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+                _rgAlbumPollTimer = null;
+            }
+        } catch (err) {
+            console.error('ReplayGain album poll failed:', err);
+            if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+            _rgAlbumPollTimer = null;
+        }
+    }
+
+    _rgAlbumPollTimer = setTimeout(poll, 1000);
+}
+
+/**
+ * Analyze selected tracks (track gain only — they may span albums).
+ */
+async function batchAnalyzeReplayGainSelected() {
+    const trackIds = Array.from(artistDetailPageState.selectedTracks);
+    if (trackIds.length === 0) return;
+
+    try {
+        const res = await fetch('/api/library/tracks/analyze-replaygain-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(`ReplayGain: ${data.error}`, 'error');
+            return;
+        }
+        showToast(`ReplayGain analysis started for ${trackIds.length} tracks…`, 'info');
+        _pollBatchRgStatus();
+    } catch (err) {
+        showToast('Failed to start batch ReplayGain analysis', 'error');
+    }
+}
+
+function _pollBatchRgStatus() {
+    if (_rgBatchPollTimer) clearTimeout(_rgBatchPollTimer);
+
+    async function poll() {
+        try {
+            const res = await fetch('/api/library/tracks/analyze-replaygain-batch/status');
+            const state = await res.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`ReplayGain: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                _rgBatchPollTimer = setTimeout(poll, 1000);
+            } else if (state.status === 'done') {
+                const msg = `ReplayGain done: ${state.analyzed} written, ${state.failed} failed`;
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                _rgBatchPollTimer = null;
+            }
+        } catch (err) {
+            console.error('ReplayGain batch poll failed:', err);
+            _rgBatchPollTimer = null;
+        }
+    }
+
+    _rgBatchPollTimer = setTimeout(poll, 800);
+}
+
+// ── Reorganize Album Files ──
+//
+// Click → enqueue → close modal. The reorganize queue worker (server-
+// side) processes items FIFO. The Reorganize Status panel mounted at
+// the top of the artist's enhanced-actions section is what surfaces
+// live progress — buttons no longer wait or lock.
+
+let _reorganizeAlbumId = null;
+
+async function showReorganizeModal(albumId) {
+    // Short-circuit if this album is already queued or running — opening
+    // the modal would be misleading (the apply click would just dedupe).
+    const queuedState = _reorganizeStateForAlbum(albumId);
+    if (queuedState) {
+        const label = queuedState === 'running' ? 'Reorganize already running for this album' : 'Album already queued for reorganize';
+        showToast(label, 'info');
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
+        return;
+    }
+
+    _reorganizeAlbumId = albumId;
+    const overlay = document.getElementById('reorganize-overlay');
+    const body = document.getElementById('reorganize-modal-body');
+    const title = document.getElementById('reorganize-modal-title');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!overlay || !body) return;
+
+    // Find album data from enhanced view state
+    let albumData = null;
+    let artistName = '';
+    if (artistDetailPageState.enhancedData) {
+        artistName = artistDetailPageState.enhancedData.artist.name || '';
+        const allAlbums = artistDetailPageState.enhancedData.albums || [];
+        albumData = allAlbums.find(a => String(a.id) === String(albumId));
+    }
+
+    title.textContent = `Reorganize: ${albumData ? albumData.title : 'Album'}`;
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Apply';
+        applyBtn.onclick = () => executeReorganize();
+    }
+
+    let html = '<div class="reorganize-content">';
+
+    // Metadata MODE picker — API call (default) vs read embedded tags.
+    // Tag-mode (#592) trusts the user's enriched library and issues
+    // zero API calls.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Metadata source picker — populated from /reorganize/sources.
+    // Empty value = use configured primary (with fallback chain).
+    // Specific source = strict mode, that source only.
+    // Hidden when mode = 'tags' since the source picker is irrelevant
+    // (tags are read straight off the file).
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Source</label>';
+    html += '<div class="reorganize-template-hint">Pick which source to read the album\'s tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads.</div>';
+    html += '<select id="reorganize-source-select" class="reorganize-template-input">';
+    html += '<option value="">Use configured primary (auto)</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Action: full pipeline vs rename-only (#875).
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Action</label>';
+    html += '<div class="reorganize-template-hint">"Full reorganize" re-tags and re-checks every track through the import pipeline — thorough, but slow and it re-touches every file. "Rename only" just moves files to your current naming scheme: no re-tagging, no quality/AcoustID checks, and only files whose name actually changes are touched. Tip: renaming can reset play counts / date-added on your media server.</div>';
+    html += '<select id="reorganize-action-select" class="reorganize-template-input">';
+    html += '<option value="full">Full reorganize (default)</option>';
+    html += '<option value="rename">Rename only (skip post-processing)</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Preview area
+    html += '<div class="reorganize-preview-section">';
+    html += '<div class="reorganize-preview-header">';
+    html += '<label class="reorganize-label">Preview</label>';
+    html += '<button class="reorganize-preview-btn" onclick="loadReorganizePreview()">Generate Preview</button>';
+    html += '</div>';
+    html += '<div id="reorganize-preview-body" class="reorganize-preview-body">';
+    html += '<div class="reorganize-preview-hint">Click "Generate Preview" to see how files will be reorganized.</div>';
+    html += '</div></div>';
+
+    html += '</div>';
+    body.innerHTML = html;
+    overlay.classList.remove('hidden');
+
+    // Populate source picker after the modal mounts
+    setTimeout(() => _populateReorganizeSources(_reorganizeAlbumId), 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
+}
+
+function _onReorganizeModeChange() {
+    const mode = document.getElementById('reorganize-mode-select')?.value || 'api';
+    const srcSection = document.getElementById('reorganize-source-section');
+    if (srcSection) srcSection.style.display = (mode === 'tags') ? 'none' : '';
+    try { localStorage.setItem('soulsync-reorganize-mode', mode); } catch (e) {}
+}
+
+async function _populateReorganizeSources(albumId) {
+    const select = document.getElementById('reorganize-source-select');
+    if (!select || !albumId) return;
+    try {
+        const resp = await fetch(`/api/library/album/${albumId}/reorganize/sources`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const sources = data.sources || [];
+        // Keep the "auto" default option, append concrete sources beneath it.
+        sources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.source;
+            opt.textContent = s.label || s.source;
+            select.appendChild(opt);
+        });
+        if (sources.length === 0) {
+            const opt = document.createElement('option');
+            opt.disabled = true;
+            opt.textContent = 'No sources available — run enrichment first';
+            select.appendChild(opt);
+        }
+    } catch (err) {
+        console.error('Failed to load reorganize sources:', err);
+    }
+}
+
+function closeReorganizeModal() {
+    const overlay = document.getElementById('reorganize-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    _reorganizeAlbumId = null;
+}
+
+async function loadReorganizePreview() {
+    const previewBody = document.getElementById('reorganize-preview-body');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!previewBody || !_reorganizeAlbumId) return;
+
+    if (applyBtn) applyBtn.disabled = true;
+    previewBody.innerHTML = '<div class="reorganize-preview-loading">Loading preview...</div>';
+
+    // Final apply-button state: only enable when the preview actually
+    // produced movable tracks AND no collisions blocked it. Any error
+    // path or empty result keeps it disabled. We compute it as we go and
+    // commit it in finally so an early return / throw can't leave the
+    // button stuck disabled forever.
+    let canApply = false;
+
+    try {
+        const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
+        const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
+        });
+        const result = await response.json();
+        if (!result.success) {
+            previewBody.innerHTML = `<div class="reorganize-preview-error">${escapeHtml(result.error || 'Preview failed')}</div>`;
+            return;
+        }
+
+        const tracks = result.tracks || [];
+        if (tracks.length === 0) {
+            previewBody.innerHTML = '<div class="reorganize-preview-hint">No tracks found.</div>';
+            return;
+        }
+
+        let hasChanges = false;
+        let hasCollisions = false;
+        let html = '<table class="reorganize-preview-table"><thead><tr>';
+        html += '<th>#</th><th>Title</th><th>Current Path</th><th></th><th>New Path</th>';
+        html += '</tr></thead><tbody>';
+
+        tracks.forEach(t => {
+            const unchanged = t.unchanged;
+            const noFile = !t.file_exists;
+            const collision = t.collision;
+            const unmatched = (t.matched === false);
+            const missingPath = !unmatched && !noFile && !t.new_path;  // matched but path-build failed
+            if (!unchanged && t.file_exists && !unmatched && !missingPath) hasChanges = true;
+            if (collision) hasCollisions = true;
+
+            let rowClass;
+            if (collision) rowClass = 'reorganize-row-collision';
+            else if (noFile || unmatched || missingPath) rowClass = 'reorganize-row-missing';
+            else if (unchanged) rowClass = 'reorganize-row-unchanged';
+            else rowClass = 'reorganize-row-changed';
+
+            const arrow = collision ? '!!'
+                : unchanged ? '='
+                : (noFile || unmatched || missingPath) ? '⊘'
+                : '→';
+
+            const newCell = noFile ? ''
+                : unmatched ? `<em>${escapeHtml(t.reason || 'Not in selected source\'s tracklist')}</em>`
+                : missingPath ? `<em>${escapeHtml(t.reason || 'Couldn\'t compute destination path')}</em>`
+                : (escapeHtml(t.new_path) + (collision ? ' <em>(collision)</em>' : ''));
+
+            html += `<tr class="${rowClass}">`;
+            html += `<td>${t.track_number || ''}</td>`;
+            html += `<td>${escapeHtml(t.title)}</td>`;
+            html += `<td class="reorganize-path">${noFile ? '<em>File not found</em>' : escapeHtml(t.current_path)}</td>`;
+            html += `<td class="reorganize-arrow">${arrow}</td>`;
+            html += `<td class="reorganize-path">${newCell}</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+
+        const changedCount = tracks.filter(t => !t.unchanged && t.file_exists && !t.collision && t.matched !== false && t.new_path).length;
+        const skippedCount = tracks.filter(t => t.unchanged).length;
+        const missingCount = tracks.filter(t => !t.file_exists).length;
+        const collisionCount = tracks.filter(t => t.collision).length;
+        const unmatchedCount = tracks.filter(t => t.file_exists && t.matched === false).length;
+        const noPathCount = tracks.filter(t => t.file_exists && t.matched !== false && !t.new_path && !t.collision).length;
+
+        let summary = `<div class="reorganize-preview-summary">`;
+        if (changedCount > 0) summary += `<span class="reorganize-stat changed">${changedCount} will move</span>`;
+        if (skippedCount > 0) summary += `<span class="reorganize-stat unchanged">${skippedCount} unchanged</span>`;
+        if (unmatchedCount > 0) summary += `<span class="reorganize-stat missing">${unmatchedCount} not in source — try a different source</span>`;
+        if (noPathCount > 0) summary += `<span class="reorganize-stat missing">${noPathCount} couldn't compute destination</span>`;
+        if (missingCount > 0) summary += `<span class="reorganize-stat missing">${missingCount} missing on disk</span>`;
+        if (collisionCount > 0) summary += `<span class="reorganize-stat collision">${collisionCount} collision${collisionCount !== 1 ? 's' : ''} — likely a source data issue</span>`;
+        summary += '</div>';
+
+        previewBody.innerHTML = summary + html;
+
+        canApply = hasChanges && !hasCollisions;
+
+    } catch (error) {
+        previewBody.innerHTML = `<div class="reorganize-preview-error">Error: ${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (applyBtn) applyBtn.disabled = !canApply;
+    }
+}
+
+async function executeReorganize() {
+    if (!_reorganizeAlbumId) return;
+
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Queueing...';
+    }
+
+    const albumTitle = document.getElementById('reorganize-modal-title')?.textContent
+        ?.replace(/^Reorganize:\s*/, '') || 'album';
+
+    try {
+        const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+        const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
+        const renameOnly = document.getElementById('reorganize-action-select')?.value === 'rename';
+        const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode, rename_only: renameOnly })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
+
+        closeReorganizeModal();
+
+        if (result.queued) {
+            const posLabel = result.position && result.position > 1 ? ` (#${result.position} in queue)` : '';
+            showToast(`Queued: ${albumTitle}${posLabel}`, 'info');
+        } else if (result.reason === 'already_queued') {
+            showToast(`Already queued: ${albumTitle}`, 'info');
+        } else {
+            showToast('Reorganize queued', 'info');
+        }
+
+        // Wake the status panel so the user sees the new item land
+        // immediately rather than waiting for the next poll tick.
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
+    } catch (error) {
+        showToast(`Reorganize failed: ${error.message}`, 'error');
+        if (applyBtn) {
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'Apply';
+        }
+    }
+}
+
+// kettui PR #377 review: distinguish 'completed' from non-completed
+// outcomes so zero-failure skips (no_source_id, no_album, no_tracks,
+// setup_failed, error) don't get a green checkmark.
+function _classifyReorganizeOutcome(state) {
+    const status = state.result_status;
+    if (status && status !== 'completed') return 'warning';
+    if (state.failed && state.failed > 0) return 'warning';
+    return 'success';
+}
+
+function _formatReorganizeResultMessage(state) {
+    const status = state.result_status;
+    if (status === 'no_source_id') {
+        return 'Reorganize skipped — album has no metadata source ID. Run enrichment first.';
+    }
+    if (status === 'no_album') {
+        return 'Reorganize skipped — album not found in DB.';
+    }
+    if (status === 'no_tracks') {
+        return 'Reorganize skipped — album has no tracks.';
+    }
+    if (status === 'setup_failed') {
+        return 'Reorganize failed — couldn\'t create staging directory.';
+    }
+    if (status === 'error') {
+        return 'Reorganize failed — see server logs for details.';
+    }
+    let msg = `Reorganized: ${state.moved || 0} moved`;
+    if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
+    if (state.failed > 0) msg += `, ${state.failed} failed`;
+    if (state.failed > 0 && state.errors && state.errors.length > 0) {
+        msg += ` (${state.errors[0].error})`;
+    }
+    return msg;
+}
+
+// ── Reorganize All Albums for Artist ──
+
+async function _showReorganizeAllModal() {
+    if (!artistDetailPageState.enhancedData) {
+        showToast('No album data loaded', 'error');
+        return;
+    }
+    const albums = artistDetailPageState.enhancedData.albums || [];
+    const artistName = artistDetailPageState.enhancedData.artist.name || 'Artist';
+
+    if (albums.length === 0) {
+        showToast('No albums to reorganize', 'error');
+        return;
+    }
+
+    const overlay = document.getElementById('reorganize-overlay');
+    const body = document.getElementById('reorganize-modal-body');
+    const title = document.getElementById('reorganize-modal-title');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!overlay || !body) return;
+
+    title.textContent = `Reorganize All Albums — ${artistName}`;
+
+    let html = '<div class="reorganize-content">';
+
+    // Mode picker — applies to ALL albums.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Mode</label>';
+    html += '<div class="reorganize-template-hint">"API" queries your metadata source for the canonical tracklist. "Embedded tags" reads each file\'s own tags as the source of truth — useful for well-tagged libraries and avoids API calls.</div>';
+    html += '<select id="reorganize-mode-select" class="reorganize-template-input" onchange="_onReorganizeModeChange()">';
+    html += '<option value="api">API metadata (default)</option>';
+    html += '<option value="tags">Embedded file tags</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Source picker — applies to ALL albums in this run. Hidden when
+    // mode = 'tags'. Albums without an ID for the chosen source will
+    // be skipped at the backend with a clear status. Auto = use
+    // configured primary with fallback chain.
+    html += '<div class="reorganize-source-section" id="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Source (applies to all albums)</label>';
+    html += '<div class="reorganize-template-hint">Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads.</div>';
+    html += '<select id="reorganize-source-select" class="reorganize-template-input">';
+    html += '<option value="">Use configured primary (auto)</option>';
+    html += '</select>';
+    html += '</div>';
+
+    // Album list
+    html += '<div style="margin-top:14px;">';
+    html += `<label class="reorganize-label">${albums.length} album${albums.length !== 1 ? 's' : ''} will be reorganized:</label>`;
+    html += '<div style="max-height:200px;overflow-y:auto;margin-top:6px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 10px;">';
+    albums.forEach((a, i) => {
+        const trackCount = a.tracks ? a.tracks.length : '?';
+        html += `<div style="padding:4px 0;font-size:0.88em;color:rgba(255,255,255,0.7);border-bottom:${i < albums.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none'};">`;
+        html += `${escapeHtml(a.title)} <span style="color:rgba(255,255,255,0.3);">(${trackCount} tracks)</span>`;
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    html += '</div>';
+    body.innerHTML = html;
+
+    // Wire apply button for bulk mode
+    if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Reorganize All';
+        applyBtn.onclick = () => _executeReorganizeAll();
+    }
+
+    overlay.classList.remove('hidden');
+
+    // Populate the source dropdown from the global authed-sources endpoint
+    setTimeout(async () => {
+        const select = document.getElementById('reorganize-source-select');
+        if (!select) return;
+        try {
+            const resp = await fetch('/api/library/reorganize/sources');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            (data.sources || []).forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.source;
+                opt.textContent = s.label || s.source;
+                select.appendChild(opt);
+            });
+        } catch (err) {
+            console.error('Failed to load reorganize sources:', err);
+        }
+    }, 50);
+
+    // Apply user's saved default mode if any
+    try {
+        const savedMode = localStorage.getItem('soulsync-reorganize-mode') || 'api';
+        const sel = document.getElementById('reorganize-mode-select');
+        if (sel) sel.value = savedMode;
+        _onReorganizeModeChange();
+    } catch (e) { /* localStorage unavailable, ignore */ }
+}
+
+async function _executeReorganizeAll() {
+    const albums = artistDetailPageState.enhancedData?.albums || [];
+    const total = albums.length;
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || 'this artist';
+    const artistId = artistDetailPageState.currentArtistId;
+    if (!artistId) return;
+
+    const confirmed = await showConfirmDialog({
+        title: 'Reorganize All Albums',
+        message: `This will queue ${total} album${total !== 1 ? 's' : ''} for ${artistName} using your configured download template. Files will be moved and renamed. This cannot be undone.`,
+        confirmText: 'Queue All',
+        destructive: false,
+    });
+    if (!confirmed) return;
+
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Queueing...'; }
+
+    const overlay = document.getElementById('reorganize-overlay');
+    if (overlay) overlay.classList.add('hidden');
+
+    // One source + mode pick applies to every album in the batch.
+    const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+    const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
+
+    try {
+        const resp = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode }),
+        });
+        const result = await resp.json();
+        if (!result.success) throw new Error(result.error || 'Queue request failed');
+
+        const enqueued = result.enqueued || 0;
+        const already = result.already_queued || 0;
+        if (enqueued > 0 && already > 0) {
+            showToast(`Queued ${enqueued} album${enqueued !== 1 ? 's' : ''}; ${already} already in queue`, 'info');
+        } else if (enqueued > 0) {
+            showToast(`Queued ${enqueued} album${enqueued !== 1 ? 's' : ''} for ${artistName}`, 'info');
+        } else if (already > 0) {
+            showToast(`All ${already} album${already !== 1 ? 's' : ''} already in queue`, 'info');
+        } else {
+            showToast('No albums to queue', 'warning');
+        }
+
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
+    } catch (err) {
+        showToast(`Reorganize-all failed: ${err.message}`, 'error');
+    } finally {
+        if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
+    }
+}
+
+
+// ── Reorganize Status Panel ──
+//
+// Lives at the start of `.enhanced-artist-meta-actions`. Polls the
+// queue snapshot endpoint and renders an at-a-glance summary plus an
+// expandable card list. Only visible when there's something to show
+// (active item, queued items, or recent completions).
+//
+// Cross-artist hint: items belonging to a different artist than the
+// page's current one are flagged so the user understands progress they
+// see refers to a separate batch.
+
+let _reorgPanelEl = null;
+let _reorgPanelArtistId = null;
+let _reorgPanelExpanded = false;
+let _reorgPanelTimer = null;
+let _reorgPanelLastSnapshot = null;
+let _reorgPanelInflight = false;
+
+const _REORG_PANEL_FAST_MS = 1500;
+const _REORG_PANEL_SLOW_MS = 8000;
+
+function mountReorganizeStatusPanel(container, artistId) {
+    if (!container) return;
+    // Tear down any panel left over from a previous artist view.
+    _stopReorganizeStatusPolling();
+
+    const panel = document.createElement('div');
+    panel.className = 'reorganize-status-panel hidden';
+    panel.id = 'reorganize-status-panel';
+    container.insertBefore(panel, container.firstChild);
+
+    _reorgPanelEl = panel;
+    _reorgPanelArtistId = artistId || null;
+    _reorgPanelExpanded = false;
+    _reorgPanelLastSnapshot = null;
+
+    // Defer the initial refresh: the caller (renderArtistMetaPanel) is
+    // still building the header in memory, so neither this panel nor
+    // its ancestor headerRight has been attached to document.body yet.
+    // refreshReorganizeStatusPanel guards on document.body.contains,
+    // so a synchronous call here would bail and kill polling forever.
+    // setTimeout 0 lets the call stack unwind so the parent appendChild
+    // runs before we check connectivity.
+    setTimeout(() => {
+        if (!_reorgPanelEl || !document.body.contains(_reorgPanelEl)) return;
+        refreshReorganizeStatusPanel();
+    }, 0);
+}
+
+function _stopReorganizeStatusPolling() {
+    if (_reorgPanelTimer) {
+        clearTimeout(_reorgPanelTimer);
+        _reorgPanelTimer = null;
+    }
+    _reorgPanelEl = null;
+    _reorgPanelLastSnapshot = null;
+}
+
+function _scheduleReorganizeStatusPoll(delayMs) {
+    if (_reorgPanelTimer) clearTimeout(_reorgPanelTimer);
+    _reorgPanelTimer = setTimeout(() => {
+        _reorgPanelTimer = null;
+        refreshReorganizeStatusPanel();
+    }, delayMs);
+}
+
+async function refreshReorganizeStatusPanel() {
+    // The panel may have been unmounted (user navigated away from
+    // enhanced view); detect by checking it's still in the document.
+    if (!_reorgPanelEl || !document.body.contains(_reorgPanelEl)) {
+        _stopReorganizeStatusPolling();
+        return;
+    }
+    if (_reorgPanelInflight) return;
+    _reorgPanelInflight = true;
+
+    let snapshot = null;
+    try {
+        const resp = await fetch('/api/library/reorganize/queue');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.success !== false) snapshot = data;
+        } else {
+            console.warn('Reorganize queue snapshot HTTP', resp.status);
+        }
+    } catch (err) {
+        // Network blip — keep showing the last snapshot, retry slowly.
+        console.warn('Reorganize queue snapshot failed:', err);
+    } finally {
+        _reorgPanelInflight = false;
+    }
+
+    if (snapshot) _reorgPanelLastSnapshot = snapshot;
+    _renderReorganizeStatusPanel(_reorgPanelLastSnapshot);
+
+    // Reschedule. Fast cadence while there's actually work in flight,
+    // slow when the queue is empty so we're not hammering the endpoint.
+    if (_reorgPanelEl && document.body.contains(_reorgPanelEl)) {
+        const active = _reorgPanelLastSnapshot?.active;
+        const queued = _reorgPanelLastSnapshot?.queued?.length || 0;
+        const next = (active || queued > 0) ? _REORG_PANEL_FAST_MS : _REORG_PANEL_SLOW_MS;
+        _scheduleReorganizeStatusPoll(next);
+    }
+}
+
+function _renderReorganizeStatusPanel(snapshot) {
+    const panel = _reorgPanelEl;
+    if (!panel) return;
+    if (!snapshot) {
+        panel.classList.add('hidden');
+        return;
+    }
+    const active = snapshot.active;
+    const queued = snapshot.queued || [];
+    const recent = snapshot.recent || [];
+
+    // Show if anything is active/queued, OR a recent completion landed
+    // within the last 20 seconds (so the user sees the result).
+    const cutoffSec = (Date.now() / 1000) - 20;
+    const recentVisible = recent.filter(r => (r.finished_at || 0) >= cutoffSec);
+
+    if (!active && queued.length === 0 && recentVisible.length === 0) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        _paintQueuedAlbumButtons(snapshot);
+        return;
+    }
+    panel.classList.remove('hidden');
+
+    // Compact summary (always visible). Click to toggle expand.
+    let html = '<div class="reorg-panel-compact" onclick="toggleReorganizeStatusPanel()">';
+    html += '<div class="reorg-panel-compact-left">';
+
+    if (active) {
+        const total = active.progress_total || 0;
+        const done = active.progress_processed || 0;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const trackBit = active.current_track ? ` — ${escapeHtml(active.current_track)}` : '';
+        const albumLabel = _reorgPanelDisplayLabel(active);
+        html += `<span class="reorg-panel-spinner"></span>`;
+        html += `<span class="reorg-panel-active-text">Reorganizing <strong>${escapeHtml(albumLabel)}</strong>`;
+        if (total > 0) html += ` (${done}/${total} · ${pct}%)`;
+        html += `${trackBit}</span>`;
+    } else if (queued.length > 0) {
+        html += `<span class="reorg-panel-spinner"></span>`;
+        html += `<span class="reorg-panel-active-text">Reorganize queue starting…</span>`;
+    } else {
+        // Only recent items remain — give a quick wrap-up summary.
+        const failed = recentVisible.filter(r => r.status === 'failed').length;
+        const done = recentVisible.filter(r => r.status === 'done').length;
+        const cls = failed > 0 ? 'recent-warn' : 'recent-ok';
+        html += `<span class="reorg-panel-recent-icon ${cls}"></span>`;
+        const parts = [];
+        if (done > 0) parts.push(`${done} reorganized`);
+        if (failed > 0) parts.push(`${failed} failed`);
+        html += `<span class="reorg-panel-active-text">${parts.join(', ') || 'Recent activity'}</span>`;
+    }
+    html += '</div>';
+
+    // Right: queue count badge + expand chevron.
+    html += '<div class="reorg-panel-compact-right">';
+    if (queued.length > 0) {
+        html += `<span class="reorg-panel-queue-badge" title="${queued.length} waiting in queue">+${queued.length} queued</span>`;
+    }
+    const chev = _reorgPanelExpanded ? '▾' : '▸';
+    html += `<span class="reorg-panel-chevron">${chev}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    if (_reorgPanelExpanded) {
+        html += '<div class="reorg-panel-expanded">';
+
+        // Active card
+        if (active) {
+            html += _reorgPanelRenderActiveCard(active);
+        }
+
+        // Queued list
+        if (queued.length > 0) {
+            html += '<div class="reorg-panel-section-header">';
+            html += `<span>Queued (${queued.length})</span>`;
+            html += `<button class="reorg-panel-clear-btn" onclick="clearReorganizeQueue(event)">Cancel All</button>`;
+            html += '</div>';
+            html += '<div class="reorg-panel-list">';
+            queued.forEach((item, idx) => {
+                html += _reorgPanelRenderQueuedRow(item, idx + 1);
+            });
+            html += '</div>';
+        }
+
+        // Recent
+        if (recentVisible.length > 0) {
+            html += `<div class="reorg-panel-section-header"><span>Recent</span></div>`;
+            html += '<div class="reorg-panel-list">';
+            recentVisible.slice(0, 6).forEach(item => {
+                html += _reorgPanelRenderRecentRow(item);
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+    }
+
+    panel.innerHTML = html;
+
+    // Mark per-album reorganize buttons so users see at-a-glance which
+    // albums are already in the queue without opening the modal.
+    _paintQueuedAlbumButtons(snapshot);
+
+    // If the active item just transitioned to a recent done/failed
+    // entry, refresh the enhanced view so the new on-disk paths show.
+    _maybeReloadEnhancedAfterCompletion(snapshot);
+}
+
+function _reorganizeStateForAlbum(albumId) {
+    const snap = _reorgPanelLastSnapshot;
+    if (!snap) return null;
+    const id = String(albumId);
+    if (snap.active && String(snap.active.album_id) === id) return 'running';
+    if ((snap.queued || []).some(q => String(q.album_id) === id)) return 'queued';
+    return null;
+}
+
+function _paintQueuedAlbumButtons(snapshot) {
+    const queuedIds = new Set();
+    const runningIds = new Set();
+    if (snapshot?.active) runningIds.add(String(snapshot.active.album_id));
+    (snapshot?.queued || []).forEach(q => queuedIds.add(String(q.album_id)));
+
+    document.querySelectorAll('.enhanced-reorganize-album-btn[data-album-id]').forEach(btn => {
+        const id = btn.dataset.albumId;
+        if (runningIds.has(id)) {
+            btn.classList.add('reorg-state-running');
+            btn.classList.remove('reorg-state-queued');
+            btn.title = 'Reorganize already running for this album';
+        } else if (queuedIds.has(id)) {
+            btn.classList.add('reorg-state-queued');
+            btn.classList.remove('reorg-state-running');
+            btn.title = 'Album already queued for reorganize';
+        } else {
+            btn.classList.remove('reorg-state-queued', 'reorg-state-running');
+            btn.title = 'Reorganize album files using your configured download template';
+        }
+    });
+}
+
+function _reorgPanelDisplayLabel(item) {
+    if (!item) return '';
+    if (_reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId) {
+        return `${item.album_title || 'Unknown album'} (${item.artist_name || 'other artist'})`;
+    }
+    return item.album_title || 'Unknown album';
+}
+
+function _reorgPanelRenderActiveCard(active) {
+    const total = active.progress_total || 0;
+    const done = active.progress_processed || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const crossArtist = _reorgPanelArtistId && active.artist_id && String(active.artist_id) !== _reorgPanelArtistId;
+
+    let h = '<div class="reorg-panel-active-card">';
+    h += `<div class="reorg-panel-active-title">${escapeHtml(active.album_title || 'Unknown album')}`;
+    if (crossArtist) {
+        h += ` <span class="reorg-panel-cross-artist">${escapeHtml(active.artist_name || 'other artist')}</span>`;
+    }
+    h += '</div>';
+    h += '<div class="reorg-panel-progress-track">';
+    h += `<div class="reorg-panel-progress-fill" style="width:${pct}%"></div>`;
+    h += '</div>';
+    h += '<div class="reorg-panel-active-meta">';
+    if (total > 0) {
+        h += `<span>${done}/${total}</span>`;
+    }
+    if (active.current_track) {
+        h += `<span class="reorg-panel-current-track">${escapeHtml(active.current_track)}</span>`;
+    }
+    h += '<span class="reorg-panel-counters">';
+    h += `<span class="ok">${active.moved || 0} moved</span>`;
+    if ((active.skipped || 0) > 0) h += `<span class="warn">${active.skipped} skipped</span>`;
+    if ((active.failed || 0) > 0) h += `<span class="fail">${active.failed} failed</span>`;
+    h += '</span>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+}
+
+function _reorgPanelRenderQueuedRow(item, position) {
+    const crossArtist = _reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId;
+    let h = '<div class="reorg-panel-row queued-row">';
+    h += `<span class="reorg-panel-row-pos">#${position}</span>`;
+    h += '<div class="reorg-panel-row-body">';
+    h += `<div class="reorg-panel-row-title">${escapeHtml(item.album_title || 'Unknown album')}</div>`;
+    if (crossArtist) {
+        h += `<div class="reorg-panel-row-sub">${escapeHtml(item.artist_name || 'other artist')}</div>`;
+    } else if (item.source) {
+        h += `<div class="reorg-panel-row-sub">via ${escapeHtml(item.source)}</div>`;
+    }
+    h += '</div>';
+    h += `<button class="reorg-panel-cancel-btn" title="Cancel" onclick="cancelReorganizeQueueItem('${item.queue_id}', event)">×</button>`;
+    h += '</div>';
+    return h;
+}
+
+function _reorgPanelRenderRecentRow(item) {
+    const crossArtist = _reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId;
+    const tone = _classifyReorganizeOutcome({
+        result_status: item.result_status,
+        failed: item.failed,
+    });
+    const cls = item.status === 'cancelled' ? 'cancelled' : tone;
+    let h = `<div class="reorg-panel-row recent-row ${cls}">`;
+    h += `<span class="reorg-panel-row-icon ${cls}"></span>`;
+    h += '<div class="reorg-panel-row-body">';
+    h += `<div class="reorg-panel-row-title">${escapeHtml(item.album_title || 'Unknown album')}</div>`;
+    let sub;
+    if (item.status === 'cancelled') {
+        sub = 'Cancelled';
+    } else {
+        sub = _formatReorganizeResultMessage({
+            result_status: item.result_status,
+            moved: item.moved,
+            skipped: item.skipped,
+            failed: item.failed,
+            errors: item.error ? [{ error: item.error }] : [],
+        });
+    }
+    if (crossArtist) sub = `${escapeHtml(item.artist_name || 'other artist')} — ${sub}`;
+    h += `<div class="reorg-panel-row-sub">${escapeHtml(sub)}</div>`;
+    h += '</div></div>';
+    return h;
+}
+
+function toggleReorganizeStatusPanel() {
+    _reorgPanelExpanded = !_reorgPanelExpanded;
+    _renderReorganizeStatusPanel(_reorgPanelLastSnapshot);
+}
+
+async function cancelReorganizeQueueItem(queueId, event) {
+    if (event) event.stopPropagation();
+    if (!queueId) return;
+    try {
+        const resp = await fetch(`/api/library/reorganize/queue/${encodeURIComponent(queueId)}/cancel`, {
+            method: 'POST',
+        });
+        const data = await resp.json();
+        if (data.cancelled) {
+            showToast('Cancelled queued item', 'info');
+        } else if (data.reason === 'running_cant_cancel') {
+            showToast('Already running — too late to cancel', 'warning');
+        } else {
+            showToast('Could not cancel item', 'warning');
+        }
+    } catch (err) {
+        showToast(`Cancel failed: ${err.message}`, 'error');
+    }
+    refreshReorganizeStatusPanel();
+}
+
+async function clearReorganizeQueue(event) {
+    if (event) event.stopPropagation();
+    const queued = _reorgPanelLastSnapshot?.queued?.length || 0;
+    if (queued === 0) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel All Queued',
+        message: `Cancel ${queued} queued reorganize${queued !== 1 ? 's' : ''}? The currently-running item will continue.`,
+        confirmText: 'Cancel All',
+        destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+        const resp = await fetch('/api/library/reorganize/queue/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Cancelled ${data.cancelled} queued item${data.cancelled !== 1 ? 's' : ''}`, 'info');
+        }
+    } catch (err) {
+        showToast(`Clear failed: ${err.message}`, 'error');
+    }
+    refreshReorganizeStatusPanel();
+}
+
+let _reorgPanelLastActiveId = null;
+let _reorgPanelPendingReload = false;
+let _reorgPanelReloadTimer = null;
+
+function _maybeReloadEnhancedAfterCompletion(snapshot) {
+    // When an item completes for the artist on screen, the moved file
+    // paths need to be re-rendered in the enhanced view. Two failure
+    // modes to avoid:
+    //   1. Reloading mid-batch — a 20-album "Reorganize All" would
+    //      otherwise fire 20 sequential /api/library/artist/X/enhanced
+    //      calls + 20 full re-renders, hammering the server.
+    //   2. Never reloading — if we wait for queue idle but more items
+    //      keep arriving, the user never sees the freshly-moved paths.
+    //
+    // Strategy: mark a reload as pending whenever a completion lands
+    // for our artist. Defer the reload until the queue is fully idle
+    // for that artist (no active item, nothing queued) — that's the
+    // natural "batch finished" boundary. Use a 1.5s timer reset on
+    // every snapshot so we don't fire while the worker is still
+    // between items.
+    const active = snapshot?.active;
+    const recent = snapshot?.recent || [];
+    const queued = snapshot?.queued || [];
+
+    // Detect a fresh completion (recent-top is a new queue_id we
+    // hadn't seen as 'active' before) for our artist.
+    if (active) {
+        _reorgPanelLastActiveId = active.queue_id;
+    } else if (_reorgPanelLastActiveId && recent.length > 0) {
+        const recentTop = recent[0];
+        if (recentTop.queue_id === _reorgPanelLastActiveId) {
+            const finishedRecently = (recentTop.finished_at || 0) >= ((Date.now() / 1000) - 10);
+            const sameArtist = _reorgPanelArtistId &&
+                recentTop.artist_id && String(recentTop.artist_id) === _reorgPanelArtistId;
+            if (finishedRecently && sameArtist) {
+                _reorgPanelPendingReload = true;
+            }
+            _reorgPanelLastActiveId = null;
+        }
+    }
+
+    if (!_reorgPanelPendingReload) return;
+
+    // Hold the reload until the queue is fully idle for our artist.
+    const stillBusyForOurArtist = active &&
+        _reorgPanelArtistId &&
+        active.artist_id && String(active.artist_id) === _reorgPanelArtistId;
+    const queuedForOurArtist = queued.some(q =>
+        _reorgPanelArtistId && q.artist_id && String(q.artist_id) === _reorgPanelArtistId
+    );
+
+    if (stillBusyForOurArtist || queuedForOurArtist) {
+        // More work coming for this artist — keep the pending flag,
+        // don't reload yet. Cancel any already-armed timer.
+        if (_reorgPanelReloadTimer) {
+            clearTimeout(_reorgPanelReloadTimer);
+            _reorgPanelReloadTimer = null;
+        }
+        return;
+    }
+
+    // Queue is idle for our artist. Arm a debounced reload — the
+    // 1.5s gap absorbs the brief window between worker items so a
+    // back-to-back batch doesn't trigger mid-flight.
+    if (_reorgPanelReloadTimer) clearTimeout(_reorgPanelReloadTimer);
+    _reorgPanelReloadTimer = setTimeout(() => {
+        _reorgPanelReloadTimer = null;
+        _reorgPanelPendingReload = false;
+        if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
+            loadEnhancedViewData(artistDetailPageState.currentArtistId);
+        }
+    }, 1500);
+}
+
+
+async function playLibraryTrack(track, albumTitle, artistName) {
+    if (!track.file_path) {
+        showToast('No file available for this track', 'error');
+        return;
+    }
+
+    // Library tracks have authoritative metadata in the SoulSync DB —
+    // any title / artist / album the caller passes in is downstream of
+    // whatever modal triggered playback and may carry noise like the
+    // ``<source_id>||<display>`` filename prefix from a Prowlarr result.
+    // When the caller has a track.id, fetch the canonical row from
+    // resolve-track and overwrite the caller-supplied fields with the
+    // DB values. Falls back silently to the caller-supplied values on
+    // any error so we never lose the play action over a metadata fetch.
+    // Library v2 rows carry a `lib2_track_id` and address the legacy row (if it
+    // still exists) as `legacy_track_id`. `track.id` is then a v2 id, which
+    // resolve-track cannot look up — running it would overwrite good metadata
+    // with a miss, so a v2-only row skips the refresh entirely.
+    if ((track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+            (track.title || track.name) && (artistName || track.artist_name)) {
+        try {
+            const _dbResp = await fetch('/api/stats/resolve-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: track.title || track.name,
+                    artist: artistName || track.artist_name || '',
+                }),
+            });
+            const _dbData = await _dbResp.json();
+            if (_dbData && _dbData.success && _dbData.track) {
+                const _row = _dbData.track;
+                track = {
+                    ...track,
+                    id: _row.id ?? track.id,
+                    title: _row.title || track.title,
+                    file_path: _row.file_path || track.file_path,
+                    bitrate: _row.bitrate ?? track.bitrate,
+                    artist_id: _row.artist_id ?? track.artist_id,
+                    album_id: _row.album_id ?? track.album_id,
+                    _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
+                };
+                if (_row.album_title) albumTitle = _row.album_title;
+                if (_row.artist_name) artistName = _row.artist_name;
+            }
+        } catch (_dbErr) {
+            console.debug('library track DB refresh skipped:', _dbErr);
+        }
+    }
+
+    try {
+        // Stop any current playback first
+        if (audioPlayer && !audioPlayer.paused) {
+            audioPlayer.pause();
+        }
+
+        // Get album art from enhanced data if available
+        let albumArt = null;
+        if (artistDetailPageState.enhancedData) {
+            const albums = artistDetailPageState.enhancedData.albums || [];
+            for (const a of albums) {
+                if ((a.tracks || []).some(t => t.id === track.id)) {
+                    albumArt = a.thumb_url;
+                    break;
+                }
+            }
+            if (!albumArt) albumArt = artistDetailPageState.enhancedData.artist?.thumb_url;
+        }
+        if (!albumArt && track._stats_image) albumArt = track._stats_image;
+
+        // Set track info in the media player UI
+        setTrackInfo({
+            title: track.title || 'Unknown Track',
+            artist: artistName || 'Unknown Artist',
+            album: albumTitle || 'Unknown Album',
+            filename: track.file_path,
+            is_library: true,
+            image_url: albumArt,
+            id: track.id,
+            lib2_track_id: track.lib2_track_id || null,
+            legacy_track_id: track.legacy_track_id || null,
+            server_track_id: track.server_track_id || null,
+            artist_id: track.artist_id,
+            album_id: track.album_id,
+            bitrate: track.bitrate,
+            sample_rate: track.sample_rate
+        });
+
+        // Show loading state
+        showLoadingAnimation();
+        const loadingText = document.querySelector('.loading-text');
+        if (loadingText) {
+            loadingText.textContent = 'Loading library track...';
+        }
+
+        // POST to library play endpoint
+        const response = await fetch('/api/library/play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_path: track.file_path,
+                title: track.title || '',
+                artist: artistName || '',
+                album: albumTitle || '',
+                // Server song id so playback can stream via the media server
+                // when the file isn't on SoulSync's disk (#809). A Library v2
+                // row's `id` is a v2 id and means nothing to the media server,
+                // so only a server/legacy id may be sent as `track_id`; the
+                // typed ids ride alongside for the v2-aware endpoints.
+                track_id: track.server_track_id || track.legacy_track_id ||
+                    (track.lib2_track_id ? null : (track.id || null)),
+                lib2_track_id: track.lib2_track_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
+            })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            // File not on disk — fall back to streaming from configured source
+            console.warn('Library file not found, falling back to stream source');
+            hideLoadingAnimation();
+            const streamRes = await fetch('/api/enhanced-search/stream-track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_name: track.title || '',
+                    artist_name: artistName || '',
+                    album_name: albumTitle || '',
+                })
+            });
+            const streamData = await streamRes.json();
+            if (streamData.success && streamData.result) {
+                streamData.result.artist = artistName;
+                streamData.result.title = track.title;
+                streamData.result.album = albumTitle;
+                streamData.result.image_url = track._stats_image || null;
+                startStream(streamData.result);
+                return;
+            }
+            throw new Error(result.error || 'Failed to start library playback');
+        }
+
+        // Re-apply repeat-one loop property
+        if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
+        // Stream state is already "ready" — start audio playback directly
+        await startAudioPlayback();
+
+    } catch (error) {
+        console.error('Library playback error:', error);
+        showToast(`Playback error: ${error.message}`, 'error');
+        hideLoadingAnimation();
+        clearTrack();
+    }
+}
+
+// ==================== End Enhanced Library Management View ====================
+
+
+/**
+ * Initialize the library page watchlist button
+ */
+async function initializeLibraryWatchlistButton(artistId, artistName) {
+    const button = document.getElementById('library-artist-watchlist-btn');
+    if (!button) return;
+
+    console.log(`🔧 Initializing library watchlist button for: ${artistName} (${artistId})`);
+
+    // Reset button state
+    button.disabled = false;
+    button.classList.remove('watching');
+
+    // Set up click handler
+    button.onclick = (e) => toggleLibraryWatchlist(e, artistId, artistName);
+
+    // Check and update current status
+    await updateLibraryWatchlistButtonStatus(artistId);
+}
+
+/**
+ * Toggle watchlist status for library page
+ */
+async function toggleLibraryWatchlist(event, artistId, artistName) {
+    event.preventDefault();
+
+    const button = document.getElementById('library-artist-watchlist-btn');
+    const icon = button.querySelector('.watchlist-icon');
+    const text = button.querySelector('.watchlist-text');
+
+    // Show loading state
+    const originalText = text.textContent;
+    text.textContent = 'Loading...';
+    button.disabled = true;
+
+    try {
+        // Check current status
+        const checkResponse = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+
+        const checkData = await checkResponse.json();
+        if (!checkData.success) {
+            throw new Error(checkData.error || 'Failed to check watchlist status');
+        }
+
+        const isWatching = checkData.is_watching;
+
+        // Toggle watchlist status
+        const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
+        const payload = isWatching ?
+            { artist_id: artistId } :
+            { artist_id: artistId, artist_name: artistName };
+
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to update watchlist');
+        }
+
+        // Update button state based on new status
+        if (isWatching) {
+            // Was watching, now removed
+            icon.textContent = '👁️';
+            text.textContent = 'Add to Watchlist';
+            button.classList.remove('watching');
+            console.log(`❌ Removed ${artistName} from watchlist`);
+        } else {
+            // Was not watching, now added
+            icon.textContent = '👁️';
+            text.textContent = 'Watching...';
+            button.classList.add('watching');
+            console.log(`✅ Added ${artistName} to watchlist`);
+        }
+
+        // Update dashboard watchlist count if function exists
+        if (typeof updateWatchlistCount === 'function') {
+            updateWatchlistCount();
+        }
+
+        showToast(data.message, 'success');
+
+    } catch (error) {
+        console.error('Error toggling library watchlist:', error);
+
+        // Restore button state
+        text.textContent = originalText;
+        showToast(`Error: ${error.message}`, 'error');
+
+    } finally {
+        button.disabled = false;
+    }
+}
+
+/**
+ * Update library watchlist button status based on current state
+ */
+async function updateLibraryWatchlistButtonStatus(artistId) {
+    const button = document.getElementById('library-artist-watchlist-btn');
+    if (!button) return;
+
+    try {
+        const response = await fetch('/api/watchlist/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: artistId })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            const icon = button.querySelector('.watchlist-icon');
+            const text = button.querySelector('.watchlist-text');
+
+            if (data.is_watching) {
+                icon.textContent = '👁️';
+                text.textContent = 'Watching...';
+                button.classList.add('watching');
+            } else {
+                icon.textContent = '👁️';
+                text.textContent = 'Add to Watchlist';
+                button.classList.remove('watching');
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to check library watchlist status:', error);
+    }
+}
+
+// ── Manual Library Match ──────────────────────────────────────────────────────
+
+let _mlmOverlay = null;
+let _mlmSelectedSource = null;
+let _mlmSelectedLibrary = null;
+let _mlmSourceTimer = null;
+let _mlmLibraryTimer = null;
+
+function openManualLibraryMatchTool(prefill) {
+    if (_mlmOverlay) _mlmOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'mlm-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) _mlmClose(); };
+
+    overlay.innerHTML = `
+        <div class="playlist-modal mlm-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>Manual Library Match</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-owner">Link source tracks to library tracks to stop re-downloads</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="_mlmClose()">&times;</span>
+            </div>
+
+            <div class="mlm-modal-body">
+                <div class="mlm-panels">
+                    <div class="mlm-panel source">
+                        <div class="server-col-header">
+                            <span class="server-col-icon">📋</span>
+                            Source Track
+                        </div>
+                        <div class="mlm-panel-search-wrap">
+                            <input class="mlm-search" id="mlm-source-search" placeholder="Search wishlist &amp; sync history&hellip;" oninput="_mlmSourceDebounce(this.value)">
+                        </div>
+                        <div class="server-col-scroll" id="mlm-source-results"><p class="mlm-hint">Type to search</p></div>
+                    </div>
+                    <div class="mlm-panel library">
+                        <div class="server-col-header">
+                            <span class="server-col-icon">🎵</span>
+                            Library Track
+                        </div>
+                        <div class="mlm-panel-search-wrap">
+                            <input class="mlm-search" id="mlm-library-search" placeholder="Search your library&hellip;" oninput="_mlmLibraryDebounce(this.value)">
+                        </div>
+                        <div class="server-col-scroll" id="mlm-library-results"><p class="mlm-hint">Type to search</p></div>
+                    </div>
+                </div>
+
+                <div class="mlm-existing-section">
+                    <div class="server-col-header mlm-matches-header">
+                        Existing Matches
+                        <span class="server-col-count" id="mlm-match-count"></span>
+                    </div>
+                    <div class="mlm-matches-wrap" id="mlm-matches-list"><p class="mlm-hint">Loading&hellip;</p></div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left">
+                    <span id="mlm-status" class="mlm-status-msg"></span>
+                </div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="_mlmClose()">Cancel</button>
+                    <button class="playlist-modal-btn playlist-modal-btn-primary" id="mlm-save-btn" disabled onclick="_mlmSaveMatch()">Save Match</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    _mlmOverlay = overlay;
+    _mlmSelectedSource = null;
+    _mlmSelectedLibrary = null;
+    _mlmUpdateSaveBtn();
+    _mlmLoadMatches();
+
+    if (prefill) {
+        const src = document.getElementById('mlm-source-search');
+        if (src) { src.value = prefill; _mlmSourceSearch(prefill); }
+    }
+}
+
+function _mlmClose() {
+    if (_mlmOverlay) { _mlmOverlay.remove(); _mlmOverlay = null; }
+    _mlmSelectedSource = null;
+    _mlmSelectedLibrary = null;
+}
+
+function _mlmSourceDebounce(q) {
+    clearTimeout(_mlmSourceTimer);
+    _mlmSourceTimer = setTimeout(() => _mlmSourceSearch(q), 300);
+}
+function _mlmLibraryDebounce(q) {
+    clearTimeout(_mlmLibraryTimer);
+    _mlmLibraryTimer = setTimeout(() => _mlmLibrarySearch(q), 300);
+}
+
+async function _mlmSourceSearch(q) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el) return;
+    if (!q.trim()) { el.innerHTML = '<p class="mlm-hint">Type to search</p>'; return; }
+    el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
+    try {
+        const res = await fetch(`/api/manual-library-matches/source-search?q=${encodeURIComponent(q)}&limit=15`);
+        const data = await res.json();
+        _mlmRenderSourceResults(data.tracks || []);
+    } catch (e) { el.innerHTML = '<p class="mlm-hint mlm-error">Search failed</p>'; }
+}
+
+async function _mlmLibrarySearch(q) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el) return;
+    if (!q.trim()) { el.innerHTML = '<p class="mlm-hint">Type to search</p>'; return; }
+    el.innerHTML = '<p class="mlm-hint">Searching&hellip;</p>';
+    try {
+        const res = await fetch(`/api/manual-library-matches/library-search?q=${encodeURIComponent(q)}&limit=15`);
+        const data = await res.json();
+        _mlmRenderLibraryResults(data.tracks || []);
+    } catch (e) { el.innerHTML = '<p class="mlm-hint mlm-error">Search failed</p>'; }
+}
+
+function _mlmEsc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _mlmRenderSourceResults(tracks) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el) return;
+    if (!tracks.length) { el.innerHTML = '<p class="mlm-hint">No results</p>'; return; }
+    el.innerHTML = tracks.map((t, i) => {
+        const sel = _mlmSelectedSource && _mlmSelectedSource.source_track_id === t.source_track_id ? 'mlm-row-selected' : '';
+        return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectSource(${i})">
+            <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
+            <div class="mlm-row-sub">${_mlmEsc(t.artist || '')}${t.album ? ' · ' + _mlmEsc(t.album) : ''}</div>
+            <div class="mlm-row-ctx">${_mlmEsc(t.context || t.source || '')}</div>
+        </div>`;
+    }).join('');
+    el._mlmTracks = tracks;
+}
+
+function _mlmRenderLibraryResults(tracks) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el) return;
+    if (!tracks.length) { el.innerHTML = '<p class="mlm-hint">No results</p>'; return; }
+    el.innerHTML = tracks.map((t, i) => {
+        const sel = _mlmSelectedLibrary && _mlmSelectedLibrary.id === t.id ? 'mlm-row-selected' : '';
+        const path = t.file_path ? t.file_path.split(/[/\\]/).pop() : '';
+        return `<div class="mlm-result-row ${sel}" data-idx="${i}" onclick="_mlmSelectLibrary(${i})">
+            <div class="mlm-row-title">${_mlmEsc(t.title || '—')}</div>
+            <div class="mlm-row-sub">${_mlmEsc(t.artist_name || '')}${t.album_title ? ' · ' + _mlmEsc(t.album_title) : ''}</div>
+            <div class="mlm-row-ctx">${_mlmEsc(path)}${t.bitrate ? ' · ' + t.bitrate + 'kbps' : ''}</div>
+        </div>`;
+    }).join('');
+    el._mlmTracks = tracks;
+}
+
+function _mlmSelectSource(idx) {
+    const el = document.getElementById('mlm-source-results');
+    if (!el || !el._mlmTracks) return;
+    _mlmSelectedSource = el._mlmTracks[idx];
+    el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
+    _mlmUpdateSaveBtn();
+}
+
+function _mlmSelectLibrary(idx) {
+    const el = document.getElementById('mlm-library-results');
+    if (!el || !el._mlmTracks) return;
+    _mlmSelectedLibrary = el._mlmTracks[idx];
+    el.querySelectorAll('.mlm-result-row').forEach((r, i) => r.classList.toggle('mlm-row-selected', i === idx));
+    _mlmUpdateSaveBtn();
+}
+
+function _mlmUpdateSaveBtn() {
+    const btn = document.getElementById('mlm-save-btn');
+    if (btn) btn.disabled = !(_mlmSelectedSource && _mlmSelectedLibrary);
+}
+
+async function _mlmSaveMatch() {
+    if (!_mlmSelectedSource || !_mlmSelectedLibrary) return;
+    const status = document.getElementById('mlm-status');
+    if (status) status.textContent = 'Saving…';
+    try {
+        const body = {
+            source: _mlmSelectedSource.source,
+            source_track_id: _mlmSelectedSource.source_track_id,
+            library_track_id: _mlmSelectedLibrary.id,
+            source_title: _mlmSelectedSource.title || '',
+            source_artist: _mlmSelectedSource.artist || '',
+            source_album: _mlmSelectedSource.album || '',
+            source_context_json: '',
+            server_source: '',
+        };
+        const res = await fetch('/api/manual-library-matches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (status) status.textContent = 'Saved!';
+            _mlmSelectedSource = null;
+            _mlmSelectedLibrary = null;
+            _mlmUpdateSaveBtn();
+            await _mlmLoadMatches();
+            setTimeout(() => { if (status) status.textContent = ''; }, 2000);
+        } else {
+            if (status) status.textContent = 'Error: ' + (data.error || 'unknown');
+        }
+    } catch (e) {
+        if (status) status.textContent = 'Network error';
+    }
+}
+
+async function _mlmLoadMatches() {
+    const el = document.getElementById('mlm-matches-list');
+    if (!el) return;
+    try {
+        const res = await fetch('/api/manual-library-matches');
+        const data = await res.json();
+        const matches = data.matches || [];
+        const countEl = document.getElementById('mlm-match-count');
+        if (countEl) countEl.textContent = matches.length;
+        if (!matches.length) {
+            el.innerHTML = '<p class="mlm-hint">No matches saved yet</p>';
+            return;
+        }
+        el.innerHTML = `<table class="mlm-matches-table">
+            <thead><tr><th>Source Track</th><th>Library Track</th><th>Source</th><th></th></tr></thead>
+            <tbody>${matches.map(m => `<tr>
+                <td><div class="mlm-row-title">${_mlmEsc(m.source_title || m.source_track_id)}</div><div class="mlm-row-sub">${_mlmEsc(m.source_artist || '')}</div></td>
+                <td><div class="mlm-row-title">${_mlmEsc(m.library_title || String(m.library_track_id))}</div><div class="mlm-row-sub">${_mlmEsc(m.library_artist || '')}</div></td>
+                <td><span class="mlm-source-badge">${_mlmEsc(m.source)}</span></td>
+                <td><button class="mlm-remove-btn" onclick="_mlmDeleteMatch(${m.id})" title="Remove match">&#x2715;</button></td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        el.innerHTML = '<p class="mlm-hint mlm-error">Failed to load matches</p>';
+    }
+}
+
+async function _mlmDeleteMatch(id) {
+    try {
+        await fetch(`/api/manual-library-matches/${id}`, { method: 'DELETE' });
+        await _mlmLoadMatches();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to remove match', 'error');
+    }
+}
+
+// =================================
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// Artist "DB Record" inspector — everything the database knows about an artist.
+// A small glowing button at the bottom-right of the hero opens a programmer-style
+// modal: a copyable field table + syntax-highlighted raw JSON, with copy-all and
+// save-as-JSON. Library artists only (source artists have no DB row).
+// ════════════════════════════════════════════════════════════════════════════
+
+
+function _jsonSyntaxHighlight(obj) {
+    let json = JSON.stringify(obj, null, 2);
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (m) => {
+        let cls = 'tok-num';
+        if (/^"/.test(m)) cls = /:$/.test(m) ? 'tok-key' : 'tok-str';
+        else if (/true|false/.test(m)) cls = 'tok-bool';
+        else if (/null/.test(m)) cls = 'tok-null';
+        return '<span class="' + cls + '">' + m + '</span>';
+    });
+}
+
+function _arecCopy(text, label) {
+    text = text == null ? '' : String(text);
+    const done = () => (typeof showToast === 'function') && showToast(label || 'Copied', 'success');
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(() => _arecCopyFallback(text, done));
+    } else { _arecCopyFallback(text, done); }
+}
+
+function _arecCopyFallback(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+    done();
+}
+
+
+function _arecEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// Watchlist export — bulk export the watchlist roster to JSON / CSV / text, with
+// optional external discography links. Reuses the DB-record modal aesthetic +
+// helpers (_jsonSyntaxHighlight / _arecCopy / _arecEsc). #export-request
+// ════════════════════════════════════════════════════════════════════════════
+async function openArtistExportModal(initialScope) {
+    // One export modal for both rosters — pick Watchlist or Library inside.
+    let scope = initialScope || 'watchlist';
+    const epOf = (s) => s === 'library' ? '/api/library/artists/export' : '/api/watchlist/export';
+    const fileOf = (s) => s === 'library' ? 'library_artists' : 'watchlist';
+
+    const existing = document.getElementById('wl-export-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wl-export-overlay';
+    overlay.className = 'arec-overlay';
+    overlay.innerHTML =
+        '<div class="arec-card" role="dialog" aria-label="Export artists">' +
+            '<div class="arec-header">' +
+                '<div class="arec-title-wrap">' +
+                    '<div class="arec-title"><span class="arec-dot"></span>Export Artists</div>' +
+                    '<div class="arec-tabs" id="wlx-scope" style="margin-top:7px;">' +
+                        '<button class="arec-tab' + (scope === 'watchlist' ? ' active' : '') + '" data-scope="watchlist">Watchlist</button>' +
+                        '<button class="arec-tab' + (scope === 'library' ? ' active' : '') + '" data-scope="library">Library</button>' +
+                    '</div>' +
+                '</div>' +
+                '<button class="arec-close" id="wlx-close" title="Close (Esc)">&times;</button>' +
+            '</div>' +
+            '<div class="arec-toolbar">' +
+                '<div class="arec-tabs" id="wlx-format">' +
+                    '<button class="arec-tab active" data-fmt="json">JSON</button>' +
+                    '<button class="arec-tab" data-fmt="csv">CSV</button>' +
+                    '<button class="arec-tab" data-fmt="txt">Text</button>' +
+                '</div>' +
+                '<label class="wlx-opt"><input type="checkbox" id="wlx-links"> external links</label>' +
+                '<label class="wlx-opt" id="wlx-contents-wrap" style="display:none;"><input type="checkbox" id="wlx-contents"> library counts</label>' +
+                '<div class="arec-actions">' +
+                    '<button class="arec-btn" id="wlx-copy">Copy</button>' +
+                    '<button class="arec-btn" id="wlx-download">Download</button>' +
+                    '<button class="arec-btn arec-btn-m3u" id="wlx-m3u" style="display:none;">Download M3U</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="arec-body" id="wlx-body"><div class="arec-loading">Building export…</div></div>' +
+            '<div class="arec-footer" id="wlx-footer"></div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    let fmt = 'json', links = false, contents = false, content = '';
+
+    const applyScopeUI = () => {
+        // "library counts" only applies to the library roster.
+        document.getElementById('wlx-contents-wrap').style.display = (scope === 'library') ? '' : 'none';
+        // The library M3U (a track-level export) only makes sense for the library, not the watchlist.
+        const m3uBtn = document.getElementById('wlx-m3u');
+        if (m3uBtn) m3uBtn.style.display = (scope === 'library') ? '' : 'none';
+        if (scope !== 'library') {
+            contents = false;
+            const cb = document.getElementById('wlx-contents');
+            if (cb) cb.checked = false;
+        }
+    };
+    applyScopeUI();
+
+    const close = () => {
+        overlay.classList.remove('visible');
+        document.removeEventListener('keydown', onKey);
+        setTimeout(() => overlay.remove(), 220);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('#wlx-close').onclick = close;
+
+    const refresh = async () => {
+        const body = document.getElementById('wlx-body');
+        body.innerHTML = '<div class="arec-loading">Building export…</div>';
+        try {
+            const res = await fetch(epOf(scope) + '?format=' + fmt + '&links=' + (links ? '1' : '0')
+                + (scope === 'library' && contents ? '&contents=1' : ''));
+            content = await res.text();
+            const count = res.headers.get('X-Export-Count') || '?';
+            document.getElementById('wlx-footer').innerHTML =
+                '<span><b>' + count + '</b> ' + (scope === 'library' ? 'library' : 'watchlist') + ' artists</span>' +
+                '<span class="arec-id">' + fmt.toUpperCase() + '</span>';
+            if (fmt === 'json') {
+                let parsed; try { parsed = JSON.parse(content || '[]'); } catch (e) { parsed = []; }
+                body.innerHTML = '<pre class="arec-code">' + _jsonSyntaxHighlight(parsed) + '</pre>';
+            } else {
+                body.innerHTML = '<pre class="arec-code">' + _arecEsc(content || '(empty)') + '</pre>';
+            }
+        } catch (err) {
+            body.innerHTML = '<div class="arec-error">Export failed: ' + _arecEsc(err.message || String(err)) + '</div>';
+        }
+    };
+
+    overlay.querySelectorAll('#wlx-scope .arec-tab').forEach(t => {
+        t.onclick = () => {
+            if (t.dataset.scope === scope) return;
+            overlay.querySelectorAll('#wlx-scope .arec-tab').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            scope = t.dataset.scope;
+            applyScopeUI();
+            refresh();
+        };
+    });
+    overlay.querySelectorAll('#wlx-format .arec-tab').forEach(t => {
+        t.onclick = () => {
+            overlay.querySelectorAll('#wlx-format .arec-tab').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            fmt = t.dataset.fmt;
+            refresh();
+        };
+    });
+    document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
+    document.getElementById('wlx-contents').addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
+    document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
+    document.getElementById('wlx-m3u').onclick = () => {
+        // A whole-library track playlist — built fresh by the server, independent of the roster export.
+        const a = document.createElement('a');
+        a.href = '/api/library/export/m3u';
+        a.download = 'soulsync_library.m3u';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (typeof showToast === 'function') showToast('Building library M3U…', 'info');
+    };
+    document.getElementById('wlx-download').onclick = () => {
+        const ext = fmt;
+        const mime = fmt === 'json' ? 'application/json' : (fmt === 'csv' ? 'text/csv' : 'text/plain');
+        const blob = new Blob([content || ''], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fileOf(scope) + '_export.' + ext;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (typeof showToast === 'function') showToast('Saved ' + fileOf(scope) + '_export.' + ext, 'success');
+    };
+
+    refresh();
+}
+
+
+// ==================== Re-identify Track Modal (#889) ====================
+// Lets an admin re-file an already-imported track under a different release
+// (single / EP / album). Searches any configured metadata source (tabs, default
+// active), and on confirm stages the file + writes a single-use hint the
+// auto-import worker consumes (see core/imports/rematch_*.py).
+
+const reidState = { trackId: null, source: null, sources: [], rows: [], selected: null };
+
+function openReidentifyModal(trackId, title, artist, albumTitle, imageUrl) {
+    reidState.trackId = trackId;
+    reidState.source = null;
+    reidState.rows = [];
+    reidState.selected = null;
+
+    const overlay = document.getElementById('reid-modal-overlay');
+    if (!overlay) return;
+
+    // Hero
+    document.getElementById('reid-hero-title').textContent = title || 'Track';
+    const sub = document.getElementById('reid-hero-sub');
+    sub.textContent = (artist || '') + (albumTitle ? ` · currently in “${albumTitle}”` : '');
+    const art = document.getElementById('reid-hero-art');
+    const bg = document.getElementById('reid-hero-bg');
+    if (imageUrl) {
+        art.style.backgroundImage = `url('${imageUrl}')`;
+        art.classList.remove('empty');
+        bg.style.backgroundImage = `url('${imageUrl}')`;
+    } else {
+        art.style.backgroundImage = '';
+        art.classList.add('empty');
+        bg.style.backgroundImage = '';
+    }
+
+    document.getElementById('reid-search-input').value = `${title || ''} ${artist || ''}`.trim();
+    document.getElementById('reid-replace').checked = true;
+    _reidUpdateConfirm();
+    _reidRenderState('idle');
+
+    overlay.classList.remove('hidden');
+    _reidLoadTabs();
+}
+
+function closeReidentifyModal() {
+    const overlay = document.getElementById('reid-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function _reidLoadTabs() {
+    const tabsEl = document.getElementById('reid-tabs');
+    tabsEl.innerHTML = '';
+    try {
+        const resp = await fetch('/api/reidentify/sources');
+        const data = await resp.json();
+        reidState.sources = (data && data.sources) || [];
+    } catch (_) {
+        reidState.sources = [];
+    }
+    if (!reidState.sources.length) {
+        tabsEl.innerHTML = '<span class="reid-tab active">No metadata sources available</span>';
+        _reidRenderState('empty', 'No configured metadata source to search.');
+        return;
+    }
+    const active = reidState.sources.find(s => s.active) || reidState.sources[0];
+    reidState.source = active.source;
+    reidState.sources.forEach(s => {
+        const tab = document.createElement('div');
+        tab.className = 'reid-tab' + (s.source === reidState.source ? ' active' : '');
+        tab.textContent = s.label || s.source;
+        tab.onclick = () => _reidSelectTab(s.source);
+        tabsEl.appendChild(tab);
+    });
+    runReidentifySearch();   // auto-search the active source on open
+}
+
+function _reidSelectTab(source) {
+    if (source === reidState.source) return;
+    reidState.source = source;
+    document.querySelectorAll('#reid-tabs .reid-tab').forEach(t => {
+        t.classList.toggle('active', t.textContent ===
+            (reidState.sources.find(s => s.source === source) || {}).label);
+    });
+    runReidentifySearch();
+}
+
+async function runReidentifySearch() {
+    const query = (document.getElementById('reid-search-input').value || '').trim();
+    if (!query || !reidState.source) return;
+    reidState.selected = null;
+    _reidUpdateConfirm();
+    _reidRenderState('loading');
+    try {
+        const url = `/api/reidentify/search?source=${encodeURIComponent(reidState.source)}&q=${encodeURIComponent(query)}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        reidState.rows = (data && data.results) || [];
+        _reidRenderResults();
+    } catch (e) {
+        _reidRenderState('empty', 'Search failed. Try another source.');
+    }
+}
+
+function _reidRenderResults() {
+    const el = document.getElementById('reid-results');
+    if (!reidState.rows.length) {
+        _reidRenderState('empty', 'No releases found. Try refining the search or another source tab.');
+        return;
+    }
+    // ISRC-bearing rows first (provably the same recording), then the rest.
+    const ranked = reidState.rows
+        .map((r, i) => ({ r, i }))
+        .sort((a, b) => (b.r.isrc ? 1 : 0) - (a.r.isrc ? 1 : 0));
+
+    el.innerHTML = '';
+    ranked.forEach(({ r }, n) => {
+        const badge = (r.album_type || 'album').toLowerCase();
+        const bits = [];
+        if (r.year) bits.push(r.year);
+        if (r.total_tracks) bits.push(`${r.total_tracks} track${r.total_tracks === 1 ? '' : 's'}`);
+        const row = document.createElement('div');
+        row.className = 'reid-result';
+        row.style.animationDelay = `${Math.min(n * 0.03, 0.3)}s`;
+        row.onclick = () => _reidSelectResult(r, row);
+        row.innerHTML = `
+            <div class="reid-result-art" ${r.image_url ? `style="background-image:url('${encodeURI(r.image_url)}')"` : ''}>
+                ${r.image_url ? '' : '<span>♪</span>'}
+            </div>
+            <div class="reid-result-info">
+                <div class="reid-result-title">${escapeHtml(r.track_title || '')}</div>
+                <div class="reid-result-release">${escapeHtml(r.album_name || 'Unknown release')}${r.artist_name ? ' · ' + escapeHtml(r.artist_name) : ''}</div>
+            </div>
+            <div class="reid-result-meta">
+                <span class="reid-badge ${badge}">${escapeHtml(badge)}</span>
+                ${bits.length ? `<span class="reid-result-detail">${escapeHtml(bits.join(' · '))}</span>` : ''}
+                <span class="reid-result-check"></span>
+            </div>`;
+        el.appendChild(row);
+    });
+}
+
+function _reidSelectResult(r, rowEl) {
+    reidState.selected = r;
+    document.querySelectorAll('#reid-results .reid-result').forEach(x => x.classList.remove('selected'));
+    rowEl.classList.add('selected');
+    _reidUpdateConfirm();
+}
+
+function _reidUpdateConfirm() {
+    const btn = document.getElementById('reid-confirm-btn');
+    if (btn) btn.disabled = !reidState.selected;
+}
+
+function _reidRenderState(kind, msg) {
+    const el = document.getElementById('reid-results');
+    if (!el) return;
+    if (kind === 'loading') {
+        el.innerHTML = '<div class="reid-state"><div class="reid-spinner"></div><p>Searching…</p></div>'
+            + '<div class="reid-skel"></div><div class="reid-skel"></div><div class="reid-skel"></div>';
+    } else if (kind === 'empty') {
+        el.innerHTML = `<div class="reid-state"><div class="reid-state-icon">🔍</div><p>${escapeHtml(msg || 'No results.')}</p></div>`;
+    } else { // idle
+        el.innerHTML = '<div class="reid-state"><div class="reid-state-icon">💿</div>'
+            + '<p>Pick the release this track should be filed under — the same song may appear on a single, an EP, and an album.</p></div>';
+    }
+}
+
+async function confirmReidentify() {
+    if (!reidState.selected || !reidState.trackId) return;
+    const btn = document.getElementById('reid-confirm-btn');
+    const replace = document.getElementById('reid-replace').checked;
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = 'Staging…';
+    try {
+        const resp = await fetch('/api/reidentify/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                library_track_id: reidState.trackId,
+                source: reidState.selected.source,
+                track_id: reidState.selected.track_id,
+                replace: replace,
+            }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || 'Re-identify failed');
+        showToast(`Re-filing under “${data.album_name || 'the chosen release'}” — it'll update after the next import pass.`, 'success');
+        closeReidentifyModal();
+    } catch (e) {
+        showToast(e.message || 'Re-identify failed', 'error');
+        btn.disabled = false;
+        btn.textContent = prev;
+    }
+}

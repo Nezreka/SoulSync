@@ -3019,6 +3019,81 @@ function showArtistDownloadsSection() {
 }
 
 /**
+ * Show download bubbles on the Library page (mirrors showArtistDownloadsSection)
+ */
+function showLibraryDownloadsSection() {
+    // Anchor on the MUSIC library's grid and derive the container FROM it.
+    // Never querySelector('.library-content'): the video library page reuses
+    // that class and its copy comes FIRST in the DOM, so the old global query
+    // grabbed the wrong container and insertBefore threw ("not a child of
+    // this node") — killing the whole Library page init (#1038).
+    // The React library page renders a dedicated host with NO React children,
+    // so this section can own that subtree outright and React never reconciles
+    // it away. That host is the normal path now that the vanilla music page is
+    // gone; the anchor-on-the-grid path below still resolves (React renders
+    // #library-artists-grid too) and stays as the backstop.
+    const reactHost = document.querySelector('[data-library-downloads-host]');
+    const artistGrid = reactHost ? null : document.getElementById('library-artists-grid');
+    if (!reactHost && (!artistGrid || !artistGrid.parentElement)) return;
+    const libraryContent = reactHost || artistGrid.parentElement;
+
+    let downloadsSection = document.getElementById('library-downloads-section');
+
+    // Create section if it doesn't exist
+    if (!downloadsSection) {
+        downloadsSection = document.createElement('div');
+        downloadsSection.id = 'library-downloads-section';
+        downloadsSection.className = 'artist-downloads-section';
+        downloadsSection.style.display = 'none';   // revealed below only when bubbles exist
+        // insertBefore(node, null) === appendChild, which is what the React
+        // host wants; the vanilla path still lands ahead of the grid.
+        libraryContent.insertBefore(downloadsSection, artistGrid);
+    } else if (downloadsSection.parentElement !== libraryContent) {
+        // The page was re-rendered under it (React remount, or a nav back to
+        // the vanilla page). Re-home it rather than leaving it orphaned in a
+        // detached tree where the user can never see it.
+        libraryContent.insertBefore(downloadsSection, artistGrid);
+    }
+
+    // Count active artists (reuses artistDownloadBubbles state)
+    const activeArtists = Object.keys(artistDownloadBubbles).filter(artistId =>
+        artistDownloadBubbles[artistId] && artistDownloadBubbles[artistId].artist
+        && Array.isArray(artistDownloadBubbles[artistId].downloads)
+        && artistDownloadBubbles[artistId].downloads.length > 0
+    );
+
+    if (activeArtists.length === 0) {
+        downloadsSection.style.display = 'none';
+        return;
+    }
+
+    downloadsSection.style.display = 'block';
+    downloadsSection.innerHTML = `
+        <div class="artist-downloads-header">
+            <h3 class="artist-downloads-title">Current Downloads</h3>
+            <p class="artist-downloads-subtitle">Active download processes</p>
+        </div>
+        <div class="artist-bubble-container">
+            ${activeArtists.map(artistId => createArtistBubbleCard(artistDownloadBubbles[artistId])).join('')}
+        </div>
+    `;
+
+    // Add click handlers + glow effects
+    activeArtists.forEach(artistId => {
+        const bubbleCard = downloadsSection.querySelector(`[data-artist-id="${artistId}"]`);
+        if (bubbleCard) {
+            bubbleCard.addEventListener('click', () => openArtistDownloadModal(artistId));
+            const artist = artistDownloadBubbles[artistId].artist;
+            if (artist.image_url) {
+                extractImageColors(artist.image_url, (colors) => {
+                    applyDynamicGlow(bubbleCard, colors);
+                });
+            }
+        }
+    });
+}
+
+/**
  * Create HTML for an artist bubble card
  */
 function createArtistBubbleCard(artistBubbleData) {

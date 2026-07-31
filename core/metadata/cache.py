@@ -1403,11 +1403,30 @@ class MetadataCache:
             logger.error(f"Deep cuts error: {e}")
             return []
 
+    # A genre dive costs several `genres LIKE '%x%'` passes, and a LEADING
+    # wildcard can't use an index — SQLite scans the whole entity cache every
+    # time. On a big cache that's tens of seconds PER PILL CLICK, re-paid even
+    # when you reopen the same genre. Genre membership barely moves (it only
+    # changes as enrichment caches new entities), so the result is cached the
+    # same way get_genre_explorer below caches its own scan.
+    _genre_dive_cache = {}   # {(genre, sources, limits): (timestamp, payload)}
+    _GENRE_DIVE_TTL = 900    # 15 minutes
+    _GENRE_DIVE_MAX = 64     # bound the dict — one entry per genre browsed
+
     def get_genre_deep_dive(self, genre, source=None, sources=None, artist_limit=12, album_limit=20, track_limit=15):
         """Get artists, albums, and tracks for a genre. Albums don't have genres in Spotify,
         so we find artists with matching genres then fetch their cached albums and tracks."""
         if not genre:
             return {'artists': [], 'albums': [], 'tracks': []}
+        import time as _time
+        _key = (
+            str(genre).strip().lower(),
+            ','.join(sorted(sources)) if sources else (source or '_all'),
+            int(artist_limit), int(album_limit), int(track_limit),
+        )
+        _hit = self._genre_dive_cache.get(_key)
+        if _hit and (_time.time() - _hit[0]) < self._GENRE_DIVE_TTL:
+            return _hit[1]
         try:
             db = self._get_db()
             conn = db._get_connection()
@@ -1593,7 +1612,18 @@ class MetadataCache:
                     for artist in artists:
                         artist['library_id'] = lib_id_map.get(artist['name'].lower())
 
-                return {'artists': artists, 'albums': albums, 'tracks': tracks, 'related_genres': related}
+                _payload = {'artists': artists, 'albums': albums, 'tracks': tracks,
+                            'related_genres': related}
+                # Only successful dives are cached — a failure must be retried,
+                # not remembered. Evict oldest first so the dict stays bounded.
+                if len(self._genre_dive_cache) >= self._GENRE_DIVE_MAX:
+                    try:
+                        _oldest = min(self._genre_dive_cache.items(), key=lambda kv: kv[1][0])[0]
+                        self._genre_dive_cache.pop(_oldest, None)
+                    except ValueError:
+                        self._genre_dive_cache.clear()
+                self._genre_dive_cache[_key] = (_time.time(), _payload)
+                return _payload
             finally:
                 conn.close()
         except Exception as e:

@@ -7,7 +7,6 @@ let currentPage = 'dashboard';
 let currentTrack = null;
 let isPlaying = false;
 let mediaPlayerExpanded = false;
-let searchResults = [];
 let currentStream = {
     status: 'stopped',
     progress: 0,
@@ -21,21 +20,13 @@ let audioPlayer = null;
 let streamPollingRetries = 0;
 let streamPollingInterval = 1000; // Start with 1-second polling
 const maxStreamPollingRetries = 10;
-let allSearchResults = [];
-let currentFilterType = 'all';
-let currentFilterFormat = 'all';
-let currentSortBy = 'quality_score';
-let isSortReversed = false;
-let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
-let watchlistCountdownInterval = null;  // Countdown timer for watchlist overview modal
 
 // Page state for Watchlist & Wishlist sidebar pages
-let watchlistPageState = { isInitialized: false, artists: [] };
 let wishlistPageState = { isInitialized: false };
 
 // --- Add these globals for the Sync Page ---
@@ -45,13 +36,100 @@ let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
 // Phase 5: WebSocket sync/discovery/scan state
 let _syncProgressCallbacks = {};
 let _discoveryProgressCallbacks = {};
-let _lastWatchlistScanStatus = null;
 let _lastMediaScanStatus = null;
 let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
+/**
+ * Show the modal of an already-active download process, for the React pages.
+ *
+ * `activeDownloadProcesses` is a top-level `let`, so it lives in the script's
+ * lexical scope and is NOT a window property — a module cannot reach it. The
+ * download modal reopens an existing process by itself
+ * (openDownloadMissingModalForArtistAlbum, shared-helpers.js:1767), but the
+ * search page checks FIRST so it can skip fetching album detail it does not
+ * need. That is not just an optimisation: when the re-click happens while the
+ * metadata source is down, the fetch fails and the user gets an error toast
+ * instead of the modal they already had open.
+ *
+ * Returns whether a modal was shown, so the caller knows to stop.
+ */
+window.reopenActiveDownloadModal = function (virtualPlaylistId) {
+    const process = activeDownloadProcesses[virtualPlaylistId];
+    if (!process || !process.modalElement) return false;
+    if (process.status === 'complete') {
+        showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+    }
+    process.modalElement.style.display = 'flex';
+    return true;
+};
+
+/**
+ * Open the download modal for a batch shown on the Downloads page.
+ *
+ * Lives here for the same reason as the function above: `activeDownloadProcesses`
+ * is a top-level `let` in this script's lexical scope, so a module cannot read
+ * it. `rehydrateModal` and `WishlistModalState` are likewise script-scoped.
+ * Moved verbatim from _adlOpenBatchModal (pages-extra.js) when the Downloads
+ * page became React.
+ *
+ * Wishlist gets its own branch because its modal is a singleton keyed by the
+ * literal 'wishlist' rather than by batch id, and it has visibility state of
+ * its own that has to be told the modal is showing again.
+ */
+window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
+    if (playlistId === 'wishlist') {
+        const clientProcess = activeDownloadProcesses['wishlist'];
+        if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+            clientProcess.modalElement.style.display = 'flex';
+            if (typeof WishlistModalState !== 'undefined') WishlistModalState.setVisible();
+        } else {
+            rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+        }
+        return;
+    }
+
+    // Any other batch: show the modal it already has, or rebuild from the server.
+    for (const [, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+    rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+};
+
+/**
+ * Paint the downloads count on the nav button.
+ *
+ * Moved verbatim from pages-extra.js when the Downloads page became React. It
+ * has to live in a classic script rather than in the React page, because the
+ * websocket status handler below (and its twin in shared-helpers.js) calls it
+ * on every push — including on pages where the Downloads route is not mounted.
+ *
+ * It reads NOTHING from the downloads page: the count is the real server-side
+ * active total from the status push, not the page's list. That distinction is
+ * why the vanilla deliberately never called this from its own poll — the poll
+ * caps at 300 rows and would under-report a bigger queue.
+ */
+function _updateDlNavBadge(count) {
+    const badge = document.getElementById('dl-nav-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
+}
+
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---
@@ -529,16 +607,27 @@ function initializeWebSocket() {
     // manual syncs, UI pipelines, and the scheduled auto-sync automation.
     socket.on('sync:active', () => qaSignal('sync'));
     socket.on('scan:watchlist', (data) => {
-        updateWatchlistScanFromData(data);
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
         if (watchlistBtn) {
             watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
         }
+        // Re-broadcast to the React side. `socket` is a module-scoped `let` in
+        // this file, so a React route cannot subscribe to it directly; this is
+        // the same `ss:` window-event seam the shell bridge already uses.
+        // Purely additive — the vanilla handlers above are untouched.
+        window.dispatchEvent(new CustomEvent('ss:watchlist-scan', { detail: data }));
     });
     socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
-    socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
+    socket.on('automation:progress', (data) => {
+        qaSignal('auto');
+        updateAutomationProgressFromData(data);
+        // Mirror to the React automations page. Same seam as ss:watchlist-scan:
+        // the progress state is module-scoped in stats-automations.js and cannot
+        // be read from a module, so the vanilla side announces and React reacts.
+        window.dispatchEvent(new CustomEvent('ss:automation-progress', { detail: data }));
+    });
     socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
     socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
     socket.on('collections:artwork', (data) => { if (typeof updateCollectionArtTask === 'function') updateCollectionArtTask(data); });
@@ -625,9 +714,27 @@ function handleServiceStatusUpdate(data) {
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
     // Spotify rate limit / cooldown / recovery
-    if (data.spotify?.rate_limited && data.spotify.rate_limit) {
+    //
+    // Only worth interrupting someone when the official API is actually
+    // serving their metadata. On Deezer (or any other source) a ban changes
+    // nothing they can see, so the modal announced that search and enrichment
+    // were paused when neither was — pure noise.
+    //
+    // Gate on the SOURCE, not on `authenticated`: during a ban the client
+    // deliberately reports authenticated=true (it means "you are connected,
+    // just throttled"), so an auth check would never suppress anything.
+    //
+    // The ban itself is untouched — it still suppresses calls and still
+    // protects against hammering. This only stops it interrupting people it
+    // does not apply to.
+    const _spotifyMattersHere = (data.metadata_source?.source || 'spotify') === 'spotify';
+    if (data.spotify?.rate_limited && data.spotify.rate_limit && _spotifyMattersHere) {
         handleSpotifyRateLimit(data.spotify.rate_limit);
         _spotifyInCooldown = false;
+    } else if (data.spotify?.rate_limited && !_spotifyMattersHere) {
+        // Banned but irrelevant to this install — make sure a modal raised
+        // before the account went away does not linger.
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
     } else if (data.spotify?.post_ban_cooldown > 0) {
         if (_spotifyRateLimitShown && !_spotifyInCooldown) {
             _spotifyRateLimitShown = false;

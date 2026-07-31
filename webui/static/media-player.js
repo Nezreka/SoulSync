@@ -129,6 +129,11 @@ function _stripSourceIdPrefix(value) {
 function setTrackInfo(track) {
     currentTrack = track;
     npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
+    // Chat now-playing (opt-in, chat.js owns the gate + throttle). Never let a
+    // chat problem break playback.
+    try {
+        if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(track);
+    } catch (e) { /* chat not loaded / not in a room */ }
 
     const trackTitleElement = document.getElementById('track-title');
     const trackTitle = _stripSourceIdPrefix(track.title) || 'Unknown Track';
@@ -229,6 +234,9 @@ function clearTrack() {
     // Clear track state
     currentTrack = null;
     isPlaying = false;
+    try {
+        if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(null);
+    } catch (e) { /* chat not loaded */ }
     npSetPlayContext('');   // hide "Playing from" when nothing's playing
 
     const trackTitleElement = document.getElementById('track-title');
@@ -541,13 +549,6 @@ function updateDiscoveryProgressFromData(data) {
     const id = data.id;
     const callback = _discoveryProgressCallbacks[id];
     if (callback) callback(data);
-}
-
-function updateWatchlistScanFromData(data) {
-    if (!data.success) return;
-    if (_lastWatchlistScanStatus === data.status && data.status !== 'scanning') return;
-    _lastWatchlistScanStatus = data.status;
-    handleWatchlistScanData(data);
 }
 
 function updateMediaScanFromData(data) {

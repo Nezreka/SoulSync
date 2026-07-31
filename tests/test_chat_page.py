@@ -116,13 +116,26 @@ class TestMessageUserHooks:
         assert "messageUser" in _CHAT_JS
 
     def test_download_surfaces_render_the_hook(self):
+        """Every surface listing a Soulseek peer offers "message this user".
+
+        The basic-search album and track cards used to live in downloads.js;
+        they are React now (webui/src/routes/search/-ui/basic-results.tsx), so
+        the guard follows them there rather than shrinking to whatever is left.
+        """
         dl = (_ROOT / "webui" / "static" / "downloads.js").read_text(
             encoding="utf-8", errors="replace")
-        assert dl.count("data-chat-msg-user=") == 3      # album + track + candidates
-        # escapeHtml leaves double quotes — every attr site must strip them
-        assert dl.count("escapeHtml(result.username || '').replace(/\"/g, '&quot;')") == 2
+        # Only the download-candidates row remains on the vanilla side.
+        assert dl.count("data-chat-msg-user=") == 1
         # candidates: only SOULSEEK peers are messageable (torrent rows aren't users)
         assert "/soulseek/i.test(String(c.source))" in dl
+
+        # ...and the two that moved. React escapes attribute values itself, so
+        # there is no manual quote-stripping to assert here — the thing that
+        # matters is that both card types still render the hook.
+        results = (_ROOT / "webui" / "src" / "routes" / "search" / "-ui"
+                   / "basic-results.tsx").read_text(encoding="utf-8", errors="replace")
+        assert "data-chat-msg-user={username}" in results
+        assert results.count("<Uploader username=") == 2   # album card + track card
 
 
 class TestChatModalStandard:

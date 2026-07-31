@@ -385,8 +385,18 @@ class TestRepliesAndMentions:
         http, state = chat_app
         import api.chat as mod
         mod._SELF.update(name="", at=0.0)
-        state["client"].get_session_info = lambda: {"username": "BoulderBadgeDad"}
+        state["client"].get_soulseek_username = lambda: "BoulderBadgeDad"
         assert http.get("/api/chat/status").get_json()["username"] == "BoulderBadgeDad"
+
+    def test_status_username_is_empty_when_slskd_wont_say(self, chat_app):
+        """An unresolvable name must read as unknown — never as a match, or the
+        reserved avatar would unlock for whoever asks first."""
+        http, state = chat_app
+        import api.chat as mod
+        mod._SELF.update(name="", at=0.0)
+        state["client"].get_soulseek_username = lambda: None
+        assert http.get("/api/chat/status").get_json()["username"] == ""
+        assert mod._avatar_allowed(100, "") is False
 
 
 class TestReactions:

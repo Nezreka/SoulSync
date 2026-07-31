@@ -1190,6 +1190,109 @@ def _video_db_assignment_tripwire():
         videoapi.__class__ = base
 
 
+@pytest.fixture()
+def video_wishlist_forensics():
+    """Make the rotating video-wishlist flake name its own cause.
+
+    The family's signature never varies: the endpoint reports it WROTE rows
+    (``wished == 2``, ``success: True``), ``wishlist_counts()`` reads back
+    zero, and the assignment tripwire above is clean — the global pointed at
+    the test's own handle the whole time. Three explanations survive that
+    evidence, and a row count taken after the fact cannot separate them:
+
+      1. the write landed in a DIFFERENT database,
+      2. the rows were inserted and then deleted by something else,
+      3. the rows were never inserted at all.
+
+    ``arm(db)`` hangs an AFTER DELETE trigger on video_wishlist, so a delete
+    from ANY connection — a daemon thread outliving its test, calling the live
+    get_video_db(), is the standing suspect — leaves a permanent record in the
+    file itself. The report then prints that record beside the identity and
+    path of both handles, the WAL, and the live thread list.
+
+    Rows present in the delete log => (2), and the log says what was removed.
+    Log empty with the wishlist empty => (3), or (1) if the paths differ.
+
+    Used by the known family members; add it to the next one that flakes
+    rather than re-rolling a 45-minute suite. Diagnostic only — the trigger
+    lives on a per-test tmp database and no production code is touched.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    class _Forensics:
+        def arm(self, db):
+            """Start recording deletes on this database. Call once, early."""
+            conn = sqlite3.connect(str(db.database_path))
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS _diag_wishlist_deletes (
+                        kind TEXT, tmdb_id INTEGER, season_number INTEGER,
+                        episode_number INTEGER, at TEXT DEFAULT CURRENT_TIMESTAMP);
+                    CREATE TRIGGER IF NOT EXISTS _diag_wishlist_del
+                    AFTER DELETE ON video_wishlist BEGIN
+                        INSERT INTO _diag_wishlist_deletes
+                            (kind, tmdb_id, season_number, episode_number)
+                        VALUES (old.kind, old.tmdb_id, old.season_number, old.episode_number);
+                    END;
+                    """)
+                conn.commit()
+            finally:
+                conn.close()
+
+        def __call__(self, db, note=""):
+            import threading
+
+            import api.video as videoapi
+            import core.video.download_events as events
+            import core.video.download_monitor as monitor
+
+            out = ["[wishlist forensics] %s" % note]
+
+            def describe(label, handle):
+                if handle is None:
+                    out.append("  %-17s: None" % label)
+                    return
+                path = Path(handle.database_path)
+                out.append("  %-17s: id=%s exists=%s size=%s path=%s"
+                           % (label, hex(id(handle)), path.exists(),
+                              path.stat().st_size if path.exists() else "-", path))
+
+            describe("test handle", db)
+            describe("api.video global", videoapi._video_db)
+            out.append("  %-17s: %s" % ("same handle", videoapi._video_db is db))
+
+            conn = sqlite3.connect(str(db.database_path))
+            try:
+                rows = conn.execute(
+                    "SELECT kind, tmdb_id, season_number, episode_number "
+                    "FROM video_wishlist ORDER BY rowid").fetchall()
+                out.append("  %-17s: %s" % ("wishlist rows", rows or "EMPTY"))
+                try:
+                    gone = conn.execute(
+                        "SELECT kind, tmdb_id, season_number, episode_number, at "
+                        "FROM _diag_wishlist_deletes ORDER BY rowid").fetchall()
+                    out.append("  %-17s: %s" % (
+                        "deletes recorded",
+                        gone or "NONE - nothing was ever deleted from THIS file"))
+                except sqlite3.Error:
+                    out.append("  %-17s: (not armed)" % "deletes recorded")
+            finally:
+                conn.close()
+
+            wal = Path(str(db.database_path) + "-wal")
+            out.append("  %-17s: exists=%s size=%s"
+                       % ("wal", wal.exists(), wal.stat().st_size if wal.exists() else "-"))
+            out.append("  %-17s: %s" % ("live threads", [
+                t.name for t in threading.enumerate() if t is not threading.main_thread()]))
+            out.append("  %-17s: forwarders=%d monitor._started=%s"
+                       % ("leak guards", len(events._forwarders), monitor._started))
+            return "\n".join(out)
+
+    return _Forensics()
+
+
 @pytest.fixture(autouse=True)
 def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     """Reset all mutable state between tests."""

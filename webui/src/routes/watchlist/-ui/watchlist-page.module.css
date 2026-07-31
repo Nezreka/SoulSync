@@ -1,0 +1,128 @@
+/*
+ * Only the rules that the vanilla page injected at runtime via
+ * `_ensureWatchlistLabelsStyles()` live here.
+ *
+ * Everything else the watchlist renders — cards, pills, source badges, the
+ * toolbar, the scan deck, the empty state — is already class-scoped in
+ * style.css (333 rules, none of them scoped to #watchlist-page), so it applies
+ * unchanged inside #webui-react-root. Those classes are used as-is rather than
+ * duplicated here: this is a port, and re-authoring them would be the only way
+ * to introduce a visual regression.
+ *
+ * The injected block WAS scoped to #watchlist-page, which no longer exists on
+ * a React route, so it is the one part that had to move.
+ */
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+
+.tab {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary, #9aa0aa);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 7px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tabActive {
+  background: linear-gradient(135deg, #1db954, #12833b);
+  color: #fff;
+  border-color: transparent;
+}
+
+.tabActive:hover {
+  color: #fff;
+  background: linear-gradient(135deg, #1db954, #12833b);
+}
+
+.labelsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.labelCard {
+  position: relative;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 18px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.labelCard:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(29, 185, 84, 0.4);
+}
+
+.labelIcon {
+  font-size: 30px;
+}
+
+.labelName {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.labelMeta {
+  font-size: 12px;
+  color: var(--text-secondary, #8a909a);
+  margin-top: 4px;
+}
+
+.labelBacklogBadge {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 180, 40, 0.16);
+  color: #ffb84d;
+}
+
+.labelActions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.labelActions button {
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  color: #cfd3da;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.labelActions button:hover {
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+}

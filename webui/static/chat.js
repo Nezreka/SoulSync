@@ -34,6 +34,12 @@
         historyDone: false,      // no more archive pages
         selfName: '',            // our slskd username (@mention highlighting)
         users: [],               // room user names (mention autocomplete)
+        convos: [],              // latest PM conversation list (guild-rail DM badge)
+        channel: 'general',      // active virtual channel (envelope `c` tag)
+        chanSeen: {},            // channel slug → newest ts read there (unread badges)
+        chanCatClosed: {},       // sidebar category → collapsed
+        pingArmed: false,        // suppress mention pings while the archive loads
+        thread: null,            // {id, name} while viewing a thread (null = channel)
         replyTo: null,           // {u, x} while composing a reply
         pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
@@ -42,6 +48,7 @@
             player: null,        //   YT.Player instance while tuned in
             playingId: null,     //   video id the player was last pointed at
             playingNow: null,    //   the now-track the player is actually playing (display fallback)
+            nowSeen: null,       //   {id, localStart, base} — elapsed on OUR clock, not the DJ's
             playerAlive: false,  //   iframe API fired onReady (safe to call methods)
             results: [],         //   resolve results awaiting a pick
             searchResults: [],   //   YouTube search modal results
@@ -63,8 +70,13 @@
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
+        arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
+    try {
+        var _ch = localStorage.getItem('chat_channel');
+        if (_ch) state.channel = _ch;      // validated against the config on first render
+    } catch (e) { /* ignore */ }
     try {
         state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
         var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
@@ -331,7 +343,15 @@
         return h % 360;
     }
 
-    function _avatar(user) {
+    function _avatar(user, avMap) {
+        // A chosen preset wins; otherwise the original hue-tinted initial. Used
+        // by message groups, the user card and the mention picker, so upgrading
+        // it here paints faces everywhere at once.
+        var n = _avatarId((avMap || _avatarMap())[user]);
+        if (n) {
+            return '<span class="chat-avatar chat-avatar--img" aria-hidden="true">' +
+                '<img src="/static/avatar/' + n + '.png" alt="" loading="lazy"></span>';
+        }
         return '<span class="chat-avatar" style="background:hsl(' + _hue(user) +
             ',52%,40%)" aria-hidden="true">' +
             esc(String(user || '?').charAt(0).toUpperCase()) + '</span>';
@@ -364,6 +384,11 @@
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
                 'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
+        }
+        if (state.view === 'room' && state.canSend && !state.thread && _chanRoom()) {
+            acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
+                'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
+                'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
         }
         if (state.view === 'room' && state.canSend) {
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
@@ -473,6 +498,7 @@
     // fold under one avatar + name header, with day separators between dates.
     function renderGroups(msgs) {
         var html = '', group = null, lastDay = null, GAP = 5 * 60 * 1000;
+        var avMap = _avatarMap();      // fold once per render, not per group
         function flush() { if (group) { html += group.html + '</div></div>'; group = null; } }
         for (var i = 0; i < msgs.length; i++) {
             var m = msgs[i];
@@ -502,7 +528,7 @@
             group = { user: user, ext: ext, self: self, t: t, html:
                 '<div class="chat-group' + (self ? ' chat-group--self' : '') +
                     (ext ? ' chat-group--ext' : '') + '">' +
-                _avatar(user) +
+                _avatar(user, avMap) +
                 '<div class="chat-group-body"><div class="chat-group-head">' +
                 '<button class="chat-msg-user" type="button" data-chat-user="' + attr(user) +
                     '" style="color:hsl(' + _hue(user) + ',65%,68%)" title="Message ' +
@@ -534,6 +560,10 @@
     function renderMessages(list) {
         var host = q('[data-chat-messages]');
         if (!host) return;
+        // The Arcade takes over the message column, so it hangs off the same
+        // entry point every caller already uses rather than needing each of
+        // them to know about it.
+        if (_arcOn()) { renderArcade(); return; }
         if (!list || !list.length) {
             host.innerHTML = '<div class="chat-empty">No messages yet — say hi 👋</div>';
             return;
@@ -559,6 +589,24 @@
                 var before = shown.length;
                 shown = shown.filter(function (m) { return m.rich || m.self === true || m.direction === 'Out'; });
                 hidden = before - shown.length;
+            }
+            // Virtual channels: show only the active one. Untagged / unknown-slug
+            // messages fold into the default channel (never hidden everywhere),
+            // so vanilla-Soulseek and old-client traffic still reads in #general.
+            // Only the SoulSync room is channelled/threaded — every other room
+            // shows its stream plainly, exactly as it did before.
+            if (_chanRoom()) {
+                shown = shown.filter(function (m) { return _msgChannel(m) === state.channel; });
+                // Inside a thread: only its parent + its replies. Outside: thread
+                // replies fold away so the channel stays readable (Discord-style).
+                if (state.thread) {
+                    var tid = state.thread.id;
+                    shown = shown.filter(function (m) {
+                        return _msgThread(m) === tid || _msgKey(m) === tid;
+                    });
+                } else {
+                    shown = shown.filter(function (m) { return !_msgThread(m); });
+                }
             }
         }
         // NEW divider: split at the frozen last-seen marker (set on room open).
@@ -642,14 +690,30 @@
         return cls;
     }
 
-    function _userBtn(n, extraClass, tunedMap) {
+    function _userBtn(n, extraClass, tunedMap, npMap, avMap) {
+        // Discord-style member row: avatar + presence dot, name, and an activity
+        // subline (the jukebox listen state doubles as "playing a game").
         var ign = isIgnored(n);
         var tuned = tunedMap && tunedMap[n];
+        var np = npMap && npMap[n];
         return '<button class="chat-user' + (extraClass || '') + (ign ? ' chat-user--ignored' : '') +
             '" type="button" data-chat-user="' + attr(n) + '" title="' + attr(n) +
             (tuned ? ' — listening to the room jukebox' : '') + '">' +
-            '<span class="chat-user-dot"></span>' + esc(n) +
-            (tuned ? '<span class="chat-user-tuned">♫</span>' : '') +
+            '<span class="chat-user-av">' +
+                _avatarHtml(n, avMap && avMap[n], 'chat-av--fill') +
+                '<span class="chat-user-dot' + (tuned ? ' chat-user-dot--tuned' : '') + '"></span>' +
+            '</span>' +
+            '<span class="chat-user-main">' +
+                '<span class="chat-user-name">' + esc(n) + '</span>' +
+                // the shared jukebox wins the line — it's what the room is doing
+                // together; a personal now-playing shows otherwise
+                (tuned
+                    ? '<span class="chat-user-act chat-user-tuned">♫ Listening to the jukebox</span>'
+                    : (np && np.t
+                        ? '<span class="chat-user-act" title="' + attr(np.t + (np.a ? ' — ' + np.a : '')) +
+                            '">♪ ' + esc(np.t) + (np.a ? ' · ' + esc(np.a) : '') + '</span>'
+                        : '')) +
+            '</span>' +
             (ign ? '<span class="chat-user-mute">muted</span>' : '') + '</button>';
     }
 
@@ -687,18 +751,28 @@
             else if (cls[n] !== 'vanilla') apps.push(n);
             else rest.push(n);
         });
+        var _evs = window.ChatProtocol ? _roomEvents() : [];
         var tunedMap = window.ChatProtocol
-            ? window.ChatProtocol.reduceTuned(_roomEvents()) : {};   // once, not per user
-        var html = '<div class="chat-users-label">' + state.users.length + ' online</div>';
-        if (self.length) html += self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap); }).join('');
+            ? window.ChatProtocol.reduceTuned(_evs) : {};            // once, not per user
+        var npMap = (window.ChatProtocol && window.ChatProtocol.reduceNowPlaying)
+            ? window.ChatProtocol.reduceNowPlaying(_evs) : {};
+        var avMap = _avatarMap();
+        // Discord groups members by role with a "NAME — count" header.
+        var html = '';
+        if (self.length) {
+            html += '<div class="chat-users-label chat-users-label--sub">You</div>' +
+                self.map(function (n) { return _userBtn(n, ' chat-user--self', tunedMap, npMap, avMap); }).join('');
+        }
         if (apps.length) {
-            html += '<div class="chat-users-label chat-users-label--sub">SoulSync users</div>' +
-                apps.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+            html += '<div class="chat-users-label chat-users-label--sub">SoulSync &mdash; ' + apps.length + '</div>' +
+                apps.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
         if (rest.length) {
-            html += (apps.length || self.length
-                        ? '<div class="chat-users-label chat-users-label--sub">Other clients</div>' : '') +
-                rest.map(function (n) { return _userBtn(n, '', tunedMap); }).join('');
+            // NOT "Online" — the SoulSync bucket above is online too; this one
+            // is specifically everyone on a non-SoulSync client.
+            html += '<div class="chat-users-label chat-users-label--sub">Other clients &mdash; ' +
+                rest.length + '</div>' +
+                rest.map(function (n) { return _userBtn(n, '', tunedMap, npMap, avMap); }).join('');
         }
         if (!self.length && !apps.length && !rest.length) {
             html += '<div class="chat-side-none">No users match</div>';
@@ -707,25 +781,11 @@
     }
 
     function renderSide(convos) {
-        var rooms = q('[data-chat-rooms]');
-        if (rooms) {
-            var list = (state.rooms.length ? state.rooms
-                : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
-            rooms.innerHTML = list.map(function (r) {
-                var on = state.view === 'room' && state.room === r.name;
-                return '<div class="chat-side-room' + (on ? ' chat-side-item--on' : '') + '">' +
-                    '<button class="chat-side-item" type="button" data-chat-open-room="' +
-                        attr(r.name) + '" title="' + attr(r.name) + '"># ' + esc(r.name) + '</button>' +
-                    (!r.home && state.canManage
-                        ? '<button class="chat-side-leave" type="button" data-chat-leave-room="' +
-                            attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
-                        : '') +
-                '</div>';
-            }).join('') +
-            (state.canManage
-                ? '<button class="chat-side-item chat-side-add" type="button" data-chat-browse-rooms>+ Browse rooms</button>'
-                : '');
-        }
+        if (convos) state.convos = convos;   // guild-rail DM badge reads the latest list
+        // Rooms are rendered by renderGuilds() into the guild rail — switching,
+        // browsing and leaving all live there. They are deliberately not listed
+        // in this sidebar too (that was two Browse-rooms buttons and two room
+        // lists saying the same thing).
         var host = q('[data-chat-convos]');
         if (!host) return;
         var list = (convos || []).map(function (c) {
@@ -738,6 +798,1851 @@
                 (unread ? '<span class="chat-side-dot"></span>' : '') + '</button>';
         }).join('');
         host.innerHTML = list || '<div class="chat-side-none">No conversations</div>';
+        renderGuilds();
+        renderChannels();
+        renderUserPanel();
+        _arcBindDrag();       // idempotent; the page element outlives every render
+    }
+
+    // ── Discord-style shell: guild rail, channels, account strip ────────────
+    // CHANNELS are a client-side VIEW over the one Soulseek room: each message
+    // carries a channel slug in its envelope (see CHAT_CHANNELS / state.channel).
+    // Untagged or unknown-slug messages always fall back to #general so nothing
+    // is ever invisible — old clients and vanilla Soulseek users still land
+    // somewhere. Categories are cosmetic grouping only.
+    // No channel names a FEATURE. The jukebox is room-scoped — everyone shares
+    // one queue regardless of which channel they're reading — so filing it under
+    // a channel would imply a queue per channel. Tune-in is already its gate.
+    // Media-agnostic on purpose: SoulSync is music AND movies/TV AND YouTube,
+    // so nothing here is scoped to one side. Names avoid colliding with actual
+    // app features too — a '#requests' channel would read as the video Requests
+    // queue, and '#releases' as a SoulSync release rather than a new album.
+    // Mirrors where the real community traffic already goes.
+    var CHAT_CHANNELS = [
+        { cat: 'Community', items: [
+            { slug: 'general', name: 'general' },
+            { slug: 'off-topic', name: 'off-topic' },
+        ] },
+        { cat: 'Support', items: [
+            { slug: 'help', name: 'help' },
+            { slug: 'bugs', name: 'bugs' },
+            { slug: 'ideas', name: 'ideas' },
+        ] },
+    ];
+    var CHAT_DEFAULT_CHANNEL = 'general';
+
+    // Channels + threads are for the SoulSync community room ONLY. In any other
+    // Soulseek room nobody tags anything, so a channel rail would file every
+    // message under #general and strand the other channels empty — and the
+    // thread fold would HIDE replies with no sidebar to find them again. Other
+    // rooms therefore get plain, unfiltered chat (the jukebox / polls / pins
+    // still work there, since those are additive folds that are simply empty
+    // when nobody has used them).
+    function _chanRoom() {
+        return state.view === 'room' &&
+               (!state.homeRoom || state.room === state.homeRoom);
+    }
+
+    function _chanKnown(slug) {
+        for (var i = 0; i < CHAT_CHANNELS.length; i++) {
+            for (var j = 0; j < CHAT_CHANNELS[i].items.length; j++) {
+                if (CHAT_CHANNELS[i].items[j].slug === slug) return true;
+            }
+        }
+        return false;
+    }
+
+    // The channel a message belongs to. Unknown/absent → the default, so a
+    // message can never be swallowed by a channel nobody is looking at.
+    function _msgChannel(m) {
+        var c = m && typeof m.chan === 'string' ? m.chan : '';
+        return _chanKnown(c) ? c : CHAT_DEFAULT_CHANNEL;
+    }
+
+    function _chanUnread() {
+        // Unread per channel = messages after our last-read marker for that
+        // channel, excluding our own. Cheap fold over the loaded message list.
+        var counts = {};
+        var seen = state.chanSeen || {};
+        (state.msgs || []).forEach(function (m) {
+            if (!m || m.username === state.selfName) return;
+            var c = _msgChannel(m);
+            if (c === state.channel) return;              // looking at it now
+            var ts = m.timestamp || '';
+            if (seen[c] && ts <= seen[c]) return;
+            counts[c] = (counts[c] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function renderGuilds() {
+        var host = q('[data-chat-guilds]');
+        if (!host) return;
+        var rooms = (state.rooms.length ? state.rooms
+            : [{ name: state.homeRoom || state.room || 'SoulSync', home: true }]);
+        var html = rooms.map(function (r) {
+            var on = state.view === 'room' && state.room === r.name;
+            var initials = String(r.name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '#';
+            // The community room is the app's own room, so it gets the app's
+            // mark. Every other room is somebody else's and keeps initials.
+            var face = r.home
+                ? '<img class="chat-guild-logo" src="/static/trans2.png" alt="" ' +
+                  'aria-hidden="true">'
+                : esc(initials);
+            // The rail is the ONLY room switcher now (the sidebar lists channels,
+            // not rooms), so leaving has to live here too — × on hover, home room
+            // excluded, same rule the old sidebar list used.
+            return '<span class="chat-guild-wrap">' +
+                '<button class="chat-guild' + (on ? ' chat-guild--on' : '') + '" type="button" ' +
+                    'data-chat-open-room="' + attr(r.name) + '" title="' + attr(r.name) + '">' +
+                    face + '</button>' +
+                (!r.home && state.canManage
+                    ? '<button class="chat-guild-leave" type="button" data-chat-leave-room="' +
+                        attr(r.name) + '" title="Leave ' + attr(r.name) + '">&times;</button>'
+                    : '') +
+            '</span>';
+        }).join('');
+        // PM puck — unread dot when any conversation is waiting
+        var pmUnread = (state.convos || []).filter(function (c) {
+            return c.hasUnAcknowledgedMessages || c.unAcknowledgedMessageCount > 0;
+        }).length;
+        html += '<div class="chat-guild-sep"></div>' +
+            '<button class="chat-guild' + (state.view === 'pm' ? ' chat-guild--on' : '') + '" type="button" ' +
+                'data-chat-guild-dm title="Direct messages">✉' +
+                (pmUnread ? '<span class="chat-guild-badge">' + (pmUnread > 99 ? '99+' : pmUnread) + '</span>' : '') +
+            '</button>';
+        if (state.canManage) {
+            html += '<button class="chat-guild chat-guild--add" type="button" data-chat-browse-rooms ' +
+                'title="Browse Soulseek rooms">+</button>';
+        }
+        host.innerHTML = html;
+    }
+
+    function renderChannels() {
+        // sidebar header = the "server" (the Soulseek room we're in)
+        var nameEl = q('[data-chat-side-head-name]');
+        if (nameEl) {
+            nameEl.textContent = state.view === 'pm'
+                ? 'Direct Messages'
+                : (state.room || state.homeRoom || 'SoulSync');
+        }
+        var host = q('[data-chat-channels]');
+        if (!host) return;
+        if (!_chanRoom()) { host.innerHTML = ''; return; }   // plain chat elsewhere
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
+        var unread = _chanUnread();
+        var closed = state.chanCatClosed || {};
+        host.innerHTML = CHAT_CHANNELS.map(function (group) {
+            var isClosed = !!closed[group.cat];
+            var rows = isClosed ? '' : group.items.map(function (ch) {
+                var on = state.channel === ch.slug;
+                var n = unread[ch.slug] || 0;
+                var row = '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
+                    (n ? ' chat-chan--unread' : '') + '" type="button" ' +
+                    'data-chat-chan="' + attr(ch.slug) + '">' +
+                    '<span class="chat-chan-hash">#</span>' +
+                    '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
+                    (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
+                '</button>';
+                // Forum-style: the active channel's threads hang beneath it.
+                if (on) {
+                    row += _threadsForChannel().map(function (t) {
+                        var tOn = state.thread && state.thread.id === t.id;
+                        return '<button class="chat-thread' + (tOn ? ' chat-thread--on' : '') +
+                            '" type="button" data-chat-thread="' + attr(t.id) + '" ' +
+                            'data-chat-thread-name="' + attr(t.name) + '" title="' + attr(t.name) + '">' +
+                            '<span class="chat-thread-branch"></span>' +
+                            '<span class="chat-thread-name">' + esc(t.name) + '</span>' +
+                        '</button>';
+                    }).join('');
+                }
+                return row;
+            }).join('');
+            return '<button class="chat-cat' + (isClosed ? ' chat-cat--closed' : '') + '" type="button" ' +
+                    'data-chat-cat="' + attr(group.cat) + '">' +
+                    '<span class="chat-cat-caret">⌄</span>' + esc(group.cat) +
+                '</button>' + rows;
+        }).join('') + _arcSidebarHtml();
+    }
+
+    // The Arcade's sidebar block. It sits below the channels and looks like
+    // one, but it is a view rather than a tag — see the Arcade section.
+    // Active games hang beneath it the way threads hang beneath a channel.
+    function _arcSidebarHtml() {
+        if (!_arcReady()) return '';
+        var closed = (state.chanCatClosed || {}).Games;
+        var on = !!state.arcade;
+        if (closed) {
+            return '<button class="chat-cat chat-cat--closed" type="button" data-chat-cat="Games">' +
+                '<span class="chat-cat-caret">⌄</span>Games</button>';
+        }
+        var turns = _arcMyTurnCount();
+        var row = '<button class="chat-chan' + (on && !state.arcade.game ? ' chat-chan--on' : '') +
+            (turns ? ' chat-chan--unread' : '') + '" type="button" data-chat-arc-home>' +
+            '<span class="chat-chan-hash">🎲</span>' +
+            '<span class="chat-chan-name">arcade</span>' +
+            (turns ? '<span class="chat-chan-unread">' + turns + '</span>' : '') +
+        '</button>';
+        if (on) {
+            row += _arcSidebarGames().map(function (g) {
+                var gOn = state.arcade.game === g.id;
+                var label = (g.white || '?') + ' vs ' + (g.black || 'open');
+                return '<button class="chat-thread' + (gOn ? ' chat-thread--on' : '') +
+                    (_arcMyMove(g) ? ' chat-thread--turn' : '') +
+                    '" type="button" data-chat-arc-open="' + attr(g.id) + '" ' +
+                    'title="' + attr(label) + '">' +
+                    '<span class="chat-thread-branch"></span>' +
+                    '<span class="chat-thread-name">' + esc(label) + '</span>' +
+                    (_arcMyMove(g) ? '<span class="chat-chan-unread">!</span>' : '') +
+                '</button>';
+            }).join('');
+        }
+        return '<button class="chat-cat" type="button" data-chat-cat="Games">' +
+            '<span class="chat-cat-caret">⌄</span>Games</button>' + row;
+    }
+
+    // ── threads ─────────────────────────────────────────────────────────────
+    // A thread is messages tagged with a parent message key (`th`), folded out
+    // of the channel stream. Same discipline as channels: purely a view over
+    // the one room, and a thread's replies never vanish — they're still in the
+    // room for vanilla clients, just grouped here.
+    function _msgThread(m) {
+        return (m && typeof m.th === 'string' && m.th) ? m.th : null;
+    }
+
+    // Threads that belong to the ACTIVE channel, newest activity first.
+    function _threadsForChannel() {
+        var byId = {};
+        (state.msgs || []).forEach(function (m) {
+            var th = _msgThread(m);
+            if (!th) return;
+            if (_msgChannel(m) !== state.channel) return;
+            var t = byId[th] || (byId[th] = { id: th, name: '', count: 0, last: '' });
+            t.count++;
+            var ts = String(m.timestamp || '');
+            if (ts > t.last) t.last = ts;
+            if (!t.name && typeof m.tn === 'string' && m.tn) t.name = m.tn;
+        });
+        // Fall back to the parent message's text when no carried name survived.
+        var out = [];
+        for (var id in byId) {
+            if (!Object.prototype.hasOwnProperty.call(byId, id)) continue;
+            var t = byId[id];
+            if (!t.name) {
+                var parent = (state.msgs || []).filter(function (m) { return _msgKey(m) === id; })[0];
+                t.name = parent ? String(parent.message || '').slice(0, 60) : 'Thread';
+            }
+            out.push(t);
+        }
+        out.sort(function (a, b) { return b.last.localeCompare(a.last); });
+        return out;
+    }
+
+    function openThread(id, name) {
+        if (!id) return;
+        state.thread = { id: id, name: name || 'Thread' };
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function closeThread() {
+        if (!state.thread) return;
+        state.thread = null;
+        state.lastStamp = null;
+        state.newMarker = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function switchChannel(slug) {
+        state.thread = null;      // leaving the channel leaves its thread
+        if (!slug || !_chanKnown(slug) || slug === state.channel) return;
+        state.channel = slug;
+        try { localStorage.setItem('chat_channel', slug); } catch (e) { /* private mode */ }
+        // Mark everything currently loaded in this channel as read.
+        var newest = '';
+        (state.msgs || []).forEach(function (m) {
+            if (_msgChannel(m) === slug) {
+                var ts = String(m.timestamp || '');
+                if (ts > newest) newest = ts;
+            }
+        });
+        if (newest) state.chanSeen[slug] = newest;
+        state.lastStamp = null;      // force a repaint — the filter changed, not the data
+        state.newMarker = null;
+        state.arcade = null;      // leaving for a channel leaves the arcade
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    // ── The Arcade ──────────────────────────────────────────────────────────
+    //
+    // Games are a VIEW, deliberately not a channel. A channel is a tag carried
+    // on messages, and every tag must resolve to somewhere a message is
+    // readable — that is the "nothing is ever invisible" invariant. A channel
+    // whose column renders a chessboard instead of messages would break it, so
+    // the arcade sits beside the channel list with its own state flag and the
+    // message-channel logic is left completely alone.
+    //
+    // Everything on screen is a pure fold of the room's protocol carriers
+    // (see chat-games.js). There is no server: the board you are looking at
+    // was computed locally from chat messages, and so was your opponent's.
+    var ARC_GLYPH = {
+        K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
+        k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
+    };
+    var ARC_PROMO = [['q', '♕'], ['r', '♖'], ['b', '♗'], ['n', '♘']];
+
+    function _arcReady() { return !!(window.ChessEngine && window.ChatGames); }
+    function _arcOn() { return !!state.arcade && _chanRoom() && _arcReady(); }
+
+    // The fold is cheap (~3ms for a 400-move game) but it runs on every bus
+    // repaint, so it is cached. The key is the log ARRAY ITSELF plus its
+    // length, not the length alone: ingestion appends (length moves), and
+    // anything that replaces the log hands us a different array. Keying on
+    // length alone would serve a stale fold whenever a different log happened
+    // to be the same size — which is exactly what the render harness caught.
+    // `stale` depends on the wall clock, but only at 24h granularity, so a
+    // cached value is never meaningfully wrong.
+    var _arcCache = { ref: null, n: -1, room: null, out: null };
+
+    function _gamesState() {
+        if (!_arcReady()) return { games: {}, order: [] };
+        var log = state.protocolLog || [];
+        if (_arcCache.out && _arcCache.ref === log && _arcCache.n === log.length &&
+            _arcCache.room === state.room) {
+            return _arcCache.out;
+        }
+        var out = window.ChatGames.reduceGames(_roomEvents(), Date.now());
+        _arcCache = { ref: log, n: log.length, room: state.room, out: out };
+        return out;
+    }
+
+    function _arcGame(id) {
+        return _gamesState().games[id] || null;
+    }
+
+    // Every carrier in this room that belongs to a game — what the reveal
+    // shows. Cheap: the protocol log is already in memory.
+    function _arcCarriers(gid) {
+        return _roomEvents().filter(function (e) {
+            return e && e.p && typeof e.p.k === 'string' &&
+                   e.p.k.slice(0, 3) === 'gm.' && e.p.g === gid;
+        });
+    }
+
+    // A .pgn the room can load into Lichess. A game played over Soulseek
+    // being a normal chess file is the entire joke, so this is a real export
+    // and not a text dump: toPGN writes the seven-tag roster, and for a game
+    // adopted mid-stream it emits SetUp/FEN so the partial move list still
+    // describes a valid game rather than a wrong one.
+    function _arcPgn(game) {
+        var E = window.ChessEngine;
+        return E.toPGN(game.moves, {
+            White: game.white || '?', Black: game.black || '?',
+            Result: game.result || '*',
+            Site: 'Soulseek/' + (state.room || 'SoulSync'),
+        }, game.startFen);
+    }
+
+    function arcDownloadPgn(gid) {
+        var game = _arcGame(gid);
+        if (!game) return;
+        try {
+            var blob = new Blob([_arcPgn(game)], { type: 'application/x-chess-pgn' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'soulsync-' + gid + '.pgn';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Could not build the PGN', 'error');
+        }
+    }
+
+    function arcCopyPgn(gid) {
+        var game = _arcGame(gid);
+        if (!game) return;
+        var text = _arcPgn(game);
+        var done = function () {
+            if (typeof showToast === 'function') showToast('PGN copied', 'success');
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, function () {
+                if (typeof showToast === 'function') showToast('Could not copy', 'error');
+            });
+        } else if (typeof showToast === 'function') {
+            showToast('Clipboard unavailable in this browser', 'error');
+        }
+    }
+
+    // 8 chars of [a-z0-9]. A collision only means the second gm.new is
+    // ignored, so this needs to be unlikely, not guaranteed.
+    function _newGid() {
+        var abc = 'abcdefghijklmnopqrstuvwxyz0123456789', s = '';
+        for (var i = 0; i < 8; i++) s += abc[Math.floor(Math.random() * abc.length)];
+        return s;
+    }
+
+    function _arcSeat(game) {
+        if (!game || !state.selfName) return '';
+        if (game.white === state.selfName) return 'w';
+        if (game.black === state.selfName) return 'b';
+        return '';
+    }
+
+    function _arcMyMove(game) {
+        return !!(game && window.ChatGames.toMove(game) &&
+                  window.ChatGames.toMove(game) === state.selfName);
+    }
+
+    // The room's move is everyone's to influence except the opponent's — they
+    // are playing against the room, so they do not get a ballot in it.
+    function _arcCanVote(game) {
+        return !!(game && state.canSend && window.ChatGames.isRoomTurn(game) &&
+                  !_arcSeat(game));
+    }
+
+    // Can this client put a piece on this board right now, either as a move
+    // or as a vote? Everything interactive keys off this.
+    function _arcActive(game) {
+        return _arcMyMove(game) || _arcCanVote(game);
+    }
+
+    // Games worth showing in the sidebar: mine first, then anything live or
+    // waiting for an opponent. Finished games stay in the lobby only.
+    function _arcSidebarGames() {
+        var st = _gamesState();
+        return st.order.map(function (id) { return st.games[id]; }).filter(function (g) {
+            return g.status !== 'over';
+        }).slice(0, 12);
+    }
+
+    // Withdrawing is for a game nothing has happened in. An open table
+    // qualifies, and so does a room game nobody has voted in yet — those are
+    // 'live' from creation, so without this they could only be escaped by
+    // resigning to an opponent who does not exist.
+    function _arcCanWithdraw(game) {
+        if (!game || !state.canSend || game.createdBy !== state.selfName) return false;
+        if (game.status === 'open') return true;
+        return !!(game.roomSeat && game.status === 'live' && game.ply === 0);
+    }
+
+    function _arcMyTurnCount() {
+        var st = _gamesState();
+        var n = 0;
+        st.order.forEach(function (id) { if (_arcMyMove(st.games[id])) n++; });
+        return n;
+    }
+
+    function openArcade(gid) {
+        if (!_arcReady()) return;
+        state.arcade = { game: gid || null, sel: -1, promo: null, flip: false, slots: false };
+        var g = gid ? _arcGame(gid) : null;
+        // Black sees the board from black's side, like every chess site.
+        if (g && _arcSeat(g) === 'b') state.arcade.flip = true;
+        state.thread = null;
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    function closeArcade() {
+        if (!state.arcade) return;
+        state.arcade = null;
+        state.lastStamp = null;
+        renderMessages(state.msgs);
+        renderHead();
+        renderComposer();
+        renderChannels();
+    }
+
+    // ── Arcade actions (each is one carrier on the bus) ──────────────────
+    // Nothing is applied optimistically. Our own carrier comes back through
+    // the room like everyone else's and the fold picks it up, so what we see
+    // is always what the room saw — an optimistic board could disagree with
+    // the fold and there would be no way to tell which was right.
+
+    function _arcAfterSend(gid) {
+        return function (r) {
+            if (!r || !r.ok) {
+                if (typeof showToast === 'function') showToast('Could not reach the room', 'error');
+                return;
+            }
+            if (gid) state.arcade = Object.assign(state.arcade || {}, { game: gid, sel: -1 });
+            refresh();
+        };
+    }
+
+    function arcNewGame(color, opponent, variant, vsRoom) {
+        var gid = _newGid();
+        var known = { connect4: 1, battleship: 1 };
+        var f = { g: gid, v: known[variant] ? variant : 'chess',
+                  c: color === 'b' ? 'b' : 'w' };
+        if (vsRoom) f.r = 1;
+        if (opponent) f.o = String(opponent).slice(0, 64);
+        sendProtocol('gm.new', f).then(_arcAfterSend(gid));
+    }
+
+    function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // ── keeping in step ─────────────────────────────────────────────────
+    //
+    // A forward move already pulls a stale client up to date, but it needs a
+    // move to arrive. The case that fixes nothing is mutual silence: if you
+    // missed my last move, you are waiting on me and I am waiting on you, so
+    // neither of us ever sends anything. gm.sync is how we get out — ask the
+    // room where the game is instead of waiting for a message that is never
+    // coming.
+    //
+    // Every carrier is visible noise to vanilla Soulseek clients, so this is
+    // deliberately stingy: only while the chat page is open, only for a live
+    // game we are seated in, only after a long quiet spell, and at most once
+    // per game per cooldown.
+    var ARC_SYNC_QUIET = 5 * 60 * 1000;    // nothing heard for this long
+    var ARC_SYNC_EVERY = 10 * 60 * 1000;   // and ask no more often than this
+    var ARC_ANSWER_SPREAD = 6000;          // answers stagger across this window
+    var _arcAsked = {};                    // gid -> when we last asked (ms)
+    var _arcAnswered = {};                 // gid|user|n -> already answered
+
+    function arcSync(gid, accept) {
+        var g = _arcGame(gid);
+        if (!g) return;
+        _arcAsked[gid] = Date.now();
+        var f = { g: gid, n: g.ply };
+        if (accept) f.r = 1;
+        sendProtocol('gm.sync', f).then(_arcAfterSend(gid));
+    }
+
+    // A stable per-client delay in [0, ARC_ANSWER_SPREAD). Derived from the
+    // username so it does not change between renders, and so two clients
+    // reliably answer at different moments rather than colliding.
+    function _arcAnswerDelay() {
+        var h = 0, n = String(state.selfName || '');
+        for (var i = 0; i < n.length; i++) h = ((h << 5) - h + n.charCodeAt(i)) | 0;
+        return Math.abs(h) % ARC_ANSWER_SPREAD;
+    }
+
+    // Answer somebody else's request. EVERY SoulSync client in the room folds
+    // every game, so the pool of clients that can help is the whole room, not
+    // the two players — which is what makes a quorum reachable at all.
+    //
+    // The flip side is that a naive implementation has sixteen people shouting
+    // the same position at once. So each client waits its own stable moment and
+    // then shuts up if the room has already produced enough agreement: the cost
+    // settles at roughly quorum-plus-a-few messages instead of one per client.
+    function _arcAnswerSyncs(fresh) {
+        if (!_arcReady() || !state.canSend || !state.selfName) return;
+        (fresh || []).forEach(function (e) {
+            if (!e || !e.p || e.p.k !== 'gm.sync') return;
+            if (e.username === state.selfName) return;          // not our own
+            if (typeof e.p.n !== 'number') return;
+            var g0 = _gamesState().games[e.p.g];
+            if (!g0 || g0.status !== 'live') return;
+            if (!(g0.ply > e.p.n) && !e.p.r) return;            // they are not behind
+            var key = g0.id + '|' + e.username + '|' + e.p.n;
+            if (_arcAnswered[key]) return;                      // asked and answered
+            _arcAnswered[key] = 1;
+            setTimeout(function () {
+                // Re-read: the answer may have arrived from others while we
+                // waited, and the game may have moved on entirely.
+                var g = _gamesState().games[e.p.g];
+                if (!g || g.status !== 'live') return;
+                if (!(g.ply > e.p.n) && !e.p.r) return;
+                var slot = g.answers && g.answers[g.fen];
+                var backers = slot ? Object.keys(slot.by).length : 0;
+                if (backers >= window.ChatGames.STATE_QUORUM) return;   // settled without us
+                sendProtocol('gm.state', { g: g.id, n: g.ply, f: g.fen });
+            }, _arcAnswerDelay());
+        });
+    }
+
+    // Ask, when a wait has gone on long enough to be suspicious.
+    function _arcMaybeSync() {
+        if (!_arcReady() || !state.canSend || !state.selfName || !_chanRoom()) return;
+        var st = _gamesState();
+        var now = Date.now();
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            if (!g || g.status !== 'live' || g.desync) return;
+            if (!_arcSeat(g)) return;                           // only our own games
+            if (_arcMyMove(g)) return;                          // the ball is with us
+            if (now - g.lastAt < ARC_SYNC_QUIET) return;
+            if (now - (_arcAsked[id] || 0) < ARC_SYNC_EVERY) return;
+            arcSync(id, false);
+        });
+    }
+
+    // Vote for the room's move. Nobody owns that seat, so this is not a move
+    // — the fold commits it once enough distinct people have picked the same
+    // one, which every client works out from the same stream.
+    function arcVote(gid, uci) {
+        var g = _arcGame(gid);
+        if (!g || !window.ChatGames.previewMove(g, uci)) return;
+        state.arcade.sel = -1;
+        state.arcade.promo = null;
+        sendProtocol('gm.vote', { g: gid, n: g.ply, m: uci }).then(_arcAfterSend(gid));
+        renderArcade();
+    }
+
+    function arcResign(gid) {
+        showConfirmDialog({
+            title: 'Resign this game?',
+            message: 'Your opponent takes the win. This cannot be undone.',
+            confirmText: 'Resign',
+            destructive: true,
+        }).then(function (ok) {
+            if (ok) sendProtocol('gm.res', { g: gid }).then(_arcAfterSend(gid));
+        });
+    }
+
+    function arcDraw(gid) { sendProtocol('gm.draw', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // Withdraw a game nobody joined. No confirm: nothing is lost, and making
+    // someone confirm away a table they set up and got bored of is friction
+    // for its own sake. Resigning a LIVE game still confirms.
+    function arcCancel(gid) {
+        sendProtocol('gm.cancel', { g: gid }).then(_arcAfterSend(gid));
+    }
+    function arcClaim(gid) { sendProtocol('gm.claim', { g: gid }).then(_arcAfterSend(gid)); }
+
+    // Send a move with the ply it occupies and the position it produces.
+    // Both are what let a client that missed the opening still follow along,
+    // and what lets a client that has the history catch a disagreement.
+    var _arcLastMoveAt = 0;
+
+    function arcMove(gid, uci) {
+        var g = _arcGame(gid);
+        if (!g) return;
+        // Every move is a real message in the room, and vanilla Soulseek
+        // clients see each one as a line of noise. Chess is slow enough not
+        // to care; Connect 4 is a game of fast taps, so a short floor keeps
+        // a quick pair (or a double-click) from bursting the room.
+        var nowMs = Date.now();
+        if (nowMs - _arcLastMoveAt < 600) return;
+        _arcLastMoveAt = nowMs;
+        // The fold owns "what does this move produce" so this works for any
+        // variant, and so an illegal move is caught here rather than being
+        // sent and silently dropped by every client that receives it.
+        var next = window.ChatGames.previewMove(g, uci);
+        if (!next) return;                       // never put an illegal move on the bus
+        state.arcade.sel = -1;
+        state.arcade.promo = null;
+        sendProtocol('gm.move', {
+            g: gid, v: g.variant, n: g.ply, m: uci, f: next.fen,
+        }).then(_arcAfterSend(gid));
+        renderArcade();                          // clear the selection immediately
+    }
+
+    // ── Arcade rendering ────────────────────────────────────────────────
+
+    function renderArcade() {
+        if (!_arcOn()) return;
+        var host = q('[data-chat-messages]');
+        if (!host) return;
+        // The slot machine is solo: it has no carriers, no opponent and no
+        // entry in the fold, so it is a destination rather than a game id.
+        if (state.arcade.slots) { host.innerHTML = _arcSlotHtml(); return; }
+        var g = state.arcade.game ? _arcGame(state.arcade.game) : null;
+        host.innerHTML = g ? _arcBoardHtml(g) : _arcLobbyHtml();
+    }
+
+    function _arcWho(name, colorGlyph, isTurn, roomSeat) {
+        return '<span class="chat-arc-who' + (isTurn ? ' chat-arc-who--turn' : '') + '">' +
+            '<span class="chat-arc-who-dot">' + colorGlyph + '</span>' +
+            (roomSeat ? '🗳 the room' : esc(name || 'open seat')) + '</span>';
+    }
+
+    function _arcLobbyHtml() {
+        var st = _gamesState();
+        var CG = window.ChatGames;
+        var mine = [], open = [], live = [], done = [];
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            // A withdrawn table never had an opponent and never had a result,
+            // so it does not belong in "Finished" beside real games — nothing
+            // finished. The carriers stay in the room (they cannot be unsent),
+            // but there is nothing here worth showing anyone.
+            if (g.reason === 'cancelled') return;
+            if (g.status === 'over') { done.push(g); return; }
+            if (_arcSeat(g)) { mine.push(g); return; }
+            if (g.status === 'open') { open.push(g); return; }
+            live.push(g);
+        });
+
+        function card(g) {
+            var toMove = CG.toMove(g);
+            var mySeat = _arcSeat(g);
+            var can = state.canSend;
+            var badge = '';
+            if (g.status === 'over') {
+                badge = '<span class="chat-arc-badge chat-arc-badge--done">' +
+                    (g.result ? esc(g.result) + ' · ' : '') +
+                    esc(g.reason || 'finished') + '</span>';
+            } else if (g.status === 'open') {
+                badge = g.expired
+                    ? '<span class="chat-arc-badge chat-arc-badge--stale">nobody joined — ' +
+                      'this table has gone cold</span>'
+                    : '<span class="chat-arc-badge chat-arc-badge--open">waiting for an opponent</span>';
+            } else if (_arcMyMove(g)) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--you">your move</span>';
+            } else if (g.stale) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--stale">idle 24h · seat claimable</span>';
+            } else if (g.desync) {
+                badge = '<span class="chat-arc-badge chat-arc-badge--bad">positions disagreed</span>';
+            }
+            var actions = '';
+            if (g.status === 'open' && !mySeat && can &&
+                (!g.isPrivate || g.invited === state.selfName)) {
+                actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                    'data-chat-arc-join="' + attr(g.id) + '">Join</button>';
+            }
+            if (g.status === 'live' && !mySeat && g.stale && can) {
+                actions += '<button class="chat-arc-btn" type="button" ' +
+                    'data-chat-arc-claim="' + attr(g.id) + '" ' +
+                    'title="This seat has been idle for 24 hours — take it over">Take the seat</button>';
+            }
+            if (_arcCanWithdraw(g)) {
+                actions += '<button class="chat-arc-btn" type="button" ' +
+                    'data-chat-arc-cancel="' + attr(g.id) + '" ' +
+                    'title="Take the table away — nobody joined, so nobody wins">' +
+                    'Withdraw</button>';
+            }
+            return '<div class="chat-arc-card' + (mySeat ? ' chat-arc-card--mine' : '') +
+                '" role="button" tabindex="0" data-chat-arc-open="' + attr(g.id) + '">' +
+                '<span class="chat-arc-card-top">' +
+                    _arcWho(g.white, '♔', toMove && toMove === g.white) +
+                    '<span class="chat-arc-vs">vs</span>' +
+                    _arcWho(g.black, '♚', toMove && toMove === g.black) +
+                '</span>' +
+                '<span class="chat-arc-card-sub">' +
+                    esc(g.variant) + ' · move ' + (Math.floor(g.ply / 2) + 1) +
+                    (g.isPrivate ? ' · private' : '') +
+                    (g.partial ? ' · joined mid-game' : '') +
+                '</span>' +
+                badge +
+                (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : '') +
+            '</div>';
+        }
+
+        function section(title, list) {
+            if (!list.length) return '';
+            return '<div class="chat-arc-sectitle">' + esc(title) +
+                '<span class="chat-arc-count">' + list.length + '</span></div>' +
+                list.map(card).join('');
+        }
+
+        var empty = (!mine.length && !open.length && !live.length && !done.length);
+        var yours = _arcMyTurnCount();
+
+        // The bank was only ever drawn inside the slot machine, so the balance
+        // was invisible everywhere else. It belongs on the front page.
+        var sl = _slotState();
+        if (!sl.bank) _slotLoadBank();
+        var bank = sl.bank;
+
+        function tile(attrs, icon, name, blurb) {
+            return '<button class="chat-arc-tile" type="button" ' + attrs + '>' +
+                '<span class="chat-arc-tile-icon">' + icon + '</span>' +
+                '<span class="chat-arc-tile-name">' + esc(name) + '</span>' +
+                '<span class="chat-arc-tile-blurb">' + esc(blurb) + '</span>' +
+            '</button>';
+        }
+
+        return '<div class="chat-arc-lobby">' +
+            '<div class="chat-arc-hero">' +
+                '<div class="chat-arc-hero-top">' +
+                    '<div>' +
+                        '<div class="chat-arc-hero-title">The Arcade</div>' +
+                        '<div class="chat-arc-hero-sub">No server anywhere. Every board ' +
+                            'here is folded out of chat messages in this Soulseek room — ' +
+                            'your client and your opponent\'s each work it out ' +
+                            'independently.</div>' +
+                    '</div>' +
+                    '<div class="chat-arc-purse" title="Play money, kept on this ' +
+                        'machine. Topped back up to the daily allowance at midnight if ' +
+                        'you are below it — anything you win above it, you keep.">' +
+                        '<span class="chat-arc-purse-coin">🪙</span>' +
+                        '<span class="chat-arc-purse-amt">' +
+                            (bank ? bank.balance.toLocaleString() : '·····') + '</span>' +
+                        '<span class="chat-arc-purse-sub">play money</span>' +
+                    '</div>' +
+                '</div>' +
+                (yours
+                    ? '<div class="chat-arc-hero-turn">' + yours + ' game' +
+                      (yours === 1 ? '' : 's') + ' waiting on you</div>'
+                    : '') +
+            '</div>' +
+            (state.canSend
+                ? '<div class="chat-arc-tiles">' +
+                    tile('data-chat-arc-new="w"', '♟', 'Chess',
+                         'turn by turn, no clock') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="connect4"', '🔴',
+                         'Connect 4', 'four in a row, quick') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="battleship"', '🚢',
+                         'Battleship', 'hidden fleets, checked at the end') +
+                    tile('data-chat-arc-new="w" data-chat-arc-room="1"', '🗳',
+                         'You vs the room', 'everyone else votes their move') +
+                    tile('data-chat-slot-open', '🎰', 'Slots',
+                         'solo, against your own luck') +
+                  '</div>' +
+                  '<div class="chat-arc-tilefoot">Chess starts you as white — ' +
+                      '<button class="chat-arc-inline" type="button" ' +
+                      'data-chat-arc-new="b">open one as black</button> instead.</div>'
+                : '<div class="chat-arc-note">Sending is admin-only on this server, ' +
+                  'so you can watch every game here but not play.</div>') +
+            (empty
+                ? '<div class="chat-arc-blank">Nothing on the tables yet. Start ' +
+                  'something and it shows up for everyone in the room.</div>'
+                : section('Your games', mine) + section('Looking for an opponent', open) +
+                  section('In progress', live) + section('Finished', done.slice(0, 10))) +
+            _arcLadderHtml() +
+        '</div>';
+    }
+
+    // The room ladder. Persistent ratings with no server and no database of
+    // record — a second fold over the results the first fold produced.
+    function _arcLadderHtml() {
+        var table = window.ChatGames.ratings(_gamesState());
+        if (!table.length) return '';
+        return '<div class="chat-arc-sectitle">Room ladder' +
+                '<span class="chat-arc-count">' + table.length + '</span></div>' +
+            '<div class="chat-arc-ladder">' +
+                table.slice(0, 15).map(function (r, i) {
+                    return '<div class="chat-arc-ladrow' +
+                        (r.name === state.selfName ? ' chat-arc-ladrow--me' : '') + '">' +
+                        '<span class="chat-arc-ladno">' + (i + 1) + '</span>' +
+                        '<span class="chat-arc-ladname">' + esc(r.name) + '</span>' +
+                        '<span class="chat-arc-ladwl">' + r.wins + 'W ' + r.losses +
+                            'L ' + r.draws + 'D</span>' +
+                        '<span class="chat-arc-ladelo">' + r.rating + '</span>' +
+                    '</div>';
+                }).join('') +
+                '<div class="chat-arc-ladnote">Elo from ' + ELO_NOTE + '</div>' +
+            '</div>';
+    }
+    var ELO_NOTE = 'finished games in this room, folded the same way on every ' +
+        'client — everyone starts at 1200. Games this client joined mid-way ' +
+        'are not rated: their seats were deduced, not observed.';
+
+    function _arcBoardHtml(game) {
+        if (game.variant === 'connect4') return _arcC4BoardHtml(game);
+        if (game.variant === 'battleship') return _arcBsBoardHtml(game);
+        var E = window.ChessEngine;
+        var CG = window.ChatGames;
+        // game.fen is our OWN fold's output, not wire data — it has already
+        // been through fromWireFEN if it was ever adopted.
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return '<div class="chat-empty">This board could not be read.</div>';
+
+        var arc = state.arcade;
+        var mySeat = _arcSeat(game);
+        var voting = _arcCanVote(game);
+        var myMove = _arcMyMove(game);
+        var active = _arcActive(game);
+        // When voting, the side you are picking for is the room's, not yours.
+        var actSide = voting ? game.roomSeat : mySeat;
+        var sel = arc.sel;
+
+        // Legal destinations from the selected square, so the board can show
+        // dots instead of making people guess.
+        var dests = {};
+        if (sel >= 0 && active) {
+            E.legalMoves(pos).forEach(function (m) {
+                if (m.from === sel) dests[m.to] = 1;
+            });
+        }
+        var lastMove = null;
+        if (game.moves.length) {
+            var lu = game.moves[game.moves.length - 1];
+            lastMove = { from: E.fromAlg(lu.slice(0, 2)), to: E.fromAlg(lu.slice(2, 4)) };
+        }
+        var checkSq = -1;
+        if (E.inCheck(pos, pos.turn)) {
+            for (var s = 0; s < 128; s++) {
+                if (!E.onBoard(s)) { s += 7; continue; }
+                if (pos.board[s] === (pos.turn === 'w' ? 'K' : 'k')) { checkSq = s; break; }
+            }
+        }
+
+        var ranks = [7, 6, 5, 4, 3, 2, 1, 0];
+        var files = [0, 1, 2, 3, 4, 5, 6, 7];
+        if (arc.flip) { ranks = ranks.slice().reverse(); files = files.slice().reverse(); }
+
+        var cells = [];
+        ranks.forEach(function (r) {
+            files.forEach(function (f) {
+                var sq = E.sqOf(f, r);
+                var piece = pos.board[sq];
+                var cls = 'chat-arc-sq chat-arc-sq--' + ((f + r) % 2 === 1 ? 'light' : 'dark');
+                if (sq === sel) cls += ' chat-arc-sq--sel';
+                if (dests[sq]) cls += piece ? ' chat-arc-sq--take' : ' chat-arc-sq--dest';
+                if (lastMove && (sq === lastMove.from || sq === lastMove.to)) cls += ' chat-arc-sq--last';
+                if (sq === checkSq) cls += ' chat-arc-sq--check';
+                var mineToDrag = piece && active &&
+                    E.colorOf(piece) === actSide && game.status === 'live';
+                cells.push('<div class="' + cls + '" data-chat-arc-sq="' + sq + '"' +
+                    (mineToDrag ? ' draggable="true"' : '') +
+                    ' title="' + attr(E.toAlg(sq)) + '">' +
+                    (piece ? '<span class="chat-arc-pc chat-arc-pc--' +
+                        (E.colorOf(piece) === 'w' ? 'w' : 'b') + '">' +
+                        ARC_GLYPH[piece] + '</span>' : '') +
+                '</div>');
+            });
+        });
+
+        // Move list in real algebraic notation. It replays from the game's
+        // OWN start position, not from the opening: a game adopted mid-stream
+        // only collects the moves that arrived after this client picked it up,
+        // so numbering those from move 1 would claim the game began with them.
+        var walk = E.fromFEN(game.startFen || E.START_FEN) || E.newGame();
+        var rows = [];
+        var pending = null;
+        game.moves.forEach(function (uci) {
+            var mv = E.uciToMove(walk, uci);
+            if (!mv) return;
+            var san = E.toSAN(walk, mv);
+            var no = walk.fullmove;
+            if (walk.turn === 'w') {
+                pending = { no: no, w: san, b: '' };
+                rows.push(pending);
+            } else if (pending && pending.no === no) {
+                pending.b = san;
+            } else {
+                pending = { no: no, w: '…', b: san };   // resumed on black's move
+                rows.push(pending);
+            }
+            walk = E.makeMove(walk, mv);
+        });
+        var sanRows = rows.map(function (r) {
+            return '<div class="chat-arc-moverow"><span class="chat-arc-moveno">' +
+                r.no + '.</span><span>' + esc(r.w) + '</span><span>' +
+                esc(r.b) + '</span></div>';
+        }).join('') || '<div class="chat-arc-moverow chat-arc-moverow--none">no moves yet</div>';
+
+        var toMove = CG.toMove(game);
+        var statusLine;
+        if (game.status === 'over') {
+            statusLine = game.winner
+                ? esc(game.winner) + ' wins by ' + esc(game.reason)
+                : 'Draw — ' + esc(game.reason);
+        } else if (game.desync) {
+            statusLine = 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        } else if (game.status === 'open') {
+            statusLine = 'Waiting for an opponent to join.';
+        } else if (myMove) {
+            statusLine = 'Your move.' + (E.inCheck(pos, pos.turn) ? ' You are in check.' : '');
+        } else if (CG.isRoomTurn(game)) {
+            statusLine = 'The room is choosing' +
+                (voting ? ' — pick a move to vote for it.'
+                        : '. You are playing against them, so no ballot for you.');
+        } else {
+            statusLine = 'Waiting on ' + esc(toMove) + '.' +
+                (E.inCheck(pos, pos.turn) ? ' They are in check.' : '');
+        }
+
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-draw="' +
+                attr(game.id) + '">' +
+                (game.drawOffer && game.drawOffer !== state.selfName
+                    ? 'Accept draw' : 'Offer draw') + '</button>';
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+        if (_arcCanWithdraw(game)) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
+                attr(game.id) + '">Withdraw</button>';
+        }
+
+        var offer = (game.drawOffer && game.status === 'live')
+            ? '<div class="chat-arc-note">' + esc(game.drawOffer) + ' offered a draw.</div>' : '';
+        var partial = game.partial
+            ? '<div class="chat-arc-note">Picked up mid-game — the room archive had ' +
+              'already rolled past the opening, so the move list starts where this ' +
+              'client joined (numbered from the real move, not from 1).</div>' : '';
+
+        var promo = arc.promo
+            ? '<div class="chat-arc-promo"><span>Promote to</span>' +
+                ARC_PROMO.map(function (p) {
+                    return '<button class="chat-arc-promobtn" type="button" ' +
+                        'data-chat-arc-promo="' + p[0] + '">' + p[1] + '</button>';
+                }).join('') +
+                '<button class="chat-arc-btn" type="button" data-chat-arc-promo="">Cancel</button>' +
+              '</div>'
+            : '';
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(arc.flip ? game.white : game.black, arc.flip ? '♔' : '♚',
+                        toMove === (arc.flip ? game.white : game.black),
+                        game.roomSeat === (arc.flip ? 'w' : 'b')) +
+            '</div>' +
+            '<div class="chat-arc-board' + (game.status === 'over' ? ' chat-arc-board--over' : '') +
+                '" data-chat-arc-board="' + attr(game.id) + '">' + cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(arc.flip ? game.black : game.white, arc.flip ? '♚' : '♔',
+                        toMove === (arc.flip ? game.black : game.white),
+                        game.roomSeat === (arc.flip ? 'b' : 'w')) +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-flip title="Flip the board">⇅</button>' +
+            '</div>' +
+            promo + offer + partial + _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + statusLine + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+            '<div class="chat-arc-moves">' + sanRows + '</div>' +
+            '<div class="chat-arc-exports">' +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-pgn="' + attr(game.id) + '" ' +
+                    'title="Download a .pgn — it opens in Lichess like any other game">' +
+                    '⤓ PGN</button>' +
+                '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+                    'data-chat-arc-pgncopy="' + attr(game.id) + '">Copy PGN</button>' +
+            '</div>' +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
+    // The trick, made visible. People assume there is a server; showing the
+    // actual chat messages the board was computed from is the whole point of
+    // building it this way.
+    function _arcRevealHtml(game) {
+        var carriers = _arcCarriers(game.id);
+        var open = !!(state.arcade && state.arcade.reveal);
+        var head = '<button class="chat-arc-reveal-btn" type="button" data-chat-arc-reveal>' +
+            '⚡ no server · this board folded from ' + carriers.length +
+            ' room message' + (carriers.length === 1 ? '' : 's') +
+            '<span class="chat-arc-reveal-caret">' + (open ? '⌃' : '⌄') + '</span></button>';
+        if (!open) return '<div class="chat-arc-reveal">' + head + '</div>';
+        var rows = carriers.slice(-40).map(function (e) {
+            return '<div class="chat-arc-rawrow">' +
+                '<span class="chat-arc-rawwho">' + esc(e.username || '?') + '</span>' +
+                '<code>' + esc(JSON.stringify(e.p)) + '</code>' +
+            '</div>';
+        }).join('') || '<div class="chat-arc-rawrow">nothing in this client\'s log</div>';
+        return '<div class="chat-arc-reveal chat-arc-reveal--open">' + head +
+            '<div class="chat-arc-rawnote">These are real messages in the Soulseek ' +
+                'room. Every SoulSync client folds them into the same position; a ' +
+                'plain Soulseek client just sees them as text it ignores.</div>' +
+            '<div class="chat-arc-raw">' + rows + '</div>' +
+        '</div>';
+    }
+
+    // ── The slot machine ────────────────────────────────────────────────
+    //
+    // The one Arcade game with no opponent, which is exactly why it can use
+    // the play-money bank: there is nobody to defraud but yourself. It is NOT
+    // on the protocol bus — a solo pull is nobody else's business and would
+    // only be noise in the room.
+    //
+    // The reel strip is weighted by repetition rather than by a probability
+    // table: the symbol you want most simply appears least. Easier to reason
+    // about, and the odds are visible in the payout list rather than buried.
+    var SLOT_REEL = [
+        '🍒', '🍒', '🍒', '🍒', '🍒', '🍒',
+        '🍋', '🍋', '🍋', '🍋', '🍋',
+        '🔔', '🔔', '🔔', '🔔',
+        '💿', '💿', '💿',
+        '🎧', '🎧',
+        '💎',
+    ];
+    var SLOT_PAYS = {
+        '💎': { three: 200, two: 12 },
+        '🎧': { three: 60, two: 6 },
+        '💿': { three: 25, two: 3 },
+        '🔔': { three: 12, two: 2 },
+        '🍋': { three: 6, two: 1 },
+        '🍒': { three: 4, two: 1 },
+    };
+    var SLOT_STAKES = [5, 25, 100, 500];
+
+    function _slotPayout(reels, stake) {
+        var a = reels[0], b = reels[1], c = reels[2];
+        if (a === b && b === c) return stake * (SLOT_PAYS[a].three || 0);
+        // Two of a kind only pays on the first two reels — the usual rule, and
+        // it keeps the maths obvious when you are staring at the result.
+        if (a === b) return stake * (SLOT_PAYS[a].two || 0);
+        return 0;
+    }
+
+    function _slotSpin() {
+        var out = [];
+        for (var i = 0; i < 3; i++) {
+            out.push(SLOT_REEL[Math.floor(Math.random() * SLOT_REEL.length)]);
+        }
+        return out;
+    }
+
+    function _slotState() {
+        if (!state.arcade.slot) {
+            state.arcade.slot = { reels: ['🍒', '🍋', '🔔'], stake: 25, spinning: false,
+                                  last: null, bank: null };
+        }
+        return state.arcade.slot;
+    }
+
+    var _bankPending = 0;      // in flight, or backing off after a failure
+
+    // Rendering triggers this, so it MUST be idempotent and must not retry in
+    // a loop: without the guard a failing endpoint meant one request per
+    // render, which is the request flood all over again.
+    function _slotLoadBank(then) {
+        var now = Date.now();
+        if (_bankPending && now - _bankPending < 15000) { if (then) then(); return; }
+        _bankPending = now;
+        getJSON('/api/chat/arcade/bank').then(function (r) {
+            if (r && r.ok && r.body && typeof r.body.balance === 'number') {
+                _slotState().bank = r.body;
+                _bankPending = 0;                  // got it; free to refresh later
+            }
+            if (then) then();
+            else renderArcade();
+        }).catch(function () {
+            if (then) then();                      // stays backed off for 15s
+        });
+    }
+
+    function _slotPull() {
+        var sl = _slotState();
+        if (sl.spinning) return;
+        if (!sl.bank || sl.bank.balance < sl.stake) {
+            if (typeof showToast === 'function') showToast('Not enough in the bank', 'error');
+            return;
+        }
+        sl.spinning = true;
+        sl.last = null;
+        renderArcade();
+
+        // Debit first, then settle the win. Two calls rather than one net
+        // adjustment so a spin that is interrupted halfway costs you the
+        // stake rather than silently paying out.
+        postJSON('/api/chat/arcade/bank', { delta: -sl.stake }).then(function (r) {
+            if (!r.ok) {
+                sl.spinning = false;
+                if (typeof showToast === 'function') {
+                    showToast((r.body && r.body.error) || 'The bank said no', 'error');
+                }
+                renderArcade();
+                return;
+            }
+            sl.bank = r.body;
+            var reels = _slotSpin();
+            var win = _slotPayout(reels, sl.stake);
+            // A beat of spinning so it reads as a pull rather than a number
+            // changing. Purely cosmetic; the result is already decided.
+            var ticks = 0;
+            var timer = setInterval(function () {
+                _slotState().reels = _slotSpin();
+                renderArcade();
+                if (++ticks < 8) return;
+                clearInterval(timer);
+                var s2 = _slotState();
+                s2.reels = reels;
+                s2.spinning = false;
+                s2.last = { win: win, stake: sl.stake };
+                if (win > 0) {
+                    postJSON('/api/chat/arcade/bank', { delta: win }).then(function (r2) {
+                        if (r2.ok) s2.bank = r2.body;
+                        renderArcade();
+                    });
+                } else {
+                    renderArcade();
+                }
+            }, 90);
+        });
+    }
+
+    function _arcSlotHtml() {
+        var sl = _slotState();
+        if (!sl.bank) _slotLoadBank();
+        var bal = sl.bank ? sl.bank.balance : null;
+        var last = sl.last;
+        return '<div class="chat-slot-wrap">' +
+            '<div class="chat-slot-cab' + (sl.spinning ? ' chat-slot-cab--spin' : '') + '">' +
+                '<div class="chat-slot-reels">' +
+                    sl.reels.map(function (r) {
+                        return '<div class="chat-slot-reel">' + r + '</div>';
+                    }).join('') +
+                '</div>' +
+                '<div class="chat-slot-verdict' +
+                    (last && last.win > 0 ? ' chat-slot-verdict--win' : '') + '">' +
+                    (sl.spinning ? '…'
+                        : last ? (last.win > 0 ? '+' + last.win.toLocaleString() : 'no luck')
+                               : 'pull to play') +
+                '</div>' +
+            '</div>' +
+            '<div class="chat-slot-bank">' +
+                '<span class="chat-slot-balance">' +
+                    (bal === null ? '…' : bal.toLocaleString()) + '</span>' +
+                '<span class="chat-slot-banklabel">in the bank · back up to ' +
+                    (sl.bank ? sl.bank.allowance.toLocaleString() : '10,000') +
+                    ' at midnight if you drop below · winnings are yours</span>' +
+            '</div>' +
+            '<div class="chat-slot-stakes">' +
+                SLOT_STAKES.map(function (v) {
+                    return '<button class="chat-arc-btn' + (v === sl.stake ? ' chat-arc-btn--go' : '') +
+                        '" type="button" data-chat-slot-stake="' + v + '">' + v + '</button>';
+                }).join('') +
+                '<button class="chat-arc-btn chat-arc-btn--go chat-slot-pull" type="button" ' +
+                    'data-chat-slot-pull' + (sl.spinning ? ' disabled' : '') + '>Pull</button>' +
+            '</div>' +
+            '<div class="chat-slot-pays">' +
+                Object.keys(SLOT_PAYS).map(function (sym) {
+                    var p = SLOT_PAYS[sym];
+                    return '<div class="chat-slot-payrow"><span>' + sym + sym + sym + '</span>' +
+                        '<b>' + p.three + '×</b><span class="chat-slot-paytwo">' + sym + sym +
+                        '</span><b>' + p.two + '×</b></div>';
+                }).join('') +
+            '</div>' +
+            '<div class="chat-arc-note">Play money, kept on this machine only. It is ' +
+                'not worth anything and cannot be staked against another player — ' +
+                'nobody else can see it, so nobody else could trust it.</div>' +
+        '</div>';
+    }
+
+    // ── Battleship ──────────────────────────────────────────────────────
+    //
+    // Your fleet never goes on the wire until the reveal, so it lives in
+    // localStorage keyed by game id: it has to survive a reload, and it must
+    // not be reconstructible by anyone else from the message stream.
+    //
+    // Answers are AUTOMATIC. Your client can see your own board, so it
+    // replies truthfully to a shot without asking you anything — no "were you
+    // hit?" prompt to sit unanswered for an hour, and no opportunity to lie by
+    // accident. A determined cheater edits their client, which is the threat
+    // model this game already accepts and catches at the reveal.
+    var BS_W = 10, BS_H = 10;
+    var BS_FLEET = [
+        { id: '1', name: 'Carrier', len: 5 },
+        { id: '2', name: 'Battleship', len: 4 },
+        { id: '3', name: 'Cruiser', len: 3 },
+        { id: '4', name: 'Submarine', len: 3 },
+        { id: '5', name: 'Destroyer', len: 2 },
+    ];
+    var _bsAnswered = {};      // gid|shotCount -> already replied
+
+    function _bsCellName(i) {
+        return 'abcdefghij'[i % BS_W] + String(Math.floor(i / BS_W) + 1);
+    }
+
+    function _bsSecret(gid, save) {
+        var key = 'chat_bs_' + gid;
+        try {
+            if (save === undefined) {
+                var raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            }
+            localStorage.setItem(key, JSON.stringify(save));
+            return save;
+        } catch (e) { return null; }
+    }
+
+    // Can `len` cells starting at `idx` going `horiz` sit on this board?
+    function _bsFits(cells, idx, horiz, len) {
+        var col = idx % BS_W, row = Math.floor(idx / BS_W);
+        if (horiz && col + len > BS_W) return false;
+        if (!horiz && row + len > BS_H) return false;
+        for (var i = 0; i < len; i++) {
+            if (cells[idx + (horiz ? i : i * BS_W)] !== '.') return false;
+        }
+        return true;
+    }
+
+    function _bsRandomBoard() {
+        var cells = new Array(BS_W * BS_H).fill('.');
+        for (var f = 0; f < BS_FLEET.length; f++) {
+            var ship = BS_FLEET[f];
+            for (var tries = 0; tries < 500; tries++) {
+                var horiz = Math.random() < 0.5;
+                var idx = Math.floor(Math.random() * BS_W * BS_H);
+                if (!_bsFits(cells, idx, horiz, ship.len)) continue;
+                for (var i = 0; i < ship.len; i++) {
+                    cells[idx + (horiz ? i : i * BS_W)] = ship.id;
+                }
+                break;
+            }
+        }
+        return cells.join('');
+    }
+
+    // The placement in progress, before it is committed.
+    function _bsDraft() {
+        var arc = state.arcade;
+        if (!arc.bs) {
+            // Empty, not a random fleet. Starting full meant there was nothing
+            // left to place: clicking open water did nothing, and rotate
+            // looked broken because no placement ever happened. Random is one
+            // button away for anyone who does not want to lay it out.
+            arc.bs = { board: '.'.repeat(BS_W * BS_H), next: 0, horiz: true };
+        }
+        return arc.bs;
+    }
+
+    function _bsPlacedCount(board) {
+        var n = 0;
+        for (var f = 0; f < BS_FLEET.length; f++) {
+            if (board.indexOf(BS_FLEET[f].id) >= 0) n++;
+        }
+        return n;
+    }
+
+    // Answer a shot at us, truthfully, from the board only we hold.
+    function _bsAutoAnswer(game) {
+        if (!game || game.variant !== 'battleship' || game.status !== 'live') return;
+        var seat = _arcSeat(game);
+        if (!seat || !state.canSend) return;
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) { return; }
+        if (st.pending !== seat) return;
+        var secret = _bsSecret(game.id);
+        if (!secret || !secret.board) return;
+        var foe = seat === 'w' ? 'b' : 'w';
+        var shots = st.shots[foe] || [];
+        var idx = shots[shots.length - 1];
+        if (idx === undefined) return;
+        var key = game.id + '|' + shots.length;
+        if (_bsAnswered[key]) return;                 // one answer per shot
+        _bsAnswered[key] = 1;
+
+        var board = secret.board;
+        var res = 'miss';
+        if (board[idx] !== '.') {
+            var ship = board[idx], hit = 0, len = 0;
+            for (var i = 0; i < board.length; i++) {
+                if (board[i] !== ship) continue;
+                len++;
+                if (shots.indexOf(i) >= 0) hit++;
+            }
+            res = hit >= len ? 'sunk' : 'hit';
+        }
+        arcMove(game.id, 'r:' + res);
+    }
+
+    // Once our fleet is down we owe a reveal; send it without ceremony.
+    function _bsAutoReveal(game) {
+        if (!game || game.variant !== 'battleship' || game.status !== 'live') return;
+        var seat = _arcSeat(game);
+        if (!seat || !state.canSend) return;
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) { return; }
+        if (!st.sunkAll || st.reveal[seat]) return;
+        var secret = _bsSecret(game.id);
+        if (!secret || !secret.board || !secret.salt) return;
+        arcMove(game.id, 'v:' + secret.salt + ':' + secret.board);
+    }
+
+    function _bsTick() {
+        if (!_arcReady()) return;
+        var st = _gamesState();
+        st.order.forEach(function (id) {
+            var g = st.games[id];
+            if (!g || g.variant !== 'battleship') return;
+            _bsAutoAnswer(g);
+            _bsAutoReveal(g);
+        });
+    }
+
+    function _arcBsBoardHtml(game) {
+        var arc = state.arcade;
+        var seat = _arcSeat(game);
+        var st;
+        try { st = JSON.parse(game.fen); } catch (e) {
+            return '<div class="chat-empty">This board could not be read.</div>';
+        }
+        var foe = seat === 'w' ? 'b' : 'w';
+        var secret = _bsSecret(game.id);
+        var committed = seat ? !!st.commits[seat] : false;
+
+        // ── setup ──
+        if (seat && !committed) {
+            var draft = _bsDraft();
+            var placed = _bsPlacedCount(draft.board);
+            var nextShip = BS_FLEET[draft.next];
+            var cells = [];
+            for (var i = 0; i < BS_W * BS_H; i++) {
+                var v = draft.board[i];
+                cells.push('<div class="chat-bs-cell' + (v !== '.' ? ' chat-bs-cell--ship' : '') +
+                    '" data-chat-bs-place="' + i + '" title="' + attr(_bsCellName(i)) + '"></div>');
+            }
+            return '<div class="chat-arc-board-wrap">' +
+                '<div class="chat-bs-title">Lay out your fleet</div>' +
+                '<div class="chat-bs-grid chat-bs-grid--own">' + cells.join('') + '</div>' +
+                '<div class="chat-bs-fleetbar">' +
+                    BS_FLEET.map(function (sh, n) {
+                        var done = draft.board.indexOf(sh.id) >= 0;
+                        return '<span class="chat-bs-ship' + (done ? ' chat-bs-ship--set' : '') +
+                            (n === draft.next && !done ? ' chat-bs-ship--next' : '') + '">' +
+                            esc(sh.name) + ' <b>' + sh.len + '</b></span>';
+                    }).join('') +
+                '</div>' +
+                '<div class="chat-arc-actions">' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-random>🎲 Random</button>' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-rotate ' +
+                        'title="Which way the next ship lies">↻ Rotate — laying ' +
+                        (draft.horiz ? '↔ across' : '↕ down') + '</button>' +
+                    '<button class="chat-arc-btn" type="button" data-chat-bs-clear>Clear</button>' +
+                    (placed === BS_FLEET.length
+                        ? '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                          'data-chat-bs-commit="' + attr(game.id) + '">Commit fleet</button>'
+                        : '') +
+                    // Setup returns early with its own action row, so without
+                    // this the creator lands here and has no way back out.
+                    (_arcCanWithdraw(game)
+                        ? '<button class="chat-arc-btn" type="button" ' +
+                          'data-chat-arc-cancel="' + attr(game.id) + '">Withdraw</button>'
+                        : '') +
+                    (game.status === 'live'
+                        ? '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                          'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>'
+                        : '') +
+                '</div>' +
+                '<div class="chat-arc-note">Your layout stays on this machine. Only a ' +
+                    'fingerprint of it goes to the room now — the fleet itself is revealed ' +
+                    'at the end, and every answer you gave is checked against it.</div>' +
+                (nextShip && placed < BS_FLEET.length
+                    ? '<div class="chat-arc-status">Place your ' + esc(nextShip.name) +
+                      ' (' + nextShip.len + ' cells, lying ' +
+                      (draft.horiz ? 'across' : 'down') + ') — click where it starts. ' +
+                      'Click a placed ship to pick it up again.</div>'
+                    : '<div class="chat-arc-status">Fleet ready — commit when you are.</div>') +
+                _arcRevealHtml(game) +
+            '</div>';
+        }
+
+        // ── waiting for the opponent to finish placing ──
+        var bothIn = st.commits.w && st.commits.b;
+        var myShots = seat ? (st.shots[seat] || []) : (st.shots.w || []);
+        var myResults = seat ? (st.results[seat] || []) : (st.results.w || []);
+        var theirShots = seat ? (st.shots[foe] || []) : (st.shots.b || []);
+
+        // their waters — what we have fired at
+        var theirs = [];
+        for (var t = 0; t < BS_W * BS_H; t++) {
+            var at2 = myShots.indexOf(t);
+            var mark = at2 >= 0 ? (myResults[at2] || '') : '';
+            var cls = 'chat-bs-cell';
+            if (mark === 'miss') cls += ' chat-bs-cell--miss';
+            else if (mark === 'hit' || mark === 'sunk') cls += ' chat-bs-cell--hit';
+            var live = bothIn && seat && !st.pending && !st.sunkAll &&
+                       st.turn === seat && at2 < 0 && game.status === 'live' && state.canSend;
+            theirs.push('<div class="' + cls + (live ? ' chat-bs-cell--fire' : '') + '"' +
+                (live ? ' data-chat-bs-fire="' + t + '"' : '') +
+                ' title="' + attr(_bsCellName(t)) + '"></div>');
+        }
+        // our waters — our fleet plus where they have fired
+        var ourBoard = (secret && secret.board) || '.'.repeat(BS_W * BS_H);
+        var ours = [];
+        for (var o = 0; o < BS_W * BS_H; o++) {
+            var cls2 = 'chat-bs-cell';
+            if (ourBoard[o] !== '.') cls2 += ' chat-bs-cell--ship';
+            if (theirShots.indexOf(o) >= 0) {
+                cls2 += ourBoard[o] !== '.' ? ' chat-bs-cell--hit' : ' chat-bs-cell--miss';
+            }
+            ours.push('<div class="' + cls2 + '" title="' + attr(_bsCellName(o)) + '"></div>');
+        }
+
+        var status;
+        if (game.status === 'over') {
+            status = game.reason === 'cheating'
+                ? esc(game.winner) + ' wins — the other fleet did not match what was committed'
+                : esc(game.winner) + ' wins — fleet sunk';
+        } else if (!bothIn) {
+            status = 'Waiting for the other fleet to be laid out.';
+        } else if (st.sunkAll) {
+            status = 'All ships down. Both fleets are being revealed and checked.';
+        } else if (st.pending) {
+            status = st.pending === seat ? 'Answering…' : 'Waiting for their answer.';
+        } else if (seat && st.turn === seat) {
+            status = 'Your shot — pick a square in their waters.';
+        } else {
+            status = 'Waiting on ' + esc(window.ChatGames.toMove(game) || 'them') + '.';
+        }
+
+        var actions = '';
+        if (state.canSend && seat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !seat && game.status === 'open') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        // The board had no way out at all: no withdraw before anyone joined,
+        // and nothing to take an idle seat with.
+        if (_arcCanWithdraw(game)) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-cancel="' +
+                attr(game.id) + '">Withdraw</button>';
+        }
+        if (state.canSend && !seat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-bs-title">Their waters</div>' +
+            '<div class="chat-bs-grid chat-bs-grid--foe">' + theirs.join('') + '</div>' +
+            '<div class="chat-bs-title">Your fleet' +
+                (secret ? '' : ' <span class="chat-bs-lost">(this browser no longer has your ' +
+                 'layout — it was stored locally)</span>') + '</div>' +
+            '<div class="chat-bs-grid chat-bs-grid--own">' + ours.join('') + '</div>' +
+            '<div class="chat-arc-status">' + status + '</div>' +
+            (actions ? '<div class="chat-arc-actions">' + actions + _arcSyncActions(game) + '</div>'
+                     : '') +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
+    // Connect 4 board. Same shell as chess — players line, board, status,
+    // actions, exports, reveal — so everything around it is shared. The board
+    // itself is a 7x6 grid where the whole COLUMN is the click target: you
+    // drop into a column, you do not place into a cell, and making people aim
+    // at the right cell would be pretending otherwise.
+    function _arcC4BoardHtml(game) {
+        var CG = window.ChatGames;
+        var cols = CG.C4_COLS, rows = CG.C4_ROWS;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var mySeat = _arcSeat(game);
+        var myMove = _arcMyMove(game);
+        var voting = _arcCanVote(game);
+        var active = _arcActive(game);
+
+        var cells = [];
+        // Render top row first so the grid reads the way the board looks.
+        for (var r = rows - 1; r >= 0; r--) {
+            for (var c = 0; c < cols; c++) {
+                var who = body[r * cols + c] || '.';
+                var full = (body[(rows - 1) * cols + c] || '.') !== '.';
+                var playable = active && !full && game.status === 'live' && state.canSend;
+                cells.push('<div class="chat-arc-c4cell' +
+                    (playable ? ' chat-arc-c4cell--live' : '') + '"' +
+                    (playable ? ' data-chat-arc-col="' + c + '"' : '') + '>' +
+                    '<span class="chat-arc-disc' +
+                        (who === 'w' ? ' chat-arc-disc--w' : (who === 'b' ? ' chat-arc-disc--b' : '')) +
+                    '"></span></div>');
+            }
+        }
+
+        var toMove = CG.toMove(game);
+        var statusLine;
+        if (game.status === 'over') {
+            statusLine = game.winner
+                ? esc(game.winner) + ' wins — ' + esc(game.reason)
+                : 'Draw — ' + esc(game.reason);
+        } else if (game.desync) {
+            statusLine = 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        } else if (game.status === 'open') {
+            statusLine = 'Waiting for an opponent to join.';
+        } else if (myMove) {
+            statusLine = 'Your move — pick a column.';
+        } else if (CG.isRoomTurn(game)) {
+            statusLine = 'The room is choosing' +
+                (voting ? ' — pick a column to vote for it.'
+                        : '. You are playing against them, so no ballot for you.');
+        } else {
+            statusLine = 'Waiting on ' + esc(toMove) + '.';
+        }
+
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+        var partial = game.partial
+            ? '<div class="chat-arc-note">Picked up mid-game — the room archive had ' +
+              'already rolled past the start.</div>' : '';
+
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '🟡', toMove === game.black, game.roomSeat === 'b') +
+            '</div>' +
+            '<div class="chat-arc-c4board' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '🔴', toMove === game.white, game.roomSeat === 'w') +
+            '</div>' +
+            partial + _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + statusLine + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+            _arcRevealHtml(game) +
+        '</div>';
+    }
+
+    // Click a square to drop the next unplaced ship there.
+    function _bsPlaceAt(idx) {
+        var draft = _bsDraft();
+        if (!(idx >= 0 && idx < BS_W * BS_H)) return;
+        // Clicking a placed ship picks it back up, so a misplacement is one
+        // click to undo rather than a full Clear.
+        var occupant = draft.board[idx];
+        if (occupant !== '.') {
+            draft.board = draft.board.split('').map(function (c) {
+                return c === occupant ? '.' : c;
+            }).join('');
+            for (var f = 0; f < BS_FLEET.length; f++) {
+                if (BS_FLEET[f].id === occupant) draft.next = f;
+            }
+            renderArcade();
+            return;
+        }
+        // Next ship still needing a home.
+        var ship = null;
+        for (var i = 0; i < BS_FLEET.length; i++) {
+            if (draft.board.indexOf(BS_FLEET[i].id) < 0) { ship = BS_FLEET[i]; draft.next = i; break; }
+        }
+        if (!ship) return;
+        var cells = draft.board.split('');
+        if (!_bsFits(cells, idx, draft.horiz, ship.len)) {
+            if (typeof showToast === 'function') showToast('It does not fit there', 'error');
+            return;
+        }
+        for (var j = 0; j < ship.len; j++) {
+            cells[idx + (draft.horiz ? j : j * BS_W)] = ship.id;
+        }
+        draft.board = cells.join('');
+        renderArcade();
+    }
+
+    // Publish only the fingerprint. The fleet itself stays here until the end.
+    function _bsCommit(gid) {
+        var draft = _bsDraft();
+        if (_bsPlacedCount(draft.board) !== BS_FLEET.length) return;
+        var H = window.ChatHash;
+        if (!H) return;
+        var salt = H.salt();
+        _bsSecret(gid, { salt: salt, board: draft.board });
+        state.arcade.bs = null;
+        arcMove(gid, 'c:' + H.commit(salt, draft.board));
+    }
+
+    function _arcColumnClick(col) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live' || game.variant !== 'connect4') return;
+        if (!_arcActive(game) || !state.canSend) return;
+        if (!/^[0-6]$/.test(String(col))) return;
+        if (_arcCanVote(game)) arcVote(game.id, String(col));
+        else arcMove(game.id, String(col));
+    }
+
+    // ── Board interaction ───────────────────────────────────────────────
+    // Click-to-select then click-to-move, with drag as an alternative. Click
+    // first because it is the only one that works on a phone.
+
+    function _arcTryMove(game, from, to) {
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return false;
+        // A pawn reaching the last rank needs a piece chosen before the move
+        // can be sent — under-promotion is occasionally the only winning move,
+        // so we ask rather than assuming a queen.
+        var needsPromo = E.legalMoves(pos).some(function (m) {
+            return m.from === from && m.to === to && m.promo;
+        });
+        if (needsPromo) {
+            state.arcade.promo = { from: from, to: to };
+            renderArcade();
+            return true;
+        }
+        var uci = E.toAlg(from) + E.toAlg(to);
+        if (!E.uciToMove(pos, uci)) return false;
+        if (_arcCanVote(game)) arcVote(game.id, uci);
+        else arcMove(game.id, uci);
+        return true;
+    }
+
+    // "Have they seen it?" — free, from carriers we already send. Any move,
+    // sync or state a player emits proves what they knew at the time, so no
+    // acknowledgement round trip is needed to show this.
+    function _arcAckHtml(game) {
+        if (!game || game.status !== 'live' || game.desync) return '';
+        var mySeat = _arcSeat(game);
+        if (!mySeat || game.roomSeat) return '';
+        var opp = mySeat === 'w' ? game.black : game.white;
+        if (!opp) return '';
+        if (_arcMyMove(game)) return '';            // it is our turn; nothing to confirm
+        var mine = game.ply - 1;                    // the ply our last move occupied
+        if (mine < 0) return '';
+        var seen = (game.ack[opp] || -1) >= mine;
+        if (seen) {
+            return '<div class="chat-arc-ack chat-arc-ack--seen">✓ ' + esc(opp) +
+                ' has seen your move</div>';
+        }
+        var mins = Math.floor((Date.now() - game.lastAt) / 60000);
+        return '<div class="chat-arc-ack">◌ not acknowledged yet' +
+            (mins >= 5 ? ' · ' + (mins >= 120 ? Math.floor(mins / 60) + 'h' : mins + 'm') +
+                         ' — asking the room where the game is' : '') +
+        '</div>';
+    }
+
+    // Actions that exist on every board regardless of variant.
+    function _arcSyncActions(game) {
+        if (!state.canSend || !_arcSeat(game)) return '';
+        if (game.desync) {
+            return '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-accept="' + attr(game.id) + '" ' +
+                'title="Take your opponent\'s position and carry on — the only ' +
+                'thing that unfreezes a disagreement">Accept their position</button>';
+        }
+        if (game.status !== 'live') return '';
+        return '<button class="chat-arc-btn chat-arc-btn--slim" type="button" ' +
+            'data-chat-arc-sync="' + attr(game.id) + '" ' +
+            'title="Ask the room where this game actually is">⟳ Sync</button>';
+    }
+
+    // The room's ballot for the current ply: what has been picked so far and
+    // how close each option is to carrying.
+    function _arcBallotHtml(game) {
+        var CG = window.ChatGames;
+        if (!CG.isRoomTurn(game)) return '';
+        var E = window.ChessEngine;
+        var pos = game.variant === 'chess' ? E.fromFEN(game.fen) : null;
+        var names = Object.keys(game.votes || {});
+        if (!names.length) {
+            return '<div class="chat-arc-note">No votes yet. ' + game.voteK +
+                ' people picking the same move commits it.</div>';
+        }
+        names.sort(function (a, b) {
+            if (game.votes[b] !== game.votes[a]) return game.votes[b] - game.votes[a];
+            return a < b ? -1 : 1;
+        });
+        return '<div class="chat-arc-ballot">' +
+            '<div class="chat-arc-ballot-head">Room ballot · ' + game.voteK +
+                ' to carry</div>' +
+            names.map(function (uci) {
+                var mv = pos && E.uciToMove(pos, uci);
+                var label = mv ? E.toSAN(pos, mv)
+                    : (game.variant === 'connect4' ? 'column ' + (parseInt(uci, 10) + 1) : uci);
+                var n = game.votes[uci];
+                return '<div class="chat-arc-ballotrow">' +
+                    '<span class="chat-arc-ballotmv">' + esc(label) + '</span>' +
+                    '<span class="chat-arc-ballotbar"><i style="width:' +
+                        Math.min(100, Math.round(n / game.voteK * 100)) + '%"></i></span>' +
+                    '<span class="chat-arc-ballotn">' + n + '/' + game.voteK + '</span>' +
+                '</div>';
+            }).join('') +
+        '</div>';
+    }
+
+    function _arcSquareClick(sq) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live') return;
+        var E = window.ChessEngine;
+        var pos = E.fromFEN(game.fen);
+        if (!pos) return;
+        var voting = _arcCanVote(game);
+        var actSide = voting ? game.roomSeat : _arcSeat(game);
+        if (!_arcActive(game) || !state.canSend) return;   // spectators just look
+
+        var piece = pos.board[sq];
+        if (arc.sel >= 0 && _arcTryMove(game, arc.sel, sq)) return;
+        // Selecting one of your own pieces (or re-selecting) never fails.
+        if (piece && E.colorOf(piece) === actSide) {
+            arc.sel = (arc.sel === sq) ? -1 : sq;
+        } else {
+            arc.sel = -1;
+        }
+        renderArcade();
+    }
+
+    // Drag is an ALTERNATIVE to click, never the only way in: click-to-move
+    // is the one that works on a phone, so drag is bound as an enhancement on
+    // top of it and both funnel into the same _arcTryMove.
+    function _arcBindDrag() {
+        var page = document.getElementById('chat-page');
+        if (!page || page._arcDragBound) return;
+        page._arcDragBound = true;
+        var from = -1;
+        page.addEventListener('dragstart', function (e) {
+            var sq = e.target.closest && e.target.closest('[data-chat-arc-sq]');
+            if (!sq || !_arcOn()) { return; }
+            from = parseInt(sq.getAttribute('data-chat-arc-sq'), 10);
+            if (state.arcade) { state.arcade.sel = from; renderArcade(); }
+            try { e.dataTransfer.setData('text/plain', String(from)); } catch (err) { /* ok */ }
+        });
+        page.addEventListener('dragover', function (e) {
+            if (!_arcOn()) return;
+            if (e.target.closest && e.target.closest('[data-chat-arc-sq]')) e.preventDefault();
+        });
+        page.addEventListener('drop', function (e) {
+            if (!_arcOn()) return;
+            var sq = e.target.closest && e.target.closest('[data-chat-arc-sq]');
+            if (!sq) return;
+            e.preventDefault();
+            var to = parseInt(sq.getAttribute('data-chat-arc-sq'), 10);
+            var game = state.arcade.game ? _arcGame(state.arcade.game) : null;
+            if (game && game.status === 'live' && from >= 0 && to >= 0 &&
+                state.canSend && _arcActive(game)) {
+                _arcTryMove(game, from, to);
+            }
+            from = -1;
+        });
+    }
+
+    function renderUserPanel() {
+        var host = q('[data-chat-userpanel]');
+        if (!host) return;
+        var name = state.selfName || 'You';
+        var initials = String(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        // Your own strip was the one place the chosen avatar never reached —
+        // message rows, the member list and the picker all had it.
+        var av = _myAvatar();
+        host.innerHTML =
+            '<div class="chat-userpanel-av' + (av ? ' chat-userpanel-av--img' : '') + '">' +
+                (av ? '<img src="/static/avatar/' + av + '.png" alt="" loading="lazy">'
+                    : esc(initials)) +
+            '</div>' +
+            '<div class="chat-userpanel-main">' +
+                '<div class="chat-userpanel-name">' + esc(name) + '</div>' +
+                '<div class="chat-userpanel-sub">' +
+                    (state.canSend ? 'Online' : 'Read-only') + '</div>' +
+            '</div>' +
+            (state.isAdmin
+                ? '<button class="chat-userpanel-btn" type="button" data-chat-settings-btn ' +
+                    'title="Chat settings">⚙</button>'
+                : '');
     }
 
     function renderHead() {
@@ -751,8 +2656,32 @@
             ? esc(topic.t)
             : (isHome ? 'the SoulSync community room on Soulseek'
                       : 'a public Soulseek room');
+        // A stale/unknown persisted slug must never strand the user on an empty
+        // view — snap back to the default before anything renders against it.
+        if (!_chanKnown(state.channel)) state.channel = CHAT_DEFAULT_CHANNEL;
+        // The Arcade owns the whole head: the room controls below (history
+        // search, pins, jukebox, the SoulSync-only filter) all act on the
+        // message list, and there is no message list here.
+        if (_arcOn()) {
+            head.innerHTML = ((state.arcade.game || state.arcade.slots)
+                ? '<button class="chat-thread-back" type="button" data-chat-arc-home ' +
+                      'title="Back to the Arcade">&larr;</button>' +
+                  '<span class="chat-head-title">' +
+                      (state.arcade.slots ? '🎰 slots' : '🎲 game') + '</span>'
+                : '<span class="chat-head-title">🎲 arcade</span>') +
+                '<span class="chat-head-sub">no server — every board here is folded ' +
+                    'out of this room&rsquo;s messages</span>' +
+                (state.isAdmin ? '<button class="chat-cog-btn" type="button" ' +
+                    'data-chat-settings-btn title="Chat settings">⚙</button>' : '');
+            return;
+        }
         head.innerHTML = state.view === 'room'
-            ? '<span class="chat-head-title"># ' + esc(state.room || '') + '</span>' +
+            ? (state.thread && _chanRoom()
+                ? '<button class="chat-thread-back" type="button" data-chat-thread-close ' +
+                      'title="Back to #' + attr(state.channel) + '">&larr;</button>' +
+                  '<span class="chat-head-title">🧵 ' + esc(state.thread.name || 'Thread') + '</span>'
+                : '<span class="chat-head-title">#' +
+                      esc(_chanRoom() ? state.channel : (state.room || '')) + '</span>') +
               '<span class="chat-head-sub' + (topic ? ' chat-head-sub--topic' : '') + '"' +
                   (topic ? ' title="topic set by ' + attr(topic.by) + '"' : '') + '>' + subText +
                   (state.canSend
@@ -788,12 +2717,17 @@
         var form = q('[data-chat-composer]');
         var input = q('[data-chat-input]');
         if (!form || !input) return;
+        // The Arcade is a view, not a channel — there is no message to send
+        // into it, and a composer would imply one.
+        if (_arcOn()) { form.hidden = true; return; }
         form.hidden = false;   // the join gate hides it; every normal render restores it
         form.classList.toggle('chat-composer--locked', !state.canSend);
         input.disabled = !state.canSend;
         input.placeholder = state.canSend
-            ? (state.view === 'room' ? 'Message # ' + (state.room || '') + '…'
-                                     : 'Message ' + (state.pmUser || '') + '…')
+            ? (state.view === 'room'
+                ? 'Message #' + (_chanRoom() ? (state.channel || CHAT_DEFAULT_CHANNEL)
+                                             : (state.room || '')) + '…'
+                : 'Message ' + (state.pmUser || '') + '…')
             : 'Read-only — chat sending is admin-only on this server';
         // Formatting only exists inside the envelope — the toolbar is a ROOM
         // thing (PMs are plaintext for non-SoulSync readers + the ProveIt bots).
@@ -1356,6 +3290,24 @@
             el = q('[data-chat-set-autojoin]'); if (el) el.checked = !!b.auto_join;
             el = q('[data-chat-set-membersend]'); if (el) el.checked = !!b.member_send;
             el = q('[data-chat-set-autoprove]'); if (el) el.checked = !!b.auto_prove;
+            // ping is a LOCAL preference (this browser only) — not server state
+            el = q('[data-chat-set-ping]');
+            if (el) {
+                var pOn = false;
+                try { pOn = localStorage.getItem('chat_ping') === '1'; } catch (err) { /* ignore */ }
+                el.checked = pOn;
+            }
+            el = q('[data-chat-set-np]');
+            if (el) {
+                var nOn = false;
+                try { nOn = localStorage.getItem('chat_np') === '1'; } catch (err) { /* ignore */ }
+                el.checked = nOn;
+            }
+            // server copy wins on open — it's the one that followed the account
+            if (typeof b.avatar !== 'undefined') {
+                try { localStorage.setItem('chat_avatar', String(_avatarId(b.avatar))); } catch (err) { /* ignore */ }
+            }
+            renderAvatarPicker();
             overlay.hidden = false;
         });
     }
@@ -1376,6 +3328,19 @@
         if (fEl && fEl.value.trim()) payload.filepost_key = fEl.value.trim();
         var xEl = q('[data-chat-set-filepost-expiry]');
         if (xEl) payload.filepost_expiry = xEl.value || '';
+        // local-only: the mention ping never leaves this browser
+        var pEl = q('[data-chat-set-ping]');
+        if (pEl) {
+            try { localStorage.setItem('chat_ping', pEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+        }
+        var nEl = q('[data-chat-set-np]');
+        if (nEl) {
+            try { localStorage.setItem('chat_np', nEl.checked ? '1' : '0'); } catch (err) { /* ignore */ }
+            // Turning it OFF must retract what the room already sees.
+            if (!nEl.checked && state.canSend && state.view === 'room') {
+                try { sendProtocol('np.set', {}); } catch (err) { /* not in a room */ }
+            }
+        }
         postJSON('/api/chat/settings', payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -1602,6 +3567,191 @@
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
 
+    // ── preset avatars ─────────────────────────────────────────────────────
+    // webui/static/avatar/1.png .. N.png. The id is an INDEX into that fixed
+    // set and is bounds-checked everywhere it crosses the wire — it must never
+    // be interpolated into a path. Unknown/absent falls back to initials, so a
+    // missing file or an old client never renders broken.
+    var CHAT_AVATARS = 100;
+    // Avatars only their owner may wear (id -> slskd username, casefolded).
+    // Hidden from everyone else's picker AND refused at render, because the
+    // envelope is client-controlled — otherwise anyone could forge the id and
+    // wear someone else's face. Mirrored in api/chat.py (RESERVED_AVATARS).
+    var RESERVED_AVATARS = { 100: 'boulderbadgedad' };
+
+    function _avatarId(raw) {
+        var n = parseInt(raw, 10);
+        return (n >= 1 && n <= CHAT_AVATARS) ? n : 0;      // 0 = none
+    }
+
+    function _avatarAllowed(id, username) {
+        var owner = RESERVED_AVATARS[_avatarId(id)];
+        if (!owner) return true;
+        return String(username || '').trim().toLowerCase() === owner;
+    }
+
+    function _myAvatar() {
+        try { return _avatarId(localStorage.getItem('chat_avatar')); } catch (e) { return 0; }
+    }
+
+    // username -> avatar id, from the hello beacons AND from anything they've
+    // said (messages carry the id, so history alone is enough to paint faces).
+    function _avatarMap() {
+        var out = {};
+        if (window.ChatProtocol && window.ChatProtocol.reduceAvatars) {
+            out = window.ChatProtocol.reduceAvatars(_roomEvents(), CHAT_AVATARS);
+        }
+        (state.msgs || []).forEach(function (m) {
+            var n = _avatarId(m && m.av);
+            if (n && typeof m.username === 'string') out[m.username] = n;
+        });
+        if (state.selfName && _myAvatar()) out[state.selfName] = _myAvatar();
+        // Drop any reserved avatar claimed by someone who doesn't own it —
+        // they fall back to initials rather than wearing another user's face.
+        Object.keys(out).forEach(function (u) {
+            if (!_avatarAllowed(out[u], u)) delete out[u];
+        });
+        return out;
+    }
+
+    // The avatar element for a user: the chosen picture, else initials.
+    function _avatarHtml(name, avId, extraClass) {
+        var initials = String(name || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+        var cls = 'chat-av' + (extraClass ? ' ' + extraClass : '');
+        var n = _avatarId(avId);
+        if (n) {
+            return '<span class="' + cls + ' chat-av--img">' +
+                '<img src="/static/avatar/' + n + '.png" alt="" loading="lazy" ' +
+                    'onerror="this.parentElement.classList.remove(\'chat-av--img\');' +
+                    'this.parentElement.textContent=' + attr(JSON.stringify(initials)) + ';">' +
+            '</span>';
+        }
+        return '<span class="' + cls + '">' + esc(initials) + '</span>';
+    }
+
+    function renderAvatarPicker() {
+        var host = q('[data-chat-avpicker]');
+        if (!host) return;
+        // Reserved avatars are gated on our slskd name, so if it hasn't loaded
+        // yet, fetch it and repaint — otherwise the owner's own avatar would be
+        // hidden from them on a cold open.
+        if (!state.selfName) {
+            getJSON('/api/chat/status').then(function (res) {
+                if (res.ok && res.body && res.body.username) {
+                    state.selfName = String(res.body.username);
+                    renderAvatarPicker();
+                }
+            });
+        }
+        var cur = _myAvatar();
+        var cells = ['<button type="button" class="chat-avpick' + (cur ? '' : ' chat-avpick--on') +
+            ' chat-avpick--none" data-chat-avpick="0" title="No avatar (use initials)">&times;</button>'];
+        for (var i = 1; i <= CHAT_AVATARS; i++) {
+            // reserved avatars only appear for the account they belong to
+            if (!_avatarAllowed(i, state.selfName)) continue;
+            cells.push('<button type="button" class="chat-avpick' + (i === cur ? ' chat-avpick--on' : '') +
+                '" data-chat-avpick="' + i + '" title="Avatar ' + i + '">' +
+                // lazy so opening settings doesn't pull them all at once
+                '<img src="/static/avatar/' + i + '.png" alt="" loading="lazy"></button>');
+        }
+        host.innerHTML = cells.join('');
+        // Show which Soulseek identity the picker is using. Reserved avatars are
+        // gated on this exact name, so when one is missing this line says why
+        // instead of the option just silently not being there.
+        var who = q('[data-chat-avwho]');
+        if (who) {
+            who.textContent = state.selfName
+                ? 'Soulseek: ' + state.selfName
+                : 'Soulseek name not reported by slskd yet';
+        }
+    }
+
+    function pickAvatar(raw) {
+        var n = _avatarId(raw);                    // 0 clears
+        // localStorage is the fast local cache every send reads; the server copy
+        // is the source of truth so the choice follows the account to another
+        // browser. Write both — the local one first so nothing waits on a fetch.
+        try { localStorage.setItem('chat_avatar', String(n)); } catch (e) { /* private mode */ }
+        postJSON('/api/chat/settings', { avatar: n }).catch(function () { /* local still applies */ });
+        renderAvatarPicker();
+        renderUserPanel();          // the account strip carries it too
+        // Announce it now so the room repaints without waiting for us to talk.
+        if (state.canSend && state.view === 'room') {
+            try { sendProtocol('hello', n ? { av: n } : {}); } catch (e) { /* not in a room */ }
+        }
+        state.lastRendered = '';
+        renderUsersList();
+    }
+
+    // ── now-playing sharing (opt-in) ───────────────────────────────────────
+    // The media player calls this whenever the local track changes; we relay it
+    // to the room as np.set so the member list can show what everyone's on.
+    // OFF by default and gated behind chat_np — this is a PUBLIC Soulseek room,
+    // and what you listen to is nobody's business unless you say so.
+    var _npLast = '';
+    var _npLastAt = 0;
+
+    function _npEnabled() {
+        try { return localStorage.getItem('chat_np') === '1'; } catch (e) { return false; }
+    }
+
+    window.__ssNowPlaying = function (track) {
+        if (!_npEnabled() || !state.canSend || state.view !== 'room') return;
+        var t = String((track && (track.title || track.name)) || '').slice(0, 120);
+        var a = String((track && track.artist) || '').slice(0, 80);
+        var sig = t + ' | ' + a;
+        if (sig === _npLast) return;                       // same track, no chatter
+        if (t && Date.now() - _npLastAt < 5000) return;    // rapid skipping: don't spam
+        _npLast = sig;
+        _npLastAt = Date.now();
+        sendProtocol('np.set', t ? { t: t, a: a } : {});    // empty payload = stopped
+    };
+
+    // ── mention/reply ping (opt-in) ────────────────────────────────────────
+    // Fires only for someone ELSE @-mentioning us or replying to one of our
+    // messages. Never our own text, throttled so a burst can't machine-gun,
+    // and silent until the user turns it on (chat_ping localStorage).
+    var _lastPingAt = 0;
+
+    function _pingWorthy(m) {
+        // Armed only AFTER the first merge for a room: opening a room (and
+        // paging scrollback) replays the archive through here, and every old
+        // mention would fire a ping.
+        if (!state.pingArmed || state.loadingOlder) return false;
+        if (!m || !state.selfName) return false;
+        if (m.username === state.selfName || m.self === true || m.direction === 'Out') return false;
+        if (mentionsMe(m.message)) return true;
+        return !!(m.reply && m.reply.u && m.reply.u === state.selfName);
+    }
+
+    function _chatPing() {
+        var on = false;
+        try { on = localStorage.getItem('chat_ping') === '1'; } catch (e) { /* private mode */ }
+        if (!on) return;
+        var now = Date.now();
+        if (now - _lastPingAt < 4000) return;         // one ping per burst
+        _lastPingAt = now;
+        // Synthesized two-tone blip — no asset to ship, no autoplay policy fight
+        // (the user has already interacted with the page by the time this fires).
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            var ctx = _chatPing._ctx || (_chatPing._ctx = new Ctx());
+            if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+            [[880, 0], [1245, 0.09]].forEach(function (pair) {
+                var osc = ctx.createOscillator(), gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = pair[0];
+                var t0 = ctx.currentTime + pair[1];
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(t0); osc.stop(t0 + 0.18);
+            });
+        } catch (e) { /* audio unavailable — stay silent */ }
+    }
+
     function mergeMessages(incoming) {
         var byKey = {};
         state.msgs.forEach(function (m) { byKey[_msgKey(m)] = m; });
@@ -1611,6 +3761,7 @@
             var existing = byKey[k];
             if (!existing) {
                 byKey[k] = m; state.msgs.push(m); added++;
+                if (_pingWorthy(m)) _chatPing();
             } else {
                 // Reactions are server-side aggregate state that changes over a
                 // message's life. mergeMessages used to only ADD new messages,
@@ -1630,6 +3781,7 @@
                 return String(a.timestamp || '').localeCompare(String(b.timestamp || ''));
             });
         }
+        state.pingArmed = true;   // the archive is in; from here on, pings are real
         // renderMessages skips a repaint when the newest-timestamp+count is
         // unchanged — a reaction change moves neither, so force the repaint.
         if (reactionsChanged) state.lastStamp = null;
@@ -1801,13 +3953,17 @@
         if (state.room && state.room !== nextRoom) {
             _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
             state.jukebox.lastRendered = '';
+            state.jukebox.nowSeen = null;   // new room, new event stream, new clock base
             state.pinsOpen = false;
             state.pollDismissedAt = null;
         }
         state.room = nextRoom;
+        state.thread = null;         // threads are per-room (and home-room only)
+        state.arcade = null;         // ditto the Arcade — games are room-scoped
         state.topicEditing = false;
         state.typing = {};
         state.typingArmedAt = Date.now() + 2000;   // archive replay isn't live typing
+        state.pingArmed = false;                   // ...and archive mentions aren't new pings
         renderTyping();
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
@@ -1947,6 +4103,11 @@
         if (!input) return;
         var text = (input.value || '').trim();
         if (!text || !state.canSend) return;
+        // Belt and braces: the composer is hidden in the Arcade, but a stray
+        // Enter must not post into whichever channel was last open — the user
+        // is looking at a chessboard, not at that channel, so the message
+        // would vanish from their view the moment it sent.
+        if (_arcOn()) { input.value = ''; return; }
         state.lastTypSentAt = 0;
         if (state.view === 'room' && text[0] === '/') {
             var slash = _runSlash(text);
@@ -1965,7 +4126,19 @@
             ? '/api/chat/room/message'
             : '/api/chat/conversations/' + encodeURIComponent(state.pmUser);
         var payload = { message: text };
-        if (state.view === 'room') payload.room = state.room || '';
+        if (state.view === 'room') {
+            payload.room = state.room || '';
+            if (_myAvatar()) payload.avatar = _myAvatar();   // rides the envelope
+            // Only the SoulSync room carries channel/thread tags — a message in
+            // any other room stays a plain room message.
+            if (_chanRoom()) {
+                payload.chan = state.channel || CHAT_DEFAULT_CHANNEL;
+                if (state.thread) {
+                    payload.thread = state.thread.id;
+                    payload.thread_name = state.thread.name || '';
+                }
+            }
+        }
         var sentReply = null;
         if (state.view === 'room' && state.replyTo) {
             payload.reply = state.replyTo;
@@ -2096,6 +4269,156 @@
             if (t) { pickMention(t.getAttribute('data-chat-mention-pick')); return; }
             t = e.target.closest('[data-chat-settings-btn]');
             if (t) { openSettings(); return; }
+            t = e.target.closest('[data-chat-avpick]');
+            if (t) { pickAvatar(t.getAttribute('data-chat-avpick')); return; }
+            // ── Discord shell: channel switch, category collapse, DM puck ──
+            t = e.target.closest('[data-chat-thread]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread'),
+                           t.getAttribute('data-chat-thread-name'));
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-start]');
+            if (t) {
+                openThread(t.getAttribute('data-chat-thread-start'),
+                           t.getAttribute('data-chat-thread-title') || 'Thread');
+                return;
+            }
+            t = e.target.closest('[data-chat-thread-close]');
+            if (t) { closeThread(); return; }
+            t = e.target.closest('[data-chat-chan]');
+            if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
+            // ── Arcade ──
+            t = e.target.closest('[data-chat-arc-home]');
+            if (t) { openArcade(null); return; }
+            t = e.target.closest('[data-chat-arc-new]');
+            if (t) {
+                arcNewGame(t.getAttribute('data-chat-arc-new'), '',
+                           t.getAttribute('data-chat-arc-variant'),
+                           t.getAttribute('data-chat-arc-room'));
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-col]');
+            if (t) { _arcColumnClick(t.getAttribute('data-chat-arc-col')); return; }
+            t = e.target.closest('[data-chat-arc-join]');
+            if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
+            t = e.target.closest('[data-chat-arc-claim]');
+            if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-resign]');
+            if (t) { arcResign(t.getAttribute('data-chat-arc-resign')); return; }
+            t = e.target.closest('[data-chat-arc-draw]');
+            if (t) { arcDraw(t.getAttribute('data-chat-arc-draw')); return; }
+            t = e.target.closest('[data-chat-arc-pgn]');
+            if (t) { arcDownloadPgn(t.getAttribute('data-chat-arc-pgn')); return; }
+            t = e.target.closest('[data-chat-arc-pgncopy]');
+            if (t) { arcCopyPgn(t.getAttribute('data-chat-arc-pgncopy')); return; }
+            t = e.target.closest('[data-chat-arc-reveal]');
+            if (t) {
+                if (state.arcade) { state.arcade.reveal = !state.arcade.reveal; renderArcade(); }
+                return;
+            }
+            t = e.target.closest('[data-chat-slot-open]');
+            if (t) {
+                if (state.arcade) { state.arcade.slots = true; state.arcade.game = null; }
+                renderArcade(); renderHead(); renderChannels();
+                return;
+            }
+            t = e.target.closest('[data-chat-slot-stake]');
+            if (t) {
+                _slotState().stake = parseInt(t.getAttribute('data-chat-slot-stake'), 10) || 5;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-slot-pull]');
+            if (t) { _slotPull(); return; }
+            t = e.target.closest('[data-chat-bs-place]');
+            if (t) { _bsPlaceAt(parseInt(t.getAttribute('data-chat-bs-place'), 10)); return; }
+            t = e.target.closest('[data-chat-bs-fire]');
+            if (t) {
+                var fg = state.arcade && state.arcade.game ? _arcGame(state.arcade.game) : null;
+                if (fg) arcMove(fg.id, 's:' + _bsCellName(
+                    parseInt(t.getAttribute('data-chat-bs-fire'), 10)));
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-random]');
+            if (t) {
+                var d = _bsDraft();
+                d.board = _bsRandomBoard(); d.next = BS_FLEET.length;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-rotate]');
+            if (t) { _bsDraft().horiz = !_bsDraft().horiz; renderArcade(); return; }
+            t = e.target.closest('[data-chat-bs-clear]');
+            if (t) {
+                var d2 = _bsDraft();
+                d2.board = '.'.repeat(BS_W * BS_H); d2.next = 0;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-bs-commit]');
+            if (t) { _bsCommit(t.getAttribute('data-chat-bs-commit')); return; }
+            t = e.target.closest('[data-chat-arc-cancel]');
+            if (t) { arcCancel(t.getAttribute('data-chat-arc-cancel')); return; }
+            t = e.target.closest('[data-chat-arc-sync]');
+            if (t) { arcSync(t.getAttribute('data-chat-arc-sync'), false); return; }
+            t = e.target.closest('[data-chat-arc-accept]');
+            if (t) {
+                var agid = t.getAttribute('data-chat-arc-accept');
+                showConfirmDialog({
+                    title: 'Accept their position?',
+                    message: 'This board and your opponent\'s disagreed, so the game was ' +
+                             'frozen rather than guessing which was right. Accepting takes ' +
+                             'their position and continues from there.',
+                    confirmText: 'Accept and continue',
+                }).then(function (ok) { if (ok) arcSync(agid, true); });
+                return;
+            }
+            // LAST of the arcade handlers on purpose. A lobby card carries
+            // data-chat-arc-open and CONTAINS the action buttons, so checking
+            // it earlier made every Join / Withdraw / Take-the-seat click
+            // resolve to the card and just open the game.
+            t = e.target.closest('[data-chat-arc-open]');
+            if (t) { openArcade(t.getAttribute('data-chat-arc-open')); return; }
+            t = e.target.closest('[data-chat-arc-flip]');
+            if (t) {
+                if (state.arcade) { state.arcade.flip = !state.arcade.flip; renderArcade(); }
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-promo]');
+            if (t) {
+                var pick = t.getAttribute('data-chat-arc-promo');
+                if (!state.arcade) return;
+                var pg = state.arcade.promo;
+                var pgame = pg && state.arcade.game ? _arcGame(state.arcade.game) : null;
+                state.arcade.promo = null;
+                state.arcade.sel = -1;
+                if (pick && pg && pgame) {
+                    var puci = window.ChessEngine.toAlg(pg.from) +
+                               window.ChessEngine.toAlg(pg.to) + pick;
+                    if (_arcCanVote(pgame)) arcVote(pgame.id, puci);
+                    else arcMove(pgame.id, puci);
+                } else {
+                    renderArcade();
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-sq]');
+            if (t) { _arcSquareClick(parseInt(t.getAttribute('data-chat-arc-sq'), 10)); return; }
+            t = e.target.closest('[data-chat-cat]');
+            if (t) {
+                var cat = t.getAttribute('data-chat-cat');
+                state.chanCatClosed[cat] = !state.chanCatClosed[cat];
+                renderChannels();
+                return;
+            }
+            t = e.target.closest('[data-chat-guild-dm]');
+            if (t) {
+                // Jump to the most recent conversation; otherwise just surface the list.
+                var first = (state.convos || [])[0];
+                if (first && (first.username || first.name)) openPm(first.username || first.name);
+                return;
+            }
             t = e.target.closest('[data-chat-settings-save]');
             if (t) { saveSettings(); return; }
             t = e.target.closest('[data-chat-settings-cancel]');
@@ -2569,6 +4892,7 @@
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
             renderBusUI();
+            _arcAnswerSyncs(fresh);
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
@@ -2588,7 +4912,8 @@
         // assume-SoulSync presence for users who haven't typed anything.
         if (!state.canSend || !state.room || state.beaconed[state.room]) return;
         state.beaconed[state.room] = 1;
-        sendProtocol('hello', {}).then(function (r) {
+        // carry the avatar so we get a face before we've said anything
+        sendProtocol('hello', _myAvatar() ? { av: _myAvatar() } : {}).then(function (r) {
             if (!r.ok) state.beaconed[state.room] = 0;   // retry next refresh
         });
     }
@@ -2646,6 +4971,9 @@
 
     // Every surface reduced from the protocol bus, painted together.
     function renderBusUI() {
+        _arcMaybeSync();         // ask, if a game has gone quiet on us
+        _bsTick();               // answer shots at us, and reveal when sunk
+        renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
         renderPinbar();
         renderPoll();
@@ -2781,10 +5109,36 @@
         return CP.electCoordinator(pool) === state.selfName;
     }
 
+    // Track WHEN WE saw a now-track start, so elapsed is measured on our own
+    // clock instead of the DJ's. `at` is the publisher's wall clock, and a
+    // client whose clock runs minutes fast used to read every track as long
+    // overdue — if that client was the DJ it advanced immediately and raced
+    // through the whole queue. `at` is now only consulted when we JOIN
+    // mid-track (the one case where we genuinely need someone else's offset).
+    function _jbxNoteNow(now) {
+        if (!now) { state.jukebox.nowSeen = null; return; }
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) return;                  // already timing it
+        var base = 0;
+        if (!s && typeof now.at === 'number') {
+            // Cold open: we joined with something already playing — trust `at`
+            // for the starting offset (clamped; a wild clock reads as 0).
+            var d = Math.floor(Date.now() / 1000 - now.at);
+            if (d > 0 && d < 86400) base = d;
+        }
+        // A handoff we watched happen started NOW, by our clock. No skew.
+        state.jukebox.nowSeen = { id: now.id, localStart: Date.now(), base: base };
+    }
+
     function _jbxElapsed(now) {
-        if (!now || typeof now.at !== 'number') return null;
-        var s = Math.floor(Date.now() / 1000 - now.at);
-        return (s >= 0 && s < 86400) ? s : null;
+        if (!now) return null;
+        var s = state.jukebox.nowSeen;
+        if (s && s.id === now.id) {
+            return s.base + Math.floor((Date.now() - s.localStart) / 1000);
+        }
+        if (typeof now.at !== 'number') return null;
+        var d = Math.floor(Date.now() / 1000 - now.at);
+        return (d >= 0 && d < 86400) ? d : null;
     }
 
     function _fmtSecs(s) {
@@ -2834,6 +5188,7 @@
         if (!panel) return;
         var st = _jbxState();
         var now = st.now;
+        _jbxNoteNow(now);             // same clock base the watchdog uses
         var elapsed = _jbxElapsed(now);
         var effD = _jbxEffDuration(now);
         var ended = !!(now && effD && elapsed !== null && elapsed > effD + 5);
@@ -2931,11 +5286,20 @@
                                 : '') +
                         '</div>';
                 } else {
-                    // tuned-in users keep their exit even between tracks
-                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' +
-                        (st.queue.length ? 'Waiting for the next track…'
-                                         : 'Nothing playing — add a song above and get the room voting.') +
-                        '</div>' +
+                    // tuned-in users keep their exit even between tracks.
+                    // Auto-DJ needs something to sound like: with no now-playing
+                    // and nothing in the room's history it has no seed to search
+                    // from, so say that instead of looking silently broken.
+                    var idleMsg;
+                    if (st.queue.length) {
+                        idleMsg = 'Waiting for the next track…';
+                    } else if (st.radio && !(st.history && st.history.length)) {
+                        idleMsg = 'Auto-DJ is on, but it needs a starting point — ' +
+                                  'add one song and it takes over from there.';
+                    } else {
+                        idleMsg = 'Nothing playing — add a song above and get the room voting.';
+                    }
+                    nowHost.innerHTML = '<div class="chat-jbx-meta chat-jbx-idle">' + idleMsg + '</div>' +
                         (state.jukebox.tunedIn
                             ? '<button class="chat-fmt-btn chat-jbx-tune" type="button" data-chat-jbx-tuneout>Tune out</button>' : '');
                 }
@@ -2950,7 +5314,7 @@
                             '<span class="chat-jbx-title" title="' + attr(e.ti || e.id) + '">' + esc(e.ti || e.id) + '</span>' +
                             '<span class="chat-jbx-meta">' +
                                 (e.id === nextId ? '<b class="chat-jbx-next">up next</b> · ' : '') +
-                                (e.auto ? '📻 auto · ' : '') +
+                                (e.auto ? '📻 ' + (e.why ? esc(e.why) : 'auto') + ' · ' : '') +
                                 (e.d ? _fmtSecs(e.d) + ' · ' : '') + esc(e.by) + '</span>' +
                         '</div>' +
                         '<button class="chat-jbx-vote" type="button" data-chat-jbx-vote="' + attr(e.id) + '"' +
@@ -3022,6 +5386,7 @@
         // already behind pageVisible, so a backgrounded tab never DJs.
         if (state.view !== 'room') return;
         var st = _jbxState();
+        _jbxNoteNow(st.now);          // stamp handoffs on OUR clock (skew guard)
         var elapsed = _jbxElapsed(st.now);
         // A tuned-in client asks the PLAYER for the truth — pasted links have
         // no duration (oEmbed doesn't give one), and the iframe's ENDED event
@@ -3059,22 +5424,50 @@
         if (!seed || !seed.ti) return;
         state.jukebox.lastAutoAt = Date.now();
         // strip (Official Video)-style noise so the search finds neighbors
-        var qtext = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
-            .replace(/\s+/g, ' ').trim().slice(0, 150);
-        if (!qtext) return;
+        // Video ids we must not repeat, plus the artist/title STRINGS the room
+        // just heard — the server uses those to steer away from what's been on.
         var avoid = {};
-        if (st.now) avoid[st.now.id] = 1;
-        (st.history || []).forEach(function (h) { avoid[h.id] = 1; });
-        postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
-            if (!res.ok) return;                   // paste-only servers: radio just idles
-            var pick = (res.body.results || []).filter(function (r) {
-                return r && r.id && !avoid[r.id];
-            })[0];
-            if (!pick) return;
-            var p = { id: pick.id, ti: pick.title, a: 1 };
-            if (pick.duration) p.d = pick.duration;
-            sendProtocol('jbx.sub', p);
+        var avoidText = [];
+        if (st.now) { avoid[st.now.id] = 1; avoidText.push(st.now.ti || ''); }
+        (st.history || []).forEach(function (h) {
+            avoid[h.id] = 1;
+            if (h.ti) avoidText.push(h.ti);
         });
+        // Send the raw titles too — the server splits "Artist - Track" itself.
+        avoidText = avoidText.concat(avoidText.map(function (t) {
+            var i = String(t).indexOf(' - ');
+            return i > 0 ? String(t).slice(0, i) : '';
+        })).filter(Boolean).slice(0, 80);
+
+        var fallbackQ = seed.ti.replace(/[\(\[][^)\]]*[\)\]]/g, ' ')
+            .replace(/\s+/g, ' ').trim().slice(0, 150);
+
+        function _queueFrom(qtext, why) {
+            if (!qtext) return;
+            postJSON('/api/chat/jukebox/resolve', { q: qtext }).then(function (res) {
+                if (!res.ok) return;               // paste-only servers: radio idles
+                var pick = (res.body.results || []).filter(function (r) {
+                    return r && r.id && !avoid[r.id];
+                })[0];
+                if (!pick) return;
+                var p = { id: pick.id, ti: pick.title, a: 1 };
+                if (pick.duration) p.d = pick.duration;
+                if (why) p.w = String(why).slice(0, 60);   // "similar to X" credit
+                sendProtocol('jbx.sub', p);
+            });
+        }
+
+        // Ask the radio brain for a genuinely DIFFERENT next track (Last.fm
+        // similar-tracks → similar-artists → the local graph). Only if it has
+        // nothing do we fall back to the old behaviour of re-searching this
+        // track's title, which tends to surface the same song again.
+        postJSON('/api/chat/jukebox/radio', { title: seed.ti, avoid: avoidText })
+            .then(function (res) {
+                var q = res.ok && res.body && res.body.query;
+                if (q) _queueFrom(q, res.body.why);
+                else _queueFrom(fallbackQ, '');
+            })
+            .catch(function () { _queueFrom(fallbackQ, ''); });
     }
 
     function _jbxAdvance(st) {
@@ -3360,6 +5753,14 @@
                         // exported for the node render harness (XSS contract tests)
                         renderRich: renderRich, renderPlain: renderPlain,
                         renderGroups: renderGroups,
+                        // Arcade HTML builders — usernames and results come off
+                        // Soulseek, so the same escaping contract applies here
+                        _arcLobbyHtml: _arcLobbyHtml, _arcBoardHtml: _arcBoardHtml,
+                        _arcSidebarHtml: _arcSidebarHtml, _arcPgn: _arcPgn,
+                        _arcBsBoardHtml: _arcBsBoardHtml, _arcSlotHtml: _arcSlotHtml,
+                        _bsPlaceAt: _bsPlaceAt, _bsDraft: _bsDraft,
+                        _slotPayout: function (r, s2) { return _slotPayout(r, s2); },
+                        renderUserPanel: renderUserPanel, renderGuilds: renderGuilds,
                         _testSetSelf: function (n) { state.selfName = n; },
                         _testSetState: function (patch) {
                             Object.keys(patch || {}).forEach(function (k) { state[k] = patch[k]; });

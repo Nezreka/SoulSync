@@ -28,24 +28,54 @@ from utils.logging_config import get_logger
 logger = get_logger("chat.api")
 
 _MAX_MESSAGE_LEN = 1000
+# Preset chat avatars live at webui/static/avatar/1.png .. <AVATAR_COUNT>.png.
+# The id is only ever an INDEX into that fixed set — remote input must never
+# reach a filesystem path.
+AVATAR_COUNT = 100
+# Avatars only their owner may wear. The picker hides them from everyone else,
+# but the envelope is client-controlled, so ownership is ALSO enforced on send
+# here and on render in chat.js — a forged id can't put someone else's face on
+# your name. Keys are avatar ids, values the slskd username (compared casefold).
+RESERVED_AVATARS = {100: "boulderbadgedad"}
+
+
+def _avatar_allowed(av: int, username: str) -> bool:
+    """True unless `av` is reserved for someone other than `username`."""
+    owner = RESERVED_AVATARS.get(int(av or 0))
+    if owner is None:
+        return True
+    return str(username or "").strip().casefold() == owner
 _INGEST_AT: dict = {}      # room -> last full-buffer archive ingest (epoch)
 _SELF = {"name": "", "at": 0.0}   # our slskd username, cached (network call)
 _AVAILABLE = {"rooms": None, "at": 0.0}   # /rooms/available cache (big list, 5-min TTL)
 
 
 def _self_username(client) -> str:
+    """Our own Soulseek name, cached — several probes over the network.
+
+    A known name is held for the full TTL; a miss is retried much sooner so an
+    slskd that was still logging in resolves on the next page load instead of
+    making the user wait out five minutes. Failures keep the last known good
+    name rather than blanking it.
+    """
     import time as _time
     now = _time.time()
-    if _SELF["name"] and now - _SELF["at"] < 300:
+    ttl = 300 if _SELF["name"] else 45
+    if _SELF["at"] and now - _SELF["at"] < ttl:
         return _SELF["name"]
     try:
-        info = _run_async(client.get_session_info()) or {}
-        name = str(info.get("username") or "")
-        if name:
-            _SELF.update(name=name, at=now)
-        return name
-    except Exception:
+        name = str(_run_async(client.get_soulseek_username()) or "").strip()
+    except Exception as e:
+        logger.warning(f"Could not resolve our Soulseek username: {e}")
+        _SELF.update(at=now)
         return _SELF["name"]
+    if name:
+        _SELF.update(name=name, at=now)
+        return name
+    logger.warning("slskd did not report a Soulseek username; self-mention "
+                   "highlighting and reserved avatars stay off")
+    _SELF.update(at=now)
+    return _SELF["name"]
 
 # Host-injected callables (configure() below) — avoids circular imports with
 # web_server, same pattern as core/enrichment/api.py.
@@ -150,8 +180,11 @@ def _unwrap_room_messages(messages):
     and attached. REACTION carriers (empty-text envelopes with 're') are
     pulled OUT of the visible list into a {target_key: {emoji: [users]}} map.
     PROTOCOL carriers (envelopes with 'p' — jukebox votes, beacons, pins) are
-    pulled out into an event list: machine coordination, never rendered,
-    never archived. Returns (messages, reactions_map, protocol_events)."""
+    pulled out into an event list: machine coordination, never rendered. Most
+    are live-only; the Arcade's gm.* carriers are the exception and DO get
+    archived (see chat_game_carriers) because a game is durable state that
+    happens to travel as messages. Returns (messages, reactions_map,
+    protocol_events)."""
     from core import chat_codec
     out = []
     reactions: dict = {}
@@ -181,6 +214,29 @@ def _unwrap_room_messages(messages):
                     continue
             m["message"] = dec["t"]
             m["rich"] = True
+            # Virtual channel tag (Discord-style channels over the one room).
+            # Unknown/absent is fine — the client falls back to #general so a
+            # message is never invisible.
+            _c = dec.get("c")
+            if isinstance(_c, str) and _c.strip():
+                m["chan"] = _c.strip()[:24]
+            # Thread membership: `th` is the parent message key (user|timestamp),
+            # `tn` the display name carried so the sidebar still has a title when
+            # the parent has scrolled out of the loaded archive.
+            # Preset avatar id (webui/static/avatar/<n>.png). Bounded int only —
+            # it indexes a fixed set, it is NEVER used to build a path.
+            try:
+                _av = int(dec.get("av"))
+                if 1 <= _av <= AVATAR_COUNT:
+                    m["av"] = _av
+            except (TypeError, ValueError):
+                pass
+            _th = dec.get("th")
+            if isinstance(_th, str) and _th.strip():
+                m["th"] = _th.strip()[:160]
+                _tn = dec.get("tn")
+                if isinstance(_tn, str) and _tn.strip():
+                    m["tn"] = _tn.strip()[:80]
             r = chat_codec.reply_of(dec)
             if r:
                 m["reply"] = r
@@ -336,6 +392,41 @@ def _oembed_fetch(video_id):
 def create_blueprint() -> Blueprint:
     bp = Blueprint("chat_api", __name__)
 
+    # ── Arcade bank (play money) ─────────────────────────────────────────
+    # Per profile, local, refilled every local midnight. It is NOT authoritative
+    # for anything between players and is not meant to be: a balance only your
+    # own machine can see cannot back a bet against somebody else. It exists so
+    # the solo games (the slot machine) have stakes, where there is nobody to
+    # defraud but yourself.
+    _ARCADE_MAX_STAKE = 1000
+
+    @bp.route("/api/chat/arcade/bank", methods=["GET"])
+    def arcade_bank_get():
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        return jsonify(db.get_arcade_bank(int(getattr(g, "profile_id", 1) or 1)))
+
+    @bp.route("/api/chat/arcade/bank", methods=["POST"])
+    def arcade_bank_adjust():
+        """Stake or collect. Bounded per call so a typo (or a bug) cannot mint
+        a fortune in one request; going below zero is refused outright, which
+        is the one rule a bank like this can actually enforce."""
+        db = _db()
+        if db is None:
+            return jsonify({"error": "Database unavailable"}), 503
+        data = request.json or {}
+        try:
+            delta = int(data.get("delta"))
+        except (TypeError, ValueError, OverflowError):
+            return jsonify({"error": "delta must be a whole number"}), 400
+        if abs(delta) > _ARCADE_MAX_STAKE * 100:
+            return jsonify({"error": "Amount out of range"}), 400
+        out = db.adjust_arcade_bank(int(getattr(g, "profile_id", 1) or 1), delta)
+        if out.get("refused"):
+            return jsonify(dict(out, error="Not enough in the bank")), 400
+        return jsonify(out)
+
     @bp.route("/api/chat/settings", methods=["GET"])
     def chat_settings_get():
         """The chat settings for the cog modal (admin-only — these are
@@ -356,6 +447,9 @@ def create_blueprint() -> Blueprint:
             "giphy_key_set": bool(_cfg("soulseek.chat_giphy_key", "")),
             "filepost_key_set": bool(_cfg("soulseek.chat_filepost_key", "")),
             "filepost_expiry": str(_cfg("soulseek.chat_filepost_expiry", "") or ""),
+            # Chosen preset avatar (0 = none). Server-side so it follows the
+            # account across browsers rather than living in one localStorage.
+            "avatar": int(_cfg("soulseek.chat_avatar", 0) or 0),
         })
 
     @bp.route("/api/chat/settings", methods=["POST"])
@@ -378,6 +472,16 @@ def create_blueprint() -> Blueprint:
                          ("auto_prove", "soulseek.chat_auto_prove")):
             if key in body:
                 _config_set(cfg, bool(body.get(key)))
+        if "avatar" in body:
+            try:
+                _av = int(body.get("avatar") or 0)
+            except (TypeError, ValueError):
+                _av = 0
+            if not (1 <= _av <= AVATAR_COUNT):
+                _av = 0
+            elif not _avatar_allowed(_av, _self_username(_client())):
+                _av = 0          # reserved for someone else — don't store it
+            _config_set("soulseek.chat_avatar", _av)
         if "giphy_key" in body:
             # present = intentional: a value sets it, empty string clears it
             _config_set("soulseek.chat_giphy_key", str(body.get("giphy_key") or "").strip())
@@ -930,17 +1034,38 @@ def create_blueprint() -> Blueprint:
                 if now - _INGEST_AT.get(room, 0) > 60:
                     _INGEST_AT[room] = now
                     db.add_chat_messages(room, live)
+                # Game carriers ride every hydrate rather than the 60s throttle:
+                # they are rare (usually none at all), the natural-key UNIQUE
+                # makes repeats free, and losing one loses a move.
+                db.add_chat_game_carriers(room, protocol_events)
                 arch = db.get_chat_messages(room, limit=100)
                 if arch:
                     out = arch
             except Exception:
                 logger.debug("chat: archive unavailable, serving live buffer", exc_info=True)
+        # Games outlive slskd's buffer: replay the archived gm.* carriers
+        # ahead of the live feed so a match survives a restart even when nobody
+        # in the room is still holding it. Asking the room is always the first
+        # move (see gm.sync); this is the backstop for a cold room. Deduped on
+        # the same natural key the client uses, and ordered oldest-first
+        # because the fold depends on stream order.
+        feed = protocol_events
+        if db is not None:
+            try:
+                seen = {(e.get("username"), e.get("timestamp"),
+                         (e.get("p") or {}).get("k")) for e in protocol_events}
+                revived = [e for e in db.get_chat_game_carriers(room)
+                           if (e["username"], e["timestamp"], e["p"].get("k")) not in seen]
+                if revived:
+                    feed = revived + protocol_events
+            except Exception:
+                logger.debug("chat: game carrier replay unavailable", exc_info=True)
         return jsonify({"room": room, "joined": True,
                         "messages": _attach_reactions(out, reactions),
                         "users": users or [], "can_send": _can_send(),
                         # machine coordination events (jukebox/polls/beacons)
-                        # from the live buffer — the page's protocol feed
-                        "protocol": protocol_events})
+                        # from the live buffer, plus replayed game carriers
+                        "protocol": feed})
 
     @bp.route("/api/chat/room/protocol", methods=["POST"])
     def chat_room_protocol_send():
@@ -962,6 +1087,10 @@ def create_blueprint() -> Blueprint:
         room = _resolve_room(payload.get("room"))
         if room is None:
             return jsonify({"error": "Not in that room"}), 404
+        # NOTE: the avatar rides INSIDE the protocol payload for carriers (the
+        # 'hello' beacon sends {k:'hello', av:N}) — an envelope-level field
+        # would be dropped here, since pure carriers never reach the message
+        # unwrap path that reads it.
         encoded = chat_codec.encode("", {"p": proto})
         if encoded is None:
             return jsonify({"error": "Protocol payload too large"}), 400
@@ -1025,6 +1154,170 @@ def create_blueprint() -> Blueprint:
             })
         return jsonify({"results": results})
 
+    # ── Auto-DJ radio brain ────────────────────────────────────────────────
+    # The old radio searched YouTube for the PLAYING TRACK'S OWN TITLE, so the
+    # top surviving hit was usually the same song again (another upload, a live
+    # cut, a cover). This picks a genuinely different NEXT track using the
+    # similarity data SoulSync already owns, best source first:
+    #   1. Last.fm similar TRACKS  — a real track-level radio graph
+    #   2. Last.fm similar ARTISTS — neighbour artist, let YouTube pick the song
+    #   3. the local similar_artists graph (built by watchlist scans)
+    # `avoid` (artist/track strings the room heard recently) is honoured at
+    # every tier, so radio keeps moving instead of circling. Returns a search
+    # QUERY; the client resolves it through /jukebox/resolve like any add.
+    _RADIO_NOISE = _re.compile(
+        r"\((?:[^)]*\b(?:official|lyric|lyrics|audio|video|visualizer|hd|4k|mv|remaster[^)]*)\b[^)]*)\)"
+        r"|\[[^\]]*\]", _re.I)
+
+    # Plenty of what gets pasted isn't a song at all — mixes, DJ sets, genre
+    # essays ("this is what deep ambient techno is supposed to feel like |
+    # PART II"). Those have no artist to branch from, but they DO have a genre,
+    # which is the better thing to follow anyway.
+    _RADIO_MIXY = _re.compile(
+        r"\b(mix|mixtape|set|dj\s*set|liveset|live\s*set|playlist|compilation|"
+        r"session|sessions|radio|episode|ep\.?\s*\d|vol\.?\s*\d|part\s+\w+|pt\.?\s*\d|"
+        r"hour|hours|minutes|continuous|mixed\s+by|selected\s+by|full\s+album)\b", _re.I)
+    # phrase-y titles that are describing a feeling/genre, not naming a track
+    _RADIO_ESSAY = _re.compile(
+        r"\b(this is what|sounds? like|feel like|feels like|music (?:to|for)|"
+        r"songs? (?:to|for)|when you|that make)\b", _re.I)
+    _RADIO_STOP = _re.compile(
+        r"\b(this|is|what|are|the|a|an|of|to|for|and|you|your|when|it|its|"
+        r"supposed|feel|feels|like|sounds?|music|songs?|track|tracks|"
+        r"mix|mixtape|set|playlist|compilation|session|sessions|radio|"
+        r"part|pt|vol|volume|episode|full|album|best|top|new|old|dj|"
+        r"hour|hours|minute|minutes|continuous|official|video|audio|"
+        # roman numerals trailing a series title ("… | PART II") would other-
+        # wise poison the tag lookup ("deep ambient techno II" matches nothing)
+        r"i{1,3}|iv|v|vi{1,3}|ix|x)\b", _re.I)
+
+    def _radio_parse(raw):
+        """('track'|'vibe', artist, track, vibe) from a YouTube-style title.
+
+        'track' → a real song we can branch from by artist/track.
+        'vibe'  → a mix/genre video; follow its GENRE instead.
+        """
+        t = _RADIO_NOISE.sub(" ", str(raw or ""))
+        t = _re.sub(r"\s+", " ", t).strip()
+        if not t:
+            return "vibe", "", "", ""
+        mixy = bool(_RADIO_MIXY.search(t) or _RADIO_ESSAY.search(t))
+        # Only a dash separates artist from track. '|' and '~' are YouTube title
+        # decoration ("... | PART II") and must never be read as an artist.
+        if not mixy:
+            for sep in (" - ", " – ", " — "):
+                if sep in t:
+                    left, right = t.split(sep, 1)
+                    left, right = left.strip()[:80], right.strip()[:80]
+                    # An artist name is short. A sentence on the left means this
+                    # is a phrase, not "Artist - Track".
+                    if left and right and len(left) <= 40 and len(left.split()) <= 6:
+                        return "track", left, right, ""
+                    break
+        # Vibe: strip the filler words and keep the genre-ish remainder.
+        words = [w for w in _re.split(r"[^A-Za-z0-9']+", t) if w]
+        keep = [w for w in words if not _RADIO_STOP.fullmatch(w) and not w.isdigit()]
+        return "vibe", "", "", " ".join(keep[:6])[:80]
+
+    @bp.route("/api/chat/jukebox/radio", methods=["POST"])
+    def chat_jukebox_radio():
+        if not _can_send():
+            return jsonify({"error": "Chat sending is admin-only on this server"}), 403
+        body = request.get_json(silent=True) or {}
+        kind, artist, track, vibe = _radio_parse(body.get("title"))
+        avoid = set()
+        for x in (body.get("avoid") or [])[:80]:
+            s = str(x or "").strip().lower()
+            if s:
+                avoid.add(s)
+        if not artist and not track and not vibe:
+            return jsonify({"query": None, "why": "no seed"})
+
+        def _fresh(a, t=""):
+            """Skip anything the room just heard (either field matching)."""
+            al, tl = str(a or "").strip().lower(), str(t or "").strip().lower()
+            if al and al in avoid:
+                return False
+            if tl and tl in avoid:
+                return False
+            return bool(al or tl)
+
+        lastfm = None
+        try:
+            from core.lastfm_client import LastFMClient
+            from config.settings import config_manager as _cfg
+            _key = _cfg.get("lastfm.api_key", "")
+            if _key:
+                lastfm = LastFMClient(api_key=_key)
+        except Exception:   # noqa: BLE001 - radio degrades, never breaks the room
+            logger.debug("chat radio: lastfm unavailable", exc_info=True)
+
+        # 0) VIBE seeds (a mix, a DJ set, a "this is what X feels like" video).
+        # There's no artist to branch from, but the GENRE is the better thread
+        # to pull anyway: ask Last.fm who defines that tag and play them.
+        if kind == "vibe" and vibe:
+            if lastfm:
+                try:
+                    for cand in (lastfm.get_tag_top_artists(vibe, limit=40) or []):
+                        ca = str(cand.get("name") or "")
+                        if _fresh(ca):
+                            return jsonify({"query": ca, "why": "%s" % vibe})
+                except Exception:   # noqa: BLE001
+                    logger.debug("chat radio: tag lookup failed", exc_info=True)
+            # Unknown tag (or no Last.fm): stay in the same lane by searching
+            # for more of the same KIND of thing rather than the same video.
+            return jsonify({"query": "%s mix" % vibe, "why": vibe})
+
+        # 1) similar TRACKS — the closest thing to a real station
+        if lastfm and artist and track:
+            try:
+                for cand in (lastfm.get_similar_tracks(artist, track, limit=30) or []):
+                    ca = str((cand.get("artist") or {}).get("name")
+                             if isinstance(cand.get("artist"), dict) else cand.get("artist") or "")
+                    ct = str(cand.get("name") or cand.get("title") or "")
+                    if _fresh(ca, ct):
+                        return jsonify({"query": ("%s %s" % (ca, ct)).strip(),
+                                        "why": "similar to %s" % (track or artist)})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-tracks failed", exc_info=True)
+
+        # 2) similar ARTISTS — hand YouTube a neighbour and let it choose
+        if lastfm and artist:
+            try:
+                for cand in (lastfm.get_similar_artists(artist, limit=30) or []):
+                    ca = str(cand.get("name") or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: similar-artists failed", exc_info=True)
+
+        # 3) the local similar-artist graph the watchlist scan already built.
+        # It's keyed by the user's OWN artist ids, so join through artists to
+        # match on the playing artist's name (only hits when they own them).
+        if artist:
+            conn = None
+            try:
+                conn = _db()._get_connection()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT sa.similar_artist_name FROM similar_artists sa "
+                    "JOIN artists a ON a.id = sa.source_artist_id "
+                    "WHERE LOWER(a.name) = LOWER(?) "
+                    "ORDER BY sa.similarity_rank LIMIT 30",
+                    (artist,),
+                )
+                for row in cur.fetchall():
+                    ca = str(row[0] or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: local graph unavailable", exc_info=True)
+            finally:
+                if conn:
+                    conn.close()
+
+        return jsonify({"query": None, "why": "no similar data"})
+
     @bp.route("/api/chat/room/history", methods=["GET"])
     def chat_room_history():
         """Scrollback: a page of archived messages strictly OLDER than
@@ -1081,6 +1374,31 @@ def create_blueprint() -> Blueprint:
         if fmeta:
             extra = dict(extra or {})
             extra["f"] = fmeta
+        # Virtual channel tag. Slug-validated here so a hostile client can't
+        # stuff arbitrary text into the envelope; the default channel is left
+        # untagged so old clients (and vanilla Soulseek) read it as #general.
+        chan = str(body.get("chan") or "").strip().lower()[:24]
+        if chan and chan != "general" and _re.fullmatch(r"[a-z0-9][a-z0-9-]*", chan):
+            extra = dict(extra or {})
+            extra["c"] = chan
+        # Preset avatar id, validated to the known range. Riding it on messages
+        # you're already sending costs a few bytes and adds NO extra carrier
+        # messages (so no extra line noise for vanilla Soulseek clients).
+        try:
+            _av = int(body.get("avatar"))
+            if 1 <= _av <= AVATAR_COUNT and _avatar_allowed(_av, _self_username(client)):
+                extra = dict(extra or {})
+                extra["av"] = _av
+        except (TypeError, ValueError):
+            pass
+        # Thread membership (parent message key + carried display name).
+        thread = str(body.get("thread") or "").strip()[:160]
+        if thread:
+            extra = dict(extra or {})
+            extra["th"] = thread
+            tname = str(body.get("thread_name") or "").strip()[:80]
+            if tname:
+                extra["tn"] = tname
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

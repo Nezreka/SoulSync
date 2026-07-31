@@ -3314,6 +3314,15 @@ async function loadAutomations() {
     const empty = document.getElementById('automations-empty');
     const statsBar = document.getElementById('automations-stats');
     if (!list || !empty) return;
+    // If React owns /automations, IT is the live page and this container is
+    // hidden. Repainting it would put a second copy of every section and card
+    // in the document — duplicate #auto-section-* ids and duplicate
+    // .automation-card[data-id] nodes, which document-wide getElementById /
+    // querySelector calls then resolve to instead of the visible ones.
+    //
+    // This is reachable: the shared builder's onSaved hook calls back into
+    // here after a save made from the React page.
+    if (document.getElementById('webui-react-root')?.classList.contains('active')) return;
     try {
         const res = await fetch('/api/automations');
         const payload = await res.json();
@@ -3367,8 +3376,6 @@ async function loadAutomations() {
             renderAutomationsMasterToggle(statsBar, 'music');
         }
 
-        // Filter bar — show when 6+ automations
-        _initAutoFilterBar(automations);
         // Catch up on current automation progress
         try {
             const progRes = await fetch('/api/automations/progress');
@@ -3954,63 +3961,7 @@ function _promptNotifyConfig(groupName) {
 }
 
 // --- Filter Bar ---
-function _initAutoFilterBar(automations) {
-    const bar = document.getElementById('auto-filter-bar');
-    if (!bar) return;
-    if (automations.length < 7) { bar.style.display = 'none'; return; }
-    bar.style.display = '';
 
-    // Populate trigger dropdown
-    const trigSel = document.getElementById('auto-filter-trigger');
-    const actSel = document.getElementById('auto-filter-action');
-    const trigTypes = [...new Set(automations.map(a => a.trigger_type))].sort();
-    const actTypes = [...new Set(automations.map(a => a.action_type))].sort();
-    const prevTrig = trigSel.value;
-    const prevAct = actSel.value;
-    trigSel.innerHTML = '<option value="">All Triggers</option>' + trigTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatTrigger(t, {}))}</option>`).join('');
-    actSel.innerHTML = '<option value="">All Actions</option>' + actTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatAction(t))}</option>`).join('');
-    trigSel.value = prevTrig;
-    actSel.value = prevAct;
-
-    // Bind events (use a flag to avoid double-binding)
-    if (!bar.dataset.bound) {
-        bar.dataset.bound = '1';
-        document.getElementById('auto-filter-search').addEventListener('input', _filterAutomations);
-        trigSel.addEventListener('change', _filterAutomations);
-        actSel.addEventListener('change', _filterAutomations);
-    }
-    _filterAutomations();
-}
-
-function _filterAutomations() {
-    const q = (document.getElementById('auto-filter-search').value || '').toLowerCase().trim();
-    const trigFilter = document.getElementById('auto-filter-trigger').value;
-    const actFilter = document.getElementById('auto-filter-action').value;
-    const cards = document.querySelectorAll('#automations-list .automation-card');
-    let visible = 0;
-    cards.forEach(card => {
-        const name = (card.querySelector('.automation-name')?.textContent || '').toLowerCase();
-        const trig = card.querySelector('.flow-trigger')?.textContent || '';
-        const act = card.querySelector('.flow-action')?.textContent || '';
-        // Match search text against name, trigger label, action label
-        const matchQ = !q || name.includes(q) || trig.toLowerCase().includes(q) || act.toLowerCase().includes(q);
-        // Match trigger/action type filters using data attributes
-        const matchTrig = !trigFilter || card.dataset.triggerType === trigFilter;
-        const matchAct = !actFilter || card.dataset.actionType === actFilter;
-        const show = matchQ && matchTrig && matchAct;
-        card.style.display = show ? '' : 'none';
-        if (show) visible++;
-    });
-    const countEl = document.getElementById('auto-filter-count');
-    if (countEl) {
-        countEl.textContent = (q || trigFilter || actFilter) ? `${visible} of ${cards.length}` : '';
-    }
-}
-
-// --- Group Dropdown ---
-let _activeGroupDropdown = null;
 
 function _showGroupDropdown(event, autoId, currentGroup) {
     // Close any existing dropdown
@@ -4372,7 +4323,13 @@ function updateAutomationProgressFromData(data) {
     for (const [aidStr, state] of Object.entries(data)) {
         const aid = parseInt(aidStr);
         const card = document.querySelector(`.automation-card[data-id="${aid}"]`);
-        if (!card) continue;
+        // Skip cards React owns. This query is document-wide, so once /automations
+        // is a React route it would otherwise inject .automation-output panels
+        // into React's DOM — which React then clobbers on its next render, and
+        // the two fight over the same node. React renders its own progress from
+        // the ss:automation-progress event instead. Vanilla music + video cards
+        // live outside the React root and are unaffected.
+        if (!card || card.closest('#webui-react-root')) continue;
 
         let panel = card.querySelector('.automation-output');
         if (!panel) {
@@ -5839,8 +5796,57 @@ function _escJs(str) {
         .replace(/>/g, '&gt;');
 }
 
-// Artist radio. The legacy artist page's Radio button is gone with that page;
-// the Artist Web graph panel ("Play radio" on an owned node) still drives this.
+// ===== ENHANCE QUALITY MODAL =====
+
+let _enhanceQualityData = null;
+let _enhanceArtistId = null;
+
+const ENHANCE_TIER_MAP = {
+    'lossless': { num: 1, label: 'Lossless', cssClass: 'lossless' },
+    'high_lossy': { num: 2, label: 'High Lossy', cssClass: 'high-lossy' },
+    'standard_lossy': { num: 3, label: 'Standard Lossy', cssClass: 'standard-lossy' },
+    'low_lossy': { num: 4, label: 'Low Lossy', cssClass: 'low-lossy' },
+    'unknown': { num: 999, label: 'Unknown', cssClass: 'unknown' },
+};
+
+async function checkArtistEnhanceEligibility(artistId) {
+    const btn = document.getElementById('library-artist-enhance-btn');
+    if (!btn) return;
+    btn.classList.add('hidden');
+    _enhanceArtistId = artistId;
+
+    try {
+        const resp = await fetch(`/api/library/artist/${artistId}/quality-analysis`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) return;
+
+        _enhanceQualityData = data;
+
+        // Show button if any tracks are below the user's min acceptable tier
+        const minTier = data.min_acceptable_tier || 1;
+        const belowCount = data.tracks.filter(t => t.tier_num > minTier).length;
+        if (belowCount > 0) {
+            btn.classList.remove('hidden');
+            btn.querySelector('.enhance-text').textContent = `Enhance Quality (${belowCount})`;
+        }
+    } catch (e) {
+        console.debug('Enhance eligibility check failed:', e);
+    }
+}
+
+async function playArtistRadio() {
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        showToast('No artist selected', 'error');
+        return;
+    }
+    return startArtistRadioById(artistId, artistName);
+}
+
+// Parameterized core of the artist-detail Radio button — also driven by the Artist Web graph panel
+// ("Play radio" on an owned node), so both entry points share one implementation.
 async function startArtistRadioById(artistId, artistName) {
     try {
         // Get tracks from this artist's library
@@ -5907,3 +5913,311 @@ async function startArtistRadioById(artistId, artistName) {
     }
 }
 
+async function writeArtistImageToDisk(overwrite) {
+    // Issue #572: writes `artist.jpg` to the artist's folder so
+    // Navidrome (which has no API for artist images) picks up a
+    // real photo on its next scan. Plex/Jellyfin also read this
+    // file as a fallback, so it's safe to run regardless of which
+    // server is active.
+    const artistId = artistDetailPageState.currentArtistId;
+    if (!artistId) {
+        showToast('No artist selected', 'error');
+        return;
+    }
+    const btn = document.getElementById('library-artist-write-image-btn');
+    if (btn) {
+        btn.disabled = true;
+        const txt = btn.querySelector('.write-image-text');
+        if (txt) txt.textContent = 'Writing…';
+    }
+    try {
+        let resp = await fetch(`/api/artist/${artistId}/write-image-to-disk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ overwrite: !!overwrite }),
+        });
+        let data = await resp.json();
+
+        // Default protect-existing path: surface a confirm so the user
+        // explicitly opts in to clobbering a hand-picked artist.jpg.
+        if (!data.success && /already exists/i.test(data.error || '')) {
+            if (confirm('artist.jpg already exists in the folder. Overwrite with the new image?')) {
+                resp = await fetch(`/api/artist/${artistId}/write-image-to-disk`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ overwrite: true }),
+                });
+                data = await resp.json();
+            } else {
+                showToast('Cancelled — existing artist.jpg kept', 'info');
+                return;
+            }
+        }
+
+        if (!data.success) {
+            showToast(`Failed: ${data.error || 'Unknown error'}`, 'error');
+            return;
+        }
+        const scan = data.scan_triggered ? ' (Navidrome scan triggered)' : '';
+        showToast(`artist.jpg written${scan}`, 'success');
+    } catch (e) {
+        showToast(`Write failed: ${e.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            const txt = btn.querySelector('.write-image-text');
+            if (txt) txt.textContent = 'Write Artist Image';
+        }
+    }
+}
+window.writeArtistImageToDisk = writeArtistImageToDisk;
+
+
+function openEnhanceQualityModal() {
+    if (!_enhanceQualityData) return;
+    const data = _enhanceQualityData;
+
+    // Remove existing modal if any
+    const existing = document.getElementById('enhance-quality-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'enhance-quality-overlay';
+    overlay.className = 'enhance-modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeEnhanceQualityModal(); };
+
+    const minTier = data.min_acceptable_tier || 1;
+    const summary = data.quality_summary || {};
+
+    overlay.innerHTML = `
+        <div class="enhance-modal" onclick="event.stopPropagation()">
+            <div class="enhance-modal-header">
+                <h3>⚡ Enhance Quality — ${_esc(data.artist_name)}</h3>
+                <button class="enhance-modal-close" onclick="closeEnhanceQualityModal()">&times;</button>
+            </div>
+            <div class="enhance-summary-bar">
+                ${_buildEnhanceSummaryChips(summary)}
+            </div>
+            <div class="enhance-controls">
+                <div class="enhance-tier-selector">
+                    <label>Upgrade tracks below:</label>
+                    <select id="enhance-tier-dropdown" onchange="updateEnhanceThreshold(parseInt(this.value))">
+                        <option value="1" ${minTier <= 1 ? 'selected' : ''}>Lossless (FLAC/WAV)</option>
+                        <option value="2" ${minTier === 2 ? 'selected' : ''}>High Lossy (OGG/Opus)</option>
+                        <option value="3" ${minTier === 3 ? 'selected' : ''}>Standard Lossy (M4A/AAC)</option>
+                        <option value="4" ${minTier >= 4 ? 'selected' : ''}>Low Lossy (MP3/WMA)</option>
+                    </select>
+                </div>
+                <div class="enhance-select-controls">
+                    <button class="enhance-select-btn" onclick="enhanceSelectAll(true)">Select All Below</button>
+                    <button class="enhance-select-btn" onclick="enhanceSelectAll(false)">Deselect All</button>
+                    <span class="enhance-selected-count" id="enhance-selected-count">0 selected</span>
+                </div>
+            </div>
+            <div class="enhance-modal-body">
+                <table class="enhance-track-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>#</th>
+                            <th>Title</th>
+                            <th>Album</th>
+                            <th>Format</th>
+                            <th>Bitrate</th>
+                        </tr>
+                    </thead>
+                    <tbody id="enhance-track-tbody">
+                    </tbody>
+                </table>
+            </div>
+            <div class="enhance-modal-footer">
+                <div class="enhance-footer-info" id="enhance-footer-info"></div>
+                <div class="enhance-footer-actions">
+                    <button class="enhance-btn secondary" onclick="closeEnhanceQualityModal()">Cancel</button>
+                    <button class="enhance-btn primary" id="enhance-submit-btn" onclick="submitEnhanceQuality()" disabled>
+                        ⚡ Enhance 0 Tracks
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    renderEnhanceTrackRows(minTier);
+}
+
+function _buildEnhanceSummaryChips(summary) {
+    const chips = [
+        { key: 'lossless', label: 'FLAC', cssClass: 'lossless' },
+        { key: 'high_lossy', label: 'OGG/Opus', cssClass: 'high-lossy' },
+        { key: 'standard_lossy', label: 'M4A/AAC', cssClass: 'standard-lossy' },
+        { key: 'low_lossy', label: 'MP3/WMA', cssClass: 'low-lossy' },
+    ];
+    return chips
+        .filter(c => (summary[c.key] || 0) > 0)
+        .map(c => `
+            <div class="enhance-summary-chip ${c.cssClass}">
+                <span class="chip-count">${summary[c.key]}</span>
+                <span class="chip-label">${c.label}</span>
+            </div>
+        `).join('');
+}
+
+function renderEnhanceTrackRows(thresholdTier) {
+    const tbody = document.getElementById('enhance-track-tbody');
+    if (!tbody || !_enhanceQualityData) return;
+
+    const tracks = _enhanceQualityData.tracks;
+    // Sort: below-threshold first, then by album + track number
+    const sorted = [...tracks].sort((a, b) => {
+        const aBt = a.tier_num > thresholdTier ? 0 : 1;
+        const bBt = b.tier_num > thresholdTier ? 0 : 1;
+        if (aBt !== bBt) return aBt - bBt;
+        const albumCmp = (a.album_title || '').localeCompare(b.album_title || '');
+        if (albumCmp !== 0) return albumCmp;
+        return (a.disc_number || 1) * 1000 + (a.track_number || 0) - ((b.disc_number || 1) * 1000 + (b.track_number || 0));
+    });
+
+    tbody.innerHTML = sorted.map(track => {
+        const isBelow = track.tier_num > thresholdTier;
+        const tierInfo = ENHANCE_TIER_MAP[track.tier_name] || ENHANCE_TIER_MAP['unknown'];
+        const bitrateStr = track.bitrate ? `${track.bitrate} kbps` : '-';
+        return `
+            <tr class="enhance-track-row ${isBelow ? 'below-threshold' : 'above-threshold'}"
+                data-track-id="${_escAttr(track.track_id)}" data-tier="${track.tier_num}">
+                <td><input type="checkbox" class="enhance-track-check"
+                    ${isBelow ? 'checked' : ''} onchange="updateEnhanceSelectedCount()"></td>
+                <td>${track.track_number || '-'}</td>
+                <td>${_esc(track.title)}</td>
+                <td>${_esc(track.album_title)}</td>
+                <td><span class="enhance-format-badge ${tierInfo.cssClass}">${_esc(track.format)}</span></td>
+                <td><span class="enhance-bitrate">${bitrateStr}</span></td>
+            </tr>
+        `;
+    }).join('');
+
+    updateEnhanceSelectedCount();
+}
+
+function updateEnhanceThreshold(tierNum) {
+    const rows = document.querySelectorAll('.enhance-track-row');
+    rows.forEach(row => {
+        const trackTier = parseInt(row.dataset.tier);
+        const isBelow = trackTier > tierNum;
+        const cb = row.querySelector('.enhance-track-check');
+
+        row.classList.toggle('below-threshold', isBelow);
+        row.classList.toggle('above-threshold', !isBelow);
+        if (cb) cb.checked = isBelow;
+    });
+    updateEnhanceSelectedCount();
+}
+
+function enhanceSelectAll(select) {
+    const thresholdTier = parseInt(document.getElementById('enhance-tier-dropdown')?.value || '1');
+    const checks = document.querySelectorAll('.enhance-track-check');
+    checks.forEach(cb => {
+        const row = cb.closest('.enhance-track-row');
+        const trackTier = parseInt(row?.dataset.tier || '999');
+        if (select) {
+            cb.checked = trackTier > thresholdTier;
+        } else {
+            cb.checked = false;
+        }
+    });
+    updateEnhanceSelectedCount();
+}
+
+function updateEnhanceSelectedCount() {
+    const checks = document.querySelectorAll('.enhance-track-check:checked');
+    const count = checks.length;
+    const countEl = document.getElementById('enhance-selected-count');
+    const submitBtn = document.getElementById('enhance-submit-btn');
+
+    if (countEl) countEl.textContent = `${count} selected`;
+    if (submitBtn) {
+        submitBtn.textContent = `⚡ Enhance ${count} Track${count !== 1 ? 's' : ''}`;
+        submitBtn.disabled = count === 0;
+    }
+}
+
+async function submitEnhanceQuality() {
+    const checks = document.querySelectorAll('.enhance-track-check:checked');
+    const trackIds = [];
+    checks.forEach(cb => {
+        const row = cb.closest('.enhance-track-row');
+        if (row?.dataset.trackId) trackIds.push(row.dataset.trackId);
+    });
+
+    if (trackIds.length === 0) return;
+
+    const submitBtn = document.getElementById('enhance-submit-btn');
+    const footerInfo = document.getElementById('enhance-footer-info');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="enhance-spinner"></span>Processing...';
+    }
+    if (footerInfo) footerInfo.textContent = 'Matching tracks across metadata sources and adding to wishlist...';
+
+    try {
+        const resp = await fetch(`/api/library/artist/${_enhanceArtistId}/enhance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds })
+        });
+
+        const result = await resp.json();
+
+        if (result.success) {
+            const msg = `${result.enhanced_count} track${result.enhanced_count !== 1 ? 's' : ''} queued for enhancement`;
+            if (footerInfo) footerInfo.textContent = msg;
+
+            showToast(msg + (result.failed_count > 0 ? ` (${result.failed_count} failed)` : ''), 'success');
+
+            // Update button count
+            const enhBtn = document.getElementById('library-artist-enhance-btn');
+            if (enhBtn && result.enhanced_count > 0) {
+                const remaining = trackIds.length - result.enhanced_count;
+                if (remaining <= 0) {
+                    enhBtn.classList.add('hidden');
+                }
+            }
+
+            if (submitBtn) {
+                submitBtn.textContent = '✅ Done';
+                submitBtn.disabled = true;
+            }
+
+            // Auto-close after short delay
+            setTimeout(() => closeEnhanceQualityModal(), 1500);
+        } else {
+            throw new Error(result.error || 'Enhancement failed');
+        }
+    } catch (e) {
+        console.error('Enhance quality error:', e);
+        showToast(`Enhancement failed: ${e.message}`, 'error');
+        if (submitBtn) {
+            submitBtn.textContent = `⚡ Enhance ${trackIds.length} Tracks`;
+            submitBtn.disabled = false;
+        }
+        if (footerInfo) footerInfo.textContent = '';
+    }
+}
+
+function closeEnhanceQualityModal() {
+    const overlay = document.getElementById('enhance-quality-overlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+        setTimeout(() => overlay.remove(), 300);
+    }
+}
+
+// Global exports
+window.openEnhanceQualityModal = openEnhanceQualityModal;
+window.closeEnhanceQualityModal = closeEnhanceQualityModal;
+window.updateEnhanceThreshold = updateEnhanceThreshold;
+window.enhanceSelectAll = enhanceSelectAll;
+window.updateEnhanceSelectedCount = updateEnhanceSelectedCount;
+window.submitEnhanceQuality = submitEnhanceQuality;
+
+// ===== END ENHANCE QUALITY MODAL =====

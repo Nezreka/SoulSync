@@ -11,10 +11,15 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LibraryV2RouteImport } from './routes/library-v2'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
+import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
+import { Route as SearchRouteRouteImport } from './routes/search/route'
 import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
+import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
+import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
@@ -33,9 +38,24 @@ const SplatRoute = SplatRouteImport.update({
   path: '/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WishlistRouteRoute = WishlistRouteRouteImport.update({
+  id: '/wishlist',
+  path: '/wishlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WatchlistRouteRoute = WatchlistRouteRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StatsRouteRoute = StatsRouteRouteImport.update({
   id: '/stats',
   path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRouteRoute = SearchRouteRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LibraryRouteRoute = LibraryRouteRouteImport.update({
@@ -51,6 +71,16 @@ const IssuesRouteRoute = IssuesRouteRouteImport.update({
 const ImportRouteRoute = ImportRouteRouteImport.update({
   id: '/import',
   path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AutomationsRouteRoute = AutomationsRouteRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActiveDownloadsRouteRoute = ActiveDownloadsRouteRouteImport.update({
+  id: '/active-downloads',
+  path: '/active-downloads',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -91,10 +121,15 @@ const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
@@ -106,9 +141,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
@@ -121,10 +161,15 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/library-v2': typeof LibraryV2Route
   '/import/album': typeof ImportAlbumRoute
@@ -138,10 +183,15 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/active-downloads'
+    | '/automations'
     | '/import'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/library-v2'
     | '/import/album'
@@ -153,9 +203,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/active-downloads'
+    | '/automations'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/library-v2'
     | '/import/album'
@@ -167,10 +222,15 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/active-downloads'
+    | '/automations'
     | '/import'
     | '/issues'
     | '/library'
+    | '/search'
     | '/stats'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/library-v2'
     | '/import/album'
@@ -183,10 +243,15 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActiveDownloadsRouteRoute: typeof ActiveDownloadsRouteRoute
+  AutomationsRouteRoute: typeof AutomationsRouteRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   LibraryRouteRoute: typeof LibraryRouteRoute
+  SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
+  WatchlistRouteRoute: typeof WatchlistRouteRoute
+  WishlistRouteRoute: typeof WishlistRouteRoute
   SplatRoute: typeof SplatRoute
   LibraryV2Route: typeof LibraryV2Route
   LabelDetailIdRoute: typeof LabelDetailIdRoute
@@ -209,11 +274,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/wishlist': {
+      id: '/wishlist'
+      path: '/wishlist'
+      fullPath: '/wishlist'
+      preLoaderRoute: typeof WishlistRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/watchlist': {
+      id: '/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof WatchlistRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/stats': {
       id: '/stats'
       path: '/stats'
       fullPath: '/stats'
       preLoaderRoute: typeof StatsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/library': {
@@ -235,6 +321,20 @@ declare module '@tanstack/react-router' {
       path: '/import'
       fullPath: '/import'
       preLoaderRoute: typeof ImportRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/automations': {
+      id: '/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof AutomationsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/active-downloads': {
+      id: '/active-downloads'
+      path: '/active-downloads'
+      fullPath: '/active-downloads'
+      preLoaderRoute: typeof ActiveDownloadsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -309,10 +409,15 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActiveDownloadsRouteRoute: ActiveDownloadsRouteRoute,
+  AutomationsRouteRoute: AutomationsRouteRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   LibraryRouteRoute: LibraryRouteRoute,
+  SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
+  WatchlistRouteRoute: WatchlistRouteRoute,
+  WishlistRouteRoute: WishlistRouteRoute,
   SplatRoute: SplatRoute,
   LibraryV2Route: LibraryV2Route,
   LabelDetailIdRoute: LabelDetailIdRoute,

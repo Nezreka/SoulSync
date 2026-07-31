@@ -147,6 +147,8 @@
                 var entry = { id: id, ti: String(p.ti || '').slice(0, 120),
                               d: _saneDuration(p.d), by: ev.username };
                 if (p.a) entry.auto = true;        // queued by the auto-DJ
+                // why the auto-DJ chose it ("similar to X") — display credit only
+                if (p.w) entry.why = String(p.w).slice(0, 60);
                 queue.push(entry);
                 inQueue[id] = entry;
             } else if (p.k === 'jbx.vote') {
@@ -275,6 +277,37 @@
         return tuned;
     }
 
+    // np.set {t, a} → what each user is playing in SoulSync's OWN player
+    // (latest per user; an empty title means they stopped). Opt-in on the
+    // sender's side — this is a public room, so nothing is broadcast unless
+    // the user turned it on.
+    function reduceNowPlaying(events) {
+        var np = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'np.set') return;
+            var t = String(ev.p.t || '').slice(0, 120);
+            if (!t) { delete np[ev.username]; return; }
+            np[ev.username] = { t: t, a: String(ev.p.a || '').slice(0, 80) };
+        });
+        return np;
+    }
+
+    // Preset avatar ids announced by the 'hello' beacon ({k:'hello', av:N}), so
+    // someone who joined but hasn't spoken still has a face. Messages carry the
+    // id too (see _avatarOf in chat.js) — this covers the silent ones. Bounded
+    // to the known set: the id INDEXES a fixed list, it never builds a path.
+    function reduceAvatars(events, maxId) {
+        var out = {};
+        var cap = (typeof maxId === 'number' && maxId > 0) ? maxId : 99;
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var n = parseInt(ev.p.av, 10);
+            if (n >= 1 && n <= cap) out[ev.username] = n;
+        });
+        return out;
+    }
+
     // The next track every client agrees on: most votes (lexicographic tie),
     // FIFO head when nobody voted. Null when the queue is empty.
     function nextTrack(state) {
@@ -292,6 +325,8 @@
         parseProtocol: parseProtocol,
         tallyVotes: tallyVotes,
         electCoordinator: electCoordinator,
+        reduceNowPlaying: reduceNowPlaying,
+        reduceAvatars: reduceAvatars,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
         reducePins: reducePins,

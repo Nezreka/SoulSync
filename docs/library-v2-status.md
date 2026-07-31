@@ -2295,3 +2295,105 @@ Arbeit.
 **Offen:** ein Durchlauf gegen eine Kopie der Produktiv-DB — insbesondere ein
 Neustart mitten in der Migration auf einer großen Library, um den
 Resume-Checkpoint unter realer Datenmenge zu belegen.
+
+---
+
+## 44. Upstream-Sync auf `Nezreka/SoulSync:dev` (31. Juli 2026)
+
+Der Branch wurde per **Merge** (nicht Rebase) auf `upstream/dev` @ `d0cb43db5`
+gebracht. Merge-Base war `d78755ca6` („bump to 3.1.8"): 197 Upstream-Commits
+gegen 109 eigene. Ein Rebase hätte jede der 109 Änderungen einzeln gegen einen
+in der Zwischenzeit vollständig nach React portierten WebUI-Baum stellen
+müssen; der Merge löst dieselbe Menge Konflikte genau einmal. Vorheriger Stand
+liegt als `backup/library-overhaul-pre-upstream-sync-20260731`.
+
+### 44.1 Was Upstream in der Zwischenzeit gebaut hat
+
+Der Kern ist eine **React-Migration des gesamten WebUI**: Watchlist, Wishlist,
+Automations, Library, Artist Detail, Label Detail, Search (enhanced *und*
+basic) und Active Downloads sind jetzt React-Routen, die jeweilige
+Vanilla-Seite ist gelöscht. Dazu kamen Chat/Arcade (Discord-artige Räume,
+serverlose Spiele), Discover-Caching, Spotify-Rate-Limit-Härtung und
+Video-Fixes. Backendseitig ist der Zuwachs klein und berührt V2 nicht
+(`api/chat.py`, `core/metadata/cache.py`, `core/search/basic.py`,
+`database/music_database.py` +187 Zeilen, alle konfliktfrei automatisch
+gemergt).
+
+### 44.2 Die eine echte Kollision: `/library` und `/artist-detail`
+
+Beide Seiten haben unabhängig voneinander `/library` nach React portiert —
+wir als Library V2, Upstream als originalgetreuen Port der alten Liste
+(`-library.api.ts`, `-ui/library-page.tsx`, `library-artist-card.tsx`, …).
+Zwei React-Seiten können dieselbe Route nicht besitzen.
+
+- **`/library` bleibt Library V2.** Der Upstream-Port ist damit unerreichbar
+  und wurde gelöscht statt als toter Code stehen zu lassen; er ist genau die
+  Seite, die diese PR ersetzt.
+- **`/artist-detail` gehört wieder Upstream.** Unsere ldp-01-Weiterleitung
+  (jede Artist-URL landete im V2-Discovery-Modus) stammt aus der Zeit, als
+  diese Seite eine Vanilla-Seite der gelöschten Library war. Sie ist jetzt
+  eine gepflegte React-Seite mit eigenen Features (Gap-Fill #1067/#1071,
+  DB-Record-Inspector, Enhanced View, Inline-Edit). Die Weiterleitung hätte
+  all das unerreichbar gemacht, deshalb ist sie zurückgenommen.
+- **Erhalten bleibt der gezielte Einstiegspunkt:** ein Suchtreffer unter
+  „In Your Library" öffnet Library V2, sobald V2 den Artist kennt
+  (`library_v2_id`), sonst unverändert Artist Detail. Das war §11 und lebte
+  in der gelöschten `search.js`; es ist jetzt als `inLibraryArtistPath()` in
+  `-search.helpers.ts` portiert und getestet. Dasselbe gilt für die globale
+  Suche in `downloads.js`.
+
+### 44.3 Zurückgenommene Löschungen
+
+Weil Upstreams React-Artist-Detail auf Vanilla-Globals aufsetzt, mussten
+Löschungen dieses Branches rückgängig gemacht werden:
+
+- `webui/static/library.js` ist wieder da (Upstream-Fassung, 7.703 Zeilen:
+  Artist-Detail-State, Discography-Modal, Enhanced View, Watch-All-Modal).
+  Unser `library-shared.js` war ein 447-Zeilen-Auszug daraus und ist
+  entfallen; die einzige inhaltliche Abweichung — die typisierten
+  `lib2_track_id`/`legacy_track_id`/`server_track_id` in `playLibraryTrack` —
+  ist in `library.js` übernommen.
+- `stats-automations.js` (Enhance-Quality-Modal, `playArtistRadio`,
+  `writeArtistImageToDisk`) und der Breadcrumb-Aufruf in `shell-bridge.js`
+  sind wiederhergestellt; `tests/test_artist_detail_cross_file_contract.py`
+  hält beide Seiten dieser Naht fest.
+- Die Enhanced-Bulk-Edit-, Tag-Preview-, Reorganize- und
+  Re-identify-Modale in `index.html` sind wieder eingesetzt.
+
+Erhalten bleiben die Download-Bubbles auf der Library-Seite: die V2-Seite
+rendert jetzt den `[data-library-downloads-host]`-Host und ruft
+`showLibraryDownloadsSection()`, und `ss:library-changed` wird über den neuen
+Hook `-library-v2.live.ts` gehört.
+
+### 44.4 Drei Fehler, die der Sync aufgedeckt hat
+
+Alle drei bestanden schon vor dem Merge auf diesem Branch und wurden von
+Upstreams neuen Guard-Tests sichtbar gemacht:
+
+1. `downloads.js` rief `isConfirmedSearchIntentModal()` hinter einem
+   `typeof === 'function'`-Guard auf — die Funktion war beim Aufräumen aus
+   `shared-helpers.js` verschwunden, der Zweig also stiller toter Code und
+   das Quality-Profil des Confirmed-Search-Modals wirkungslos. Wieder
+   hergestellt (`tests/test_vanilla_globals_resolve.py`).
+2. `libraryV2SearchSchema.q` war ein blankes `z.string().default('').catch('')`:
+   TanStack JSON-parst Suchparameter, ein Filter wie „123" kam als NUMBER an,
+   wurde verworfen und die Liste zeigte kommentarlos alles. Jetzt
+   `coercedString` wie `discover`/`discoverName`.
+3. Die vier Library-Tour-Schritte in `helper.js` ankerten auf
+   `[data-page="library"]` ohne Klassen-Token, was
+   `tests/test_helper_tours.py` nicht validieren kann. Jetzt
+   `.nav-button[data-page="library"]` wie jeder andere Sidebar-Anker.
+
+### 44.5 Verifikation
+
+- Frontend: `tsc --noEmit` sauber, Production Build erfolgreich,
+  `oxfmt --check` + `oxlint --type-check` mit **298 Warnungen / 0 Fehlern** —
+  exakt der Stand von sauberem `upstream/dev`, also keine neu eingeführten.
+- Vitest: 1.970 bestanden / 143 Dateien. Die 131 Fehlschläge in vier
+  `artist-detail`-Dateien sind **auf unverändertem `upstream/dev` identisch
+  reproduziert** (lokale Node-Runtime liefert kein `localStorage`); sie sind
+  keine Folge des Merges.
+- Pytest: `tests/library2` 1.193, `tests/library`+`search`+`wishlist`+
+  `metadata` 1.324, `tests/downloads`+`repair_jobs`+`quality`+`imports` 1.761,
+  sowie alle 61 Top-Level-Dateien, die eine der gemergten Frontend-Dateien
+  lesen, 984 — alles bestanden.

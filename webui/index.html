@@ -4073,252 +4073,38 @@
                             </div>
                         </div>
 
-                        <!-- Search source picker — icon row populated by search.js.
-                             Each icon triggers a single-source fetch (no fan-out);
-                             results are cached per (query, source) pair. -->
-                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
+                        <!-- The source picker is React's (webui/src/routes/search/-ui/
+                             source-row.tsx). The empty div that used to live here shared
+                             its id with the React one, and getElementById answers with
+                             whichever comes first in the document. -->
 
-                        <!-- Basic Search Section -->
-                        <div id="basic-search-section" class="search-section">
+                        <!-- BOTH search panels are React's now: the enhanced/metadata
+                             half and the basic (Soulseek/download-source file) half both
+                             live in webui/src/routes/search/.
 
-                            <!-- Source picker: chip row, one chip per active download source.
-                                 Populated by downloads.js:initBasicSearchSources().
-                                 Hidden until sources load; in single-source mode shows one
-                                 non-interactive chip so the user knows what they're searching. -->
-                            <div class="bs-source-row" id="bs-source-row" aria-label="Search source" role="tablist"></div>
-
-                            <!-- Search bar -->
-                            <div class="bs-search-bar">
-                                <div class="bs-search-input-wrap">
-                                    <svg class="bs-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/></svg>
-                                    <input type="text" id="downloads-search-input"
-                                           placeholder="Search artists, albums, tracks…"
-                                           autocomplete="off" spellcheck="false">
-                                    <button id="downloads-cancel-btn" class="bs-cancel-btn hidden" aria-label="Cancel">✕</button>
-                                </div>
-                                <button id="downloads-search-btn" class="bs-search-btn">Search</button>
-                            </div>
-
-                            <!-- Status / loading bar -->
-                            <div class="bs-status-bar">
-                                <div class="spinner-animation hidden"></div>
-                                <span id="search-status-text" class="bs-status-text">Enter an artist, album, or track name to search</span>
-                                <div class="dots-animation hidden"></div>
-                            </div>
-
-                            <!-- Filters: always-visible compact pill row -->
-                            <div id="filters-container" class="bs-filters hidden">
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Type</span>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="type" data-value="all">All</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="album">Albums</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="type" data-value="track">Tracks</button>
-                                </div>
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Format</span>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="format" data-value="all">All</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="flac">FLAC</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="mp3">MP3</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="ogg">OGG</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="aac">AAC</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="format" data-value="wma">WMA</button>
-                                </div>
-                                <div class="bs-filter-group">
-                                    <span class="bs-filter-label">Sort</span>
-                                    <button id="sort-order-btn" class="filter-btn bs-filter-pill sort-order-btn" data-order="desc">↓</button>
-                                    <button class="filter-btn bs-filter-pill active" data-filter-type="sort" data-value="relevance">Relevance</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="quality_score">Quality</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="size">Size</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="title">Name</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="username">Uploader</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="bitrate">Bitrate</button>
-                                    <button class="filter-btn bs-filter-pill" data-filter-type="sort" data-value="duration">Duration</button>
-                                </div>
-                            </div>
-
-                            <!-- Results area -->
-                            <div class="bs-results-wrap" id="search-results-area">
-                                <div class="search-results-placeholder">
-                                    <p>Enter a search term to get started.</p>
-                                </div>
-                            </div>
-
-                        </div>
-                        <!-- End Basic Search Section -->
-
-                        <!-- Enhanced Search Section (New) -->
-                        <div id="enhanced-search-section" class="search-section active">
-                            <!-- Enhanced Search Bar with Dropdown -->
-                            <div class="enhanced-search-input-wrapper">
-                                <div class="enhanced-search-bar-container">
-                                    <div class="enhanced-search-wrapper">
-                                        <div class="enhanced-search-icon">✨</div>
-                                        <input type="text" id="enhanced-search-input"
-                                            placeholder="Search for artists, albums, or tracks...">
-                                        <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
-                                    </div>
-                                </div>
-
-                                <!-- Link lookup (#775): paste a provider link and resolve
-                                     it directly on the owning source (Spotify / Apple Music
-                                     / MusicBrainz / Deezer) — no fuzzy search. Results render
-                                     in the dropdown below and reuse the normal download/
-                                     import flow. Links only: a bare ID is ambiguous. -->
-                                <div class="enh-id-lookup">
-                                    <span class="enh-id-lookup-icon">🔗</span>
-                                    <input type="text" id="enh-id-input" class="enh-id-input"
-                                        placeholder="…or paste a Spotify / Apple Music / MusicBrainz / Deezer link, or a MusicBrainz ID"
-                                        autocomplete="off" spellcheck="false">
-                                    <button id="enh-id-btn" class="enh-id-btn" type="button">Look up</button>
-                                </div>
-
-                                <!-- Enhanced Search Dropdown (Overlay Panel) -->
-                                <div id="enhanced-dropdown" class="enhanced-dropdown hidden">
-                                    <div class="enhanced-dropdown-content">
-                                        <!-- Mobile close bar -->
-                                        <button id="enhanced-dropdown-close" class="enhanced-dropdown-close">
-                                            <span>✕</span> Close Results
-                                        </button>
-                                        <!-- Loading State -->
-                                        <div id="enhanced-loading" class="enhanced-loading hidden">
-                                            <div class="spinner"></div>
-                                            <p id="enhanced-loading-text">Searching across Spotify and your library...
-                                            </p>
-                                        </div>
-
-                                        <!-- Empty State -->
-                                        <div id="enhanced-empty" class="enhanced-empty hidden">
-                                            <div class="empty-icon">🔍</div>
-                                            <p>No results found</p>
-                                        </div>
-
-                                        <!-- Results Container -->
-                                        <div id="enhanced-results-container" class="enhanced-results-container hidden">
-
-                                            <!-- Fallback banner — shown when user clicked Spotify but backend
-                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
-                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
-
-                                            <!-- Artists Container (Side by Side) -->
-                                            <div class="enh-artists-wrapper">
-                                                <!-- DB Artists -->
-                                                <div id="enh-db-artists-section"
-                                                    class="enh-dropdown-section enh-artist-section hidden">
-                                                    <div class="enh-section-header">
-                                                        <span class="enh-section-icon">📚</span>
-                                                        <h4 class="enh-section-title">In Your Library</h4>
-                                                        <span class="enh-section-count"
-                                                            id="enh-db-artists-count">0</span>
-                                                    </div>
-                                                    <div class="enh-compact-list" id="enh-db-artists-list"></div>
-                                                </div>
-
-                                                <!-- Spotify Artists -->
-                                                <div id="enh-spotify-artists-section"
-                                                    class="enh-dropdown-section enh-artist-section hidden">
-                                                    <div class="enh-section-header">
-                                                        <span class="enh-section-icon">🎤</span>
-                                                        <h4 class="enh-section-title">Artists</h4>
-                                                        <span class="enh-section-count"
-                                                            id="enh-spotify-artists-count">0</span>
-                                                    </div>
-                                                    <div class="enh-compact-list" id="enh-spotify-artists-list"></div>
-                                                </div>
-                                            </div>
-
-                                            <!-- Albums -->
-                                            <div id="enh-albums-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">💿</span>
-                                                    <h4 class="enh-section-title">Albums</h4>
-                                                    <span class="enh-section-count" id="enh-albums-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-albums-list"></div>
-                                            </div>
-
-                                            <!-- Singles & EPs -->
-                                            <div id="enh-singles-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🎶</span>
-                                                    <h4 class="enh-section-title">Singles & EPs</h4>
-                                                    <span class="enh-section-count" id="enh-singles-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-singles-list"></div>
-                                            </div>
-
-                                            <!-- Tracks -->
-                                            <div id="enh-tracks-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🎵</span>
-                                                    <h4 class="enh-section-title">Tracks</h4>
-                                                    <span class="enh-section-count" id="enh-tracks-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-tracks-list"></div>
-                                            </div>
-
-                                            <!-- Labels (record labels — monitored like an artist watchlist) -->
-                                            <div id="enh-labels-section" class="enh-dropdown-section hidden">
-                                                <div class="enh-section-header">
-                                                    <span class="enh-section-icon">🏷️</span>
-                                                    <h4 class="enh-section-title">Labels</h4>
-                                                    <span class="enh-section-count" id="enh-labels-count">0</span>
-                                                </div>
-                                                <div class="enh-compact-list" id="enh-labels-list"></div>
-                                            </div>
-
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Main Search Results Area (for slskd results) -->
-                            <div class="search-results-container">
-                                <div class="search-results-header">
-                                    <h3>Search Results</h3>
-                                </div>
-                                <div class="search-results-scroll-area" id="enhanced-main-results-area">
-                                    <div class="search-results-placeholder">
-                                        <p>Search results will appear here when you select an album or track.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- End Enhanced Search Section -->
+                             Their markup is deleted rather than left unused. Every id in
+                             it — #enhanced-search-input, #enhanced-main-results-area,
+                             #enh-source-row, #downloads-search-input, #search-results-area,
+                             #bs-source-row, #filters-container — is looked up by id by the
+                             global download widget, the wishlist handoff, the tour or
+                             showSearchDownloadBubbles, and two elements answering to one id
+                             resolves by document order, which is not a contract.
+                             tests/test_react_ids_are_not_duplicated.py guards this. -->
                     </div>
 
                 </div>
             </div>
             <!-- Automations Page -->
             <div class="page" id="automations-page">
-                <!-- List View -->
-                <div class="automations-list-view" id="automations-list-view">
-                    <div class="page-shell automations-container">
-                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
-                                <p class="header-subtitle">Configure scheduled tasks and automated workflows</p>
-                            </div>
-                            <div class="header-spacer"></div>
-                            <div class="header-actions">
-                                <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
-                            </div>
-                        </div>
-                        <div class="automations-stats" id="automations-stats"></div>
-                        <div class="auto-filter-bar" id="auto-filter-bar" style="display:none;">
-                            <input type="text" class="auto-filter-search" id="auto-filter-search" placeholder="Filter automations…">
-                            <select class="auto-filter-select" id="auto-filter-trigger"><option value="">All Triggers</option></select>
-                            <select class="auto-filter-select" id="auto-filter-action"><option value="">All Actions</option></select>
-                            <span class="auto-filter-count" id="auto-filter-count"></span>
-                        </div>
-                        <div class="automations-list" id="automations-list"></div>
-                        <div class="automations-empty" id="automations-empty" style="display:none;">
-                            <div class="automations-empty-icon">&#9889;</div>
-                            <div class="automations-empty-title">No automations yet</div>
-                            <div class="automations-empty-text">Create your first automation to schedule tasks and trigger actions automatically.</div>
-                            <button class="auto-new-btn" onclick="showAutomationBuilder()">+ New Automation</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- List View — INTENTIONALLY EMPTY.
+                     React renders the automations list (see
+                     webui/src/routes/automations/). This container has to stay:
+                     the shared builder toggles it directly, and
+                     hideAutomationBuilder does `_bEl('listView').style.display`
+                     with no null guard, so removing it would throw on every
+                     Back / Cancel / Save — on the VIDEO side too, which drives
+                     the same builder through its own context. -->
+                <div class="automations-list-view" id="automations-list-view"></div>
 
                 <!-- Builder View -->
                 <div class="automations-builder-view" id="automations-builder-view" style="display:none;">
@@ -4340,62 +4126,115 @@
             </div>
 
             <!-- Active Downloads Page -->
-            <div class="page" id="active-downloads-page">
-                <div class="adl-layout">
-                    <!-- Left: download list -->
-                    <div class="adl-main">
-                        <div class="adl-container">
-                            <div class="adl-header">
-                                <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
-                                <div class="adl-controls">
-                                    <div class="adl-filter-pills" id="adl-filter-pills">
-                                        <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
-                                        <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
-                                        <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
-                                        <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
-                                        <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
-                                        <button class="adl-pill" data-filter="unverified" onclick="adlSetFilter('unverified')" title="Review queue: imported-but-unconfirmed downloads (unverified / force-imported) and quarantined files that were never imported.">⚠ Unverified/Quarantine</button>
-                                    </div>
-                                    <div style="display:flex;align-items:center;gap:10px;">
-                                        <span class="adl-count" id="adl-count"></span>
-                                        <button class="adl-cancel-all-btn" id="adl-cancel-all-btn" onclick="adlCancelAll()" style="display:none" title="Cancel all active and queued downloads">Cancel All</button>
-                                        <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="adl-list" id="adl-list">
-                                <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Library.</div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Right: batch context panel -->
-                    <div class="adl-batch-panel" id="adl-batch-panel">
-                        <div class="adl-batch-panel-header">
-                            <h3 class="adl-batch-panel-title">Batches</h3>
-                            <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                            </button>
-                        </div>
-                        <div class="adl-batch-summary" id="adl-batch-summary" style="display:none">
-                            <!-- Live aggregate (batches · downloading · speed · ETA) rendered by JS -->
-                        </div>
-                        <div class="adl-batch-active" id="adl-batch-active">
-                            <!-- Active batch cards rendered by JS -->
-                        </div>
-                        <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
-                            <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
-                                <span>Recent History</span>
-                                <div class="adl-batch-history-header-actions">
-                                    <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
-                                    <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                </div>
-                            </div>
-                            <div class="adl-batch-history-list" id="adl-batch-history-list">
-                                <!-- Completed batch history rendered by JS -->
-                            </div>
-                        </div>
-                    </div>
+            <!-- The Downloads page is React's: webui/src/routes/active-downloads/.
+                 Its markup is deleted rather than left unused — every id in it
+                 (#adl-list, #adl-count, #adl-batch-panel, #adl-empty …) is also
+                 rendered by the React page, and two elements answering to one id
+                 resolves by document order, which is not a contract.
+                 tests/test_react_ids_are_not_duplicated.py guards this. -->
 
+            <!-- Artist Detail Page -->
+
+            <!-- Enhanced Bulk Edit Modal -->
+            <div class="modal-overlay hidden" id="enhanced-bulk-edit-overlay">
+                <div class="enhanced-bulk-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="enhanced-bulk-modal-title">Batch Edit Tracks</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeBulkEditModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="enhanced-bulk-modal-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBulkEditModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" onclick="executeBulkEdit()">Apply Changes</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Bulk Actions Bar -->
+            <div class="enhanced-bulk-bar" id="enhanced-bulk-bar">
+                <div class="enhanced-bulk-bar-info">
+                    <span class="enhanced-bulk-bar-count" id="enhanced-bulk-count">0</span>
+                    <span class="enhanced-bulk-bar-label">tracks selected</span>
+                </div>
+                <div class="enhanced-bulk-bar-actions">
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="showBulkEditModal()">Edit Selected</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
+                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
+                    <button class="btn btn--sm btn--danger enhanced-bulk-btn" onclick="clearTrackSelection()">Clear Selection</button>
+                </div>
+            </div>
+
+            <!-- Tag Preview Modal -->
+            <div class="modal-overlay hidden" id="tag-preview-overlay">
+                <div class="enhanced-bulk-modal tag-preview-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="tag-preview-title">Write Tags to File</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeTagPreviewModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="tag-preview-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <label class="tag-preview-cover-label">
+                            <input type="checkbox" id="tag-preview-embed-cover" checked>
+                            Embed cover art
+                        </label>
+                        <label class="tag-preview-cover-label hidden" id="tag-preview-sync-label">
+                            <input type="checkbox" id="tag-preview-sync-server" checked>
+                            <span id="tag-preview-sync-text">Sync to server</span>
+                        </label>
+                        <div class="tag-preview-footer-actions">
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Tag Preview Modal -->
+            <div class="modal-overlay hidden" id="batch-tag-preview-overlay">
+                <div class="enhanced-bulk-modal batch-tag-preview-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="batch-tag-preview-title">Write Tags</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeBatchTagPreviewModal()">&times;</button>
+                    </div>
+                    <div id="batch-tag-preview-summary"></div>
+                    <div class="enhanced-bulk-modal-body batch-tag-preview-body" id="batch-tag-preview-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer">
+                        <label class="tag-preview-cover-label">
+                            <input type="checkbox" id="batch-tag-preview-embed-cover" checked>
+                            Embed cover art
+                        </label>
+                        <label class="tag-preview-cover-label hidden" id="batch-tag-preview-sync-label">
+                            <input type="checkbox" id="batch-tag-preview-sync-server" checked>
+                            <span id="batch-tag-preview-sync-text">Sync to server</span>
+                        </label>
+                        <div class="tag-preview-footer-actions">
+                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBatchTagPreviewModal()">Cancel</button>
+                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reorganize Album Modal -->
+            <div class="modal-overlay hidden" id="reorganize-overlay">
+                <div class="enhanced-bulk-modal reorganize-modal">
+                    <div class="enhanced-bulk-modal-header">
+                        <h3 id="reorganize-modal-title">Reorganize Album</h3>
+                        <button class="enhanced-bulk-modal-close" onclick="closeReorganizeModal()">&times;</button>
+                    </div>
+                    <div class="enhanced-bulk-modal-body" id="reorganize-modal-body">
+                        <!-- Populated dynamically -->
+                    </div>
+                    <div class="enhanced-bulk-modal-footer" id="reorganize-modal-footer">
+                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeReorganizeModal()">Cancel</button>
+                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
+                    </div>
                 </div>
             </div>
 
@@ -9527,56 +9366,6 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <!-- Label detail — a record label's catalog (distinct albums grouped
-                 by their real artist), monitored like the artist watchlist.
-                 Static legacy page; MBID rides the URL. Driven by label-detail.js. -->
-            <div class="page" id="label-detail-page">
-                <div class="page-shell label-detail-container">
-                    <button class="label-detail-back" type="button"
-                            id="label-detail-back-btn">← Back</button>
-                    <div class="label-detail-hero">
-                        <div class="label-detail-hero-art" id="label-detail-hero-art">🏷️</div>
-                        <div class="label-detail-hero-main">
-                            <div class="label-detail-eyebrow">Record Label</div>
-                            <h1 class="label-detail-name" id="label-detail-name">Label</h1>
-                            <div class="label-detail-meta" id="label-detail-meta"></div>
-                        </div>
-                        <div class="label-detail-hero-actions">
-                            <button class="library-artist-watchlist-btn" id="label-detail-watch-btn"
-                                    type="button" hidden>
-                                <span class="watchlist-icon">👁️</span>
-                                <span class="watchlist-text">Add to Watchlist</span>
-                            </button>
-                            <div class="label-detail-backlog" id="label-detail-backlog" hidden>
-                                <span class="label-detail-backlog-label">Monitor</span>
-                                <div class="label-detail-seg">
-                                    <button type="button" data-backlog="0" class="active">New releases</button>
-                                    <button type="button" data-backlog="1">Full backlog</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="label-detail-toolbar" id="label-detail-toolbar" hidden>
-                        <div class="label-detail-filters" id="label-detail-filters">
-                            <button type="button" data-lf="all" class="active">All <span id="lf-count-all">0</span></button>
-                            <button type="button" data-lf="missing">Missing <span id="lf-count-missing">0</span></button>
-                            <button type="button" data-lf="owned">Owned <span id="lf-count-owned">0</span></button>
-                        </div>
-                        <select class="label-detail-sort" id="label-detail-sort">
-                            <option value="newest">Newest first</option>
-                            <option value="oldest">Oldest first</option>
-                            <option value="artist">Artist A–Z</option>
-                        </select>
-                    </div>
-
-                    <div class="label-detail-status" id="label-detail-loading">Loading label catalog…</div>
-                    <div class="label-detail-status hidden" id="label-detail-empty">No releases to show.</div>
-                    <div class="label-release-grid" id="label-detail-grid"></div>
-                    <div class="label-detail-sentinel" id="label-detail-sentinel"></div>
-                    <div class="label-detail-status hidden" id="label-detail-more">Loading more…</div>
-                </div>
-            </div>
 
             <!-- Chat — Soulseek rooms + private messages, proxied through slskd.
                  ONE page for the whole app: the video sidebar reveals this same div
@@ -9607,11 +9396,25 @@
                         </div>
                     </div>
                     <div class="chat-shell">
+                        <!-- Discord-style guild rail: every joined Soulseek room is an
+                             "server" icon; PMs get their own puck. Purely a nav view over
+                             the rooms/convos the sidebar already lists. -->
+                        <nav class="chat-guilds" data-chat-guilds></nav>
                         <aside class="chat-side">
-                            <div class="chat-side-label">Rooms</div>
-                            <div class="chat-side-list" data-chat-rooms></div>
-                            <div class="chat-side-label">Messages</div>
-                            <div class="chat-side-list" data-chat-convos></div>
+                            <div class="chat-side-head" data-chat-side-head>
+                                <span class="chat-side-head-name" data-chat-side-head-name>SoulSync</span>
+                                <span class="chat-side-head-caret">⌄</span>
+                            </div>
+                            <div class="chat-side-scroll">
+                                <!-- virtual channels (client-side tags over the one room).
+                                     Rooms live in the guild rail, Discord-style — they are
+                                     deliberately NOT listed again here. -->
+                                <div class="chat-side-list chat-chanlist" data-chat-channels></div>
+                                <div class="chat-side-label">Direct Messages</div>
+                                <div class="chat-side-list" data-chat-convos></div>
+                            </div>
+                            <!-- bottom-left user panel (Discord's account strip) -->
+                            <div class="chat-userpanel" data-chat-userpanel></div>
                         </aside>
                         <main class="chat-main">
                             <div class="chat-head" data-chat-head></div>
@@ -9704,6 +9507,13 @@
                                         Auto-join the community room</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-membersend>
                                         Let non-admin profiles send messages</label>
+                                    <label class="chat-settings-label">Your avatar
+                                        <span class="chat-settings-hint" data-chat-avwho></span></label>
+                                    <div class="chat-avpicker" data-chat-avpicker></div>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-ping>
+                                        Play a sound when someone mentions or replies to me</label>
+                                    <label class="chat-settings-check"><input type="checkbox" data-chat-set-np>
+                                        Share what I'm playing in the room (everyone in the Soulseek room can see it)</label>
                                     <label class="chat-settings-check"><input type="checkbox" data-chat-set-autoprove>
                                         Auto-answer "prove you're human" download challenges</label>
                                     <div class="chat-settings-actions">
@@ -10233,282 +10043,10 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  WATCHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page" id="watchlist-page">
-                <div class="page-shell watchlist-page-container">
-                    <!-- Header -->
-                    <div class="watchlist-page-header">
-                        <div class="watchlist-page-header-left">
-                            <h2 class="watchlist-page-title">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="rgb(var(--accent-rgb))"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-                                Watchlist
-                            </h2>
-                            <div class="watchlist-page-meta">
-                                <span class="wl-meta-chip" id="watchlist-page-count">0 artists</span>
-                                <span class="wl-meta-chip wl-meta-chip--accent" id="watchlist-next-auto-timer">Next Auto: --</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Scan status / live activity (IDs match old modal for compatibility) -->
-                    <div id="watchlist-scan-status" class="watchlist-page-scan-status" style="display: none;">
-                        <!-- #831 round 2: full-width live "scan deck" -->
-                        <div id="watchlist-live-activity" class="wl-scan-deck" style="display: none;">
-                            <div class="wl-scan-deck-head">
-                                <span class="wl-scan-live-dot"></span>
-                                <span class="wl-scan-live-label">Scanning</span>
-                                <span id="wl-scan-progress-text" class="wl-scan-progress-text"></span>
-                                <div class="wl-scan-counters">
-                                    <div class="wl-scan-counter">
-                                        <span id="wl-scan-found" class="wl-scan-counter-num">0</span>
-                                        <span class="wl-scan-counter-label">found</span>
-                                    </div>
-                                    <div class="wl-scan-counter added">
-                                        <span id="wl-scan-added" class="wl-scan-counter-num">0</span>
-                                        <span class="wl-scan-counter-label">added</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="wl-scan-progress"><div id="wl-scan-progress-bar" class="wl-scan-progress-bar" style="width: 0%;"></div></div>
-                            <div class="wl-scan-deck-body">
-                                <div class="wl-scan-hero">
-                                    <div class="wl-scan-portrait">
-                                        <img id="watchlist-artist-img" class="wl-scan-portrait-img" src="" alt="" onerror="this.style.display='none';" />
-                                        <div class="wl-scan-album-thumb">
-                                            <img id="watchlist-album-img" src="" alt="" onerror="this.style.display='none';" />
-                                        </div>
-                                    </div>
-                                    <div class="wl-scan-hero-text">
-                                        <div id="watchlist-artist-name" class="wl-scan-artist-name">Waiting…</div>
-                                        <div id="wl-scan-phase" class="wl-scan-phase">starting…</div>
-                                        <div class="wl-scan-now">
-                                            <div id="watchlist-album-name" class="wl-scan-album-name">—</div>
-                                            <div id="watchlist-track-name" class="wl-scan-track-name">—</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="wl-scan-feed">
-                                    <div class="wl-scan-feed-label">Added to wishlist this run</div>
-                                    <div id="watchlist-additions-feed" class="wl-scan-feed-list"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="watchlist-page-scan-summary" class="scan-status-summary" style="display: none;"></div>
-                    </div>
-
-                    <!-- Action buttons -->
-                    <div class="watchlist-page-actions">
-                        <button class="wl-chip wl-chip--cta" id="scan-watchlist-btn" onclick="startWatchlistScan()">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            Scan for New Releases
-                            <span class="wl-chip-shimmer"></span>
-                        </button>
-                        <button class="wl-chip wl-chip--red" id="cancel-watchlist-scan-btn" onclick="cancelWatchlistScan()" style="display: none;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                            Cancel Scan
-                        </button>
-                        <button class="wl-chip wl-chip--slate" id="update-similar-artists-btn" onclick="updateSimilarArtists()">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            Update Similar Artists
-                        </button>
-                        <button class="wl-chip wl-chip--slate" id="watchlist-page-settings-btn" onclick="openWatchlistGlobalSettingsModal()">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                            Global Settings
-                        </button>
-                        <button class="wl-chip wl-chip--slate" id="watchlist-page-origins-btn" onclick="openDownloadOriginsModal('watchlist')" title="See every track your watchlist downloaded">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            Download Origins
-                        </button>
-                        <button class="wl-chip wl-chip--slate" id="watchlist-page-history-btn" onclick="openWatchlistHistoryModal()" title="Every past scan and the tracks it added to the wishlist">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><polyline points="12 7 12 12 15 15"/></svg>
-                            History
-                        </button>
-                        <button class="wl-chip wl-chip--red" id="watchlist-page-blocklist-btn" onclick="openBlocklistModal('artist')" title="Block artists, albums or tracks from ever being downloaded">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
-                            Blocklist
-                        </button>
-                    </div>
-
-                    <!-- Global override banner -->
-                    <div class="watchlist-global-override-banner" id="watchlist-page-override-banner" style="display: none;">
-                        <span>&#9888;&#65039;</span>
-                        <span>Global override is active — per-artist settings are being ignored during scans.</span>
-                    </div>
-
-                    <!-- Last scan summary -->
-                    <!-- Artists / Labels tabs (labels = record-label watchlist, additive) -->
-                    <div class="watchlist-tabs" id="watchlist-tabs">
-                        <button class="watchlist-tab active" type="button" data-wl-tab="artists"
-                                onclick="switchWatchlistTab('artists')">Artists</button>
-                        <button class="watchlist-tab" type="button" data-wl-tab="labels"
-                                onclick="switchWatchlistTab('labels')">Labels</button>
-                    </div>
-
-                    <div class="watchlist-last-scan-strip" id="watchlist-last-scan-strip" style="display: none;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span id="watchlist-last-scan-text">Last scan: --</span>
-                    </div>
-
-                    <!-- Search + Sort row -->
-                    <div class="watchlist-toolbar">
-                        <div class="watchlist-search-container">
-                            <svg class="watchlist-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.35)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                            <input type="text" id="watchlist-search-input" class="watchlist-search-input" placeholder="Filter watchlist…" oninput="filterWatchlistArtists()">
-                        </div>
-                        <select class="watchlist-sort-select" id="watchlist-sort-select" onchange="sortWatchlistArtists(this.value)">
-                            <option value="name-asc">Name A-Z</option>
-                            <option value="name-desc">Name Z-A</option>
-                            <option value="scan-oldest">Oldest Scanned</option>
-                            <option value="scan-newest">Recently Scanned</option>
-                            <option value="added-newest">Recently Added</option>
-                        </select>
-                    </div>
-
-                    <!-- Batch bar -->
-                    <div class="watchlist-batch-bar" id="watchlist-batch-bar">
-                        <label class="watchlist-select-all-label" onclick="event.stopPropagation();">
-                            <input type="checkbox" id="watchlist-select-all-cb" onchange="toggleWatchlistSelectAll(this.checked)">
-                            <span>Select All</span>
-                        </label>
-                        <span class="watchlist-batch-count" id="watchlist-batch-count"></span>
-                        <button class="btn btn--secondary watchlist-batch-remove-btn" id="watchlist-batch-remove-btn" onclick="batchRemoveFromWatchlist()" style="display: none;">
-                            Remove Selected
-                        </button>
-                    </div>
-
-                    <!-- Artist grid -->
-                    <div class="watchlist-artists-grid" id="watchlist-artists-list">
-                        <!-- Populated by JS -->
-                    </div>
-
-                    <!-- Empty state -->
-                    <div class="watchlist-page-empty" id="watchlist-page-empty" style="display: none;">
-                        <div class="watchlist-page-empty-icon">
-                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </div>
-                        <h3>Your watchlist is empty</h3>
-                        <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
-                        <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
-                    </div>
-
-                    <!-- Labels tab (record-label watchlist) — shown via .wl-view-labels -->
-                    <div class="watchlist-labels-tab" id="watchlist-labels-tab">
-                        <div class="watchlist-labels-grid" id="watchlist-labels-list">
-                            <!-- Populated by initializeWatchlistLabelsTab() -->
-                        </div>
-                        <div class="watchlist-page-empty" id="watchlist-labels-empty" style="display: none;">
-                            <div class="watchlist-page-empty-icon">
-                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-                            </div>
-                            <h3>No labels followed yet</h3>
-                            <p>Search a record label, open it, and hit Follow to monitor its new releases here.</p>
-                            <button class="btn btn--primary" onclick="navigateToPage('search')">Open Search</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- ═══════════════════════════════════════════════════════════════════
                  WISHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page" id="wishlist-page">
-                <div class="page-shell wishlist-page-container">
-                    <!-- Header -->
-                    <div class="wishlist-page-header">
-                        <div class="wishlist-page-header-left">
-                            <h2 class="wishlist-page-title">
-                                <span class="wishlist-page-title-icon">&#11088;</span>
-                                Wishlist
-                            </h2>
-                            <div class="wishlist-page-meta">
-                                <span class="wishlist-page-count" id="wishlist-page-count">0 tracks</span>
-                                <span class="wishlist-page-timer" id="wishlist-next-auto-timer">Next Auto: --</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="wishlist-page-actions">
-                        <button class="btn btn--secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-                            Ignored
-                        </button>
-                        <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
-                            Cleanup
-                        </button>
-                        <button class="btn btn--danger" onclick="clearEntireWishlist()">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-                            Clear All
-                        </button>
-                    </div>
-
-                    <!-- Stats strip -->
-                    <div class="wishlist-stats-strip" id="wishlist-stats-strip">
-                        <div class="wishlist-stat-item">
-                            <span class="wishlist-stat-value" id="wishlist-stat-albums">0</span>
-                            <span class="wishlist-stat-label">Album Tracks</span>
-                        </div>
-                        <div class="wishlist-stat-divider"></div>
-                        <div class="wishlist-stat-item">
-                            <span class="wishlist-stat-value" id="wishlist-stat-singles">0</span>
-                            <span class="wishlist-stat-label">Singles</span>
-                        </div>
-                        <div class="wishlist-stat-divider"></div>
-                        <div class="wishlist-stat-item">
-                            <span class="wishlist-stat-value wishlist-stat-cycle" id="wishlist-stat-cycle">Albums/EPs</span>
-                            <span class="wishlist-stat-label">Next Cycle</span>
-                        </div>
-                    </div>
-
-                    <!-- Nebula view — artist orbs with album satellites -->
-                    <div class="wl-nebula" id="wishlist-nebula">
-                        <!-- Action bar -->
-                        <div class="wl-nebula-bar">
-                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Filter wishlist…" oninput="_filterNebula()">
-                            <button type="button" class="wl-chip wl-failing-filter" id="wl-failing-filter" onclick="_toggleFailingFilter()" title="Show only artists with tracks that keep failing to download">&#9888; Failing</button>
-                            <button class="btn btn--primary" onclick="_nebulaDownload()">
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                Download Wishlist
-                            </button>
-                        </div>
-                        <!-- Artist orbs container -->
-                        <div class="wl-nebula-field" id="wl-nebula-field">
-                            <!-- Populated by JS: artist orbs with album fans -->
-                        </div>
-                    </div>
-
-                    <!-- Legacy track list (used by selectWishlistCategory for download flow) -->
-                    <div id="wishlist-category-tracks" class="wishlist-category-tracks" style="display: none;">
-                        <div class="wishlist-category-header">
-                            <button class="wishlist-back-btn" onclick="_nebulaBack()">&#8592; Back</button>
-                            <span id="wishlist-category-name" class="wishlist-category-name"></span>
-                            <div class="wishlist-category-header-right">
-                                <button class="wishlist-select-all-btn" id="wishlist-select-all-btn" onclick="toggleWishlistSelectAll()">Select All</button>
-                                <button id="wishlist-download-btn" class="btn btn--primary" style="display: none;" onclick="downloadSelectedCategory()">
-                                    Download Selection
-                                </button>
-                            </div>
-                        </div>
-                        <div class="wishlist-batch-bar" id="wishlist-batch-bar" style="display: none;">
-                            <span class="wishlist-batch-count" id="wishlist-batch-count">0 selected</span>
-                            <button class="btn btn--secondary wishlist-batch-remove-btn" onclick="batchRemoveFromWishlist()">
-                                Remove Selected
-                            </button>
-                        </div>
-                        <div id="wishlist-tracks-list" class="wishlist-tracks-scroll">
-                            <div class="loading-indicator">Loading tracks...</div>
-                        </div>
-                    </div>
-
-                    <!-- Empty state -->
-                    <div class="wishlist-page-empty" id="wishlist-page-empty" style="display: none;">
-                        <div class="wishlist-page-empty-icon">
-                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                        </div>
-                        <h3>Your wishlist is empty</h3>
-                        <p>Failed downloads and tracks from watchlist scans will appear here automatically.</p>
-                    </div>
-                </div>
-            </div>
 
         </div> <!-- /main-content -->
     </div> <!-- /main-container -->
@@ -10870,383 +10408,50 @@
         </div>
     </div>
 
+    <!-- Re-identify Track Modal (#889) -->
+    <div class="modal-overlay hidden" id="reid-modal-overlay" onclick="if(event.target===this)closeReidentifyModal()">
+        <div class="reid-modal" id="reid-modal">
+            <div class="reid-hero">
+                <div class="reid-hero-decor">
+                    <div class="reid-hero-bg" id="reid-hero-bg"></div>
+                    <div class="reid-hero-overlay"></div>
+                </div>
+                <span class="reid-close" onclick="closeReidentifyModal()">&times;</span>
+                <div class="reid-hero-content">
+                    <div class="reid-hero-art" id="reid-hero-art"></div>
+                    <div class="reid-hero-meta">
+                        <div class="reid-hero-eyebrow">Re-identify track</div>
+                        <div class="reid-hero-title" id="reid-hero-title">Track</div>
+                        <div class="reid-hero-sub" id="reid-hero-sub"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reid-tabs" id="reid-tabs"></div>
+
+            <div class="reid-search">
+                <svg class="reid-search-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+                <input type="text" id="reid-search-input" class="reid-search-input"
+                    placeholder="Search for the track…" onkeydown="if(event.key==='Enter')runReidentifySearch()" />
+                <button class="reid-search-btn" id="reid-search-btn" onclick="runReidentifySearch()">Search</button>
+            </div>
+
+            <div class="reid-results" id="reid-results"></div>
+
+            <div class="reid-footer">
+                <label class="reid-replace" title="When on, the original file is deleted after the track is re-filed under the new release.">
+                    <input type="checkbox" id="reid-replace" checked />
+                    <span class="reid-replace-box"></span>
+                    <span class="reid-replace-text">Replace the original file <em>(recommended)</em></span>
+                </label>
+                <div class="reid-footer-actions">
+                    <button class="btn btn--secondary" onclick="closeReidentifyModal()">Cancel</button>
+                    <button class="btn btn--primary" id="reid-confirm-btn" disabled onclick="confirmReidentify()">Re-identify</button>
+                </div>
+            </div>
+        </div>
+    </div>
     <!-- Watchlist Artist Config Modal -->
-    <div class="modal-overlay hidden" id="watchlist-artist-config-modal-overlay">
-        <div class="watchlist-artist-config-modal" id="watchlist-artist-config-modal">
-            <div class="watchlist-artist-config-header">
-                <div class="watchlist-artist-config-hero" id="watchlist-artist-config-hero">
-                    <!-- Hero content will be dynamically populated -->
-                </div>
-                <span class="watchlist-artist-config-close" onclick="closeWatchlistArtistConfigModal()">&times;</span>
-            </div>
-
-            <div class="watchlist-artist-config-content">
-                <div class="watchlist-artist-config-body">
-                    <div class="config-section">
-                        <h3 class="config-section-title">Auto-Download</h3>
-                        <p class="config-section-subtitle">When on, new releases are added to the wishlist and downloaded automatically. Turn off to <strong>follow only</strong> — still see new releases in scans, but pick what to download yourself.</p>
-
-                        <div class="config-options">
-                            <label class="config-option">
-                                <input type="checkbox" id="config-auto-download" checked>
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">⬇️</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Auto-download new releases</span>
-                                        <span class="config-option-description">Off = follow only (discover but don't auto-add to wishlist)</span>
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="config-section">
-                        <h3 class="config-section-title">Download Preferences</h3>
-                        <p class="config-section-subtitle">Select which types of releases to monitor for this artist</p>
-
-                        <div class="form-group" style="margin: 12px 0 16px;">
-                            <label for="config-quality-profile" style="display:block;margin-bottom:6px;font-weight:600;">Quality Profile</label>
-                            <select id="config-quality-profile" class="form-select">
-                                <option value="">Loading profiles…</option>
-                            </select>
-                            <small style="display:block;margin-top:6px;opacity:.7;">All Albums, EPs and Singles queued by this Watchlist artist use this profile.</small>
-                        </div>
-
-                        <div class="config-options">
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-albums" checked>
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">💿</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Albums</span>
-                                        <span class="config-option-description">Full-length studio albums</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-eps" checked>
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎵</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">EPs</span>
-                                        <span class="config-option-description">Extended plays (4-6 tracks)</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-singles" checked>
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎶</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Singles</span>
-                                        <span class="config-option-description">Single tracks and 2-3 track
-                                            releases</span>
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="config-section">
-                        <h3 class="config-section-title">Content Filters</h3>
-                        <p class="config-section-subtitle">Check to INCLUDE, leave unchecked to EXCLUDE (default: all
-                            excluded)</p>
-
-                        <div class="config-options">
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-live">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎤</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Live Versions</span>
-                                        <span class="config-option-description">Check to include live performances and
-                                            concerts</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-remixes">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎧</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Remixes</span>
-                                        <span class="config-option-description">Check to include remix versions and
-                                            edits</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-acoustic">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎸</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Acoustic Versions</span>
-                                        <span class="config-option-description">Check to include acoustic and stripped
-                                            versions</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-compilations">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">📀</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Compilations</span>
-                                        <span class="config-option-description">Check to include greatest hits and
-                                            collections</span>
-                                    </div>
-                                </div>
-                            </label>
-
-                            <label class="config-option">
-                                <input type="checkbox" id="config-include-instrumentals">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">🎹</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Instrumentals</span>
-                                        <span class="config-option-description">Check to include instrumental, karaoke,
-                                            and backing track versions</span>
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="config-section">
-                        <h3 class="config-section-title">Scan Lookback</h3>
-                        <p class="config-section-subtitle">How far back to look for releases on first scan of this artist</p>
-                        <div class="form-group" style="margin: 12px 0 0;">
-                            <select id="config-lookback-days" class="form-select">
-                                <option value="">Use Global Setting</option>
-                                <option value="7">Last 7 days</option>
-                                <option value="30">Last 30 days</option>
-                                <option value="90">Last 90 days</option>
-                                <option value="180">Last 6 months</option>
-                                <option value="365">Last year</option>
-                                <option value="730">Last 2 years</option>
-                                <option value="1825">Last 5 years</option>
-                                <option value="36500">Entire discography</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Metadata Source Override -->
-                    <div class="config-section">
-                        <h3 class="config-section-title">Scan Source</h3>
-                        <p class="config-section-subtitle">Override which metadata provider is used when scanning this artist for new releases</p>
-                        <div class="config-metadata-source-selector" id="config-metadata-source-selector">
-                            <!-- Dynamically populated with source buttons -->
-                        </div>
-                    </div>
-
-                    <!-- Linked Provider Section -->
-                    <div class="config-section" id="watchlist-linked-provider-section" style="display:none">
-                        <h3 class="config-section-title">Linked Artist</h3>
-                        <p class="config-section-subtitle">The metadata provider artist linked to this watchlist entry</p>
-                        <div id="watchlist-linked-provider-content">
-                            <!-- Dynamically populated -->
-                        </div>
-                    </div>
-                </div>
-
-                <div class="watchlist-artist-config-footer">
-                    <div class="config-modal-actions">
-                        <button class="btn btn--secondary"
-                            onclick="closeWatchlistArtistConfigModal()">
-                            Cancel
-                        </button>
-                        <button class="btn btn--primary" id="save-artist-config-btn">
-                            Save Preferences
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Watchlist Global Config Modal -->
-    <div class="modal-overlay hidden" id="watchlist-global-config-modal-overlay">
-        <div class="watchlist-artist-config-modal wl-global-modal" id="watchlist-global-config-modal">
-            <div class="wl-global-modal-head">
-                <div>
-                    <h2 class="wl-global-modal-title">Global Watchlist Settings</h2>
-                    <p class="wl-global-modal-sub">Override per-artist settings for all watchlist scans.</p>
-                </div>
-                <button class="wl-global-modal-close" onclick="closeWatchlistGlobalSettingsModal()" aria-label="Close">✕</button>
-            </div>
-
-            <div class="watchlist-artist-config-content">
-                <div class="watchlist-artist-config-body">
-                    <!-- Global Override Toggle -->
-                    <div class="config-section">
-                        <label class="config-option global-override-toggle" id="global-override-toggle-label">
-                            <input type="checkbox" id="global-override-enabled" onchange="toggleGlobalOverrideOptions()">
-                            <div class="config-option-content">
-                                <div class="config-option-icon">🌐</div>
-                                <div class="config-option-text">
-                                    <span class="config-option-title">Enable Global Override</span>
-                                    <span class="config-option-description">When enabled, the settings below apply to ALL
-                                        artists, ignoring individual artist configs</span>
-                                </div>
-                            </div>
-                        </label>
-                    </div>
-
-                    <div id="global-override-options" style="opacity: 0.4; pointer-events: none; transition: opacity 0.3s;">
-                        <!-- Release Types -->
-                        <div class="config-section">
-                            <h3 class="config-section-title">Release Types</h3>
-                            <p class="config-section-subtitle">Select which release types to download for all artists</p>
-
-                            <div class="config-options">
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-albums" checked>
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">💿</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Albums</span>
-                                            <span class="config-option-description">Full-length studio albums</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-eps" checked>
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎵</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">EPs</span>
-                                            <span class="config-option-description">Extended plays (4-6 tracks)</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-singles" checked>
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎶</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Singles</span>
-                                            <span class="config-option-description">Single tracks and 2-3 track
-                                                releases</span>
-                                        </div>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Content Filters -->
-                        <div class="config-section">
-                            <h3 class="config-section-title">Content Filters</h3>
-                            <p class="config-section-subtitle">Check to INCLUDE, leave unchecked to EXCLUDE (default: all
-                                excluded)</p>
-
-                            <div class="config-options">
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-live">
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎤</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Include Live Versions</span>
-                                            <span class="config-option-description">Live performances and concerts</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-remixes">
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎧</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Include Remixes</span>
-                                            <span class="config-option-description">Remix versions and edits</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-acoustic">
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎸</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Include Acoustic Versions</span>
-                                            <span class="config-option-description">Acoustic and stripped versions</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-compilations">
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">📀</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Include Compilations</span>
-                                            <span class="config-option-description">Greatest hits and collections</span>
-                                        </div>
-                                    </div>
-                                </label>
-
-                                <label class="config-option">
-                                    <input type="checkbox" id="global-include-instrumentals">
-                                    <div class="config-option-content">
-                                        <div class="config-option-icon">🎹</div>
-                                        <div class="config-option-text">
-                                            <span class="config-option-title">Include Instrumentals</span>
-                                            <span class="config-option-description">Instrumental, karaoke, and backing track versions</span>
-                                        </div>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Include Everything shortcut -->
-                        <div class="config-section">
-                            <label class="config-option include-everything-option">
-                                <input type="checkbox" id="global-include-all" onchange="toggleGlobalIncludeAll()">
-                                <div class="config-option-content">
-                                    <div class="config-option-icon">✅</div>
-                                    <div class="config-option-text">
-                                        <span class="config-option-title">Include Everything</span>
-                                        <span class="config-option-description">Enable all release types AND content filters
-                                            (live, remixes, acoustic, compilations, instrumentals)</span>
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Custom Exclusion Terms (always visible, independent of global override) -->
-                    <div class="config-section">
-                        <h3 class="config-section-title">Custom Exclusion Terms</h3>
-                        <p class="config-section-subtitle">Comma-separated terms — tracks or albums matching any term will be skipped during scans</p>
-                        <div class="config-exclude-terms-container">
-                            <input type="text" id="global-exclude-terms" class="config-exclude-terms-input"
-                                placeholder="e.g. commentary, interlude, skit, demo, a cappella">
-                            <p class="config-exclude-terms-hint">Applied globally to all watchlist scans regardless of override setting. Case-insensitive substring matching.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="watchlist-artist-config-footer">
-                <div class="config-modal-actions">
-                    <button class="btn btn--secondary"
-                        onclick="closeWatchlistGlobalSettingsModal()">
-                        Cancel
-                    </button>
-                    <button class="btn btn--primary" id="save-global-config-btn"
-                        onclick="saveWatchlistGlobalConfig()">
-                        Save Global Settings
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Genre Browser Modal -->
     <div class="genre-browser-modal-overlay" id="genre-browser-modal">
@@ -11548,7 +10753,6 @@
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='server-activity.js', v=static_v) }}"></script>
@@ -11564,7 +10768,7 @@
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='library-shared.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
@@ -11579,8 +10783,13 @@
     <script src="{{ url_for('static', filename='auto-sync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat-protocol.js', v=static_v) }}"></script>
+    <!-- Arcade: the chess rules engine and the game lifecycle fold. Both are
+         pure and self-contained (no DOM, no fetch); chat.js reads them off
+         window and simply hides the Arcade if either failed to load. -->
+    <script src="{{ url_for('static', filename='chat-hash.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chess-engine.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='chat-games.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='chat.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='label-detail.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->

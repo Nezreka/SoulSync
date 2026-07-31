@@ -87,6 +87,10 @@ def test_p4_review_catches_pinned():
     open_room = js[js.index("function openRoom"):js.index("function loadRooms")]
     assert open_room.index("_jbxTuneOut()") < open_room.index("state.room = nextRoom")
     users_list = js[js.index("function renderUsersList"):js.index("function renderSide")]
-    assert "reduceTuned(_roomEvents())" in users_list
+    # Assert the INTENT, not the exact call: the room's events are folded ONCE
+    # per render (they're now hoisted and shared with the now-playing reducer),
+    # never per user.
+    assert users_list.count("reduceTuned(") == 1
+    assert users_list.count("_roomEvents()") == 1
     user_btn = js[js.index("function _userBtn"):js.index("function renderUsers(")]
     assert "reduceTuned" not in user_btn

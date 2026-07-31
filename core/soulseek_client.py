@@ -2009,7 +2009,52 @@ class SoulseekClient(DownloadSourcePlugin):
         except Exception as e:
             logger.error(f"Error getting session info: {e}")
             return None
-    
+
+    async def get_soulseek_username(self) -> Optional[str]:
+        """Resolve the Soulseek username slskd is logged in as.
+
+        slskd has not kept this field in one place across versions — it lives on
+        the server state in current builds, on the session payload in older ones,
+        and in the options dump either way. Probe them in that order and take the
+        first hit rather than trusting any single endpoint. Returns None (and
+        says why in the log) when nothing carries it; callers must treat an
+        unknown name as "unknown", never as a match.
+        """
+        if not self.base_url:
+            return None
+
+        seen = {}
+        for endpoint in ('server', 'server/state', 'session'):
+            try:
+                res = await self._make_request('GET', endpoint)
+            except Exception as e:
+                seen[endpoint] = f'error: {e}'
+                continue
+            if not isinstance(res, dict):
+                seen[endpoint] = 'no dict response'
+                continue
+            name = res.get('username') or res.get('Username')
+            if name:
+                return str(name).strip() or None
+            seen[endpoint] = sorted(res.keys())
+
+        # Options dump nests it under the soulseek section.
+        try:
+            opts = await self._make_request('GET', 'options')
+            if isinstance(opts, dict):
+                sk = opts.get('soulseek') or opts.get('Soulseek') or {}
+                name = sk.get('username') or sk.get('Username') if isinstance(sk, dict) else None
+                if name:
+                    return str(name).strip() or None
+                seen['options'] = sorted(sk.keys()) if isinstance(sk, dict) else 'no soulseek section'
+            else:
+                seen['options'] = 'no dict response'
+        except Exception as e:
+            seen['options'] = f'error: {e}'
+
+        logger.warning(f"Could not resolve slskd Soulseek username; endpoints probed: {seen}")
+        return None
+
     # ── Soulseek chat (rooms + private messages) ──────────────────────────────
     # Thin pass-throughs to slskd's chat API. slskd IS a full Soulseek client;
     # these ride the same base_url + X-API-Key the search/transfer calls use.

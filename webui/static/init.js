@@ -3010,14 +3010,6 @@ function buildLabelDetailPath(labelId, name = null) {
     return path;
 }
 
-function parseLabelDetailPath(pathname = window.location.pathname) {
-    const segs = String(pathname || '').split('/').filter(Boolean);
-    if (segs[0] !== 'label-detail' || segs.length < 2) return null;
-    const id = decodeURIComponent(segs.slice(1).join('/'));
-    if (!id) return null;
-    const name = new URLSearchParams(window.location.search || '').get('name') || '';
-    return { id, name };
-}
 
 function navigateToLabelDetail(labelId, name = null, options = {}) {
     if (!labelId) return;
@@ -3261,9 +3253,7 @@ async function loadPageData(pageId) {
         stopWishlistCountPolling();
         stopLogPolling();
         // Stop watchlist/wishlist page timers when navigating away
-        if (watchlistCountdownInterval) { clearInterval(watchlistCountdownInterval); watchlistCountdownInterval = null; }
         if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
-        if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
         }
@@ -3276,28 +3266,23 @@ async function loadPageData(pageId) {
                 initializeSyncPage();
                 await loadSyncData();
                 break;
-            case 'search':
-                initializeSearch();
-                initializeSearchModeToggle();
-                initializeFilters();
+            // No 'search' case: React owns /search — BOTH panels, enhanced and
+            // basic — and loadPageData only runs for legacy-kind pages, so this
+            // could never fire again. search.js, which used to bind the basic
+            // panel, is deleted.
+            // No 'label-detail' case: React owns /label-detail, and loadPageData
+            // only runs for legacy-kind pages. The vanilla renderer it used to
+            // call (label-detail.js) is deleted.
+            // No 'active-downloads' case: React owns /active-downloads, and
+            // loadPageData only runs for legacy-kind pages. The vanilla page
+            // it used to call lives in pages-extra.js and is deleted.
+            // No 'library' case: React owns /library, and loadPageData only runs
+            // for legacy-kind pages. resolvePageId() returns null for a React
+            // path and #library-page no longer exists, so neither route into
+            // here can reach it — and initializeLibraryPage is deleted.
+            case 'artist-detail':
+                // Artist detail page is entered through the route handoff and legacy navigator.
                 break;
-            case 'label-detail': {
-                // Resolve the label from nav state, falling back to the URL
-                // (reload / browser-back). label-detail.js owns the render.
-                const lab = (_labelDetailState && _labelDetailState.id)
-                    ? _labelDetailState
-                    : (typeof parseLabelDetailPath === 'function' ? parseLabelDetailPath() : null);
-                if (lab && lab.id && typeof loadLabelDetailData === 'function') {
-                    if (typeof initializeLabelDetailPage === 'function') initializeLabelDetailPage();
-                    loadLabelDetailData(lab.id, lab.name || '');
-                }
-                break;
-            }
-            case 'active-downloads':
-                loadActiveDownloadsPage();
-                break;
-            // 'library' and 'artist-detail' are React routes: the router owns
-            // them end to end, so the shell has nothing to initialize here.
             case 'discover':
                 if (!discoverPageInitialized) {
                     await loadDiscoverPage();
@@ -3351,12 +3336,8 @@ async function loadPageData(pageId) {
             case 'tools':
                 await initializeToolsPage();
                 break;
-            case 'watchlist':
-                await initializeWatchlistPage();
-                break;
-            case 'wishlist':
-                await initializeWishlistPage();
-                break;
+            // 'wishlist' is a React route now — navigateToPage shows the React
+            // host and never calls loadPageData for it.
             case 'automations':
                 await loadAutomations();
                 break;
@@ -3534,3 +3515,65 @@ async function loadPageData(pageId) {
         snapToCenterIfReady();
     });
 })();
+
+
+// ===========================================
+// APP BOOT
+// ===========================================
+
+/**
+ * Hydrate the persisted download bubbles, then navigate to the landing page.
+ *
+ * Moved here from search.js when basic search was ported to React and that
+ * file was deleted. It never had anything to do with search — it is the boot
+ * routine, and init.js is where it is called from.
+ */
+async function loadInitialData() {
+    try {
+        const initialPath = window.location.pathname;
+        const initialNavigationEpoch = navigationEpoch;
+
+        // Load artist bubble state first
+        await hydrateArtistBubblesFromSnapshot();
+
+        // Load search bubble state
+        await hydrateSearchBubblesFromSnapshot();
+
+        // Load discover download state
+        await hydrateDiscoverDownloadsFromSnapshot();
+
+        // Navigate to user's home page (or dashboard for admin)
+        const homePage = getProfileHomePage();
+        const urlPage = _getPageFromPath();
+        const targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+            ? urlPage
+            : homePage;
+
+        if (window.location.pathname !== initialPath || navigationEpoch !== initialNavigationEpoch) {
+            return;
+        }
+
+        if (targetPage === 'artist-detail') {
+            const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
+            if (artistRoute && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
+            }
+            return;
+        }
+
+        // Always apply the target page to the legacy shell chrome.
+        const router = getWebRouter();
+        const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+
+        if (route?.kind === 'react') {
+            showReactHost(targetPage);
+            setActivePageChrome(targetPage);
+            // Keep nested react-tab URLs like /import/auto or /import/singles intact.
+            return;
+        }
+
+        navigateToPage(targetPage, { forceReload: true });
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+    }
+}

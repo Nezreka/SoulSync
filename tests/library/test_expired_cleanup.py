@@ -88,12 +88,11 @@ def test_select_expired_filters():
         _entry(eid=3, days_old=70, protected=True),          # mirrored → keep
         _entry(eid=4, days_old=10),                          # too new → keep
     ]
-    out = select_expired(
-        entries,
-        watchlist_retention="off",
-        playlist_retention="2mo",
-        now=NOW,
-    )
+    # `now=NOW` is load-bearing, not decoration. Without it select_expired falls
+    # back to wall-clock while the entries carry created_at fixed relative to
+    # NOW, so entry 4 ("too new") silently ages past the 2mo window and the test
+    # starts failing on a date nobody touched anything — it armed on 2026-07-27.
+    out = select_expired(entries, watchlist_retention="off", playlist_retention="2mo", now=NOW)
     assert [e["id"] for e in out] == [1]
 
 

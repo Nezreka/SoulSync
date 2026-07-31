@@ -957,29 +957,36 @@ const HELPER_CONTENT = {
     },
 
     // Basic Search
-    '#basic-search-section .search-bar-container': {
+    //
+    // These selectors are the React panel's (webui/src/routes/search/-ui/).
+    // Four of them used to point at elements that did not exist —
+    // `.search-bar-container`, `#filter-toggle-btn`, `#filter-content` and
+    // `.search-status-container` — so those tour steps silently highlighted
+    // nothing. document.querySelector just returns null and the step is skipped.
+    '#bs-source-row': {
+        title: 'Search Source',
+        description: 'Which download source the search is sent to. With one source configured this is a label; with several, pick the one to search.',
+        docsId: 'search-basic'
+    },
+    '.bs-search-bar': {
         title: 'Basic Search',
-        description: 'Direct search query sent to Soulseek. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
+        description: 'Direct search query sent to your download source. Enter artist name, song title, or any keywords. Results show raw P2P file listings.',
         docsId: 'search-basic'
     },
-    '#filter-toggle-btn': {
-        title: 'Filters',
-        description: 'Toggle the filter panel to narrow results by type (Albums/Singles), format (FLAC/MP3/OGG/AAC/WMA), and sort order.',
-        docsId: 'search-basic'
-    },
-    '#filter-content': {
+    '#filters-container': {
         title: 'Search Filters',
-        description: 'Filter and sort Soulseek results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, bitrate, size, speed, or name.',
+        description: 'Filter and sort the results. Type filters hide non-matching results. Format filters show only specific audio formats. Sort reorders by relevance, quality, size, name, uploader, bitrate or duration.',
         tips: [
-            'Type: All, Albums (grouped results), or Singles (individual files)',
+            'Type: All, Albums (grouped results), or Tracks (individual files)',
             'Format: FLAC for lossless, MP3 for compressed, or specific formats',
-            'Sort: Relevance uses the matching engine score; Quality uses bitrate density'
+            'Sort: Relevance uses the matching engine score; Quality uses bitrate density',
+            'The arrow flips the order — down is best-first, up reverses it'
         ],
         docsId: 'search-basic'
     },
-    '.search-status-container': {
+    '.bs-status-bar': {
         title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while Soulseek is being queried.',
+        description: 'Shows the current search state — ready, searching, or results count. The spinner animates while the source is being queried.',
     },
     '#search-results-area': {
         title: 'Search Results',
@@ -2227,10 +2234,10 @@ const HELPER_TOURS = {
         // on the sidebar entry and describes what you find once you are there
         // (the same approach the Automations builder steps take).
         steps: [
-            { page: 'library', selector: '[data-page="library"]', title: 'Your Library', description: 'Everything you own, plus everything you have asked for. Artists, releases, tracks and the actual files behind them all live here, in SoulSync\'s own database — no media server required.' },
-            { page: 'library', selector: '[data-page="library"]', title: 'Monitoring', description: 'Monitor an artist to follow new releases (this is your watchlist), or monitor single releases and tracks (this is your wishlist). Monitoring only says what you want; quality profiles say what counts as good enough.' },
-            { page: 'library', selector: '[data-page="library"]', title: 'Missing and Cutoff Unmet', description: 'The Wanted view lists what you are monitoring but do not own, and what you own below its quality cutoff. Automatic Search works through exactly that list.' },
-            { page: 'library', selector: '[data-page="library"]', title: 'Files and repair', description: 'Every file is a record: where it is, whether it is still there, what quality it is, what happened to it. Tag writing, ReplayGain, reorganize and bulk edits all act on those records. 🎉' },
+            { page: 'library', selector: '.nav-button[data-page="library"]', title: 'Your Library', description: 'Everything you own, plus everything you have asked for. Artists, releases, tracks and the actual files behind them all live here, in SoulSync\'s own database — no media server required.' },
+            { page: 'library', selector: '.nav-button[data-page="library"]', title: 'Monitoring', description: 'Monitor an artist to follow new releases (this is your watchlist), or monitor single releases and tracks (this is your wishlist). Monitoring only says what you want; quality profiles say what counts as good enough.' },
+            { page: 'library', selector: '.nav-button[data-page="library"]', title: 'Missing and Cutoff Unmet', description: 'The Wanted view lists what you are monitoring but do not own, and what you own below its quality cutoff. Automatic Search works through exactly that list.' },
+            { page: 'library', selector: '.nav-button[data-page="library"]', title: 'Files and repair', description: 'Every file is a record: where it is, whether it is still there, what quality it is, what happened to it. Tag writing, ReplayGain, reorganize and bulk edits all act on those records. 🎉' },
         ]
     },
     'discover': {
@@ -3281,14 +3288,18 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.8': [
-        { date: 'July 2026 · 3.1.8' },
-        { title: 'Quality Profiles that actually govern downloads (#1076)', desc: 'quality profiles used to be decorative — only auto-import could use a named one. now every watchlist artist and every mirrored playlist gets its own profile, and it\'s honored everywhere a download starts: manual search/discover/library, auto-sync, playlist sync, download-missing, and retries. an explicit per-action pick beats the saved assignment beats the global default, in that order, on every path. edit a profile\'s rules and everything assigned to it changes at once. thanks nick2000713.' },
-        { title: 'Preview + pick tracks from Mixes & ListenBrainz (#1079)', desc: 'open a Mix or a ListenBrainz recommendation and each track now has a play button to preview it and a checkbox — select the ones you like and Download selected instead of grabbing the whole playlist. thanks andreamassaro9.' },
-        { title: 'Discover loads faster', desc: 'the page fired ~20 section requests at once and choked the backend; it now loads the top of the page first and streams the rest in, so it\'s usable in a couple seconds instead of half a minute. also fixed the sidebar header showing through the artist map.' },
-        { title: 'Help & Docs covers the video side', desc: 'the Help page documented only the music side — it now has full guide sections for the whole video app (library, downloads, watchlist, wishlist, calendar, collections, overlays, repair, youtube channels, and more) plus a video API reference, matching the music-side format.' },
-        { title: 'Library v2 fixes (#1055)', desc: 'a batch pulled from the Library v2 work: simple downloads only fill blank/placeholder tags now (never overwrite good ones), and a stuck usenet job gives up cleanly instead of polling for hours. thanks nick2000713.' },
-        { title: 'Earlier versions', desc: '3.1.7 turned chat into a hangout with a shared room jukebox + file sharing + polls/pins. 3.1.6 made video downloads land atomically + redesigned automations. 3.1.5 made chat best-in-class. 3.1.4 added the Comma Artist Splitter.' },
+    '3.1.9': [
+        { date: 'July 2026 · 3.1.9' },
+        { title: 'The Arcade', desc: 'the chat room gets games. chess, Connect 4, Battleship and a slot machine, played over Soulseek with NO SERVER anywhere — a match is just hidden messages in the room, and every client folds them into the same board independently. the board says so out loud: "no server · folded from 34 room messages", and you can click it to see the messages behind the position.' },
+        { title: 'Chess, properly', desc: 'full rules — castling, en passant, under-promotion, stalemate, threefold, fifty-move — with the engine checked against the standard perft positions so move generation is exactly right rather than roughly right. drag or click, legal-move dots, check and last-move highlights, algebraic move list, board flips for black. correspondence style with no clock: close the tab, come back tomorrow, the sidebar tells you whose move it is. resign, offer a draw, take over a seat idle 24h, and export a PGN that opens in Lichess like any other game.' },
+        { title: 'Connect 4, Battleship, Slots', desc: 'Connect 4 is click-a-column. Battleship is the clever one: your fleet never goes on the wire until the end, both players publish a fingerprint of their board up front, and at the reveal every client checks every answer you gave against the board you showed — lie about one miss and no board fits. your own client answers shots automatically so nobody waits on a prompt. Slots is solo with play money: 10k a day, topped back up at midnight if you are below it, and anything you win above it is yours.' },
+        { title: 'You vs the room, and a room ladder', desc: 'one seat is you and the other belongs to everybody else — they vote, and the move plays when enough of them agree. finished games feed an Elo ladder: persistent ratings with no server and no database of record.' },
+        { title: 'Games that survive real life', desc: 'a client that missed moves catches up from the position carried on the next one. if both sides are waiting on each other and nothing arrives, it asks the room where the game actually is — and the room is OUTVOTED rather than trusted, so one client claiming a fake board gets ignored. matches are archived too, so a game survives an slskd restart even when nobody is around to ask.' },
+        { title: 'Chat avatars', desc: 'pick from 100 presets in the chat settings cog. it shows on every message, in the member list and on your account strip, and it is saved to your account so it follows you to another browser.' },
+        { title: 'Mentions never actually worked', desc: 'SoulSync read your Soulseek name off an endpoint that does not carry it, so it was always blank — which meant @-pings never highlighted you and reserved avatars never appeared. it asks the endpoints that actually have it now.' },
+        { title: 'Spotify rate-limit popup, for people not using Spotify', desc: 'the ban modal appeared on installs whose metadata source is Deezer, announcing that search and enrichment were paused when neither was. it only shows when Spotify is genuinely your source now, and a 30-minute ban needs a real 429 rather than any error that happens to contain the letters "rate".' },
+        { title: 'Re-matching a TV show left the old episodes', desc: 'a show re-matched onto a different title kept the previous one\'s episode list, so "Lucky (2026)" showed two 2026 episodes stacked on six from a 2022 series. the old title\'s episodes are cleared now, while episodes you actually have files for keep their files and watch state.' },
+        { title: 'Earlier versions', desc: '3.1.8 rebuilt chat into a Discord-style app with channels + threads and made Quality Profiles govern every download. 3.1.7 turned chat into a hangout with a shared jukebox. 3.1.6 made video downloads land atomically. 3.1.5 made chat best-in-class.' },
     ],
 };
 
@@ -3319,16 +3330,37 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.8: quality profiles that actually work",
-        description: "quality profiles stop being decorative — pin a profile to any watchlist artist or mirrored playlist and it governs every download that title triggers. plus preview + pick tracks from your Mixes, a much faster Discover page, and the whole video app finally documented.",
+        title: "3.1.9: the chat room gets an arcade",
+        description: "chess, connect 4, battleship and a slot machine, played over soulseek with no server anywhere. a match is nothing but hidden messages in the room, and every client folds them into the same board independently — the board tells you so, and lets you look at the messages behind the position. plus 100 preset avatars, and a fix for @-mentions that never worked.",
         features: [
+            "the arcade: a games section in the chat sidebar with a lobby of what's on the tables. no game server exists — every board is folded out of chat messages, and yours and your opponent's clients each work it out on their own",
+            "chess done properly: castling, en passant, under-promotion, stalemate, threefold and fifty-move, with the engine verified against the standard perft positions so move generation is exactly correct. drag or click, legal-move dots, check and last-move highlights, algebraic move list, board flips for black, and a PGN export that opens in lichess",
+            "correspondence style, no clock: close the tab and come back tomorrow — the sidebar tells you whose move it is. resign, offer a draw, withdraw a table nobody joined, or take over a seat that has been idle a day",
+            "battleship with commit-reveal: your fleet never goes on the wire until the end, both sides publish a fingerprint of their board first, and at the reveal every client checks every answer against the board you showed. lie about a single miss and no board fits. your client answers shots automatically from your own board",
+            "connect 4, a slot machine with play money (10k a day, topped back up at midnight if you drop below, winnings kept), you-vs-the-room chess where everyone else votes the moves, and an elo ladder folded out of finished games",
+            "games that survive real life: a client that missed moves catches up from the next move's position, a stuck game asks the room where it actually is, and the room is outvoted rather than trusted so a client claiming a fake board gets ignored. matches are archived so they survive an slskd restart",
+            "chat avatars: 100 presets in the settings cog, shown on every message and in the member list, saved to your account so it follows you between browsers",
+            "mentions never worked: soulsync read your soulseek name off an endpoint that does not carry it, so it was always blank and @-pings never highlighted. fixed",
+            "spotify's rate-limit popup no longer interrupts people whose metadata source is deezer, and a 30-minute ban now needs a real 429 instead of any error containing the letters 'rate'",
+            "re-matching a tv show no longer leaves the previous title's episodes behind — episodes you have files for keep their files and watch state",
+        ],
+        usage_note: "the arcade is in the chat sidebar under Games. avatars are behind the chat settings cog. everything in the arcade is play-money or for fun; nothing there touches your library.",
+    },
+    {
+        title: "Earlier in 3.1.8: chat becomes discord, quality profiles start working",
+        description: "chat gets rebuilt into a real discord-style app — server rail, channels, threads, a proper member list — all riding one soulseek room, and auto-dj turns into an actual radio. and quality profiles stop being decorative: pin one to any watchlist artist or mirrored playlist and it governs every download that title triggers. plus preview + pick from your mixes, a much faster discover page, and the whole video app documented.",
+        features: [
+            "chat looks and behaves like discord: a server rail of every soulseek room you've joined (plus a DM puck with unread counts), a channel sidebar with collapsible categories and an account strip, the message column, and a member list with avatars, presence dots and an activity line showing who's listening to the jukebox",
+            "channels + threads: the room now has #general and #off-topic under Community, #help, #bugs and #ideas under Support, all with unread badges — they're tags carried inside the SoulSync envelope, so untagged messages and anything from a vanilla soulseek client always land in #general and nothing is ever invisible. 🧵 any message to start a thread; a channel's threads hang beneath it in the sidebar and open in their own view. channels are SoulSync-room only — every other soulseek room stays plain unfiltered chat",
+            "auto-dj is a real radio: when the jukebox queue runs dry it now builds a genuine radio out of what the room just played — last.fm similar-tracks, then similar-artists, then your own library's similar-artist graph — instead of requeueing the same song. if the last thing played was a mix rather than a single track it follows the genre instead of hunting for songs similar to a video title. it says why it's idle, and the room elects a single DJ so two people turning it on can't double-queue",
+            "mention ping + now-playing: an optional sound when someone @-mentions you or replies to you — off by default, throttled, and silent while a room's history is loading. plus an opt-in activity line that shows the room what you're playing in SoulSync",
             "quality profiles everywhere (#1076, thanks nick2000713): every watchlist artist and mirrored playlist gets its own named quality profile, honored at every point a download starts — manual search/discover/library, auto-sync, playlist sync, download-missing, and retries. an explicit per-action choice beats the saved assignment beats the global default, always in that order. nothing copies the rules around, so editing a profile in Settings changes everything assigned to it at once",
             "preview + pick from Mixes & ListenBrainz (#1079, thanks andreamassaro9): each track in a Mix or ListenBrainz recommendation gets a preview play button and a checkbox — audition the picks and Download selected instead of grabbing the whole playlist",
             "discover loads fast: the page used to fire ~20 section requests at once and contend itself into a ~30s load; it now loads above-the-fold sections first and streams the rest, usable in a couple seconds. plus the sidebar header no longer bleeds through the artist map overlay",
             "the video side is documented: Help & Docs now has full guide sections for the whole video app plus a video API reference, matching the music-side format (screenshots to follow)",
             "library v2 fixes (#1055, thanks nick2000713): simple downloads only fill blank/placeholder tags instead of clobbering good ones, and a stuck usenet job gives up cleanly instead of polling for hours",
         ],
-        usage_note: "assign a quality profile from a watchlist artist's or a mirrored playlist's settings, or pick one per-download in the Add to Wishlist / Download Missing dialogs. the Mix preview + select controls are inside the Mix / ListenBrainz playlist modals.",
+        usage_note: "channels + threads live on the Chat page; the mention ping is behind the chat settings cog. assign a quality profile from a watchlist artist's or a mirrored playlist's settings, or pick one per-download in the Add to Wishlist / Download Missing dialogs. the Mix preview + select controls are inside the Mix / ListenBrainz playlist modals.",
     },
     {
         title: "Earlier in 3.1.7 — the chat jukebox release",

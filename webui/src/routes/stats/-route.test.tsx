@@ -130,10 +130,10 @@ describe('stats route', () => {
 
     fireEvent.click(bubbleLink);
 
-    // ldp-01: the canonical `/artist-detail/...` URL stays the link target, but
-    // it now redirects into Library V2 instead of the legacy artist page.
-    await waitFor(() => expect(history.location.pathname).toBe('/library'));
-    expect(new URLSearchParams(history.location.search).get('discover')).toBe('library:7');
+    await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/library/7'));
+    // Artist detail is React-owned now, so the click routes there directly
+    // rather than handing the URL back to the legacy shell.
+    expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();
   });
 
   it('falls back to streaming when track resolution fails', async () => {
@@ -173,5 +173,30 @@ describe('stats route', () => {
     const { history } = renderStatsRoute(['/stats']);
 
     await waitFor(() => expect(history.location.pathname).toBe('/discover'));
+  });
+});
+
+describe('stats route survives a backend outage', () => {
+  beforeEach(() => {
+    window.SoulSyncWebShellBridge = createShellBridge();
+    window.showToast = vi.fn();
+  });
+
+  it('renders the page instead of "Something went wrong"', async () => {
+    // Only the cached-stats query was unguarded; the status probe already had
+    // its own catch. allSettled covers both.
+    server.use(
+      http.get('/api/stats/cached', () => HttpResponse.json({ error: 'down' }, { status: 500 })),
+      http.get('/api/listening/stats/status', () =>
+        HttpResponse.json({ error: 'down' }, { status: 500 }),
+      ),
+    );
+
+    renderStatsRoute(['/stats']);
+
+    await waitFor(() =>
+      expect(window.SoulSyncWebShellBridge!.showReactHost).toHaveBeenCalledWith('stats'),
+    );
+    expect(screen.queryByText('Something went wrong')).toBeNull();
   });
 });
