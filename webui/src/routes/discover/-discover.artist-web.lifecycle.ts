@@ -330,6 +330,129 @@ export function webKillSigma(): void {
   }
 }
 
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+
+export type WebKeyAction =
+  | 'none'
+  | 'blur-input'
+  | 'exit-path'
+  | 'clear-selection'
+  | 'close'
+  | 'focus-search'
+  | 'fit'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'help';
+
+/**
+ * What a keypress means (6659-6681).
+ *
+ * Escape UNWINDS rather than closing: it leaves path mode if you are in it, then
+ * clears a selection if one is showing, and only closes the web when there is
+ * nothing left to back out of. Getting that order wrong does not look like a
+ * bug — Escape just feels like it skips a step.
+ *
+ * While typing, Escape blurs the field and every other key is left alone. The
+ * shortcuts are single letters, so without that you could not type "safe" into
+ * the search box without firing four of them.
+ */
+export function webKeyAction(
+  key: string,
+  tagName: string | undefined,
+  state: { pathMode: boolean; panelOpen: boolean },
+): WebKeyAction {
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+    return key === 'Escape' ? 'blur-input' : 'none';
+  }
+  if (key === 'Escape') {
+    if (state.pathMode) return 'exit-path';
+    return state.panelOpen ? 'clear-selection' : 'close';
+  }
+  if (key === 's' || key === 'S') return 'focus-search';
+  if (key === 'f' || key === 'F' || key === '0') return 'fit';
+  if (key === '+' || key === '=') return 'zoom-in';
+  if (key === '-' || key === '_') return 'zoom-out';
+  if (key === '?') return 'help';
+  return 'none';
+}
+
+/**
+ * The KEYBOARD's zoom steps (6676-6678).
+ *
+ * Deliberately gentler than the toolbar buttons' WEB_ZOOM_IN/OUT, because a key
+ * repeats when held. Note that a ratio BELOW one is zooming in.
+ */
+export const WEB_KEY_ZOOM_IN = 0.77;
+export const WEB_KEY_ZOOM_OUT = 1.3;
+
+/** What the shortcuts need from the page. */
+export interface WebKeyHost {
+  pathMode: () => boolean;
+  panelOpen: () => boolean;
+  exitPath: () => void;
+  clearSelection: () => void;
+  close: () => void;
+  /** Focus the search box; returns whether there was one to focus. */
+  focusSearch: () => boolean;
+  fitToView: () => void;
+  zoom: (ratio: number) => void;
+  showHelp: () => void;
+}
+
+/**
+ * Bind the shortcuts, and return the unbind (6659-6683, 7334).
+ *
+ * The vanilla removes a stale listener at the top of every open, because its
+ * handler lives on the singleton and an open can happen twice. A disposer is the
+ * same guarantee in the shape React already enforces.
+ *
+ * preventDefault is called ONLY for 's', and only when there was a search box to
+ * focus (6672) — with no search box on the page, 's' still types an 's'. The
+ * host's boolean return is what carries that.
+ */
+export function attachWebKeys(host: WebKeyHost): () => void {
+  const onKey = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    const action = webKeyAction(e.key, target?.tagName, {
+      pathMode: host.pathMode(),
+      panelOpen: host.panelOpen(),
+    });
+    switch (action) {
+      case 'blur-input':
+        target?.blur();
+        break;
+      case 'exit-path':
+        host.exitPath();
+        break;
+      case 'clear-selection':
+        host.clearSelection();
+        break;
+      case 'close':
+        host.close();
+        break;
+      case 'focus-search':
+        if (host.focusSearch()) e.preventDefault();
+        break;
+      case 'fit':
+        host.fitToView();
+        break;
+      case 'zoom-in':
+        host.zoom(WEB_KEY_ZOOM_IN);
+        break;
+      case 'zoom-out':
+        host.zoom(WEB_KEY_ZOOM_OUT);
+        break;
+      case 'help':
+        host.showHelp();
+        break;
+      default:
+        break;
+    }
+  };
+  document.addEventListener('keydown', onKey);
+  return () => document.removeEventListener('keydown', onKey);
+}
+
 /**
  * Everything the canvas owns, released (7329-7333, and 6717-6721 for the state
  * card, which replaces the canvas with a message and so must free it too).

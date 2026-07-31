@@ -15,6 +15,10 @@ import {
   webStartFX,
   webStartLiveLayout,
   webTeardown,
+  attachWebKeys,
+  webKeyAction,
+  WEB_KEY_ZOOM_IN,
+  WEB_KEY_ZOOM_OUT,
   WEB_SETTLE_RESET_MS,
 } from './-discover.artist-web.lifecycle';
 
@@ -711,5 +715,300 @@ describe('webRunLayoutSync', () => {
     expect(() => webRunLayoutSync(fakeGraph())).not.toThrow();
     expect(warn).toHaveBeenCalled();
     expect(log).toEqual([]);
+  });
+});
+
+// ── The keyboard, against the real vanilla handler ───────────────────────────
+
+interface VanillaKeys {
+  openArtistWeb: (lens: string) => Promise<void>;
+  vlog: string[];
+}
+
+/**
+ * Capture the vanilla's live keydown handler.
+ *
+ * `openArtistWeb` binds it synchronously, before its first await — so calling it
+ * with the CDN globals absent walks exactly as far as the bind and then returns
+ * at the libraries check. That is enough to get the real handler onto the real
+ * document, which is what makes this a differential rather than a re-reading.
+ */
+function loadVanillaKeys(): VanillaKeys {
+  return loadVanilla<VanillaKeys>(
+    ['openArtistWeb'],
+    `const vlog = [];
+     const _artistWeb = { gen: 0, onKey: null, lens: 'genre', pathMode: false };
+     function closeArtistWeb() { vlog.push('close'); }
+     function _artWebExitPath() { vlog.push('exit-path'); }
+     function _artWebClearSelection() { vlog.push('clear-selection'); }
+     function artWebFitToView() { vlog.push('fit'); }
+     function artWebZoom(r) { vlog.push('zoom ' + r); }
+     function artWebShowHelp() { vlog.push('help'); }`,
+    ['vlog', '_artistWeb'],
+  );
+}
+
+describe('the keyboard shortcuts match the vanilla', () => {
+  let container: HTMLElement;
+  let canvas: HTMLElement;
+  let searchBox: HTMLInputElement;
+  let panel: HTMLElement;
+  let mine: string[];
+  let disposeMine: (() => void) | null = null;
+  let vanilla: VanillaKeys;
+  let pathMode = false;
+
+  beforeEach(() => {
+    vi.useRealTimers(); //  nothing here is timed, and jsdom events prefer it
+    document.body.innerHTML = '';
+    container = document.createElement('div');
+    container.id = 'artist-web-container';
+    canvas = document.createElement('div');
+    canvas.id = 'artist-web-canvas';
+    searchBox = document.createElement('input');
+    searchBox.id = 'artist-web-search';
+    panel = document.createElement('div');
+    panel.id = 'artweb-panel';
+    panel.style.display = 'none';
+    container.append(canvas, searchBox, panel);
+    document.body.append(container);
+
+    pathMode = false;
+    mine = [];
+    vanilla = loadVanillaKeys();
+  });
+
+  afterEach(() => {
+    disposeMine?.();
+    disposeMine = null;
+    if (vanilla._artistWeb.onKey) {
+      document.removeEventListener('keydown', vanilla._artistWeb.onKey as EventListener);
+    }
+    document.body.innerHTML = '';
+  });
+
+  /** The port's host, expressed against the same DOM the vanilla reads. */
+  function attachMine() {
+    disposeMine = attachWebKeys({
+      pathMode: () => pathMode,
+      panelOpen: () => {
+        const p = document.getElementById('artweb-panel');
+        return !!p && p.style.display !== 'none';
+      },
+      exitPath: () => mine.push('exit-path'),
+      clearSelection: () => mine.push('clear-selection'),
+      close: () => mine.push('close'),
+      focusSearch: () => {
+        const el = document.getElementById('artist-web-search');
+        if (!el) return false;
+        el.focus();
+        return true;
+      },
+      fitToView: () => mine.push('fit'),
+      zoom: (r) => mine.push(`zoom ${r}`),
+      showHelp: () => mine.push('help'),
+    });
+  }
+
+  /**
+   * Press a key on a target and report what each side did with it.
+   *
+   * Focus is captured PER SIDE and restored between them. Checking it once at
+   * the end instead would let the vanilla's blur stand in for a missing one in
+   * the port — the two run against the same document, so whichever goes second
+   * silently covers for the first.
+   */
+  function press(key: string, target: EventTarget = document) {
+    const fire = () => {
+      const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      target.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    const startActive = document.activeElement as HTMLElement | null;
+    const focused = () => (document.activeElement as HTMLElement | null)?.id ?? '';
+
+    attachMine();
+    const minePrevented = fire();
+    disposeMine!();
+    disposeMine = null;
+    const mineResult = { effects: [...mine], prevented: minePrevented, focused: focused() };
+    mine = [];
+
+    startActive?.focus(); //  same starting point for the second run
+    void vanilla.openArtistWeb('genre');
+    vanilla._artistWeb.pathMode = pathMode;
+    const theirsPrevented = fire();
+    document.removeEventListener('keydown', vanilla._artistWeb.onKey as EventListener);
+    vanilla._artistWeb.onKey = null;
+    const theirsResult = {
+      effects: [...vanilla.vlog],
+      prevented: theirsPrevented,
+      focused: focused(),
+    };
+    vanilla.vlog.length = 0;
+
+    return { mine: mineResult, theirs: theirsResult };
+  }
+
+  it('Escape unwinds path mode first', () => {
+    pathMode = true;
+    panel.style.display = 'block';
+    const r = press('Escape');
+    expect(r.mine).toEqual(r.theirs);
+    // Path mode wins over an open panel — the order is the whole behaviour.
+    expect(r.mine.effects).toEqual(['exit-path']);
+  });
+
+  it('Escape then clears a shown selection', () => {
+    panel.style.display = 'block';
+    const r = press('Escape');
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['clear-selection']);
+  });
+
+  it('Escape closes when the panel is hidden', () => {
+    const r = press('Escape');
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['close']);
+  });
+
+  it('Escape closes when there is no panel at all', () => {
+    panel.remove();
+    const r = press('Escape');
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['close']);
+  });
+
+  it('Escape inside a field blurs the field and closes nothing', () => {
+    searchBox.focus();
+    const r = press('Escape', searchBox);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual([]);
+    expect(r.mine.focused).toBe(''); //  blurred, by THIS side
+  });
+
+  it.each(['s', 'S'])('%s focuses the search box and swallows the keypress', (key) => {
+    const r = press(key);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.focused).toBe('artist-web-search');
+    expect(r.mine.prevented).toBe(true);
+  });
+
+  it('s with no search box on the page still types an s', () => {
+    searchBox.remove();
+    const r = press('s');
+    expect(r.mine).toEqual(r.theirs);
+    // preventDefault lives INSIDE the `if (input)` — swallowing it here would
+    // make the letter unusable everywhere the box is absent.
+    expect(r.mine.prevented).toBe(false);
+  });
+
+  it.each(['f', 'F', '0'])('%s fits the view', (key) => {
+    const r = press(key);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['fit']);
+  });
+
+  it.each(['+', '='])('%s zooms in with the gentler key ratio', (key) => {
+    const r = press(key);
+    expect(r.mine).toEqual(r.theirs);
+    // 0.77, not the toolbar button's 0.7 — and below 1 means IN.
+    expect(r.mine.effects).toEqual(['zoom 0.77']);
+  });
+
+  it.each(['-', '_'])('%s zooms out with the gentler key ratio', (key) => {
+    const r = press(key);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['zoom 1.3']); //  not the button's 1.4
+  });
+
+  it('? opens the guide', () => {
+    const r = press('?');
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual(['help']);
+  });
+
+  it.each(['q', 'Enter', 'ArrowLeft', 'z'])('%s is left alone', (key) => {
+    const r = press(key);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual([]);
+    expect(r.mine.prevented).toBe(false);
+  });
+
+  it.each(['s', 'f', '+', '?', '0'])('%s does nothing while typing in a field', (key) => {
+    const r = press(key, searchBox);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual([]);
+  });
+
+  it('does nothing while typing in a textarea either', () => {
+    const area = document.createElement('textarea');
+    container.append(area);
+    const r = press('f', area);
+    expect(r.mine).toEqual(r.theirs);
+    expect(r.mine.effects).toEqual([]);
+  });
+
+  it('unbinds, so a key after the overlay closes does nothing', () => {
+    attachMine();
+    disposeMine!();
+    disposeMine = null;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(mine).toEqual([]);
+  });
+
+  it('does not stack handlers across a remount', () => {
+    attachMine();
+    disposeMine!();
+    attachMine();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(mine).toEqual(['close']);
+  });
+});
+
+describe('the key zoom ratios', () => {
+  it('are the gentler pair, distinct from the toolbar buttons', () => {
+    // 6676-6678. The toolbar uses 0.7 / 1.4; a key repeats when held, so it
+    // steps smaller. Conflating the two pairs is silent — zooming just feels
+    // wrong — so they are pinned to literals here.
+    expect(WEB_KEY_ZOOM_IN).toBe(0.77);
+    expect(WEB_KEY_ZOOM_OUT).toBe(1.3);
+    expect(WEB_KEY_ZOOM_IN).toBeLessThan(1); //  below one is zooming IN
+    expect(WEB_KEY_ZOOM_OUT).toBeGreaterThan(1);
+  });
+});
+
+describe('webKeyAction', () => {
+  const open = { pathMode: false, panelOpen: true };
+  const idle = { pathMode: false, panelOpen: false };
+
+  it('reads the Escape unwind as a three-step ladder', () => {
+    expect(webKeyAction('Escape', 'DIV', { pathMode: true, panelOpen: true })).toBe('exit-path');
+    expect(webKeyAction('Escape', 'DIV', open)).toBe('clear-selection');
+    expect(webKeyAction('Escape', 'DIV', idle)).toBe('close');
+  });
+
+  it('treats a field as swallowing everything but Escape', () => {
+    for (const tag of ['INPUT', 'TEXTAREA']) {
+      expect(webKeyAction('Escape', tag, idle)).toBe('blur-input');
+      expect(webKeyAction('s', tag, idle)).toBe('none');
+      expect(webKeyAction('?', tag, idle)).toBe('none');
+    }
+  });
+
+  it('maps every advertised key, and nothing else', () => {
+    expect(webKeyAction('s', undefined, idle)).toBe('focus-search');
+    expect(webKeyAction('S', undefined, idle)).toBe('focus-search');
+    expect(webKeyAction('f', undefined, idle)).toBe('fit');
+    expect(webKeyAction('F', undefined, idle)).toBe('fit');
+    expect(webKeyAction('0', undefined, idle)).toBe('fit');
+    expect(webKeyAction('+', undefined, idle)).toBe('zoom-in');
+    expect(webKeyAction('=', undefined, idle)).toBe('zoom-in');
+    expect(webKeyAction('-', undefined, idle)).toBe('zoom-out');
+    expect(webKeyAction('_', undefined, idle)).toBe('zoom-out');
+    expect(webKeyAction('?', undefined, idle)).toBe('help');
+    for (const key of ['a', '1', 'Enter', 'Tab', 'ArrowUp', ' ']) {
+      expect(webKeyAction(key, undefined, idle)).toBe('none');
+    }
   });
 });
