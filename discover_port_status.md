@@ -1,6 +1,6 @@
 # discover page → React: status
 
-Branch `react-migration-discover`, 38 commits, **not pushed**.
+Branch `react-migration-discover`, 47 commits, **not pushed**.
 
 ## the honest summary
 
@@ -134,3 +134,86 @@ of this document was wrong.
 Corollary, from the reachability tooling: my first attempt brace-matched
 function bodies, desynchronised on nested template literals, and confidently
 reported **zero** dead code. A tool that agrees with you is not evidence.
+
+## the two visualisations (added after the coverage work above)
+
+Both are now ported at the DECISION layer and heavily verified. State it that
+way rather than "the visualisations are done", because the distinction matters:
+what remains of them is the imperative DOM and orchestration, and that becomes
+JSX and effects when the page gets its React components — there is nothing to
+port ahead of that.
+
+A coverage sweep over the two regions (157 function declarations) breaks down as:
+
+| | count |
+|---|---|
+| ported under the same name, or recorded dead in the audit | 116 |
+| decision layer ported under a different name | 31 |
+| pure DOM / orchestration, nothing to port yet | 10 |
+
+The last 10 are `_artWebKillLiveLayout`, `_artWebSyncLensButtons`, `_switchGenre`,
+`_changeGenre`, `_filterGenrePicker`, `_filterGenreSidebar`, `artMapToggleSimilar`
+(its toolbar half — the keyboard half is ported), `artWebExploreInMap`,
+`artWebPlayArtist` and `openArtistMapExplorer`. Every one is a class toggle, a
+modal, a teardown or a hand-off.
+
+| module | covers | mutants |
+|---|---|---|
+| `-discover.artist-map.ts` | island layout, camera targets, hit test, reveal stepper, ripple physics | 68, 66 dead (2 equivalent, recorded) |
+| `-discover.artist-map.panel.ts` | info panel, island nav + jump menu, tooltip, context menu, shortcuts | 48/48 |
+| `-discover.artist-map.render.ts` | offscreen buffer, painters, live overlay, rAF loop, camera easing, image stream | 92/92 |
+| `-discover.artist-map.interaction.ts` | wheel/pan/hover/click/touch/keys/resize + dispose | 50/50 |
+| `-discover.artist-map.entry.ts` | watchlist / genre / explorer entry, toolbar search, the info hand-off | 39/39 |
+| `-discover.artist-web.ts` | palette, edge styling, label renderer, three lens builders, both reducers, spread FX | 86, 85 dead (1 equivalent, recorded) |
+| `-discover.artist-web.controller.ts` | lifecycle + generation guards, FA2 supervisor, search, selection, tooltip, path mode | 88/88 (shared with the panel) |
+| `-discover.artist-web.panel.ts` | legend + the four side-panel cards | (above) |
+
+### how canvas and sigma code got verified
+
+Canvas calls return nothing to compare, so both sides run against a **recording
+2D context** that logs every call and every property assignment in order, and
+the two logs are diffed. `document.createElement('canvas')` is stubbed for both
+and each canvas is labelled by creation order, so the sequence in which sprites
+and buffers are built is part of the diff too.
+
+The event handlers use the same idea with effects: a real jsdom canvas, the same
+synthetic events, one recorder standing in for every collaborator.
+
+The Artist Web's lens builders take the Graph CONSTRUCTOR as an argument, so both
+sides get one minimal graphology stand-in and their finished graphs are compared
+attribute by attribute, with `Math.random` seeded and rewound per side.
+
+### the one deliberate divergence
+
+`attachArtMapInteraction` returns a dispose function. The vanilla guards against
+stacking listeners with a flag on the canvas ELEMENT, which works only because
+index.html declares that canvas once; React recreates it per mount, so the guard
+would stop guarding anything. Same behaviour while mounted.
+
+### two transcription misses the differential caught
+
+Both in code already written and believed correct:
+
+1. the map's key handler bails when the container is missing or hidden (10018).
+2. `s` only calls preventDefault INSIDE `if (input)` (10026-10029) — with no
+   search box on the page, the key still types an s.
+
+### three vacuous assertions of my own, all the same shape
+
+Asserting a value against the very constant under mutation. One was worse than
+vacuous: `SOURCE.toContain('ratio: ' + WEB_CAMERA.cameraToRatio)` passed a
+0.12 → 0.15 mutation, because `artWebFocusNode` genuinely uses 0.15 elsewhere in
+the file. All three are literals now.
+
+## what is left
+
+**The React page itself.** `src/routes/discover/` still has no `route.tsx` and no
+`-ui/` components — the whole page is logic modules. That is the next phase and
+it is large: every section plus both visualisation shells, then the manifest
+flip, then PR 2's cleanup (delete discover.js + the 37 dead functions).
+
+**Deletion hazard, unchanged:** `startDecadeSync`, `startDecadeSyncPolling` and
+`openDownloadModalForDecade` are LIVE despite sitting inside the dead region.
+
+**Still out:** `rehydrateDiscoverDownloadModal` (~327 lines), documented in
+`-discover.download-bar.ts`.
