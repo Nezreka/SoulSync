@@ -7,9 +7,9 @@
  */
 
 export interface ArtistMapHubProps {
-  onOpenWatchlist(): void;
-  onOpenGenre(): void;
-  onOpenExplorer(): void;
+  onOpenWatchlist: () => void;
+  onOpenGenre: () => void;
+  onOpenExplorer: () => void;
 }
 
 const ARROW = (
