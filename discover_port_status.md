@@ -4,8 +4,15 @@ Branch `react-migration-discover`, 27 commits, **not pushed**.
 
 ## the honest summary
 
-The **logic layer is largely done and heavily verified. There is still no UI and
-nothing is mountable**, so there is nothing for you to click yet. discover.js is
+The **logic layer is partly done and what exists is heavily verified. There is
+still no UI and nothing is mountable**, so there is nothing for you to click yet.
+
+**Corrected after a coverage audit** (`discover_coverage_gaps.md`): "region X is
+done" previously meant "I ported the functions I enumerated while reading region
+X", and hand enumeration missed live functions in several regions — including
+four of the seven live mix feeders, the download bar's bubble modal and its
+bootstrap. 40 live functions outside the two visualisations are still un-ported.
+The table below marks what is complete vs partial. discover.js is
 12,319 lines — the largest file on the music side — and about 4,500 of those are
 the two canvas/sigma visualisations, which are untouched.
 
@@ -25,19 +32,19 @@ commit.
 | `-discover.section-state.ts` | the five-state lifecycle | loading/rendered/empty/stale/error |
 | `-discover.limiter.ts` | the 5-way request pool | protects Flask+GIL, not the browser |
 | `-discover.use-page.ts` | load tiering | above/below fold, load-once |
-| `-discover.hero.ts` | hero + Watch All | id chain, bands, indicators |
+| `-discover.hero.ts` | hero + Watch All | **PARTIAL** — `checkAndUpdateDiscoverHeroWatchlistButton` not ported |
 | `-discover.your-albums.ts` | grid + paging | |
 | `-discover.your-albums-actions.ts` | search, card download, sources, bulk, batch modal | |
 | `-discover.your-artists.ts` | cards + stale polling | |
 | `-discover.your-artists-actions.ts` | info modal, watchlist, sources, all-artists modal | **3 bug fixes** |
-| `-discover.mixes.ts` | mix registry + covers + modal actions | |
-| `-discover.download-bar.ts` | the shared download bar | **cross-file window contract** |
-| `-discover.playlist-sync.ts` | start / poll / resume-after-refresh | **1 bug fix** |
+| `-discover.mixes.ts` | mix registry + covers + modal actions | **PARTIAL** — 4 live feeders + the modal's track table + the #1079 selection bar are not ported |
+| `-discover.download-bar.ts` | the shared download bar | **PARTIAL** — cross-file contract done; `openDiscoverDownloadModal` + `initializeDiscoverDownloadBar` are not ported |
+| `-discover.playlist-sync.ts` | start / poll / resume-after-refresh | **1 bug fix**; `openDownloadModalForDiscoverPlaylist` not ported |
 | `-discover.cache-sections.ts` | 5 cache sections + Genre Deep Dive | |
 | `-discover.build-playlist.ts` | seed picker + generator | |
 | `-discover.bylt.ts` | Because You Listen To | **1 bug fix** |
 | `-discover.adventurousness.ts` | the dial + the bounded loader pool | wave maths differentially tested |
-| `-discover.recommended.ts` | both recommendation carousels | |
+| `-discover.recommended.ts` | both recommendation carousels | **PARTIAL** — the "View All" modal renderer not ported |
 | `-discover.seasonal.ts` | seasonal albums/playlist + artist context | context differentially tested (27 cases) |
 | `-discover.listenbrainz-cache.ts` | the LB cross-file cache contract | closes a carried requirement |
 
@@ -84,6 +91,12 @@ listed that feeder as live a commit earlier.
   the ListenBrainz playlists section (3397-4259). Both were read this session
   but not yet transcribed.
 * PR 2 (delete discover.js + the dead code) — not started.
+* **40 live functions outside the visualisations remain un-ported** — the full
+  list, with line numbers, is in `discover_coverage_gaps.md`. Re-run the union
+  coverage check there before claiming any region is complete.
+* **`startDecadeSync` / `startDecadeSyncPolling` / `openDownloadModalForDecade`
+  are LIVE** (reached from the decade mix card at 2672) even though the tabbed
+  decade browser around them is dead. Do not delete them with the dead region.
 
 ## outstanding requirements — do not lose these
 
