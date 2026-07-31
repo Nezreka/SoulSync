@@ -12,6 +12,7 @@ import {
   recommendationReasonTitle,
   whyIcon,
 } from './-discover.helpers';
+import { pickArtistDetailSource } from './-discover.your-artists';
 
 /**
  * Differential parity: run MY port and the REAL vanilla side by side.
@@ -86,6 +87,7 @@ const V = loadVanilla<{
   _whyIcon: (t: unknown) => string;
   _listeningRecommendationReason: (a: unknown) => string;
   _listeningRecommendationReasonTitle: (a: unknown) => string;
+  _pickArtistDetailSource: (a: unknown) => unknown;
 }>([
   'cleanArtistName',
   '_normalizeTrack',
@@ -95,6 +97,7 @@ const V = loadVanilla<{
   '_whyIcon',
   '_listeningRecommendationReason',
   '_listeningRecommendationReasonTitle',
+  '_pickArtistDetailSource',
 ]);
 
 describe('cleanArtistName', () => {
@@ -234,6 +237,40 @@ describe('whyIcon', () => {
   for (const t of ['genre', 'obscure', 'consensus', 'explore', 'unknown', '', null, undefined]) {
     it(`matches the vanilla for ${JSON.stringify(t)}`, () => {
       expect(whyIcon(t)).toBe(V._whyIcon(t));
+    });
+  }
+});
+
+describe('pickArtistDetailSource', () => {
+  // Argument-pure, so it is compared against the REAL vanilla rather than
+  // against expectations typed from reading it.
+  const cases: unknown[] = [
+    null,
+    undefined,
+    {},
+    { active_source: 'spotify', spotify_artist_id: 'sp1' },
+    // active source set but ITS field empty -> falls through to declaration order
+    { active_source: 'spotify', deezer_artist_id: 'dz1' },
+    { active_source: 'itunes', itunes_artist_id: 'it1', spotify_artist_id: 'sp1' },
+    // no active source at all -> first populated field wins, in order
+    { deezer_artist_id: 'dz1', discogs_artist_id: 'dc1' },
+    { discogs_artist_id: 'dc1', spotify_artist_id: 'sp1' },
+    { musicbrainz_artist_id: 'mb1' },
+    { soul_id: 'hb1' },
+    { amazon_artist_id: 'am1' },
+    // active_source_id fallback, which requires a KNOWN active source
+    { active_source: 'spotify', active_source_id: 'as1' },
+    { active_source: 'nonsense', active_source_id: 'as1' },
+    { active_source_id: 'as1' },
+    // `source` is the alias for active_source
+    { source: 'deezer', deezer_artist_id: 'dz1' },
+    { source: 'SPOTIFY', spotify_artist_id: 'sp1' }, //  case-insensitive
+    // numeric ids must come back as strings
+    { active_source: 'spotify', spotify_artist_id: 12345 },
+  ];
+  for (const [i, input] of cases.entries()) {
+    it(`matches the vanilla for case ${i}`, () => {
+      expect(pickArtistDetailSource(input as never)).toEqual(V._pickArtistDetailSource(input));
     });
   }
 });
