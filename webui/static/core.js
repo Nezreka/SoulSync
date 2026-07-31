@@ -100,6 +100,36 @@ window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
     }
     rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
 };
+
+/**
+ * Paint the downloads count on the nav button.
+ *
+ * Moved verbatim from pages-extra.js when the Downloads page became React. It
+ * has to live in a classic script rather than in the React page, because the
+ * websocket status handler below (and its twin in shared-helpers.js) calls it
+ * on every push — including on pages where the Downloads route is not mounted.
+ *
+ * It reads NOTHING from the downloads page: the count is the real server-side
+ * active total from the status push, not the page's list. That distinction is
+ * why the vanilla deliberately never called this from its own poll — the poll
+ * caps at 300 rows and would under-report a bigger queue.
+ */
+function _updateDlNavBadge(count) {
+    const badge = document.getElementById('dl-nav-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
+}
+
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---
