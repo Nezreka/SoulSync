@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { advColor, advState, advWaveY } from './-discover.adventurousness';
 import {
   cleanArtistName,
   discoverTrackToSpotifyShape,
@@ -73,10 +74,11 @@ function extractFunction(name: string): string {
  * vanilla return raw text too, so the comparison comes down to the LOGIC — which
  * is the thing that has to match. (Escaping itself is covered by React.)
  */
-function loadVanilla<T>(names: string[]): T {
-  const preamble = 'const escapeHtml = (s) => s;';
+function loadVanilla<T>(names: string[], extraPreamble = '', extraExports: string[] = []): T {
+  const preamble = `const escapeHtml = (s) => s;\n${extraPreamble}`;
   const body = names.map(extractFunction).join('\n');
-  return new Function(`${preamble}\n${body}\nreturn { ${names.join(', ')} };`)() as T;
+  const exports = [...names, ...extraExports].join(', ');
+  return new Function(`${preamble}\n${body}\nreturn { ${exports} };`)() as T;
 }
 
 const V = loadVanilla<{
@@ -310,4 +312,87 @@ describe('_yourAlbumsPickSource', () => {
       expect(yourAlbumsPickSource(input as never)).toEqual(V._yourAlbumsPickSource(input));
     });
   }
+});
+
+/**
+ * The dial's maths, lifted separately because `_advWaveY` closes over the
+ * module-level `_advWave` for its animation phase. The port takes `phase` as an
+ * argument instead, so the harness supplies a real `_advWave` and the tests set
+ * its phase before each comparison.
+ */
+const ADV = loadVanilla<{
+  _advState: (v: number) => string;
+  _advColor: (v: number, light?: number, alpha?: number | null) => string;
+  _advWaveY: (u: number, v: number) => number;
+  _advWave: { value: number; phase: number };
+}>(
+  ['_advState', '_advColor', '_advWaveY'],
+  'const _advWave = { value: 0.3, phase: 0, raf: null, dragging: false };',
+  ['_advWave'],
+);
+
+describe('_advState', () => {
+  // Every band, both sides of every boundary — the bounds are exclusive, so
+  // 0.40 is "Adventurous" and a `<=` slip would put it in "Balanced".
+  const cases = [
+    -1, 0, 0.0001, 0.119, 0.12, 0.1201, 0.3, 0.399, 0.4, 0.4001, 0.5, 0.699, 0.7, 0.7001, 0.9, 1, 2,
+  ];
+  for (const v of cases) {
+    it(`matches the vanilla at ${v}`, () => {
+      expect(advState(v)).toBe(ADV._advState(v));
+    });
+  }
+});
+
+describe('_advColor', () => {
+  const values = [-0.5, 0, 0.25, 0.333333, 0.5, 0.75, 1, 1.5];
+  for (const v of values) {
+    it(`matches the vanilla hue at ${v}`, () => {
+      expect(advColor(v)).toBe(ADV._advColor(v));
+    });
+  }
+
+  it('matches for each lightness the page actually uses', () => {
+    for (const v of values) {
+      expect(advColor(v, 55)).toBe(ADV._advColor(v, 55));
+      expect(advColor(v, 62)).toBe(ADV._advColor(v, 62));
+      expect(advColor(v, 50, 0.16)).toBe(ADV._advColor(v, 50, 0.16));
+    }
+  });
+
+  it('matches the falsy-lightness fallback, quirk and all', () => {
+    // `light || 55` — 0 yields 55, not black. Transcribed, not "fixed".
+    expect(advColor(0.5, 0)).toBe(ADV._advColor(0.5, 0));
+    expect(advColor(0.5, undefined)).toBe(ADV._advColor(0.5, undefined));
+  });
+
+  it('matches an alpha of ZERO, which `!= null` keeps as hsla', () => {
+    expect(advColor(0.5, 55, 0)).toBe(ADV._advColor(0.5, 55, 0));
+  });
+});
+
+describe('_advWaveY', () => {
+  const phases = [0, 0.5, 1.3, 3.14159, 12.5];
+  const values = [0, 0.001, 0.3, 0.5, 1];
+  const positions = [0, 0.25, 0.5, 0.75, 1];
+  for (const phase of phases) {
+    for (const v of values) {
+      it(`matches the vanilla at phase ${phase}, v ${v}`, () => {
+        ADV._advWave.phase = phase;
+        for (const u of positions) {
+          expect(advWaveY(u, v, phase)).toBeCloseTo(ADV._advWaveY(u, v), 12);
+        }
+      });
+    }
+  }
+
+  it('matches at v=0, where the second harmonic is SKIPPED entirely', () => {
+    // `if (v > 0)` — at rest there is one sine, not a sum. Dropping the guard
+    // changes nothing numerically (the term is multiplied by v) but the port
+    // keeps it so the shapes stay identical line for line.
+    ADV._advWave.phase = 2.2;
+    for (const u of positions) {
+      expect(advWaveY(u, 0, 2.2)).toBeCloseTo(ADV._advWaveY(u, 0), 12);
+    }
+  });
 });
