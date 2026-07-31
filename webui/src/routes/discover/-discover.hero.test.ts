@@ -16,6 +16,13 @@ import {
   heroPopularityClass,
   heroShowsPopularity,
   heroWatchlistLabel,
+  WATCH_ALL_BUSY,
+  WATCH_ALL_DONE,
+  WATCH_ALL_IDLE,
+  allWatched,
+  heroIndicators,
+  watchAllPayload,
+  watchAllState,
 } from './-discover.hero';
 
 const artist = (over: Partial<DiscoverHeroArtist> = {}): DiscoverHeroArtist =>
@@ -145,5 +152,93 @@ describe('the empty state', () => {
     expect(HERO_EMPTY_SUBTITLE).toBe(
       'Run a watchlist scan to generate personalized recommendations',
     );
+  });
+});
+
+describe('the Watch All button', () => {
+  it('is actionable when idle', () => {
+    expect(watchAllState('idle')).toEqual({
+      label: WATCH_ALL_IDLE,
+      disabled: false,
+      allWatched: false,
+    });
+  });
+
+  it('disables while adding, so a double-click cannot fire two batches', () => {
+    const s = watchAllState('busy');
+    expect(s.label).toBe(WATCH_ALL_BUSY);
+    expect(s.disabled).toBe(true);
+  });
+
+  it('stays DISABLED once everything is watched', () => {
+    // Re-posting the batch is a no-op the user cannot distinguish from failure.
+    expect(watchAllState('done')).toEqual({
+      label: WATCH_ALL_DONE,
+      disabled: true,
+      allWatched: true,
+    });
+  });
+});
+
+describe('allWatched', () => {
+  it('is true only when every check says watching', () => {
+    expect(allWatched([{ success: true, is_watching: true }])).toBe(true);
+    expect(
+      allWatched([
+        { success: true, is_watching: true },
+        { success: true, is_watching: true },
+      ]),
+    ).toBe(true);
+  });
+
+  it('stops at the first artist that is not watched', () => {
+    expect(
+      allWatched([
+        { success: true, is_watching: true },
+        { success: true, is_watching: false },
+      ]),
+    ).toBe(false);
+  });
+
+  it('treats a FAILED check as not-watched', () => {
+    // A broken check must never claim everything is watched and disable the
+    // button — that would strand the user with no way to add.
+    expect(allWatched([{ success: false, is_watching: true }])).toBe(false);
+    expect(allWatched([{}])).toBe(false);
+  });
+
+  it('is vacuously true for no artists, which the caller guards separately', () => {
+    expect(allWatched([])).toBe(true);
+  });
+});
+
+describe('the Watch All payload', () => {
+  it('sends only id and name, not the whole artist', () => {
+    const payload = watchAllPayload([
+      artist({ artist_id: 'a1', artist_name: 'A', spotify_artist_id: 'sp', popularity: 90 }),
+    ]);
+    expect(payload).toEqual([{ artist_id: 'a1', artist_name: 'A' }]);
+  });
+
+  it('sends null rather than undefined for a missing id', () => {
+    expect(watchAllPayload([artist({ artist_id: null })])[0].artist_id).toBeNull();
+  });
+});
+
+describe('the slide indicators', () => {
+  it('emits one dot per artist with the current one active', () => {
+    const dots = heroIndicators(3, 1);
+    expect(dots.map((d) => d.active)).toEqual([false, true, false]);
+  });
+
+  it('labels slides 1-based for screen readers', () => {
+    expect(heroIndicators(2, 0).map((d) => d.ariaLabel)).toEqual([
+      'Go to slide 1',
+      'Go to slide 2',
+    ]);
+  });
+
+  it('emits nothing for an empty hero', () => {
+    expect(heroIndicators(0, 0)).toEqual([]);
   });
 });
