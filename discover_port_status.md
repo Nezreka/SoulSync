@@ -291,7 +291,37 @@ behavioural test had passed:
 
 `-ui/artefact-parity.test.ts` now holds ids at zero-unknown and zero-duplicate.
 
-### the styling debt, which blocks the route flip
+### the component layer is NOT complete — 11 pieces have no UI
+
+I reported it complete. It was not. A coverage sweep over `DISCOVER_LAYOUT` and
+the modal-bearing modules found eleven pieces with no component at all, every
+one of them reachable in the vanilla today:
+
+| missing | its logic module |
+| --- | --- |
+| the five `cache-*` shelves | `-discover.cache-sections.ts` (wholly unused) |
+| the BYLT sections | `-discover.bylt.ts` (wholly unused) |
+| the seasonal PLAYLIST section | `seasonalMixTitles`, `seasonalHasPlaylist` |
+| the blacklist modal | `-discover.blacklist.ts` (wholly unused) |
+| the Your Artists modal | `artistsModalPager`, `applyArtistsModalFilter` |
+| the artist INFO modal | `infoStats`, `infoMatchBadges`, `cleanBio` |
+| the Your Artists sources modal | `ARTISTS_SOURCE_INFO` |
+| the Your Albums batch modal | `prepareBatchRows`, `reduceBatchEvent` |
+| the Your Albums sources modal | `YOUR_ALBUMS_SOURCE_INFO` |
+| the artist-map info modal | `artMapInfoBest` |
+| the decade tab contents | `decadeTrackToSpotify` |
+
+Every one of those modules was ported and fully tested, the suite was green, and
+every other gate passed — because nothing asked "is there UI for this?". "Done"
+was my judgement and my judgement was wrong.
+
+`-ui/ui-coverage.test.ts` now answers it mechanically, and ratchets: a piece
+that gains a component fails the test until it is struck off the list, so the
+list cannot go stale. It requires a component name to be DECLARED rather than
+merely mentioned — the first draft reported the sync panel as built after its
+declaration had been renamed away, because another component still imported it.
+
+### the styling debt, which also blocks the route flip
 
 94 class names in the components have **no CSS**. They are semantic names that
 replaced the vanilla's INLINE styles (the map and web panels build their markup
@@ -301,8 +331,8 @@ prerequisite of the flip, not polish.
 
 ### still to build
 
-**The CSS above (#258), then `route.tsx` + the manifest flip (#251).** The flip
-is the whole remaining piece:
+**The eleven components above, then the CSS (#258), then `route.tsx` + the
+manifest flip (#251).** The flip is the last step:
 a page hook that owns the state every component above takes as props, then
 mounting it and flipping the manifest so discover.js stops loading. Nothing is
 mounted yet, so the vanilla page is still what users get and nothing
