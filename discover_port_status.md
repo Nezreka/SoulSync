@@ -222,6 +222,13 @@ against a green baseline:
 | `discover-section` + `discover-hero` | 32/32 |
 | `recommended-shelf` — both recommendation shelves | 25/25 |
 | `recommended-modal` | 23/23 |
+| `your-artists-shelf` + `your-albums-shelf` | 32/32 |
+| `album-shelves` — recent releases + seasonal | 16/16 |
+| `mix-shelf` — the card four sections share | 16/16 |
+| `mix-modal` — compact rows, selection bar, actions | 24/24 |
+| `sync-status` — the shared panel + Sync button | 15/15 |
+| `radio-sections` — Last.fm + ListenBrainz | 24/24 |
+| `adventurousness-dial`, `download-bar`, `build-playlist` | 25/25 |
 
 Two equivalent mutants are recorded in the code rather than papered over: the
 context menu's inner `hasId` check (unreachable behind `disabled`) and the
@@ -245,12 +252,35 @@ section shell's re-test of `loaded` (unreachable behind `isSectionVisible`).
   the web lifecycle. Nothing throws; selections just stop fanning out. The
   vanilla differential caught it.
 
+### more findings
+
+- **`BpSelectionState` has no `atMax` or `canGenerate`.** I invented both; the
+  real fields are `generateDisabled`, `showEmptyHint` and `counterLabel`. tsc
+  caught these two because that interface has no index signature — unlike
+  `DiscoverHeroArtist`, which is why `artist.name` got through.
+- **Two card renderers were byte-identical** (recent releases / seasonal) and are
+  now one component. So are the four mix shelves — but they must NOT share a
+  GRID: the registry holds every section's mixes so the modal can resolve any
+  key, and rendering the whole registry into one shelf is how the other sections
+  leak into Your Mixes.
+- **The decade shelf is a mix shelf**, not an album shelf — `decadeMix()` returns
+  a `DiscoverMix`, which is why the mix card takes its count from `trackCount`
+  as well as from loaded tracks.
+- **Redundant copies removed rather than tested twice.** Both album shelves were
+  passing an `emptyMessage` that `SECTION_EMPTY_POLICY` already owns; the mutants
+  that survived were pointing at the duplication, not at a missing test.
+
 ### still to build
 
-`your-artists` / `your-albums`, `recent-releases` / `seasonal` / decade shelf,
-mixes / Last.fm radio / ListenBrainz, the adventurousness dial / build-playlist /
-download bar, then `route.tsx` + the manifest flip, then PR 2's cleanup (delete
-discover.js + the 37 dead functions).
+**`route.tsx` + the manifest flip (#251).** This is the whole remaining piece:
+a page hook that owns the state every component above takes as props, then
+mounting it and flipping the manifest so discover.js stops loading. Nothing is
+mounted yet, so the vanilla page is still what users get and nothing
+user-facing has changed.
+
+Then PR 2's cleanup (delete discover.js + the 37 dead functions), and the two
+standing ratchets: the 51 interpolated-against-SOURCE assertions and the 77
+untested exports in the earlier discover modules.
 
 **Deletion hazard, unchanged:** `startDecadeSync`, `startDecadeSyncPolling` and
 `openDownloadModalForDecade` are LIVE despite sitting inside the dead region.
