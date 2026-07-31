@@ -1,82 +1,112 @@
-# discover port — status as of Jul 31, ~00:00
+# discover page → React: status
 
-Branch `react-migration-discover`, **10 commits**, everything green:
-full vitest **2,130 / 116 files**, tsc clean, `npm run check` clean.
-**Nothing pushed.**
+Branch `react-migration-discover`, 22 commits, **not pushed**.
 
-## the honest headline
+## the honest summary
 
-**The data layer is done and verified. No UI is built yet.** I did not finish
-the page. What exists is correct; what's missing is missing, not half-done.
+The **logic layer is largely done and heavily verified. There is still no UI and
+nothing is mountable**, so there is nothing for you to click yet. discover.js is
+12,319 lines — the largest file on the music side — and about 4,500 of those are
+the two canvas/sigma visualisations, which are untouched.
 
-## what is DONE and verified
+Full suite: **2,528 tests / 127 files green.** Every module below was written by
+reading its vanilla source end to end first, then mutation-tested — a mutation
+that survives means the test was vacuous, and each pass is recorded in its
+commit.
 
-| file | what it is | verification |
+## what is done
+
+| module | covers | notes |
 |---|---|---|
-| `-discover.helpers.ts` | 8 pure helpers | 101 **differential** tests vs the REAL vanilla, extracted by brace-matching from discover.js |
-| `-discover.limiter.ts` | the 5-at-a-time request pool | 8 tests; matches the vanilla for the reason the vanilla states (Flask+GIL contention, not browser limits) |
-| `-discover.layout.ts` | section order + pairing rule | 20 tests; order pinned verbatim, lone-pair-member promotion covered |
-| `-discover.section-state.ts` | the **five-state** section lifecycle | 19 tests; per-section copy/hide/toast/stale transcribed from the controller |
-| `-discover.api.ts` | 40+ endpoints, outcome-returning | 24 tests; paths/methods/params/bodies all traced to handlers |
-| `-discover.use-page.ts` | load tiering + section resolution | 15 tests; above/below fold gating, limiter wiring, load-once caching |
+| `-discover.helpers.ts` | 8 pure helpers | **137 differential tests** against the real discover.js |
+| `-discover.types.ts` | response shapes | traced to handlers, not invented |
+| `-discover.api.ts` | 40+ endpoints | outcome-returning; dead endpoints marked |
+| `-discover.layout.ts` | section order + pairing | order pinned verbatim |
+| `-discover.section-state.ts` | the five-state lifecycle | loading/rendered/empty/stale/error |
+| `-discover.limiter.ts` | the 5-way request pool | protects Flask+GIL, not the browser |
+| `-discover.use-page.ts` | load tiering | above/below fold, load-once |
+| `-discover.hero.ts` | hero + Watch All | id chain, bands, indicators |
+| `-discover.your-albums.ts` | grid + paging | |
+| `-discover.your-albums-actions.ts` | search, card download, sources, bulk, batch modal | |
+| `-discover.your-artists.ts` | cards + stale polling | |
+| `-discover.your-artists-actions.ts` | info modal, watchlist, sources, all-artists modal | **3 bug fixes** |
+| `-discover.mixes.ts` | mix registry + covers + modal actions | |
+| `-discover.download-bar.ts` | the shared download bar | **cross-file window contract** |
+| `-discover.playlist-sync.ts` | start / poll / resume-after-refresh | **1 bug fix** |
+| `-discover.cache-sections.ts` | 5 cache sections + Genre Deep Dive | |
+| `-discover.build-playlist.ts` | seed picker + generator | |
+| `-discover.bylt.ts` | Because You Listen To | **1 bug fix** |
 
-**61+ mutants raised, all caught.** Every number and rule was traced to source.
+### bugs found and fixed (all pinned by a test that names them)
+
+1. **`refreshYourArtists` never re-enables its button.** Gives up after 60
+   attempts with a bare `clearInterval; return;` (5590) — a refresh that never
+   settles leaves the button dead until reload. Your Albums re-enables from its
+   timeout; this did not.
+2. **The Your Artists sources modal bails silently on a disconnected source**
+   (5673, 5680). That is the exact complaint the Your Albums hints were written
+   to fix (1665-1667); the fix was never copied across. Now shares one hint table.
+3. **The all-artists modal doesn't reset to page 1 on search or sort** (only on
+   the source pills, 5772) — searching from page 3 asks for page 3 of a smaller
+   result set and renders an empty grid whose only exit is Prev.
+4. **`listening_mix` has no display name.** `startDiscoverPlaylistSync` sources
+   eight playlist types; the completion-toast map lists seven (and is duplicated
+   in the socket and polling paths, which is how they drifted). That sync toasts
+   the raw key: "listening_mix sync complete!".
+5. **One malformed BYLT section blanks every later shelf.**
+   `section.tracks.map(...)` (10438) is unguarded inside the `onRendered` loop.
+
+### the dead-code audit — `discover_dead_code_audit.md`
+
+Computing reachability over the whole file (after nearly porting a subsystem
+with no callers) found **35 of 363 top-level functions, ~1,190 lines, ~10% of
+the file, unreachable**. The entire genre browser (its containers are not in
+index.html), the decade browser's pre-shelf card and tab paths, and
+`createTabbedBrowserSection` itself. PR 2 can delete all of it; none of it
+should be ported.
+
+One of those findings corrected my own work: `loadPersonalizedDailyMixes` is
+unreachable, so the `daily_mix_*` cards have never rendered for users, and I had
+listed that feeder as live a commit earlier.
 
 ## what is NOT done
 
-* **no UI at all** — hero, your-albums/your-artists, the shelves, the download bar
-* **Artist Map** (canvas, 71 fns) and **Artist Web** (sigma.js, 76 fns) — untouched.
-  The CDN→npm decision is made (bundle graphology/sigma) but not executed.
-* mount / route / manifest flip
-* PR 2 (delete discover.js) — not started
-
-## the mistake pattern, and the fix
-
-Five defects in this session all had ONE cause: **I wrote code from a reading of
-the vanilla and verified afterwards.** That produced an invented hero type
-(`name`/`id`/`logo_url`/`followers` — none exist), an invented `staleTime`, a
-missing dial query, a missing `listening_mix` feeder, and a two-state failure
-model where the vanilla has five.
-
-The last one only surfaced when I read `discover-section-controller.js` **in
-full** rather than grepping it. Everything I found by grepping was partial;
-everything I found by reading was right.
-
-**Rule for whoever picks this up (including me): read the source file end to
-end BEFORE writing the React version. Not a grep. The whole thing.**
+* **no UI, no route, no mount** — nothing is clickable. This is the whole
+  remaining gap between "verified logic" and "you can test it".
+* **Artist Map** (canvas, 5829-6523) and **Artist Web** (sigma.js, 6523-10361) —
+  ~4,500 lines, untouched. The CDN→npm decision (bundle graphology/sigma) is
+  made but not executed.
+* Remaining live sections not yet ported: the Adventurousness dial, Recommended
+  For You, Last.fm Track Radio, ListenBrainz playlists, Seasonal, the
+  personalized playlists loaders.
+* PR 2 (delete discover.js + the dead code) — not started.
 
 ## outstanding requirements — do not lose these
 
-* **`checkForActiveDiscoverSyncs`** — last thing `loadDiscoverPage` calls. Polls
-  `/api/sync/status/discover_release_radar|_discovery_weekly|_seasonal_playlist`;
-  if a sync is mid-flight it re-shows the status, disables the button and
-  resumes polling. Reloading mid-sync without it makes a running sync look dead.
-  Lands with the first of those three sections.
-* ~~**`your-mixes-section` feeders still to add**~~ — DONE, and the count in this
-  doc was wrong. There are **eight** feeders, not seven, now pinned by
-  `YOUR_MIX_FEEDERS` in `-discover.mixes.ts`: `release_radar`,
-  `discovery_weekly`, `seasonal_playlist`, `popular_picks`, `hidden_gems`,
-  `listening_mix`, `daily_mix_${index}`, `discovery_shuffle`. `daily_mix_*` is
-  variadic AND the only one with no `syncKey` (so its modal correctly gets no
-  actions). Still true that every feeder must count in `hasContent`, or the
-  shelf hides for a user who only has that one mix.
+* ~~`checkForActiveDiscoverSyncs`~~ — **done**, in `-discover.playlist-sync.ts`.
+* ~~your-mixes feeders~~ — **done**; there are eight call sites but only SEVEN
+  live feeders (`daily_mix_*` is dead). `YOUR_MIX_FEEDERS` carries a `live` flag.
 * **`window.listenbrainzTracksCache` / `listenbrainzPlaylistsCache`** must be
-  read/written on `window` by the LB phase — documented shared contract with the
-  Sync tab. A `typeof`-guarded consumer degrades SILENTLY, which is worse than
-  the loud `cleanArtistName` break the globals guard catches.
-* **item-level types are still unverified** — `DiscoverAlbum`, `DiscoverArtist`,
-  `DiscoverTrack`. Trace each against its handler before building its cards.
+  read/written on `window` by the LB phase — shared contract with the Sync tab. A
+  `typeof`-guarded consumer degrades SILENTLY, which is worse than a loud break.
+* **item-level types still unverified**: `DiscoverArtist`, `DiscoverTrack`.
+  Trace each against its handler before building its cards. `DiscoverAlbum`,
   `DiscoverHeroArtist`, `YourAlbumsResponse`, `SourcesResponse` and
   `SeasonalResponse` ARE traced.
+* **`discoverDownloads` is a shared global with two UNGUARDED external readers**
+  (`wishlist-tools.js:7443` and `:7551` call `Object.keys(...)` / index it with
+  no `typeof` check). It must be on `window` before wishlist-tools runs, which is
+  why `publishDownloadGlobals` runs at module load rather than from an effect.
 
-## proven safe
+## the rule this page keeps proving
 
-Simulating the deletion of discover.js fails `test_vanilla_globals_resolve`,
-naming `loadDiscoverPage`, `cleanArtistName`, `addDiscoverDownload`,
-`removeDiscoverDownload`, `discoverDownloads` and five init.js hooks. PR 2
-cannot silently orphan them.
+**Read the source end to end before writing the React version. Not a grep.**
 
-## also on this branch's dev, unrelated
+Everything I found by grepping was partial; everything I found by reading was
+right. Two concrete instances this session: the tabbed-browser subsystem I was
+about to port had no callers, and the mix-feeder count in the previous version
+of this document was wrong.
 
-`video_db_flake_diagnosis.md` — the nightly CI flake, mechanism found, not from
-PR #1107. Cheap narrowing + real root cause both written up there.
+Corollary, from the reachability tooling: my first attempt brace-matched
+function bodies, desynchronised on nested template literals, and confidently
+reported **zero** dead code. A tool that agrees with you is not evidence.
