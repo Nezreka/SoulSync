@@ -32,19 +32,19 @@ commit.
 | `-discover.section-state.ts` | the five-state lifecycle | loading/rendered/empty/stale/error |
 | `-discover.limiter.ts` | the 5-way request pool | protects Flask+GIL, not the browser |
 | `-discover.use-page.ts` | load tiering | above/below fold, load-once |
-| `-discover.hero.ts` | hero + Watch All | **PARTIAL** — `checkAndUpdateDiscoverHeroWatchlistButton` not ported |
+| `-discover.hero.ts` | hero + Watch All + the watchlist state check | id chain, bands, indicators |
 | `-discover.your-albums.ts` | grid + paging | |
 | `-discover.your-albums-actions.ts` | search, card download, sources, bulk, batch modal | |
 | `-discover.your-artists.ts` | cards + stale polling | |
 | `-discover.your-artists-actions.ts` | info modal, watchlist, sources, all-artists modal | **3 bug fixes** |
-| `-discover.mixes.ts` | mix registry + covers + modal actions | **PARTIAL** — 4 live feeders + the modal's track table + the #1079 selection bar are not ported |
-| `-discover.download-bar.ts` | the shared download bar | **PARTIAL** — cross-file contract done; `openDiscoverDownloadModal` + `initializeDiscoverDownloadBar` are not ported |
-| `-discover.playlist-sync.ts` | start / poll / resume-after-refresh | **1 bug fix**; `openDownloadModalForDiscoverPlaylist` not ported |
+| `-discover.mixes.ts` | registry + covers + modal actions + the 4 live feeders + #1079 selection bar | gaps closed |
+| `-discover.download-bar.ts` | the shared download bar + bubble modal routing | **cross-file window contract**; `rehydrateDiscoverDownloadModal` (~327 lines) still out |
+| `-discover.playlist-sync.ts` | start / poll / resume + the download modal | **1 bug fix** |
 | `-discover.cache-sections.ts` | 5 cache sections + Genre Deep Dive | |
 | `-discover.build-playlist.ts` | seed picker + generator | |
 | `-discover.bylt.ts` | Because You Listen To | **1 bug fix** |
 | `-discover.adventurousness.ts` | the dial + the bounded loader pool | wave maths differentially tested |
-| `-discover.recommended.ts` | both recommendation carousels | **PARTIAL** — the "View All" modal renderer not ported |
+| `-discover.recommended.ts` | both carousels + the "View All" modal | |
 | `-discover.seasonal.ts` | seasonal albums/playlist + artist context | context differentially tested (27 cases) |
 | `-discover.listenbrainz-cache.ts` | the LB cross-file cache contract | closes a carried requirement |
 
@@ -91,9 +91,10 @@ listed that feeder as live a commit earlier.
   the ListenBrainz playlists section (3397-4259). Both were read this session
   but not yet transcribed.
 * PR 2 (delete discover.js + the dead code) — not started.
-* **40 live functions outside the visualisations remain un-ported** — the full
-  list, with line numbers, is in `discover_coverage_gaps.md`. Re-run the union
-  coverage check there before claiming any region is complete.
+* **22 live functions outside the visualisations remain un-ported** (down from
+  40 — the gaps inside regions I had called done are closed). Full list with
+  line numbers in `discover_coverage_gaps.md`. Re-run the union coverage check
+  there before claiming any region is complete.
 * **`startDecadeSync` / `startDecadeSyncPolling` / `openDownloadModalForDecade`
   are LIVE** (reached from the decade mix card at 2672) even though the tabbed
   decade browser around them is dead. Do not delete them with the dead region.
