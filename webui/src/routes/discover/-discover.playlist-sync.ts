@@ -255,3 +255,34 @@ export const SYNC_BUTTON_IDLE: SyncButtonState = {
 export function syncButtonState(running: boolean): SyncButtonState {
   return running ? SYNC_BUTTON_RUNNING : SYNC_BUTTON_IDLE;
 }
+
+// ── Opening the whole-playlist download modal (11129) ───────────────────────
+
+/**
+ * `openDownloadModalForDiscoverPlaylist` (11129), found missing by the coverage
+ * audit. It is the mix modal's Download action.
+ *
+ * It reads the SAME eight track sources as startDiscoverPlaylistSync and does
+ * the SAME conversion — track_data_json whole when present, otherwise built
+ * from the flat columns, artists flattened to strings either way. Two callers,
+ * one shape, which is why `toSyncTracks` is shared rather than duplicated.
+ *
+ * The virtual id is also the same `discover_${type}`. That matters: the
+ * download modal and the sync both address one playlist, and the download bar
+ * keys its bubble on it.
+ */
+export const PLAYLIST_DOWNLOAD_NO_TRACKS = noTracksToast;
+
+export function playlistDownloadFailed(message: string): string {
+  return `Failed to open download modal: ${message}`;
+}
+
+/**
+ * Whether the Download action can proceed (11153).
+ *
+ * Same guard and same warning as the sync path — an empty mix is not an error,
+ * just nothing to do.
+ */
+export function canOpenPlaylistDownload(tracks: unknown[] | null | undefined): boolean {
+  return Array.isArray(tracks) && tracks.length > 0;
+}

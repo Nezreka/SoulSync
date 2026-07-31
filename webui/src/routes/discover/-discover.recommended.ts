@@ -278,3 +278,45 @@ export function watchingIdsFrom(
 export function watchlistCheckIds(artists: RecommendedArtist[]): string[] {
   return artists.map((a) => a.artist_id).filter(Boolean) as string[];
 }
+
+// ── The "View All" modal (811) ─────────────────────────────────────────────
+
+/**
+ * `renderRecommendedArtistsModal` (811), found missing by the coverage audit.
+ *
+ * The grid inside reuses the same `.recommended-artist-card` shape as the
+ * carousel — same data hooks, same watchlist button — so `recommendedCard`
+ * covers a row. What is modal-specific is the header count, the search box and
+ * the Add All action.
+ */
+export const REC_MODAL_TITLE = 'Recommended Artists';
+export const REC_MODAL_SEARCH_PLACEHOLDER = 'Search recommended artists...';
+export const REC_MODAL_ADD_ALL = 'Add All to Watchlist';
+
+/** `${n} artist${n !== 1 ? 's' : ''}` (818) — plural at zero, like the batch footer. */
+export function recModalCountLabel(count: number): string {
+  return `${count} artist${count !== 1 ? 's' : ''}`;
+}
+
+/** At most three genre tags per card (840). */
+export const REC_MODAL_MAX_GENRES = 3;
+
+export function recModalGenres(artist: RecommendedArtist): string[] {
+  const genres = (artist as { genres?: unknown }).genres;
+  return Array.isArray(genres) ? (genres as string[]).slice(0, REC_MODAL_MAX_GENRES) : [];
+}
+
+/**
+ * The modal's source fallback is THREE deep (844), one more than the carousel's.
+ *
+ * `artist.source || source || _recommendedArtistsSource` — the module-level
+ * cache is the last resort, because the modal can be opened from the primed
+ * cache without a fresh response to read a source off.
+ */
+export function recModalSource(
+  artist: RecommendedArtist,
+  modalSource: string | null,
+  cachedSource: string | null,
+): string {
+  return artist.source || modalSource || cachedSource || '';
+}

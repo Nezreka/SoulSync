@@ -23,6 +23,8 @@ import {
   heroIndicators,
   watchAllPayload,
   watchAllState,
+  heroWatchlistButtonState,
+  heroWatchlistCheckBody,
 } from './-discover.hero';
 
 const artist = (over: Partial<DiscoverHeroArtist> = {}): DiscoverHeroArtist =>
@@ -240,5 +242,40 @@ describe('the slide indicators', () => {
 
   it('emits nothing for an empty hero', () => {
     expect(heroIndicators(0, 0)).toEqual([]);
+  });
+});
+
+describe('the hero watchlist state check', () => {
+  it('leaves the button ALONE on an unsuccessful check', () => {
+    // The response says nothing about membership; guessing either way lies.
+    expect(heroWatchlistButtonState({ success: false, is_watching: true })).toBeNull();
+    expect(heroWatchlistButtonState(null)).toBeNull();
+  });
+
+  it('labels each state and flags the class', () => {
+    expect(heroWatchlistButtonState({ success: true, is_watching: true })).toEqual({
+      icon: HERO_WATCHLIST_ICON,
+      label: 'Watching...',
+      watching: true,
+    });
+    expect(heroWatchlistButtonState({ success: true, is_watching: false })).toEqual({
+      icon: HERO_WATCHLIST_ICON,
+      label: 'Add to Watchlist',
+      watching: false,
+    });
+  });
+
+  it('uses the SAME icon in both branches, as the vanilla does', () => {
+    const on = heroWatchlistButtonState({ success: true, is_watching: true });
+    const off = heroWatchlistButtonState({ success: true, is_watching: false });
+    expect(on?.icon).toBe(off?.icon);
+  });
+
+  it('treats a missing is_watching as not watching', () => {
+    expect(heroWatchlistButtonState({ success: true })?.watching).toBe(false);
+  });
+
+  it('posts just the artist id', () => {
+    expect(heroWatchlistCheckBody('a1')).toEqual({ artist_id: 'a1' });
   });
 });

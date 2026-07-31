@@ -24,6 +24,9 @@ import {
   syncStatusId,
   toSyncTracks,
   virtualPlaylistId,
+  PLAYLIST_DOWNLOAD_NO_TRACKS,
+  canOpenPlaylistDownload,
+  playlistDownloadFailed,
 } from './-discover.playlist-sync';
 
 describe('the eight playlist types', () => {
@@ -227,5 +230,25 @@ describe('resuming after a refresh', () => {
     expect(SYNC_BUTTON_IDLE.cursor).toBe('pointer');
     expect(SYNC_BUTTON_RUNNING.disabled).toBe(true);
     expect(SYNC_BUTTON_IDLE.disabled).toBe(false);
+  });
+});
+
+describe('the whole-playlist download action', () => {
+  it('shares the sync path’s guard and warning', () => {
+    // An empty mix is nothing to do, not an error.
+    expect(canOpenPlaylistDownload([{}])).toBe(true);
+    expect(canOpenPlaylistDownload([])).toBe(false);
+    expect(canOpenPlaylistDownload(null)).toBe(false);
+    expect(PLAYLIST_DOWNLOAD_NO_TRACKS('Fresh Tape')).toBe('No tracks available for Fresh Tape');
+  });
+
+  it('reports a failure with the underlying message', () => {
+    expect(playlistDownloadFailed('boom')).toBe('Failed to open download modal: boom');
+  });
+
+  it('addresses the SAME virtual playlist id as the sync', () => {
+    // The download modal and the sync both address one playlist, and the
+    // download bar keys its bubble on that id.
+    expect(virtualPlaylistId('release_radar')).toBe('discover_release_radar');
   });
 });

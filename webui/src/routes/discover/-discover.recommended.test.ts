@@ -23,6 +23,13 @@ import {
   shouldEnrich,
   watchingIdsFrom,
   watchlistCheckIds,
+  REC_MODAL_ADD_ALL,
+  REC_MODAL_MAX_GENRES,
+  REC_MODAL_SEARCH_PLACEHOLDER,
+  REC_MODAL_TITLE,
+  recModalCountLabel,
+  recModalGenres,
+  recModalSource,
 } from './-discover.recommended';
 
 const artist = (over: Partial<RecommendedArtist> = {}): RecommendedArtist => ({
@@ -261,5 +268,39 @@ describe('the batch status check', () => {
     expect(watchingIdsFrom({ success: false, results: { a1: true } })).toEqual([]);
     expect(watchingIdsFrom({ success: true })).toEqual([]);
     expect(watchingIdsFrom(null)).toEqual([]);
+  });
+});
+
+describe('the "View All" modal', () => {
+  it('pluralises the header count, including at zero', () => {
+    expect(recModalCountLabel(1)).toBe('1 artist');
+    expect(recModalCountLabel(2)).toBe('2 artists');
+    expect(recModalCountLabel(0)).toBe('0 artists');
+  });
+
+  it('shows at most three genre tags', () => {
+    expect(REC_MODAL_MAX_GENRES).toBe(3);
+    expect(recModalGenres({ genres: ['a', 'b', 'c', 'd'] } as never)).toEqual(['a', 'b', 'c']);
+    expect(recModalGenres({ genres: ['a'] } as never)).toEqual(['a']);
+  });
+
+  it('copes with genres absent or not an array', () => {
+    expect(recModalGenres({} as never)).toEqual([]);
+    expect(recModalGenres({ genres: 'techno' } as never)).toEqual([]);
+  });
+
+  it('falls back THREE deep for the source, unlike the carousel’s two', () => {
+    // The modal can open from the primed cache with no fresh response to read a
+    // source off, so the module-level cached source is the last resort.
+    expect(recModalSource({ source: 'deezer' }, 'spotify', 'itunes')).toBe('deezer');
+    expect(recModalSource({}, 'spotify', 'itunes')).toBe('spotify');
+    expect(recModalSource({}, null, 'itunes')).toBe('itunes');
+    expect(recModalSource({}, null, null)).toBe('');
+  });
+
+  it('keeps the modal copy', () => {
+    expect(REC_MODAL_TITLE).toBe('Recommended Artists');
+    expect(REC_MODAL_SEARCH_PLACEHOLDER).toBe('Search recommended artists...');
+    expect(REC_MODAL_ADD_ALL).toBe('Add All to Watchlist');
   });
 });

@@ -177,3 +177,41 @@ export function heroIndicators(count: number, currentIndex: number): HeroIndicat
     ariaLabel: `Go to slide ${index + 1}`,
   }));
 }
+
+// ── The hero's watchlist state check (548) ─────────────────────────────────
+
+/**
+ * `checkAndUpdateDiscoverHeroWatchlistButton` (548), found missing by the
+ * coverage audit.
+ *
+ * Runs per displayed artist to sync the Add/Watching button with reality. Note
+ * it changes the LABEL and the class but NOT the icon — both branches set the
+ * same 👁️. The stylesheet keys off `.watching`, so the icon assignment is
+ * redundant in both arms; transcribed as-is rather than "simplified", because
+ * removing it from one arm and not the other is exactly how such a pair drifts.
+ *
+ * A response with `success: false` leaves the button untouched — it says
+ * nothing about membership, so guessing either way would be a lie.
+ */
+export interface HeroWatchlistButton {
+  icon: string;
+  label: string;
+  watching: boolean;
+}
+
+export function heroWatchlistButtonState(
+  data: { success?: boolean; is_watching?: boolean } | null | undefined,
+): HeroWatchlistButton | null {
+  if (!data?.success) return null;
+  const watching = Boolean(data.is_watching);
+  return {
+    icon: HERO_WATCHLIST_ICON,
+    label: heroWatchlistLabel(watching),
+    watching,
+  };
+}
+
+/** POST body for the per-artist check (550-554). */
+export function heroWatchlistCheckBody(artistId: string): { artist_id: string } {
+  return { artist_id: artistId };
+}
