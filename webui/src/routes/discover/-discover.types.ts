@@ -74,20 +74,30 @@ export interface DiscoverHeroResponse extends DiscoverEnvelope {
 
 // ── Albums / artists / tracks ─────────────────────────────────────────────
 
+/**
+ * An album row.
+ *
+ * `in_library` is the ownership flag and it is TRACED: the your-albums handler
+ * stamps it on every row (matching by spotify id, then by artist+album name)
+ * and the status filter reads it. An earlier version of this interface invented
+ * `owned`/`missing` booleans that the server never sends — every badge would
+ * have rendered "missing".
+ *
+ * The remaining fields vary by which shelf produced the row, so they stay
+ * optional; trace a specific shelf's handler before relying on one.
+ */
 export interface DiscoverAlbum {
-  name?: string;
   album_name?: string;
-  artist?: string;
   artist_name?: string;
-  album_cover_url?: string;
+  /** Set by the your-albums handler. Drives the owned/missing badge. */
+  in_library?: boolean;
   image_url?: string;
+  album_cover_url?: string;
+  spotify_album_id?: string;
   release_date?: string;
   year?: number;
   album_type?: string;
   total_tracks?: number;
-  /** Ownership, when the endpoint joins against the library. */
-  owned?: boolean;
-  missing?: boolean;
   [key: string]: unknown;
 }
 
