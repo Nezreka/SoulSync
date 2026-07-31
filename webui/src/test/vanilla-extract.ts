@@ -49,51 +49,118 @@ export function extractFunction(name: string, source: string = VANILLA_DISCOVER)
   }
   let i = source.indexOf('{', p);
   let depth = 0;
-  let inString: string | null = null;
-  let escaped = false;
-  let comment: '//' | '/*' | null = null;
+  // 'code' | 'tmpl' — plus a stack recording the brace depth each `${` opened at,
+  // so a nested template inside a substitution returns to the right template.
+  let mode: 'code' | 'tmpl' = 'code';
+  const tmplStack: number[] = [];
+  // The last significant character, which is how a `/` is classified: after a
+  // value it is division, after an operator or opener it starts a regex.
+  let prev = '';
+
+  const REGEX_PRECEDERS = '(,=:[!&|?{};+-*%~^<>\n';
 
   for (; i < source.length; i++) {
     const c = source[i];
-    if (comment === '//') {
-      if (c === '\n') comment = null;
-      continue;
-    }
-    if (comment === '/*') {
-      if (c === '*' && source[i + 1] === '/') {
-        comment = null;
+
+    if (mode === 'tmpl') {
+      // Inside a template literal. A backtick closes it; `${` re-enters code.
+      if (c === '\\') {
         i++;
+        continue;
+      }
+      if (c === '`') {
+        mode = 'code';
+        prev = '`';
+        continue;
+      }
+      if (c === '$' && source[i + 1] === '{') {
+        tmplStack.push(depth);
+        depth++;
+        mode = 'code';
+        i++;
+        prev = '{';
+        continue;
       }
       continue;
     }
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (c === '\\') escaped = true;
-      else if (c === inString) inString = null;
-      continue;
-    }
-    // COMMENTS MUST BE SKIPPED, not just strings. An apostrophe in a prose
-    // comment ("decays over the ripple's life") otherwise opens a phantom string
-    // that swallows the rest of the function — which is exactly how extracting
-    // `_artMapNodeDisplacement` first failed. A backslash outside a string is an
-    // escape inside a regex literal, so skip the char after it and a `\/` can
-    // never be mistaken for a comment either.
-    if (c === '\\') {
-      i++;
-      continue;
-    }
+
+    // Comments. An apostrophe in prose ("decays over the ripple's life") would
+    // otherwise open a phantom string that swallows the rest of the function —
+    // exactly how extracting `_artMapNodeDisplacement` first failed.
     if (c === '/' && source[i + 1] === '/') {
-      comment = '//';
-      i++;
-    } else if (c === '/' && source[i + 1] === '*') {
-      comment = '/*';
-      i++;
-    } else if (c === '"' || c === "'" || c === '`') inString = c;
-    else if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) return source.slice(m.index, i + 1);
+      while (i < source.length && source[i] !== '\n') i++;
+      continue;
     }
+    if (c === '/' && source[i + 1] === '*') {
+      i += 2;
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      i++;
+      continue;
+    }
+
+    // A regex literal. `/"/g` inside `.replace(/"/g, '&quot;')` would otherwise
+    // read as a division followed by an unterminated string, and everything
+    // after it desyncs. Character classes are skipped wholesale so a `/` inside
+    // `[^/]` cannot end it early.
+    if (c === '/' && REGEX_PRECEDERS.includes(prev)) {
+      i++;
+      let inClass = false;
+      for (; i < source.length; i++) {
+        const r = source[i];
+        if (r === '\\') {
+          i++;
+          continue;
+        }
+        if (r === '[') inClass = true;
+        else if (r === ']') inClass = false;
+        else if (r === '/' && !inClass) break;
+      }
+      prev = '/';
+      continue;
+    }
+
+    if (c === '"' || c === "'") {
+      const quote = c;
+      i++;
+      for (; i < source.length; i++) {
+        if (source[i] === '\\') {
+          i++;
+          continue;
+        }
+        if (source[i] === quote) break;
+      }
+      prev = quote;
+      continue;
+    }
+
+    // A template literal. NESTING is the point: the vanilla's context menu holds
+    // a template whose substitution contains another template, and treating
+    // every backtick as a plain toggle closes the outer one on the inner's
+    // opener — which is how `_artMapSetupInteraction` first failed.
+    if (c === '`') {
+      mode = 'tmpl';
+      continue;
+    }
+
+    if (c === '{') {
+      depth++;
+      prev = '{';
+      continue;
+    }
+    if (c === '}') {
+      depth--;
+      // Closing a `${…}` returns to the template that opened it.
+      if (tmplStack.length && depth === tmplStack[tmplStack.length - 1]) {
+        tmplStack.pop();
+        mode = 'tmpl';
+        continue;
+      }
+      if (depth === 0) return source.slice(m.index, i + 1);
+      prev = '}';
+      continue;
+    }
+
+    if (!/\s/.test(c) || c === '\n') prev = c;
   }
   throw new Error(`unbalanced braces extracting ${name}`);
 }
