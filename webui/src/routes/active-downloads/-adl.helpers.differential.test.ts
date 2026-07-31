@@ -4,13 +4,15 @@
  * Reading a function and re-implementing it is how the search port shipped an
  * artist link that went nowhere — the code looked right and no test disagreed.
  * This file removes the judgement call: it lifts the original function bodies
- * straight out of pages-extra.js, evaluates them, and asserts my port produces
+ * out of the vanilla, evaluates them, and asserts the port produces
  * byte-identical output across a matrix of inputs including the awkward ones
  * (0, negative, null, non-finite, unknown enum values).
  *
- * If someone edits the vanilla before it is deleted, this fails rather than
- * quietly drifting. It is deleted along with pages-extra.js's region in P8 —
- * by then the unit tests pin the behaviour on their own.
+ * The vanilla itself is gone now, so the source is a FROZEN FIXTURE captured
+ * the moment before deletion. That is deliberate: converting these into
+ * hand-written expectations would replace "matches the code it replaced" with
+ * "matches what I believed the code did", which is exactly the failure mode
+ * the file exists to rule out. These 16 functions have no other coverage.
  */
 
 import { readFileSync } from 'node:fs';
@@ -40,7 +42,19 @@ import {
   verificationHistoryId,
 } from './-adl.helpers';
 
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/pages-extra.js'), 'utf8');
+/**
+ * The vanilla's source, as it stood immediately before deletion.
+ *
+ * Read from a committed fixture rather than from static/pages-extra.js, which
+ * no longer contains this code. Keeping the ORIGINAL text means the parity
+ * claim stays checkable: the port is still compared against the real functions
+ * it replaced, byte for byte, rather than against expectations I typed out
+ * myself. The fixture is frozen — nothing should ever edit it.
+ */
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/active-downloads/__fixtures__/vanilla-adl.js'),
+  'utf8',
+);
 
 /**
  * Pull one top-level `function name(...) { ... }` out of the vanilla by
