@@ -51,21 +51,27 @@ export function useAdlVerification(): AdlVerificationController {
     openGroups: new Set<string>(),
   });
 
+  /**
+   * Refs, not state, because both flags are read SYNCHRONOUSLY at the top of
+   * loadQuarantine. The vanilla's guard was a plain module variable
+   * (`if (_verifQuarLoading || (_verifQuarLoaded && !force)) return;`), and a
+   * ref is its exact React equivalent. Reading `quarantineLoaded` back out of
+   * state instead does not work: a no-op `setState` updater runs AFTER the
+   * synchronous code that follows it, so the guard would always see its
+   * initial value and never fire. `quarantineLoaded` still lives in state as
+   * well, because the UI renders "Loading quarantine…" from it.
+   */
   const loadingRef = useRef(false);
+  const loadedRef = useRef(false);
 
   const loadQuarantine = useCallback(async (force = false) => {
     // One in flight at a time, and skip entirely unless forced once loaded —
     // this hits a filesystem scan server-side.
-    if (loadingRef.current) return;
-    let shouldRun = true;
-    setState((prev) => {
-      if (prev.quarantineLoaded && !force) shouldRun = false;
-      return prev;
-    });
-    if (!shouldRun) return;
+    if (loadingRef.current || (loadedRef.current && !force)) return;
 
     loadingRef.current = true;
     const entries = await fetchQuarantine();
+    loadedRef.current = true;
     loadingRef.current = false;
     setState((prev) => ({ ...prev, quarantine: entries, quarantineLoaded: true }));
   }, []);
