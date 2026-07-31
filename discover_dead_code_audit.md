@@ -5,9 +5,16 @@ tabbed-browser subsystem when its entry point turned out to have no callers, so
 I computed the reachability closure over the whole file instead of chasing
 functions one at a time.
 
-**35 of 363 top-level functions (~1,190 lines, ~10% of the file) cannot be
+**37 of 363 top-level functions (~1,236 lines, ~10% of the file) cannot be
 entered by any user action.** None of it should be ported. PR 2 can delete all
 of it.
+
+> **Revised from 35 → 37.** The first version of this audit scanned raw source
+> for identifiers, so a COMMENT mentioning a function created a false "live"
+> edge. Re-running with comments stripped found two more. The direction of that
+> flaw is safe for a deletion audit — it kept things alive that are dead, never
+> the reverse — but it means the figure is a FLOOR, not a count. See "the
+> comment-edge flaw" below.
 
 ## method
 
@@ -126,3 +133,38 @@ Only top-level `function` declarations. Module-level `const` arrow functions,
 object-literal methods and the `_artMap` / artist-web internals reached through
 event wiring are outside the graph, so the real dead total is likely higher.
 Nothing here depends on that.
+
+
+## the comment-edge flaw (found while porting Last.fm Radio)
+
+The original graph counted every identifier in a function's span, comments
+included. Two functions were therefore "reachable" only because prose mentioned
+them:
+
+| line | function | what kept it alive |
+|---|---|---|
+| 2609 | `_renderTabbedTrackList` | mentioned in the dead tabbed-browser configs' comments — this audit already listed it as dead by hand, so no correction needed |
+| 3302 | `generateLastfmRadio` | **the author's own comment above it**: `// Keep generateLastfmRadio as public alias (called by nothing now but harmless)` |
+
+`generateLastfmRadio` is a genuine addition to the dead set. Its only
+non-definition occurrence in the entire repo is that comment; it is absent from
+index.html and no reachable function calls it.
+
+Re-running with `//` and `/* */` stripped (string-literal aware, so a `//`
+inside a URL is not mistaken for a comment): **37 dead, ~1,236 lines.**
+
+Implication for anyone re-running this: identifier-in-comment is not a
+reference. Strip comments first, or the audit quietly under-reports.
+
+## three more pieces of dead code inside the Last.fm Radio region
+
+Not top-level functions, so outside the graph entirely — found by reading:
+
+* `_lastfmRadioSelected` (3238) — declared, never read or assigned.
+* The `listeners` span (3268) — built as
+  `<span class="lastfm-radio-result-listeners">Nk listeners</span>` and then used
+  ONLY as a truthiness test (3276). The span never enters the DOM, its "Nk"
+  formatting never renders, and the class exists in neither style.css nor
+  mobile.css. What actually renders is `toLocaleString()`.
+* The `' — '` round-trip parse in `generateLastfmRadio` — dead with its function,
+  and fragile anyway: any track or artist containing " — " would mis-split.
