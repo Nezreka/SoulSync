@@ -267,6 +267,21 @@ export function fetchSeasonalCurrent(): Promise<SeasonalResponse> {
   return readJson<SeasonalResponse>(apiClient.get('discover/seasonal/current'));
 }
 
+// ── The Your Mixes shelf's remaining feeders ────────────────────────────────
+// Release radar + weekly are SLOW EXTERNAL (2065, 2094): they hit third-party
+// sources and must never gate anything. The seasonal playlist (4358) is keyed
+// by the CURRENT season, so its fetch waits until /seasonal/current answers.
+
+export const fetchReleaseRadar = () => section<Record<string, unknown>>('discover/release-radar');
+export const fetchDiscoveryWeekly = () =>
+  section<Record<string, unknown>>('discover/discovery-weekly');
+
+export function fetchSeasonalPlaylist(
+  seasonKey: string,
+): Promise<SectionOutcome<Record<string, unknown>>> {
+  return section(`discover/seasonal/${seasonKey}/playlist`);
+}
+
 // ── Decades (the Time Machine shelf) ──────────────────────────────────────
 
 export const fetchAvailableDecades = () =>

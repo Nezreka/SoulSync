@@ -108,11 +108,7 @@ const REQUIRED_UI: Record<string, string[]> = {
  * Each one is a section or modal a user can reach in the vanilla today, so the
  * route flip cannot happen while this list is non-empty without losing it.
  */
-const MISSING_UI = [
-  'artist map info modal wiring',
-  'decade shelf feeder',
-  'seasonal playlist shelf feeder',
-];
+const MISSING_UI = ['artist map info modal wiring', 'decade shelf feeder'];
 
 describe('every UI piece the page needs has a component', () => {
   // -ui components PLUS the route level (route.tsx, the page hook): shelf
@@ -123,7 +119,12 @@ describe('every UI piece the page needs has a component', () => {
       .map((f) => readFileSync(join(UI, f), 'utf8')),
     ...readdirSync(ROUTE)
       .filter(
-        (f) => /\.(tsx|ts)$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.startsWith('-discover.'),
+        (f) =>
+          /\.(tsx|ts)$/.test(f) &&
+          !/\.test\.tsx?$/.test(f) &&
+          // Module files are the SUPPLY side; the consumers that satisfy a
+          // feeder entry are route.tsx and the page hooks (-discover.use-*).
+          (!f.startsWith('-discover.') || f.startsWith('-discover.use-')),
       )
       .map((f) => readFileSync(join(ROUTE, f), 'utf8')),
   ].join('\n');
