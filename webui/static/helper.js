@@ -1071,12 +1071,12 @@ const HELPER_CONTENT = {
     },
 
     // Curated Playlists
-    '#release-radar-playlist': {
+    '.discover-mix-card[data-mix-key="release_radar"]': {
         title: 'Fresh Tape',
         description: 'New releases from recent additions to your library and discovery pool. Refreshes regularly with the latest drops.',
         docsId: 'disc-playlists'
     },
-    '#discovery-weekly-playlist': {
+    '.discover-mix-card[data-mix-key="discovery_weekly"]': {
         title: 'The Archives',
         description: 'Curated selection from your full collection — a weekly-style playlist that highlights tracks across your library.',
         docsId: 'disc-playlists'
@@ -2455,8 +2455,8 @@ const HELPER_TOURS = {
             { page: 'discover', selector: '#seasonal-albums-section', title: 'Seasonal Content', description: 'Season-aware sections that appear automatically — Christmas albums in December, summer vibes in July. Includes curated albums and a Seasonal Mix playlist you can sync to your server.' },
 
             // Playlists
-            { page: 'discover', selector: '#release-radar-playlist', title: 'Fresh Tape', description: 'A playlist of brand-new tracks from recent releases. Each has Download and Sync buttons — sync sends the playlist directly to your media server as a new playlist.' },
-            { page: 'discover', selector: '#discovery-weekly-playlist', title: 'The Archives', description: 'Curated tracks from your existing collection. Every playlist section has Download (grab missing tracks) and Sync (push to media server) buttons.' },
+            { page: 'discover', selector: '.discover-mix-card[data-mix-key="release_radar"]', title: 'Fresh Tape', description: 'A playlist of brand-new tracks from recent releases. Each has Download and Sync buttons — sync sends the playlist directly to your media server as a new playlist.' },
+            { page: 'discover', selector: '.discover-mix-card[data-mix-key="discovery_weekly"]', title: 'The Archives', description: 'Curated tracks from your existing collection. Every playlist section has Download (grab missing tracks) and Sync (push to media server) buttons.' },
 
             // Build a playlist
             { page: 'discover', selector: '.build-playlist-container', title: 'Build a Playlist', description: 'Create custom playlists from seed artists. Search and select 1-5 artists, hit Generate, and get a 50-track playlist mixing your picks with similar artist discoveries. Download or sync the result.' },
