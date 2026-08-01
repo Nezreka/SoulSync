@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -52,6 +52,18 @@ function bodyFor(url: string): Record<string, unknown> {
     };
   }
   if (url.includes('/api/lastfm/configured')) return { configured: false };
+  if (url.includes('/api/discover/because-you-listen-to')) {
+    return {
+      success: true,
+      sections: [
+        {
+          artist_name: 'Purrple Cat',
+          tracks: [{ name: 'Moonwinds', artist: 'Purrple Cat', album: 'Moon Album' }],
+        },
+      ],
+    };
+  }
+  if (url.includes('/api/discover/resolve-cache-album')) return { success: false };
   // Every shelf/section: an empty success — the page must render regardless.
   return { success: true };
 }
@@ -107,6 +119,23 @@ describe('discover route (live)', () => {
     // discover_downloads/hydrate. Both fire from the page's mount effect.
     expect(requested.some((u) => u.includes('discover_downloads/hydrate'))).toBe(true);
     expect(requested.some((u) => u.includes('/api/sync/status/'))).toBe(true);
+  });
+
+  it('a BYLT tile resolves by ALBUM name, not track name', async () => {
+    renderRoute();
+    await screen.findByText('Hero Artist');
+    const tile = await screen.findByText('Moonwinds');
+    tile.closest('.ya-card')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // The first wiring resolved an album named after the TRACK and every
+    // click died with 'Failed to fetch album tracks'. The resolve request
+    // must carry the album's name.
+    await waitFor(() => {
+      const resolve = requested.find((u) => u.includes('resolve-cache-album'));
+      expect(resolve).toBeTruthy();
+      // URLSearchParams encodes spaces as '+'.
+      expect(resolve).toContain('name=Moon+Album');
+      expect(resolve).toContain('artist=Purrple+Cat');
+    });
   });
 
   it('Download selected hands the shared modal READY tracks — no second conversion', async () => {

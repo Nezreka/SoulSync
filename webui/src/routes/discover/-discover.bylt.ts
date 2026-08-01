@@ -38,6 +38,9 @@ export interface ByltTrack {
   /** NOTE: `name` and `artist` — NOT `track_name`/`artist_name`. */
   name?: string;
   artist?: string;
+  /** The album NAME (web_server 32468) — the click-to-download resolve
+   *  needs it; the vanilla card just never read it. */
+  album?: string;
   image_url?: string;
 }
 

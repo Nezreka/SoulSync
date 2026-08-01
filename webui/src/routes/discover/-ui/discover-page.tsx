@@ -601,7 +601,11 @@ export function DiscoverPage() {
             // name/artist_name, hence the adapter.
             onOpenTrack={(track) =>
               void albumOpen.openCacheItem('genre_dive_tracks', {
+                // The cache TRACK branch resolves by ALBUM name + artist; the
+                // first wiring passed the TRACK name as the album and every
+                // click failed with 'Failed to fetch album tracks'.
                 name: track.name,
+                album_name: track.album,
                 artist_name: track.artist,
               })
             }
