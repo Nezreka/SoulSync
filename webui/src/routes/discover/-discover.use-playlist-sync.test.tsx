@@ -43,7 +43,12 @@ beforeEach(() => {
     bridgeCalls.push({ id, name, tracks: spotifyTracks });
     return Promise.resolve();
   };
-  server.use(http.get('/api/sync/status/:id', () => HttpResponse.json(statusBody)));
+  server.use(
+    http.get('/api/sync/status/:id', () => {
+      const { httpStatus, ...body } = statusBody as { httpStatus?: number };
+      return HttpResponse.json(body, { status: httpStatus ?? 200 });
+    }),
+  );
 });
 
 afterEach(() => {
@@ -161,6 +166,13 @@ describe('usePlaylistSync', () => {
       pending: 1,
       percentage: 75,
     });
+
+    // A non-OK poll is SKIPPED before its body is read — even one whose
+    // body claims finished must not complete the sync.
+    statusBody = { status: 'finished', httpStatus: 404 } as never;
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(toasts).toEqual([]);
+    expect(result.current.progressFor('popular-picks')).toBeDefined();
 
     statusBody = {
       status: 'finished',
