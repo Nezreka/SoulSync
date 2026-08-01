@@ -10,7 +10,7 @@ import { ArtistMapHub } from './artist-map-hub';
  * the class names survived the move — `style.css` still owns the look, and a
  * renamed class is an invisible regression until someone opens the page.
  */
-const SHELL = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+const CSS_SHEET = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
 
 afterEach(cleanup);
 
@@ -69,8 +69,10 @@ describe('ArtistMapHub', () => {
       'artmap-hub-card-arrow',
     ]) {
       expect(container.querySelector(`.${cls}`), cls).not.toBeNull();
-      // …and the vanilla still uses the same one, so neither side drifted alone.
-      expect(SHELL).toContain(cls);
+      // …and the stylesheet still targets the same one, so neither side
+      // drifted alone. (This used to cross-check index.html's markup, which
+      // the flip deleted — the CSS is the surviving drift partner.)
+      expect(CSS_SHEET).toContain(`.${cls}`);
     }
   });
 

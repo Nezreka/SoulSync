@@ -77,7 +77,10 @@ import {
  */
 const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
 /** The toolbar buttons are markup, so their ratios are pinned against the shell. */
-const SHELL = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+const OVERLAY = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/-ui/artist-web-overlay.tsx'),
+  'utf8',
+);
 
 // ── A minimal graphology ─────────────────────────────────────────────────────
 
@@ -364,8 +367,11 @@ describe('the tuning still matches discover.js', () => {
     // A ratio BELOW 1 is zoomed IN, which is why the + button passes 0.7.
     expect(WEB_ZOOM_IN).toBeLessThan(1);
     expect(WEB_ZOOM_OUT).toBeGreaterThan(1);
-    expect(SHELL).toContain(`artWebZoom(${WEB_ZOOM_IN})`);
-    expect(SHELL).toContain(`artWebZoom(${WEB_ZOOM_OUT})`);
+    // The vanilla buttons' onclick literals died with the index.html markup;
+    // the LIVING markup is the React overlay, which must pass the same
+    // ratios. LITERALS on the right, same reason as below.
+    expect(OVERLAY).toContain('onZoom(0.7)');
+    expect(OVERLAY).toContain('onZoom(1.4)');
     // LITERALS. Interpolating the constant lets a mutation pick a value that
     // happens to appear elsewhere in the file — 0.12 → 0.15 passed that way,
     // because artWebFocusNode really does use 0.15.

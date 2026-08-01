@@ -66,6 +66,27 @@ const KNOWN_IDS = new Set<string>([
 const NEW_IDS = ['build-a-playlist', 'lastfm-radio', 'listenbrainz', 'recent-releases'];
 
 /**
+ * Artefacts whose ONLY vanilla home was the index.html discover markup, which
+ * the flip deleted (the duplicate-id guard in tests/ forbids a React page's
+ * ids from also living in index.html). Everything else the components emit is
+ * still cross-checked against discover.js and the stylesheets; these names
+ * survive as a FROZEN ledger of what that markup declared. discover.js's own
+ * deletion in PR 2 will move more names here the same way.
+ */
+const DELETED_MARKUP_IDS = [
+  'adv-wave',
+  'adv-wave-fill',
+  'adv-wave-svg',
+  'bp-info-panel',
+  'build-playlist-sync-btn',
+  'discover-hero-view-all',
+  'your-albums-section',
+  'your-artists-carousel',
+  'your-artists-section',
+];
+const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];
+
+/**
  * Classes the port introduces because the vanilla styled that element INLINE.
  *
  * EMPTY — and it must stay that way. The 88 names that used to live here
@@ -114,7 +135,9 @@ describe('the components emit the vanilla ARTEFACTS', () => {
     const bad: string[] = [];
     for (const { file, ids } of perFile) {
       for (const id of new Set(ids)) {
-        if (!KNOWN_IDS.has(id) && !NEW_IDS.includes(id)) bad.push(`${file}: id="${id}"`);
+        if (!KNOWN_IDS.has(id) && !NEW_IDS.includes(id) && !DELETED_MARKUP_IDS.includes(id)) {
+          bad.push(`${file}: id="${id}"`);
+        }
       }
     }
     expect(
@@ -130,7 +153,13 @@ describe('the components emit the vanilla ARTEFACTS', () => {
     const bad = new Set<string>();
     for (const { file, classes } of perFile) {
       for (const cls of new Set(classes)) {
-        if (!KNOWN_CLASSES.has(cls) && !NEW_CLASSES.includes(cls)) bad.add(`${file}: .${cls}`);
+        if (
+          !KNOWN_CLASSES.has(cls) &&
+          !NEW_CLASSES.includes(cls) &&
+          !DELETED_MARKUP_CLASSES.includes(cls)
+        ) {
+          bad.add(`${file}: .${cls}`);
+        }
       }
     }
     expect(
@@ -148,6 +177,8 @@ describe('the components emit the vanilla ARTEFACTS', () => {
     // stale allowlist is how the next invented artefact hides.
     expect(NEW_IDS.filter((i) => KNOWN_IDS.has(i))).toEqual([]);
     expect(NEW_CLASSES.filter((c) => KNOWN_CLASSES.has(c))).toEqual([]);
+    expect(DELETED_MARKUP_IDS.filter((i) => KNOWN_IDS.has(i))).toEqual([]);
+    expect(DELETED_MARKUP_CLASSES.filter((c) => KNOWN_CLASSES.has(c))).toEqual([]);
   });
 
   it('never emits one id from two components', () => {

@@ -700,7 +700,7 @@ export function DiscoverPage() {
   const vizOpen = map.kind !== null || webRequest !== null;
 
   return (
-    // NOT className="page" and NOT id="discover-page": .page is display:none
+    // NOT the vanilla page class and NOT its page id: .page is display:none
     // until the shell adds .active, which it only does for the react HOST and
     // for legacy pages — the label-detail flip hid its entire page this way.
     // The host (.page.active) already provides the page padding, and nothing
