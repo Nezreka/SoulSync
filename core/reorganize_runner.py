@@ -68,56 +68,77 @@ def build_runner(
     from core.reorganize_queue import get_queue
 
     def _update_track_path(track_id, new_path):
+        """Repoint both catalogues at ``new_path``.
+
+        iss29-E01: this MUST raise when the catalogue was not updated.
+        ``_finalize_track`` detects a failed path update solely by catching an
+        exception out of this callback, and on success it goes on to
+        ``os.remove`` the original. Swallowing the error here therefore deleted
+        the user's only copy while both catalogues still pointed at the old
+        path — reported as "moved". The realistic trigger is the SQLite write
+        lock being held elsewhere (import commit, ``recompute_wanted``): the
+        connection raises ``database is locked``, the whole transaction rolls
+        back, and the file is destroyed anyway. Downstream that reads as a lib2
+        miss, a ``dead_file_cleaner`` finding and a re-download of a track the
+        user already owned.
+
+        The legacy and lib2 writes are committed SEPARATELY. On ``main`` this
+        callback ran a single UPDATE; this branch added four more inside the
+        same transaction, so a lib2-side failure also discarded the legacy
+        write. Splitting them means the worst case is a stale lib2 path with the
+        file still present at both locations — recoverable by a scan, and never
+        a deletion.
+        """
         lib2_links = {"track_ids": [], "file_ids": []}
         config_manager = get_config_manager() if get_config_manager is not None else None
-        try:
-            db = get_database()
-            with db._get_connection() as conn:
-                from core.library2.feature import library_v2_enabled
-                library_v2_enabled(config_manager)
-                legacy_row = conn.execute(
-                    "SELECT file_path FROM tracks WHERE id=?",
+        db = get_database()
+        with db._get_connection() as conn:
+            from core.library2.feature import library_v2_enabled
+            library_v2_enabled(config_manager)
+            legacy_row = conn.execute(
+                "SELECT file_path FROM tracks WHERE id=?",
+                (str(track_id),),
+            ).fetchone()
+            previous_path = legacy_row["file_path"] if legacy_row else None
+            has_v2_files = bool(conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_track_files'"
+            ).fetchone())
+            if has_v2_files:
+                rows = conn.execute(
+                    """SELECT f.id AS file_id, f.track_id
+                         FROM lib2_track_files f
+                        WHERE f.legacy_track_id=?""",
                     (str(track_id),),
-                ).fetchone()
-                previous_path = legacy_row["file_path"] if legacy_row else None
-                has_v2_files = bool(conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' "
-                    "AND name='lib2_track_files'"
-                ).fetchone())
-                if has_v2_files:
+                ).fetchall()
+                if not rows and previous_path:
                     rows = conn.execute(
                         """SELECT f.id AS file_id, f.track_id
                              FROM lib2_track_files f
-                            WHERE f.legacy_track_id=?""",
-                        (str(track_id),),
+                             JOIN lib2_tracks t ON t.id=f.track_id
+                            WHERE t.legacy_track_id=? AND f.path=?""",
+                        (str(track_id), previous_path),
                     ).fetchall()
-                    if not rows and previous_path:
-                        rows = conn.execute(
-                            """SELECT f.id AS file_id, f.track_id
-                                 FROM lib2_track_files f
-                                 JOIN lib2_tracks t ON t.id=f.track_id
-                                WHERE t.legacy_track_id=? AND f.path=?""",
-                            (str(track_id), previous_path),
-                        ).fetchall()
-                    lib2_links = {
-                        "track_ids": sorted({int(row["track_id"]) for row in rows}),
-                        "file_ids": sorted({int(row["file_id"]) for row in rows}),
-                    }
+                lib2_links = {
+                    "track_ids": sorted({int(row["track_id"]) for row in rows}),
+                    "file_ids": sorted({int(row["file_id"]) for row in rows}),
+                }
+            conn.execute(
+                "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_path, str(track_id)),
+            )
+            conn.commit()
+
+        if lib2_links["file_ids"]:
+            with db._get_connection() as conn:
+                marks = ",".join("?" for _ in lib2_links["file_ids"])
                 conn.execute(
-                    "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (new_path, str(track_id)),
+                    f"UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                    f"WHERE id IN ({marks})",
+                    (new_path, *lib2_links["file_ids"]),
                 )
-                if lib2_links["file_ids"]:
-                    marks = ",".join("?" for _ in lib2_links["file_ids"])
-                    conn.execute(
-                        f"UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
-                        f"WHERE id IN ({marks})",
-                        (new_path, *lib2_links["file_ids"]),
-                    )
                 conn.commit()
-        except Exception as db_err:
-            logger.warning(f"[Reorganize] DB path update failed for {track_id}: {db_err}")
-            return
+
         # A lib2-imported track keeps a legacy_track_id back-reference. Route
         # the update through the common boundary so path, file snapshot,
         # artwork state and History stay coherent under the native-catalogue

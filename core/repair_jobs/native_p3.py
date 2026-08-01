@@ -44,6 +44,35 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.native_p3")
 
+# Sidecars `_rename_to_basename` carries along with the audio file; a rollback
+# of that rename has to bring them back too (iss29-E09).
+_CARRIED_SIDECAR_EXTS = ('.lrc',)
+
+
+def _restore_sidecar(moved_audio: str, original_audio: str) -> None:
+    """Undo the sidecar half of a renamed track.
+
+    ``_rename_to_basename`` renames the ``.lrc`` alongside the audio, but the
+    dd28-29 rollback only put the audio back — leaving the lyrics stranded under
+    the new stem, where nothing looks for them, and the track showing no lyrics
+    despite the file being right there. Best-effort: a rollback must never raise
+    a second failure on top of the first.
+    """
+    moved_stem = os.path.splitext(moved_audio)[0]
+    original_stem = os.path.splitext(original_audio)[0]
+    for ext in _CARRIED_SIDECAR_EXTS:
+        moved_sidecar = moved_stem + ext
+        original_sidecar = original_stem + ext
+        if not os.path.isfile(moved_sidecar) or os.path.exists(original_sidecar):
+            continue
+        try:
+            os.replace(moved_sidecar, original_sidecar)
+        except OSError as exc:  # noqa: BLE001
+            logger.warning(
+                "Could not roll back sidecar %s → %s: %s",
+                moved_sidecar, original_sidecar, exc,
+            )
+
 
 def _edition_tracklists(
     conn: Any, album_id: int,
@@ -246,19 +275,49 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
 
                 try:
                     if not details.get("tag_ok", False):
-                        _fix_track_number_tag(
+                        # iss29-E07: the rename is only correct if the tag write
+                        # actually landed. `save_audio_file` returns False when
+                        # its integrity check aborts the swap — the original is
+                        # left untouched and the tags are NOT written. Renaming
+                        # anyway produced a file called `07 - Song.flac` still
+                        # carrying TRCK 3, and `fix_finding` then resolved the
+                        # finding, so the scanner would never look at it again.
+                        if not _fix_track_number_tag(
                             resolved,
                             int(details["correct_track_num"]),
                             int(details.get("total_tracks") or 0),
-                        )
+                        ):
+                            logger.warning(
+                                "Track-number tag write aborted for %s — leaving the "
+                                "filename alone so the finding stays actionable",
+                                resolved,
+                            )
+                            result.errors += 1
+                            continue
                     new_path = None
                     new_filename = details.get("new_filename")
                     if new_filename:
-                        new_path = _rename_to_basename(
+                        # iss29-E08: distinguish "already named correctly" from
+                        # "refused to rename". Both used to arrive as None and
+                        # both were then counted as auto_fixed, so a collision
+                        # with an existing destination resolved the finding for
+                        # a file that still had the wrong name.
+                        from core.repair_jobs.track_number_repair import (
+                            rename_to_basename_result,
+                        )
+
+                        new_path, rename_error = rename_to_basename_result(
                             resolved,
                             os.path.basename(resolved),
                             os.path.splitext(str(new_filename))[0],
                         )
+                        if rename_error:
+                            logger.warning(
+                                "Track-number rename refused for %s: %s", resolved,
+                                rename_error,
+                            )
+                            result.errors += 1
+                            continue
                     if new_path:
                         # dd28-29: the rename already happened on disk. If the
                         # separate DB write fails there is no rollback, so the
@@ -277,6 +336,12 @@ class NativeTrackNumberRepairJob(TrackNumberRepairJob):
                         except Exception:
                             try:
                                 os.replace(new_path, resolved)
+                                # iss29-E09: the rename carried the .lrc along,
+                                # so the rollback has to bring it back too —
+                                # otherwise the audio returns to its old name
+                                # and the lyrics stay orphaned at the new one,
+                                # where nothing looks for them.
+                                _restore_sidecar(new_path, resolved)
                                 logger.warning(
                                     "Rolled back rename of %s: catalog update failed",
                                     new_path,

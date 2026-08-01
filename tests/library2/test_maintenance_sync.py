@@ -1363,3 +1363,81 @@ def test_artist_subject_of_a_metadata_only_repair_stays_narrow(legacy_db):
     assert outcome["artists"] == 1
     assert outcome["files"] == 0
     assert outcome["scan"]["scanned"] == 0
+
+
+# --- iss29-E03: an album-scoped delete must retire ONE file, not the album ---
+
+
+def test_album_scoped_delete_retires_only_the_file_the_repair_removed(legacy_db):
+    """One removed file must not mark every file of the album deleted.
+
+    ``_fix_unwanted_content`` deletes exactly one file and reports
+    ``removed_content`` — a delete action. Its findings carry
+    ``entity_type='album'`` because that is how ``live_commentary_cleaner``
+    creates them (and that job is not retired, so an upgrade brings open ones
+    along). ``_resolve_links`` widens an album subject to every track and every
+    live file of the album so a rescan covers them, and the delete branch used
+    that same widened set.
+
+    The consequence is not cosmetic: the album ends up with no live files, so
+    ``recompute_wanted`` wants the whole album again and the wishlist
+    re-downloads a release that is sitting complete on disk, while the real
+    files look like orphans to the dead-file cleaner.
+    """
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    # The seed album has a single file; a second one is what makes the
+    # over-wide delete observable at all.
+    _add_v2_only_file(legacy_db, "/m/02.flac", title="Second Track")
+    conn = legacy_db._get_connection()
+    try:
+        album_id = conn.execute(
+            "SELECT id FROM lib2_albums WHERE legacy_album_id=10"
+        ).fetchone()[0]
+        target = conn.execute(
+            "SELECT f.id AS file_id, f.path AS path FROM lib2_track_files f "
+            "JOIN lib2_tracks t ON t.id=f.track_id WHERE t.legacy_track_id=100"
+        ).fetchone()
+        sibling_files = conn.execute(
+            "SELECT f.id FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id "
+            "WHERE t.album_id=? AND f.id<>?",
+            (album_id, target["file_id"]),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db,
+        _Config(True),
+        job_id="live_commentary_cleaner",
+        finding_type="unwanted_content",
+        action="removed_content",
+        entity_type="album",
+        entity_id=f"lib2:{album_id}",
+        file_path=target["path"],
+        details={},
+        result={"success": True, "action": "removed_content"},
+    )
+
+    assert outcome["reason"] == "synchronized"
+    conn = legacy_db._get_connection()
+    try:
+        removed = conn.execute(
+            "SELECT file_state FROM lib2_track_files WHERE id=?", (target["file_id"],)
+        ).fetchone()[0]
+        survivors = [
+            conn.execute(
+                "SELECT COALESCE(file_state,'active') FROM lib2_track_files WHERE id=?",
+                (row[0],),
+            ).fetchone()[0]
+            for row in sibling_files
+        ]
+    finally:
+        conn.close()
+
+    assert removed == "deleted"
+    assert survivors, "fixture must have at least one other file on the album"
+    assert all(state != "deleted" for state in survivors), (
+        f"the rest of the album was retired too: {survivors}"
+    )

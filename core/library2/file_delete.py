@@ -120,6 +120,42 @@ def _containing_root(path: str, roots: List[str]) -> Optional[str]:
     return max(matches, key=len) if matches else None
 
 
+def fuzzy_resolved_path_is_deletable(
+    original: str, resolved: str, config_manager: Any = None,
+) -> bool:
+    """May a destructive repair delete ``resolved``, given it came from
+    ``original`` via the fuzzy path resolver?
+
+    iss29-E04. ``resolve_library_file_path`` suffix-walks the configured base
+    directories to recover a moved file, and it tries the **transfer folder
+    first** (``core/library/path_resolver.py``). Imports land under
+    ``soulseek.transfer_path`` in the very same ``Artist/Album/…`` layout, so a
+    finding on a library file that has since vanished can resolve onto a freshly
+    downloaded replacement — and the destructive fixes then deleted the download
+    and recorded the finding as converged.
+
+    The rule is only applied when the resolver actually guessed: a path that
+    exists exactly as the catalogue records it is the file the user asked about,
+    and is deleted without further ceremony. A GUESSED path must land inside a
+    configured library root — the same containment ADR-05 already enforces for
+    the Library V2 delete pipeline (:func:`_containing_root`).
+
+    Fails closed: with no usable roots configured there is nothing to validate a
+    guess against, so the guess is not acted on.
+    """
+    if not resolved:
+        return False
+    try:
+        if os.path.realpath(resolved) == os.path.realpath(original):
+            return True  # not a guess — the catalogue path itself
+    except OSError:
+        pass
+    roots = _library_roots(config_manager)
+    if not roots:
+        return False
+    return _containing_root(resolved, roots) is not None
+
+
 def _scope_snapshot(
     database, entity: str, entity_id: int, file_ids: Optional[List[int]] = None,
 ) -> tuple[str, List[Dict[str, Any]]]:

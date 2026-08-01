@@ -957,8 +957,12 @@ def _normalize_title(title: str) -> str:
     return t.strip()
 
 
-def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
-    """Update ONLY the track number tag in the file."""
+def _fix_track_number_tag(file_path: str, correct_num: int, total: int) -> bool:
+    """Update ONLY the track number tag in the file.
+
+    Returns True only when the tag actually reached the file on disk
+    (iss29-E07) — callers gate the follow-up rename on this.
+    """
     from mutagen import File as MutagenFile
     from mutagen.id3 import TRCK, ID3
     from mutagen.flac import FLAC
@@ -969,7 +973,7 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
         audio = MutagenFile(file_path)
         if audio is None:
             logger.error("Cannot re-open file for tag fix: %s", file_path)
-            return
+            return False
 
         track_str = f"{correct_num}/{total}"
 
@@ -981,21 +985,35 @@ def _fix_track_number_tag(file_path: str, correct_num: int, total: int):
         elif isinstance(audio, MP4):
             audio['trkn'] = [(correct_num, total)]
         else:
-            return
+            return False
 
         # Atomic + audio-integrity-verified save (#819/#1000): never rewrite the
         # user's library file in place; abort if the write would damage the audio.
+        #
+        # iss29-E07: the return value MUST be propagated. `save_audio_file`
+        # returns False for "integrity check failed, original untouched, tags
+        # NOT written" — discarding that reported an unwritten tag as fixed,
+        # and in the native P3 path it let the rename proceed, leaving a file
+        # named `07 - Song.flac` carrying TRCK 3 with the finding resolved so
+        # nothing would ever look at it again.
         from core.metadata.common import save_audio_file, get_mutagen_symbols
-        save_audio_file(audio, get_mutagen_symbols())
+        if not save_audio_file(audio, get_mutagen_symbols()):
+            logger.error("Track tag NOT written (atomic save aborted): %s", file_path)
+            return False
 
         logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
+        return True
     except Exception as e:
         logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
+        return False
 
 
-def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int):
+def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int) -> bool:
     """Update ONLY the disc number tag (multi-disc albums — #1075: per-disc
-    track numbering is only enforceable when the disc tag rides along)."""
+    track numbering is only enforceable when the disc tag rides along).
+
+    Returns True only when the tag actually reached the file (iss29-E07).
+    """
     from mutagen import File as MutagenFile
     from mutagen.id3 import TPOS, ID3
     from mutagen.flac import FLAC
@@ -1006,7 +1024,7 @@ def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int):
         audio = MutagenFile(file_path)
         if audio is None:
             logger.error("Cannot re-open file for disc tag fix: %s", file_path)
-            return
+            return False
 
         disc_str = f"{disc_num}/{total_discs}" if total_discs else str(disc_num)
 
@@ -1020,25 +1038,46 @@ def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int):
         elif isinstance(audio, MP4):
             audio['disk'] = [(disc_num, total_discs or 0)]
         else:
-            return
+            return False
 
-        # Atomic + audio-integrity-verified save (#819/#1000)
+        # Atomic + audio-integrity-verified save (#819/#1000). The result is
+        # propagated for the same reason as in `_fix_track_number_tag`
+        # (iss29-E07).
         from core.metadata.common import save_audio_file, get_mutagen_symbols
-        save_audio_file(audio, get_mutagen_symbols())
+        if not save_audio_file(audio, get_mutagen_symbols()):
+            logger.error("Disc tag NOT written (atomic save aborted): %s", file_path)
+            return False
 
         logger.info("Fixed disc tag: %s → %s", os.path.basename(file_path), disc_str)
+        return True
     except Exception as e:
         logger.error("Error fixing disc tag in %s: %s", file_path, e, exc_info=True)
+        return False
 
 
-def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Optional[str]:
-    """Rename a file to the planned basename (extension kept). Returns new path or
-    None. The prefix itself is decided by ``_planned_prefix`` — this only moves."""
+def rename_to_basename_result(
+    file_path: str, filename: str, new_basename: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Rename a file to the planned basename (extension kept).
+
+    Returns ``(new_path, error)``:
+
+    * ``(path, None)`` — renamed.
+    * ``(None, None)`` — nothing to do; the name is already correct.
+    * ``(None, "…")`` — the rename was NOT performed and the reason why.
+
+    iss29-E08: :func:`_rename_to_basename` collapses all three onto ``None``,
+    so a collision with an existing destination — or a source that vanished —
+    was indistinguishable from "already named correctly" and got counted as a
+    successful fix, resolving the finding for a file that still carries the
+    wrong name. The prefix itself is decided by ``_planned_prefix``; this only
+    moves.
+    """
     try:
         basename = os.path.splitext(filename)[0]
         ext = os.path.splitext(filename)[1]
         if new_basename == basename:
-            return None
+            return None, None
 
         new_filename = new_basename + ext
         parent_dir = os.path.dirname(file_path)
@@ -1046,11 +1085,11 @@ def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Opt
 
         if not os.path.isfile(file_path):
             logger.error("Source file disappeared before rename: %s", file_path)
-            return None
+            return None, f'source file no longer on disk: {file_path}'
 
         if os.path.exists(new_path):
             logger.warning("Target path already exists, skipping rename: %s", new_path)
-            return None
+            return None, f'a different file already occupies {new_filename}'
 
         os.rename(file_path, new_path)
         logger.info("Renamed: %s → %s", filename, new_filename)
@@ -1063,10 +1102,20 @@ def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Opt
                 os.rename(lrc_path, new_lrc_path)
                 logger.info("Renamed LRC: %s.lrc → %s.lrc", basename, new_basename)
 
-        return new_path
+        return new_path, None
     except Exception as e:
         logger.error("Error renaming %s: %s", file_path, e, exc_info=True)
-        return None
+        return None, str(e)
+
+
+def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Optional[str]:
+    """Backwards-compatible wrapper: the new path, or None for anything else.
+
+    Callers that must tell "already correct" from "refused" use
+    :func:`rename_to_basename_result` instead (iss29-E08).
+    """
+    new_path, _error = rename_to_basename_result(file_path, filename, new_basename)
+    return new_path
 
 
 def _update_db_file_path(db, old_path: str, new_path: str):

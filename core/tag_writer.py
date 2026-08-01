@@ -550,7 +550,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         # format kwargs as before, just routed through the shared atomic helper.
         from types import SimpleNamespace
         from core.metadata.common import save_audio_file
-        save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile))
+        # iss29-E07: a False here means the integrity check aborted the swap —
+        # the original is untouched and NOTHING was written. Reporting success
+        # made lib2's "Write Tags" count the file as written and persist a tag
+        # snapshot for content the file does not contain, so the tag-gap cell
+        # showed the gap forever with no way to act on it.
+        if not save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile)):
+            return {
+                'success': False,
+                'error': 'Atomic save aborted by the audio integrity check — tags not written',
+            }
 
         return {'success': True, 'written_fields': written}
 

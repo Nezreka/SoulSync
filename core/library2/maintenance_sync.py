@@ -182,6 +182,9 @@ def _resolve_links(
     ids = _details_lib2_ids(details)
     artists, albums = set(ids["artists"]), set(ids["albums"])
     tracks, files = set(ids["tracks"]), set(ids["files"])
+    # Files the change named CONCRETELY, as opposed to files pulled in by a
+    # fan-out for rescan purposes — see iss29-E03 below.
+    direct_files: set = set()
 
     entity_type = str(entity_type or "").strip().lower()
     native_id = _native_entity_id(entity_id)
@@ -232,6 +235,14 @@ def _resolve_links(
                     files.add(int(row["id"]))
         except Exception as exc:  # noqa: BLE001
             logger.debug("mapped path subject resolution failed: %s", exc)
+
+    # iss29-E03: everything identified up to HERE was named concretely — an
+    # explicit lib2 file id in the finding details, or a path the change itself
+    # carried. Everything the fan-outs below add is rescan scope: files the
+    # repair may have touched indirectly. Only this narrow set may be marked
+    # deleted, because a repair that removed one file must not retire the rest
+    # of the album with it.
+    direct_files.update(files)
 
     if files:
         rows = conn.execute(
@@ -316,11 +327,15 @@ def _resolve_links(
             sorted(tracks),
         ).fetchall()
         files.update(int(row[0]) for row in rows)
+        # A track named without a concrete file is still a narrow subject: the
+        # track's own files are what a delete of that track would mean.
+        direct_files.update(files)
     return {
         "artists": sorted(artists),
         "albums": sorted(albums),
         "tracks": sorted(tracks),
         "files": sorted(files),
+        "direct_files": sorted(direct_files & files),
     }
 
 
@@ -530,10 +545,23 @@ def sync_repair_change(
 
         changed_fields: set[str] = set(effects - {"observe", "none"})
         deleting = action in _DELETE_ACTIONS or result.get("library_v2_file_deleted") is True
-        if deleting and links["files"]:
+        # iss29-E03: retire only the files the change actually named, never the
+        # album-wide fan-out that `_resolve_links` builds for rescan purposes.
+        #
+        # `_fix_unwanted_content` deletes exactly ONE file and reports
+        # `removed_content`, which is a delete action. Its findings carry
+        # `entity_type='album'` (that is how `live_commentary_cleaner` creates
+        # them, and the job is not retired), so the fan-out expanded the subject
+        # to every track and every live file of the album and the loop marked
+        # them all deleted. The album then looked file-less, `recompute_wanted`
+        # wanted the whole thing back, and the wishlist re-downloaded an album
+        # that was sitting complete on disk while the real files looked like
+        # orphans.
+        delete_scope = links.get("direct_files") or []
+        if deleting and delete_scope:
             from core.library2.track_files import set_file_state
 
-            for file_id in links["files"]:
+            for file_id in delete_scope:
                 if set_file_state(conn, file_id, "deleted"):
                     changed_fields.add("file_state")
         repair_intent = str(result.get("repair_intent") or "").strip().lower()

@@ -2083,6 +2083,25 @@ class RepairWorker:
                     ),
                 }
             return {'success': True, 'deleted_file': False}
+        # iss29-E04: only delete a RESOLVER-GUESSED path when it sits inside a
+        # configured library root. The suffix walk tries the transfer folder
+        # first and imports use the same Artist/Album layout, so a finding on a
+        # library file that has since moved could otherwise resolve onto a
+        # freshly downloaded replacement and destroy it.
+        from core.library2.file_delete import fuzzy_resolved_path_is_deletable
+
+        if not fuzzy_resolved_path_is_deletable(
+            target, resolved, self._config_manager,
+        ):
+            return {
+                'success': False,
+                'error': (
+                    'The file at the recorded path is gone and the only match '
+                    'found lies outside your library folders — refusing to '
+                    'delete it. Re-scan the library so the catalogue points at '
+                    'the real file.'
+                ),
+            }
         try:
             os.remove(resolved)
             return {'success': True, 'deleted_file': True, 'resolved_path': resolved}
@@ -2207,12 +2226,25 @@ class RepairWorker:
                     resolved = _resolve_file_path(target_path, self.transfer_folder,
                                                   download_folder=download_folder,
                                                   config_manager=self._config_manager)
+                from core.library2.file_delete import fuzzy_resolved_path_is_deletable
+
                 if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        deleted_file = True
-                    except Exception as e:
-                        logger.warning("Could not delete preview file %s: %s", resolved, e)
+                    # iss29-E04: a guessed path must be inside a library root —
+                    # the resolver tries the transfer folder first, where fresh
+                    # downloads live under the same Artist/Album layout.
+                    if not fuzzy_resolved_path_is_deletable(
+                        target_path, resolved, self._config_manager,
+                    ):
+                        logger.warning(
+                            "Refusing to delete preview candidate outside the library "
+                            "roots: %s (recorded as %s)", resolved, target_path,
+                        )
+                    else:
+                        try:
+                            os.remove(resolved)
+                            deleted_file = True
+                        except Exception as e:
+                            logger.warning("Could not delete preview file %s: %s", resolved, e)
 
             # Drop the legacy DB row so the track shows as missing. Native V2
             # subjects have no legacy row; the maintenance bridge marks the V2
@@ -2460,6 +2492,24 @@ class RepairWorker:
         if correct_num is None:
             return {'success': False, 'error': 'No correct track number in finding details'}
 
+        # iss29-E10: prove the file is reachable BEFORE touching the catalogue.
+        # The catalogue write used to be committed first and the file check ran
+        # afterwards, so on an unmounted root or a path-mapping miss the track
+        # was renumbered in both catalogues while the file on disk kept its old
+        # number — the two then disagreed permanently, with the finding left
+        # open against a track whose DB row already claims to be fixed.
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        # Resolve file path for cross-environment compat (Docker)
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
+
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
+
         # If we have an entity_id (track DB ID), update DB directly
         native_track_id = _lib2_id(entity_id)
         if native_track_id is not None:
@@ -2490,19 +2540,8 @@ class RepairWorker:
             except Exception as e:
                 logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
 
-        # Fix the file tag (the primary fix — works even without entity_id)
-        if not file_path:
-            return {'success': False, 'error': 'No file path associated with this finding'}
-
-        # Resolve file path for cross-environment compat (Docker)
-        download_folder = None
-        if self._config_manager:
-            download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
-
-        if not os.path.isfile(resolved):
-            return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
-
+        # Fix the file tag (the primary fix — works even without entity_id).
+        # `resolved` was established above, before the catalogue write.
         try:
             from core.repair_jobs.track_number_repair import (
                 _fix_track_number_tag,
@@ -2526,7 +2565,18 @@ class RepairWorker:
                     except Exception as e:
                         logger.debug("Failed to read total_tracks tag from file: %s", e)
                 total_tracks = int(total_tracks or 0)
-                _fix_track_number_tag(resolved, int(correct_num), total_tracks)
+                # iss29-E07: an aborted atomic save leaves the original
+                # untouched and the tags unwritten. Renaming on top of that
+                # produces a filename that contradicts the tag AND resolves the
+                # finding, so nothing ever revisits it.
+                if not _fix_track_number_tag(resolved, int(correct_num), total_tracks):
+                    return {
+                        'success': False,
+                        'error': (
+                            'Track number tag could not be written '
+                            f'({os.path.basename(resolved)}) — file left unchanged'
+                        ),
+                    }
 
             # #1075: per-disc numbering needs the disc tag written too — the
             # scan rode disc_ok/disc_number/total_discs in the finding, so
@@ -2535,8 +2585,18 @@ class RepairWorker:
             # the old behavior.
             if not details.get('disc_ok', True) and details.get('disc_number'):
                 from core.repair_jobs.track_number_repair import _fix_disc_number_tag
-                _fix_disc_number_tag(resolved, int(details['disc_number']),
-                                     int(details.get('total_discs') or 0))
+                # Same contract as the track tag above (iss29-E07): per-disc
+                # numbering is only enforceable when the disc tag actually
+                # landed, so a failed write must not reach the rename.
+                if not _fix_disc_number_tag(resolved, int(details['disc_number']),
+                                            int(details.get('total_discs') or 0)):
+                    return {
+                        'success': False,
+                        'error': (
+                            'Disc number tag could not be written '
+                            f'({os.path.basename(resolved)}) — file left unchanged'
+                        ),
+                    }
 
             # Rename to EXACTLY what the finding promised (#1009 — the old code
             # recomputed the prefix here and mangled 4-digit disc+track names:
@@ -2559,8 +2619,20 @@ class RepairWorker:
                         new_filename = candidate + ext
             new_path = None
             if new_filename:
-                new_path = _rename_to_basename(resolved, fname,
-                                               os.path.splitext(new_filename)[0])
+                # iss29-E08: a refused rename (destination occupied, source
+                # gone) must not be reported as a completed fix — that resolved
+                # the finding for a file still carrying the wrong name, and
+                # nothing would ever raise it again.
+                from core.repair_jobs.track_number_repair import rename_to_basename_result
+
+                new_path, rename_error = rename_to_basename_result(
+                    resolved, fname, os.path.splitext(new_filename)[0],
+                )
+                if rename_error:
+                    return {
+                        'success': False,
+                        'error': f'Could not rename {fname}: {rename_error}',
+                    }
 
             # Update DB file path if renamed
             if new_path:
@@ -3126,7 +3198,14 @@ class RepairWorker:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
                 resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
+                from core.library2.file_delete import fuzzy_resolved_path_is_deletable
+
+                if (resolved and os.path.exists(resolved)
+                        # iss29-E04: never act on a resolver GUESS that landed
+                        # outside the library roots — the walk tries transfer
+                        # first, where a fresh download of this very track sits.
+                        and fuzzy_resolved_path_is_deletable(
+                            track_path, resolved, self._config_manager)):
                     os.remove(resolved)
                     file_deleted = True
                     # Clean up empty parent directories
