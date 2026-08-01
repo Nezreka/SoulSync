@@ -100,7 +100,7 @@ enthält die Diagnose; diese Tabelle enthält ausschließlich Remediationstatus.
 | [12](library-v2-issues.md#find22-12) | Alias-Suche/Totals | Verified | `ce7b4516` | spezifisch |
 | [13](library-v2-issues.md#find22-13) | Alias-Aktionsscope | Verified | `a95e5309` | spezifisch |
 | [14](library-v2-issues.md#find22-14) | Album-Credits rebuilden | Verified | `bdc478a5` | spezifisch |
-| [15](library-v2-issues.md#find22-15) | Ein Queue-Poll pro Artist | Verified | `2e227c1b` | spezifisch |
+| [15](library-v2-issues.md#find22-15) | Ein Queue-Poll pro Artist | Verified | `2e227c1b`, §46 | spezifisch; der Vertrag war zwischenzeitlich verletzt und sein Guard-Test vakuum (iss29-C06) — beides in §46 behoben, der Test prüft jetzt die tatsächliche Schreibweise |
 | [16](library-v2-issues.md#find22-16) | Working Copy per Inhalt prüfen | Verified | `9592159f` | spezifisch |
 | [17](library-v2-issues.md#find22-17) | Refresh & Scan als Job | Verified | `7ded959c` | spezifisch |
 
@@ -2153,7 +2153,7 @@ Artist-Kopf).
 
 | ID | Finding | Status | Umsetzung |
 |---|---|---|---|
-| [ldp-01](library-v2-issues.md#ldp-01) | Suchtreffer landet in der Legacy-Library | Implemented | `/artist-detail/$source/$id` leitet nach `/library-v2?discover=<source>:<id>` um. Bewusst in der Route, nicht in `search.js`: alle sechs Aufrufer bauen dieselbe URL über `buildArtistDetailPath` (issues.md §28.7) |
+| [ldp-01](library-v2-issues.md#ldp-01) | Suchtreffer landet in der Legacy-Library | Implemented (zurückgenommen §44.2, **wiederhergestellt §46**) | `/artist-detail/$source/$id` leitet nach `/library?discover=<source>:<id>` um. Bewusst in der Route, nicht in `search.js`: alle sechs Aufrufer bauen dieselbe URL über `buildArtistDetailPath` (issues.md §28.7). Beim Upstream-Sync entfernt, weil Upstream dieselbe Route mit einer eigenen React-Seite belegt hatte; auf Nutzerentscheidung wiederhergestellt (§46.1) — Upstreams Artist-Seite ist damit bewusst unerreichbar |
 | [ldp-02](library-v2-issues.md#ldp-02) | V2 kann keinen Artist ohne Katalogzeile darstellen | Implemented | Discovery-Ansicht aus dem bestehenden `/api/artist-detail/<id>?source=&name=`; neuer `GET/POST /api/library/v2/discovery/artist` (Resolve read-only / Materialisieren) plus `POST …/discovery/track` für ldp-06. Resolve nutzt `find_or_create_artist(create=False)` — dieselbe Identitätslogik wie jeder andere Einstieg, ohne Write |
 | [ldp-03](library-v2-issues.md#ldp-03) | `All Releases` braucht Table ↔ Legacy-Karten | Implemented | Zweite Umschaltgruppe, nur bei `All Releases`; Kachelgitter mit den Legacy-Klassen (`release-card album-card`, `album-card-image`, `completion-overlay`), also ohne eine Zeile neues CSS |
 | [ldp-04](library-v2-issues.md#ldp-04) | Discography-Filterleiste fehlt | Implemented | `discography-filters.ts` — `classifyReleaseContent` 1:1 aus `library.js` portiert (#877 bleibt eine Quelle), Filterleiste mit den Legacy-Klassen, wirksam in Table- **und** Kachelansicht |
@@ -2161,7 +2161,7 @@ Artist-Kopf).
 | [ldp-06](library-v2-issues.md#ldp-06) | Top-Tracks-Aktion heißt falsch | Implemented | Aktion heißt `Bookmark`; sie materialisiert Artist/Album/Track und ruft danach den bestehenden `tracks/<id>/monitor`-Pfad — kein zweiter Weg zu Wanted/Wishlist |
 | [ldp-07](library-v2-issues.md#ldp-07) | Artwork-Geschwindigkeit | Implemented | `_apply_artwork_urls` wirft die Provider-URL nicht mehr weg (`remote_image_url`) und lässt sie bei reinen Discography-Zeilen sogar die primäre `image_url` bleiben; `precache_all_artwork` überspringt dieselben Zeilen. `Artwork` zeigt die CDN-URL statt des Platzhalters, solange ein kalter Build läuft, mit eigenem Fehlerzustand für die Remote-URL |
 | [ldp-08](library-v2-issues.md#ldp-08) | Metadaten-Quellen NICHT übernehmen | Verified | Nicht portiert; `ArtistMatchChips` bleiben auch im reichen Kopf |
-| [ldp-09](library-v2-issues.md#ldp-09) | Abschlussbedingung | Implemented | Über die Suche ist kein Weg mehr in die Legacy-Artist-Oberfläche offen; Regressionstest hält fest, dass `navigateToArtistDetail` nicht mehr aufgerufen wird |
+| [ldp-09](library-v2-issues.md#ldp-09) | Abschlussbedingung | Implemented (zurückgenommen §44.2, **wiederhergestellt §46**) | Über die Suche ist kein Weg mehr in die Legacy-Artist-Oberfläche offen; Regressionstest hält fest, dass `navigateToArtistDetail` nicht mehr aufgerufen wird |
 
 ### Bewusste Entscheidungen in der Umsetzung
 
@@ -2400,56 +2400,268 @@ Upstreams neuen Guard-Tests sichtbar gemacht:
 
 ---
 
-## 45. Multi-Agent-Audit nach dem Upstream-Sync — offene Arbeitsliste (1. August 2026)
+## 45. Multi-Agent-Audit nach dem Upstream-Sync — Arbeitsliste (1. August 2026)
 
 Fünf parallele Read-only-Audits über `483405764`. Die vollständigen Diagnosen
 stehen in [issues.md §29](library-v2-issues.md#29-multi-agent-audit-nach-dem-upstream-sync-1-august-2026);
-diese Tabelle ist ausschließlich der Remediationstatus. **Nichts davon ist
-umgesetzt** — alle Einträge sind Pending.
+diese Tabelle ist ausschließlich der Remediationstatus. **Abgearbeitet in §46**
+— der Stand unten ist der Endstand, nicht die ursprüngliche Pending-Liste.
 
 Die vier mit *verifiziert* markierten Blocker hat der Koordinator unabhängig am
 Code nachgeprüft, nicht nur vom Agenten übernommen. Wichtig für die
-Priorisierung: **keiner dieser Befunde wird von der bestehenden Testsuite
-gefangen** (webui 240 Tests grün, `tests/library2` 1.193 grün).
+Priorisierung: **keiner dieser Befunde wurde von der bestehenden Testsuite
+gefangen** (webui 240 Tests grün, `tests/library2` 1.193 grün) — deshalb ist zu
+jedem Blocker ein Regressionstest entstanden, der vor dem Fix nachweislich
+fehlschlägt.
 
 ### 45.1 Vor dem PR-Ready zu erledigen
 
 | ID | Kurz | Status |
 |---|---|---|
-| [iss29-A01](library-v2-issues.md#iss29-a01) | Upgrade landet in dauerhaft leerer Library, meldet sich als „done" (`try_claim` stempelt den Watermark neu, ohne den Checkpoint zu löschen) — *verifiziert* | Pending |
-| [iss29-D01](library-v2-issues.md#iss29-d01-blocker--schreibtransaktion-bleibt-über-provider-http-calls-offen--verifiziert) | Schreibtransaktion über Provider-Calls offen in der Anchor-Schleife — dieselbe Deadlock-Klasse wie die bekannte Produktivstörung — *verifiziert* | Pending |
-| [iss29-E01](library-v2-issues.md#iss29-e01) | Reorganize löscht das Original, obwohl der DB-Update fehlschlug — *verifiziert* | Pending |
-| [iss29-E02](library-v2-issues.md#iss29-e02) | Sibling-Move überschreibt eine vorhandene Datei stillschweigend — *verifiziert* | Pending |
-| [iss29-E04](library-v2-issues.md#iss29-e04) | Destruktives Repair löscht Fuzzy-Resolver-Treffer ohne Root-Containment (kann frische Downloads im Transfer-Ordner treffen) | Pending |
-| [iss29-E03](library-v2-issues.md#iss29-e03) | Eine gelöschte Datei markiert alle Dateien des Albums als `deleted` → Re-Download eines vollständigen Albums | Pending |
+| [iss29-A01](library-v2-issues.md#iss29-a01) | Upgrade landet in dauerhaft leerer Library, meldet sich als „done" (`try_claim` stempelt den Watermark neu, ohne den Checkpoint zu löschen) — *verifiziert* | **Behoben** (§46.2) |
+| [iss29-D01](library-v2-issues.md#iss29-d01-blocker--schreibtransaktion-bleibt-über-provider-http-calls-offen--verifiziert) | Schreibtransaktion über Provider-Calls offen in der Anchor-Schleife — dieselbe Deadlock-Klasse wie die bekannte Produktivstörung — *verifiziert* | **Behoben** (§46.3) |
+| [iss29-E01](library-v2-issues.md#iss29-e01) | Reorganize löscht das Original, obwohl der DB-Update fehlschlug — *verifiziert* | **Behoben** (§46.4) |
+| [iss29-E02](library-v2-issues.md#iss29-e02) | Sibling-Move überschreibt eine vorhandene Datei stillschweigend — *verifiziert* | **Behoben** (§46.4) |
+| [iss29-E04](library-v2-issues.md#iss29-e04) | Destruktives Repair löscht Fuzzy-Resolver-Treffer ohne Root-Containment (kann frische Downloads im Transfer-Ordner treffen) | **Behoben** (§46.5) |
+| [iss29-E03](library-v2-issues.md#iss29-e03) | Eine gelöschte Datei markiert alle Dateien des Albums als `deleted` → Re-Download eines vollständigen Albums | **Behoben** (§46.5) |
 
 ### 45.2 Wichtig, aber nicht release-blockierend
 
-`iss29-A02` (Heartbeat verwirft Rowid-Checkpoints), `iss29-A03` (Migrationsanzeige
-friert ein), `iss29-A04` (Nach-Lauf-Watermark verliert währenddessen entstandene
-Artists), `iss29-B01` (Sidebar-Library toter Klick — *verifiziert*), `iss29-B03`
-(Search→Library lädt die App neu), `iss29-C01` (Zeitzonenfehler im Grab-Watcher,
-2 h Versatz in Europe/Zurich — *verifiziert*), `iss29-C02` (409 als Fehler
-gemeldet), `iss29-C03`/`C04`/`C05` (Fehlerzustände als Leer-/Ladezustände —
-`C03` *verifiziert*), `iss29-C06` (Queue-Poll pro Album, Guard-Test vakuum —
-*verifiziert*), `iss29-E05` (Reorganize löscht lib2-eigene `.lrc`), `iss29-E06`
-(Full-Table-Scan + FS-Stats unter gehaltener Schreibsperre), `iss29-E07`
-(abgebrochener Speichervorgang als Erfolg gemeldet, Datei halb umbenannt),
-`iss29-D02`–`D05`.
+Alle behoben (§46.6–§46.8): `iss29-A02`, `A03`, `A04`, `A05`, `A06`,
+`B01`, `B03`, `B04a`, `B04b`, `B04c`, `B05`, `B07`, `B08`, `B09`,
+`C01`–`C10`, `E05`, `E06`, `E07`, `E08`, `E09`, `E10`, `D02`–`D12`.
 
-### 45.3 Produktentscheidung nötig
+`iss29-A07` war **kein** Befund: der Rückgabewert wird zu Recht verworfen, der
+Aufruf existiert für die einmalige Deprecation-Warnung. Die Absicht ist jetzt
+im Code dokumentiert statt implizit.
 
-[iss29-B02](library-v2-issues.md#iss29-b02): mit der ldp-01-Rücknahme (§44.2) ist
-der Discovery-Modus unerreichbar geworden — verwaiste Suchparameter, ~200 Zeilen
-Frontend, vier Backend-Endpunkte, der ldp-06-„Bookmark"-Flow und eine grüne
-Testsuite für einen Modus, den niemand betreten kann. Entweder ersatzlos löschen
-oder einen Einstiegspunkt geben. Damit hängt `iss29-B05` (toter
-Rich-Header-Vorwahl) zusammen.
+### 45.3 Produktentscheidung — getroffen
+
+[iss29-B02](library-v2-issues.md#iss29-b02): Der Nutzer hat entschieden, dass ein
+Suchtreffer in Library V2 landen soll — auch für einen Artist, den die Library
+noch nicht kennt. Damit ist **ldp-01 wiederhergestellt** statt der Discovery-Code
+gelöscht; `iss29-B05` (Rich-Header-Vorwahl) hängt daran und ist mit erledigt.
+Konsequenz, ausdrücklich so gewollt: Upstreams eigene React-Artist-Seite
+(7.165 Zeilen, u. a. Gap-Fill #1067/#1071, DB-Record-Inspector, Enhanced View,
+Inline-Edit) ist über die Suche nicht mehr erreichbar. Siehe §46.1.
 
 ### 45.4 Dokumentationsschuld
 
-[iss29-B06](library-v2-issues.md#iss29-b06): §42 dieser Datei führt **ldp-01** und
-**ldp-09** unverändert als Implemented, obwohl §44.2 beide zurücknimmt; dazu vier
-Code-Kommentare, die die Weiterleitung weiter behaupten. Ebenso widersprechen
-`find22-15` (§3, Zeile 103) und `M-12` dem tatsächlichen Stand — siehe
-`iss29-C06` und `iss29-C09`.
+[iss29-B06](library-v2-issues.md#iss29-b06): erledigt — §42 führt `ldp-01`/`ldp-09`
+jetzt mit ihrer Rücknahme UND ihrer Wiederherstellung, die vier Code-Kommentare
+stimmen wieder (die Weiterleitung existiert tatsächlich), `find22-15` (§3) trägt
+den Hinweis auf die zwischenzeitliche Verletzung, und `M-12` ist durch den
+`onError` aus §46.7 gedeckt.
+
+### 45.5 Bewusst offen geblieben
+
+| ID | Warum |
+|---|---|
+| [iss29-A08](library-v2-issues.md#293-minor) | **SPEKULATIV** — der Agent konnte es selbst nicht belegen. Das Doc verlangt eine eigene Reproduktion vor jeder Arbeit; die wurde nicht durchgeführt, also wurde nichts geändert |
+| [iss29-A09](library-v2-issues.md#293-minor) | **SPEKULATIV**, ausdrücklich als „bounded, nicht quadratisch, ungemessen" beschrieben. Ohne Messung wäre jede Änderung eine Wette |
+| [iss29-B10](library-v2-issues.md#293-minor) | **SPEKULATIV** und formgleich zu Upstream. Ein Eingriff in Upstreams Permission-Gate ohne belegten Fall erzeugt nur Sync-Konflikte |
+| [iss29-D13](library-v2-issues.md#minor-backend) | Sauber zu beheben nur mit einer neuen normalisierten Namensspalte + Index (Schema-Migration und Anpassung aller Schreibpfade). Das ist eigene Arbeit mit eigenem Testbedarf, nicht der Abschluss dieser Runde — bewusst vertagt statt am Sitzungsende hineingehastet |
+
+
+## 46. Abarbeitung des Multi-Agent-Audits (1. August 2026)
+
+Alle Befunde aus §45 / [issues.md §29](library-v2-issues.md#29-multi-agent-audit-nach-dem-upstream-sync-1-august-2026)
+umgesetzt, bis auf die vier in §45.5 begründeten. Jeder Blocker hat einen
+Regressionstest, der **vor** dem Fix nachweislich fehlschlägt — die bestehende
+Suite fing keinen einzigen dieser Befunde.
+
+Endstand: `tests/library2` 1.219 grün (vorher 1.193), `webui` 1.974 grün
+(vorher 1.971). Die vier `artist-detail`-Dateien mit „localStorage is not
+available" (131 Tests) sind unverändert die bekannte lokale Node-Störung, kein
+Tree-Problem — sie reproduzieren identisch auf sauberem `upstream/dev`.
+
+### 46.1 ldp-01 wiederhergestellt (iss29-B02, B03, B05)
+
+Nutzerentscheidung: ein Suchtreffer soll in Library V2 landen, auch für einen
+Artist ohne Katalogzeile. `/artist-detail/$source/$id` ist damit wieder der
+50-Zeilen-Redirect-Stub nach `/library?discover=<source>:<id>`, wie vor dem
+Sync. Dass Upstreams gepflegte React-Artist-Seite dadurch unerreichbar wird,
+ist bekannt und gewollt; sie liegt weiter im Tree und ist ein Ein-Zeilen-Revert
+entfernt.
+
+Mitgezogen:
+
+- **B03** — ein `<a href="/library?...">` löste einen vollen Dokument-Load aus,
+  weil weder TanStack rohe Anker abfängt noch der Shell-Interceptor diesen Pfad
+  kannte. Neu: `SoulSyncWebRouter.navigateToHref` plus ein Zweig in
+  `_handleShellLinkClick`, der jede React-Route in-app übernimmt — deckt auch
+  die von Hand gebauten Links in `downloads.js` ab.
+- **B01** — dieselbe Naht: die Sidebar-„Library" war aus jeder Unteransicht ein
+  toter Klick, weil `navigateToPage` bei `pageId === currentPage` sofort
+  zurückkehrt. React-Seiten gehen jetzt über ihren Basispfad, was den Guard
+  umgeht und die Sub-View-Parameter fallen lässt — genau das, was der Klick meint.
+- **B05** — `inLibraryArtistPath` trägt die ldp-05-Vorwahl
+  (`releases=all&releaseView=cards&header=rich`), damit derselbe Artist nicht
+  unterschiedlich aussieht, je nachdem ob V2 ihn schon gemappt hat.
+
+Die fünf Tests in `artist-detail/-route.test.tsx`, die Upstreams Seite pinnten,
+sind **ersetzt** (nicht repariert) — sie pinnen jetzt den Redirect. Einer davon
+hat dabei einen echten Fund produziert: TanStack JSON-kodiert Suchparameter, ein
+reiner Ziffernname steht also als `discoverName=%22311%22` auf der Leitung. Die
+Assertion prüft deshalb den *geparsten* Wert, nicht den Querystring.
+
+### 46.2 Migration: Checkpoint, Heartbeat, Watermark (A01, A02, A04, A05, A06)
+
+- **A01** (Blocker): `try_claim` löscht `resume_stage`/`resume_rowid`/`resume_run_id`,
+  wenn der gespeicherte `resume_watermark` nicht der ist, den der Claim gerade
+  stempelt. Die Invariante ist damit lokal und gilt für jeden Aufrufer: ein
+  Checkpoint überlebt einen Claim nur, wenn er gegen denselben Quell-Snapshot
+  entstand. Zwei Tests — der wiederbelebte Punkt UND das echte Resume.
+- **A02**: ein Beat mit `rowid` wird nie gedrosselt. Nur solche Beats persistiert
+  `heartbeat` überhaupt; die Drosselung verwarf also genau die Checkpoints, und
+  ein vollständig erfolgreicher Lauf endete mit `resume_stage='tracks', rowid=0`
+  — dem Wert, der A01 von Doppelarbeit zu leerer Library macht.
+- **A04**: `mark_done` stempelt den **vor** dem ersten Walk erfassten Watermark.
+  Ein Artist, der während des Laufs entsteht, bleibt damit sichtbar offen und
+  wird beim nächsten Tick gewalkt.
+- **A05**: `ensure_bootstrap_schema` schreibt nur noch, wenn die Zeile fehlt —
+  vorher nahm jeder `/import/status`-Poll (1×/s pro Tab) die Schreibsperre.
+- **A06**: der Autostart-Backoff wird nach einem Tick mit Fortschritt
+  zurückgesetzt, statt sich auch bei No-ops bis 30 min zu verdoppeln.
+
+### 46.3 Schreibsperre über Provider-Calls (D01)
+
+`resolve_and_enrich_native_artist` sammelt jetzt **alle** Anchor-Identitäten
+netzseitig ein und schreibt sie danach — dieselbe Form, die
+`enrich_native_entity_for_service` 300 Zeilen weiter unten bereits beschreibt.
+Vorher öffnete `_persist_identity` (blankes UPDATE, `isolation_level=""`) eine
+Transaktion, die über den nächsten Provider-Roundtrip offen blieb: die
+Provider-Clients cachen ihre Antworten in **derselben** Datenbank, der Writer
+wartete also auf sich selbst.
+
+Der Test misst `conn.in_transaction` **während** des Provider-Calls, nicht die
+Aufrufreihenfolge — ein Refactoring, das den verschränkten Write zurückbringt,
+fällt damit auf, wie auch immer die Schleife geschrieben ist.
+
+### 46.4 Reorganize (E01, E02, E05, E07)
+
+- **E01** (Blocker): der Callback in `reorganize_runner` schluckt nichts mehr.
+  `_finalize_track` erkennt einen fehlgeschlagenen DB-Update ausschließlich an
+  einer Exception und löscht danach das Original — der geschluckte Fehler
+  zerstörte also die einzige Kopie und meldete „moved". Legacy- und lib2-Write
+  liegen jetzt in **getrennten** Transaktionen: auf `main` war das eine einzige
+  Anweisung, dieser Branch hatte vier weitere in denselben `try` gelegt.
+- **E02** (Blocker): der Sibling-Move prüft die Zieldatei (`shutil.move` löst auf
+  POSIX zu `os.rename` auf und überschreibt lautlos) und läuft erst **nach** dem
+  erfolgreichen kanonischen Rename — vorher lag das Album bei einem Fehlschlag
+  auf zwei Ordner verteilt.
+- **E05**: `.lrc` & Co. werden mitgenommen statt gelöscht. Reorganize war der
+  einzige Mover im Projekt, der das Sidecar wegwarf — und traf damit genau die
+  Dateien, die lib2 selbst schreibt.
+- **E07**: `save_audio_file`s `False` („Original unangetastet, Tags NICHT
+  geschrieben") wird an allen drei dateiverändernden Aufrufern ausgewertet. Im
+  nativen P3-Pfad bricht der Fix jetzt ab, statt die Datei umzubenennen und das
+  Finding aufzulösen.
+
+### 46.5 Destruktives Repair (E03, E04, E06, E08, E09, E10)
+
+- **E03** (Blocker): der Delete-Zweig in `sync_repair_change` benutzt
+  `links["direct_files"]` — nur das, was die Änderung **konkret** benannt hat.
+  Der Album-Fan-out von `_resolve_links` existiert für den Rescan-Scope; ihn zum
+  Löschen zu benutzen hieß, dass eine entfernte Datei das ganze Album als
+  dateilos markierte und die Wishlist ein vollständig vorhandenes Album erneut
+  herunterlud.
+- **E04** (Blocker): neue gemeinsame Schranke
+  `fuzzy_resolved_path_is_deletable` — ein vom Resolver **geratener** Pfad muss
+  in einem konfigurierten Library-Root liegen. Der Suffix-Walk probiert den
+  Transfer-Ordner zuerst, und Importe liegen dort im selben Layout; ein Finding
+  auf einer verschwundenen Library-Datei traf also den frischen Ersatz-Download.
+  Angewandt an allen drei Löschstellen, fail-closed ohne konfigurierte Roots.
+- **E06**: `mark_file_verification_status` versucht zuerst den indizierten
+  Gleichheits-Match (`idx_lib2_track_files_path`) und fällt nur bei Fehlschlag
+  auf den Resolver-Walk zurück; der Aufruf liegt außerdem nicht mehr in der
+  offenen Schreibtransaktion des „Approve"-Endpunkts. Der Fallback bleibt
+  bewusst vollständig — der Resolver, nicht diese Funktion, definiert
+  „dieselbe Datei". Ein erster Versuch, den Walk über Basenames zu verengen,
+  wurde verworfen, weil er einen echten Vertrag gebrochen hätte.
+- **E08**: `rename_to_basename_result` trennt „schon richtig benannt" von
+  „Rename verweigert"; beides kam vorher als `None` an und wurde als Fix gezählt.
+- **E09**: der dd28-29-Rollback nimmt das `.lrc` mit zurück.
+- **E10**: der Katalog-Write kommt erst, nachdem die Datei als erreichbar
+  nachgewiesen ist — vorher wurde bei nicht gemountetem Root umnummeriert,
+  während die Datei ihre alte Nummer behielt.
+
+### 46.6 UI-Fehlerzustände (A03, C01–C06)
+
+- **A03**: das Import-Status-Polling beobachtet `bootstrap.status`. `running`
+  setzt nur der manuelle Import-Button; die automatische Migration fasste ihn nie
+  an, also stoppte React Query den Timer nach dem ersten Fetch und die Seite fror
+  auf derselben Prozentzahl ein.
+- **C01**: die Zeitstempel verlassen den Server als ISO-8601-UTC (`_iso_utc`).
+  SQLites `CURRENT_TIMESTAMP` ist UTC ohne Zone, V8 liest das als **Lokalzeit** —
+  in Europe/Zurich zwei Stunden daneben. Der Grab-Watcher filtert nach
+  „neuer als mein Start", das Quarantäne-Event fiel also aus dem Filter und die
+  UI meldete am Ende **Grabbed ✓** für eine Datei, die nie ankam. Serverseitig
+  behoben, damit nicht jeder Konsument denselben Fehler wiederholt.
+- **C02**: 409 („Job läuft bereits") wird gelesen statt geworfen — der Server
+  liefert die laufende Job-ID im Body.
+- **C03/C04/C05**: `isError` wird überall ausgewertet. Kein „Your library is
+  empty" mehr für einen Nutzer mit 900 Artists, kein ewiges „Loading…" nach einem
+  404, und die Wanted-Ansicht behauptet nicht mehr „alles schon auf Platte",
+  wenn der Request gescheitert ist.
+- **C06**: eine Queue-Abfrage pro Artist; das Ergebnis wird an die Alben
+  durchgereicht. Der Guard-Test prüfte ein Literal, das im Code gar nicht
+  vorkam, und bestand deshalb vakuum — er ist neu geschrieben und prüft die
+  tatsächliche Schreibweise.
+
+### 46.7 UI-Aktionen (C07–C10, B04, B07, B08, B09)
+
+- **C07**: `Promise.allSettled` statt `Promise.all` — ein Teilerfolg wird als
+  solcher gemeldet, statt 39 angewandte Änderungen als Totalausfall auszugeben.
+- **C08**: die Bulk-Bar hat die Quality-Profile-Aktion (inkl. „Inherit"), die
+  UI-04 fordert und die Backend und Einzelpfad längst konnten.
+- **C09**: `useUiPreferencesMutation` hat einen `onError` — vorher scheiterte
+  eine Präferenz lautlos und war nach dem nächsten Laden wieder weg (M-12 war
+  als implementiert geführt).
+- **C10**: `/library/v2/enabled` liefert `can_write`, und der gemeinsame
+  `ActionButton` wertet es aus. Ein Nicht-Admin bekam vorher die volle Toolbar,
+  jeder Klick 403.
+- **B04a/b/c**: „In Your Library" überlebt den YouTube-Tab (lokales Ergebnis,
+  quellenunabhängig); der Suchcache ist durch den ldp-01-Redirect entschärft
+  (Discovery löst live auf); und ein lib2-nativer Artist wird nicht mehr gegen
+  den generischen Provider-Bild-Resolver aufgelöst, der IDs an Provider
+  weiterreicht und zuverlässig ein fremdes Gesicht lieferte.
+- **B07**: `/library-v2` steht in `_DEEPLINK_VALID_PAGES`.
+- **B08**: die lib2-Artist-ID reist mit zum Player, „Go to artist" ist damit bei
+  V2-Wiedergabe nicht mehr dauerhaft deaktiviert.
+- **B09**: die Filterfelder sind kontrolliert und folgen der URL — Browser-Back
+  desynchronisierte sie vorher dauerhaft.
+
+### 46.8 lib2-Backend (D02–D12)
+
+- **D02**: die Wishlist→lib2-Auflösung indiziert den Katalog **einmal** statt ihn
+  pro Deskriptor erneut zu durchlaufen (1.000 × 50k Iterationen mit je einem
+  `json.loads`). Die Ambiguitätserkennung bleibt exakt erhalten — der Index
+  zeigt auf Listen.
+- **D03**: der Monitor-Endpunkt schiebt den Provider-Walk in
+  `_schedule_tracklist_resolve`, statt einen Web-Worker über die volle
+  Provider-Kette zu blockieren. Die Album-Detail-Route lehnt genau das seit
+  langem ab und begründet es.
+- **D04**: die Artist-Suche ist indizierbar formuliert
+  (`canonical_artist_id = a.id OR (… IS NULL AND member.id = a.id)` statt eines
+  `COALESCE`, das kein Index bedienen kann) und escaped `%`/`_`, die vorher als
+  Wildcards aus der Nutzereingabe wirkten.
+- **D05**: `resolve_tracklist` dokumentiert, dass es die Verbindung des
+  **Aufrufers** committet — wie `mirror_tracks_wishlist` es für sich selbst tut.
+  Alle vier heutigen Aufrufer sind nur durch ihre Position sicher.
+- **D06**: `enrich_native_entity_all_services` liest `provider_id` statt des nie
+  gelieferten `external_id`. Der zugehörige Test hatte die falsche Vertragsseite
+  gepinnt (sein Stub gab `external_id` zurück) — Defekt und Guard hoben sich
+  gegenseitig auf.
+- **D07**: `retry_failed` beschreibt, woher die Supersede-Garantie wirklich
+  kommt (aus `drain`) und wodurch sie verloren geht.
+- **D08/D09**: `file-tags/edit` validiert den Typ von `key`, und sieben Routen
+  benutzen `request.get_json(silent=True)` — es gibt projektweit keinen
+  `errorhandler`, ein Client bekam sonst Flasks HTML-500 statt der JSON-Form.
+- **D10**: verschluckte Tag-Cache-Fehler rollen zurück, bevor die nächste
+  Anweisung LRClib bzw. das NAS anspricht.
+- **D11**: `prune_done` läuft am Ende eines `drain`, der etwas getan hat. Vorher
+  lief es auf dem normalen Pfad nie, und `_superseded_ids` scannte die wachsende
+  Historie bei jedem Drain.
+- **D12**: `/artists/<id>/duplicates` benutzt das vorhandene
+  `primary_file_rows` statt zwei Abfragen pro Paar.
