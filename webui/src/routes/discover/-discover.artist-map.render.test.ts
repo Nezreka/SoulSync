@@ -2,16 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type ArtMapNode, artMap } from './-discover.artist-map';
 import {
-  artMapAnimateConstellation,
-  artMapRender,
   ARTMAP_CAMERA_MS,
   ARTMAP_IMAGE_CONCURRENCY,
   ARTMAP_REDRAW_THROTTLE_MS,
+  artMapAnimateConstellation,
   artMapAnimateTo,
   artMapCircleMask,
   artMapDecodeSmall,
   artMapEnsureAmbient,
+  artMapFocusIsland,
+  artMapIslandNavStep,
   artMapLoadImage,
+  artMapRender,
   artMapStartLoop,
   artMapStreamImages,
 } from './-discover.artist-map.render';
@@ -564,5 +566,79 @@ describe('artMapStreamImages', () => {
     expect(artMap.dirty).toBe(false); //  nothing yet — the redraw is deferred
     await vi.advanceTimersByTimeAsync(ARTMAP_REDRAW_THROTTLE_MS + 10);
     expect(artMap.dirty).toBe(true);
+  });
+});
+
+describe('artMapFocusIsland', () => {
+  const island = (name: string, over: Record<string, unknown> = {}) =>
+    ({ name, cx: 100, cy: 50, r: 200, hue: 120, count: 2, ...over }) as never;
+
+  function withIslands() {
+    artMap.width = 1000;
+    artMap.height = 600;
+    artMap._panelW = 320;
+    artMap._islands = [island('idm'), island('ambient', { cx: 900, cy: 400 })];
+    artMap.placed = [
+      node({ id: 1, _island: 'idm' } as never),
+      node({ id: 2, _island: 'ambient' } as never),
+      node({ id: 3, _island: 'idm', _isLabel: true } as never),
+    ];
+  }
+
+  it('shows ONLY the focused island, labels always hidden, and frames it', () => {
+    withIslands();
+    const isl = artMapFocusIsland(0, { bloom: false });
+    expect(isl!.name).toBe('idm');
+    expect(artMap._focusIdx).toBe(0);
+    expect(artMap.placed.map((n) => n.opacity)).toEqual([1, 0, 0]);
+    // Framed in the width the panel leaves free (6097-6102).
+    const usableW = 1000 - 320;
+    const span = 200 * 2.3 + 120;
+    const z = Math.min(usableW / span, 600 / span, 1.2);
+    expect(artMap.zoom).toBeCloseTo(z);
+    expect(artMap.offsetX).toBeCloseTo(usableW / 2 - 100 * z);
+    expect(artMap.offsetY).toBeCloseTo(600 / 2 - 50 * z);
+  });
+
+  it('clamps the index instead of failing on an out-of-range step', () => {
+    withIslands();
+    expect(artMapFocusIsland(99, { bloom: false })!.name).toBe('ambient');
+    expect(artMap._focusIdx).toBe(1);
+    expect(artMapFocusIsland(-5, { bloom: false })!.name).toBe('idm');
+  });
+
+  it('blooms by default and renders statically only when told not to', () => {
+    withIslands();
+    artMapFocusIsland(0);
+    // Bloom queues the reveal loop: bubbles get reveal timings + a ripple.
+    expect(artMap._revealing).toBe(true);
+    expect(artMap._ripples).toHaveLength(1);
+    expect((artMap._ripples![0] as { hue: number }).hue).toBe(120);
+  });
+
+  it('returns null with no islands', () => {
+    artMap._islands = [];
+    expect(artMapFocusIsland(0)).toBeNull();
+  });
+});
+
+describe('artMapIslandNavStep', () => {
+  it('wraps both directions, and is INERT below two islands', () => {
+    artMap.width = 1000;
+    artMap.height = 600;
+    artMap._panelW = 320;
+    artMap._islands = [
+      { name: 'a', cx: 0, cy: 0, r: 100, hue: 0, count: 1 } as never,
+      { name: 'b', cx: 10, cy: 0, r: 100, hue: 0, count: 1 } as never,
+    ];
+    artMap.placed = [];
+    artMap._focusIdx = 1;
+    expect(artMapIslandNavStep(1)!.name).toBe('a'); // wrap forward
+    expect(artMap._focusIdx).toBe(0);
+    expect(artMapIslandNavStep(-1)!.name).toBe('b'); // wrap back
+    artMap._islands = [{ name: 'only', cx: 0, cy: 0, r: 100, hue: 0, count: 1 } as never];
+    artMap._focusIdx = 0;
+    expect(artMapIslandNavStep(1)).toBeNull();
+    expect(artMap._focusIdx).toBe(0);
   });
 });

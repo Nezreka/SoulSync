@@ -23,6 +23,7 @@ import {
   artMapIsLiveSize,
   artMapNodeDisplacement,
   artMapNodeImgPx,
+  artMapReservedW,
   artMapStepAnimations,
 } from './-discover.artist-map';
 
@@ -1015,6 +1016,60 @@ export function artMapDrawPerf(ctx: Ctx, t0: number): void {
 // ── Camera animation ─────────────────────────────────────────────────────────
 
 /** How long a toolbar zoom/fit takes to land (8400). */
+/**
+ * Focus one genre island (6082-6113): clamp + remember the index, show ONLY
+ * that island's bubbles (labels stay hidden — the nav bar already names the
+ * genre), and frame it in the space LEFT of the info panel.
+ *
+ * The vanilla ends by rewriting the island nav and the panel (6105-6106);
+ * here those are React state, so the FOCUSED ISLAND is returned for the
+ * caller to feed them. `bloom: false` re-renders statically instead.
+ */
+export function artMapFocusIsland(
+  idx: number,
+  opts: { bloom?: boolean } = {},
+): ArtMapIsland | null {
+  const islands = artMap._islands || [];
+  if (!islands.length) return null;
+  const clamped = Math.max(0, Math.min(islands.length - 1, idx));
+  artMap._focusIdx = clamped;
+  const isl = islands[clamped];
+
+  for (const n of artMap.placed) {
+    n.opacity = !n._isLabel && n._island === isl.name ? 1 : 0;
+  }
+
+  // ~80% framing in the width the panel leaves free (6097-6102).
+  const usableW = Math.max(200, artMap.width - artMapReservedW());
+  const span = isl.r * 2.3 + 120;
+  const z = Math.min(usableW / span, artMap.height / span, 1.2);
+  artMap.zoom = z;
+  artMap.offsetX = usableW / 2 - isl.cx * z;
+  artMap.offsetY = artMap.height / 2 - isl.cy * z;
+
+  if (opts.bloom !== false) {
+    artMapBloomIsland(isl);
+  } else {
+    artMap.dirty = true;
+    artMapRender();
+  }
+  return isl;
+}
+
+/**
+ * Step to the prev/next island, WRAPPING (6139-6146) — and refusing entirely
+ * below two islands, so the arrows are inert rather than re-blooming the only
+ * island on every press.
+ */
+export function artMapIslandNavStep(dir: number): ArtMapIsland | null {
+  const islands = artMap._islands || [];
+  if (islands.length < 2) return null;
+  let idx = (artMap._focusIdx || 0) + dir;
+  if (idx < 0) idx = islands.length - 1;
+  if (idx >= islands.length) idx = 0;
+  return artMapFocusIsland(idx, { bloom: true });
+}
+
 export const ARTMAP_CAMERA_MS = 250;
 
 /**
