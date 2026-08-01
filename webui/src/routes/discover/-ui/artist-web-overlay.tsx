@@ -123,7 +123,7 @@ export function ArtWebOverlay({
   const activeCount = rows.filter((r) => r.active).length;
 
   return (
-    <div className="artist-map-container" id="artist-web-container">
+    <div className="artist-map-container" id="artist-web-container" style={{ display: 'flex' }}>
       <div className="artist-map-toolbar">
         <div className="artmap-nav-left">
           <button

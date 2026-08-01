@@ -135,7 +135,7 @@ export function ArtMapOverlay({
   );
 
   return (
-    <div ref={containerRef} className="artist-map-container" id="artist-map-container">
+    <div ref={containerRef} className="artist-map-container" id="artist-map-container" style={{ display: 'flex' }}>
       <div className="artist-map-toolbar">
         <div className="artmap-nav-left">
           <button
