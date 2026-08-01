@@ -386,7 +386,13 @@ describe('detail paths', () => {
    * which is the bug this replaces (docs/library-v2-issues.md §10/§11).
    */
   it('opens an "In Your Library" hit in Library v2 when v2 knows the artist', () => {
-    expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe('/library?artist=7');
+    // ldp-05 (iss29-B05): a search arrival lands on the legacy artist page's
+    // shape — full discography, cards, rich header. Without these params the
+    // deep link fell back to the in-library defaults, so the same artist looked
+    // different depending on whether v2 had mapped it.
+    expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe(
+      '/library?artist=7&releases=all&releaseView=cards&header=rich',
+    );
   });
 
   it('falls back to artist detail when v2 has not mapped the artist', () => {

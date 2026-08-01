@@ -109,6 +109,23 @@ export function emptySourceResults(): SourceResults {
   return { db_artists: [], artists: [], albums: [], tracks: [], videos: [] };
 }
 
+/**
+ * The library artists any source of this query already resolved (iss29-B04a).
+ *
+ * "In Your Library" is a local catalogue result: it does not depend on which
+ * provider tab is active, so a source that cannot produce it (the video
+ * search) should show what a sibling already found rather than an empty
+ * section.
+ */
+export function knownDbArtists(
+  sources: Partial<Record<string, SourceResults>>,
+): SourceResults['db_artists'] {
+  for (const results of Object.values(sources)) {
+    if (results?.db_artists?.length) return results.db_artists;
+  }
+  return [];
+}
+
 /** Unpack /api/enhanced-search into the per-source cache shape. */
 export function sourceResultsFromResponse(data: EnhancedSearchResponse): SourceResults {
   return {
@@ -300,7 +317,13 @@ export function inLibraryArtistPath(artist: {
   library_v2_id?: number | null;
 }): string {
   return artist.library_v2_id
-    ? `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}`
+    ? // ldp-05 (iss29-B05): arriving from a search result means landing on what
+      // the legacy artist page showed — full discography, cards, rich header.
+      // Without these the direct deep link fell back to the in-library defaults
+      // (My Library / table / compact), so the same artist looked different
+      // depending on whether v2 had mapped it yet.
+      `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}` +
+      `&releases=all&releaseView=cards&header=rich`
     : artistDetailPath(artist.id ?? '');
 }
 

@@ -321,6 +321,11 @@ def test_global_search_merges_v2_only_artists_and_provider_deduplicates(tmp_path
         'library_v2_id': 12,
         'name': 'V2 Native Artist',
         'image_url': 'FIXED::cover.jpg',
+        # iss29-B04c: `id` is a LIB2 id here, so the generic
+        # /api/artist/<id>/image resolver must not be asked to resolve it — it
+        # forwards ids straight to the providers and returned whichever Deezer
+        # or iTunes artist happened to own that number.
+        'image_is_native': True,
     }
 
 

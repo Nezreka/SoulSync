@@ -6864,6 +6864,10 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             legacy_track_id: track.legacy_track_id || null,
             server_track_id: track.server_track_id || null,
             artist_id: track.artist_id,
+            // iss29-B08: a V2-native track has no legacy artist id, so the
+            // player's "Go to artist" needs the lib2 one to route to
+            // /library?artist=. setTrackInfo drops anything it isn't handed.
+            lib2_artist_id: track.lib2_artist_id || null,
             album_id: track.album_id,
             bitrate: track.bitrate,
             sample_rate: track.sample_rate

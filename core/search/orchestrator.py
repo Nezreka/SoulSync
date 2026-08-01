@@ -352,7 +352,19 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                 'id': v2_id,
                 'library_v2_id': v2_id,
                 'name': row['name'],
-                'image_url': deps.fix_artist_image_url(row['image_url']),
+                # iss29-B04c: a lib2-NATIVE artist has no legacy row, so `id`
+                # here is a lib2 id. The generic `/api/artist/<id>/image`
+                # resolver forwards whatever id it is given to the providers,
+                # which means a lib2 id resolved to whichever Deezer/iTunes
+                # artist happens to own that number — a confidently wrong face
+                # on the card. Library V2 serves this artist's own artwork, so
+                # point at that; when there is none, the caller must show the
+                # placeholder rather than ask the provider resolver.
+                'image_url': (
+                    deps.fix_artist_image_url(row['image_url'])
+                    if row['image_url'] else f"/api/library/v2/artwork/artist/{v2_id}"
+                ),
+                'image_is_native': True,
             })
     except Exception as exc:  # fresh/partially migrated DB: legacy search still works
         logger.debug("Library-v2 global artist search unavailable: %s", exc)

@@ -122,6 +122,14 @@ export function bindWindowWebRouter(router: AnyRouter) {
       await router.navigate({ href, replace: options?.replace === true });
       return true;
     },
+    async navigateToHref(href, options) {
+      // Only same-origin app paths; anything else belongs to the browser.
+      if (!href.startsWith('/') || href.startsWith('//')) return false;
+      const pageId = resolveShellPageFromPath(new URL(href, window.location.origin).pathname);
+      if (!pageId || getShellRouteByPageId(pageId)?.kind !== 'react') return false;
+      await router.navigate({ href: href as `/${string}`, replace: options?.replace === true });
+      return true;
+    },
   };
 }
 
