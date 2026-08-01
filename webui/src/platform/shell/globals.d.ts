@@ -217,6 +217,21 @@ declare global {
      * down, the fetch fails and the modal the user already had would never come
      * back. Returns true when a modal was shown.
      */
+    /**
+     * downloads.js:429 — the shared download-missing modal, YouTube-track
+     * flavour. Discover's mixes, recent/seasonal/cache albums and the playlist
+     * builder all hand their converted tracks to it; artist/album context is
+     * optional and switches the modal into album mode.
+     */
+    openDownloadMissingModalForYouTube?: (
+      virtualPlaylistId: string,
+      playlistName: string,
+      spotifyTracks: unknown[],
+      artist?: unknown,
+      album?: unknown,
+    ) => void | Promise<void>;
+    /** init.js:1465 — the My Accounts / personal settings modal. */
+    openPersonalSettings?: () => void | Promise<void>;
     /** core.js bridge: one discover download's process record, or null. */
     discoverDownloadProcess?: (
       virtualPlaylistId: string,
