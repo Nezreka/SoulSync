@@ -90,9 +90,7 @@ const MISSING_UI = [
   'decade tab contents',
   'seasonal playlist shelf feeder',
   'your albums batch modal',
-  'your albums sources modal',
   'your artists modal',
-  'your artists sources modal',
 ];
 
 describe('every UI piece the page needs has a component', () => {
