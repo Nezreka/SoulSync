@@ -1,6 +1,7 @@
 import type { HeroWatchlistButton, WatchAllPhase } from '../-discover.hero';
 import type { DiscoverHeroArtist } from '../-discover.types';
 
+import { recommendationReason, recommendationReasonTitle } from '../-discover.helpers';
 import {
   heroGenres,
   heroIndicators,
@@ -76,7 +77,15 @@ export function DiscoverHero({
       <div
         className="discover-hero-background"
         id="discover-hero-bg"
-        style={artist?.image_url ? { backgroundImage: `url(${artist.image_url})` } : undefined}
+        style={
+          artist?.image_url
+            ? {
+                backgroundImage: `url('${artist.image_url}')`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }
+            : undefined
+        }
       />
       <div className="discover-hero-overlay" />
 
@@ -124,25 +133,43 @@ export function DiscoverHero({
           <h1 className="discover-hero-title" id="discover-hero-title">
             {artist ? artist.artist_name : HERO_EMPTY_TITLE}
           </h1>
-          <p className="discover-hero-subtitle" id="discover-hero-subtitle">
-            {/* The empty subtitle tells the user what to DO; a blank billboard
-                just looks broken. */}
-            {artist ? 'Discover new music tailored to your taste' : HERO_EMPTY_SUBTITLE}
+          <p
+            className="discover-hero-subtitle"
+            id="discover-hero-subtitle"
+            // The full provenance list; the visible line truncates (468-469).
+            title={artist ? recommendationReasonTitle(artist as never) : undefined}
+          >
+            {/* NOT static copy. The vanilla sets this to the "because you have
+                X, Y" line per artist (468); the static text is only the markup's
+                pre-load placeholder. Empty state still explains what to do. */}
+            {artist ? recommendationReason(artist as never) : HERO_EMPTY_SUBTITLE}
           </p>
+          {/* The vanilla's meta markup verbatim (474-499): a content wrapper,
+              a banded popularity tile with icon/value/label, and the genres in
+              their own .hero-genres item as .genre-tag pills. The first draft
+              invented flat spans and "84% match" copy — it type-checked,
+              passed its tests, and matched nothing style.css styles. */}
           <div className="discover-hero-meta" id="discover-hero-meta">
-            {artist && heroShowsPopularity(artist) && (
-              <span
-                className={`discover-hero-popularity ${heroPopularityClass(artist.popularity ?? 0)}`}
-              >
-                {artist.popularity}% match
-              </span>
-            )}
-            {artist &&
-              heroGenres(artist).map((g) => (
-                <span className="discover-hero-genre" key={g}>
-                  {g}
-                </span>
-              ))}
+            <div className="discover-hero-meta-content">
+              {artist && heroShowsPopularity(artist) && (
+                <div
+                  className={`hero-meta-item hero-popularity ${heroPopularityClass(artist.popularity ?? 0)}`}
+                >
+                  <span className="meta-icon">⭐</span>
+                  <span className="meta-value">{artist.popularity}/100</span>
+                  <span className="meta-label">Popularity</span>
+                </div>
+              )}
+              {artist && heroGenres(artist).length > 0 && (
+                <div className="hero-meta-item hero-genres">
+                  {heroGenres(artist).map((g) => (
+                    <span className="genre-tag" key={g}>
+                      {g}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           {!empty && (
             <div className="discover-hero-actions">

@@ -54,19 +54,52 @@ describe('the hero', () => {
     expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
   });
 
-  it('shows at most three genres', () => {
+  it('shows at most three genres, as .genre-tag pills in .hero-genres', () => {
     const { container } = render(<DiscoverHero {...heroProps()} />);
-    expect(container.querySelectorAll('.discover-hero-genre')).toHaveLength(3);
+    expect(container.querySelectorAll('.hero-genres .genre-tag')).toHaveLength(3);
     expect(screen.queryByText('techno')).toBeNull();
   });
 
+  it('drops the genres item entirely when there are none', () => {
+    const { container } = render(
+      <DiscoverHero {...heroProps({ artist: artist({ genres: [] }) })} />,
+    );
+    expect(container.querySelector('.hero-genres')).toBeNull();
+  });
+
+  it('subtitles with the per-artist REASON, carrying the full list as a title', () => {
+    // The vanilla sets the subtitle to the "because you have X, Y" line per
+    // artist (468); static copy is only the pre-load placeholder.
+    const { container } = render(
+      <DiscoverHero
+        {...heroProps({ artist: artist({ because: ['Squarepusher', 'Autechre'] } as never) })}
+      />,
+    );
+    const sub = container.querySelector('#discover-hero-subtitle')!;
+    expect(sub.textContent).toBe('Because you have Squarepusher & Autechre');
+    expect(sub).toHaveAttribute('title', 'In your library: Squarepusher, Autechre');
+  });
+
   it('treats a popularity of zero as an absence, not a score', () => {
-    // The server sends 0 for artists it knows nothing about; "0% match" reads
+    // The server sends 0 for artists it knows nothing about; a zero tile reads
     // as a judgement rather than missing data.
     const { container } = render(
       <DiscoverHero {...heroProps({ artist: artist({ popularity: 0 }) })} />,
     );
-    expect(container.querySelector('.discover-hero-popularity')).toBeNull();
+    expect(container.querySelector('.hero-popularity')).toBeNull();
+  });
+
+  it('renders the popularity tile with the vanilla markup, banded', () => {
+    // .hero-meta-item.hero-popularity.{band} with icon / "N/100" / label
+    // (476-484) — the first draft invented flat spans and "84% match".
+    const { container } = render(<DiscoverHero {...heroProps()} />);
+    const tile = container.querySelector('.hero-meta-item.hero-popularity')!;
+    expect(tile).toHaveClass('high');
+    expect(tile.querySelector('.meta-icon')!.textContent).toBe('⭐');
+    expect(tile.querySelector('.meta-value')!.textContent).toBe('84/100');
+    expect(tile.querySelector('.meta-label')!.textContent).toBe('Popularity');
+    // And the whole meta block sits inside the content wrapper (474).
+    expect(container.querySelector('.discover-hero-meta-content')).not.toBeNull();
   });
 
   it.each([
@@ -77,7 +110,7 @@ describe('the hero', () => {
     const { container } = render(
       <DiscoverHero {...heroProps({ artist: artist({ popularity }) })} />,
     );
-    expect(container.querySelector('.discover-hero-popularity')).toHaveClass(band);
+    expect(container.querySelector('.hero-popularity')).toHaveClass(band);
   });
 
   it('hides the arrows and dots when there is only one artist', () => {
@@ -143,9 +176,11 @@ describe('the hero', () => {
       'src',
       '/img/aphex.jpg',
     );
-    expect(
-      (container.querySelector('#discover-hero-bg') as HTMLElement).style.backgroundImage,
-    ).toBe('url("/img/aphex.jpg")'); //  as the CSSOM normalises it
+    const bg = container.querySelector('#discover-hero-bg') as HTMLElement;
+    expect(bg.style.backgroundImage).toContain('/img/aphex.jpg');
+    // cover/center ride along inline, exactly as the vanilla sets them (509-510).
+    expect(bg.style.backgroundSize).toBe('cover');
+    expect(bg.style.backgroundPosition).toBe('center center'); //  as the CSSOM normalises it
   });
 
   it('leaves the watchlist button alone when the check has not answered', () => {
@@ -255,9 +290,14 @@ describe('the section shell', () => {
 
   it('stays and explains when an empty-state section has no rows', () => {
     // These messages tell the user what to DO, which is lost if the section
-    // simply disappears.
-    render(<DiscoverSection {...section({ id: 'recent-releases', count: 0 })} />);
-    expect(screen.getByText('No recent releases found')).toBeInTheDocument();
+    // simply disappears — and the markup is the controller's own
+    // `.discover-empty > p`, which style.css actually styles.
+    const { container } = render(
+      <DiscoverSection {...section({ id: 'recent-releases', count: 0 })} />,
+    );
+    expect(container.querySelector('.discover-empty > p')!.textContent).toBe(
+      'No recent releases found',
+    );
   });
 
   it('stays out of the layout until its load completes', () => {

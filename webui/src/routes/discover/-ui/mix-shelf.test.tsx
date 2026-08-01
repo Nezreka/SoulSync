@@ -76,9 +76,13 @@ describe('the mix card', () => {
         onOpen={vi.fn()}
       />,
     );
-    expect(container.querySelector('.mix-card-cover--solid')).not.toBeNull();
+    const cover = container.querySelector('.mix-card-cover--solid')!;
     expect(container.querySelectorAll('.mix-card-tile')).toHaveLength(0);
-    expect(screen.getByText('1990s')).toBeInTheDocument();
+    // The section's own nodes are DIRECT children of the cover (4842) — a
+    // wrapper div would break child selectors and height:100% sizing.
+    expect(cover.children[0].tagName).toBe('SPAN');
+    expect(cover.children[0].textContent).toBe('1990s');
+    expect(cover.children[1]).toHaveClass('mix-card-play');
   });
 
   it('keeps a play affordance on both cover kinds', () => {

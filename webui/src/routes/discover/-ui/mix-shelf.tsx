@@ -27,15 +27,15 @@ export function DiscoverMixCard({ mix, onOpen }: DiscoverMixCardProps) {
   return (
     <div className="discover-mix-card" data-mix-key={mix.key} onClick={() => onOpen(mix.key)}>
       {mixUsesSolidCover(mix) ? (
-        <div className="mix-card-cover mix-card-cover--solid">
-          {/* Sections with no per-track art (decades) supply their own cover —
-              a gradient and a label, built by the section, not by us. */}
-          <div
-            className="mix-card-solid-inner"
-            dangerouslySetInnerHTML={{ __html: mix.coverHtml as string }}
-          />
-          <div className="mix-card-play">▶</div>
-        </div>
+        <div
+          className="mix-card-cover mix-card-cover--solid"
+          // The cover html's nodes are DIRECT children of the cover in the
+          // vanilla (4842), with the play overlay beside them — a wrapper div
+          // would break any child selector or height:100% the cover relies on.
+          dangerouslySetInnerHTML={{
+            __html: `${mix.coverHtml as string}<div class="mix-card-play">▶</div>`,
+          }}
+        />
       ) : (
         <div className="mix-card-cover">
           {mixCoverTiles(mix.tracks).map((cover, i) => (

@@ -85,8 +85,11 @@ export function DiscoverSection({
         {actions && <div className="discover-section-actions">{actions}</div>}
       </div>
       {showEmpty ? (
-        <div className="discover-section-empty">
-          {emptyMessage ?? (policy.kind === 'empty-state' ? policy.message : '')}
+        // `.discover-empty` with an inner <p> — the section controller's own
+        // markup (discover-section-controller.js 156, discover.js 2467).
+        // `.discover-section-empty` was an invention with no stylesheet rule.
+        <div className="discover-empty">
+          <p>{emptyMessage ?? (policy.kind === 'empty-state' ? policy.message : '')}</p>
         </div>
       ) : (
         children

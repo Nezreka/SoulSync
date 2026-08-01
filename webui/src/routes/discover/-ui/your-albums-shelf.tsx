@@ -1,12 +1,12 @@
-import type { AlbumBadge } from '../-discover.your-albums';
-
 import {
   albumBadge,
   albumCover,
   yourAlbumsPagination,
   YOUR_ALBUMS_DEFAULT_SORT,
   YOUR_ALBUMS_DEFAULT_STATUS,
+  YOUR_ALBUMS_EMPTY,
 } from '../-discover.your-albums';
+import { DiscoverAlbumCard } from './album-shelves';
 import { DiscoverSection } from './discover-section';
 import { GearIcon, RefreshIcon } from './your-artists-shelf';
 
@@ -52,7 +52,8 @@ export interface YourAlbumsShelfProps {
   onSortChange: (sort: string) => void;
   onPrevPage: () => void;
   onNextPage: () => void;
-  onOpenAlbum: (album: YourAlbum) => void;
+  /** BY INDEX (1468): the download flow resolves the album from its own list. */
+  onOpenAlbum: (index: number) => void;
 }
 
 const STATUS_OPTIONS = [
@@ -97,7 +98,10 @@ export function YourAlbumsShelf({
       id="your-albums-section"
       title="Your Albums"
       subtitle={subtitle}
-      count={albums.length}
+      // The TOTAL, not the current page/filter: a filter that matches nothing
+      // must not hide the whole section — the vanilla keeps it and puts
+      // "No albums found" in the grid (1457-1459).
+      count={total}
       loaded={loaded}
       actions={
         <>
@@ -190,12 +194,23 @@ export function YourAlbumsShelf({
             <div className="loading-spinner" />
             <p>Loading your albums...</p>
           </div>
+        ) : albums.length === 0 ? (
+          <div className="spotify-library-empty">
+            <p>{YOUR_ALBUMS_EMPTY}</p>
+          </div>
         ) : (
-          albums.map((album) => (
-            <AlbumCard
+          /* The SAME .ya-card the other album shelves use (1467-1479) — the
+             first draft invented a .spotify-album-card family that exists in no
+             stylesheet. Ownership rides as a badge on the shared card. */
+          albums.map((album, i) => (
+            <DiscoverAlbumCard
               key={String(album.id ?? `${album.artist_name}:${album.album_name}`)}
-              album={album}
-              onOpen={onOpenAlbum}
+              cover={albumCover(album)}
+              albumName={album.album_name ?? ''}
+              artistName={album.artist_name ?? ''}
+              badge={albumBadge(album)}
+              titleAttr={`${album.album_name ?? ''} — ${album.artist_name ?? ''}`}
+              onOpen={() => onOpenAlbum(i)}
             />
           ))
         )}
@@ -203,31 +218,25 @@ export function YourAlbumsShelf({
 
       {pager.visible && (
         <div className="spotify-library-pagination" id="your-albums-pagination">
-          <button type="button" disabled={pager.prevDisabled} onClick={onPrevPage}>
-            Previous
+          <button
+            type="button"
+            className="spotify-library-page-btn"
+            disabled={pager.prevDisabled}
+            onClick={onPrevPage}
+          >
+            ← Previous
           </button>
-          <span className="spotify-library-page-label">{pager.label}</span>
-          <button type="button" disabled={pager.nextDisabled} onClick={onNextPage}>
-            Next
+          <span className="spotify-library-page-info">{pager.label}</span>
+          <button
+            type="button"
+            className="spotify-library-page-btn"
+            disabled={pager.nextDisabled}
+            onClick={onNextPage}
+          >
+            Next →
           </button>
         </div>
       )}
     </DiscoverSection>
-  );
-}
-
-function AlbumCard({ album, onOpen }: { album: YourAlbum; onOpen: (album: YourAlbum) => void }) {
-  const badge: AlbumBadge = albumBadge(album);
-  return (
-    <div className="spotify-album-card" onClick={() => onOpen(album)}>
-      <div className="spotify-album-cover">
-        <img src={albumCover(album)} alt={album.album_name ?? ''} loading="lazy" />
-        <span className={`spotify-album-badge ${badge.className}`}>{badge.icon}</span>
-      </div>
-      <div className="spotify-album-info">
-        <div className="spotify-album-name">{album.album_name}</div>
-        <div className="spotify-album-artist">{album.artist_name}</div>
-      </div>
-    </div>
   );
 }

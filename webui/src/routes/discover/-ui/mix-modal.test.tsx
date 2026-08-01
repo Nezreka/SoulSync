@@ -8,9 +8,11 @@ import { CompactPlaylist, MixModal, MixSelectionBarView } from './mix-modal';
 /**
  * The compact track list and the mix modal.
  *
- * `selectable` is the axis everything here turns on: it is opt-in per call, and
- * it brings the checkbox, the preview button AND the class the grid reflows on.
- * The plain playlist renderers pass nothing and must get none of it.
+ * `selectable` is the axis the rows turn on; the modal's own risk is different:
+ * its first version was invented wholesale and passed a full mutation pass,
+ * because its tests asserted the invention. Everything below the rows now pins
+ * the VANILLA shell — `.mix-modal` in `#mix-modal-overlay`, the eyebrow
+ * subtitle, `btn--sm` actions with the sync id, and the selbar's real ids.
  */
 
 afterEach(cleanup);
@@ -110,8 +112,22 @@ describe('the selection bar', () => {
     total: 3,
     selected: [],
     onSelectAll: vi.fn(),
+    onClearSelection: vi.fn(),
     onDownloadSelected: vi.fn(),
     ...over,
+  });
+
+  it('keeps the ids the vanilla updater writes into', () => {
+    const { container } = render(<MixSelectionBarView {...bar()} />);
+    for (const sel of [
+      '#mix-modal-selbar.mix-modal-selbar',
+      '.mix-selbar-all #mix-select-all',
+      '#mix-sel-count.mix-sel-count',
+      '.mix-selbar-spacer',
+      '#mix-dl-selected',
+    ]) {
+      expect(container.querySelector(sel), sel).not.toBeNull();
+    }
   });
 
   it('counts the selection and disables download at zero', () => {
@@ -126,32 +142,26 @@ describe('the selection bar', () => {
     expect(screen.getByText('Download selected (2)')).not.toBeDisabled();
   });
 
-  it('ticks select-all only when everything is selected', () => {
+  it('ticks select-all only when everything is selected, never on empty', () => {
     const { container, rerender } = render(<MixSelectionBarView {...bar({ selected: [0, 1] })} />);
-    const box = () => container.querySelector('.mix-select-all input') as HTMLInputElement;
+    const box = () => container.querySelector('#mix-select-all') as HTMLInputElement;
     expect(box().checked).toBe(false);
     rerender(<MixSelectionBarView {...bar({ selected: [0, 1, 2] })} />);
     expect(box().checked).toBe(true);
+    // 0 === 0 would otherwise show select-all ticked on a list with no rows.
+    rerender(<MixSelectionBarView {...bar({ total: 0, selected: [] })} />);
+    expect(box().checked).toBe(false);
   });
 
-  it('does NOT tick select-all for an empty list', () => {
-    // 0 === 0 would otherwise show every row selected on a list with no rows.
-    const { container } = render(<MixSelectionBarView {...bar({ total: 0 })} />);
-    expect((container.querySelector('.mix-select-all input') as HTMLInputElement).checked).toBe(
-      false,
-    );
-  });
-
-  it('selects and clears everything', () => {
-    const p = bar();
-    const { container, rerender } = render(<MixSelectionBarView {...p} />);
-    fireEvent.click(container.querySelector('.mix-select-all input')!);
+  it('selects everything, clears everything — as DIFFERENT actions', () => {
+    // Clear exists even when nothing is "all": it unticks whatever subset is
+    // ticked, which select-all(false) only does from the fully-ticked state.
+    const p = bar({ selected: [1] });
+    const { container } = render(<MixSelectionBarView {...p} />);
+    fireEvent.click(container.querySelector('#mix-select-all')!);
     expect(p.onSelectAll).toHaveBeenCalledWith([0, 1, 2]);
-
-    const p2 = bar({ selected: [0, 1, 2] });
-    rerender(<MixSelectionBarView {...p2} />);
-    fireEvent.click(container.querySelector('.mix-select-all input')!);
-    expect(p2.onSelectAll).toHaveBeenCalledWith([]);
+    fireEvent.click(screen.getByText('Clear'));
+    expect(p.onClearSelection).toHaveBeenCalled();
   });
 
   it('downloads the selection', () => {
@@ -177,61 +187,72 @@ describe('the mix modal', () => {
     onClose: vi.fn(),
     onAction: vi.fn(),
     onSelectAll: vi.fn(),
+    onClearSelection: vi.fn(),
     onToggleTrack: vi.fn(),
     onPreviewTrack: vi.fn(),
     onDownloadSelected: vi.fn(),
     ...over,
   });
 
-  it('shows the title, subtitle and the track list', () => {
-    const { container } = render(
-      <MixModal {...props({ mix: mix({ subtitle: 'Fresh picks' }) })} />,
-    );
-    expect(screen.getByText('Your Mix')).toBeInTheDocument();
-    expect(screen.getByText('Fresh picks')).toBeInTheDocument();
-    expect(container.querySelectorAll('.discover-playlist-track-compact')).toHaveLength(1);
-  });
-
-  it('always renders its rows SELECTABLE', () => {
-    // The whole point of #1079 — the modal is where selection lives.
+  it('renders the vanilla shell: overlay id, .mix-modal, header, body id', () => {
     const { container } = render(<MixModal {...props()} />);
-    expect(container.querySelector('.track-compact-check')).not.toBeNull();
+    for (const sel of [
+      '#mix-modal-overlay.modal-overlay',
+      '.mix-modal',
+      '.mix-modal-header',
+      '.mix-modal-actions',
+      '.mix-modal-close',
+      '#mix-modal-tracks.mix-modal-body',
+    ]) {
+      expect(container.querySelector(sel), sel).not.toBeNull();
+    }
   });
 
-  it('builds Download and Sync from a syncKey', () => {
+  it('puts the subtitle ABOVE the title as an eyebrow, falling back to Mix', () => {
+    const { container, rerender } = render(
+      <MixModal {...props({ mix: mix({ subtitle: 'by ListenBrainz' }) })} />,
+    );
+    const header = container.querySelector('.mix-modal-header > div')!;
+    expect(header.children[0]).toHaveClass('mix-modal-subtitle');
+    expect(header.children[0].textContent).toBe('by ListenBrainz');
+    expect(header.children[1]).toHaveClass('mix-modal-title');
+    expect(header.children[1].textContent).toBe('Your Mix');
+    rerender(<MixModal {...props()} />);
+    expect(container.querySelector('.mix-modal-subtitle')!.textContent).toBe('Mix');
+  });
+
+  it('leaves the meta EMPTY until a lazy mix has tracks', () => {
+    // '' rather than '0 tracks' (4981); the count fills in after the fetch.
+    const { container, rerender } = render(<MixModal {...props({ tracks: undefined })} />);
+    expect(container.querySelector('.mix-modal-meta')!.textContent).toBe('');
+    rerender(<MixModal {...props()} />);
+    expect(container.querySelector('.mix-modal-meta')!.textContent).toBe('1 tracks');
+  });
+
+  it('builds Download and Sync from a syncKey, in btn--sm classes', () => {
     render(<MixModal {...props()} />);
-    expect(screen.getByText('Download')).toBeInTheDocument();
-    expect(screen.getByText('Sync')).toBeInTheDocument();
+    expect(screen.getByText('Download')).toHaveClass('btn', 'btn--sm', 'btn--secondary');
+    expect(screen.getByText('Sync')).toHaveClass('btn', 'btn--sm', 'btn--primary');
   });
 
-  it("prefers a mix's own actions", () => {
-    render(
-      <MixModal
-        {...props({
-          mix: mix({ actions: [{ label: 'Rebuild', onclick: 'rebuild' }] }),
-        })}
-      />,
+  it('gives the SYNC button the id the live poller re-enables it by', () => {
+    // your_mix → your-mix (underscores to hyphens, 4943).
+    render(<MixModal {...props()} />);
+    expect(screen.getByText('Sync')).toHaveAttribute('id', 'your-mix-sync-btn');
+    expect(screen.getByText('Download')).not.toHaveAttribute('id');
+  });
+
+  it("prefers a mix's own actions, and shows none with neither", () => {
+    const { container, rerender } = render(
+      <MixModal {...props({ mix: mix({ actions: [{ label: 'Rebuild', onclick: 'x' }] }) })} />,
     );
     expect(screen.getByText('Rebuild')).toBeInTheDocument();
     expect(screen.queryByText('Sync')).toBeNull();
-  });
-
-  it('shows NO actions for a mix with neither', () => {
-    // That is the vanilla's behaviour, not an oversight: there is nothing for
-    // Download or Sync to act on.
-    const { container } = render(<MixModal {...props({ mix: mix({ syncKey: undefined }) })} />);
-    expect(container.querySelector('.mix-modal-actions')).toBeNull();
-  });
-
-  it('marks the primary action', () => {
-    render(<MixModal {...props()} />);
-    expect(screen.getByText('Sync')).toHaveClass('primary');
-    expect(screen.getByText('Download')).not.toHaveClass('primary');
+    rerender(<MixModal {...props({ mix: mix({ syncKey: undefined }) })} />);
+    expect(container.querySelectorAll('.mix-modal-actions button')).toHaveLength(1); // close only
   });
 
   it('reports the whole action, so the caller can honour closeFirst', () => {
-    // Download opens a second modal beneath this one, which would otherwise be
-    // uninteractable — the flag has to survive the click.
     const p = props();
     render(<MixModal {...p} />);
     fireEvent.click(screen.getByText('Download'));
@@ -240,20 +261,64 @@ describe('the mix modal', () => {
     );
   });
 
-  it('renders a sync panel when it is given one', () => {
+  it('renders the generic sync block from the statusBase when syncing', () => {
     const { container } = render(
-      <MixModal {...props({ syncStatus: <div className="sync-panel">syncing</div> })} />,
+      <MixModal
+        {...props({
+          syncing: true,
+          syncProgress: { total_tracks: 10, matched_tracks: 4, failed_tracks: 1 },
+        })}
+      />,
     );
-    expect(container.querySelector('.sync-panel')).not.toBeNull();
+    expect(container.querySelector('#your-mix-sync-status')).not.toBeNull();
+    expect(container.querySelector('#your-mix-sync-percentage')!.textContent).toBe('50');
   });
 
-  it('closes on the backdrop and the × but not on the card', () => {
+  it('lets a section REPLACE the sync block with its own markup', () => {
+    // ListenBrainz syncs write into -sync-total/-sync-matched spans; handing it
+    // the generic block would leave the poller writing into nothing.
+    const { container } = render(
+      <MixModal
+        {...props({
+          syncing: true,
+          syncStatusOverride: <div className="lb-status">lb</div>,
+        })}
+      />,
+    );
+    expect(container.querySelector('.lb-status')).not.toBeNull();
+    expect(container.querySelector('#your-mix-sync-status')).toBeNull();
+  });
+
+  it('hides the selection bar until there are tracks to select', () => {
+    const { container, rerender } = render(<MixModal {...props({ tracks: undefined })} />);
+    expect(container.querySelector('#mix-modal-selbar')).toBeNull();
+    rerender(<MixModal {...props({ tracks: [] })} />);
+    expect(container.querySelector('#mix-modal-selbar')).toBeNull();
+    rerender(<MixModal {...props()} />);
+    expect(container.querySelector('#mix-modal-selbar')).not.toBeNull();
+  });
+
+  it('always renders its rows SELECTABLE', () => {
+    const { container } = render(<MixModal {...props()} />);
+    expect(container.querySelector('.track-compact-check')).not.toBeNull();
+  });
+
+  it('shows loading and failure as the shared empty blocks', () => {
+    const { container, rerender } = render(
+      <MixModal {...props({ tracks: undefined, loading: true })} />,
+    );
+    expect(container.querySelector('.discover-empty p')!.textContent).toBe('Loading tracks…');
+    rerender(<MixModal {...props({ tracks: undefined, error: true })} />);
+    expect(container.querySelector('.discover-empty p')!.textContent).toBe('Failed to load tracks');
+  });
+
+  it('closes on the backdrop and the ✕ but not on the card', () => {
     const p = props();
     const { container } = render(<MixModal {...p} />);
-    fireEvent.click(container.querySelector('.discover-mix-modal')!);
+    fireEvent.click(container.querySelector('.mix-modal')!);
     expect(p.onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText('Close'));
-    fireEvent.click(container.querySelector('.modal-overlay')!);
+    fireEvent.click(container.querySelector('#mix-modal-overlay')!);
     expect(p.onClose).toHaveBeenCalledTimes(2);
   });
 });

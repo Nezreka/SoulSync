@@ -51,21 +51,55 @@ describe('the dial', () => {
     expect(label()).not.toBe(first);
   });
 
-  it('draws a wave path and an area beneath it', () => {
+  it('draws the wave into the vanilla path ids, area filled by the gradient', () => {
     const { container } = render(<AdventurousnessDial {...dial()} />);
-    const line = container.querySelector('.adv-wave-line')!.getAttribute('d')!;
-    const area = container.querySelector('.adv-wave-area')!.getAttribute('d')!;
+    const line = container.querySelector('#adv-wave-path')!.getAttribute('d')!;
+    const area = container.querySelector('#adv-wave-area')!;
     expect(line.startsWith('M ')).toBe(true);
     // The area is the line closed down to the baseline — same shape, plus a lid.
-    expect(area.startsWith(line)).toBe(true);
-    expect(area.endsWith('Z')).toBe(true);
+    expect(area.getAttribute('d')!.startsWith(line)).toBe(true);
+    expect(area.getAttribute('d')!.endsWith('Z')).toBe(true);
+    // Filled by the GRADIENT, fading to nothing — not a solid colour. The
+    // vanilla recolours only the top stop (95).
+    expect(area).toHaveAttribute('fill', 'url(#adv-wave-fill)');
+    const stop = container.querySelector('#adv-wave-fill-top')!;
+    expect(stop.getAttribute('stop-color')).toBe(
+      container.querySelector('#adv-wave-path')!.getAttribute('stroke'),
+    );
+    expect(stop.getAttribute('stop-opacity')).toBe('0.32');
+  });
+
+  it('strokes the line at 2.5 with round caps and its glow', () => {
+    const { container } = render(<AdventurousnessDial {...dial()} />);
+    const path = container.querySelector('#adv-wave-path') as SVGPathElement;
+    expect(path.getAttribute('stroke-width')).toBe('2.5');
+    expect(path.getAttribute('stroke-linecap')).toBe('round');
+    expect(path.style.filter).toContain('drop-shadow');
+  });
+
+  it('labels its two poles', () => {
+    // index.html 4543-4546 — without them the dial never says what its ends
+    // mean. The first draft dropped the footer entirely.
+    const { container } = render(<AdventurousnessDial {...dial()} />);
+    const ends = container.querySelector('.adv-wave-ends')!;
+    expect(ends.textContent).toContain('Safe — artists you already like');
+    expect(ends.textContent).toContain('Adventurous — deep cuts');
+  });
+
+  it('sends the colour wash chasing the orb', () => {
+    // The aura follows the orb's left calc (103-105); background alone leaves
+    // it parked at the left edge.
+    const { container } = render(<AdventurousnessDial {...dial({ value: 1 })} />);
+    const aura = container.querySelector('#adv-wave-aura') as HTMLElement;
+    expect(aura.style.left).toContain('calc(');
+    expect(aura.style.background).toContain('radial-gradient');
   });
 
   it('advances the wave on each frame', () => {
     const { container } = render(<AdventurousnessDial {...dial()} />);
-    const before = container.querySelector('.adv-wave-line')!.getAttribute('d');
+    const before = container.querySelector('#adv-wave-path')!.getAttribute('d');
     act(() => frames.shift()!(0));
-    expect(container.querySelector('.adv-wave-line')!.getAttribute('d')).not.toBe(before);
+    expect(container.querySelector('#adv-wave-path')!.getAttribute('d')).not.toBe(before);
   });
 
   it('computes NOTHING while the page is off screen', () => {
@@ -73,9 +107,9 @@ describe('the dial', () => {
     // sixty times a second.
     vi.spyOn(HTMLElement.prototype, 'offsetParent', 'get').mockReturnValue(null);
     const { container } = render(<AdventurousnessDial {...dial()} />);
-    const before = container.querySelector('.adv-wave-line')!.getAttribute('d');
+    const before = container.querySelector('#adv-wave-path')!.getAttribute('d');
     act(() => frames.shift()!(0));
-    expect(container.querySelector('.adv-wave-line')!.getAttribute('d')).toBe(before);
+    expect(container.querySelector('#adv-wave-path')!.getAttribute('d')).toBe(before);
   });
 
   it('cancels the loop on unmount', () => {
@@ -137,6 +171,10 @@ describe('the dial', () => {
     // A plain `left: 100%` puts the orb half outside the card's overflow.
     expect(orb.style.left).toContain('calc(');
     expect(orb.style.left).toContain('18px');
+    // The outer glow pairs with the inner white ring (99-100), and currentColor
+    // drives the pulsing ring animation (98).
+    expect(orb.style.boxShadow).toContain('inset 0 0 0 2px');
+    expect(orb.style.color).not.toBe('');
   });
 });
 
@@ -244,9 +282,34 @@ describe('build a playlist', () => {
       onGenerate: vi.fn(),
       onDownload: vi.fn(),
       onSync: vi.fn(),
+      onToggleInfo: vi.fn(),
+      loaded: true,
       ...over,
     };
   }
+
+  it('wraps itself in the section header, with the info toggle INSIDE the title', () => {
+    // index.html 5004-5010: the "?" sits inside the h2, and the "How it works"
+    // panel toggles `visible` between the header and the container.
+    const p = bp();
+    const { container } = render(<BuildPlaylistSection {...p} />);
+    expect(screen.getByText('Build a Playlist')).toBeInTheDocument();
+    expect(
+      screen.getByText('Create a custom playlist from your favorite artists'),
+    ).toBeInTheDocument();
+    const panel = container.querySelector('#bp-info-panel')!;
+    expect(panel).not.toHaveClass('visible');
+    fireEvent.click(container.querySelector('.bp-info-toggle')!);
+    expect(p.onToggleInfo).toHaveBeenCalled();
+  });
+
+  it('opens the info panel with the vanilla class and its full copy', () => {
+    const { container } = render(<BuildPlaylistSection {...bp({ infoOpen: true })} />);
+    const panel = container.querySelector('#bp-info-panel')!;
+    expect(panel).toHaveClass('visible');
+    expect(panel.querySelectorAll('.bp-info-content ol li')).toHaveLength(3);
+    expect(screen.getByText(/more varied the playlist will be/)).toBeInTheDocument();
+  });
 
   it('keeps the ids and classes the vanilla styling and handlers target', () => {
     // The first draft invented almost all of these, which type-checked and

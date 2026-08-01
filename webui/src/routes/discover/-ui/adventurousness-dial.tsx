@@ -102,7 +102,9 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
         <div
           className="adv-wave-aura"
           id="adv-wave-aura"
-          style={{ background: styles.auraBackground }}
+          // The colour wash FOLLOWS the orb (103-105); background alone leaves
+          // it parked at the left edge.
+          style={{ left: styles.orbLeft, background: styles.auraBackground }}
         />
         <svg
           className="adv-wave-svg"
@@ -111,13 +113,26 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          <path className="adv-wave-area" d={advAreaPath(line)} fill={styles.color} />
+          {/* The luminous area is a GRADIENT fill fading to nothing, not a
+              solid colour — _advApply recolours only the top stop (95). The
+              first draft filled it solid and dropped the vanilla's ids. */}
+          <defs>
+            <linearGradient id="adv-wave-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop id="adv-wave-fill-top" offset="0" stopColor={styles.color} stopOpacity="0.32" />
+              <stop offset="1" stopColor="#1DB954" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path id="adv-wave-area" d={advAreaPath(line)} fill="url(#adv-wave-fill)" stroke="none" />
           <path
-            className="adv-wave-line"
+            id="adv-wave-path"
             d={line}
             fill="none"
             stroke={styles.color}
-            strokeWidth="2"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            // The line's glow (93) — set with the colour, not per frame.
+            style={{ filter: `drop-shadow(0 0 7px ${styles.color})` }}
           />
         </svg>
         <div
@@ -126,10 +141,20 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
           style={{
             left: styles.orbLeft,
             top: advOrbTopPercent(styles.value, phase, trackRef.current?.clientWidth ?? 0),
+            // currentColor drives the pulsing ring (98); the fill is the
+            // brighter tone and the shadow pairs an outer glow with the inner
+            // white ring (99-100).
+            color: styles.color,
             background: styles.colorBright,
-            boxShadow: `0 0 12px ${styles.color}`,
+            boxShadow: `0 0 9px 0 ${styles.color}, inset 0 0 0 2px rgba(255,255,255,0.5)`,
           }}
         />
+      </div>
+      {/* The two poles (index.html 4543-4546) — the first draft dropped them,
+          leaving the dial with no explanation of what its ends mean. */}
+      <div className="adv-wave-ends">
+        <span>Safe — artists you already like</span>
+        <span>Adventurous — deep cuts</span>
       </div>
     </div>
   );

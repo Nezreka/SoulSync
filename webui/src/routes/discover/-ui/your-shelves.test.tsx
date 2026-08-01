@@ -261,28 +261,35 @@ function albumProps(over: Partial<YourAlbumsShelfProps> = {}): YourAlbumsShelfPr
 }
 
 describe('Your Albums', () => {
-  it('renders the grid, filters and card', () => {
+  it('renders the grid, filters and the SHARED album card', () => {
+    // The same .ya-card the other album shelves use (1467) — the first draft
+    // invented a .spotify-album-card family that exists in no stylesheet.
     const { container } = render(<YourAlbumsShelf {...albumProps()} />);
     expect(container.querySelector('#your-albums-grid')).not.toBeNull();
     expect(container.querySelector('#your-albums-filters')).not.toBeNull();
-    expect(screen.getByText('Selected Ambient Works')).toBeInTheDocument();
-    expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
+    const card = container.querySelector('.ya-card.discover-album-card')!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector('.ya-card-name')!.textContent).toBe('Selected Ambient Works');
+    expect(card.querySelector('.ya-card-sub')!.textContent).toBe('Aphex Twin');
+    // Titled "Album — Artist" for the hover tooltip (1468).
+    expect(card).toHaveAttribute('title', 'Selected Ambient Works — Aphex Twin');
   });
 
-  it('badges owned and missing differently', () => {
+  it('badges owned and missing differently, on the shared badge element', () => {
     const { container, rerender } = render(<YourAlbumsShelf {...albumProps()} />);
-    expect(container.querySelector('.spotify-album-badge')).toHaveClass('missing');
-    expect(container.querySelector('.spotify-album-badge')!.textContent).toBe('↓');
+    const badge = () => container.querySelector('.discover-album-badge')!;
+    expect(badge()).toHaveClass('missing');
+    expect(badge().textContent).toBe('↓');
     rerender(<YourAlbumsShelf {...albumProps({ albums: [album({ in_library: true })] })} />);
-    expect(container.querySelector('.spotify-album-badge')).toHaveClass('owned');
-    expect(container.querySelector('.spotify-album-badge')!.textContent).toBe('✓');
+    expect(badge()).toHaveClass('owned');
+    expect(badge().textContent).toBe('✓');
   });
 
   it('falls back to the placeholder cover', () => {
     const { container } = render(
       <YourAlbumsShelf {...albumProps({ albums: [album({ image_url: undefined })] })} />,
     );
-    expect(container.querySelector('.spotify-album-cover img')).toHaveAttribute(
+    expect(container.querySelector('.ya-card-img img')).toHaveAttribute(
       'src',
       '/static/placeholder-album.png',
     );
@@ -291,7 +298,19 @@ describe('Your Albums', () => {
   it('shows a spinner instead of an empty grid while loading', () => {
     const { container } = render(<YourAlbumsShelf {...albumProps({ loading: true })} />);
     expect(container.querySelector('.loading-spinner')).not.toBeNull();
-    expect(container.querySelector('.spotify-album-card')).toBeNull();
+    expect(container.querySelector('.discover-album-card')).toBeNull();
+  });
+
+  it('keeps the SECTION when a filter matches nothing, and says so in the grid', () => {
+    // count comes from the TOTAL: hiding the whole section — filters, stats and
+    // all — because a filter matched nothing would strand the user with no way
+    // to clear it. The vanilla keeps the section and puts the message in the
+    // grid (1457-1459).
+    const { container } = render(<YourAlbumsShelf {...albumProps({ albums: [], total: 120 })} />);
+    expect(container.querySelector('#your-albums-section')).not.toBeNull();
+    expect(container.querySelector('.spotify-library-empty p')!.textContent).toBe(
+      'No albums found',
+    );
   });
 
   it('reports filter, status and sort changes', () => {
@@ -312,28 +331,37 @@ describe('Your Albums', () => {
   });
 
   it('hides the pager entirely when everything fits on one page', () => {
-    // An all-disabled pager is noise, not information.
     const { container } = render(<YourAlbumsShelf {...albumProps({ total: 48 })} />);
     expect(container.querySelector('#your-albums-pagination')).toBeNull();
   });
 
-  it('shows the range and disables the ends', () => {
-    const { rerender } = render(<YourAlbumsShelf {...albumProps({ total: 130, page: 1 })} />);
-    expect(screen.getByText('1–48 of 130')).toBeInTheDocument(); //  48 to a page
-    expect(screen.getByText('Previous')).toBeDisabled();
-    expect(screen.getByText('Next')).not.toBeDisabled();
+  it('renders the pager with the vanilla classes, range and arrows', () => {
+    const { container, rerender } = render(
+      <YourAlbumsShelf {...albumProps({ total: 130, page: 1 })} />,
+    );
+    const btns = () =>
+      [...container.querySelectorAll('.spotify-library-page-btn')] as HTMLButtonElement[];
+    expect(btns()[0].textContent).toBe('← Previous');
+    expect(btns()[1].textContent).toBe('Next →');
+    expect(container.querySelector('.spotify-library-page-info')!.textContent).toBe(
+      '1–48 of 130', //  48 to a page
+    );
+    expect(btns()[0].disabled).toBe(true);
+    expect(btns()[1].disabled).toBe(false);
 
     rerender(<YourAlbumsShelf {...albumProps({ total: 130, page: 3 })} />);
-    expect(screen.getByText('97–130 of 130')).toBeInTheDocument(); //  the last of 3 pages
-    expect(screen.getByText('Next')).toBeDisabled();
-    expect(screen.getByText('Previous')).not.toBeDisabled();
+    expect(container.querySelector('.spotify-library-page-info')!.textContent).toBe(
+      '97–130 of 130', //  the last of 3 pages
+    );
+    expect(btns()[1].disabled).toBe(true);
+    expect(btns()[0].disabled).toBe(false);
   });
 
   it('steps pages', () => {
     const p = albumProps({ total: 130, page: 2 });
     render(<YourAlbumsShelf {...p} />);
-    fireEvent.click(screen.getByText('Previous'));
-    fireEvent.click(screen.getByText('Next'));
+    fireEvent.click(screen.getByText('← Previous'));
+    fireEvent.click(screen.getByText('Next →'));
     expect(p.onPrevPage).toHaveBeenCalled();
     expect(p.onNextPage).toHaveBeenCalled();
   });
@@ -346,10 +374,11 @@ describe('Your Albums', () => {
     expect(screen.getByLabelText('Download missing albums')).toBeInTheDocument();
   });
 
-  it('opens an album', () => {
-    const p = albumProps();
+  it('opens an album BY INDEX', () => {
+    // The download flow resolves the album from the module list (1468).
+    const p = albumProps({ albums: [album(), album({ id: 2, album_name: 'Drukqs' })], total: 2 });
     const { container } = render(<YourAlbumsShelf {...p} />);
-    fireEvent.click(container.querySelector('.spotify-album-card')!);
-    expect(p.onOpenAlbum).toHaveBeenCalledWith(album());
+    fireEvent.click(container.querySelectorAll('.discover-album-card')[1]);
+    expect(p.onOpenAlbum).toHaveBeenCalledWith(1);
   });
 });

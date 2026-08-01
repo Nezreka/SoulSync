@@ -1,31 +1,26 @@
+import { useState } from 'react';
+
 import type { LastfmTrackResult } from '../-discover.lastfm-radio';
 import type { LbTabId } from '../-discover.listenbrainz';
 import type { DiscoverMix } from '../-discover.mixes';
 
-import {
-  lastfmSelectionLabel,
-  resultShowsListeners,
-  resultSubtitle,
-} from '../-discover.lastfm-radio';
-import {
-  lbSubtitle,
-  LB_CONNECT_TITLE,
-  LB_EMPTY_CATEGORY,
-  LB_TABS,
-} from '../-discover.listenbrainz';
+import { resultSubtitle } from '../-discover.lastfm-radio';
+import { lbSubtitle, LB_LOAD_FAILED, LB_TABS } from '../-discover.listenbrainz';
 import { DiscoverSection } from './discover-section';
 import { DiscoverMixCard } from './mix-shelf';
 
 /**
  * The Last.fm Radio and ListenBrainz sections.
  *
- * Transcribed from index.html 5125-5182.
+ * Transcribed from index.html 5125-5182, discover.js 3250-3300 (the search
+ * dropdown) and 3458-3675 (the ListenBrainz tabs, connect state and groups).
  *
- * Both render mix cards, so neither owns a card of its own. What they DO own is
- * their controls: a search box that generates a radio from one track, and a
- * tab set that has to distinguish "this category is empty" from "you have not
- * connected an account" — those are different problems with different fixes,
- * and one message for both sends the user to the wrong place.
+ * HISTORY. The first version of both was invented: made-up row classes with no
+ * artwork on the Last.fm results, a made-up `.listenbrainz-tab` tab strip with
+ * disabled placeholder tabs, and a one-line connect prompt. The vanilla reuses
+ * the DECADE tab styling (`.decade-tabs-inner` > `.decade-tab[data-tab]`),
+ * renders ONLY tabs that have data, and its connect state is a full
+ * `.lb-empty-state` card with an icon, copy, a settings button and a help link.
  */
 
 // ── Last.fm Radio ────────────────────────────────────────────────────────────
@@ -33,8 +28,9 @@ import { DiscoverMixCard } from './mix-shelf';
 export interface LastfmRadioSectionProps {
   query: string;
   results: LastfmTrackResult[];
-  /** Whether the dropdown is showing at all. */
   dropdownOpen: boolean;
+  /** The dropdown shows a mini spinner while the request is in flight (3254). */
+  searching?: boolean;
   mixes: DiscoverMix[];
   loaded: boolean;
   generating?: boolean;
@@ -48,6 +44,7 @@ export function LastfmRadioSection({
   query,
   results,
   dropdownOpen,
+  searching,
   mixes,
   loaded,
   generating,
@@ -85,22 +82,22 @@ export function LastfmRadioSection({
             />
             {dropdownOpen && (
               <div id="lastfm-radio-dropdown" className="lastfm-radio-dropdown">
-                {results.map((track) => (
-                  <button
-                    type="button"
-                    key={lastfmSelectionLabel(track.name ?? '', track.artist ?? '')}
-                    className="lastfm-radio-result"
-                    onClick={() => onPick(track)}
-                  >
-                    <span className="lastfm-result-name">{track.name}</span>
-                    <span className="lastfm-result-sub">{resultSubtitle(track)}</span>
-                    {/* Listener counts are only shown where there IS one — a
-                        "0 listeners" line reads as a judgement of the track. */}
-                    {resultShowsListeners(track) && (
-                      <span className="lastfm-result-listeners">{track.listeners}</span>
-                    )}
-                  </button>
-                ))}
+                {searching ? (
+                  <div className="lastfm-radio-searching">
+                    <div
+                      className="server-search-spinner"
+                      style={{ width: 14, height: 14, margin: '0 auto' }}
+                    />
+                  </div>
+                ) : (
+                  results.map((track) => (
+                    <LastfmResultRow
+                      key={`${track.name ?? ''}:${track.artist ?? ''}`}
+                      track={track}
+                      onPick={onPick}
+                    />
+                  ))
+                )}
               </div>
             )}
           </div>
@@ -116,22 +113,56 @@ export function LastfmRadioSection({
   );
 }
 
+/**
+ * One search hit (3264-3279): artwork, then a meta column of track name and
+ * "artist · N listeners". The vanilla computes a separate "Nk listeners" span
+ * and never interpolates it — the module records it as dead, and it stays dead
+ * here.
+ */
+function LastfmResultRow({
+  track,
+  onPick,
+}: {
+  track: LastfmTrackResult;
+  onPick: (track: LastfmTrackResult) => void;
+}) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <button type="button" className="lastfm-radio-result" onClick={() => onPick(track)}>
+      <div className="lastfm-radio-result-art">
+        {track.image_url && !broken ? (
+          <img src={track.image_url} alt="" loading="lazy" onError={() => setBroken(true)} />
+        ) : (
+          <div className="lastfm-radio-art-empty" />
+        )}
+      </div>
+      <div className="lastfm-radio-result-meta">
+        <span className="lastfm-radio-result-track">{track.name}</span>
+        <span className="lastfm-radio-result-artist">{resultSubtitle(track)}</span>
+      </div>
+    </button>
+  );
+}
+
 // ── ListenBrainz ─────────────────────────────────────────────────────────────
 
 export interface ListenBrainzSectionProps {
   username: string | null;
   activeTab: LbTabId;
-  /** Which tabs actually returned playlists. */
+  /** Which tabs returned playlists — a tab with none is NOT rendered (3462). */
   hasData: Record<string, boolean>;
   mixes: DiscoverMix[];
   loading?: boolean;
+  /** The whole tab load failed, which is not the same as "connect". */
+  error?: boolean;
   loaded: boolean;
-  /** Sub-tab group names, when the active tab has enough to warrant them. */
   groups?: string[];
   activeGroup?: string | null;
   onSelectTab: (tab: LbTabId) => void;
   onSelectGroup: (group: string) => void;
   onRefresh: () => void;
+  /** The connect card's button opens the personal settings (3486). */
+  onConnect: () => void;
   onOpenMix: (key: string) => void;
 }
 
@@ -141,15 +172,18 @@ export function ListenBrainzSection({
   hasData,
   mixes,
   loading,
+  error,
   loaded,
   groups,
   activeGroup,
   onSelectTab,
   onSelectGroup,
   onRefresh,
+  onConnect,
   onOpenMix,
 }: ListenBrainzSectionProps) {
-  const anyData = Object.values(hasData).some(Boolean);
+  const liveTabs = LB_TABS.filter((tab) => hasData[tab.id]);
+  const anyData = liveTabs.length > 0;
 
   return (
     <DiscoverSection
@@ -177,45 +211,68 @@ export function ListenBrainzSection({
             <div className="loading-spinner" />
             <p>Loading playlists...</p>
           </div>
-        ) : (
-          LB_TABS.map((tab) => (
+        ) : error ? (
+          <div className="discover-empty">
+            <p>{LB_LOAD_FAILED}</p>
+          </div>
+        ) : !anyData ? (
+          /*
+            The connect card (3479-3489). Not a one-liner: it says WHY, links the
+            settings, and points at where the token lives. "No playlists" and
+            "not connected" are different problems with different fixes.
+          */
+          <div className="lb-empty-state">
+            <div className="lb-empty-icon">🧠</div>
+            <h3>Connect ListenBrainz</h3>
+            <p>
+              Link your ListenBrainz account to see personalized playlists, recommendations, and
+              collaborative playlists.
+            </p>
             <button
               type="button"
-              key={tab.id}
-              className={tab.id === activeTab ? 'listenbrainz-tab active' : 'listenbrainz-tab'}
-              data-lb-tab={tab.id}
-              // A tab with nothing behind it is shown but not selectable —
-              // hiding it entirely would make the set jump around per refresh.
-              disabled={!hasData[tab.id]}
-              onClick={() => onSelectTab(tab.id)}
+              className="action-button primary lb-connect-btn"
+              onClick={onConnect}
             >
-              {tab.label}
+              Connect ListenBrainz
             </button>
-          ))
+            <p className="lb-empty-help">
+              Get your token from{' '}
+              <a href="https://listenbrainz.org/profile/" target="_blank" rel="noreferrer">
+                listenbrainz.org/profile
+              </a>
+            </p>
+          </div>
+        ) : (
+          /* The DECADE tab styling, reused on purpose (3461) — and only tabs
+             WITH data exist. Hiding rather than disabling is the vanilla's
+             behaviour; a dead tab is simply not offered. */
+          <div className="decade-tabs-inner">
+            {liveTabs.map((tab) => (
+              <button
+                type="button"
+                key={tab.id}
+                className={tab.id === activeTab ? 'decade-tab active' : 'decade-tab'}
+                data-tab={tab.id}
+                onClick={() => onSelectTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
       <div className="listenbrainz-tab-content" id="listenbrainz-tab-content">
-        {/*
-          Two different empty states. No data ANYWHERE means the account is not
-          connected; no data in THIS tab means the category is empty. One
-          message for both sends the user to the wrong fix.
-        */}
-        {!loading && !anyData ? (
-          <div className="listenbrainz-connect">{LB_CONNECT_TITLE}</div>
-        ) : (
+        {anyData && !loading && !error && (
           <>
             {groups && groups.length > 0 && (
-              <div className="listenbrainz-sub-tabs">
+              <div id="lb-subtabs-bar">
                 {groups.map((group) => (
                   <button
                     type="button"
                     key={group}
-                    className={
-                      group === activeGroup
-                        ? 'listenbrainz-sub-tab-btn active'
-                        : 'listenbrainz-sub-tab-btn'
-                    }
+                    className={group === activeGroup ? 'lb-subtab active' : 'lb-subtab'}
+                    data-group={group}
                     onClick={() => onSelectGroup(group)}
                   >
                     {group}
@@ -223,15 +280,12 @@ export function ListenBrainzSection({
                 ))}
               </div>
             )}
-            {mixes.length === 0 && !loading ? (
-              <div className="listenbrainz-empty">{LB_EMPTY_CATEGORY}</div>
-            ) : (
-              <div className="discover-mixes-grid" id="listenbrainz-grid">
-                {mixes.map((mix) => (
-                  <DiscoverMixCard key={mix.key} mix={mix} onOpen={onOpenMix} />
-                ))}
-              </div>
-            )}
+            {/* A plain .discover-grid of mix cards (3634) — no bespoke grid. */}
+            <div className="discover-grid">
+              {mixes.map((mix) => (
+                <DiscoverMixCard key={mix.key} mix={mix} onOpen={onOpenMix} />
+              ))}
+            </div>
           </>
         )}
       </div>

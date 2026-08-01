@@ -158,6 +158,25 @@ export function ArtMapOverlay({
             </svg>
           </button>
           <div className="artmap-brand">
+            <svg
+              className="artmap-brand-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="4" cy="6" r="2" />
+              <circle cx="20" cy="6" r="2" />
+              <circle cx="4" cy="18" r="2" />
+              <circle cx="20" cy="18" r="2" />
+              <line x1="6" y1="7" x2="10" y2="10" />
+              <line x1="14" y1="10" x2="18" y2="7" />
+              <line x1="6" y1="17" x2="10" y2="14" />
+              <line x1="14" y1="14" x2="18" y2="17" />
+            </svg>
             <span className="artmap-brand-text">{title}</span>
           </div>
           <div className="artmap-stats" id="artist-map-stats">
@@ -167,6 +186,18 @@ export function ArtMapOverlay({
 
         <div className="artmap-nav-center">
           <div className="artmap-search-wrap">
+            <svg
+              className="artmap-search-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
             <input
               type="text"
               id="artist-map-search"
@@ -185,6 +216,18 @@ export function ArtMapOverlay({
             style={{ opacity: artMap._hideSimilar ? 0.4 : 1 }}
             onClick={onToggleSimilar}
           >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="12" cy="5" r="3" />
+              <circle cx="5" cy="19" r="3" />
+              <circle cx="19" cy="19" r="3" />
+            </svg>
             <span>Filter</span>
           </button>
           <div className="artmap-zoom-group">

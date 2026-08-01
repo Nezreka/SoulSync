@@ -25,6 +25,10 @@ export interface DiscoverAlbumCardProps {
   cover: string;
   albumName: string;
   artistName: string;
+  /** Your Albums marks ownership on the same card (1474). */
+  badge?: { className: 'owned' | 'missing'; icon: string };
+  /** Your Albums titles the card "Album — Artist" (1468). */
+  titleAttr?: string;
   onOpen: () => void;
 }
 
@@ -32,11 +36,13 @@ export function DiscoverAlbumCard({
   cover,
   albumName,
   artistName,
+  badge,
+  titleAttr,
   onOpen,
 }: DiscoverAlbumCardProps) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="ya-card discover-album-card" onClick={onOpen}>
+    <div className="ya-card discover-album-card" title={titleAttr} onClick={onOpen}>
       <div className="ya-card-img">
         {!failed && <img src={cover} alt="" loading="lazy" onError={() => setFailed(true)} />}
         <div className="ya-card-placeholder" style={failed ? undefined : { display: 'none' }}>
@@ -44,6 +50,11 @@ export function DiscoverAlbumCard({
         </div>
       </div>
       <div className="ya-card-gradient" />
+      {badge && (
+        <div className="ya-card-badges">
+          <div className={`discover-album-badge ${badge.className}`}>{badge.icon}</div>
+        </div>
+      )}
       <div className="ya-card-info">
         <div className="ya-card-name">{albumName}</div>
         <div className="ya-card-sub">{artistName}</div>
