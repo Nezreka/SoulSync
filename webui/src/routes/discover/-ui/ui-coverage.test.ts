@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const UI = resolve(process.cwd(), 'src/routes/discover/-ui');
+const ROUTE = resolve(process.cwd(), 'src/routes/discover');
 
 /** Every UI piece the discover page needs, and the symbols that would build it. */
 const REQUIRED_UI: Record<string, string[]> = {
@@ -52,10 +53,19 @@ const REQUIRED_UI: Record<string, string[]> = {
   'artist web overlay': ['ArtWebOverlay'],
   'artist web panel': ['ArtWebArtistCard'],
 
+  'BYLT sections': ['ByltSections'],
+
   // ── Not built yet ────────────────────────────────────────────────────────
   'cache-* shelves': ['cacheDiscoverCard', 'CACHE_SECTIONS', 'genrePill'],
-  'BYLT sections': ['byltTrackCard', 'byltSections', 'BYLT_CONTAINER_ID'],
-  'seasonal playlist section': ['seasonalMixTitles', 'seasonalHasPlaylist'],
+  /*
+   * NOT a section. The vanilla's loader renders nothing into
+   * #seasonal-playlist-section — it collapses it (_collapseOldMixSection,
+   * 4370) and upserts a MIX CARD onto the Your Mixes shelf. This entry is the
+   * page hook's FEEDER: fetch the seasonal tracks and upsertShelfMix with the
+   * seasonalMixTitles title. It resolves with #251, which is why the scan
+   * covers the route directory as well as -ui/.
+   */
+  'seasonal playlist shelf feeder': ['seasonalMixTitles', 'seasonalHasPlaylist'],
   'blacklist modal': ['blacklistEntries', 'BLACKLIST_TITLE'],
   'your artists modal': ['artistsModalPager', 'applyArtistsModalFilter'],
   'artist info modal': ['infoStats', 'infoMatchBadges'],
@@ -73,13 +83,12 @@ const REQUIRED_UI: Record<string, string[]> = {
  * route flip cannot happen while this list is non-empty without losing it.
  */
 const MISSING_UI = [
-  'BYLT sections',
   'artist info modal',
   'artist map info modal',
   'blacklist modal',
   'cache-* shelves',
   'decade tab contents',
-  'seasonal playlist section',
+  'seasonal playlist shelf feeder',
   'your albums batch modal',
   'your albums sources modal',
   'your artists modal',
@@ -87,10 +96,18 @@ const MISSING_UI = [
 ];
 
 describe('every UI piece the page needs has a component', () => {
-  const components = readdirSync(UI)
-    .filter((f) => f.endsWith('.tsx') && !f.endsWith('.test.tsx'))
-    .map((f) => readFileSync(join(UI, f), 'utf8'))
-    .join('\n');
+  // -ui components PLUS the route level (route.tsx, the page hook): shelf
+  // FEEDERS live in the hook, not in a component, and must still count.
+  const components = [
+    ...readdirSync(UI)
+      .filter((f) => f.endsWith('.tsx') && !f.endsWith('.test.tsx'))
+      .map((f) => readFileSync(join(UI, f), 'utf8')),
+    ...readdirSync(ROUTE)
+      .filter(
+        (f) => /\.(tsx|ts)$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.startsWith('-discover.'),
+      )
+      .map((f) => readFileSync(join(ROUTE, f), 'utf8')),
+  ].join('\n');
 
   /**
    * Is this piece built?
