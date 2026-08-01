@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { WebBuilt, WebGraphCtor, WebLens, WebSizeBy } from './-discover.artist-web';
+import type { WebBuilt, WebGraph, WebGraphCtor, WebLens, WebSizeBy } from './-discover.artist-web';
+import type { WebSigmaHandlers } from './-discover.artist-web.lifecycle';
 import type {
   WebArtistCard,
   WebDiscoveryCard,
@@ -20,6 +21,8 @@ import {
 } from './-discover.artist-web';
 import {
   webBetweenness,
+  webCountKinds,
+  webDiscoveryStats,
   webLibsReady,
   webResolveGraph,
   webResolveLens,
@@ -84,9 +87,19 @@ export interface ArtistWebController {
   toggleEdges: () => void;
   clickNode: (node: string, buildDetailPath: (id: unknown, source: string) => string) => void;
   clearSelection: () => void;
+  /** Recompute the owned/discovery tally after an expand grew the graph (8189). */
+  recountStats: () => void;
 }
 
-export function useArtistWeb(): ArtistWebController {
+/**
+ * `ui` is the assembly's window into sigma's events (hover, node/stage clicks,
+ * pointer moves for the tooltip). The mount happens deep inside renderLens,
+ * long after this hook returned, so the handlers delegate through a ref — the
+ * assembly's CURRENT closures always win, and mounting with no ui registered
+ * degrades to the base behaviour (track the hovered node) rather than binding
+ * stale stubs.
+ */
+export function useArtistWeb(ui?: Partial<WebSigmaHandlers>): ArtistWebController {
   const [open, setOpen] = useState(false);
   const [lens, setLensState] = useState<WebLens>('genre');
   const [sizeBy, setSizeByState] = useState<WebSizeBy>('popularity');
@@ -98,6 +111,8 @@ export function useArtistWeb(): ArtistWebController {
   const [selection, setSelection] = useState<WebSelection>(null);
   /** The "· settling…" stats suffix while the live layout runs (6973). */
   const [settling, setSettling] = useState(false);
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
 
   /** The vanilla's state card: message + teardown FIRST (6755-6760). */
   const stateCard = useCallback((message: string) => {
@@ -163,10 +178,11 @@ export function useArtistWeb(): ArtistWebController {
       webMountSigma(host, built.graph, {
         onHover: (node) => {
           artistWeb._hoverNode = node;
+          uiRef.current?.onHover?.(node);
         },
-        onClickNode: () => {},
-        onClickStage: () => {},
-        onTooltipMove: () => {},
+        onClickNode: (node) => uiRef.current?.onClickNode?.(node),
+        onClickStage: () => uiRef.current?.onClickStage?.(),
+        onTooltipMove: (node) => uiRef.current?.onTooltipMove?.(node),
       });
       artWebFinishLayout(built.graph);
       webStartLiveLayout(built.graph, {
@@ -289,6 +305,13 @@ export function useArtistWeb(): ArtistWebController {
     [],
   );
 
+  const recountStats = useCallback(() => {
+    const g = artistWeb.graph as WebGraph | null;
+    if (!g) return;
+    const counts = webCountKinds(g);
+    setStats(webDiscoveryStats(counts.owned, counts.discovery));
+  }, []);
+
   const clearSelection = useCallback(() => {
     artistWeb.selectedKey = null;
     artistWeb.selectedFocus = null;
@@ -316,5 +339,6 @@ export function useArtistWeb(): ArtistWebController {
     toggleEdges,
     clickNode,
     clearSelection,
+    recountStats,
   };
 }

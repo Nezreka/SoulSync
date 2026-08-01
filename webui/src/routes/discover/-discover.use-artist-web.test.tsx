@@ -24,6 +24,7 @@ const libraryPayload = {
 };
 
 let libraryHits = 0;
+let sigmaInstances: { emit: (event: string, payload: unknown) => void }[] = [];
 let discoveryHits = 0;
 
 function stub({
@@ -55,10 +56,19 @@ function installLibs() {
   w.graphology = FakeGraph;
   w.graphologyLibrary = { layout: {} };
   w.Sigma = class {
-    constructor() {}
+    /** Handlers by event name, so a test can emit enterNode/clickNode. */
+    handlers: Record<string, (payload: unknown) => void> = {};
+    constructor() {
+      sigmaInstances.push(this);
+    }
     kill() {}
     refresh() {}
-    on() {}
+    on(event: string, fn: (payload: unknown) => void) {
+      this.handlers[event] = fn;
+    }
+    emit(event: string, payload: unknown) {
+      this.handlers[event]?.(payload);
+    }
     getCamera() {
       return { animate: () => {}, animatedReset: () => {} };
     }
@@ -77,6 +87,7 @@ function mount() {
 
 beforeEach(() => {
   stub();
+  sigmaInstances = [];
   installLibs();
   artistWeb.gen = 0;
   artistWeb.data = null;
@@ -233,5 +244,48 @@ describe('useArtistWeb — selection and toggles', () => {
     act(() => result.current.toggleEdges());
     expect(artistWeb.edgeDeclutter).toBe(true);
     expect(result.current.edgeDeclutter).toBe(true);
+  });
+});
+
+describe('useArtistWeb — the ui seam', () => {
+  it("delegates sigma's events to the CURRENT ui handlers, keeping the base hover", async () => {
+    const hovered: (string | null)[] = [];
+    const clicked: string[] = [];
+    const { result } = renderHook(() =>
+      useArtistWeb({
+        onHover: (n) => hovered.push(n),
+        onClickNode: (n) => clicked.push(n),
+      }),
+    );
+    await act(async () => result.current.openWeb(host()));
+    const sigma = sigmaInstances[0];
+    act(() => sigma.emit('enterNode', { node: 'a1' }));
+    act(() => sigma.emit('clickNode', { node: 'a1' }));
+    act(() => sigma.emit('leaveNode', {}));
+    expect(hovered).toEqual(['a1', null]);
+    expect(clicked).toEqual(['a1']);
+    // The base behaviour survives delegation: the singleton tracked the hover.
+    expect(artistWeb._hoverNode).toBeNull();
+  });
+
+  it('mounting with NO ui registered stays inert instead of crashing', async () => {
+    const { result } = mount();
+    await act(async () => result.current.openWeb(host()));
+    const sigma = sigmaInstances[0];
+    act(() => sigma.emit('enterNode', { node: 'a1' }));
+    expect(artistWeb._hoverNode).toBe('a1');
+    act(() => sigma.emit('clickNode', { node: 'a1' }));
+    expect(result.current.selection).toBeNull();
+  });
+});
+
+describe('useArtistWeb — recountStats', () => {
+  it('re-tallies owned/discovery from the LIVE graph, the post-expand line (8189)', async () => {
+    const { result } = mount();
+    await act(async () => result.current.openWeb(host()));
+    const g = artistWeb.graph as { addNode: (k: string, a: Record<string, unknown>) => void };
+    g.addNode('grown1', { kind: 'discovery', label: 'New' });
+    act(() => result.current.recountStats());
+    expect(result.current.stats).toMatch(/of your artists · \d+ to discover/);
   });
 });

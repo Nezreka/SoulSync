@@ -114,6 +114,9 @@ declare global {
     /** stats-automations.js — reads artistDetailPageState for the artist id.
      *  Must be given the id explicitly once React owns the page. */
     playArtistRadio?: (artistId?: string | number, artistName?: string) => void;
+    /** stats-automations.js — the parameterized radio core the Artist Web's
+     *  "Play radio" hands off to (survives the discover.js deletion). */
+    startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
     /** library.js — the Download Discography modal. */
