@@ -6,6 +6,9 @@ import type { SyncProgress } from './-discover.playlist-sync';
 import { decadeSyncCompleteToast, decadeTrackToSpotify } from './-discover.decade-shelf';
 import {
   noTracksToast,
+  RESUMABLE_SYNCS,
+  resumeStatusUrl,
+  syncIsActive,
   playlistDisplayName,
   SYNC_POLL_MS,
   SYNC_STATUS_HIDE_MS,
@@ -41,6 +44,13 @@ import {
 export type SyncToast = { message: string; level: 'success' | 'warning' };
 
 export interface PlaylistSyncController {
+  /**
+   * checkForActiveDiscoverSyncs (324-395): probe the three RESUMABLE syncs
+   * on mount; any that answers syncing/starting gets its status display and
+   * poller back, so a reload mid-sync doesn't look like the sync stopped.
+   * Probe failures are SILENT (RESUME_PROBE_FAILURE_IS_SILENT).
+   */
+  resumeActiveSyncs: () => Promise<void>;
   /** Live progress by status base; undefined = not syncing. */
   progressFor: (statusBase: string) => SyncProgress | undefined;
   syncingKeys: string[];
@@ -139,7 +149,38 @@ export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSy
     [poll],
   );
 
+  const resumeActiveSyncs = useCallback(async () => {
+    await Promise.all(
+      RESUMABLE_SYNCS.map(async (playlistType) => {
+        try {
+          const res = await fetch(resumeStatusUrl(playlistType));
+          if (!res.ok) return;
+          const data = (await res.json()) as { status?: string };
+          if (!syncIsActive(data.status)) return;
+          const statusBase = playlistType.replace(/_/g, '-');
+          // Visible immediately, then the poller takes over — the same shape
+          // a fresh start has.
+          setProgress((prev) => ({
+            ...prev,
+            [statusBase]: {
+              total: 0,
+              matched: 0,
+              failed: 0,
+              processed: 0,
+              pending: 0,
+              percentage: 0,
+            },
+          }));
+          poll(statusBase, virtualPlaylistId(playlistType), syncCompleteToast(playlistType));
+        } catch {
+          /* sync not active — ignore (351, 383) */
+        }
+      }),
+    );
+  }, [poll]);
+
   return {
+    resumeActiveSyncs,
     progressFor: (statusBase) => progress[statusBase],
     syncingKeys: Object.keys(progress),
     startMixSync,

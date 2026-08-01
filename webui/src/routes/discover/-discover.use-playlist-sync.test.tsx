@@ -52,6 +52,37 @@ afterEach(() => {
   server.resetHandlers();
 });
 
+describe('usePlaylistSync — resume', () => {
+  it('resumes ONLY the syncs that answer active, silently skipping the rest', async () => {
+    // release_radar mid-sync; weekly 404s; seasonal answers but finished.
+    server.use(
+      http.get('/api/sync/status/discover_release_radar', () =>
+        HttpResponse.json({ status: 'syncing', progress: { total_tracks: 4 } }),
+      ),
+      // res.ok is checked BEFORE the body is read (328) — even a 404 whose
+      // body claims 'syncing' must not resume.
+      http.get('/api/sync/status/discover_discovery_weekly', () =>
+        HttpResponse.json({ status: 'syncing' }, { status: 404 }),
+      ),
+      http.get('/api/sync/status/discover_seasonal_playlist', () =>
+        HttpResponse.json({ status: 'finished' }),
+      ),
+    );
+    const { result } = mount();
+    await act(async () => result.current.resumeActiveSyncs());
+    expect(result.current.syncingKeys).toEqual(['release-radar']);
+    // 'starting' also counts — it is the FIRST state a sync reports (330).
+    server.use(
+      http.get('/api/sync/status/discover_discovery_weekly', () =>
+        HttpResponse.json({ status: 'starting' }),
+      ),
+    );
+    await act(async () => result.current.resumeActiveSyncs());
+    expect(result.current.syncingKeys).toContain('discovery-weekly');
+    expect(toasts).toEqual([]); // resuming is silent
+  });
+});
+
 describe('usePlaylistSync', () => {
   it('refuses an empty sync with the per-family warning, engine untouched', () => {
     const { result } = mount();
