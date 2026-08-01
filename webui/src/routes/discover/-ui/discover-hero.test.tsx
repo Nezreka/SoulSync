@@ -116,12 +116,12 @@ describe('the hero', () => {
   it('hides the arrows and dots when there is only one artist', () => {
     const { container } = render(<DiscoverHero {...heroProps({ count: 1, index: 0 })} />);
     expect(container.querySelectorAll('.discover-hero-nav')).toHaveLength(0);
-    expect(container.querySelectorAll('.discover-hero-indicator')).toHaveLength(0);
+    expect(container.querySelectorAll('.hero-indicator')).toHaveLength(0);
   });
 
   it('marks exactly one dot as current', () => {
     const { container } = render(<DiscoverHero {...heroProps()} />);
-    const dots = [...container.querySelectorAll('.discover-hero-indicator')];
+    const dots = [...container.querySelectorAll('.hero-indicator')];
     expect(dots).toHaveLength(5);
     expect(dots.filter((d) => d.classList.contains('active'))).toHaveLength(1);
     expect(dots[2]).toHaveClass('active');
@@ -129,7 +129,7 @@ describe('the hero', () => {
 
   it('labels the dots one-based, for screen readers', () => {
     const { container } = render(<DiscoverHero {...heroProps()} />);
-    expect(container.querySelectorAll('.discover-hero-indicator')[0]).toHaveAttribute(
+    expect(container.querySelectorAll('.hero-indicator')[0]).toHaveAttribute(
       'aria-label',
       'Go to slide 1',
     );
@@ -142,7 +142,7 @@ describe('the hero', () => {
     expect(p.onNavigate).toHaveBeenCalledWith(-1);
     fireEvent.click(container.querySelector('.discover-hero-nav-next')!);
     expect(p.onNavigate).toHaveBeenLastCalledWith(1);
-    fireEvent.click(container.querySelectorAll('.discover-hero-indicator')[4]);
+    fireEvent.click(container.querySelectorAll('.hero-indicator')[4]);
     expect(p.onJump).toHaveBeenCalledWith(4);
   });
 

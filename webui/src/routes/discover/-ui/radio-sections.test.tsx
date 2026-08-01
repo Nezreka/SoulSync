@@ -224,7 +224,11 @@ describe('ListenBrainz', () => {
     rerender(
       <ListenBrainzSection {...lb({ groups: ['Daily Jams', 'Weekly'], activeGroup: 'Weekly' })} />,
     );
-    const subs = [...container.querySelectorAll('#lb-subtabs-bar .lb-subtab')];
+    // The bar carries the DECADE strip class + the tabs its decade styling
+    // (3702, 3707) — a bare .lb-subtab is a JS hook with no stylesheet rule,
+    // which is exactly how the first draft rendered an unstyled strip.
+    expect(container.querySelector('#lb-subtabs-bar')).toHaveClass('decade-tabs-inner');
+    const subs = [...container.querySelectorAll('#lb-subtabs-bar .decade-tab.lb-subtab')];
     expect(subs).toHaveLength(2);
     expect(subs.map((s) => s.getAttribute('data-group'))).toEqual(['Daily Jams', 'Weekly']);
     expect(screen.getByText('Weekly')).toHaveClass('active');

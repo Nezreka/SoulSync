@@ -209,7 +209,7 @@ export function DiscoverHero({
             <button
               type="button"
               key={ind.index}
-              className={ind.active ? 'discover-hero-indicator active' : 'discover-hero-indicator'}
+              className={ind.active ? 'hero-indicator active' : 'hero-indicator'}
               aria-label={ind.ariaLabel}
               aria-current={ind.active ? 'true' : undefined}
               onClick={() => onJump(ind.index)}

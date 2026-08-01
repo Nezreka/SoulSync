@@ -266,12 +266,14 @@ export function ListenBrainzSection({
         {anyData && !loading && !error && (
           <>
             {groups && groups.length > 0 && (
-              <div id="lb-subtabs-bar">
+              <div className="decade-tabs-inner" id="lb-subtabs-bar" style={{ marginBottom: 16 }}>
                 {groups.map((group) => (
                   <button
                     type="button"
                     key={group}
-                    className={group === activeGroup ? 'lb-subtab active' : 'lb-subtab'}
+                    className={
+                      group === activeGroup ? 'decade-tab lb-subtab active' : 'decade-tab lb-subtab'
+                    }
                     data-group={group}
                     onClick={() => onSelectGroup(group)}
                   >

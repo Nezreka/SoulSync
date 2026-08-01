@@ -39,7 +39,13 @@ const CSS = readdirSync(resolve(process.cwd(), 'static'))
 
 /** Class tokens the vanilla actually declares — attributes and selectors. */
 const KNOWN_CLASSES = new Set<string>([
-  ...[...(HTML + JS).matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(/\s+/)),
+  // The vanilla's class attributes live in template literals — strip the
+  // `${…}` interpolations BEFORE tokenizing, or `class="decade-tab
+  // lb-subtab${active}"` yields the token `lb-subtab${active}` and the real
+  // class never becomes known.
+  ...[...(HTML + JS).matchAll(/class="([^"]+)"/g)].flatMap((m) =>
+    m[1].replace(/\$\{[^}]*\}?/g, ' ').split(/\s+/),
+  ),
   ...[...CSS.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1]),
 ]);
 
@@ -62,104 +68,15 @@ const NEW_IDS = ['build-a-playlist', 'lastfm-radio', 'listenbrainz', 'recent-rel
 /**
  * Classes the port introduces because the vanilla styled that element INLINE.
  *
- * Every name below is in the Artist Map / Artist Web panels, overlays and
- * hints, whose vanilla markup carries `style="…"` on every node (several of
- * the builders say so outright: "Inline-styled so it doesn't depend on CSS").
- * Replacing that with semantic classes is the right shape — and it means these
- * have NO stylesheet rules until #258 writes them. That CSS is a prerequisite
- * of the route flip. Adding a name here is a claim that the vanilla element it
- * replaces was inline-styled — nothing else belongs on this list.
+ * EMPTY — and it must stay that way. The 88 names that used to live here
+ * (the Artist Map / Artist Web panels, overlays and hints, whose vanilla
+ * markup carried `style="…"` on every node) got real stylesheet rules in
+ * #258 — the "React discover port" block at the end of static/style.css,
+ * every rule a 1:1 transcription with the vanilla line cited. That made
+ * them KNOWN_CLASSES, which is this list's designed end state: a name may
+ * only pass through here on its way to a stylesheet.
  */
-const NEW_CLASSES = [
-  'artist-map-loading',
-  'artmap-card-action-row',
-  'artmap-card-actions',
-  'artmap-card-avatar',
-  'artmap-card-back',
-  'artmap-card-canvas',
-  'artmap-card-details',
-  'artmap-card-explore',
-  'artmap-card-genre',
-  'artmap-card-genres',
-  'artmap-card-glyph',
-  'artmap-card-head',
-  'artmap-card-img',
-  'artmap-card-name',
-  'artmap-card-open',
-  'artmap-card-pop',
-  'artmap-card-type',
-  'artmap-card-watch',
-  'artmap-island-menu',
-  'artmap-island-menu-count',
-  'artmap-island-menu-dot',
-  'artmap-island-menu-name',
-  'artmap-island-nav',
-  'artmap-island-nav-current',
-  'artmap-island-nav-meta',
-  'artmap-island-nav-name',
-  'artmap-ministat',
-  'artmap-ministat-label',
-  'artmap-ministat-value',
-  'artmap-panel-body',
-  'artmap-panel-coverage',
-  'artmap-panel-coverage-fill',
-  'artmap-panel-coverage-row',
-  'artmap-panel-coverage-track',
-  'artmap-panel-empty',
-  'artmap-panel-eyebrow',
-  'artmap-panel-grip',
-  'artmap-panel-head',
-  'artmap-panel-heading',
-  'artmap-panel-list-title',
-  'artmap-panel-rank',
-  'artmap-panel-row',
-  'artmap-panel-row-name',
-  'artmap-panel-star',
-  'artmap-panel-stats',
-  'artmap-panel-thumb',
-  'artweb-avatar',
-  'artweb-avatar-glyph',
-  'artweb-btn-ghost',
-  'artweb-btn-lens',
-  'artweb-btn-link',
-  'artweb-btn-primary',
-  'artweb-card-actions',
-  'artweb-card-badge',
-  'artweb-card-empty',
-  'artweb-card-genre',
-  'artweb-card-head',
-  'artweb-card-kicker',
-  'artweb-card-kicker-spaced',
-  'artweb-card-meter',
-  'artweb-card-name',
-  'artweb-card-pill',
-  'artweb-card-pills',
-  'artweb-card-stats',
-  'artweb-card-sub',
-  'artweb-card-title',
-  'artweb-firstrun-hint',
-  'artweb-genre-clear',
-  'artweb-genre-count',
-  'artweb-genre-dot',
-  'artweb-genre-empty',
-  'artweb-genre-name',
-  'artweb-hint',
-  'artweb-member-name',
-  'artweb-member-rank',
-  'artweb-member-row',
-  'artweb-ministat',
-  'artweb-ministat-label',
-  'artweb-ministat-value',
-  'artweb-panel',
-  'artweb-panel-body',
-  'artweb-panel-close',
-  'artweb-path-dot',
-  'artweb-path-hint',
-  'artweb-path-link',
-  'artweb-path-name',
-  'artweb-path-row',
-  'artweb-path-tag',
-];
+const NEW_CLASSES: string[] = [];
 
 function componentFiles(): string[] {
   return readdirSync(UI)
@@ -173,6 +90,17 @@ export function literalArtefacts(source: string): { ids: string[]; classes: stri
   const classes = [...source.matchAll(/\bclassName="([^"{}]+)"/g)]
     .flatMap((m) => m[1].split(/\s+/))
     .filter(Boolean);
+  // Ternary classNames — className={cond ? 'a b' : 'c'} — where BOTH branches
+  // are plain string literals. The quoted-only scan above missed these, which
+  // is how four classes (artmap-panel--sheet among them) never reached the
+  // allowlist at all until #258's CSS cross-check caught them. Template-string
+  // classNames stay out of scope: their literals mix with expression text and
+  // matching them loosely would flag comparison strings as classes.
+  for (const m of source.matchAll(/\bclassName=\{[^{}]*?'([^']*)'\s*:\s*'([^']*)'\s*\}/g)) {
+    for (const branch of [m[1], m[2]]) {
+      for (const tok of branch.split(/\s+/)) if (tok) classes.push(tok);
+    }
+  }
   return { ids, classes };
 }
 
@@ -248,9 +176,19 @@ describe('the components emit the vanilla ARTEFACTS', () => {
     expect(found.ids).toEqual(['a-b']);
     expect(found.classes).toEqual(['c-d', 'e-f']);
     expect(literalArtefacts('<div className={x ? "p" : "q"} />').classes).toEqual([]);
+    // Ternaries with SINGLE-quoted branches are in scope, both branches.
+    expect(literalArtefacts("<div className={x ? 'p q' : 'r'} />").classes).toEqual([
+      'p',
+      'q',
+      'r',
+    ]);
     // TOKENIZED, not substring: containing a known token must not make an
     // unknown one pass — the exact hole the first draft had.
     expect(KNOWN_CLASSES.has('listenbrainz-tab-content')).toBe(true);
     expect(KNOWN_CLASSES.has('listenbrainz-tab')).toBe(false);
+    // Interpolations are stripped before tokenizing: the vanilla's
+    // `class="decade-tab lb-subtab${…}"` must yield `lb-subtab`, not
+    // `lb-subtab${…}`.
+    expect(KNOWN_CLASSES.has('lb-subtab')).toBe(true);
   });
 });
