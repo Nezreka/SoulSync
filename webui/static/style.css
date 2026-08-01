@@ -74037,3 +74037,15 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .artweb-firstrun-hint { /* 7839-7841 */
     bottom: 20px; padding: 9px 18px; transition: opacity 0.4s ease;
 }
+
+/* React discover port — div->button UA resets (live smoke-test round 2).
+   These three were DIVs in the vanilla with no background rule of their own,
+   so as <button>s they rendered the UA's white. Same reset family as the
+   #258 block above; vanilla styling stays in each class's own rule. */
+.artmap-genre-sidebar-item,
+.artist-map-search-item,
+.build-playlist-search-result,
+.artmap-explore-result {
+    background: transparent; border: none; width: 100%;
+    font: inherit; color: inherit; text-align: left;
+}

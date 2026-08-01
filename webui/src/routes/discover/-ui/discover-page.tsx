@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
@@ -18,6 +18,13 @@ import { byltSections, type ByltSection } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
 import { buildLayoutRows } from '../-discover.layout';
 import { discoverLimiter } from '../-discover.limiter';
+import {
+  lbStatusBase,
+  lbSyncFailedId,
+  lbSyncMatchedId,
+  lbSyncPercentageId,
+  lbSyncTotalId,
+} from '../-discover.listenbrainz';
 import { syncBubbleImage, toSyncTracks } from '../-discover.playlist-sync';
 import { recSource, recommendedVisible } from '../-discover.recommended';
 import { useAlbumOpen } from '../-discover.use-album-open';
@@ -43,8 +50,9 @@ import { AdventurousnessDial } from './adventurousness-dial';
 import { RecentReleasesShelf, SeasonalAlbumsShelf } from './album-shelves';
 import { ArtistInfoModal } from './artist-info-modal';
 import { ArtistMapAssembly } from './artist-map-assembly';
-import { ArtistMapHub } from './artist-map-hub';
+import { ArtistMapHub, ArtistWebHub } from './artist-map-hub';
 import { ArtistWebAssembly } from './artist-web-assembly';
+import { ArtMapExplorePrompt } from './artmap-explore-prompt';
 import { BlacklistModal } from './blacklist-modal';
 import { BuildPlaylistSection } from './build-playlist';
 import { ByltSections } from './bylt-sections';
@@ -105,6 +113,45 @@ function toRawProgress(p: { total: number; matched: number; failed: number } | u
     : undefined;
 }
 
+/**
+ * The LB sync-status block, transcribed from the statusHtml at 3595-3608.
+ *
+ * Rendered hidden; sync-services.js flips the container's display and fills
+ * the spans by id while its poll runs — the ids are the contract.
+ */
+function LbSyncStatus({ identifier }: { identifier: string }) {
+  return (
+    <div
+      className="discover-sync-status"
+      id={`${lbStatusBase(identifier)}-sync-status`}
+      style={{ display: 'none' }}
+    >
+      <div className="sync-status-content">
+        <div className="sync-status-label">
+          <span className="sync-icon">⟳</span>
+          <span>Syncing to media server...</span>
+        </div>
+        <div className="sync-status-stats">
+          <span className="sync-stat">
+            ♪ <span id={lbSyncTotalId(identifier)}>0</span>
+          </span>
+          <span className="sync-separator">/</span>
+          <span className="sync-stat">
+            ✓ <span id={lbSyncMatchedId(identifier)}>0</span>
+          </span>
+          <span className="sync-separator">/</span>
+          <span className="sync-stat">
+            ✗ <span id={lbSyncFailedId(identifier)}>0</span>
+          </span>
+          <span className="sync-stat">
+            (<span id={lbSyncPercentageId(identifier)}>0</span>%)
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** A section outcome's payload when it succeeded, else undefined. */
 function okData<T>(outcome: unknown): T | undefined {
   const o = outcome as { kind?: string; data?: T } | undefined;
@@ -143,6 +190,8 @@ export function DiscoverPage() {
   const [recModalOpen, setRecModalOpen] = useState(false);
   const [addingAll, setAddingAll] = useState(false);
   const [expandedCaches, setExpandedCaches] = useState<Record<string, boolean>>({});
+  const [explorerPromptOpen, setExplorerPromptOpen] = useState(false);
+  const [lbCovers, setLbCovers] = useState<Record<string, unknown[]>>({});
 
   // BYLT never joined use-page's tiers (its loader renders '' when empty), so
   // the page queries it directly with the same limiter/no-retry shape.
@@ -167,8 +216,16 @@ export function DiscoverPage() {
   const registry = useMemo(() => {
     const all: Record<string, DiscoverMix> = { ...mixes.registry };
     for (const m of [...lb.mixes, ...lastfm.mixes]) all[m.key] = m;
+    // Hydrated LB tracks ride into the registry, so opening a card the
+    // mosaic pass already fetched is instant — the vanilla gets the same
+    // effect by mutating mix.tracks in place (4874).
+    for (const [key, tracks] of Object.entries(lbCovers)) {
+      if (all[key] && !all[key].tracks?.length && tracks.length) {
+        all[key] = { ...all[key], tracks };
+      }
+    }
     return all;
-  }, [mixes.registry, lb.mixes, lastfm.mixes]);
+  }, [mixes.registry, lb.mixes, lastfm.mixes, lbCovers]);
 
   // lb-* keys lazy-load from the playlist endpoint — one resolver serves
   // ListenBrainz AND Last.fm radio mixes (both key `lb-<tab>-<identifier>`).
@@ -181,6 +238,32 @@ export function DiscoverPage() {
     };
   }, []);
   const modal = useMixModal(registry, lbLazy);
+
+  // The cover-mosaic hydration (_hydrateMixCovers, 4870): LB cards arrive
+  // track-less, so each one background-fetches its playlist once and the card
+  // re-renders with a real 4-tile mosaic and an honest track count.
+  const lbCoversRef = useRef(lbCovers);
+  lbCoversRef.current = lbCovers;
+  useEffect(() => {
+    for (const mix of lb.mixes) {
+      if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
+      const lazy = lbLazy(mix);
+      if (!lazy) continue;
+      setLbCovers((prev) => ({ ...prev, [mix.key]: [] })); // in-flight marker
+      lazy()
+        .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
+        .catch(() => {});
+    }
+  }, [lb.mixes, lbLazy]);
+  const lbMixesHydrated = useMemo(
+    () =>
+      lb.mixes.map((mix) =>
+        !mix.tracks?.length && lbCovers[mix.key]?.length
+          ? { ...mix, tracks: lbCovers[mix.key] }
+          : mix,
+      ),
+    [lb.mixes, lbCovers],
+  );
 
   /** Convert + hand to the SHARED downloads.js modal (11129-11160). */
   const openTracksModal = useCallback((virtualId: string, name: string, rows: unknown[]) => {
@@ -208,6 +291,13 @@ export function DiscoverPage() {
         })();
         return;
       }
+      if (verb === 'lb-sync') {
+        // sync-services.js owns the WHOLE LB sync — fetch, virtual playlist,
+        // polling — and writes into the -sync-total/-sync-matched spans the
+        // modal's override renders (3592-3616). It survives PR2.
+        void window.startListenBrainzPlaylistSync?.(rest.join(':'));
+        return;
+      }
       const type = mix.syncKey ?? mix.key;
       const art = syncBubbleImage(toSyncTracks((modal.tracks ?? []) as Record<string, unknown>[]));
       if (action.isSync) {
@@ -229,11 +319,19 @@ export function DiscoverPage() {
     const result = modal.downloadSelection();
     if (result.kind === 'ok') {
       modal.close();
-      openTracksModal(result.virtualId, result.name, result.tracks);
+      // result.tracks are ALREADY spotify-shaped (discoverTrackToSpotifyShape
+      // ran inside downloadSelection). Re-converting them read track_name off
+      // a shape that has `name` — every artist became "Unknown Artist" in the
+      // live smoke test. Straight to the shared modal, no second conversion.
+      void window.openDownloadMissingModalForYouTube?.(
+        result.virtualId,
+        result.name,
+        result.tracks,
+      );
     } else {
       toast(result.toast, result.level);
     }
-  }, [modal, openTracksModal]);
+  }, [modal]);
 
   const openDive = useCallback((genre: string) => {
     setDive({ genre, data: null, phase: 'loading' });
@@ -257,11 +355,23 @@ export function DiscoverPage() {
   );
   const recArtists = recommendedVisible(recPayload?.artists ?? []);
 
-  // Enrich image-less recommended artists once the shelf has rows.
+  // Once a shelf has rows: enrich image-less cards AND batch-confirm which
+  // are already watched (checkRecommendedWatchlistStatuses, 694/801) — the
+  // vanilla does both per shelf load, listening recs included.
+  const listeningArtists = recommendedVisible(
+    okData<{ artists?: RecommendedArtist[] }>(page.sections.listeningRecs?.data)?.artists ?? [],
+  );
   useEffect(() => {
-    if (recArtists.length) void rec.enrichImages(recArtists, recSource(recPayload));
+    if (recArtists.length) {
+      void rec.enrichImages(recArtists, recSource(recPayload));
+      void rec.checkWatching(recArtists);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recArtists.length]);
+  useEffect(() => {
+    if (listeningArtists.length) void rec.checkWatching(listeningArtists);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listeningArtists.length]);
 
   const hasContent = useCallback(
     (id: DiscoverSectionId): boolean => {
@@ -449,7 +559,7 @@ export function DiscoverPage() {
             username={lb.username}
             activeTab={lb.activeTab}
             hasData={lb.hasData}
-            mixes={lb.mixes}
+            mixes={lbMixesHydrated}
             loading={!lb.loaded && !lb.error}
             error={lb.error}
             loaded={lb.loaded}
@@ -467,6 +577,7 @@ export function DiscoverPage() {
           <BuildPlaylistSection
             query={bp.query}
             results={bp.results}
+            resultsMessage={bp.resultsMessage}
             searching={bp.searching}
             selected={bp.selected}
             generating={bp.generating}
@@ -515,7 +626,12 @@ export function DiscoverPage() {
   const vizOpen = map.kind !== null || webRequest !== null;
 
   return (
-    <div className="page" id="discover-page">
+    // NOT className="page" and NOT id="discover-page": .page is display:none
+    // until the shell adds .active, which it only does for the react HOST and
+    // for legacy pages — the label-detail flip hid its entire page this way.
+    // The host (.page.active) already provides the page padding, and nothing
+    // in CSS or shared JS targets #discover-page, so the root carries neither.
+    <div>
       {/* The overlays render INSTEAD of the container — the vanilla hid every sibling. */}
       <ArtistMapAssembly
         map={map}
@@ -554,15 +670,21 @@ export function DiscoverPage() {
           <ArtistMapHub
             onOpenWatchlist={() => void map.openWatchlist()}
             onOpenGenre={() => void map.openGenre()}
-            onOpenExplorer={() => setWebRequest({})}
+            // Explorer asks for an artist FIRST (9633) — the prompt resolves a
+            // real name, then the map explores it.
+            onOpenExplorer={() => setExplorerPromptOpen(true)}
           />
+          <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
           {rows.map((row) =>
             row.kind === 'full' ? (
               <div key={row.id}>{renderSection(row.id)}</div>
             ) : (
+              // The sections must be the grid's DIRECT children:
+              // `.discover-row-2col > .discover-section` carries the
+              // min-width:0 that stops a wide shelf blowing the column out.
               <div className="discover-row-2col" key={row.ids.join('+')}>
                 {row.ids.map((id) => (
-                  <div key={id}>{renderSection(id)}</div>
+                  <Fragment key={id}>{renderSection(id)}</Fragment>
                 ))}
               </div>
             ),
@@ -579,6 +701,11 @@ export function DiscoverPage() {
           loading={modal.loading}
           error={modal.error}
           selected={modal.selected}
+          syncStatusOverride={
+            modal.mix.key.startsWith('lb-') ? (
+              <LbSyncStatus identifier={modal.mix.key.split('-').slice(2).join('-')} />
+            ) : undefined
+          }
           syncing={Boolean(modal.mix.statusBase && sync.syncingKeys.includes(modal.mix.statusBase))}
           syncProgress={
             modal.mix.statusBase ? toRawProgress(sync.progressFor(modal.mix.statusBase)) : undefined
@@ -709,6 +836,16 @@ export function DiscoverPage() {
           onSelectAll={albums.batch.selectAll}
           onSubmit={() => void albums.batch.submit()}
           onClose={albums.batch.close}
+        />
+      )}
+
+      {explorerPromptOpen && (
+        <ArtMapExplorePrompt
+          onPick={(name) => {
+            setExplorerPromptOpen(false);
+            void map.openExplorer(name);
+          }}
+          onClose={() => setExplorerPromptOpen(false)}
         />
       )}
 

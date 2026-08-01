@@ -29,6 +29,8 @@ import { SyncStatus } from './sync-status';
 export interface BuildPlaylistSectionProps {
   query: string;
   results: SeedArtist[];
+  /** The no-results / all-selected copy the search answered with (10921). */
+  resultsMessage?: string | null;
   searching?: boolean;
   selected: SeedArtist[];
   generating?: boolean;
@@ -57,6 +59,7 @@ export interface BuildPlaylistSectionProps {
 export function BuildPlaylistSection({
   query,
   results,
+  resultsMessage,
   searching,
   selected,
   generating,
@@ -142,7 +145,15 @@ export function BuildPlaylistSection({
               </div>
             )}
           </div>
-          <div id="build-playlist-search-results" className="build-playlist-search-results">
+          <div
+            id="build-playlist-search-results"
+            className="build-playlist-search-results"
+            // display:none in the stylesheet; the vanilla flips it inline once
+            // there is something to show (10906). Without this the search
+            // "did nothing" — results rendered into an invisible box.
+            style={{ display: results.length || resultsMessage ? 'block' : 'none' }}
+          >
+            {resultsMessage && <div className="build-playlist-no-selection">{resultsMessage}</div>}
             {results.map((artist) => (
               <button
                 type="button"

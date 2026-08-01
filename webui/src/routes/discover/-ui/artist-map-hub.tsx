@@ -125,3 +125,123 @@ export function ArtistMapHub({ onOpenWatchlist, onOpenGenre, onOpenExplorer }: A
     </div>
   );
 }
+
+/**
+ * The Artist WEB hub — the second `.artmap-hub` (index.html 4424-4452), a
+ * sibling of the map hub with its own three lens cards. It was MISSED in the
+ * first page assembly ("artist web is gone entirely" — the live smoke test),
+ * which is why it exists as its own export rather than a variant flag: the two
+ * hubs are separate markup blocks in the vanilla and stay separate here.
+ */
+export function ArtistWebHub({
+  onOpenLens,
+}: {
+  onOpenLens: (lens: 'genre' | 'community' | 'discovery') => void;
+}) {
+  return (
+    <div className="artmap-hub">
+      <div className="artmap-hub-bg" />
+      <div className="artmap-hub-content">
+        <div className="artmap-hub-header">
+          <svg
+            className="artmap-hub-icon"
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="5" cy="5" r="1.6" />
+            <circle cx="19" cy="5" r="1.6" />
+            <circle cx="5" cy="19" r="1.6" />
+            <circle cx="19" cy="19" r="1.6" />
+            <line x1="12" y1="12" x2="5" y2="5" />
+            <line x1="12" y1="12" x2="19" y2="5" />
+            <line x1="12" y1="12" x2="5" y2="19" />
+            <line x1="12" y1="12" x2="19" y2="19" />
+          </svg>
+          <div>
+            <h2 className="artmap-hub-title">Artist Web</h2>
+            <p className="artmap-hub-subtitle">Your library as an interactive similarity graph</p>
+          </div>
+        </div>
+        <div className="artmap-hub-cards">
+          <button type="button" className="artmap-hub-card" onClick={() => onOpenLens('genre')}>
+            <div className="artmap-hub-card-icon">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="7" cy="8" r="1.5" />
+                <circle cx="17" cy="8" r="1.5" />
+                <circle cx="8" cy="16" r="1.5" />
+                <circle cx="16" cy="16" r="1.5" />
+                <line x1="12" y1="12" x2="7" y2="8" />
+                <line x1="12" y1="12" x2="17" y2="8" />
+                <line x1="12" y1="12" x2="8" y2="16" />
+                <line x1="12" y1="12" x2="16" y2="16" />
+              </svg>
+            </div>
+            <div className="artmap-hub-card-text">
+              <h3>Taste Map</h3>
+              <p>Every artist in your library, wired together by similarity</p>
+            </div>
+            {ARROW}
+          </button>
+          <button type="button" className="artmap-hub-card" onClick={() => onOpenLens('community')}>
+            <div className="artmap-hub-card-icon">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="7" cy="8" r="2.5" />
+                <circle cx="17" cy="8" r="2.5" />
+                <circle cx="12" cy="17" r="2.5" />
+                <line x1="8.8" y1="9.8" x2="10.5" y2="15" />
+                <line x1="15.2" y1="9.8" x2="13.5" y2="15" />
+                <line x1="9.5" y1="8" x2="14.5" y2="8" />
+              </svg>
+            </div>
+            <div className="artmap-hub-card-text">
+              <h3>Communities</h3>
+              <p>Your library's real scenes, found from who sounds alike — not genre tags</p>
+            </div>
+            {ARROW}
+          </button>
+          <button type="button" className="artmap-hub-card" onClick={() => onOpenLens('discovery')}>
+            <div className="artmap-hub-card-icon">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <polygon points="15.5 8.5 13 13 8.5 15.5 11 11 15.5 8.5" />
+              </svg>
+            </div>
+            <div className="artmap-hub-card-text">
+              <h3>Discovery Web</h3>
+              <p>Artists you don't have yet, mapped from the ones you do</p>
+            </div>
+            {ARROW}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
