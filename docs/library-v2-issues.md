@@ -4360,3 +4360,532 @@ im Code:
   über `lib2_artists.legacy_artist_id` auf und reicht sie **nie** als
   Provider-ID an den Autolink-Resolver weiter — sonst landete eine
   Media-Server-ID in einer Provider-ID-Spalte (Guide §2.5).
+
+---
+
+## 29. Multi-Agent-Audit nach dem Upstream-Sync (1. August 2026)
+
+Fünf parallele Read-only-Audits über `library-overhaul` @ `483405764`
+(Upgrade-/First-Import-Pfad, Routing/Einstiegspunkte, Library-Aktionen,
+lib2-Backend, Datei-/Repair-Operationen). Diagnosen, keine Fixes — der
+Remediationstatus gehört in `library-v2-status.md`.
+
+Alle als **verifiziert** markierten Befunde hat der Koordinator unabhängig am
+Code nachgeprüft, nicht nur vom Agenten übernommen. Als **SPEKULATIV**
+markierte Punkte hat der jeweilige Agent selbst nicht belegen können; sie
+brauchen vor jeder Arbeit eine eigene Reproduktion.
+
+Baseline zum Zeitpunkt des Audits: `webui` 36 Dateien / 240 Tests grün,
+`tests/library2` 1.193 grün. **Kein einziger Befund unten wird von der
+bestehenden Suite gefangen.**
+
+### 29.1 Release-Blocker
+
+#### iss29-A01 — Upgrade landet in einer dauerhaft leeren Library, die sich als „fertig" meldet — VERIFIZIERT
+
+`core/library2/bootstrap.py:274-289` (`try_claim`) schreibt in beiden
+UPDATE-Zweigen `resume_watermark=?` neu, löscht aber `resume_stage`,
+`resume_rowid` und `resume_run_id` nicht. Der Watermark ist das **einzige**
+Invalidierungssignal (`bootstrap.py:231-232`), und `run_bootstrap_if_needed`
+liest den Resume-Punkt *vor* dem Claim (`:496-498`) — der Aufrufer erfährt also
+nie, dass der Claim genau die Zeile gerade wieder gültig gestempelt hat, die er
+verworfen hatte.
+
+Der Agent hat es mit zwei Probe-Skripten gegen den echten Codepfad belegt:
+
+```
+after run A : resume_stage='tracks' rowid=60000 run_id='RUN-A' watermark=W1
+run B resume point (korrekt invalidiert): None
+after run B claim: resume_stage='tracks' rowid=60000 run_id='RUN-A' watermark=W2  <-- neu gestempelt
+run C resume point: ResumePoint(stage='tracks', rowid=60000, run_id='RUN-A')
+```
+
+Wirkung: der wiederbelebte Punkt nennt `stage='tracks'`, also liefert
+`walk_from()` (`core/library2/importer.py:1036-1045`) für `artists` und `albums`
+`None` — beide Walks entfallen. Der Tracks-Walk findet dann ein leeres
+`album_map` und überspringt jede Zeile (`importer.py:1395-1397`). `mark_done`
+stempelt den aktuellen Watermark, `should_stop_autostart` liefert `True`, und
+`web_server.py:32719-32720` **verlässt die Autostart-Schleife**:
+
+```
+4) tick -> {'success': True, 'stats': {'artists': 0, 'albums': 0, 'tracks': 0}}
+   status='done'; lib2 counts 0/0/0; should_stop_autostart: True
+5) tick -> {'skipped': 'already_done'}   lib2 weiterhin 0/0/0
+```
+
+Das Fenster ist auf einem echten Upgrade realistisch: zwischen Claim und erstem
+Checkpoint (`importer.py:1105`) läuft `ensure_library_v2_schema` mit sieben
+Full-Table-Pässen (`core/library2/schema.py:824-905`) plus
+`_ArtistResolver.seed_existing()` und `_discography_album_index()` — auf einer
+100k-Track-Library zig Sekunden, also genau dort, wo ein crash-loopender
+Container steht. Über die UI ebenso erreichbar: `POST /api/library/v2/import`
+(`api/library_v2.py:5046`) und `POST /api/library/v2/reset` (`:5159`) claimen
+dieselbe Zeile; `reset` committet den `DELETE FROM lib2_*`-Wipe vor dem ersten
+Checkpoint (`importer.py:1080`).
+
+Fixrichtung: `resume_stage`/`resume_rowid`/`resume_run_id` im selben UPDATE
+löschen, wenn `resume_point_for` `None` ergab (die Entscheidung in `try_claim`
+hineinreichen) — oder `resume_watermark` nur schreiben, wenn die Zeile gerade
+keinen Checkpoint trägt, damit ein unpassendes Paar sich weiter selbst ablehnt.
+
+#### iss29-E01 — Reorganize löscht das Original auch dann, wenn der DB-Update fehlschlug — VERIFIZIERT
+
+`core/library_reorganize.py:1592-1598` erkennt einen DB-Fehler ausschließlich an
+einer Exception aus `ctx.update_track_path_fn` und gibt dann `False` zurück. Der
+übergebene Callback in `core/reorganize_runner.py:118-120` schluckt aber alles:
+
+```python
+        except Exception as db_err:
+            logger.warning(f"[Reorganize] DB path update failed for {track_id}: {db_err}")
+            return
+```
+
+Also läuft `_finalize_track` weiter bis `os.remove(resolved_src)`
+(`library_reorganize.py:1624`) und meldet `True`.
+
+Szenario: Reorganize läuft, während die SQLite-Schreibsperre gehalten wird
+(Import-Commit, `recompute_wanted`). `with db._get_connection() as conn:`
+(`reorganize_runner.py:75`) wirft `database is locked`; die ganze Transaktion —
+legacy `tracks.file_path` **und** `lib2_track_files.path` (`:106-116`) — rollt
+zurück. Das Original wird trotzdem gelöscht, der Lauf meldet „moved". Beide
+Kataloge zeigen auf einen Pfad, den es nicht mehr gibt → lib2-Missing →
+`dead_file_cleaner`-Finding → die Wanted-Projektion lädt einen Track neu
+herunter, den der Nutzer besaß.
+
+Branch-spezifisch: auf `main` führte dieser Callback eine einzige UPDATE-Anweisung
+aus; dieser Branch hat vier weitere in denselben `try` gelegt, sodass ein
+lib2-Fehler jetzt auch den Legacy-Write verwirft.
+
+Fixrichtung: re-raisen (oder einen geprüften Bool zurückgeben) und Legacy- und
+lib2-Write in getrennte Transaktionen legen.
+
+#### iss29-E02 — Sibling-Format-Move überschreibt eine vorhandene Zieldatei stillschweigend — VERIFIZIERT
+
+`core/library_reorganize.py:2324-2332` baut `sibling_dst` und ruft
+`shutil.move` — **ohne** Existenzprüfung; auf POSIX löst das für eine reguläre
+Datei zu `os.rename` auf und überschreibt. Der kanonische Move daneben prüft
+sehr wohl (`_rename_track_in_place:2004`, `'destination already exists'`,
+Docstring: „never silent data loss") — aber die Siblings werden in `:2010-2011`
+**vor** dieser Prüfung verschoben, die Absicherung greift also nie für sie.
+
+Szenario: Lossy-Copy aktiv → `Old/05 Song.flac` (in DB) + `Old/05 Song.mp3`
+(nicht in DB). Im Ziel liegt bereits ein fremdes `05 - Song.mp3` (früherer
+Teillauf, zweite Edition). `new_abs` für die FLAC existiert nicht, die
+kanonische Prüfung geht also durch; der Sibling-Zweig zerstört die vorhandene
+MP3 ohne Fehler, ohne Log, ohne Zähler. Sekundär: schlägt danach das kanonische
+`os.rename` (`:2013`) fehl, sind die Siblings schon verschoben und das Album ist
+auf zwei Ordner verteilt.
+
+Fixrichtung: dieselbe Existenzprüfung auf `sibling_dst`; Siblings erst nach
+erfolgreichem kanonischen Rename bewegen.
+
+### 29.2 Major
+
+#### iss29-A02 — Heartbeat-Drosselung verwirft genau die Checkpoints, die eine Rowid tragen
+
+`core/library2/bootstrap.py:509-517`: `_progress` verwirft jeden Beat mit
+`current != total` innerhalb von `_HEARTBEAT_THROTTLE_SECONDS`. Genau das sind
+die Stage-Eröffnungs-Checkpoints (`importer.py:1105`, `:1187`, `:1379`) und der
+Finalize-Übergang (`:1569`) — und nur diese persistiert `heartbeat()` überhaupt
+(`bootstrap.py:361`: `writes_checkpoint = rowid is not None and bool(run_id)`).
+Belegt: nach einem **vollständig erfolgreichen** Lauf steht
+`resume_stage='tracks', resume_rowid=0` in der Zeile, nie `'finalizing'`. Der
+mig-01-Vertrag aus `library-v2-status.md` §43.1 hält damit für keine Library,
+deren Walks in unter 5 s durchlaufen. Allein kostet das nur Doppelarbeit —
+zusammen mit iss29-A01 liefert es den giftigen `tracks`/`0`-Wert.
+Fixrichtung: einen Beat mit `rowid` nie drosseln.
+
+#### iss29-A03 — `/library` friert während der automatischen Migration auf „Migrating your library…" ein
+
+`webui/src/routes/library/-library-v2.api.ts:1823-1832` pollt nur, solange
+`running` oder `artwork_cache.running` gesetzt ist. `running` ist der
+In-Process-State, den **ausschließlich** der manuelle Import-Button setzt
+(`api/library_v2.py:5040-5041`); der Autostart-Bootstrap rührt ihn nie an.
+`bootstrap.status` — der einzige Deskriptor der automatischen Migration
+(`:5231`) — wird nicht abgefragt. `refetchOnWindowFocus` ist global `false`
+(`webui/src/app/query-client.ts:8`). Der eine Statusabruf sieht
+`bootstrap.status === 'running'`, React Query stoppt den Timer, wertet das
+Prädikat erst nach einem Fetch neu aus — der nie kommt. Der Nutzer sieht
+stundenlang dieselbe Prozentzahl. `import-status.test.tsx:220-320` prüft nur
+`describeLibraryV2Migration` als reine Funktion, pinnt das also nicht.
+
+#### iss29-A04 — `mark_done` stempelt den *Nach*-Lauf-Watermark
+
+`core/library2/bootstrap.py:536-544` nimmt `source_watermark(database)` am Ende.
+Die drei Walks sind Keyset-Scans zu verschiedenen Zeitpunkten
+(`importer.py:1106`, `:1211`, `:1390`), und dazwischen läuft der komplette
+`post_import`-Precache. Auto-Import, Wishlist-Downloads und Media-Server-Sync
+schreiben derweil in die Legacy-Tabellen. Ein Artist, der nach dem
+Artists-Walk entsteht, wird nie gewalkt, aber vom Schluss-Watermark mitgezählt →
+nächster Tick `skipped: already_done`, `should_stop_autostart` `True`, Artist für
+die restliche Prozesslaufzeit in V2 unsichtbar. Fixrichtung: den vor dem ersten
+Walk erfassten Watermark stempeln (den `try_claim` bereits notiert hat).
+
+#### iss29-B01 — Sidebar-„Library" ist aus jeder Library-Unteransicht ein toter Klick — VERIFIZIERT
+
+`webui/static/init.js:3175` `if (!options.forceReload && pageId === currentPage) return;`
+und `webui/static/shell-bridge.js:74` `currentPage = pageId;` in
+`showReactHost`. `useReactPageShell('library')`
+(`webui/src/platform/shell/route-controllers.tsx:48`) ruft `showReactHost('library')`
+für **jede** V2-Ansicht, also ist `currentPage` durchgehend `'library'`. Der
+Capture-Handler (`shell-bridge.js:230`) `preventDefault()`et den Anker und ruft
+`navigateToPage('library')`, das sofort zurückkehrt. Auf `/library?artist=42`
+passiert beim Klick auf „Library" gar nichts — keine URL-Änderung, keine
+Ansicht, kein Feedback. Genauso bei `?section=wanted` und `?album=7`. Vor dem
+Cutover war Artist-Detail eine eigene `pageId`, da funktionierte der Klick.
+
+#### iss29-B02 — `?discover=` / `?discoverName=` sind verwaist, Discovery-Modus unerreichbar
+
+Mit der Rücknahme von ldp-01 (§44.2 im Status-Doc) ist der einzige Produzent
+dieser URLs entfallen. Jede verbliebene Zuweisung *löscht* sie
+(`library-v2-page.tsx:5764,5765,5787,5788,5810,5842`); die einzige Konstruktion
+im Repo steht in der Testfixture `-ui/discovery-artist.test.tsx:24`.
+Unerreichbar, aber weiterhin ausgeliefert: `DiscoveryArtistView`
+(`library-v2-page.tsx:5723-5905`), `DISCOVERY_ARTIST_VIEW` (`:4871-4875`), der
+API-Client-Block (`-library-v2.api.ts:635-760`), vier Backend-Endpunkte
+(`GET/POST /api/library/v2/discovery/artist`, `POST …/discovery/track`,
+`GET …/discovery/track-status`), der ldp-06-„Bookmark artist"-Flow
+(`:5775-5796`) und eine grüne Testsuite für einen Modus, den niemand betreten
+kann. **Produktentscheidung nötig:** ersatzlos löschen, oder einen
+Einstiegspunkt geben (z. B. „Open in Library" auf Upstreams Artist-Detail für
+einen Provider-Artist ohne Katalogzeile).
+
+#### iss29-B03 — Der einzige überlebende Search→Library-Einstieg lädt die ganze App neu
+
+`inLibraryArtistPath()` liefert `/library?artist=<v2id>`, und die Karte ist ein
+nackter `<a href>` ohne `onClick` (`-ui/search-results.tsx:203-219`,
+`compact-item.tsx:182-197`). Der einzige Dokument-Interceptor
+(`shell-bridge.js:214-241`) behandelt nur `.nav-button[data-page]` und
+`/artist-detail/`; `/library?...` fällt an den Browser durch, TanStack fängt
+rohe Anker nicht ab. Ergebnis: der Treffer *mit* `library_v2_id` erzwingt einen
+kompletten Dokument-Load (index.html, alle Vanilla-Bundles, React-Bundle,
+Profil-Bootstrap), während die Karte direkt daneben *ohne* `library_v2_id`
+in-app navigiert. `webui/static/downloads.js:5326` baut denselben Link von Hand
+mit demselben Ergebnis.
+
+#### iss29-C01 — Interactive-Search-Grab-Watcher ist zeitzonenkaputt, Quarantäne-Feedback feuert nie — VERIFIZIERT
+
+`webui/src/routes/library/-ui/interactive-search.tsx:269-286` vergleicht
+`Date.parse(e.date)` gegen `Date.now()`. `e.date` ist die rohe DB-Spalte, nie
+normalisiert (`core/library2/history_feed.py:252,295,341,379,427`;
+`api/library_v2.py:4409-4441` reicht sie durch). Die Spalte ist
+`created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP`
+(`core/acquisition/history.py:64`), der Insert (`:209-212`) liefert nichts —
+also SQLites **UTC**-`CURRENT_TIMESTAMP` im Format `"YYYY-MM-DD HH:MM:SS"`,
+Leerzeichen, keine Zone. V8 parst das als **Lokalzeit**. Nachgemessen:
+
+```
+$ TZ=Europe/Zurich node -e "…"
+Date.parse('2026-07-31 13:04:05') = 2026-07-31T11:04:05.000Z
+tatsächliche Bedeutung            = 2026-07-31T13:04:05.000Z
+Versatz                           = 2 Stunden
+```
+
+Europe/Zurich ist die Zeitzone dieses Projekts — der Fehler feuert also heute.
+Östlich von UTC fällt das Quarantäne-Event aus dem `fresh`-Filter, jeder Poll
+liefert `pending`, und `:653-655` zeigt am Ende **`Grabbed ✓`** über einer Datei,
+die nie ankam — exakt die Regression, die §21.2 / iss27-10 als behoben führt.
+Westlich davon invertiert es: eine ältere, fremde Quarantäne wird diesem Grab
+zugeschrieben. Dieselbe rohe Zeit rendert das History-Modal
+(`library-v2-page.tsx:2203`), zeigt also UTC als Lokalzeit an.
+
+#### iss29-C02 — Refresh & Scan und Automatic Search melden einen *laufenden* Job als Fehler (409 unbehandelt)
+
+`-library-v2.api.ts:328-335` und `:1478-1488` übergeben kein
+`throwHttpErrors: false`; `apiClient` ist `ky.create({ retry: 0 })`
+(`webui/src/app/api-client.ts:14-17`), der 409 wirft also vor dem Lesen des
+Bodys. Der Server liefert die laufende Job-ID sehr wohl zurück
+(`api/library_v2.py:4922-4929` bzw. `:4562-4569`), und
+`startLibraryV2DiscographyRefresh` (`-library-v2.api.ts:624-633`) zeigt das
+gewünschte Muster. Der Button-State ist per-Mount
+(`library-v2-page.tsx:675-709`), überlebt also weder Remount noch zweiten Tab
+noch die separate `useScopedSearchBanner`-Instanz der Albumseite. Der
+`dd28-16`-Kommentar (`:6596-6610`) beansprucht diese Klasse als behoben, deckt
+aber nur den In-Session-Fall. `startLibraryV2UpgradeScan` (`:1463-1470`) hat
+dieselbe Lücke für die globale Automatic Search.
+
+#### iss29-C03 — Fehlgeschlagener Artist-Listen-Fetch rendert „Your library is empty — Import library" — VERIFIZIERT
+
+`library-v2-page.tsx:3812` `const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;`
+— `isError` wird nirgends gelesen, `retry: 1`
+(`webui/src/app/query-client.ts:7`). Nach den Retries ist `isLoading` false und
+`data` undefined → `LibraryEmptyState` (`:10137-10164`) erklärt einem Nutzer mit
+900 Artists seine Library für leer und bietet einen vollen Import an. Mit Text im
+Filterfeld degradiert es zur stumm leeren Liste. `AlbumDetailView`
+(`:4750-4753`) macht es richtig — es ist also eine Inkonsistenz, kein Hausstil.
+
+#### iss29-C04 — Fehlgeschlagener Artist-Fetch lässt die Seite dauerhaft auf „Loading…"
+
+`library-v2-page.tsx:6154-6156` hat keinen `isError`-Zweig: `isLoading` false +
+`artist` undefined wählt weiter `Loading…`, dauerhaft, ohne Meldung, ohne Retry.
+`?artist=999999` (gelöschter Artist, altes Lesezeichen) → `api/library_v2.py:1615`
+liefert 404 → die Seite dreht sich für immer. Gleiches Muster in
+`AlbumTrackTable` (`:7956-7958`) und `HistoryModal` (`:2185-2188`, das auf einem
+Fehlschlag die *falsche* Aussage `No recorded history for this artist yet.`
+rendert).
+
+#### iss29-C05 — Wanted-Views behaupten bei fehlgeschlagenem Fetch „every monitored track you want is already on disk"
+
+`library-v2-page.tsx:4332`, `:4395-4405` — `isError` ungelesen. Fällt
+`/api/library/v2/wanted` (`api/library_v2.py:1316`) aus, behauptet die
+Missing-Ansicht positiv, dass nichts fehlt: eine Tatsachenaussage über die
+Library, abgeleitet aus einem gescheiterten Request, auf genau dem Bildschirm,
+den der Nutzer konsultiert, um zu entscheiden, ob Automatic Search Arbeit hat.
+
+#### iss29-C06 — `find22-15` („ein Queue-Poll pro Artist") ist verletzt, sein Guard-Test läuft ins Leere — VERIFIZIERT
+
+```
+library-v2-page.tsx:6002:  libraryV2QueueStatusQueryOptions('artists', artistId)
+library-v2-page.tsx:7880:  libraryV2QueueStatusQueryOptions('albums', albumId)
+```
+
+`:7880` sitzt in `AlbumTrackTable`, das pro aufgeklapptem Album einmal montiert
+wird (`:6911`), mit `refetchInterval: 3000` (`-library-v2.api.ts:1502-1517`).
+Der Guard `-ui/artist-queue-polling.test.ts:12` prüft
+`not.toContain("libraryV2QueueStatusQueryOptions('albums', album.id)")` — der
+Code schreibt aber `'albums', albumId`, das Literal kommt also nie vor und die
+Assertion besteht vakuum. Sechs aufgeklappte Blöcke ≈ 140 Requests/min, jeder
+mit `entity_track_ids` + Queue-Scan (`api/library_v2.py:4658-4696`) gegen genau
+die SQLite-DB, deren einzelne Schreibsperre der bekannte Engpass dieses Projekts
+ist. Die artist-weite Antwort enthält all diese Tracks bereits.
+`library-v2-status.md:103` führt find22-15 als Verified.
+
+#### iss29-E03 — Eine gelöschte Datei markiert alle Dateien eines Albums als `deleted`
+
+`core/library2/maintenance_sync.py:532-538` mit der Aufweitung in `:264-278`:
+`_resolve_links` expandiert ein `entity_type='album'`-Subject auf **jeden** Track
+und **jede** nicht gelöschte Datei des Albums, und der Delete-Zweig setzt sie
+alle auf `deleted`. `_fix_unwanted_content` (`core/repair_worker.py:3100-3149`)
+löscht aber genau *eine* Datei und liefert `action: 'removed_content'`, das in
+`_DELETE_ACTIONS` (`:41-51`) steht. Ein Upgrade bringt offene
+album-scope-`unwanted_content`-Findings mit (`live_commentary_cleaner` erzeugt
+sie mit `entity_type='album'`, und der Job steht **nicht** in `RETIRED_JOB_IDS`).
+Folge: Album gilt als dateilos → `recompute_wanted` (`:593-612`) will das ganze
+Album neu → die Wishlist lädt ein vollständig vorhandenes Album erneut, während
+die echten Dateien wie Waisen aussehen.
+
+#### iss29-E04 — Destruktives Repair löscht, was der Fuzzy-Pfad-Resolver liefert — ohne Root-Containment, ohne Revalidierung
+
+`core/repair_worker.py:2063-2088` (`_remove_native_repair_file`):
+`resolved = target if os.path.isfile(target) else resolve_lib2_path(target, ...)`,
+dann `os.remove(resolved)`. Der Suffix-Walk des Resolvers probiert die
+Basisverzeichnisse **Transfer-Ordner zuerst** (`core/library/path_resolver.py:101-104`),
+und Importe landen unter `soulseek.transfer_path` im selben
+`Artist/Album/…`-Layout (`core/imports/paths.py:523`). Szenario: `corrupt_audio`-
+Finding auf einer bereits verschwundenen Library-Datei, während unter Transfer
+ein frisch heruntergeladener Ersatz liegt → der Walk trifft die Transfer-Kopie
+und `os.remove` zerstört den Download, `sync_repair_change` verbucht es als
+konvergiert. Der Gegenbeweis für die Absicht steht daneben:
+`core/library2/file_delete.py` verlangt Containment in `library.music_paths`
+(`_containing_root:110-120`) und revalidiert Größe + mtime gegen ein
+Preview-Token (`:568-577`). `_remove_native_repair_file` tut beides nicht;
+dasselbe gilt für `_fix_unwanted_content` (`:3128-3131`) und
+`_fix_short_preview_track` (`:2203-2212`).
+
+#### iss29-E05 — Reorganize löscht `.lrc`-Lyrics, die Library V2 selbst geschrieben hat
+
+`core/library_reorganize.py:2255` (`_TRACK_SIDECAR_EXTS`) und `:2342-2354`
+(`_delete_track_sidecars`, aufgerufen aus `_finalize_track:1627`). Der volle
+Reorganize-Lauf staged nur das Audio (`_stage_track:1539`), trägt die `.lrc`
+also nicht mit — und löscht sie danach an der Quelle. lib2 schreibt genau diese
+Dateien (`core/library2/lyrics.py:99,131`). „Fetch Lyrics" gefolgt von
+„Reorganize" auf derselben Seite leert die Lyrics-Spalte. `_fix_path_mismatch`
+(`core/repair_worker.py:3729-3738`) und `_rename_to_basename`
+(`core/repair_jobs/track_number_repair.py:1058-1064`) *verschieben* das Sidecar —
+Reorganize ist der Ausreißer.
+
+#### iss29-E06 — `mark_file_verification_status` scannt die ganze Tabelle und statet das Dateisystem, während die Schreibsperre gehalten wird
+
+`core/library2/verification.py:39-53`, gerufen aus `web_server.py:9357-9362`
+*innerhalb* der offenen Schreibtransaktion (`UPDATE library_history` bei `:9350`).
+Es liest **jede** `lib2_track_files`-Zeile und ruft `resolve_lib2_path` für jede
+nicht passende; `resolve_library_file_path` beginnt mit `os.path.exists`
+(`path_resolver.py:232`) und suffix-walkt für fehlende Dateien alle Basisdirs ×
+Segmente. Auf einer 30k-Library über SMB/NFS hält ein einziger „Approve"-Klick
+die Schreibsperre über ≥30k Netzwerk-Stats — dieselbe Anti-Pattern-Klasse wie
+der bekannte Deadlock, an einer neuen lib2-Stelle.
+
+#### iss29-E07 — Abgebrochener atomarer Speichervorgang wird als erfolgreicher Tag-Write gemeldet
+
+`core/metadata/common.py:314-324` liefert `False` für „Original unangetastet,
+Tags NICHT geschrieben". Drei dateiverändernde Aufrufer verwerfen den Wert
+(`core/tag_writer.py:553-555`, `core/repair_jobs/track_number_repair.py:989,1027`) —
+`core/replaygain.py:326` und `core/library/file_tags.py:487` prüfen ihn, der
+Vertrag ist also andernorts verstanden. (a) lib2 Write Tags zählt `written` und
+persistiert einen Snapshot (`core/library2/retag.py:411-415`) — die UI sagt
+„N written", die Datei ist unverändert, die Tag-Gap-Zelle zeigt die Lücke für
+immer. (b) Schlimmer: `native_p3.py:247-261` fährt nach dem gescheiterten
+Tag-Write unbeirrt mit `_rename_to_basename` fort — die Datei heißt danach
+`07 - Song.flac` und trägt TRCK `3`; `fix_finding` löst das Finding auf, es wird
+nie wieder erkannt.
+
+### 29.3 Minor
+
+| ID | Befund | Ort |
+|---|---|---|
+| iss29-A05 | Jeder `/import/status`-Poll nimmt die Schreibsperre (`ensure_bootstrap_schema` endet auf `INSERT OR IGNORE`) — 1×/s pro offenem Tab gegen die Artwork-Worker | `core/library2/bootstrap.py:105-107,176-191` |
+| iss29-A06 | Autostart-Backoff verdoppelt sich auch bei No-op-Ticks und wird nie zurückgesetzt; Fresh Install wartet nach einem späten Erst-Scan ~22 min | `web_server.py:32710-32714` |
+| iss29-A07 | Toter Feature-Flag-Aufruf, Rückgabewert verworfen (einziger Konsument von `config_get`) | `core/library2/bootstrap.py:485-487` |
+| iss29-B04a | YouTube-Videos-Quelle liefert `db_artists: []`, „In Your Library" verschwindet, solange das Icon aktiv ist (vorbestehende Upstream-Form) | `-search.use-controller.ts:236` |
+| iss29-B04b | Such-Cache 600 s: ein währenddessen importierter Artist zeigt bis zu 10 min auf Artist-Detail statt V2 | `core/search/cache.py:18` |
+| iss29-B04c | Für lib2-native Artists geht `'id': v2_id` an `/api/artist/<id>/image`, den generischen Resolver, der IDs an Provider weiterreicht → falsches Foto | `core/search/orchestrator.py:352-356`, `web_server.py:11475-11477` |
+| iss29-B05 | ldp-05-Regression: der Rich-Header-Vorwahl für Such-Ankünfte ist tot, `openArtistSearch()` setzt hart auf `compact`/`library`/`table` zurück | `library-v2-page.tsx:4857-4865` |
+| iss29-B06 | Kommentare und Doku behaupten weiter die zurückgenommene Weiterleitung; §42 führt ldp-01 und ldp-09 unverändert als Implemented | `-library-v2.types.ts:45-46`, `library-v2-page.tsx:4868,5908,6132`, `library-v2-status.md` §42 |
+| iss29-B07 | `/library-v2` fehlt in `_DEEPLINK_VALID_PAGES`, ein Lesezeichen wird vom Vanilla-Shell zu `dashboard` aufgelöst; React gewinnt das Rennen meist — **Ausgang SPEKULATIV**, die Lücke selbst nicht | `webui/static/init.js:2939-2959` |
+| iss29-B08 | Media-Player-„Go to artist" ist bei lib2-Wiedergabe dauerhaft deaktiviert (`artist_id: null` ist korrekt, aber nichts routet auf `/library?artist=`) | `library-v2-page.tsx:8803`, `webui/static/media-player.js:161-171` |
+| iss29-B09 | Filterfeld ist unkontrolliert (`defaultValue`), desynct bei Browser-Back von der URL | `library-v2-page.tsx:3845-3857` |
+| iss29-B10 | Permission-Gate kann sich selbst im Kreis umleiten, wenn die Home-Page zu `library` normalisiert, `library` aber nicht erlaubt ist — Form vorbestehend (identisch zu Upstream), durch den `library-v2`-Alias neu erreichbar; **SPEKULATIV** | `webui/src/routes/library/route.tsx:17-22` |
+| iss29-C07 | Bulk-Bar Monitor/Unmonitor/ReplayGain melden bei Teilerfolg Totalausfall (`Promise.all` statt `allSettled`) | `library-v2-page.tsx:7613-7658` |
+| iss29-C08 | UI-04 fordert eine Bulk-Quality-Profile-/inherit-Aktion; die Bulk-Bar hat sie nicht (Backend und Einzelpfad existieren) | `library-v2-page.tsx:7606-7677` |
+| iss29-C09 | UI-Preferences-Mutationen scheitern lautlos, kein `onError`, kein Konsument rendert einen — M-12 ist als Implemented geführt | `library-v2-page.tsx:7286-7307` |
+| iss29-C10 | Nicht-Admin-Profile bekommen die volle Toolbar angeboten; jeder Klick 403, weil `/library/v2/enabled` kein `can_write` liefert | `api/library_v2.py:264-269,349-351` |
+| iss29-E08 | Rename-Kollision wird als erfolgreicher Fix gezählt (`None` bedeutet sowohl „nichts zu tun" als auch „Ziel existiert, übersprungen") | `core/repair_jobs/track_number_repair.py:1040-1053` |
+| iss29-E09 | `.lrc` wird beim dd28-29-Rollback nicht mitgerollt — Audio zurück, Lyrics verwaist am neuen Namen | `core/repair_jobs/native_p3.py:279` |
+| iss29-E10 | Nativer Track-Number-Fix committet den Katalog, bevor er die Datei prüft; bei nicht gemountetem Root wird umnummeriert, ohne dass sich etwas ändert | `core/repair_worker.py:2465-2504` |
+| iss29-A08 | **SPEKULATIV**: Claim kann während `post_import` veralten (Beat nur alle 20 Alben vs. `STALE_AFTER_SECONDS = 600`) → Lease verloren, volle Migration erneut | `core/library2/bootstrap.py:530-534`, `core/library2/completeness.py:591` |
+| iss29-A09 | **SPEKULATIV**: Importer-Working-Set wächst linear mit der Library (`existing_files` hält bei 100k Tracks 100k Pfade); bounded, nicht quadratisch, ungemessen | `core/library2/importer.py:1193-1344` |
+
+### 29.4 Geprüft und korrekt befunden
+
+Ausdrücklich **keine** Befunde, damit der nächste Durchgang sie nicht erneut
+untersucht: `awaitBulkJobState` (M-14), der `useScopedSearchBanner`-Sequenzguard
+für In-Session-Überlappung, Discography-Refresh-409-Attach und der
+`shouldAutoFetchDiscography`-Loop-Guard, die Interactive-Search-Fan-out-/
+Teilfehler-/0-Treffer-Pfade, der Force-Confirm-Scope (§52.12.4),
+`meetsCutoffOnly`/`profileTargetRank`, `QualityProfilePicker`-Vererbung,
+`MirrorStatusBanner`, `user_explicit` plus transaktionale Outbox im
+Monitor-Endpunkt; `_reconcile_legacy_snapshot`-Run-ID-Semantik, `_legacy_rows`-
+Commit-Grenzen, `checkpoint()`-Sichtbarkeitsreihenfolge, Fresh-Install-Division
+durch Null (überall geguardet), `should_stop_autostart` (mig-05),
+`reclaim_abandoned_claim` (mig-04), `_guard()` gegen Nicht-Admin-POSTs; der
+`/library-v2`-Redirect erhält den kompletten Querystring, `coercedString` deckt
+die All-Digits-Falle für `q`/`discover`/`discoverName`, alle übrigen Suchparameter
+sind erreichbar und round-trippen, der Route-Loader blockiert nicht auf einem
+Fetch-Fehler, Stats verlinkt korrekt in-app auf Upstreams Artist-Detail, und die
+`navigateToArtistDetail`-not-called-Assertions pinnen Upstreams React-Ownership,
+nicht den zurückgezogenen ldp-01-Vertrag; `core/library2/file_delete.py`
+(ADR-05), `_present_track_files`/`writable_file_rows` (dd28-38),
+`_fix_orphan_file`, `subject_details` mit `file_id`, und jeder erzeugte
+`finding_type` hat einen Handler außer den drei bewusst report-only-Typen.
+
+### 29.5 Nachtrag: lib2-Backend und Datenschicht
+
+Das fünfte Audit lief länger als die übrigen; seine Befunde stehen deshalb hier
+gesammelt statt in 29.1–29.3 einsortiert. Prioritätsreihenfolge gilt trotzdem.
+
+#### iss29-D01 (Blocker) — Schreibtransaktion bleibt über Provider-HTTP-Calls offen — VERIFIZIERT
+
+`core/library2/native_enrich.py:255-290`: die Anchor-Schleife ruft
+`_persist_identity` (ein blankes `UPDATE lib2_artists`, `:152-154`) und geht dann
+zum nächsten Anchor — dessen `anchor_resolver` zwei blockierende
+Provider-Roundtrips macht (`core/metadata/album_tracks.py:616-625`). In der
+ganzen Funktion `resolve_and_enrich_native_artist` steht **kein einziges
+`conn.commit()`** (nachgeprüft). Bei `isolation_level=""` öffnet Pythons
+`sqlite3` bei DML implizit eine Transaktion und gibt sie erst beim Commit frei.
+
+Das ist exakt die Klasse, die dieselbe Datei 30 Zeilen später beschreibt
+(`native_enrich.py:625-634`): *„Release the writer before the provider walk …
+Holding it here deadlocked this thread against itself: the provider clients cache
+their responses in the SAME database through their own connection … it then
+waited out the full 30 s busy timeout, and every other writer in the process
+waited with it."* Siehe auch die bereits dokumentierte Produktivstörung derselben
+Ursache.
+
+Betroffene Population: ein unmapped nativer Artist mit ≥2 Provider-Anchors —
+also eine Feature-Credit-Zeile auf einem Album, das bereits gegen Spotify *und*
+MusicBrainz/Deezer gematcht ist; genau die Gruppe, für die der Job existiert
+(`_artist_catalog_anchors`, `:169-204`). Zwei Einstiege: der Button
+`POST /api/library/v2/maintenance/reconcile-unmapped-artists`
+(`api/library_v2.py:3246-3262`) **und** der automatische Post-Import-Trigger mit
+120 s Debounce (`core/library2/unmapped_trigger.py`). Bei *k* Anchors ist das
+Fenster (*k*−1) × (Provider-Latenz + bis zu 30 s Busy-Timeout), in dem jeder
+andere Writer im Prozess „database is locked" bekommt.
+
+Fixrichtung: wie `enrich_native_entity_for_service` erst alle Anchor-Identitäten
+netzseitig einsammeln und dann in einer Transaktion schreiben — oder direkt nach
+jedem `_persist_identity` committen; das Re-Read in `:282-284` funktioniert auf
+einer frischen Transaktion genauso.
+
+#### iss29-D02 (Major) — Wishlist→lib2-Auflösung ist O(Wishlist-Zeilen × lib2-Tracks) mit einem `json.loads` pro Paar
+
+`core/library2/monitor_sync.py:282-290` materialisiert den ganzen
+Track-Katalog und läuft ihn für **jeden** Deskriptor erneut durch, mit
+`_provider_ids` → `json.loads` pro Zeile (`:241-258`). Nur Deskriptoren mit
+`source_info.lib2_track_id` kürzen ab (`:298-306`) — Zeilen aus der Legacy-
+Wishlist-UI, aus Playlist-Downloads oder aus `POST /api/wishlist` haben diesen
+Marker nicht. „Clear Wishlist" mit 1.000 Legacy-Zeilen gegen 50k Tracks = 50 Mio.
+Iterationen; der stündliche `reconcile_track_wishlist` (`:809-835`) zahlt es
+jede Stunde auf einer gehaltenen Verbindung. Fixrichtung: einmalig einen
+`{(namespace, value): [track_id, …]}`-Index bauen (ein JSON-Parse pro Track) und
+per Dict auflösen; die Ambiguitätserkennung bleibt über die Listenlänge erhalten.
+
+#### iss29-D03 (Major) — `POST /<entity>/<id>/monitor` macht den Provider-Walk auf dem Request-Thread
+
+`api/library_v2.py:2824-2833` ruft `resolve_tracklist` inline. Die Album-Detail-
+Route 1.000 Zeilen darüber lehnt genau das ab und begründet es
+(`api/library_v2.py:1822-1834`: *„Off the request thread … doing it inline made
+opening a release hang the page"*). Das Monitoren eines reinen
+Discography-Releases — die normale Lidarr-Geste, für die dieser Branch existiert
+— blockiert damit einen Web-Worker über die volle Provider-Kette (bis 25–30 s
+Budget), und der Browser sieht ein Timeout auf einem Toggle, das der Server
+danach zu Ende führt. Der identische Aufruf im Bulk-Pfad (`:3517`) ist in
+Ordnung, weil er bereits in einem Hintergrundjob sitzt. Kein Lock-Problem:
+`resolve_tracklist` committet vorher (`completeness.py:493`) und die Route hat
+noch nichts geschrieben. Fixrichtung: `_schedule_tracklist_resolve`
+(`api/library_v2.py:1724`) wiederverwenden und den Client pollen lassen.
+
+#### iss29-D04 (Major) — Artist-Listen-Suche ist quadratisch in der Artist-Zahl
+
+`core/library2/queries.py:155-170`: ein korreliertes `EXISTS` über
+`COALESCE(member.canonical_artist_id, member.id)=a.id` — kein Index kann das
+bedienen, der vorhandene ist `idx_lib2_artists_canonical(canonical_artist_id)`
+(`core/library2/schema.py:815-818`) — kombiniert mit `LIKE '%…%'`, das
+`idx_lib2_artists_name` ebenfalls ausschließt. Dieselbe `where`-Klausel wird in
+der `page_artists`-CTE (`queries.py:208-214`) ein zweites Mal ausgewertet.
+`GET /api/library/v2/artists?search=a` auf 10.000 Artists ≈ 10⁸ Zeilenvergleiche,
+zweimal, auf dem Request-Thread, bei jedem Tastendruck. Nebenbefund in denselben
+Zeilen: der Suchbegriff wird ohne `ESCAPE` in das `LIKE`-Muster interpoliert, `%`
+und `_` aus der Nutzereingabe wirken also als Wildcards.
+
+#### iss29-D05 (Major, latent) — `resolve_tracklist` committet die Verbindung des *Aufrufers*
+
+`core/library2/completeness.py:469,482,493,525`. Der Commit ist für die Sperre
+richtig, aber `conn` gehört dem Aufrufer und die Funktion hat keinen
+Eigentumsvertrag. Alle vier heutigen Aufrufer sind sicher — aber jeweils nur
+durch ihre Position in der Schleife (`api/library_v2.py:2831` hat noch nichts
+geschrieben; `:3517` und `discography.py:730` haben in der Vorrunde committet;
+`completeness.py:576` hat eine eigene Verbindung). `mirror_tracks_wishlist`
+dokumentiert dieselbe Eigenschaft ausdrücklich für sich selbst
+(`wishlist_mirror.py:238-241`); `resolve_tracklist` nicht. Ein harmlos
+aussehendes Refactoring — den Monitor-UPDATE über den Resolve-Aufruf ziehen —
+committet dann still eine halb angewandte Mutation.
+
+#### Minor (Backend)
+
+| ID | Befund | Ort |
+|---|---|---|
+| iss29-D06 | `enrich_native_entity_all_services` prüft auf `external_id`, das die aufgerufene Funktion nie zurückgibt → liefert immer `{}`, entgegen dem eigenen Docstring (beide Aufrufer verwerfen den Wert, daher heute folgenlos) | `core/library2/native_enrich.py:684-692,739-740` |
+| iss29-D07 | `retry_failed`-Docstring beansprucht einen Supersede-Schutz, den die Anweisung nicht hat; die Garantie kommt tatsächlich erst aus `drain` → bei Backlog > `limit=500` oder einem Aufrufer ohne Drain lebt dd28-13 wieder auf | `core/library2/mirror_outbox.py:388-398` |
+| iss29-D08 | `file-tags/edit` wirft `AttributeError` bei `{"key": 5}`; es gibt **keinen** `errorhandler` im Projekt, der Client bekommt Flasks HTML-500 statt der JSON-Fehlerform | `api/library_v2.py:1913-1916` |
+| iss29-D09 | Sieben mutierende Routen benutzen `request.json` statt `request.get_json(silent=True)` → HTML 415/400 bei fehlendem `Content-Type` | `api/library_v2.py:1675,2810,3430,3712,3736,4307,4351` |
+| iss29-D10 | Verschluckte Tag-Cache-Fehler ohne `conn.rollback()`; die nächste Anweisung ist ein LRClib- bzw. NAS-Zugriff — dieselbe Klasse wie iss29-D01, zweiter Ordnung | `core/library2/lyrics.py:112-119`, `core/library2/replaygain.py:136-144` |
+| iss29-D11 | `prune_done` läuft auf dem normalen Mirror-Pfad nie; die Produktiv-DB hält bereits 771 `done`-Zeilen gegen `keep=500`, und `_superseded_ids` scannt diese Historie bei jedem Drain | `core/library2/mirror_outbox.py:401-407` |
+| iss29-D12 | N+1 in `/artists/<id>/duplicates`: `_file_summary` zweimal pro Paar statt des vorhandenen `primary_file_rows` | `api/library_v2.py:4227-4248` |
+| iss29-D13 | `autolink` fällt für nicht-ASCII-Namen immer auf den Full-Table-Scan zurück (SQLites `lower()` ist ASCII-only), plus ein nicht indexierbares `external_ids LIKE '%…%'` — beides korrekt, aber im Hot Loop jedes fertigen Downloads | `core/library2/autolink.py:147-150,164-174` |
+
+#### Als sauber belegt (Negativnachweis zur Write-Lock-Klasse)
+
+Der Agent hat **jede** aus `core/library2/` erreichbare Provider-/Netzwerkstelle
+geprüft und den Writer davor jeweils freigegeben gefunden:
+`completeness.py:494`, `native_enrich.py:552/638/651/663/723/949`,
+`discography.py:460/730`, `mb_reconcile.py:324`,
+`track_identity_reconcile.py:137`, `artwork.py:492/537/1028` (letzteres
+absichtlich per dd28-04), sowie die Happy Paths von `replaygain.py` und
+`lyrics.py`. iss29-D01 ist die einzige Ausnahme. Ebenfalls geprüft und **kein**
+Befund: Rowid-Wiederverwendung (alle lib2-Tabellen sind `AUTOINCREMENT`),
+`resolve_alias_group` kann nie leer zurückkommen (also kein `IN ()` in den ~20
+Buildern), keine `IN`-Liste überschreitet SQLites Variablenlimit (der einzige
+library-weite Fall läuft über das chunk-sichere `sql_util.select_existing_ids`),
+`_owned_import`s scheinbar ungebundenes `owner` (gebunden bei
+`api/library_v2.py:996`), und `ReportedPathHealth.to_public_dict` redigiert
+korrekt.

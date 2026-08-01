@@ -2397,3 +2397,59 @@ Upstreams neuen Guard-Tests sichtbar gemacht:
   `metadata` 1.324, `tests/downloads`+`repair_jobs`+`quality`+`imports` 1.761,
   sowie alle 61 Top-Level-Dateien, die eine der gemergten Frontend-Dateien
   lesen, 984 — alles bestanden.
+
+---
+
+## 45. Multi-Agent-Audit nach dem Upstream-Sync — offene Arbeitsliste (1. August 2026)
+
+Fünf parallele Read-only-Audits über `483405764`. Die vollständigen Diagnosen
+stehen in [issues.md §29](library-v2-issues.md#29-multi-agent-audit-nach-dem-upstream-sync-1-august-2026);
+diese Tabelle ist ausschließlich der Remediationstatus. **Nichts davon ist
+umgesetzt** — alle Einträge sind Pending.
+
+Die vier mit *verifiziert* markierten Blocker hat der Koordinator unabhängig am
+Code nachgeprüft, nicht nur vom Agenten übernommen. Wichtig für die
+Priorisierung: **keiner dieser Befunde wird von der bestehenden Testsuite
+gefangen** (webui 240 Tests grün, `tests/library2` 1.193 grün).
+
+### 45.1 Vor dem PR-Ready zu erledigen
+
+| ID | Kurz | Status |
+|---|---|---|
+| [iss29-A01](library-v2-issues.md#iss29-a01) | Upgrade landet in dauerhaft leerer Library, meldet sich als „done" (`try_claim` stempelt den Watermark neu, ohne den Checkpoint zu löschen) — *verifiziert* | Pending |
+| [iss29-D01](library-v2-issues.md#iss29-d01-blocker--schreibtransaktion-bleibt-über-provider-http-calls-offen--verifiziert) | Schreibtransaktion über Provider-Calls offen in der Anchor-Schleife — dieselbe Deadlock-Klasse wie die bekannte Produktivstörung — *verifiziert* | Pending |
+| [iss29-E01](library-v2-issues.md#iss29-e01) | Reorganize löscht das Original, obwohl der DB-Update fehlschlug — *verifiziert* | Pending |
+| [iss29-E02](library-v2-issues.md#iss29-e02) | Sibling-Move überschreibt eine vorhandene Datei stillschweigend — *verifiziert* | Pending |
+| [iss29-E04](library-v2-issues.md#iss29-e04) | Destruktives Repair löscht Fuzzy-Resolver-Treffer ohne Root-Containment (kann frische Downloads im Transfer-Ordner treffen) | Pending |
+| [iss29-E03](library-v2-issues.md#iss29-e03) | Eine gelöschte Datei markiert alle Dateien des Albums als `deleted` → Re-Download eines vollständigen Albums | Pending |
+
+### 45.2 Wichtig, aber nicht release-blockierend
+
+`iss29-A02` (Heartbeat verwirft Rowid-Checkpoints), `iss29-A03` (Migrationsanzeige
+friert ein), `iss29-A04` (Nach-Lauf-Watermark verliert währenddessen entstandene
+Artists), `iss29-B01` (Sidebar-Library toter Klick — *verifiziert*), `iss29-B03`
+(Search→Library lädt die App neu), `iss29-C01` (Zeitzonenfehler im Grab-Watcher,
+2 h Versatz in Europe/Zurich — *verifiziert*), `iss29-C02` (409 als Fehler
+gemeldet), `iss29-C03`/`C04`/`C05` (Fehlerzustände als Leer-/Ladezustände —
+`C03` *verifiziert*), `iss29-C06` (Queue-Poll pro Album, Guard-Test vakuum —
+*verifiziert*), `iss29-E05` (Reorganize löscht lib2-eigene `.lrc`), `iss29-E06`
+(Full-Table-Scan + FS-Stats unter gehaltener Schreibsperre), `iss29-E07`
+(abgebrochener Speichervorgang als Erfolg gemeldet, Datei halb umbenannt),
+`iss29-D02`–`D05`.
+
+### 45.3 Produktentscheidung nötig
+
+[iss29-B02](library-v2-issues.md#iss29-b02): mit der ldp-01-Rücknahme (§44.2) ist
+der Discovery-Modus unerreichbar geworden — verwaiste Suchparameter, ~200 Zeilen
+Frontend, vier Backend-Endpunkte, der ldp-06-„Bookmark"-Flow und eine grüne
+Testsuite für einen Modus, den niemand betreten kann. Entweder ersatzlos löschen
+oder einen Einstiegspunkt geben. Damit hängt `iss29-B05` (toter
+Rich-Header-Vorwahl) zusammen.
+
+### 45.4 Dokumentationsschuld
+
+[iss29-B06](library-v2-issues.md#iss29-b06): §42 dieser Datei führt **ldp-01** und
+**ldp-09** unverändert als Implemented, obwohl §44.2 beide zurücknimmt; dazu vier
+Code-Kommentare, die die Weiterleitung weiter behaupten. Ebenso widersprechen
+`find22-15` (§3, Zeile 103) und `M-12` dem tatsächlichen Stand — siehe
+`iss29-C06` und `iss29-C09`.
