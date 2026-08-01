@@ -217,6 +217,11 @@ declare global {
      * down, the fetch fails and the modal the user already had would never come
      * back. Returns true when a modal was shown.
      */
+    /** core.js bridge: one discover download's process record, or null. */
+    discoverDownloadProcess?: (
+      virtualPlaylistId: string,
+    ) => { status?: string; modalElement?: unknown; modalId?: string } | null;
+    rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
     /** core.js bridge: seed a virtual playlist + tracks, start the shared sync. */
     startDiscoverVirtualSync?: (

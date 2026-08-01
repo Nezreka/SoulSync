@@ -72,6 +72,15 @@ window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTrac
     return startPlaylistSync(virtualPlaylistId);
 };
 
+/**
+ * Bridge for the React discover download bar: expose one download's process
+ * record (status + modal handles). `activeDownloadProcesses` is a top-level
+ * `let` in this script's lexical scope — same story as everything else here.
+ */
+window.discoverDownloadProcess = function (virtualPlaylistId) {
+    return activeDownloadProcesses[virtualPlaylistId] || null;
+};
+
 window.reopenActiveDownloadModal = function (virtualPlaylistId) {
     const process = activeDownloadProcesses[virtualPlaylistId];
     if (!process || !process.modalElement) return false;
