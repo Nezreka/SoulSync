@@ -87,7 +87,19 @@ const REQUIRED_UI: Record<string, string[]> = {
    * route level references them.
    */
   'artist map info modal wiring': ['artMapInfoBest', 'artMapInfoSourceOrder'],
-  'decade tab contents': ['decadeTrackToSpotify', 'decadeHasTracks'],
+  /*
+   * NOT the tabbed UI. The live loader (loadDecadeBrowserTabs, 2647) abandoned
+   * the decade tabs — "#discover redesign: Time Machine is now a shelf of
+   * decade mix cards": it hides #decade-tabs and renders decadeMix cards via
+   * _renderMixGrid into the shared mix shelf/modal, all of which is ported.
+   * The tab controller is a closed dead cycle (_getDecadeBrowserTabsCtrl ←
+   * loadDecadeTracks ← switchDecadeTab ← the ctrl's own tab buttons) that the
+   * live path never enters, so there is no tab-contents component to build.
+   * What remains is the hook FEEDER: fetch available decades, decadeMix them
+   * onto the shelf, and wire Sync/Download through these track converters.
+   * Resolves at #251 via the route-directory scan.
+   */
+  'decade shelf feeder': ['decadeTrackToSpotify', 'decadeHasTracks'],
 };
 
 /**
@@ -98,7 +110,7 @@ const REQUIRED_UI: Record<string, string[]> = {
  */
 const MISSING_UI = [
   'artist map info modal wiring',
-  'decade tab contents',
+  'decade shelf feeder',
   'seasonal playlist shelf feeder',
 ];
 
