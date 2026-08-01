@@ -295,11 +295,17 @@ export function DiscoverPage() {
       if (!mix) return;
       const [verb, ...rest] = action.onclick.split(':');
       if (verb === 'lb-download') {
+        // The FULL discovery flow (state check, rehydrate, seed + poll + the
+        // sync-services discovery modal), verbatim in the core.js bridge —
+        // Boulder's directive: exactly like vanilla, no difference. Serves
+        // ListenBrainz AND Last.fm radio playlists (both are LB cards, 3378).
         modal.close();
         void (async () => {
           const identifier = rest.join(':');
-          const data = (await fetchLbPlaylist(identifier)) as { tracks?: unknown[] };
-          openTracksModal(`discover-lb-playlist-${identifier}`, mix.title, data.tracks ?? []);
+          const tracks = modal.tracks?.length
+            ? modal.tracks
+            : (((await fetchLbPlaylist(identifier)) as { tracks?: unknown[] }).tracks ?? []);
+          void window.openLbPlaylistDiscovery?.(identifier, mix.title, tracks);
         })();
         return;
       }

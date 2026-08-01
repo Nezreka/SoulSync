@@ -263,6 +263,17 @@ declare global {
     ) => { status?: string; modalElement?: unknown; modalId?: string } | null;
     rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /**
+     * core.js bridge: the LB/Last.fm playlist DISCOVERY download flow, moved
+     * verbatim from discover.js (3934-4137) with tracks as a parameter. It
+     * rehydrates an in-flight session or seeds a fresh discovery and opens the
+     * sync-services discovery modal — the exact vanilla behaviour.
+     */
+    openLbPlaylistDiscovery?: (
+      identifier: string,
+      title: string,
+      tracks: unknown[],
+    ) => Promise<void>;
     /** core.js bridge: seed a virtual playlist + tracks, start the shared sync. */
     startDiscoverVirtualSync?: (
       virtualPlaylistId: string,
