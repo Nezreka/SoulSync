@@ -210,6 +210,10 @@ export function DiscoverPage() {
   useEffect(() => {
     void sync.resumeActiveSyncs();
     void bar.hydrate();
+    // The LB discovery states hydrate from the backend at page init
+    // (discover.js 244) — without this, a restart forgets every in-flight
+    // discovery/download and the resume branches find no state.
+    void window.loadListenBrainzPlaylistsFromBackend?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -332,11 +336,15 @@ export function DiscoverPage() {
       } else {
         modal.close();
         const rows = (modal.tracks ?? []) as Record<string, unknown>[];
+        const decade = /^decade_(\d+)$/.exec(mix.key);
         if (!rows.length) {
-          toast('No tracks available yet', 'warning');
+          // The decade path words its refusal differently (2863).
+          toast(
+            decade ? 'No tracks available for this decade' : 'No tracks available yet',
+            'warning',
+          );
           return;
         }
-        const decade = /^decade_(\d+)$/.exec(mix.key);
         if (decade) {
           // The decade download is its OWN conversion and its OWN ids
           // (2860-2905): decade_<year>, "<year>s Classics", and artists stay

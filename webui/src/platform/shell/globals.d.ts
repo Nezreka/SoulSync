@@ -264,6 +264,13 @@ declare global {
     rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
     /**
+     * sync-spotify.js — hydrates listenbrainzPlaylistStates from the backend
+     * (/api/listenbrainz/playlists). The vanilla discover init called this
+     * (discover.js 244); without it the discovery flow's cross-restart
+     * resume/rehydration silently finds no state.
+     */
+    loadListenBrainzPlaylistsFromBackend?: () => Promise<void>;
+    /**
      * core.js bridge: the LB/Last.fm playlist DISCOVERY download flow, moved
      * verbatim from discover.js (3934-4137) with tracks as a parameter. It
      * rehydrates an in-flight session or seeds a fresh discovery and opens the
