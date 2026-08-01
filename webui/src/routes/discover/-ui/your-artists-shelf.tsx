@@ -113,7 +113,7 @@ export function YourArtistsShelf({
   );
 }
 
-interface YourArtistCardProps {
+export interface YourArtistCardProps {
   artist: YourArtist;
   logos: SourceLogos;
   buildDetailPath: (id: string, source: string) => string;
@@ -121,7 +121,7 @@ interface YourArtistCardProps {
   onToggleWatchlist: (artist: YourArtist) => void;
 }
 
-function YourArtistCard({
+export function YourArtistCard({
   artist,
   logos,
   buildDetailPath,

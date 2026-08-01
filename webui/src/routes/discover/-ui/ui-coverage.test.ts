@@ -67,7 +67,7 @@ const REQUIRED_UI: Record<string, string[]> = {
    */
   'seasonal playlist shelf feeder': ['seasonalMixTitles', 'seasonalHasPlaylist'],
   'blacklist modal': ['blacklistEntries', 'BLACKLIST_TITLE'],
-  'your artists modal': ['artistsModalPager', 'applyArtistsModalFilter'],
+  'your artists modal': ['YourArtistsModal'],
   'artist info modal': ['infoStats', 'infoMatchBadges'],
   'your artists sources modal': ['ARTISTS_SOURCE_INFO', 'toggleArtistSource'],
   'your albums batch modal': ['prepareBatchRows', 'batchFooter'],
@@ -90,7 +90,6 @@ const MISSING_UI = [
   'decade tab contents',
   'seasonal playlist shelf feeder',
   'your albums batch modal',
-  'your artists modal',
 ];
 
 describe('every UI piece the page needs has a component', () => {
