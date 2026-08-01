@@ -24,7 +24,42 @@ convention exists to test against), so resolving it now would be speculative.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional, Sequence
+
+# `YYYY-MM-DD HH:MM:SS[.ffffff]` with no timezone — SQLite's own
+# CURRENT_TIMESTAMP shape, which is always UTC.
+_NAIVE_SQLITE_TIMESTAMP = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$"
+)
+
+
+def _iso_utc(value: Any) -> Any:
+    """Normalise a stored timestamp into an unambiguous ISO-8601 UTC string.
+
+    iss29-C01. Most of these columns default to SQLite's ``CURRENT_TIMESTAMP``,
+    which is **UTC** written as ``"YYYY-MM-DD HH:MM:SS"`` — a space separator and
+    no zone. Handed to a browser unchanged, ``Date.parse`` reads that as LOCAL
+    time (ECMA-262 only treats the date-time form as UTC when it is
+    ``T``-separated *and* zoneless, and the space form falls through to
+    implementation-defined local parsing). In Europe/Zurich — this project's
+    timezone — every such timestamp arrived two hours in the past.
+
+    That is not only a display bug: the interactive-search grab watcher filters
+    quarantine events by "newer than when I started", so east of UTC the event
+    never looked fresh, every poll stayed ``pending``, and the UI finally
+    reported **Grabbed ✓** for a file that never arrived.
+
+    Anything already carrying a zone (or that is not a timestamp at all) is
+    passed through untouched.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not _NAIVE_SQLITE_TIMESTAMP.match(text):
+        return value
+    return text.replace(" ", "T") + "Z"
+
 
 EVENT_CATEGORY = {
     "request_created": ("info", "Search requested"),
@@ -249,7 +284,7 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             detail = payload.get("reason") or payload.get("source")
             detail = detail or r["message"] or r["reason_code"]
         events.append({
-            "date": r["created_at"],
+            "date": _iso_utc(r["created_at"]),
             "event_type": r["event_type"],
             "category": category,
             "title": label,
@@ -292,7 +327,7 @@ def _entity_history_events(conn, track_ids: Sequence[int], limit: int) -> List[D
         elif r["from_entity_type"] and r["from_entity_id"] is not None:
             detail = f"← {r['from_entity_type']} #{r['from_entity_id']}"
         events.append({
-            "date": r["occurred_at"],
+            "date": _iso_utc(r["occurred_at"]),
             "event_type": r["event_type"],
             "category": "moved",
             "title": label,
@@ -338,7 +373,7 @@ def _file_delete_events(
         completed = r["status"] == "completed"
         database_only = r["mode"] == "database_only"
         events.append({
-            "date": r["completed_at"] or r["created_at"],
+            "date": _iso_utc(r["completed_at"] or r["created_at"]),
             "event_type": "file_records_removed" if database_only else "files_deleted",
             "category": "deleted",
             "title": (
@@ -376,7 +411,7 @@ def _manual_skip_events(conn, track_ids: Sequence[int], limit: int) -> List[Dict
         except (TypeError, ValueError):
             checks = []
         events.append({
-            "date": r["created_at"],
+            "date": _iso_utc(r["created_at"]),
             "event_type": "manual_skip",
             "category": "override",
             "title": "Check overridden",
@@ -424,7 +459,7 @@ def _maintenance_events(
         except (TypeError, ValueError):
             fields = []
         events.append({
-            "date": row["occurred_at"],
+            "date": _iso_utc(row["occurred_at"]),
             "event_type": row["action"],
             "category": "maintenance",
             "title": MAINTENANCE_EVENT_LABEL.get(
@@ -442,7 +477,7 @@ def _maintenance_events(
 
 def _track_downloads_to_events(rows: Sequence[Any]) -> List[Dict[str, Any]]:
     return [{
-        "date": r["created_at"],
+        "date": _iso_utc(r["created_at"]),
         "event_type": "downloaded",
         "category": "imported" if r["status"] == "completed" else "info",
         "title": "Downloaded",

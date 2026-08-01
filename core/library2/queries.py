@@ -153,12 +153,35 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     # (get_artist merges their albums in) and never listed on their own.
     clauses, params = ["a.canonical_artist_id IS NULL"], {}
     if search:
+        # iss29-D04: spell the alias-membership test so an index can serve it.
+        #
+        # `COALESCE(member.canonical_artist_id, member.id) = a.id` is not
+        # sargable — no index can answer it, and the only artist indexes are
+        # `idx_lib2_artists_canonical(canonical_artist_id)` and
+        # `idx_lib2_artists_name`. Combined with a leading-wildcard LIKE that
+        # made `GET /artists?search=a` a full cross product: ~10^8 row
+        # comparisons on a 10k-artist library, evaluated TWICE (the same WHERE
+        # is reused by the count and by the page_artists CTE), on the request
+        # thread, on every keystroke.
+        #
+        # The two branches below are exactly equivalent to the COALESCE — the
+        # outer query already restricts `a` to canonical rows — and each one is
+        # an index lookup.
         clauses.append(
             "EXISTS (SELECT 1 FROM lib2_artists member "
-            "WHERE COALESCE(member.canonical_artist_id, member.id)=a.id "
-            "AND member.name LIKE :like)"
+            "WHERE (member.canonical_artist_id = a.id "
+            "       OR (member.canonical_artist_id IS NULL AND member.id = a.id)) "
+            "AND member.name LIKE :like ESCAPE '\\')"
         )
-        params["like"] = f"%{search}%"
+        # ...and escape the wildcards. Without ESCAPE, a user typing `%` or `_`
+        # was writing pattern syntax rather than searching for the character.
+        escaped = (
+            str(search)
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        params["like"] = f"%{escaped}%"
     if monitored == "monitored":
         clauses.append("a.monitored = 1")
     elif monitored == "unmonitored":

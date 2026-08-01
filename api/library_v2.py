@@ -348,7 +348,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @app.route("/api/library/v2/enabled")
     def lib2_enabled():
-        return jsonify({"success": True, "enabled": _enabled() and _page_allowed()})
+        # iss29-C10: `_guard` rejects every mutating request from a non-admin
+        # profile (P0-02 — the lib2 monitored columns are global), but this
+        # endpoint never said so, so a read-only profile was offered the whole
+        # toolbar and each button answered 403 on click. Publishing the same
+        # predicate the guard uses lets the UI render what the profile can
+        # actually do.
+        return jsonify({
+            "success": True,
+            "enabled": _enabled() and _page_allowed(),
+            "can_write": _profile() == ADMIN_PROFILE_ID,
+        })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
 
@@ -1672,7 +1682,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         try:
             alias_of = int(body.get("alias_of"))
         except (TypeError, ValueError):
@@ -1913,7 +1923,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         body = request.get_json(silent=True) or {}
         if not isinstance(body, dict) or "key" not in body:
             return jsonify({"success": False, "error": "JSON body must contain 'key'"}), 400
+        # iss29-D08: `{"key": 5}` used to raise AttributeError on `.strip()`.
+        # There is no Flask errorhandler anywhere in this project, so the client
+        # got an HTML 500 page instead of the JSON error shape every other
+        # branch here returns — unparseable by the caller.
+        if not isinstance(body["key"], str):
+            return jsonify({"success": False, "error": "'key' must be a string"}), 400
         key = body["key"].strip()
+        if not key:
+            return jsonify({"success": False, "error": "'key' must not be empty"}), 400
         value = body.get("value")
         if value is not None and not isinstance(value, str):
             value = str(value)
@@ -2807,7 +2825,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         table = _MONITOR_TABLES.get(entity)
         if not table:
             return jsonify({"success": False, "error": "Unknown entity"}), 400
-        monitored = bool((request.json or {}).get("monitored", True))
+        monitored = bool((request.get_json(silent=True) or {}).get("monitored", True))
         db = get_database()
         conn = db._get_connection()
         try:
@@ -2826,11 +2844,20 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1", (eid,)
                 ).fetchone()
                 if not has_tracks:
-                    try:
-                        from core.library2.completeness import resolve_tracklist
-                        resolve_tracklist(config_manager, conn, eid)
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("monitor tracklist resolve failed (%s): %s", eid, e)
+                    # iss29-D03: hand the provider walk to the background
+                    # resolver instead of running it on the request thread.
+                    # The album-detail route a thousand lines above refuses to
+                    # do this inline and says why ("doing it inline made opening
+                    # a release hang the page"); monitoring a discography-only
+                    # release — the ordinary Lidarr gesture this branch exists
+                    # for — held a web worker for the full provider chain, up to
+                    # the 25-30s budget, so the browser timed out on a toggle
+                    # the server then finished anyway.
+                    #
+                    # The monitor flag below is written immediately, which is
+                    # what the user asked for; the tracks appear when the walk
+                    # lands and the client's existing poll picks them up.
+                    _schedule_tracklist_resolve(eid)
             marks = ",".join("?" for _ in entity_ids)
             cur.execute(
                 f"UPDATE {table} SET monitored=? WHERE id IN ({marks})",
@@ -3427,7 +3454,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "all")
         monitored = bool(body.get("monitored", True))
         requested_album_ids = body.get("album_ids")
@@ -3709,7 +3736,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         monitor_new = str(body.get("monitor_new_items") or "").strip()
         if monitor_new not in ("all", "none", "new"):
             return jsonify({"success": False, "error": "monitor_new_items must be all|none|new"}), 400
@@ -3733,7 +3760,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         album_type = str(body.get("album_type") or "").strip().lower()
         if album_type not in _ALBUM_TYPES:
             return jsonify({"success": False,
@@ -4224,13 +4251,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 album_ids,
             ).fetchall()
 
+            # iss29-D12: one query for every track on the page instead of two
+            # per pair. `primary_file_rows` is the existing batched form of the
+            # exact same ADR-03 primary-file pick; the per-track version ran
+            # 2xN queries for an artist whose duplicates list can be hundreds of
+            # rows long.
+            from core.library2.track_files import primary_file_rows
+
+            _summary_fields = ("path", "format", "bitrate", "sample_rate", "bit_depth")
+            _primary_files = primary_file_rows(
+                conn,
+                [r["single_id"] for r in rows] + [r["canonical_id"] for r in rows],
+            )
+
             def _file_summary(track_id: int) -> Optional[Dict[str, Any]]:
-                from core.library2.track_files import primary_order
-                f = conn.execute(
-                    f"SELECT path, format, bitrate, sample_rate, bit_depth "
-                    f"FROM lib2_track_files WHERE track_id=? "
-                    f"ORDER BY {primary_order()} LIMIT 1", (track_id,)).fetchone()
-                return dict(f) if f else None
+                row = _primary_files.get(int(track_id))
+                return {field: row.get(field) for field in _summary_fields} if row else None
 
             pairs = [{
                 "title": r["title"],
@@ -4304,7 +4340,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         raw = body.get("canonical_track_id")
         conn = _conn()
         try:
@@ -4348,7 +4384,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        body = request.json or {}
+        body = request.get_json(silent=True) or {}
         try:
             to_track_id = int(body.get("to_track_id") or 0)
         except (TypeError, ValueError):
@@ -5031,7 +5067,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
-        reset = bool((request.json or {}).get("reset")) if request.is_json else False
+        reset = bool((request.get_json(silent=True) or {}).get("reset")) if request.is_json else False
         with _import_lock:
             if _import_state["running"]:
                 return jsonify({"success": False, "error": "Import already running"}), 409

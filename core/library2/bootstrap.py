@@ -102,9 +102,18 @@ def ensure_bootstrap_schema(cursor) -> None:
             cursor.execute(
                 f"ALTER TABLE lib2_bootstrap_state ADD COLUMN {name} {column_type}"
             )
-    cursor.execute(
-        "INSERT OR IGNORE INTO lib2_bootstrap_state (id, status) VALUES (1, 'pending')"
-    )
+    # iss29-A05: only INSERT when the row is genuinely absent. `ensure_bootstrap_schema`
+    # runs on every `get_state`, i.e. on every `/import/status` poll — once a
+    # second per open tab — and an unconditional `INSERT OR IGNORE` takes
+    # SQLite's write lock even when it changes nothing, competing with the
+    # artwork workers for the one writer this database has. The read is served
+    # from the page cache; the write was pure contention.
+    if cursor.execute(
+        "SELECT 1 FROM lib2_bootstrap_state WHERE id = 1"
+    ).fetchone() is None:
+        cursor.execute(
+            "INSERT OR IGNORE INTO lib2_bootstrap_state (id, status) VALUES (1, 'pending')"
+        )
 
 
 def source_watermark(database: Any) -> str:
@@ -257,7 +266,8 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS,
         cursor = conn.cursor()
         ensure_bootstrap_schema(cursor)
         cursor.execute(
-            "SELECT status, heartbeat_at, attempts FROM lib2_bootstrap_state WHERE id = 1"
+            "SELECT status, heartbeat_at, attempts, resume_watermark "
+            "FROM lib2_bootstrap_state WHERE id = 1"
         )
         row = cursor.fetchone()
         old_status = row["status"]
@@ -270,11 +280,29 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS,
 
         now = _now_iso()
         owner_token = uuid.uuid4().hex
+
+        # iss29-A01: stamping the new watermark WITHOUT clearing the checkpoint
+        # re-validates it. `resume_watermark` is the only invalidation signal a
+        # checkpoint has (`resume_point_for`), so leaving row offsets taken
+        # against a different source snapshot next to a freshly stamped
+        # watermark declares them current again — and the caller already read
+        # its resume point before this claim, so it never learns of the revival.
+        # A later attempt then resumes at `stage='tracks'`, skips the artist and
+        # album walks entirely, finds an empty album map, imports nothing, and
+        # marks the migration done over an empty library.
+        #
+        # The invariant is local and holds for every caller: a checkpoint
+        # survives a claim only if it was taken against the snapshot this claim
+        # is stamping.
+        keep_checkpoint = row["resume_watermark"] == watermark
+        checkpoint_sql = "" if keep_checkpoint else (
+            ", resume_stage=NULL, resume_rowid=NULL, resume_run_id=NULL"
+        )
         if old_heartbeat is None:
             cursor.execute(
                 "UPDATE lib2_bootstrap_state SET status='running', attempts=?, "
                 "last_error=NULL, started_at=?, finished_at=NULL, heartbeat_at=?, "
-                "owner_token=?, resume_watermark=? "
+                "owner_token=?, resume_watermark=?" + checkpoint_sql + " "
                 "WHERE id=1 AND status=? AND heartbeat_at IS NULL",
                 (attempts + 1, now, now, owner_token, watermark, old_status),
             )
@@ -282,7 +310,7 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS,
             cursor.execute(
                 "UPDATE lib2_bootstrap_state SET status='running', attempts=?, "
                 "last_error=NULL, started_at=?, finished_at=NULL, heartbeat_at=?, "
-                "owner_token=?, resume_watermark=? "
+                "owner_token=?, resume_watermark=?" + checkpoint_sql + " "
                 "WHERE id=1 AND status=? AND heartbeat_at=?",
                 (attempts + 1, now, now, owner_token, watermark, old_status,
                  old_heartbeat),
@@ -484,6 +512,12 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     """
     from core.library2.feature import library_v2_enabled
 
+    # iss29-A07 assumed this was a dead call because the return value is
+    # discarded. It is not: `library_v2_enabled` emits the one-time
+    # "features.library_v2=false is deprecated and ignored" warning, and this is
+    # the only place on the automatic path that reaches it — the flag cannot
+    # disable the migration any more, so the RESULT is genuinely irrelevant
+    # while the warning is not. Called for the side effect, deliberately.
     library_v2_enabled(config_get=config_get)
 
     current_watermark = source_watermark(database)
@@ -508,7 +542,17 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
 
     def _progress(stage, current, total, *, connection=None, rowid=None, run_id=None):
         now = time.monotonic()
-        if current != total and now - last_beat["t"] < _HEARTBEAT_THROTTLE_SECONDS:
+        # iss29-A02: a beat carrying a rowid is the ONLY kind `heartbeat`
+        # persists as a resume checkpoint, and those are exactly the stage
+        # openings and the finalize transition — a handful per run, not a
+        # stream. Throttling them meant that on any library whose walks finish
+        # inside the 5 s window only the first checkpoint was ever written, so a
+        # fully successful run ended with `resume_stage='tracks', rowid=0`
+        # instead of the finalize marker. That is the value that turns
+        # iss29-A01 from wasted work into an empty migrated library.
+        writes_checkpoint = rowid is not None and bool(run_id)
+        if (not writes_checkpoint and current != total
+                and now - last_beat["t"] < _HEARTBEAT_THROTTLE_SECONDS):
             return
         last_beat["t"] = now
         heartbeat(
@@ -533,12 +577,21 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
         except Exception as exc:  # noqa: BLE001
             logger.warning("Library v2 post-import precache failed: %s", exc)
 
-    final_watermark = source_watermark(database)
-    if source_row_count(final_watermark) == 0:
-        mark_waiting_for_source(database, owner_token, watermark=final_watermark)
+    # iss29-A04: stamp the watermark the walks actually saw, not the one the
+    # source has now. The three walks are keyset scans taken at three different
+    # moments and the whole post-import precache runs after them, while
+    # auto-import, wishlist downloads and the media-server sync keep writing to
+    # the legacy tables. An artist created after the artists walk is never
+    # walked — but a watermark taken here would count it, so the next tick
+    # answers `already_done`, `should_stop_autostart` returns True, and that
+    # artist stays invisible in V2 for the rest of the process lifetime.
+    # Stamping the pre-run snapshot leaves the difference visible, so the next
+    # tick runs again and picks the row up.
+    if source_row_count(current_watermark) == 0:
+        mark_waiting_for_source(database, owner_token, watermark=current_watermark)
         logger.info("Library v2 bootstrap is waiting for the first legacy library scan")
         return {"success": True, "stats": stats, "waiting_for_source": True}
-    if not mark_done(database, owner_token, watermark=final_watermark):
+    if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
     logger.info("Library v2 bootstrap import completed: %s", stats)
     return {"success": True, "stats": stats}

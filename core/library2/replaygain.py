@@ -138,6 +138,13 @@ def analyze_album_replaygain(
                 read_and_persist_tag_cache(conn, file_id, path)
                 conn.commit()
             except Exception as scan_err:
+                # iss29-D10: release the half-applied transaction before the
+                # next iteration touches the NAS again — a writer held across
+                # file I/O is the iss29-D01 pattern one order down.
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
                 logger.debug("Failed to rescan file tags after album ReplayGain write for %s: %s", path, scan_err)
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1

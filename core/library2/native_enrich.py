@@ -256,7 +256,22 @@ def resolve_and_enrich_native_artist(
     if anchors:
         matched_sources: List[str] = []
         first_match: Optional[Dict[str, Any]] = None
-        existing_external_ids = row["external_ids"]
+
+        # iss29-D01: resolve EVERY anchor before persisting any of them.
+        #
+        # `_persist_identity` is a bare UPDATE and `isolation_level=""` opens an
+        # implicit transaction on DML, so writing anchor n and then resolving
+        # anchor n+1 held the SQLite writer across a blocking provider call.
+        # That is the self-deadlock this file describes for
+        # `enrich_native_entity_for_service` below: the provider clients cache
+        # their responses in the same database through their own connection, so
+        # the held writer waits on itself for the full busy timeout and every
+        # other writer in the process queues behind it.
+        #
+        # Splitting the loop keeps the network phase entirely free of DML — the
+        # reads above start no write transaction — and the write phase entirely
+        # free of I/O. Same shape as `enrich_native_entity_for_service`.
+        resolved_anchors: List[tuple] = []
         for source, (kind, provider_id) in anchors.items():
             try:
                 identity = anchor_resolver(source, kind, provider_id)
@@ -269,6 +284,15 @@ def resolve_and_enrich_native_artist(
             resolved_id = str((identity or {}).get("artist_id") or "").strip()
             if not identity or not resolved_id:
                 continue
+            resolved_anchors.append((source, resolved_id, identity))
+
+        # Re-read rather than reusing the row fetched before the provider walk:
+        # another writer may have merged into the same blob while we were on the
+        # network, and that walk is the long part of this function.
+        existing_external_ids = conn.execute(
+            "SELECT external_ids FROM lib2_artists WHERE id=?", (int(artist_id),)
+        ).fetchone()["external_ids"]
+        for source, resolved_id, identity in resolved_anchors:
             _persist_identity(
                 conn, int(artist_id),
                 source=source,
@@ -736,8 +760,12 @@ def enrich_native_entity_all_services(
             # the 30s busy timeout.
             if commit and conn is not None:
                 conn.commit()
-        if result.get("success") and result.get("external_id"):
-            resolved[str(result.get("source") or service)] = str(result["external_id"])
+        # iss29-D06: the key is `provider_id`. `enrich_native_entity_for_service`
+        # has never returned `external_id`, so this dict was unconditionally
+        # empty — contradicting the docstring above. Both of today's callers
+        # discard the value, which is why nothing surfaced it.
+        if result.get("success") and result.get("provider_id"):
+            resolved[str(result.get("source") or service)] = str(result["provider_id"])
     return resolved
 
 

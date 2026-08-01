@@ -1014,7 +1014,11 @@ def test_enrich_all_services_walks_every_supported_provider(monkeypatch):
         if service == "musicbrainz":
             raise RuntimeError("provider down")
         if service == "spotify":
-            return {"success": True, "source": "spotify", "external_id": "sp-1"}
+            # iss29-D06: the real `enrich_native_entity_for_service` returns
+            # `provider_id`; it has never returned `external_id`. This stub said
+            # `external_id`, so the aggregate returned {} in production while
+            # this test stayed green — the defect and its guard cancelled out.
+            return {"success": True, "source": "spotify", "provider_id": "sp-1"}
         return {"success": False}
 
     monkeypatch.setattr(native_enrich, "enrich_native_entity_for_service", fake_one)
@@ -1177,3 +1181,60 @@ def test_enrichment_releases_the_write_lock_before_calling_a_provider(
         )
     finally:
         conn.close()
+
+
+# --- iss29-D01: the writer must be released across provider calls ---------
+
+
+def test_anchor_walk_never_holds_a_write_transaction_across_a_provider_call(imported_conn):
+    """The anchor loop must not keep an open write transaction over network I/O.
+
+    This is the deadlock class this project already took a production outage on,
+    and which this very file documents 300 lines further down: the provider
+    clients cache their responses in the SAME SQLite database through their own
+    connection. A writer held across a provider call therefore waits on itself —
+    it blocks the cache write, waits out the full 30 s busy timeout, and every
+    other writer in the process queues behind it.
+
+    ``_persist_identity`` is a bare UPDATE and ``isolation_level=""`` opens an
+    implicit transaction on DML, so persisting anchor *n* and then resolving
+    anchor *n+1* is exactly that pattern. The window is
+    (anchors − 1) × (provider latency + up to 30 s busy timeout), reachable both
+    from the maintenance button and from the automatic post-import trigger.
+
+    Asserting on ``in_transaction`` rather than on call ORDER is deliberate: a
+    future refactor that reintroduces an interleaved write would still be caught,
+    however the loop is spelled.
+    """
+    aid = _insert_native_artist(imported_conn, "Multi Anchor")
+    _insert_album(
+        imported_conn, aid, "One Release",
+        spotify_id="SP-A", musicbrainz_id="MB-A",
+        external_ids={"deezer": "DZ-A"},
+    )
+    imported_conn.commit()
+
+    transaction_states = []
+
+    def anchor_resolver(source, kind, provider_id):
+        # Stand-in for the blocking provider roundtrip.
+        transaction_states.append((source, imported_conn.in_transaction))
+        return {"source": source, "artist_id": f"{source.upper()}-ARTIST",
+                "name": "Multi Anchor"}
+
+    result = NE.resolve_and_enrich_native_artist(
+        imported_conn, aid, resolver=_refusing_resolver, anchor_resolver=anchor_resolver,
+    )
+
+    assert result["success"] is True
+    assert len(transaction_states) == 3, transaction_states
+    held = [source for source, in_txn in transaction_states if in_txn]
+    assert held == [], f"write transaction still open during provider calls for {held}"
+
+    # ...and the writes themselves must still all land.
+    row = imported_conn.execute(
+        "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id=?", (aid,)
+    ).fetchone()
+    assert row["spotify_id"] == "SPOTIFY-ARTIST"
+    assert row["musicbrainz_id"] == "MUSICBRAINZ-ARTIST"
+    assert json.loads(row["external_ids"])["deezer"] == "DEEZER-ARTIST"

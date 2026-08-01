@@ -9354,7 +9354,14 @@ def approve_verification_item(history_id):
                 conn.execute(
                     "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
                     (HUMAN_VERIFIED, p))
-            from core.library2.verification import mark_file_verification_status
+            conn.commit()
+        # iss29-E06: the lib2 update runs on its OWN transaction, after the
+        # legacy write is committed. It may still have to consult the path
+        # resolver for a mapped-path setup, and the resolver touches the
+        # filesystem — doing that inside the transaction above held the single
+        # SQLite writer across network stats on a NAS-backed library.
+        from core.library2.verification import mark_file_verification_status
+        with db._get_connection() as conn:
             lib2_updated = mark_file_verification_status(
                 conn,
                 {p for p in (file_path, on_disk) if p},
@@ -32706,11 +32713,20 @@ def _autostart_library_v2_bootstrap_import():
     except Exception as e:
         logger.debug(f"lib2 bootstrap claim reclaim skipped: {e}")
 
-    delay = 30
+    # iss29-A06: the backoff must describe how long we have been waiting for
+    # something to happen, not how many times we have looked.
+    #
+    # It used to double on EVERY tick, including the no-op ticks that are the
+    # normal state of a fresh install waiting for its first media-server scan,
+    # and it was never reset. Twelve quiet ticks reach the 30-minute ceiling,
+    # so a first scan that finished just after a tick sat unimported for up to
+    # half an hour — on exactly the install where the user is watching for the
+    # library to appear.
+    base_delay = 30
     max_delay = 1800
+    delay = base_delay
     while True:
         _t.sleep(delay)
-        delay = min(delay * 2, max_delay)
         try:
             database = get_database()
             result = lib2_bootstrap.run_bootstrap_if_needed(
@@ -32718,7 +32734,14 @@ def _autostart_library_v2_bootstrap_import():
             )
             if lib2_bootstrap.should_stop_autostart(result):
                 return
+            # A tick that actually migrated something means the source is live;
+            # start checking frequently again. Only genuinely idle ticks back off.
+            if result.get("success") or result.get("skipped") == "already_running":
+                delay = base_delay
+            else:
+                delay = min(delay * 2, max_delay)
         except Exception as e:
+            delay = min(delay * 2, max_delay)
             logger.debug(f"lib2 bootstrap import tick skipped: {e}")
 
 

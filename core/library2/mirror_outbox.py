@@ -362,6 +362,32 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
                 conn.commit()
             finally:
                 conn.close()
+
+    # iss29-D11: prune here, on the path that actually runs.
+    #
+    # `prune_done` was only ever called from the monitoring-list reconcile job
+    # and from the manual retry endpoint, so on a normal install the completed
+    # rows were never trimmed — the production database already holds 771
+    # `done` rows against `keep=500`. That history is not inert: `_superseded_ids`
+    # scans it on every drain, so the cost of a drain grows with every mirror
+    # op ever performed. Trimming after a pass that actually did something
+    # keeps the table bounded without adding a write to a no-op drain.
+    if done or failed or superseded:
+        conn = db._get_connection()
+        try:
+            pruned = prune_done(conn)
+            conn.commit()
+            if pruned:
+                logger.debug("mirror outbox: pruned %d completed row(s)", pruned)
+        except Exception as prune_err:  # noqa: BLE001 — housekeeping, never fatal
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            logger.debug("mirror outbox prune skipped: %s", prune_err)
+        finally:
+            conn.close()
+
     return {"done": done, "failed": failed, "superseded": superseded}
 
 
@@ -388,9 +414,17 @@ def outbox_status(conn) -> Dict[str, Any]:
 def retry_failed(conn) -> int:
     """Flip 'failed' rows back to 'pending' (manual retry). Caller commits.
 
-    Rows that a newer op already overrides are NOT resurrected (dd28-13) —
-    the next drain would only skip them anyway, and before the supersede check
-    existed they were exactly how a removed wishlist entry came back.
+    iss29-D07 — the honest version of what this guarantees. The statement below
+    resurrects EVERY failed row; it has no supersede filter of its own. Rows a
+    newer op overrides are not re-applied because the next :func:`drain` marks
+    them ``superseded`` before executing anything (dd28-13), so the protection
+    lives entirely in the drain and only holds while these two run as a pair.
+
+    Two ways to lose it, both worth knowing before this is reused: a backlog
+    larger than the drain's ``limit`` (default 500) leaves the tail pending for
+    a later pass whose supersede window has moved on, and any caller that
+    retries WITHOUT then draining re-arms exactly the failure dd28-13 fixed —
+    a removed wishlist entry coming back.
     """
     cur = conn.execute(
         "UPDATE lib2_mirror_outbox SET status='pending', attempts=0 "

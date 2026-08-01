@@ -114,6 +114,15 @@ def fetch_track_lyrics(
         read_and_persist_tag_cache(conn, file_row["id"], resolved)
         conn.commit()
     except Exception as scan_err:  # noqa: BLE001
+        # iss29-D10: roll back before moving on. A failed
+        # `read_and_persist_tag_cache` leaves a partially applied write
+        # transaction open on this connection, and the very next statement is
+        # an LRClib call for the sibling files below — i.e. the writer would be
+        # held across network I/O, the same class as iss29-D01, one order down.
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
         logger.debug(
             "Failed to rescan file tags after lyrics fetch for %s: %s", resolved, scan_err,
         )

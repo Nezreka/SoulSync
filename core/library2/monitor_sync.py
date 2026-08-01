@@ -288,6 +288,35 @@ def _descriptor_lib2_track_ids(
              FROM lib2_tracks t
              JOIN lib2_albums al ON al.id=t.album_id"""
     ).fetchall()
+
+    # iss29-D02: index the catalogue ONCE instead of re-walking it per
+    # descriptor.
+    #
+    # This loop used to run the full track list for every removed wishlist row
+    # and call `json.loads` on `external_ids` for each pair — "Clear Wishlist"
+    # with 1,000 legacy rows against a 50k-track library is 50 million
+    # iterations and as many JSON parses. Only descriptors carrying
+    # `source_info.lib2_track_id` short-circuit, and rows from the legacy
+    # wishlist UI, from playlist downloads or from `POST /api/wishlist` never
+    # have that marker. The hourly `reconcile_track_wishlist` paid it again
+    # every hour, on a held connection.
+    #
+    # One parse per track, then dictionary lookups. Ambiguity detection is
+    # preserved exactly: the index maps to a LIST of rows, so "more than one
+    # candidate" stays observable and the code still refuses to guess.
+    qualified_index: Dict[tuple, List[Any]] = {}
+    generic_index: Dict[str, List[Any]] = {}
+    for row in rows:
+        row_ids = _provider_ids(row["external_ids"])
+        if row["spotify_id"]:
+            row_ids.setdefault("spotify", str(row["spotify_id"]))
+        if row["musicbrainz_id"]:
+            row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+        if row["isrc"]:
+            row_ids.setdefault("isrc", str(row["isrc"]))
+        for source, value in row_ids.items():
+            qualified_index.setdefault((source, value), []).append(row)
+            generic_index.setdefault(value, []).append(row)
     for descriptor in descriptors:
         if not isinstance(descriptor, Mapping):
             continue
@@ -362,20 +391,22 @@ def _descriptor_lib2_track_ids(
             else:
                 generic_ids.add(raw_id)
 
+        # Same membership test as before, resolved through the prebuilt index.
+        # `seen` keeps the result a de-duplicated list of rows, because one row
+        # is reachable through several of its own provider ids.
+        seen: set[int] = set()
         candidates = []
-        for row in rows:
-            row_ids = _provider_ids(row["external_ids"])
-            if row["spotify_id"]:
-                row_ids.setdefault("spotify", str(row["spotify_id"]))
-            if row["musicbrainz_id"]:
-                row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
-            if row["isrc"]:
-                row_ids.setdefault("isrc", str(row["isrc"]))
-            if any(
-                row_ids.get(source) in provider_values
-                for source, provider_values in qualified_ids.items()
-            ) or generic_ids.intersection(row_ids.values()):
-                candidates.append(row)
+        for source, provider_values in qualified_ids.items():
+            for value in provider_values:
+                for row in qualified_index.get((source, value), ()):
+                    if int(row["id"]) not in seen:
+                        seen.add(int(row["id"]))
+                        candidates.append(row)
+        for value in generic_ids:
+            for row in generic_index.get(value, ()):
+                if int(row["id"]) not in seen:
+                    seen.add(int(row["id"]))
+                    candidates.append(row)
 
         if len(candidates) > 1 and album_identity:
             narrowed = []

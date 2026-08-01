@@ -489,3 +489,145 @@ def test_autostart_stops_only_once_the_library_is_actually_migrated(result, expe
     scan after startup never reached ``lib2_*`` until the next restart.
     """
     assert lib2_bootstrap.should_stop_autostart(result) is expected
+
+
+# --- the checkpoint/watermark pair (iss29-A01, A02, A04) -----------------
+#
+# These three defects compose into one production failure: an upgrade that
+# lands in a permanently empty Library V2 and reports itself as "done". None of
+# them is caught by the tests above, because each is individually survivable —
+# it is the pair (revived checkpoint) plus (a stage the walks then skip) that
+# is fatal.
+
+
+def _add_legacy_artist(db, artist_id=2, name="Newcomer"):
+    """One more row in the legacy source, i.e. a new source watermark."""
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO artists VALUES(?,?,NULL,NULL,NULL,NULL,NULL)",
+            (artist_id, name),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_claim_does_not_revive_a_checkpoint_from_another_source_snapshot(legacy_db):
+    """iss29-A01: the claim must not re-validate the checkpoint it invalidated.
+
+    ``resume_watermark`` is the ONLY invalidation signal a checkpoint has. The
+    claim used to stamp the current watermark while leaving the old
+    ``resume_stage``/``resume_rowid``/``resume_run_id`` in place — which is
+    precisely the act of declaring a stale checkpoint fresh again.
+
+    What that costs: the revived point names ``stage='tracks'``, so ``walk_from``
+    returns None for artists and albums, both walks are skipped, the tracks walk
+    finds an empty album map and skips every row, and ``mark_done`` stamps the
+    run as complete. The user gets an empty library that says it finished.
+    """
+    first_watermark = lib2_bootstrap.source_watermark(legacy_db)
+    token = lib2_bootstrap.try_claim(legacy_db, watermark=first_watermark)
+    assert token
+    lib2_bootstrap.heartbeat(
+        legacy_db, token, stage="tracks", current=1, total=9,
+        rowid=60000, run_id="RUN-A",
+    )
+    # A crash keeps the checkpoint on purpose — that is what resume is for.
+    lib2_bootstrap.mark_failed(legacy_db, token, "container restart")
+
+    _add_legacy_artist(legacy_db)
+    second_watermark = lib2_bootstrap.source_watermark(legacy_db)
+    assert second_watermark != first_watermark
+
+    state = lib2_bootstrap.get_state(legacy_db)
+    assert lib2_bootstrap.resume_point_for(state, second_watermark) is None
+
+    assert lib2_bootstrap.try_claim(legacy_db, watermark=second_watermark)
+
+    # The claim has just stamped `second_watermark`. If it kept the row offsets
+    # taken against `first_watermark`, they now compare equal and a THIRD run
+    # would resume from them.
+    revived = lib2_bootstrap.resume_point_for(
+        lib2_bootstrap.get_state(legacy_db), second_watermark
+    )
+    assert revived is None
+
+
+def test_claim_keeps_a_checkpoint_taken_against_the_same_snapshot(legacy_db):
+    """The other side of iss29-A01: a genuine resume must still resume.
+
+    Clearing too eagerly would silently turn every restart into a full
+    re-migration, which is the cost the checkpoint exists to avoid.
+    """
+    watermark = lib2_bootstrap.source_watermark(legacy_db)
+    token = lib2_bootstrap.try_claim(legacy_db, watermark=watermark)
+    lib2_bootstrap.heartbeat(
+        legacy_db, token, stage="albums", current=1, total=9,
+        rowid=42, run_id="RUN-A",
+    )
+    lib2_bootstrap.mark_failed(legacy_db, token, "container restart")
+
+    assert lib2_bootstrap.try_claim(legacy_db, watermark=watermark)
+
+    resumed = lib2_bootstrap.resume_point_for(
+        lib2_bootstrap.get_state(legacy_db), watermark
+    )
+    assert resumed is not None
+    assert resumed.stage == "albums"
+    assert resumed.rowid == 42
+    assert resumed.run_id == "RUN-A"
+
+
+def test_a_beat_carrying_a_rowid_is_never_throttled(legacy_db, monkeypatch):
+    """iss29-A02: the throttle dropped exactly the beats that persist a resume point.
+
+    ``heartbeat`` only writes a checkpoint when the beat carries both a rowid
+    and a run id, and those beats are the stage openings and the finalize
+    transition. The throttle discarded every beat with ``current != total``
+    inside a 5 s window — so on any library whose walks finish quickly, the only
+    checkpoint ever persisted was the FIRST one. That is what leaves
+    ``resume_stage='tracks', resume_rowid=0`` after a fully successful run, and
+    it is the value that makes iss29-A01 fatal rather than merely wasteful.
+    """
+    delivered = []
+    real_heartbeat = lib2_bootstrap.heartbeat
+
+    def _spy(database, owner_token, **kwargs):
+        delivered.append(kwargs)
+        return real_heartbeat(database, owner_token, **kwargs)
+
+    monkeypatch.setattr(lib2_bootstrap, "heartbeat", _spy)
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+    assert result.get("success") is True
+
+    checkpointed = {
+        beat["stage"] for beat in delivered
+        if beat.get("rowid") is not None and beat.get("run_id")
+    }
+    assert {"artists", "albums", "tracks", "finalizing"} <= checkpointed
+
+
+def test_mark_done_stamps_the_watermark_the_walks_actually_saw(legacy_db):
+    """iss29-A04: stamping the POST-run watermark loses concurrent writers.
+
+    The walks are keyset scans taken at three different moments, and the whole
+    post-import precache runs after them. Auto-import, wishlist downloads and
+    the media-server sync all write to the legacy tables meanwhile. An artist
+    that appears after the artists walk is never walked — but a watermark taken
+    at the end counts it, so the next tick reports ``already_done`` and the
+    artist stays invisible in V2 for the rest of the process lifetime.
+    """
+    def _post_import(_progress):
+        _add_legacy_artist(legacy_db, artist_id=999, name="Arrived Mid-Run")
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(
+        legacy_db, _enabled, post_import=_post_import
+    )
+    assert result.get("success") is True
+
+    # The row that arrived mid-run was never walked, so the migration is not
+    # done with respect to the source as it now stands.
+    second = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+    assert second.get("skipped") != "already_done"

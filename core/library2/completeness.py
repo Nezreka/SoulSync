@@ -419,7 +419,22 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
 
 
 def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict]]:
-    """Return + cache the album's canonical tracklist. None when unavailable."""
+    """Return + cache the album's canonical tracklist. None when unavailable.
+
+    **Commits ``conn``.** iss29-D05: this function calls ``conn.commit()``
+    several times, and ``conn`` belongs to the CALLER. That is deliberate and
+    necessary — it makes provider calls, and holding SQLite's single writer
+    across one of those is the deadlock this project has already taken an
+    outage on — but it means any uncommitted work the caller was carrying is
+    committed here, at a point the caller does not choose.
+
+    All four call sites are safe today only by position: two committed in the
+    previous loop iteration, one has written nothing yet, and one owns a
+    private connection. A refactor as small as hoisting a monitor UPDATE above
+    the resolve call would silently commit a half-applied mutation. Pass a
+    connection you are willing to have committed, or use your own.
+    ``mirror_tracks_wishlist`` documents the same property for itself.
+    """
     context = _album_tracklist_context(conn, album_id)
     if context is None:
         return None
