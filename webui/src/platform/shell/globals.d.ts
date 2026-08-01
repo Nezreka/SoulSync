@@ -218,6 +218,12 @@ declare global {
      * back. Returns true when a modal was shown.
      */
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /** core.js bridge: seed a virtual playlist + tracks, start the shared sync. */
+    startDiscoverVirtualSync?: (
+      virtualPlaylistId: string,
+      name: string,
+      spotifyTracks: unknown[],
+    ) => Promise<unknown>;
     /**
      * The basic-search results currently on screen, published for the vanilla
      * matched-download modal.

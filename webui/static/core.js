@@ -56,6 +56,22 @@ let activeDownloadProcesses = {};
  *
  * Returns whether a modal was shown, so the caller knows to stop.
  */
+/**
+ * Bridge for the React discover page: seed a VIRTUAL playlist and its tracks,
+ * then hand off to the shared sync engine. `playlistTrackCache` and
+ * `spotifyPlaylists` are top-level `let`s in this script's lexical scope, so a
+ * module cannot seed them itself — the same reason the function below exists.
+ * Mirrors what startDecadeSync/startDiscoverPlaylistSync did inline (discover.js
+ * 2753-2764) before the page moved to React.
+ */
+window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
+    }
+    return startPlaylistSync(virtualPlaylistId);
+};
+
 window.reopenActiveDownloadModal = function (virtualPlaylistId) {
     const process = activeDownloadProcesses[virtualPlaylistId];
     if (!process || !process.modalElement) return false;

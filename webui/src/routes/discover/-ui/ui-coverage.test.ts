@@ -108,7 +108,7 @@ const REQUIRED_UI: Record<string, string[]> = {
  * Each one is a section or modal a user can reach in the vanilla today, so the
  * route flip cannot happen while this list is non-empty without losing it.
  */
-const MISSING_UI = ['artist map info modal wiring', 'decade shelf feeder'];
+const MISSING_UI = ['artist map info modal wiring'];
 
 describe('every UI piece the page needs has a component', () => {
   // -ui components PLUS the route level (route.tsx, the page hook): shelf
