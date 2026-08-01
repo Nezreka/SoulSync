@@ -151,6 +151,17 @@ export function fetchYourArtistsSources(): Promise<SourcesResponse> {
 }
 
 /**
+ * The sources modals persist through the GENERAL settings endpoint (1703,
+ * 5695) — `{discover: {your_albums_sources | your_artists_sources: 'a,b'}}` —
+ * not a discover-scoped one.
+ */
+export function saveDiscoverSettings(
+  body: Record<string, unknown>,
+): Promise<DiscoverResult & Record<string, unknown>> {
+  return readJson(apiClient.post('settings', { json: body }));
+}
+
+/**
  * One artist's detail for the hover/expand card.
  *
  * `name` rides along as a query param even though the id is in the path —
