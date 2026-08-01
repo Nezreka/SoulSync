@@ -76,6 +76,10 @@ describe('library v2 track play button (H1)', () => {
         file_path: '/music/track.flac',
         bitrate: 1234,
         artist_id: null,
+        // iss29-B08: the legacy artist id is null for a V2-native track, which
+        // left the player's "Go to artist" permanently disabled. The lib2 id
+        // travels alongside it so the player can route to /library?artist=.
+        lib2_artist_id: 3,
         album_id: null,
       },
       'Some Album',

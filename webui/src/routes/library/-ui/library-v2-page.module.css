@@ -4108,6 +4108,33 @@ button.statusWarn:disabled {
   cursor: default;
 }
 
+/* UI-04 / iss29-C08: bulk quality-profile control. Matches .bulkBarButton so
+   the select reads as one of the bar's actions rather than a stray form field. */
+.bulkBarSelect select {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.bulkBarSelect select:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: #fff;
+}
+
+.bulkBarSelect select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bulkBarSelect select option {
+  background: #1a1a1f;
+  color: #fff;
+}
+
 .bulkBarButtonDanger {
   border-color: rgba(239, 68, 68, 0.35);
   color: rgb(248, 113, 113);

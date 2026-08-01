@@ -4,6 +4,8 @@ import { useNavigate as useRouterNavigate } from '@tanstack/react-router';
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  createContext,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -85,6 +87,7 @@ import {
   retryLibraryV2Mirror,
   runRepairJob,
   setLibraryV2Monitored,
+  setLibraryV2QualityProfile,
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
   startLibraryV2ScopedSearch,
@@ -612,6 +615,21 @@ export function MonitorToggle({
   );
 }
 
+/**
+ * Whether this profile may mutate the catalogue (iss29-C10).
+ *
+ * `_guard` in api/library_v2.py rejects EVERY non-GET from a non-admin profile
+ * — the lib2 monitored columns are global, so a second profile's write would
+ * overwrite the admin's state (P0-02). The UI knew nothing about that, so a
+ * read-only profile was offered the full toolbar and every button answered 403
+ * on click. Defaults to true so nothing is locked down by a missing provider.
+ */
+const LibraryV2CanWriteContext = createContext(true);
+
+export function useLibraryV2CanWrite(): boolean {
+  return useContext(LibraryV2CanWriteContext);
+}
+
 function ActionButton({
   icon,
   label,
@@ -629,12 +647,15 @@ function ActionButton({
   disabled?: boolean;
   tone?: 'default' | 'danger';
 }) {
+  // Every ActionButton is a write action, so the gate belongs here rather than
+  // at each of the ~30 call sites.
+  const canWrite = useLibraryV2CanWrite();
   return (
     <button
       type="button"
       className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''}`}
-      disabled={busy || disabled}
-      title={title}
+      disabled={busy || disabled || !canWrite}
+      title={canWrite ? title : 'Library changes require the admin profile'}
       onClick={onClick}
     >
       <SvgIcon name={busy ? 'refresh' : icon} />
@@ -2184,6 +2205,12 @@ function HistoryModal({
       <div className={styles.resultsWrap}>
         {historyQuery.isLoading ? (
           <div className={styles.inlineLoading}>Loading history…</div>
+        ) : historyQuery.isError ? (
+          // iss29-C04: "no recorded history" is a claim about the journals.
+          // A failed fetch knows nothing about them.
+          <div className={styles.inlineLoading}>
+            {mutationErrorMessage(historyQuery.error, 'History could not be loaded.')}
+          </div>
         ) : rows.length === 0 ? (
           <div className={styles.inlineLoading}>No recorded history for this {scope} yet.</div>
         ) : (
@@ -3680,7 +3707,7 @@ export function LibraryV2Page() {
   const search = Route.useSearch();
   const enabledQuery = useQuery(libraryV2EnabledQueryOptions());
 
-  if (enabledQuery.data === false) {
+  if (enabledQuery.data?.enabled === false) {
     return (
       <div className={styles.page}>
         <div className={styles.emptyState}>
@@ -3704,9 +3731,19 @@ export function LibraryV2Page() {
         }
       : null;
 
+  // iss29-C10: `canWrite` defaults to true while the query is still in flight
+  // and for servers that predate the field, so an admin never sees their own
+  // toolbar flicker into a disabled state.
+  const canWrite = enabledQuery.data?.canWrite !== false;
+
   return (
-    <>
+    <LibraryV2CanWriteContext.Provider value={canWrite}>
       <MirrorStatusBanner />
+      {!canWrite ? (
+        <div className={styles.emptyState}>
+          Read-only: library changes require the admin profile.
+        </div>
+      ) : null}
       {search.album ? (
         <AlbumDetailView albumId={search.album} />
       ) : discover && !search.artist ? (
@@ -3724,7 +3761,7 @@ export function LibraryV2Page() {
       ) : (
         <ArtistIndexView />
       )}
-    </>
+    </LibraryV2CanWriteContext.Provider>
   );
 }
 
@@ -3774,7 +3811,9 @@ function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   // Debounce the filter box: navigating per keystroke fires a request each key.
-  const searchDebounce = useRef<number | undefined>(undefined);
+  const artistFilter = useUrlSyncedFilter(search.q, (value) =>
+    void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+  );
 
   // Only fetched for the table view (D6) — the card grid doesn't use either.
   const isTableView = search.view === 'table';
@@ -3811,7 +3850,13 @@ function ArtistIndexView() {
 
   const artists = artistsQuery.data?.artists ?? [];
   const pagination = artistsQuery.data?.pagination;
-  const isEmpty = !artistsQuery.isLoading && artists.length === 0 && !search.q;
+  // iss29-C03: a FAILED fetch is not an empty library. `retry: 1` means that
+  // after the retry `isLoading` is false and `data` undefined, which used to
+  // render "Your library is empty — Import library" to a user with 900 artists
+  // and offer them a full re-import. `AlbumDetailView` already reads `isError`;
+  // this was the inconsistency, not the house style.
+  const isEmpty =
+    !artistsQuery.isLoading && !artistsQuery.isError && artists.length === 0 && !search.q;
 
   // showLibraryDownloadsSection (shared-helpers.js) renders the per-artist
   // download bubbles on the library page. It is bound to `artistDownloadBubbles`
@@ -3846,14 +3891,8 @@ function ArtistIndexView() {
           className={styles.searchInput}
           type="text"
           placeholder="Filter artists…"
-          defaultValue={search.q}
-          onChange={(e) => {
-            const value = e.target.value;
-            window.clearTimeout(searchDebounce.current);
-            searchDebounce.current = window.setTimeout(() => {
-              void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) });
-            }, 300);
-          }}
+          value={artistFilter.value}
+          onChange={(e) => artistFilter.onChange(e.target.value)}
         />
         <select
           className={styles.select}
@@ -3909,6 +3948,16 @@ function ArtistIndexView() {
 
       {artistsQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
+      ) : artistsQuery.isError ? (
+        // iss29-C03: say the list could not be loaded. Anything else here is a
+        // statement about the user's library derived from a failed request.
+        <div className={styles.emptyState}>
+          <h2>Could not load your library</h2>
+          <p>{mutationErrorMessage(artistsQuery.error, 'The library list failed to load.')}</p>
+          <button type="button" onClick={() => void artistsQuery.refetch()}>
+            Try again
+          </button>
+        </div>
       ) : isEmpty ? (
         <LibraryEmptyState />
       ) : search.view === 'table' ? (
@@ -4322,7 +4371,9 @@ function WantedIndexView() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const search = Route.useSearch();
-  const searchDebounce = useRef<number | undefined>(undefined);
+  const wantedFilter = useUrlSyncedFilter(search.q, (value) =>
+    void navigate({ search: (p) => ({ ...p, q: value, page: 1 }) }),
+  );
   // dd28-16: one shared banner + a run-sequence guard, so a slower earlier
   // search can no longer overwrite a newer one's result.
   const { banner, setBanner, busy: searchBusy, runScoped } = useScopedSearchBanner();
@@ -4381,19 +4432,25 @@ function WantedIndexView() {
           className={styles.searchInput}
           type="text"
           placeholder="Filter by track, album or artist…"
-          defaultValue={search.q}
-          onChange={(e) => {
-            const value = e.target.value;
-            window.clearTimeout(searchDebounce.current);
-            searchDebounce.current = window.setTimeout(() => {
-              void navigate({ search: (p) => ({ ...p, q: value, page: 1 }) });
-            }, 300);
-          }}
+          value={wantedFilter.value}
+          onChange={(e) => wantedFilter.onChange(e.target.value)}
         />
       </div>
 
       {wantedQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
+      ) : wantedQuery.isError ? (
+        // iss29-C05: this screen is consulted to decide whether Automatic
+        // Search has anything to do. Claiming "everything you want is already
+        // on disk" off the back of a failed request is a factual statement
+        // about the library derived from no data at all.
+        <div className={styles.emptyState}>
+          <h2>Could not load this list</h2>
+          <p>{mutationErrorMessage(wantedQuery.error, 'The wanted list failed to load.')}</p>
+          <button type="button" onClick={() => void wantedQuery.refetch()}>
+            Try again
+          </button>
+        </div>
       ) : rows.length === 0 ? (
         <div className={styles.emptyState}>
           <h2>Nothing here</h2>
@@ -4845,6 +4902,39 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
       )}
     </div>
   );
+}
+
+/**
+ * A debounced filter box that stays in step with the URL (iss29-B09).
+ *
+ * The inputs used to be uncontrolled (`defaultValue`), so React never touched
+ * them again after mount: a browser Back — or any other navigation that changed
+ * `q` — updated the results while the box kept showing the old text, and the
+ * next keystroke re-applied that stale text. Local state keeps typing
+ * responsive; the effect resyncs whenever the URL moves on its own.
+ */
+function useUrlSyncedFilter(
+  urlValue: string | undefined,
+  apply: (value: string) => void,
+  delayMs = 300,
+): { value: string; onChange: (next: string) => void } {
+  const [value, setValue] = useState(urlValue ?? '');
+  const timer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    setValue(urlValue ?? '');
+  }, [urlValue]);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  return {
+    value,
+    onChange: (next: string) => {
+      setValue(next);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => apply(next), delayMs);
+    },
+  };
 }
 
 /** Filter for the release toggle: "My Library" keeps owned or wanted releases;
@@ -6151,7 +6241,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       <BackLink onClick={() => void navigate({ search: (p) => ({ ...p, artist: undefined }) })}>
         ← All artists
       </BackLink>
-      {artistQuery.isLoading || !artist ? (
+      {artistQuery.isError ? (
+        // iss29-C04: without this branch `isLoading` false + `artist` undefined
+        // fell through to "Loading…" forever — a stale bookmark to a deleted
+        // artist (404) span the page for good, with no message and no retry.
+        <div className={styles.emptyState}>
+          <h2>Artist not found</h2>
+          <p>{mutationErrorMessage(artistQuery.error, 'This artist could not be loaded.')}</p>
+        </div>
+      ) : artistQuery.isLoading || !artist ? (
         <div className={styles.loading}>Loading…</div>
       ) : (
         <>
@@ -6427,6 +6525,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 artistId={artistId}
                 scope="albums"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
                 onAction={handleAction}
               />
               <AlbumGroup
@@ -6435,6 +6534,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 artistId={artistId}
                 scope="eps"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
                 onAction={handleAction}
               />
               <AlbumGroup
@@ -6443,6 +6543,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 artistId={artistId}
                 scope="singles"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
                 onAction={handleAction}
               />
             </>
@@ -6735,6 +6836,7 @@ function AlbumGroup({
   artistId,
   scope,
   queueStatusByAlbum,
+  queueStatusTracks,
   onAction,
 }: {
   title: string;
@@ -6742,6 +6844,7 @@ function AlbumGroup({
   artistId: number;
   scope: 'albums' | 'eps' | 'singles';
   queueStatusByAlbum: Record<number, number>;
+  queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
   onAction: ActionHandler;
 }) {
   if (albums.length === 0) return null;
@@ -6765,6 +6868,7 @@ function AlbumGroup({
             key={album.id}
             album={album}
             activeDownloads={queueStatusByAlbum[album.id] ?? 0}
+            queueStatusTracks={queueStatusTracks}
             onAction={onAction}
           />
         ))}
@@ -6777,10 +6881,12 @@ function AlbumBlock({
   album,
   activeDownloads,
   onAction,
+  queueStatusTracks,
 }: {
   album: LibraryV2AlbumSummary;
   activeDownloads: number;
   onAction: ActionHandler;
+  queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -6908,7 +7014,14 @@ function AlbumBlock({
           tracklist, so it stayed a one-track album. The endpoint's own guard
           is a single row read and only calls a provider when the tracklist is
           genuinely incomplete. */}
-      {open ? <AlbumTrackTable albumId={album.id} resolve onAction={onAction} /> : null}
+      {open ? (
+        <AlbumTrackTable
+          albumId={album.id}
+          resolve
+          onAction={onAction}
+          queueStatusTracks={queueStatusTracks}
+        />
+      ) : null}
     </div>
   );
 }
@@ -7303,6 +7416,29 @@ function useUiPreferencesMutation() {
       settledRef.current = sequence;
       queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences);
     },
+    /**
+     * iss29-C09: no consumer of this mutation renders `error`, so a rejected
+     * write vanished completely — the toggle stayed where the user put it,
+     * nothing was persisted, and the next page load quietly reverted it. M-12
+     * is documented as implemented, which is what made the silence
+     * indistinguishable from success.
+     *
+     * These are preferences, not library state, so a toast is the right
+     * weight: it says the choice did not stick without interrupting the work.
+     * Refetching restores what the server actually holds, so the UI stops
+     * showing a value that only exists on this client.
+     */
+    onError: (error) => {
+      const message = mutationErrorMessage(error, 'Could not save your view preferences');
+      if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+        window.showToast(message, 'error');
+      } else {
+        console.error('[library-v2] ui preferences update failed:', message);
+      }
+      void queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'],
+      });
+    },
   });
 }
 
@@ -7589,6 +7725,7 @@ function TrackTableBulkBar({
 
   const trackIds = tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
+  const bulkProfilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -7603,6 +7740,25 @@ function TrackTableBulkBar({
     }
   }
 
+  /**
+   * Fan a per-track mutation out over the selection and report what actually
+   * happened (iss29-C07).
+   *
+   * `Promise.all` rejects on the FIRST failure, so one unwritable track made
+   * the bar say "Monitor failed" even though the other 39 had been applied —
+   * and the user's only cue to re-check was the row state itself. It also
+   * abandoned the remaining calls mid-flight. `allSettled` runs them all and
+   * the message distinguishes total from partial failure.
+   */
+  async function fanOut(ids: number[], apply: (id: number) => Promise<unknown>): Promise<void> {
+    const outcomes = await Promise.allSettled(ids.map((id) => apply(id)));
+    const failures = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
+    if (failures.length === 0) return;
+    const first = mutationErrorMessage(failures[0].reason, 'unknown error');
+    if (failures.length === ids.length) throw new Error(first);
+    throw new Error(`${failures.length} of ${ids.length} failed (first: ${first})`);
+  }
+
   return (
     <div className={styles.bulkBar}>
       <span className={styles.bulkBarCount}>{tracks.length} selected</span>
@@ -7612,7 +7768,7 @@ function TrackTableBulkBar({
         disabled={busy !== null}
         onClick={() =>
           void run('Monitor', async () => {
-            await Promise.all(trackIds.map((id) => setLibraryV2Monitored('tracks', id, true)));
+            await fanOut(trackIds, (id) => setLibraryV2Monitored('tracks', id, true));
           })
         }
       >
@@ -7624,7 +7780,7 @@ function TrackTableBulkBar({
         disabled={busy !== null}
         onClick={() =>
           void run('Unmonitor', async () => {
-            await Promise.all(trackIds.map((id) => setLibraryV2Monitored('tracks', id, false)));
+            await fanOut(trackIds, (id) => setLibraryV2Monitored('tracks', id, false));
           })
         }
       >
@@ -7650,12 +7806,48 @@ function TrackTableBulkBar({
         disabled={busy !== null || trackIds.length === 0}
         onClick={() =>
           void run('ReplayGain', async () => {
-            await Promise.all(trackIds.map((id) => analyzeLibraryV2TrackReplayGain(id)));
+            await fanOut(trackIds, (id) => analyzeLibraryV2TrackReplayGain(id));
           })
         }
       >
         {busy === 'ReplayGain' ? 'Analyzing…' : 'ReplayGain'}
       </button>
+      {/* UI-04 / iss29-C08: bulk quality-profile assignment. The backend and
+          the single-track path both existed; the bulk bar was simply missing
+          the control, so assigning a profile to 40 selected tracks meant 40
+          trips through the per-row picker. "Inherit" posts `inherit: true`,
+          the same payload the picker's inherit option sends. */}
+      <label className={styles.bulkBarSelect}>
+        <span className="sr-only">Quality profile</span>
+        <select
+          aria-label="Quality profile for the selected tracks"
+          disabled={busy !== null || trackIds.length === 0}
+          value=""
+          onChange={(event) => {
+            const raw = event.target.value;
+            event.target.value = '';
+            if (!raw) return;
+            const profileId = raw === 'inherit' ? null : Number(raw);
+            void run('Quality profile', async () => {
+              // A track has no children to cascade to, and §52.3 keeps the
+              // profile choice orthogonal to wanted/monitoring intent.
+              await fanOut(trackIds, (id) =>
+                setLibraryV2QualityProfile('tracks', id, profileId, false, false),
+              );
+            });
+          }}
+        >
+          <option value="">
+            {busy === 'Quality profile' ? 'Applying…' : 'Quality profile…'}
+          </option>
+          <option value="inherit">Inherit from album</option>
+          {(bulkProfilesQuery.data ?? []).map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
+      </label>
       <button
         type="button"
         className={styles.bulkBarButton}
@@ -7867,19 +8059,34 @@ export function AlbumTrackTable({
   albumId,
   resolve,
   onAction,
+  queueStatusTracks,
 }: {
   albumId: number;
   /** Discography-only releases materialize their provider tracklist on expand. */
   resolve?: boolean;
   onAction: ActionHandler;
+  /**
+   * find22-15 / iss29-C06: the per-track queue map, handed down from the ONE
+   * artist-scope poll. Every expanded album on an artist page used to mount its
+   * own 3s poll — six open blocks came to ~140 requests/min, each running
+   * `entity_track_ids` plus a queue scan against the single-writer SQLite
+   * database that is this project's known bottleneck — for tracks the
+   * artist-wide response already contained. Absent (the standalone album page,
+   * which has no artist-scope query) this component still polls for itself.
+   */
+  queueStatusTracks?: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
-  const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('albums', albumId));
+  const ownQueueStatusQuery = useQuery({
+    ...libraryV2QueueStatusQueryOptions('albums', albumId),
+    enabled: queueStatusTracks === undefined && albumId > 0,
+  });
+  const queueTracks = queueStatusTracks ?? ownQueueStatusQuery.data?.tracks ?? {};
   const preferencesMutation = useUiPreferencesMutation();
-  useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
+  useRefreshLibraryWhenQueueDrains(Object.keys(queueTracks).length);
   const album = albumQuery.data;
   const [sort, setSort] = useState<TrackSort | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -7953,6 +8160,16 @@ export function AlbumTrackTable({
     }
     return set;
   }, [matchQuery.data]);
+  if (albumQuery.isError) {
+    // iss29-C04: an expanded album whose fetch failed used to sit on
+    // "Loading tracks…" permanently, because `isLoading` is false once the
+    // retry is spent and `album` stays undefined.
+    return (
+      <div className={styles.inlineLoading}>
+        {mutationErrorMessage(albumQuery.error, 'Tracks could not be loaded.')}
+      </div>
+    );
+  }
   if (albumQuery.isLoading || !album) {
     return <div className={styles.inlineLoading}>Loading tracks…</div>;
   }
@@ -8282,7 +8499,7 @@ export function AlbumTrackTable({
                 track.id != null ? () => toggleSelected(track.id as number) : undefined
               }
               onAction={onAction}
-              queueStatus={track.id != null ? queueStatusQuery.data?.tracks[track.id] : undefined}
+              queueStatus={track.id != null ? queueTracks[track.id] : undefined}
             />
           ))}
         </tbody>
@@ -8801,6 +9018,12 @@ export function TrackPlayButton({
             file_path: filePath,
             bitrate: track.file?.bitrate ?? null,
             artist_id: null,
+            // iss29-B08: the V2 artist, so the player's "Go to artist" can
+            // route back into this page instead of staying disabled.
+            lib2_artist_id:
+              track.artists?.find((a) => a.role === 'primary')?.id ??
+              track.artists?.[0]?.id ??
+              null,
             // Legacy ids, and library-v2 only holds lib2 ones. Feeding a lib2
             // album id into a legacy slot is the H-14 confusion; the player
             // gets the display strings below instead.

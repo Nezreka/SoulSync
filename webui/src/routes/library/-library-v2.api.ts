@@ -36,6 +36,14 @@ export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
 interface EnabledResponse {
   success: boolean;
   enabled: boolean;
+  /** iss29-C10: whether THIS profile may mutate the catalogue at all. */
+  can_write?: boolean;
+}
+
+export interface LibraryV2Availability {
+  enabled: boolean;
+  /** False for a non-admin profile: every mutating endpoint answers 403. */
+  canWrite: boolean;
 }
 interface ArtistsResponse {
   success: boolean;
@@ -64,9 +72,14 @@ interface QualityProfilesResponse {
   error?: string;
 }
 
-export async function fetchLibraryV2Enabled(): Promise<boolean> {
+export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
   const payload = await readJson<EnabledResponse>(apiClient.get('library/v2/enabled'));
-  return Boolean(payload.enabled);
+  return {
+    enabled: Boolean(payload.enabled),
+    // Older servers do not send the field; assume writable there so an
+    // upgrade cannot lock an admin out of their own library.
+    canWrite: payload.can_write !== false,
+  };
 }
 
 export interface LibraryV2AcquisitionImportSummary {
@@ -326,11 +339,21 @@ export async function setLibraryV2QualityProfile(
 }
 
 export async function refreshLibraryV2(entity: 'artists' | 'albums', id: number): Promise<string> {
+  /**
+   * iss29-C02: a 409 means "this scan is ALREADY running", and the server
+   * returns the running job's id in the body so the client can attach to it.
+   * Without `throwHttpErrors: false`, ky (created with `retry: 0`) threw before
+   * the body was ever read, so a second tab, a remount, or the album page's
+   * separate banner instance turned a perfectly healthy job into a red error.
+   * Same shape as `startLibraryV2DiscographyRefresh`.
+   */
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
-    apiClient.post(`library/v2/${entity}/${id}/refresh`, { json: {} }),
+    apiClient.post(`library/v2/${entity}/${id}/refresh`, {
+      json: {},
+      throwHttpErrors: false,
+    }),
   );
-  if (!payload.success) throw new Error(payload.error || 'Failed to refresh');
-  if (!payload.job_id) throw new Error('Refresh did not return a job id');
+  if (!payload.job_id) throw new Error(payload.error || 'Failed to refresh');
   return payload.job_id;
 }
 
@@ -1461,11 +1484,13 @@ export async function reconcileWishlist(): Promise<string> {
 }
 
 export async function startLibraryV2UpgradeScan(): Promise<string> {
+  // iss29-C02: same 409-is-not-an-error contract as `refreshLibraryV2` — the
+  // global Automatic Search is exactly the button two tabs are most likely to
+  // press at once, and the server hands back the running job's id.
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
-    apiClient.post('library/v2/upgrade-scan', { json: {} }),
+    apiClient.post('library/v2/upgrade-scan', { json: {}, throwHttpErrors: false }),
   );
-  if (!payload.success) throw new Error(payload.error || 'Upgrade scan failed');
-  if (!payload.job_id) throw new Error('Upgrade scan did not return a job id');
+  if (!payload.job_id) throw new Error(payload.error || 'Upgrade scan failed');
   return payload.job_id;
 }
 
@@ -1824,8 +1849,21 @@ export function libraryV2ImportStatusQueryOptions(refetchIntervalMs = 1000) {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'],
     queryFn: fetchLibraryV2ImportStatus,
+    /**
+     * iss29-A03: `running` is the IN-PROCESS flag, and only the manual Import
+     * button ever sets it. The autostart bootstrap — the one an upgrading
+     * installation actually runs — never touches it, and `bootstrap.status` is
+     * its only descriptor. Polling on `running` alone meant the first status
+     * fetch saw `bootstrap.status === 'running'`, React Query stopped the
+     * timer, and the predicate was only re-evaluated after a fetch that would
+     * now never happen (`refetchOnWindowFocus` is globally false). The page sat
+     * on the same percentage for the entire migration.
+     */
     refetchInterval: (query) =>
-      query.state.data?.running || query.state.data?.artwork_cache.running
+      query.state.data?.running ||
+      query.state.data?.artwork_cache.running ||
+      query.state.data?.bootstrap?.status === 'running' ||
+      query.state.data?.bootstrap?.status === 'pending'
         ? refetchIntervalMs
         : false,
   });
