@@ -70,7 +70,7 @@ const REQUIRED_UI: Record<string, string[]> = {
   'your artists modal': ['YourArtistsModal'],
   'artist info modal': ['ArtistInfoModal'],
   'your artists sources modal': ['ARTISTS_SOURCE_INFO', 'toggleArtistSource'],
-  'your albums batch modal': ['prepareBatchRows', 'batchFooter'],
+  'your albums batch modal': ['YourAlbumsBatchModal'],
   'your albums sources modal': ['YOUR_ALBUMS_SOURCE_INFO', 'toggleSource'],
   /*
    * NOT a second modal. `openYourArtistInfoModal_direct` (10285) adapts a map
@@ -96,7 +96,6 @@ const MISSING_UI = [
   'cache-* shelves',
   'decade tab contents',
   'seasonal playlist shelf feeder',
-  'your albums batch modal',
 ];
 
 describe('every UI piece the page needs has a component', () => {
