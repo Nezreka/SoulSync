@@ -68,11 +68,19 @@ const REQUIRED_UI: Record<string, string[]> = {
   'seasonal playlist shelf feeder': ['seasonalMixTitles', 'seasonalHasPlaylist'],
   'blacklist modal': ['blacklistEntries', 'BLACKLIST_TITLE'],
   'your artists modal': ['YourArtistsModal'],
-  'artist info modal': ['infoStats', 'infoMatchBadges'],
+  'artist info modal': ['ArtistInfoModal'],
   'your artists sources modal': ['ARTISTS_SOURCE_INFO', 'toggleArtistSource'],
   'your albums batch modal': ['prepareBatchRows', 'batchFooter'],
   'your albums sources modal': ['YOUR_ALBUMS_SOURCE_INFO', 'toggleSource'],
-  'artist map info modal': ['artMapInfoBest', 'artMapInfoSourceOrder'],
+  /*
+   * NOT a second modal. `openYourArtistInfoModal_direct` (10285) adapts a map
+   * node into a pool entry and opens the SAME info modal; the adapter is
+   * ported in -discover.artist-map.entry.ts. What remains is hook wiring —
+   * feed the adapter's pool into <ArtistInfoModal> from the map's context
+   * menu and island card — which is #251's, so these symbols resolve when the
+   * route level references them.
+   */
+  'artist map info modal wiring': ['artMapInfoBest', 'artMapInfoSourceOrder'],
   'decade tab contents': ['decadeTrackToSpotify', 'decadeHasTracks'],
 };
 
@@ -83,8 +91,7 @@ const REQUIRED_UI: Record<string, string[]> = {
  * route flip cannot happen while this list is non-empty without losing it.
  */
 const MISSING_UI = [
-  'artist info modal',
-  'artist map info modal',
+  'artist map info modal wiring',
   'blacklist modal',
   'cache-* shelves',
   'decade tab contents',
