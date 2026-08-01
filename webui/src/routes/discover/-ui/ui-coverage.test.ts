@@ -108,7 +108,12 @@ const REQUIRED_UI: Record<string, string[]> = {
  * Each one is a section or modal a user can reach in the vanilla today, so the
  * route flip cannot happen while this list is non-empty without losing it.
  */
-const MISSING_UI = ['artist map info modal wiring'];
+/**
+ * EMPTY — the designed end state. Every piece the vanilla page offers has a
+ * component or a hook consumer; the gate now exists to catch a REGRESSION
+ * (a piece losing its component), which is the 'gained' branch below.
+ */
+const MISSING_UI: string[] = [];
 
 describe('every UI piece the page needs has a component', () => {
   // -ui components PLUS the route level (route.tsx, the page hook): shelf
