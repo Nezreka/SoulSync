@@ -321,9 +321,28 @@ list cannot go stale. It requires a component name to be DECLARED rather than
 merely mentioned — the first draft reported the sync panel as built after its
 declaration had been renamed away, because another component still imported it.
 
+### the line-by-line review (Jul 31, third pass)
+
+A full diff of every component against the vanilla renderer it transcribes
+found SEVEN components diverging — mix modal (invented wholesale), ListenBrainz
+(decade-styled tabs, only-with-data, the .lb-empty-state connect card), Last.fm
+rows (artwork + one-line meta), the hero (reason-driven subtitle, the real
+.hero-meta-item markup), Your Albums (the shared .ya-card + badge, real pager),
+the dial (gradient area, #adv-wave-path at 2.5, orb ring, chasing aura, the
+.adv-wave-ends footer), and the solid mix cover (direct children). All fixed
+against the sources, 34/34 fidelity mutants killed.
+
+The root cause each time: markup built from module contracts or static HTML
+without reading the JS that renders the dynamic parts — and tests that asserted
+the invention, so full mutation passes proved nothing. The artefact gate is now
+TOKENIZED (substring matching let `.listenbrainz-tab` pass inside
+`.listenbrainz-tab-content`) with an explicit per-name allowlist instead of a
+numeric budget, under which 30+ wrong classes had hidden as "pending CSS".
+
 ### the styling debt, which also blocks the route flip
 
-94 class names in the components have **no CSS**. They are semantic names that
+88 class names in the components have **no CSS** (was 94; the review resolved
+the rest into real vanilla classes). They are semantic names that
 replaced the vanilla's INLINE styles (the map and web panels build their markup
 in JS with `style="…"` on every node). Those elements render structurally
 correct and visually bare. The gate ratchets the number; writing that CSS is a
