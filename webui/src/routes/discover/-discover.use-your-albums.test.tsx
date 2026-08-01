@@ -6,7 +6,8 @@ import { server } from '@/test/msw';
 
 import type { AlbumsToast } from './-discover.use-your-albums';
 
-import { useYourAlbums } from './-discover.use-your-albums';
+import { saveDiscoverSettings } from './-discover.api';
+import { INITIAL_GRID, useYourAlbums } from './-discover.use-your-albums';
 
 let toasts: AlbumsToast[] = [];
 let gridQueries: string[] = [];
@@ -64,6 +65,7 @@ afterEach(() => {
 describe('useYourAlbums — grid', () => {
   it('loads on mount, derives the subtitle and the Download button', async () => {
     const { result } = mount();
+    expect(result.current.grid.state).toEqual(INITIAL_GRID);
     expect(result.current.grid.phase).toBe('loading');
     await waitFor(() => expect(result.current.grid.phase).toBe('ready'));
     expect(result.current.grid.albums).toHaveLength(1);
@@ -115,6 +117,20 @@ describe('useYourAlbums — grid', () => {
     expect(gridQueries.length).toBe(before + 2); // not yet
     await act(() => vi.advanceTimersByTimeAsync(450));
     expect(gridQueries.at(-1)).toContain('search=xtal');
+  });
+});
+
+describe('saveDiscoverSettings', () => {
+  it('posts the body to the GENERAL settings endpoint', async () => {
+    let posted: unknown = null;
+    server.use(
+      http.post('/api/settings', async ({ request }) => {
+        posted = await request.json();
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    await saveDiscoverSettings({ discover: { your_albums_sources: 'spotify' } });
+    expect(posted).toEqual({ discover: { your_albums_sources: 'spotify' } });
   });
 });
 

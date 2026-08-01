@@ -57,12 +57,14 @@ function decadeOf(mix: DiscoverMix): number | null {
 export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSyncController {
   const [progress, setProgress] = useState<Record<string, SyncProgress>>({});
   const timers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const lingers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const toastRef = useRef(onToast);
   toastRef.current = onToast;
 
   useEffect(
     () => () => {
       for (const t of Object.values(timers.current)) clearInterval(t);
+      for (const t of lingers.current) clearTimeout(t);
     },
     [],
   );
@@ -82,14 +84,17 @@ export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSy
             clearInterval(timers.current[statusBase]);
             delete timers.current[statusBase];
             toastRef.current({ message: doneToast, level: 'success' });
-            // The status block lingers, then clears (3000ms, 2815).
-            setTimeout(() => {
+            // The status block lingers, then clears (3000ms, 2815). Tracked
+            // so an unmount mid-linger cancels it.
+            const linger = setTimeout(() => {
+              lingers.current.delete(linger);
               setProgress((prev) => {
                 const next = { ...prev };
                 delete next[statusBase];
                 return next;
               });
             }, SYNC_STATUS_HIDE_MS);
+            lingers.current.add(linger);
           }
         } catch {
           /* a missed poll is just the next poll's problem */

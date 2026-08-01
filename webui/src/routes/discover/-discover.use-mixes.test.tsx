@@ -48,14 +48,15 @@ function stub({
       return json({ tracks: radar });
     }),
     http.get('/api/discover/discovery-weekly', () => json({ tracks: weekly })),
-    http.get('/api/discover/seasonal/current', () =>
-      json({
+    http.get('/api/discover/seasonal/current', () => {
+      hits.push('seasonal-current');
+      return json({
         season: 'winter',
         name: 'Winter',
         icon: '❄️',
         playlist_available: playlistAvailable,
-      }),
-    ),
+      });
+    }),
     http.get('/api/discover/seasonal/winter/playlist', () => {
       hits.push('seasonal-playlist');
       return json({ tracks: seasonalPlaylist });
@@ -66,13 +67,16 @@ function stub({
       '/api/discover/personalized/discovery-shuffle',
       '/api/discover/personalized/listening-mix',
     ].map((path) => http.get(path, () => json({ tracks: personalized }))),
-    http.get('/api/discover/decades/available', () => json({ decades })),
+    http.get('/api/discover/decades/available', () => {
+      hits.push('decades');
+      return json({ decades });
+    }),
   );
 }
 
-function mount() {
+function mount(belowFoldReady = true) {
   const client = createTestQueryClient();
-  return renderHook(() => useDiscoverMixes(), {
+  return renderHook(() => useDiscoverMixes(belowFoldReady), {
     wrapper: ({ children }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     ),
@@ -84,6 +88,20 @@ afterEach(() => {
 });
 
 describe('useDiscoverMixes', () => {
+  it('holds the SHARED below-fold queries until tier 1 settles', async () => {
+    // seasonal + decades share cache keys with useDiscoverPage's gated tier-2
+    // entries; an ungated observer here would fire them at mount and defeat
+    // the tiering. Slow externals (radar) fire regardless — that is their
+    // whole point.
+    stub({ radar: [track('r')], decades: [{ year: 1980, track_count: 1 }] });
+    const { result } = mount(false);
+    await waitFor(() => expect(result.current.mixes.length).toBeGreaterThan(0));
+    expect(hits).toContain('radar');
+    expect(hits).not.toContain('seasonal-current');
+    expect(hits).not.toContain('decades');
+    expect(result.current.decadeMixes).toEqual([]);
+  });
+
   it('renders every fed mix in DECLARATION order, not arrival order', async () => {
     stub({
       radar: [track('r')],

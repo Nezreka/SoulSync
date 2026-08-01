@@ -75,7 +75,14 @@ export interface DiscoverMixesController {
   registry: Record<string, DiscoverMix>;
 }
 
-export function useDiscoverMixes(): DiscoverMixesController {
+/**
+ * @param belowFoldReady `useDiscoverPage().aboveFoldSettled`. The seasonal
+ * and decades queries SHARE their cache keys with useDiscoverPage's tier-2
+ * entries, which are gated on tier 1 settling — an ungated observer here
+ * would fire those fetches at mount and defeat the tiering the page hook
+ * exists to preserve. The slow-external feeders stay ungated on purpose.
+ */
+export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController {
   // Same keys as useDiscoverPage → served from cache, no second request.
   const popularPicks = useQuery(mixQuery('popular-picks', fetchPopularPicks));
   const hiddenGems = useQuery(mixQuery('hidden-gems', fetchHiddenGems));
@@ -87,8 +94,9 @@ export function useDiscoverMixes(): DiscoverMixesController {
     staleTime: STALE,
     gcTime: STALE,
     retry: false,
+    enabled: belowFoldReady,
   });
-  const decades = useQuery(mixQuery('decades', fetchAvailableDecades));
+  const decades = useQuery(mixQuery('decades', fetchAvailableDecades, belowFoldReady));
 
   // Slow external — enabled from mount, awaited by nothing.
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));

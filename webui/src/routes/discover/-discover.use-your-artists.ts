@@ -159,9 +159,11 @@ export function useYourArtists(onToast: (toast: ArtistsToast) => void): YourArti
   // ── Refresh (5578-5605) ───────────────────────────────────────────────
   const [refreshing, setRefreshing] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const browseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
       if (pollTimer.current) clearInterval(pollTimer.current);
+      if (browseTimer.current) clearTimeout(browseTimer.current);
     },
     [],
   );
@@ -211,7 +213,6 @@ export function useYourArtists(onToast: (toast: ArtistsToast) => void): YourArti
   const [browseTotal, setBrowseTotal] = useState<number | null>(null);
   const [browseArtists, setBrowseArtists] = useState<YourArtist[]>([]);
   const [browsePhase, setBrowsePhase] = useState<'loading' | 'error' | 'ready'>('loading');
-  const browseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const browseGen = useRef(0);
 
   const loadBrowse = useCallback((state: ArtistsModalState) => {
