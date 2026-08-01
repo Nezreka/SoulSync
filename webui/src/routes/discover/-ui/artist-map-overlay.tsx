@@ -361,7 +361,7 @@ export function ArtMapOverlay({
       )}
 
       {loading && (
-        <div id="artist-map-loading" className="artist-map-loading">
+        <div id="artist-map-loading">
           <div className="artist-map-loading-content">
             <div className="watch-all-loading-spinner" />
             <div className="artist-map-loading-text">{loading}</div>
