@@ -222,7 +222,15 @@ describe('ListenBrainz', () => {
     const { container, rerender } = render(<ListenBrainzSection {...lb()} />);
     expect(container.querySelector('#lb-subtabs-bar')).toBeNull();
     rerender(
-      <ListenBrainzSection {...lb({ groups: ['Daily Jams', 'Weekly'], activeGroup: 'Weekly' })} />,
+      <ListenBrainzSection
+        {...lb({
+          groups: [
+            { name: 'Daily Jams', count: 2 },
+            { name: 'Weekly', count: 4 },
+          ],
+          activeGroup: 'Weekly',
+        })}
+      />,
     );
     // The bar carries the DECADE strip class + the tabs its decade styling
     // (3702, 3707) — a bare .lb-subtab is a JS hook with no stylesheet rule,
@@ -231,13 +239,21 @@ describe('ListenBrainz', () => {
     const subs = [...container.querySelectorAll('#lb-subtabs-bar .decade-tab.lb-subtab')];
     expect(subs).toHaveLength(2);
     expect(subs.map((s) => s.getAttribute('data-group'))).toEqual(['Daily Jams', 'Weekly']);
-    expect(screen.getByText('Weekly')).toHaveClass('active');
+    // The label carries the count (3710): "Weekly (4)", not a bare name.
+    expect(subs.map((s) => s.textContent)).toEqual(['Daily Jams (2)', 'Weekly (4)']);
+    expect(screen.getByText('Weekly (4)')).toHaveClass('active');
   });
 
-  it('selects a group', () => {
-    const p = lb({ groups: ['Daily Jams', 'Weekly'], activeGroup: 'Weekly' });
+  it('selects a group by its NAME, not its label', () => {
+    const p = lb({
+      groups: [
+        { name: 'Daily Jams', count: 2 },
+        { name: 'Weekly', count: 4 },
+      ],
+      activeGroup: 'Weekly',
+    });
     render(<ListenBrainzSection {...p} />);
-    fireEvent.click(screen.getByText('Daily Jams'));
+    fireEvent.click(screen.getByText('Daily Jams (2)'));
     expect(p.onSelectGroup).toHaveBeenCalledWith('Daily Jams');
   });
 

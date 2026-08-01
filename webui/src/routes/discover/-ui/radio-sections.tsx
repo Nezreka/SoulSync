@@ -156,7 +156,8 @@ export interface ListenBrainzSectionProps {
   /** The whole tab load failed, which is not the same as "connect". */
   error?: boolean;
   loaded: boolean;
-  groups?: string[];
+  /** Sub-tab groups WITH their playlist counts — the label reads "Name (N)". */
+  groups?: { name: string; count: number }[];
   activeGroup?: string | null;
   onSelectTab: (tab: LbTabId) => void;
   onSelectGroup: (group: string) => void;
@@ -270,14 +271,17 @@ export function ListenBrainzSection({
                 {groups.map((group) => (
                   <button
                     type="button"
-                    key={group}
+                    key={group.name}
                     className={
-                      group === activeGroup ? 'decade-tab lb-subtab active' : 'decade-tab lb-subtab'
+                      group.name === activeGroup
+                        ? 'decade-tab lb-subtab active'
+                        : 'decade-tab lb-subtab'
                     }
-                    data-group={group}
-                    onClick={() => onSelectGroup(group)}
+                    data-group={group.name}
+                    onClick={() => onSelectGroup(group.name)}
                   >
-                    {group}
+                    {/* The count rides in the label (3710) — "Weekly Jams (4)". */}
+                    {group.name} ({group.count})
                   </button>
                 ))}
               </div>
