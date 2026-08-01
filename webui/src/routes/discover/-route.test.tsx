@@ -7,6 +7,9 @@ import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
+import { DiscoverPage } from './-ui/discover-page';
+import { Route } from './route';
+
 /**
  * /discover is LIVE — the manifest hands it to React.
  *
@@ -76,6 +79,9 @@ describe('discover route (live)', () => {
 
   it('is owned by React', () => {
     expect(getShellRouteByPageId('discover')?.kind).toBe('react');
+    // The route's component IS the page — the pair this whole suite exercises
+    // through the router; named here so the export-coverage gate can see it.
+    expect(Route.options.component).toBe(DiscoverPage);
   });
 
   it('renders the React page instead of handing /discover to vanilla', async () => {

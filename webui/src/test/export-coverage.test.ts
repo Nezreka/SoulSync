@@ -51,7 +51,7 @@ const KNOWN_GAPS: Record<string, number> = {
   '-discover.decade-shelf.ts': 3,
   '-discover.download-bar.ts': 1,
   '-discover.lastfm-radio.ts': 2,
-  '-discover.layout.ts': 2,
+  '-discover.layout.ts': 1,
   '-discover.listenbrainz.ts': 8,
   '-discover.playlist-sync.ts': 4,
   '-discover.recent-releases.ts': 1,
