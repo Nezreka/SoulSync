@@ -41,7 +41,9 @@ function stub({
     http.get('/api/discover/listenbrainz/collaborative', () =>
       HttpResponse.json({ success: true, playlists: collaborative }),
     ),
-    http.post('/api/discover/listenbrainz/refresh', () => HttpResponse.json(refresh)),
+    http.post('/api/discover/listenbrainz/refresh', () =>
+      HttpResponse.json(refresh as Record<string, unknown>),
+    ),
   );
 }
 

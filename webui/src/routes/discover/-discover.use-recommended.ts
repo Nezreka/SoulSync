@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { RecommendedArtist } from './-discover.recommended';
 
 import { ADV_ENDPOINT, ADV_LIVE_THROTTLE_MS } from './-discover.adventurousness';
+import { watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
 import { watchlistRequest, watchlistToast } from './-discover.your-artists-actions';
 
 /**
@@ -31,6 +32,8 @@ export interface RecommendedController {
   toggleWatchlist: (artistId: string, artistName: string) => Promise<void>;
   /** Ask the enrich endpoint about the image-less cards of one shelf. */
   enrichImages: (items: RecommendedArtist[], source: string) => Promise<void>;
+  /** Batch-confirm which cards are already watched (1173-1195). */
+  checkWatching: (items: RecommendedArtist[]) => Promise<void>;
 }
 
 export function useRecommended(onToast: (toast: RecToast) => void): RecommendedController {
@@ -102,7 +105,36 @@ export function useRecommended(onToast: (toast: RecToast) => void): RecommendedC
     }
   }, []);
 
-  return { watchingIds, images, toggleWatchlist, enrichImages };
+  /**
+   * checkRecommendedWatchlistStatuses (1173): one check-batch POST per shelf
+   * load, folding every already-watched id into the set the buttons read.
+   * A failed probe changes nothing — the optimistic default is "not watched",
+   * exactly the vanilla's catch-and-ignore.
+   */
+  const checkWatching = useCallback(async (items: RecommendedArtist[]) => {
+    const artistIds = watchlistCheckIds(items);
+    if (!artistIds.length) return;
+    try {
+      const res = await fetch('/api/watchlist/check-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist_ids: artistIds }),
+      });
+      const data = (await res.json()) as { success?: boolean; results?: Record<string, unknown> };
+      const watched = watchingIdsFrom(data);
+      if (watched.length) {
+        setWatchingIds((prev) => {
+          const next = new Set(prev);
+          for (const id of watched) next.add(id);
+          return next;
+        });
+      }
+    } catch {
+      /* unknown stays unwatched — the vanilla swallows this too */
+    }
+  }, []);
+
+  return { watchingIds, images, toggleWatchlist, enrichImages, checkWatching };
 }
 
 export interface AdventurousnessController {

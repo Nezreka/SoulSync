@@ -61,6 +61,47 @@ afterEach(() => {
 });
 
 describe('useRecommended', () => {
+  it('checkWatching folds check-batch answers into watchingIds (1173-1195)', async () => {
+    let checkBody: unknown = null;
+    server.use(
+      http.post('/api/watchlist/check-batch', async ({ request }) => {
+        checkBody = await request.json();
+        return HttpResponse.json({ success: true, results: { sp1: true, sp2: false } });
+      }),
+    );
+    const { result } = renderHook(() => useRecommended((t) => toasts.push(t)), {
+      wrapper: wrapper(),
+    });
+    await act(async () => {
+      await result.current.checkWatching([
+        { artist_id: 'sp1', artist_name: 'A' },
+        { artist_id: 'sp2', artist_name: 'B' },
+        { artist_name: 'no-id' },
+      ] as RecommendedArtist[]);
+    });
+    // Only real ids go up; only TRUE answers come back into the set.
+    expect(checkBody).toEqual({ artist_ids: ['sp1', 'sp2'] });
+    expect(result.current.watchingIds.has('sp1')).toBe(true);
+    expect(result.current.watchingIds.has('sp2')).toBe(false);
+  });
+
+  it('checkWatching with no usable ids never calls the endpoint', async () => {
+    let hits = 0;
+    server.use(
+      http.post('/api/watchlist/check-batch', () => {
+        hits += 1;
+        return HttpResponse.json({ success: true, results: {} });
+      }),
+    );
+    const { result } = renderHook(() => useRecommended((t) => toasts.push(t)), {
+      wrapper: wrapper(),
+    });
+    await act(async () => {
+      await result.current.checkWatching([{ artist_name: 'no-id' }] as RecommendedArtist[]);
+    });
+    expect(hits).toBe(0);
+  });
+
   it('toggles per card, tracking membership and toasting', async () => {
     const { result } = renderHook(() => useRecommended((t) => toasts.push(t)));
     await act(() => result.current.toggleWatchlist('sp1', 'Aphex Twin'));

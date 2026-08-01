@@ -115,6 +115,8 @@ function _artWebSyncSizeButtons() {}
 function _artWebClearSpread() { _artistWeb.spreadRoot = null; _artistWeb.spreadSet = null; _artWebStartFX(); }
 `;
 
+type Attrs = Record<string, unknown>;
+
 interface Vanilla {
   _artistWeb: ArtistWebState;
   /** A mutable holder — `let` bindings inside the preamble cannot be reassigned

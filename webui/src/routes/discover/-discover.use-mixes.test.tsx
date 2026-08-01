@@ -198,7 +198,7 @@ describe('the feeder fetchers', () => {
     stub({ radar: [track('r')], weekly: [] });
     const radar = await fetchReleaseRadar();
     expect(radar.kind).toBe('ok');
-    expect((radar as { data: { tracks: unknown[] } }).data.tracks).toEqual([track('r')]);
+    expect((radar as unknown as { data: { tracks: unknown[] } }).data.tracks).toEqual([track('r')]);
     expect((await fetchDiscoveryWeekly()).kind).toBe('ok');
 
     stub({ radar: 'error' });

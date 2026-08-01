@@ -42,11 +42,11 @@ function stub({
   server.use(
     http.get('/api/graph/library', () => {
       libraryHits += 1;
-      return HttpResponse.json(libraryPayload);
+      return HttpResponse.json(libraryPayload as Record<string, unknown>);
     }),
     http.get('/api/graph/discovery', () => {
       discoveryHits += 1;
-      return HttpResponse.json(discovery);
+      return HttpResponse.json(discovery as Record<string, unknown>);
     }),
   );
 }

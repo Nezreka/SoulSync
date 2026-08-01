@@ -117,6 +117,11 @@ declare global {
     /** stats-automations.js — the parameterized radio core the Artist Web's
      *  "Play radio" hands off to (survives the discover.js deletion). */
     startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
+    /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
+     *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
+     *  spans. Shared (survives discover.js's deletion), so the React page
+     *  calls it and renders the span block it writes into. */
+    startListenBrainzPlaylistSync?: (identifier: string) => void | Promise<void>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
     /** library.js — the Download Discography modal. */
@@ -235,6 +240,23 @@ declare global {
     ) => void | Promise<void>;
     /** init.js:1465 — the My Accounts / personal settings modal. */
     openPersonalSettings?: () => void | Promise<void>;
+    /**
+     * The React download-bar store's PUBLISHED globals — the names downloads.js
+     * (954, 1806) and core.js call. Assigned at module load in
+     * -discover.use-download-bar.ts; module scripts run after classic scripts,
+     * so these assignments replace the vanilla function declarations and every
+     * bare cross-file call resolves to the one store.
+     */
+    discoverDownloads?: unknown;
+    addDiscoverDownload?: (
+      playlistId: string,
+      playlistName: string,
+      playlistType: string,
+      imageUrl?: string | null,
+    ) => void;
+    removeDiscoverDownload?: (playlistId: string) => void;
+    updateDiscoverDownloadBar?: () => void;
+    hydrateDiscoverDownloadsFromSnapshot?: () => Promise<void>;
     /** core.js bridge: one discover download's process record, or null. */
     discoverDownloadProcess?: (
       virtualPlaylistId: string,
