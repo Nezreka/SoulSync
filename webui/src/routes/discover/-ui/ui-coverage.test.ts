@@ -56,7 +56,13 @@ const REQUIRED_UI: Record<string, string[]> = {
   'BYLT sections': ['ByltSections'],
 
   // ── Not built yet ────────────────────────────────────────────────────────
-  'cache-* shelves': ['cacheDiscoverCard', 'CACHE_SECTIONS', 'genrePill'],
+  'cache-* shelves': ['CacheShelf', 'GenreExplorerSection'],
+  /*
+   * Discovered while building the cache shelves: the Genre Explorer pills open
+   * `openGenreDeepDive` (discover.js 10790) — a full modal with artist/track/
+   * album grids — which no entry recorded. New REQUIRED entry, born missing.
+   */
+  'genre deep dive modal': ['GenreDiveModal'],
   /*
    * NOT a section. The vanilla's loader renders nothing into
    * #seasonal-playlist-section — it collapses it (_collapseOldMixSection,
@@ -92,7 +98,7 @@ const REQUIRED_UI: Record<string, string[]> = {
  */
 const MISSING_UI = [
   'artist map info modal wiring',
-  'cache-* shelves',
+  'genre deep dive modal',
   'decade tab contents',
   'seasonal playlist shelf feeder',
 ];
