@@ -98,7 +98,6 @@ const REQUIRED_UI: Record<string, string[]> = {
  */
 const MISSING_UI = [
   'artist map info modal wiring',
-  'genre deep dive modal',
   'decade tab contents',
   'seasonal playlist shelf feeder',
 ];
