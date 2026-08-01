@@ -47,6 +47,7 @@ LIB2_ARTISTS_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_artists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    name_key TEXT,                                    -- normalize_name(name): indexed dedup key, never displayed (iss29-D13)
     sort_name TEXT,
     spotify_id TEXT,
     musicbrainz_id TEXT,
@@ -331,6 +332,12 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN tracklist_error TEXT"),
     ("lib2_albums", "tracklist_retry_at",
      "ALTER TABLE lib2_albums ADD COLUMN tracklist_retry_at TIMESTAMP"),
+    # iss29-D13: an indexed, case-folded dedup key. `WHERE lower(name)=?` is a
+    # SCAN (no index covers the expression) and SQLite's `lower()` is ASCII-only,
+    # so every Cyrillic/Greek/Turkish name missed it and fell through to a second
+    # scan in Python — ~169 ms per finished download at 100k artists.
+    ("lib2_artists", "name_key",
+     "ALTER TABLE lib2_artists ADD COLUMN name_key TEXT"),
     ("lib2_artists", "quality_profile_id",
      "ALTER TABLE lib2_artists ADD COLUMN quality_profile_id INTEGER"),
     ("lib2_albums", "quality_profile_id",
@@ -764,6 +771,27 @@ def _migrate_artist_monitored_default(cursor: Any) -> None:
         raise
 
 
+def _backfill_artist_name_keys(cursor: Any) -> int:
+    """Fill ``lib2_artists.name_key`` for every row that still lacks one.
+
+    Self-healing rather than one-shot: the lookup keeps a Python-side backstop
+    for unkeyed rows (direct SQL inserts, ad-hoc repair), and this hands those
+    rows their key on the next start so the backstop stays empty. Scoped by
+    ``name_key IS NULL``, which the index answers as a seek, so it costs
+    nothing once the library is keyed.
+    """
+    from core.library2.importer import normalize_name
+
+    rows = cursor.execute(
+        "SELECT id, name FROM lib2_artists WHERE name_key IS NULL"
+    ).fetchall()
+    updates = [(normalize_name(row[1]), row[0]) for row in rows if row[1]]
+    if not updates:
+        return 0
+    cursor.executemany("UPDATE lib2_artists SET name_key=? WHERE id=?", updates)
+    return len(updates)
+
+
 def ensure_library_v2_schema(connection: Any) -> None:
     """Create the Library v2 tables + indexes if missing.
 
@@ -818,6 +846,19 @@ def ensure_library_v2_schema(connection: Any) -> None:
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_artists_canonical create skipped: %s", e)
+    # iss29-D13 normalized artist key. Index first, then backfill — also AFTER
+    # the additive column migration, so installs that predate the column get
+    # both in the same startup and never need a re-import to benefit.
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name_key "
+            "ON lib2_artists(name_key)"
+        )
+        filled = _backfill_artist_name_keys(cursor)
+        if filled:
+            logger.info("Backfilled %d Library-v2 artist name keys", filled)
+    except Exception as e:  # noqa: BLE001
+        logger.error("artist name_key migration failed (will retry next start): %s", e)
     # Provider-less stable ids (audit P1-12). Index + backfill run AFTER the
     # additive column migration above so they also work on installs that
     # predate the stable_id columns.

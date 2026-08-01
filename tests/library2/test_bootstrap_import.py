@@ -244,3 +244,105 @@ def test_empty_fresh_install_retries_after_first_library_rows_arrive(legacy_db):
         ).fetchone()[0] == 1
     finally:
         conn.close()
+
+
+# --- iss29-A08: a working migration must never look dead ------------------
+#
+# The lease is kept alive only by progress callbacks, and post-import precache
+# beats sparsely: `_resolve_stage` every 20 albums, `precache_tag_cache` every
+# 50 files. Fifty tag reads across a slow or wedged network mount can easily
+# exceed `STALE_AFTER_SECONDS`, at which point another process claims the
+# migration out from under the one still doing the work — `mark_done` then
+# fails with "lease was lost" and the whole import runs again. Liveness has to
+# come from the fact that the run is still running, not from how chatty the
+# stage it happens to be in is.
+
+
+def _wait_for(predicate, timeout=5.0, interval=0.01):
+    """Poll until true. Condition-based, so it is neither flaky nor slow."""
+    import time as _t
+
+    deadline = _t.monotonic() + timeout
+    while _t.monotonic() < deadline:
+        if predicate():
+            return True
+        _t.sleep(interval)
+    return False
+
+
+def test_silent_post_import_keeps_the_claim_alive(legacy_db, monkeypatch):
+    monkeypatch.setattr(lib2_bootstrap, "_import_legacy_library",
+                        lambda *a, **k: {"artists": 0})
+    observed = {}
+
+    def _post_import(_progress):
+        # A stage that reports nothing for a while — exactly what tag precache
+        # looks like between two of its every-50-files beats.
+        before = lib2_bootstrap.get_state(legacy_db)["heartbeat_at"]
+        observed["beat"] = _wait_for(
+            lambda: lib2_bootstrap.get_state(legacy_db)["heartbeat_at"] != before
+        )
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(
+        legacy_db, _enabled, post_import=_post_import,
+        keepalive_interval_seconds=0.05,
+    )
+
+    assert observed["beat"] is True, "claim went silent while the run was alive"
+    assert result["success"] is True
+
+
+def test_keepalive_never_moves_the_resume_checkpoint(legacy_db, monkeypatch):
+    """A bare beat may extend the lease but must not rewrite the walk position.
+
+    `heartbeat()` only persists a checkpoint when it is given both a rowid and
+    a run id; the keepalive must therefore pass neither. If it ever did, a
+    crash during post-import would resume at a position no walk ever reached.
+    """
+    def _fake_import(*_a, **kwargs):
+        progress = kwargs.get("progress")
+        progress("albums", 5, 10, rowid=4242, run_id="run-a08")
+        return {"artists": 0}
+
+    monkeypatch.setattr(lib2_bootstrap, "_import_legacy_library", _fake_import)
+    seen = {}
+
+    def _post_import(_progress):
+        before = lib2_bootstrap.get_state(legacy_db)["heartbeat_at"]
+        _wait_for(lambda: lib2_bootstrap.get_state(legacy_db)["heartbeat_at"] != before)
+        seen["state"] = lib2_bootstrap.get_state(legacy_db)
+
+    lib2_bootstrap.run_bootstrap_if_needed(
+        legacy_db, _enabled, post_import=_post_import,
+        keepalive_interval_seconds=0.05,
+    )
+
+    assert seen["state"]["resume_stage"] == "albums"
+    assert seen["state"]["resume_rowid"] == 4242
+    assert seen["state"]["resume_run_id"] == "run-a08"
+
+
+def test_keepalive_stops_once_the_run_is_over(legacy_db, monkeypatch):
+    """The thread must not outlive the claim it was extending.
+
+    A keepalive still beating after `mark_done` would keep a finished
+    migration looking "running" to anything reading the state.
+    """
+    import threading as _threading
+
+    monkeypatch.setattr(lib2_bootstrap, "_import_legacy_library",
+                        lambda *a, **k: {"artists": 0})
+    before = {t.name for t in _threading.enumerate()}
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(
+        legacy_db, _enabled, post_import=lambda _p: None,
+        keepalive_interval_seconds=0.05,
+    )
+
+    assert result["success"] is True
+    assert _wait_for(
+        lambda: not [t for t in _threading.enumerate()
+                     if t.name not in before and "Lib2BootstrapKeepalive" in t.name]
+    ), "keepalive thread outlived the run"
+    settled = lib2_bootstrap.get_state(legacy_db)
+    assert settled["status"] == "done"

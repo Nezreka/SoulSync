@@ -2453,14 +2453,18 @@ stimmen wieder (die Weiterleitung existiert tatsächlich), `find22-15` (§3) tr�
 den Hinweis auf die zwischenzeitliche Verletzung, und `M-12` ist durch den
 `onError` aus §46.7 gedeckt.
 
-### 45.5 Bewusst offen geblieben
+### 45.5 Bewusst offen geblieben — **inzwischen abgearbeitet in §47**
 
-| ID | Warum |
-|---|---|
-| [iss29-A08](library-v2-issues.md#293-minor) | **SPEKULATIV** — der Agent konnte es selbst nicht belegen. Das Doc verlangt eine eigene Reproduktion vor jeder Arbeit; die wurde nicht durchgeführt, also wurde nichts geändert |
-| [iss29-A09](library-v2-issues.md#293-minor) | **SPEKULATIV**, ausdrücklich als „bounded, nicht quadratisch, ungemessen" beschrieben. Ohne Messung wäre jede Änderung eine Wette |
-| [iss29-B10](library-v2-issues.md#293-minor) | **SPEKULATIV** und formgleich zu Upstream. Ein Eingriff in Upstreams Permission-Gate ohne belegten Fall erzeugt nur Sync-Konflikte |
-| [iss29-D13](library-v2-issues.md#minor-backend) | Sauber zu beheben nur mit einer neuen normalisierten Namensspalte + Index (Schema-Migration und Anpassung aller Schreibpfade). Das ist eigene Arbeit mit eigenem Testbedarf, nicht der Abschluss dieser Runde — bewusst vertagt statt am Sitzungsende hineingehastet |
+Der Stand unten ist der Grund, aus dem diese vier am 1. August zunächst liegen
+blieben. Die fehlende Reproduktion ist in [§47](#47-abarbeitung-der-vier-in-455-vertagten-befunde-1-august-2026)
+nachgeholt; Ergebnis: drei echte Fehler, ein Fehlalarm.
+
+| ID | Warum damals vertagt | Ausgang |
+|---|---|---|
+| [iss29-A08](library-v2-issues.md#293-minor) | **SPEKULATIV** — der Agent konnte es selbst nicht belegen. Das Doc verlangt eine eigene Reproduktion vor jeder Arbeit; die wurde nicht durchgeführt, also wurde nichts geändert | **Bestätigt, behoben** (§47.2) — kritisch ist nicht der 20-Alben-Beat, sondern der 50-Dateien-Beat der letzten Stufe |
+| [iss29-A09](library-v2-issues.md#293-minor) | **SPEKULATIV**, ausdrücklich als „bounded, nicht quadratisch, ungemessen" beschrieben. Ohne Messung wäre jede Änderung eine Wette | **Kein Defekt** (§47.4) — gemessen: 29,6 MiB bei 100k Tracks. Geschlossen, nicht vertagt |
+| [iss29-B10](library-v2-issues.md#293-minor) | **SPEKULATIV** und formgleich zu Upstream. Ein Eingriff in Upstreams Permission-Gate ohne belegten Fall erzeugt nur Sync-Konflikte | **Bestätigt, behoben** (§47.3) — reproduziert als Endlosschleife, nicht als Bounce; zentral in `bridge.ts` |
+| [iss29-D13](library-v2-issues.md#minor-backend) | Sauber zu beheben nur mit einer neuen normalisierten Namensspalte + Index (Schema-Migration und Anpassung aller Schreibpfade). Das ist eigene Arbeit mit eigenem Testbedarf, nicht der Abschluss dieser Runde — bewusst vertagt statt am Sitzungsende hineingehastet | **Bestätigt, behoben** (§47.1) — „alle Schreibpfade" waren vier INSERTs und ein UPDATE; 169 ms → 0,004 ms |
 
 
 ## 46. Abarbeitung des Multi-Agent-Audits (1. August 2026)
@@ -2665,3 +2669,158 @@ fällt damit auf, wie auch immer die Schleife geschrieben ist.
   Historie bei jedem Drain.
 - **D12**: `/artists/<id>/duplicates` benutzt das vorhandene
   `primary_file_rows` statt zwei Abfragen pro Paar.
+
+
+## 47. Abarbeitung der vier in §45.5 vertagten Befunde (1. August 2026)
+
+§45.5 hat vier Befunde bewusst offen gelassen: drei als **SPEKULATIV** (der
+Agent konnte sie nicht belegen, und das Doc verlangt eine eigene Reproduktion
+vor jeder Arbeit) und einen als zu groß für den Sitzungsschluss. Diese Runde
+holt genau die Reproduktion nach, die damals gefehlt hat — und kommt dabei
+zu **drei** Fehlern und **einem** Fehlalarm.
+
+Die Reihenfolge ist Absicht: erst messen, dann entscheiden, ob überhaupt etwas
+zu ändern ist. Bei `iss29-A09` lautet die Antwort nein, und das ist ein
+Ergebnis, kein übersprungener Punkt.
+
+### 47.1 iss29-D13 — bestätigt, und schlimmer als beschrieben
+
+Der Befund sagte, `autolink` falle für Nicht-ASCII-Namen auf den Full-Table-Scan
+zurück. `EXPLAIN QUERY PLAN` sagt: der „schnelle Pfad" war nie schnell.
+
+```
+SELECT id FROM lib2_artists WHERE lower(name) = ?   -> SCAN lib2_artists
+SELECT id FROM lib2_artists WHERE name_key  = ?     -> SEARCH … USING COVERING INDEX
+```
+
+Kein Index kann `lower(name)` bedienen, also scannt **jede** Namensauflösung die
+Tabelle — auch für ASCII. Nicht-ASCII zahlt zusätzlich den Python-Scan, weil
+SQLites `lower()` ASCII-only ist: `'ЛЮБЭ'`, `'Μέλισσες'`, `'İzel'` bleiben dort
+unverändert, während `normalize_name` casefoldet. Zwei volle Scans pro fertigem
+Download.
+
+Gemessen (synthetische Library, `scratchpad/verify_d13.py`):
+
+| Artists | vorher (Nicht-ASCII) | nachher | Faktor |
+|---|---|---|---|
+| 5.000 | 8,7 ms | 0,004 ms | ~2.000× |
+| 30.000 | 52,6 ms | 0,004 ms | ~13.000× |
+| 60.000 | 103,5 ms | 0,012 ms | ~8.700× |
+| 100.000 | 168,6 ms | 0,004 ms | ~40.000× |
+
+**Umsetzung.** `lib2_artists.name_key` (= `normalize_name(name)`, nie angezeigt)
+plus `idx_lib2_artists_name_key`, additive Spaltenmigration und ein Backfill in
+`ensure_library_v2_schema`. Die Sorge aus §45.5 („Anpassung aller Schreibpfade")
+war zu pessimistisch: es sind **vier** produktive INSERTs und **ein** UPDATE mit
+`name=` — `autolink.py`, `native_enrich.py` und zweimal `importer.py`.
+
+Der Python-Scan bleibt als Backstop, aber auf `WHERE name_key IS NULL`
+eingeschränkt. Auf einer migrierten DB ist das ein Index-Seek über eine leere
+Menge (`SEARCH … USING INDEX`), kein Scan; gleichzeitig findet er weiterhin
+alles, was ein nicht angepasster Schreibpfad, ein direkter SQL-Insert oder eine
+Ad-hoc-Reparatur hinterlässt. Der Backfill ist absichtlich **nicht** einmalig,
+sondern läuft bei jedem Start über die schlüssellosen Zeilen — er hält damit den
+Backstop leer, statt sich auf Vollständigkeit der Schreibpfade zu verlassen.
+
+Backfill von 60.000 Zeilen: 318 ms, einmalig.
+
+Nicht angefasst: das `external_ids LIKE '%…%'` derselben Funktion. Es ist
+weiterhin ein Scan und feuert für Nicht-Spotify-Provider-IDs. Der Nutzer hat den
+Umfang bewusst auf den Namensschlüssel begrenzt; der Punkt bleibt in
+[issues.md §29.3](library-v2-issues.md#293-minor) offen geführt.
+
+### 47.2 iss29-A08 — bestätigt: Liveness hing an der Gesprächigkeit der Stufe
+
+Die Lease wurde ausschließlich von Progress-Callbacks verlängert. Der Befund
+nannte 20 Alben; der tatsächlich kritische Pfad ist die **letzte** Stufe vor
+`mark_done`: `precache_tag_cache` schlägt alle **50** Dateien an
+(`tag_cache.py:179`). Fünfzig Tag-Reads über einen langsamen oder hängenden
+Netzwerk-Mount überschreiten `STALE_AFTER_SECONDS = 600` ohne Mühe. Die Folge
+ist nicht kosmetisch: ein anderer Prozess beansprucht die Migration, `mark_done`
+scheitert mit „Bootstrap lease was lost before completion", und die vollständige
+Migration läuft erneut.
+
+**Umsetzung.** `_ClaimKeepalive` — ein Daemon-Thread, der die Lease alle 60 s
+verlängert, solange der Lauf lebt, gestartet nach `try_claim` und in einem
+`finally` vor `mark_done` gestoppt. Liveness folgt damit dem Lauf, nicht der
+Stufe.
+
+Zwei Eigenschaften, die den Unterschied zu einem naiven Heartbeat ausmachen:
+
+- Der Beat geht über ein neues, absichtlich engeres `touch_claim`, das **nur**
+  `heartbeat_at` schreibt. `heartbeat(...)` ohne Argumente hätte Stage,
+  `current_count` und `total_count` auf NULL/0 zurückgesetzt — die UI hätte
+  während der Migration ihren Fortschritt verloren. Der Resume-Checkpoint bleibt
+  ebenfalls unberührt: ein Liveness-Beat ist kein Fortschritt und darf keine
+  Walk-Position beschreiben, die kein Walk erreicht hat.
+- Der Thread hört auf zu schlagen, sobald `touch_claim` `False` liefert — eine
+  entwendete Lease darf nicht unter ihrem neuen Eigentümer weiterverlängert
+  werden.
+
+Bewusst in Kauf genommen: ein *hängender, aber lebender* Prozess hält seine
+Lease jetzt unbegrenzt. Das ist richtig — zwei gleichzeitige Migrationen sind
+schlimmer als eine blockierte —, und der Fall „Prozess tot" ist weiterhin über
+`reclaim_abandoned_claim(process_started_at=…)` beim Neustart abgedeckt.
+
+### 47.3 iss29-B10 — bestätigt: kein Bounce, eine Endlosschleife
+
+Reproduziert, und deutlicher als erwartet: der Routen-Test hängt vitest auf,
+statt zu scheitern. Die Weiterleitung terminiert nicht.
+
+`getProfileHomePath` liefert die Home-Page zurück, ohne zu prüfen, ob das Profil
+sie überhaupt öffnen darf. Jeder React-Routen-Guard leitet genau dorthin um,
+wenn er den Zugriff verweigert — bei `home_page = library` (oder dem
+Alt-Seiten-Id `library-v2`, den der Shell auf `library` normalisiert) und einem
+`allowed_pages` ohne `library` schickt `/library` also auf `/library`.
+
+Die Vanilla-Shell prüft das seit jeher (`navigateToPage`, `init.js:3186`:
+`home !== currentPage && isPageAllowed(home)`); die React-Guards haben die
+ungeprüfte Variante geerbt. Die Form ist unverändert Upstream — gegen `main`
+verifiziert —, neu erreichbar wurde sie durch den `library-v2`-Alias.
+
+**Umsetzung** (Nutzerentscheidung: zentral). `getProfileHomePath` fällt auf die
+erste erlaubte Route der Manifest-Reihenfolge zurück, überspringt dabei
+`artist-detail`/`label-detail` (Detailrouten brauchen eine Entity-ID in der URL
+und sind nie eine Landeseite) und endet notfalls auf `/help`, das der
+Berechtigungs-Gate der Shell bedingungslos erlaubt. Eine kleine Änderung an
+einer geteilten Datei deckt damit alle ~10 Routen-Guards ab.
+
+### 47.4 iss29-A09 — gemessen, kein Defekt
+
+Der Befund beschrieb sich selbst als „bounded, nicht quadratisch, ungemessen".
+Die fehlende Messung ist nachgeholt.
+
+Working Set des Importers bei **100.000 Tracks / 20.000 Alben**: **29,6 MiB**
+(`existing_files` + `track_map` + `album_map` + die beiden Album-Maps). Der
+Zeilen-Walk selbst wächst nicht mit — `_legacy_rows` ist ein Keyset-Scan in
+begrenzten Batches.
+
+30 MiB rechtfertigen nicht, genau die Maps umzubauen, die doppelte INSERTs beim
+Re-Import verhindern (§62). Der Punkt ist damit **geschlossen: gemessen, kein
+Defekt** — nicht vertagt.
+
+### Verifikation
+
+Jeder der drei Fehler hat einen Regressionstest, der **vor** dem Fix
+nachweislich fehlschlägt:
+
+| Test | vorher |
+|---|---|
+| `test_existing_artist_is_found_without_scanning_the_table` (7 Fälle) | 4 rot |
+| `test_new_artist_row_carries_its_normalized_key` | rot |
+| `test_schema_migration_backfills_the_key_for_existing_rows` | rot |
+| `test_rows_without_a_key_are_still_matched` | rot |
+| `test_silent_post_import_keeps_the_claim_alive` | rot |
+| `test_keepalive_never_moves_the_resume_checkpoint` | rot |
+| `test_keepalive_stops_once_the_run_is_over` | rot |
+| `getProfileHomePath` — Gate-Fälle (bridge.test.ts, 2 Fälle) | rot |
+| `does not bounce a denied profile back into /library` | **hängt** |
+
+Suiten nach dem Fix: `tests/library2` 1.233 grün; `tests/acquisition`,
+`tests/imports`, `tests/repair_jobs`, `tests/search`, `tests/wishlist`,
+`tests/quality` 1.768 grün / 3 skipped; webui-Typecheck und -Lint sauber.
+
+Die vier roten webui-Dateien unter `src/routes/artist-detail/` sind
+**vorbestehend** und keine Regression: sie scheitern an `localStorage` in dieser
+Node-Umgebung (`--localstorage-file` nicht gesetzt) und fallen mit exakt
+denselben 131 Fehlern aus, wenn man den Änderungssatz wegstasht.

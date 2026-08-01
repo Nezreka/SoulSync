@@ -44,6 +44,7 @@ automatic bootstrap has nothing left to do, never "permanently locked".
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 import uuid
 import json
@@ -59,6 +60,9 @@ logger = get_logger("library2.bootstrap")
 
 STALE_AFTER_SECONDS = 600  # a "running" claim with no heartbeat in 10min is dead
 _HEARTBEAT_THROTTLE_SECONDS = 5
+# iss29-A08: comfortably inside STALE_AFTER_SECONDS, so several beats have to be
+# missed in a row before anything considers the run dead.
+KEEPALIVE_INTERVAL_SECONDS = 60
 
 LIB2_BOOTSTRAP_STATE_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_bootstrap_state (
@@ -416,6 +420,76 @@ def heartbeat(database: Any, owner_token: str, *, stage: Optional[str] = None,
             conn.close()
 
 
+def touch_claim(database: Any, owner_token: str) -> bool:
+    """Extend a held claim's lease and nothing else.
+
+    Deliberately narrower than ``heartbeat``: it writes only ``heartbeat_at``,
+    leaving stage/progress *and* the resume checkpoint exactly as the last real
+    progress report left them. A liveness beat is not progress, and must not be
+    able to blank the stage the UI is showing or move a walk position no walk
+    reached.
+    """
+    conn = database._get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE lib2_bootstrap_state SET heartbeat_at=? "
+            "WHERE id=1 AND status='running' AND owner_token=?",
+            (_now_iso(), owner_token),
+        )
+        updated = cursor.rowcount > 0
+        conn.commit()
+        return updated
+    except sqlite3.OperationalError as exc:
+        logger.debug("lib2 bootstrap keepalive skipped: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
+class _ClaimKeepalive:
+    """Keep a held bootstrap claim fresh for as long as the run is alive.
+
+    iss29-A08: the lease used to be extended only by progress callbacks, so
+    liveness depended on how chatty the current stage happens to be. Post-import
+    precache is the sparse one — ``_resolve_stage`` beats every 20 albums and
+    ``precache_tag_cache`` every 50 files — and fifty tag reads across a slow or
+    wedged network mount outlast ``STALE_AFTER_SECONDS`` without difficulty. The
+    claim then reads as abandoned while the work is still running: another
+    process takes it, ``mark_done`` fails with "lease was lost before
+    completion", and the whole migration runs again.
+
+    Liveness therefore follows the run itself. The thread is a daemon so it can
+    never hold up shutdown, and it stops beating the moment the claim stops
+    being ours — a stolen claim must not be silently re-extended underneath its
+    new owner.
+    """
+
+    def __init__(self, database: Any, owner_token: str, interval: float):
+        self._database = database
+        self._owner_token = owner_token
+        self._interval = max(float(interval), 0.001)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="Lib2BootstrapKeepalive", daemon=True)
+
+    def start(self) -> "_ClaimKeepalive":
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                if not touch_claim(self._database, self._owner_token):
+                    return  # no longer running, or no longer ours
+            except Exception as exc:  # noqa: BLE001 - liveness must never crash the run
+                logger.debug("lib2 bootstrap keepalive beat failed: %s", exc)
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=10)
+
+
 def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = None) -> bool:
     conn = database._get_connection()
     try:
@@ -495,6 +569,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                             profile_id: int = ADMIN_PROFILE_ID,
                             post_import: Optional[Callable[[Any], Any]] = None,
                             stale_after_seconds: int = STALE_AFTER_SECONDS,
+                            keepalive_interval_seconds: float = KEEPALIVE_INTERVAL_SECONDS,
                             ) -> Dict[str, Any]:
     """Run the legacy → v2 import exactly once, only if it's actually needed.
 
@@ -563,19 +638,27 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     _progress.lib2_connection_aware = True
     _progress.lib2_resume_aware = True
 
+    # iss29-A08: hold the lease for as long as this run is alive, independent of
+    # how often the stage it is in reports progress. Stopped before `mark_done`
+    # so no beat can land after the run has settled.
+    keepalive = _ClaimKeepalive(database, owner_token,
+                                keepalive_interval_seconds).start()
     try:
-        stats = _import_legacy_library(database, profile_id=profile_id,
-                                       progress=_progress, resume=resume)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Library v2 bootstrap import failed: %s", exc, exc_info=True)
-        mark_failed(database, owner_token, str(exc))
-        return {"success": False, "error": str(exc)}
-
-    if post_import is not None:
         try:
-            post_import(_progress)
+            stats = _import_legacy_library(database, profile_id=profile_id,
+                                           progress=_progress, resume=resume)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Library v2 post-import precache failed: %s", exc)
+            logger.error("Library v2 bootstrap import failed: %s", exc, exc_info=True)
+            mark_failed(database, owner_token, str(exc))
+            return {"success": False, "error": str(exc)}
+
+        if post_import is not None:
+            try:
+                post_import(_progress)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Library v2 post-import precache failed: %s", exc)
+    finally:
+        keepalive.stop()
 
     # iss29-A04: stamp the watermark the walks actually saw, not the one the
     # source has now. The three walks are keyset scans taken at three different
@@ -605,6 +688,7 @@ __all__ = [
     "should_stop_autostart",
     "try_claim",
     "heartbeat",
+    "touch_claim",
     "mark_done",
     "mark_failed",
     "mark_waiting_for_source",

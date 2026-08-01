@@ -7,8 +7,44 @@ import type { ShellProfileContext } from './bridge';
 import {
   SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
   bindWindowWebRouter,
+  getProfileHomePath,
   waitForShellContext,
 } from './bridge';
+
+describe('getProfileHomePath', () => {
+  it('returns the profile home page when it is allowed', () => {
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'wishlist' as const),
+    });
+
+    expect(getProfileHomePath(bridge)).toBe('/wishlist');
+  });
+
+  it('never returns a home path the profile is not allowed to open (iss29-B10)', () => {
+    // Every React route guard redirects here when it denies access. A home page
+    // the profile may not open therefore sends the router straight back to the
+    // page that just refused it. `library` is the reachable case: the legacy
+    // `library-v2` page id normalizes to `library`, so a profile whose home is
+    // the old id lands on a page its allowed_pages may well not contain.
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'library' as const),
+      isPageAllowed: vi.fn((pageId) => pageId !== 'library'),
+    });
+
+    expect(getProfileHomePath(bridge)).not.toBe('/library');
+  });
+
+  it('falls back to a page every profile may open when nothing else is allowed', () => {
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'library' as const),
+      isPageAllowed: vi.fn(() => false),
+    });
+
+    // `help` and `issues` are unconditionally permitted by the shell's own
+    // gate, so one of them is always a truthful landing place.
+    expect(['/help', '/issues']).toContain(getProfileHomePath(bridge));
+  });
+});
 
 describe('waitForShellContext', () => {
   beforeEach(() => {

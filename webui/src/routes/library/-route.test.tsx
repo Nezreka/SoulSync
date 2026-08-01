@@ -109,4 +109,16 @@ describe('library route (live)', () => {
     const { router } = renderRoute();
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/library'));
   });
+
+  it('does not bounce a denied profile back into /library (iss29-B10)', async () => {
+    // Home page resolves to `library` (directly, or via the legacy `library-v2`
+    // page id the shell normalizes to it) while allowed_pages excludes it. The
+    // guard used to redirect to the very page it had just refused.
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((pageId) => pageId !== 'library'),
+      getProfileHomePage: vi.fn(() => 'library'),
+    });
+    const { router } = renderRoute();
+    await waitFor(() => expect(router.state.location.pathname).not.toBe('/library'));
+  });
 });

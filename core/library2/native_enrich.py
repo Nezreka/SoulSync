@@ -838,9 +838,11 @@ def _get_or_create_component_artist(
             )
         return cid
 
+    from core.library2.importer import normalize_name
+
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, monitored) VALUES(?, ?, ?)",
-        (name, name, monitored),
+        "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) VALUES(?, ?, ?, ?)",
+        (name, normalize_name(name), name, monitored),
     )
     cid = int(cur.lastrowid)
     _persist_identity(

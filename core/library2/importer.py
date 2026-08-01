@@ -655,9 +655,9 @@ class _ArtistResolver:
 
         # 3) create a fresh row (may share a name but is id-distinct)
         self.cursor.execute(
-            "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
-            "external_ids, quality_profile_id, monitored) VALUES(?,?,?,?,?,?,?)",
-            (name, name, ids.get("spotify"), ids.get("musicbrainz"),
+            "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
+            "external_ids, quality_profile_id, monitored) VALUES(?,?,?,?,?,?,?,?)",
+            (name, key, name, ids.get("spotify"), ids.get("musicbrainz"),
              json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}",
              self.default_profile_id, 0),
         )
@@ -716,13 +716,14 @@ class _ArtistResolver:
             external_json = (json.dumps(row_ids, sort_keys=True, separators=(",", ":"))
                              if row_ids else "{}")
             self.cursor.execute(
-                "UPDATE lib2_artists SET name=?, sort_name=?, spotify_id=?, "
+                "UPDATE lib2_artists SET name=?, name_key=?, sort_name=?, spotify_id=?, "
                 "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
                 "aliases=?, legacy_artist_id=?, "
                 "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (fields["name"], fields["sort_name"], row_ids.get("spotify"),
+                (fields["name"], normalize_name(fields["name"]),
+                 fields["sort_name"], row_ids.get("spotify"),
                  row_ids.get("musicbrainz"),
                  external_json, fields["image_url"], fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
@@ -736,11 +737,12 @@ class _ArtistResolver:
         external_json = json.dumps(ids, sort_keys=True, separators=(",", ":")) if ids else "{}"
         spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
         self.cursor.execute(
-            "INSERT INTO lib2_artists(name, sort_name, spotify_id, musicbrainz_id, "
+            "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, genres, summary, style, mood, label, "
             "banner_url, aliases, legacy_artist_id, quality_profile_id, "
-            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (fields["name"], fields["sort_name"], spotify_col, mbid_col, external_json,
+            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (fields["name"], normalize_name(fields["name"]),
+             fields["sort_name"], spotify_col, mbid_col, external_json,
              fields["image_url"], fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
              fields["aliases"], legacy_id, self.default_profile_id, run_id, 0),

@@ -159,16 +159,22 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
     key = normalize_name(name)
     if not key:
         return None
-    # Fast path: SQL case-insensitive match covers almost every real name and
-    # avoids scanning the whole artist table per finished download.
+    # iss29-D13: an index seek on the stored normalized key. The previous
+    # "fast path" was `WHERE lower(name) = ?`, which EXPLAIN reports as SCAN —
+    # no index can cover the expression — and SQLite's `lower()` is ASCII-only,
+    # so Cyrillic/Greek/Turkish names missed it and paid a second, Python-side
+    # scan of the whole table on top. Measured at 100k artists: ~169 ms per
+    # finished download, against ~0.004 ms here.
     row = conn.execute(
-        "SELECT id FROM lib2_artists WHERE lower(name) = ? LIMIT 1", (key,)
+        "SELECT id FROM lib2_artists WHERE name_key = ? LIMIT 1", (key,)
     ).fetchone()
     if row is None:
-        # Slow path: python normalization also collapses whitespace/casefolds
-        # (SQLite's lower() is ASCII-only, so this also covers non-ASCII names
-        # the fast path's lower() comparison misses).
-        for candidate in conn.execute("SELECT id, name FROM lib2_artists"):
+        # Backstop for rows no keyed write path produced (direct SQL inserts,
+        # ad-hoc repair). Scoped to exactly those, so the index answers it as a
+        # seek over an empty set on a migrated library — and the startup
+        # backfill hands any stragglers a key, keeping it that way.
+        for candidate in conn.execute(
+                "SELECT id, name FROM lib2_artists WHERE name_key IS NULL"):
             if normalize_name(candidate["name"]) == key:
                 row = candidate
                 break
@@ -195,9 +201,9 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
     provider_ids = {namespace: provider_id} if namespace and provider_id else {}
     monitored = int(artist_is_watchlisted(conn, name, provider_ids, profile_id=1))
     cur = conn.execute(
-        "INSERT INTO lib2_artists(name, sort_name, spotify_id, external_ids, "
-        "quality_profile_id, monitored) VALUES(?, ?, ?, ?, ?, ?)",
-        (name, name, provider_id if namespace == "spotify" else None,
+        "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, external_ids, "
+        "quality_profile_id, monitored) VALUES(?, ?, ?, ?, ?, ?, ?)",
+        (name, key, name, provider_id if namespace == "spotify" else None,
          external_json, default_quality_profile_id(conn), monitored))
     return cur.lastrowid
 

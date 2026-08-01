@@ -925,3 +925,119 @@ def test_simple_download_keeps_an_embedded_spotify_id(lib2_enabled, imported_con
              JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id=?""",
         (file_id,),
     ).fetchone()["spotify_id"] == "sp-embedded-1"
+
+
+# --- iss29-D13: artist lookup must not scan the table per download --------
+#
+# `_find_or_create_artist` runs once per finished download. Its "fast path",
+# `WHERE lower(name) = ?`, is not fast: EXPLAIN QUERY PLAN reports SCAN, not
+# SEARCH, because no index covers `lower(name)`. Worse, SQLite's `lower()` is
+# ASCII-only, so every Cyrillic/Greek/CJK/Turkish name misses it and falls
+# through to a second, Python-side scan of the whole table. Measured on
+# 100k artists: ~169 ms per download (8 ms SQL scan + 160 ms Python scan).
+# An indexed normalized key answers the same question in ~0.004 ms.
+
+
+def _artists_conn(tmp_path, rows=()):
+    """A bare lib2 schema plus whatever artists the test needs."""
+    import sqlite3 as _sqlite3
+
+    from core.library2.schema import ensure_library_v2_schema
+
+    conn = _sqlite3.connect(str(tmp_path / "artists.db"))
+    conn.row_factory = _sqlite3.Row
+    ensure_library_v2_schema(conn)
+    for name in rows:
+        conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES(?, ?)",
+                     (name, name))
+    conn.commit()
+    return conn
+
+
+@pytest.mark.parametrize("stored,looked_up", [
+    ("Любэ", "Любэ"),            # Cyrillic: sqlite lower() is a no-op here
+    ("ЛЮБЭ", "любэ"),            # ...and cannot case-fold it either
+    ("Μέλισσες", "ΜΈΛΙΣΣΕΣ"),    # Greek, with the accent SQLite leaves alone
+    ("宇多田ヒカル", "宇多田ヒカル"),  # CJK: no case at all, still has to match
+    ("Sigur Rós", "SIGUR RÓS"),  # Latin-1 supplement inside an ASCII name
+    ("Drake", "drake"),          # the plain ASCII case must keep working
+    ("Aphex  Twin", "Aphex Twin"),  # normalize_name collapses whitespace
+])
+def test_existing_artist_is_found_without_scanning_the_table(tmp_path, stored, looked_up):
+    conn = _artists_conn(tmp_path, [stored, "Filler One", "Filler Two"])
+    try:
+        statements = []
+        conn.set_trace_callback(statements.append)
+        artist_id = A._find_or_create_artist(conn, looked_up, create=False)
+        conn.set_trace_callback(None)
+
+        assert artist_id is not None, f"{looked_up!r} did not match stored {stored!r}"
+        assert not [s for s in statements if "FROM lib2_artists" in s and "WHERE" not in s], (
+            "fell back to a full-table scan: " + repr(statements)
+        )
+    finally:
+        conn.close()
+
+
+def test_new_artist_row_carries_its_normalized_key(tmp_path):
+    from core.library2.importer import normalize_name
+
+    conn = _artists_conn(tmp_path)
+    try:
+        artist_id = A._find_or_create_artist(conn, "ЛЮБЭ")
+        row = conn.execute("SELECT name, name_key FROM lib2_artists WHERE id=?",
+                           (artist_id,)).fetchone()
+        assert row["name"] == "ЛЮБЭ", "display name must stay untouched"
+        assert row["name_key"] == normalize_name("ЛЮБЭ")
+    finally:
+        conn.close()
+
+
+def test_schema_migration_backfills_the_key_for_existing_rows(tmp_path):
+    """Installs that predate the column must not need a re-import to benefit."""
+    import sqlite3 as _sqlite3
+
+    from core.library2.importer import normalize_name
+    from core.library2.schema import ensure_library_v2_schema
+
+    path = str(tmp_path / "old.db")
+    conn = _sqlite3.connect(path)
+    conn.row_factory = _sqlite3.Row
+    ensure_library_v2_schema(conn)
+    # Simulate a pre-migration install: drop the key back to NULL.
+    conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES('ЛЮБЭ', 'ЛЮБЭ')")
+    conn.execute("UPDATE lib2_artists SET name_key=NULL")
+    conn.commit()
+    conn.close()
+
+    conn = _sqlite3.connect(path)
+    conn.row_factory = _sqlite3.Row
+    ensure_library_v2_schema(conn)
+    conn.commit()
+    try:
+        assert conn.execute(
+            "SELECT name_key FROM lib2_artists WHERE name='ЛЮБЭ'"
+        ).fetchone()["name_key"] == normalize_name("ЛЮБЭ")
+        assert conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='index' AND name='idx_lib2_artists_name_key'"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_rows_without_a_key_are_still_matched(tmp_path):
+    """A write path that never learned about `name_key` must not vanish.
+
+    The Python scan stays as a backstop, but scoped to the unkeyed rows only —
+    so it costs nothing on a migrated database and still finds anything a
+    direct SQL insert (tests, ad-hoc repair) left behind.
+    """
+    conn = _artists_conn(tmp_path, ["Filler"])
+    try:
+        conn.execute(
+            "INSERT INTO lib2_artists(name, sort_name, name_key) VALUES('ЛЮБЭ','ЛЮБЭ',NULL)")
+        conn.commit()
+        assert A._find_or_create_artist(conn, "любэ", create=False) is not None
+    finally:
+        conn.close()
