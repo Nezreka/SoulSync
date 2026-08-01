@@ -66,7 +66,7 @@ const REQUIRED_UI: Record<string, string[]> = {
    * covers the route directory as well as -ui/.
    */
   'seasonal playlist shelf feeder': ['seasonalMixTitles', 'seasonalHasPlaylist'],
-  'blacklist modal': ['blacklistEntries', 'BLACKLIST_TITLE'],
+  'blacklist modal': ['BlacklistModal'],
   'your artists modal': ['YourArtistsModal'],
   'artist info modal': ['ArtistInfoModal'],
   'your artists sources modal': ['ARTISTS_SOURCE_INFO', 'toggleArtistSource'],
@@ -92,7 +92,6 @@ const REQUIRED_UI: Record<string, string[]> = {
  */
 const MISSING_UI = [
   'artist map info modal wiring',
-  'blacklist modal',
   'cache-* shelves',
   'decade tab contents',
   'seasonal playlist shelf feeder',
