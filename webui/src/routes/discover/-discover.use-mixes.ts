@@ -88,9 +88,21 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   const hiddenGems = useQuery(mixQuery('hidden-gems', fetchHiddenGems));
   const shuffle = useQuery(mixQuery('discovery-shuffle', fetchDiscoveryShuffle));
   const listeningMix = useQuery(mixQuery('listening-mix', fetchListeningMix));
+  // SHARED cache key with use-page, which stores the seasonal payload as a
+  // SectionOutcome — the queryFn and the read must both speak that shape, or
+  // whichever hook runs second reads garbage out of the shared entry.
   const seasonal = useQuery({
     queryKey: ['discover', 'seasonal'] as const,
-    queryFn: () => discoverLimiter.run(fetchSeasonalCurrent),
+    queryFn: async (): Promise<SectionOutcome<SeasonData>> => {
+      try {
+        return {
+          kind: 'ok',
+          data: (await discoverLimiter.run(fetchSeasonalCurrent)) as SeasonData,
+        };
+      } catch (error) {
+        return { kind: 'error', error };
+      }
+    },
     staleTime: STALE,
     gcTime: STALE,
     retry: false,
@@ -102,7 +114,8 @@ export function useDiscoverMixes(belowFoldReady = true): DiscoverMixesController
   const releaseRadar = useQuery(mixQuery('release-radar', fetchReleaseRadar));
   const weekly = useQuery(mixQuery('discovery-weekly', fetchDiscoveryWeekly));
 
-  const season = seasonal.data as SeasonData | undefined;
+  const seasonalOutcome = seasonal.data as SectionOutcome<SeasonData> | undefined;
+  const season = seasonalOutcome?.kind === 'ok' ? seasonalOutcome.data : undefined;
   const seasonKey = season?.season ?? '';
   const seasonalPlaylist = useQuery(
     mixQuery(

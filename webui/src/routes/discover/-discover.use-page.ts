@@ -120,6 +120,27 @@ export interface DiscoverPageController {
  * No retry: a dead shelf should fail fast and stay empty rather than spend
  * three attempts holding a slot that another shelf could use.
  */
+/**
+ * Wrap a RAW fetcher into the SectionOutcome shape resolveSection expects.
+ *
+ * Seven of the api module's fetchers return the payload directly (their other
+ * consumers want it that way); feeding one to resolveSection made
+ * `outcome.data` undefined, which resolved the section to 'empty' + hidden.
+ * That single mismatch took out both recommendation shelves, seasonal,
+ * your-artists, the label explorer and the dial's saved value in the first
+ * live smoke test — and, because every hidden section's PAIR PARTNER falls
+ * back to full width, the whole two-column layout with them.
+ */
+function asOutcome<T>(fn: () => Promise<T>): () => Promise<SectionOutcome<T>> {
+  return async () => {
+    try {
+      return { kind: 'ok', data: await fn() };
+    } catch (error) {
+      return { kind: 'error', error };
+    }
+  };
+}
+
 function shelfQuery<T>(key: string, fn: () => Promise<T>, enabled = true) {
   return {
     queryKey: ['discover', key] as const,
@@ -141,10 +162,14 @@ export function useDiscoverPage(): DiscoverPageController {
    * is visible immediately and would otherwise render at a default before
    * snapping to the user's real setting.
    */
-  const adventurousness = useQuery(shelfQuery('adventurousness', fetchAdventurousness));
+  const adventurousness = useQuery(shelfQuery('adventurousness', asOutcome(fetchAdventurousness)));
   const genreExplorer = useQuery(shelfQuery('genre-explorer', fetchGenreExplorer));
-  const listeningRecs = useQuery(shelfQuery('listening-recs', fetchListeningRecommendations));
-  const recommendedArtists = useQuery(shelfQuery('similar-artists', fetchSimilarArtists));
+  const listeningRecs = useQuery(
+    shelfQuery('listening-recs', asOutcome(fetchListeningRecommendations)),
+  );
+  const recommendedArtists = useQuery(
+    shelfQuery('similar-artists', asOutcome(fetchSimilarArtists)),
+  );
   const popularPicks = useQuery(shelfQuery('popular-picks', fetchPopularPicks));
   const hiddenGems = useQuery(shelfQuery('hidden-gems', fetchHiddenGems));
   const shuffle = useQuery(shelfQuery('discovery-shuffle', fetchDiscoveryShuffle));
@@ -176,15 +201,25 @@ export function useDiscoverPage(): DiscoverPageController {
   const aboveFoldSettled = aboveFold.every((q) => !q.isPending);
 
   // ── Tier 2: below the fold, gated on tier 1 ───────────────────────────
-  const seasonal = useQuery(shelfQuery('seasonal', fetchSeasonalCurrent, aboveFoldSettled));
+  const seasonal = useQuery(
+    shelfQuery('seasonal', asOutcome(fetchSeasonalCurrent), aboveFoldSettled),
+  );
   const undiscovered = useQuery(
     shelfQuery('undiscovered', fetchUndiscoveredAlbums, aboveFoldSettled),
   );
   const labelExplorer = useQuery(
-    shelfQuery('label-explorer', fetchLabelExplorer, aboveFoldSettled),
+    shelfQuery('label-explorer', asOutcome(fetchLabelExplorer), aboveFoldSettled),
   );
-  const yourAlbums = useQuery(shelfQuery('your-albums', () => fetchYourAlbums(), aboveFoldSettled));
-  const yourArtists = useQuery(shelfQuery('your-artists', fetchYourArtists, aboveFoldSettled));
+  const yourAlbums = useQuery(
+    shelfQuery(
+      'your-albums',
+      asOutcome(() => fetchYourAlbums()),
+      aboveFoldSettled,
+    ),
+  );
+  const yourArtists = useQuery(
+    shelfQuery('your-artists', asOutcome(fetchYourArtists), aboveFoldSettled),
+  );
   const deepCuts = useQuery(shelfQuery('deep-cuts', fetchDeepCuts, aboveFoldSettled));
   const decades = useQuery(shelfQuery('decades', fetchAvailableDecades, aboveFoldSettled));
 

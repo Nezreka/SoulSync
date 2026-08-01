@@ -275,9 +275,16 @@ describe('hasContent drives which sections render', () => {
       ),
     );
     const { result } = render();
+    // The dial rides the OUTCOME shape like every other section — the raw
+    // payload leaking through here is exactly what hid seven sections in the
+    // first live smoke test.
     await waitFor(() =>
       expect(
-        (result.current.sections.adventurousness.data as { value?: number } | undefined)?.value,
+        (
+          result.current.sections.adventurousness.data as
+            | { kind?: string; data?: { value?: number } }
+            | undefined
+        )?.data?.value,
       ).toBe(0.42),
     );
   });
@@ -293,7 +300,11 @@ describe('hasContent drives which sections render', () => {
     const { result } = render();
     await waitFor(() => expect(result.current.aboveFoldSettled).toBe(true));
     expect(
-      (result.current.sections.adventurousness.data as { value?: number } | undefined)?.value,
+      (
+        result.current.sections.adventurousness.data as
+          | { kind?: string; data?: { value?: number } }
+          | undefined
+      )?.data?.value,
     ).toBe(0);
   });
 

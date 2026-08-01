@@ -16,6 +16,7 @@ import { fetchBecauseYouListenTo, fetchGenreDeepDive, fetchLbPlaylist } from '..
 import { bpMetaStats } from '../-discover.build-playlist';
 import { byltSections, type ByltSection } from '../-discover.bylt';
 import { CACHE_SECTIONS } from '../-discover.cache-sections';
+import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-shelf';
 import { buildLayoutRows } from '../-discover.layout';
 import { discoverLimiter } from '../-discover.limiter';
 import {
@@ -35,7 +36,7 @@ import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
-import { useMixModal } from '../-discover.use-mix-modal';
+import { defaultLazySource, useMixModal } from '../-discover.use-mix-modal';
 import { useDiscoverMixes } from '../-discover.use-mixes';
 import { useDiscoverPage } from '../-discover.use-page';
 import { usePlaylistSync } from '../-discover.use-playlist-sync';
@@ -245,16 +246,27 @@ export function DiscoverPage() {
   const lbCoversRef = useRef(lbCovers);
   lbCoversRef.current = lbCovers;
   useEffect(() => {
-    for (const mix of lb.mixes) {
+    // The decade cards are lazy too (2675) — the vanilla's hydration pass
+    // runs on every grid it renders, so decades get their mosaics with LB.
+    for (const mix of [...lb.mixes, ...mixes.decadeMixes]) {
       if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
-      const lazy = lbLazy(mix);
+      const lazy = defaultLazySource(mix) ?? lbLazy(mix);
       if (!lazy) continue;
       setLbCovers((prev) => ({ ...prev, [mix.key]: [] })); // in-flight marker
       lazy()
         .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
         .catch(() => {});
     }
-  }, [lb.mixes, lbLazy]);
+  }, [lb.mixes, mixes.decadeMixes, lbLazy]);
+  const decadeMixesHydrated = useMemo(
+    () =>
+      mixes.decadeMixes.map((mix) =>
+        !mix.tracks?.length && lbCovers[mix.key]?.length
+          ? { ...mix, tracks: lbCovers[mix.key] }
+          : mix,
+      ),
+    [mixes.decadeMixes, lbCovers],
+  );
   const lbMixesHydrated = useMemo(
     () =>
       lb.mixes.map((mix) =>
@@ -299,17 +311,46 @@ export function DiscoverPage() {
         return;
       }
       const type = mix.syncKey ?? mix.key;
-      const art = syncBubbleImage(toSyncTracks((modal.tracks ?? []) as Record<string, unknown>[]));
       if (action.isSync) {
         const out = sync.startMixSync(mix, modal.tracks);
         if (out) toast(out.message, out.level);
         // A sync ALSO registers a bar bubble (11344), art from the tracks.
-        else bar.add(`discover_${type}`, mix.title, type, art);
+        else {
+          bar.add(
+            `discover_${type}`,
+            mix.title,
+            type,
+            syncBubbleImage(toSyncTracks((modal.tracks ?? []) as Record<string, unknown>[])),
+          );
+        }
       } else {
         modal.close();
-        if (openTracksModal(`discover_${type}`, mix.title, modal.tracks ?? [])) {
-          bar.add(`discover_${type}`, mix.title, type, art);
+        const rows = (modal.tracks ?? []) as Record<string, unknown>[];
+        if (!rows.length) {
+          toast('No tracks available yet', 'warning');
+          return;
         }
+        const decade = /^decade_(\d+)$/.exec(mix.key);
+        if (decade) {
+          // The decade download is its OWN conversion and its OWN ids
+          // (2860-2905): decade_<year>, "<year>s Classics", and artists stay
+          // OBJECTS (DECADE_DOWNLOAD_KEEPS_ARTIST_OBJECTS) — toSyncTracks here
+          // made every artist "Unknown Artist" in the live smoke test.
+          const year = Number(decade[1]);
+          void window.openDownloadMissingModalForYouTube?.(
+            `decade_${year}`,
+            decadeClassicsName(year),
+            rows.map((t) => decadeTrackToSpotify(t, false)),
+          );
+        } else {
+          void window.openDownloadMissingModalForYouTube?.(
+            `discover_${type}`,
+            mix.title,
+            toSyncTracks(rows),
+          );
+        }
+        // No bubble here: downloads.js registers it when the download actually
+        // starts (1806) — a bubble at modal-open outlived a cancelled modal.
       }
     },
     [modal, sync, bar, openTracksModal],
@@ -429,7 +470,7 @@ export function DiscoverPage() {
             id={id}
             title="Year Mixes"
             subtitle="Jump into the sound of a decade — open one to see the tracks"
-            mixes={mixes.decadeMixes}
+            mixes={decadeMixesHydrated}
             loaded={true}
             gridId="year-mixes-grid"
             onOpenMix={modal.open}
