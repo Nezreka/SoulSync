@@ -591,7 +591,22 @@ export function DiscoverPage() {
           />
         );
       case 'discover-bylt-sections':
-        return <ByltSections sections={byltRows} />;
+        return (
+          <ByltSections
+            sections={byltRows}
+            // NEW behaviour at Boulder's request (the vanilla tiles are
+            // inert): resolve the track's album by name+artist and open the
+            // download modal — the same flow the Deep Cuts cards use. The
+            // BYLT rows carry name/artist, the cache item wants
+            // name/artist_name, hence the adapter.
+            onOpenTrack={(track) =>
+              void albumOpen.openCacheItem('genre_dive_tracks', {
+                name: track.name,
+                artist_name: track.artist,
+              })
+            }
+          />
+        );
       case 'lastfm-radio':
         return (
           <LastfmRadioSection

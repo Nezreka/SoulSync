@@ -27,22 +27,42 @@ import {
 
 export interface ByltSectionsProps {
   sections: ByltSection[];
+  /**
+   * Open a track's album in the download modal. OPTIONAL and NEW BEHAVIOUR:
+   * the vanilla tiles are inert (10386-10399 has no onclick) — Boulder asked
+   * for them to behave like the Deep Cuts cards, which resolve name+artist
+   * to the album and open the shared modal.
+   */
+  onOpenTrack?: (track: ByltTrack) => void;
 }
 
-export function ByltSections({ sections }: ByltSectionsProps) {
+export function ByltSections({ sections, onOpenTrack }: ByltSectionsProps) {
   // Blank on empty, not an empty-state box (10429-10430).
   if (sections.length === 0) return null;
 
   return (
     <div id={BYLT_CONTAINER_ID}>
       {sections.map((section, idx) => (
-        <ByltShelf key={`${section.artist_name ?? ''}:${idx}`} section={section} idx={idx} />
+        <ByltShelf
+          key={`${section.artist_name ?? ''}:${idx}`}
+          section={section}
+          idx={idx}
+          onOpenTrack={onOpenTrack}
+        />
       ))}
     </div>
   );
 }
 
-function ByltShelf({ section, idx }: { section: ByltSection; idx: number }) {
+function ByltShelf({
+  section,
+  idx,
+  onOpenTrack,
+}: {
+  section: ByltSection;
+  idx: number;
+  onOpenTrack?: (track: ByltTrack) => void;
+}) {
   const [headBroken, setHeadBroken] = useState(false);
   return (
     <div className="discover-section bylt-section">
@@ -68,20 +88,31 @@ function ByltShelf({ section, idx }: { section: ByltSection; idx: number }) {
       </div>
       <div className="discover-grid" id={byltCarouselId(idx)}>
         {(section.tracks ?? []).map((track, i) => (
-          <ByltTrackCard key={`${track.name ?? ''}:${i}`} track={track} />
+          <ByltTrackCard key={`${track.name ?? ''}:${i}`} track={track} onOpen={onOpenTrack} />
         ))}
       </div>
     </div>
   );
 }
 
-function ByltTrackCard({ track }: { track: ByltTrack }) {
+function ByltTrackCard({
+  track,
+  onOpen,
+}: {
+  track: ByltTrack;
+  onOpen?: (track: ByltTrack) => void;
+}) {
   const [broken, setBroken] = useState(false);
   const card = byltTrackCard(track);
   const showImage = Boolean(card.image) && !broken;
   return (
-    // Display-only: the vanilla card has no onclick (10386-10399).
-    <div className="ya-card discover-album-card">
+    // The vanilla card has no onclick (10386-10399); the click is NEW, added
+    // at Boulder's request so these behave like every other album card.
+    <div
+      className="ya-card discover-album-card"
+      style={onOpen ? { cursor: 'pointer' } : undefined}
+      onClick={onOpen ? () => onOpen(track) : undefined}
+    >
       <div className="ya-card-img">
         {card.image && (
           <img
