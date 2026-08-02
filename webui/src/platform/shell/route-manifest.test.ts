@@ -53,7 +53,7 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
-    expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
+    expect(getShellRouteByPageId('discover')?.kind).toBe('react');
     expect(getShellRouteByPageId('watchlist')?.kind).toBe('react');
     // Order follows the manifest array, not the migration order.
     expect(getShellRouteByPageId('wishlist')?.kind).toBe('react');
@@ -64,6 +64,7 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'search',
+      'discover',
       'watchlist',
       'wishlist',
       'automations',

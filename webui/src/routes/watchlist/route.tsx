@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import { WatchlistPage } from './-ui/watchlist-page';
 import {
@@ -15,11 +15,7 @@ import { watchlistSearchSchema } from './-watchlist.types';
 export const Route = createFileRoute('/watchlist')({
   validateSearch: watchlistSearchSchema,
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('watchlist')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'watchlist');
   },
   loaderDeps: ({ search }) => ({ tab: search.tab }),
   loader: async ({ context, deps }) => {

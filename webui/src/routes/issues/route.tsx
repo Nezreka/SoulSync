@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
   issueCountsQueryOptions,
@@ -13,11 +13,7 @@ import { IssuesPage } from './-ui/issues-page';
 export const Route = createFileRoute('/issues')({
   validateSearch: issueSearchSchema,
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('issues')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'issues');
   },
   loaderDeps: ({ search }) => ({
     status: search.status,

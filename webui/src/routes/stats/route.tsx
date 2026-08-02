@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import { listeningStatsStatusQueryOptions, statsCachedQueryOptions } from './-stats.api';
 import { statsSearchSchema } from './-stats.types';
@@ -9,11 +9,7 @@ import { StatsPage } from './-ui/stats-page';
 export const Route = createFileRoute('/stats')({
   validateSearch: statsSearchSchema,
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('stats')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'stats');
   },
   loaderDeps: ({ search }) => ({
     range: search.range,

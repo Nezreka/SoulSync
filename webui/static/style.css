@@ -73537,3 +73537,515 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .label-detail-page .label-release-grid { grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 14px; }
     .label-detail-page .album-card .label-card-artist-btn { opacity: 1; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   React discover port — Artist Map / Artist Web chrome (#258)
+
+   1:1 transcriptions of the inline `style="…"` strings the vanilla builders
+   carried (discover.js line refs on every rule). The vanilla said outright why
+   it inline-styled these: "so it doesn't depend on CSS that might not exist"
+   (6148). The React components replaced those inline styles with the classes
+   below; anything DATA-DRIVEN (per-hue colors, widths, per-state backgrounds)
+   stays inline in the components and is deliberately absent here.
+
+   Two mechanical notes:
+   - Rows the vanilla built as <div onclick> are <button>s in the port, so
+     those rules carry explicit UA resets (background/border/font/width).
+   - Positions the vanilla MEASURED at runtime (toolbar height, sidebar width)
+     are custom properties with the vanilla's fallback values; the page hook
+     sets them the way the vanilla measured them:
+       --artmap-panel-top   toolbar height       (6346, fallback 56px)
+       --artmap-chrome-top  toolbar height + 10  (6165, fallback 66px)
+       --artmap-chrome-left sidebar width + 16   (6166, fallback 16px)
+       --artmap-menu-top    nav bottom + 6       (6193, fallback 124px)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Artist Map: info panel shell (6321-6349) ── */
+.artmap-panel {
+    position: absolute;
+    background: linear-gradient(180deg, rgba(20,15,34,0.95), rgba(11,8,20,0.97));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 22;
+    display: flex; flex-direction: column;
+    color: #fff; overflow: hidden; font-size: 13px;
+    /* desktop: right sidebar below the toolbar (6345-6347) */
+    top: var(--artmap-panel-top, 56px); right: 0; width: 320px;
+    height: calc(100% - var(--artmap-panel-top, 56px));
+    border-left: 1px solid rgba(168,85,247,0.18);
+    box-shadow: -10px 0 36px rgba(0,0,0,0.45);
+    transform: none;
+}
+/* mobile: bottom sheet (6331-6335); the component drives transform inline */
+.artmap-panel--sheet {
+    top: auto; left: 0; right: 0; bottom: 0;
+    width: auto; height: auto; max-height: 62%;
+    border-left: none;
+    border-top: 1px solid rgba(168,85,247,0.25);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 36px rgba(0,0,0,0.5);
+    transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+}
+.artmap-panel-grip { /* 6336-6337; a <button> in the port */
+    flex: none; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; position: relative;
+    width: 100%; padding: 0; background: transparent; border: none;
+}
+.artmap-panel-grip > span { /* 6341 */
+    width: 40px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.25);
+}
+.artmap-panel-head { /* 6320 */
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.artmap-panel-body { /* 6321 */
+    flex: 1; overflow-y: auto; padding: 12px 14px;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ── Artist Map: dashboard head (6421-6437) ── */
+.artmap-panel-eyebrow { /* 6422 */
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+}
+.artmap-panel-heading { /* 6423 */
+    font-size: 19px; font-weight: 800; margin-top: 2px;
+}
+.artmap-panel-stats { /* 6424; the card reuses it at margin-top:16px (6483) */
+    display: flex; gap: 8px; margin-top: 12px;
+}
+.artmap-ministat { /* _miniStat, 6394 */
+    flex: 1; background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 8px 6px; text-align: center;
+}
+.artmap-ministat-value { /* 6395; per-hue color stays inline */
+    font-size: 18px; font-weight: 800; color: #fff; line-height: 1;
+}
+.artmap-ministat-label { /* 6396 */
+    font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: rgba(255,255,255,0.45); margin-top: 4px;
+}
+.artmap-panel-coverage { /* 6429 */
+    margin-top: 12px;
+}
+.artmap-panel-coverage-row { /* 6430 */
+    display: flex; justify-content: space-between;
+    font-size: 10.5px; color: rgba(255,255,255,0.5); margin-bottom: 4px;
+}
+.artmap-panel-coverage-track { /* 6433 */
+    height: 6px; background: rgba(255,255,255,0.08);
+    border-radius: 3px; overflow: hidden;
+}
+.artmap-panel-coverage-fill { /* 6434; width + gradient stay inline.
+    The dashboard fill has border-radius:3px, the card's pop fill none —
+    inside an overflow:hidden 3px track the clip renders them identical. */
+    height: 100%; border-radius: 3px;
+}
+
+/* ── Artist Map: top-artists list (6441-6453); rows are <button>s ── */
+.artmap-panel-list-title { /* 6442 (its letter-spacing is 0.1em there vs the
+    eyebrow's 0.12em — a merge of 0.02em, invisible at 10px) */
+    margin: 2px 2px 8px;
+}
+.artmap-panel-row { /* 6445-6446 */
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; border-radius: 9px; cursor: pointer;
+    width: 100%; background: transparent; border: none;
+    color: inherit; font: inherit; text-align: left;
+}
+.artmap-panel-row:hover { /* onmouseover, 6447 */
+    background: rgba(255,255,255,0.06);
+}
+.artmap-panel-rank { /* 6448 */
+    width: 18px; text-align: center; font-size: 11px; font-weight: 700;
+    color: rgba(255,255,255,0.35);
+}
+.artmap-panel-thumb { /* 6449 */
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    overflow: hidden; background: rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: center;
+}
+.artmap-panel-thumb img { /* 6450 */
+    width: 100%; height: 100%; object-fit: cover;
+}
+.artmap-panel-row-name { /* 6452 */
+    flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artmap-panel-star { /* 6453 */
+    color: #c084fc; font-size: 11px;
+}
+.artmap-panel-empty { /* 6454 */
+    color: rgba(255,255,255,0.4); padding: 8px;
+}
+
+/* ── Artist Map: artist card (6473-6500) ── */
+.artmap-card-back { /* 6474 */
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7); border-radius: 8px; padding: 4px 10px;
+    font-size: 11px; cursor: pointer; margin-bottom: 12px;
+}
+.artmap-card-head { /* 6475 */
+    text-align: center;
+}
+.artmap-card-avatar { /* 6476; border-color + box-shadow are per-hue, inline */
+    width: 120px; height: 120px; margin: 0 auto; border-radius: 50%;
+    overflow: hidden; border: 2px solid transparent;
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+}
+.artmap-card-canvas { /* 6477 */
+    width: 120px; height: 120px;
+}
+.artmap-card-img { /* 6478 */
+    width: 100%; height: 100%; object-fit: cover;
+}
+.artmap-card-glyph { /* 6478 */
+    font-size: 36px; opacity: 0.5;
+}
+.artmap-card-name { /* 6480 */
+    font-size: 18px; font-weight: 800; margin-top: 12px;
+}
+.artmap-card-type { /* 6481; per-hue color inline */
+    font-size: 11px; margin-top: 3px;
+}
+.artmap-card-genres { /* 6483 */
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+    margin-top: 14px;
+}
+.artmap-card-genre { /* 6484; per-hue bg/border-color/color inline */
+    font-size: 10.5px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid transparent;
+}
+.artmap-card-pop { /* 6490 — the coverage track again, nudged down */
+    margin-top: 8px;
+}
+.artmap-card-actions { /* 6493 */
+    display: flex; flex-direction: column; gap: 8px; margin-top: 18px;
+}
+.artmap-card-explore { /* 6494; per-hue gradient inline */
+    border: none; color: #fff; border-radius: 10px; padding: 10px;
+    font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.artmap-card-action-row { /* 6495 */
+    display: flex; gap: 8px;
+}
+.artmap-card-details { /* 6496 */
+    flex: 1; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); color: #fff;
+    border-radius: 10px; padding: 9px; font-size: 12px; cursor: pointer;
+}
+.artmap-card-watch { /* _artMapWatchBtnHtml, 6259-6261; the watched/unwatched
+    background + border-color are state-driven and stay inline */
+    flex: 1; border: 1px solid transparent; color: #e9d5ff;
+    border-radius: 10px; padding: 9px; font-size: 12px; font-weight: 600;
+    cursor: pointer;
+}
+.artmap-card-open { /* 6499 */
+    text-align: center; color: rgba(255,255,255,0.55); font-size: 11.5px;
+    text-decoration: none; padding: 4px;
+}
+
+/* ── Artist Map: island nav (6167-6178) ── */
+.artmap-island-nav {
+    position: absolute;
+    top: var(--artmap-chrome-top, 66px); left: var(--artmap-chrome-left, 16px);
+    display: flex; align-items: center; gap: 12px; padding: 7px 12px;
+    background: rgba(16,12,28,0.82);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(168,85,247,0.25); border-radius: 14px;
+    z-index: 30; box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    user-select: none; max-width: calc(100vw - 32px);
+}
+.artmap-island-nav > button { /* the prev/next roundels, 6170 */
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06);
+    color: #fff; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex: none;
+}
+.artmap-island-nav > button.artmap-island-nav-current { /* the center block,
+    6173 — a div in the vanilla, a button here, hence the resets */
+    width: auto; height: auto; border-radius: 0; border: none;
+    background: transparent; display: block; flex: initial;
+    text-align: center; min-width: 120px; cursor: pointer;
+    padding: 0; color: inherit; font: inherit;
+}
+.artmap-island-nav-name { /* 6174; per-hue color inline; block so the two
+    spans stack like the vanilla's divs */
+    display: block; font-weight: 700; font-size: 13px; letter-spacing: 0.04em;
+}
+.artmap-island-nav-meta { /* 6175 */
+    display: block; font-size: 11px; color: rgba(255,255,255,0.55);
+    margin-top: 1px;
+}
+
+/* ── Artist Map: island quick-jump menu (6193-6203); rows are <button>s ── */
+.artmap-island-menu {
+    position: absolute;
+    top: var(--artmap-menu-top, 124px); left: var(--artmap-chrome-left, 16px);
+    min-width: 180px; max-height: 50vh; overflow-y: auto;
+    background: rgba(16,12,28,0.96);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(168,85,247,0.25); border-radius: 12px;
+    z-index: 31; box-shadow: 0 8px 28px rgba(0,0,0,0.5); padding: 6px;
+}
+.artmap-island-menu-row { /* 6196 */
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px; cursor: pointer;
+    width: 100%; background: transparent; border: none; font: inherit;
+}
+.artmap-island-menu-row:hover { /* 6197 */
+    background: rgba(255,255,255,0.08);
+}
+.artmap-island-menu-row.active { /* 6196 (i === cur) */
+    background: rgba(168,85,247,0.18);
+}
+.artmap-island-menu-dot { /* 6199; per-hue background inline */
+    width: 9px; height: 9px; border-radius: 50%; flex: none;
+}
+.artmap-island-menu-name { /* 6198 */
+    flex: 1; min-width: 0; text-align: left; font-size: 12.5px;
+    font-weight: 600; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artmap-island-menu-count { /* 6202 */
+    font-size: 11px; color: rgba(255,255,255,0.45);
+}
+
+/* ── Artist Web: side panel (7902-7907) ── */
+.artweb-panel { /* geometry (position/size/z-index) stays inline in the
+    component; this is the visual half of the vanilla cssText */
+    background: rgba(20,18,26,0.92);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 16px;
+    box-shadow: 0 14px 44px rgba(0,0,0,0.55);
+}
+.artweb-panel-body { /* 7907 */
+    flex: 1; overflow-y: auto; padding: 16px;
+    -webkit-overflow-scrolling: touch;
+}
+.artweb-panel-close { /* 7988 / 8040 / 8066 / 7787 */
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7); border-radius: 8px; padding: 4px 10px;
+    font-size: 11px; cursor: pointer; margin-bottom: 14px;
+}
+
+/* ── Artist Web: cards (7988-8028 artist, 8040-8053 genre, 8066-8093
+      discovery, 7786-7793 path) ── */
+.artweb-card-head { /* 7989 */
+    text-align: center;
+}
+.artweb-avatar { /* 7990; border-color + box-shadow are per-color, inline */
+    width: 110px; height: 110px; margin: 0 auto; border-radius: 50%;
+    overflow: hidden; border: 2px solid transparent;
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+}
+.artweb-avatar img { /* 8018 */
+    width: 100%; height: 100%; object-fit: cover;
+}
+.artweb-avatar-glyph { /* 7991 */
+    font-size: 34px; opacity: 0.5;
+}
+.artweb-card-name { /* 7993 */
+    font-size: 18px; font-weight: 800; margin-top: 12px;
+}
+.artweb-card-genre { /* 7994; color inline */
+    font-size: 11px; margin-top: 3px;
+}
+.artweb-card-badge { /* 8071; color + border-color inline */
+    display: inline-block; font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; border: 1px solid transparent;
+    border-radius: 999px; padding: 2px 9px; margin-top: 6px;
+}
+.artweb-card-pills { /* 8073 */
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+    margin-top: 14px;
+}
+.artweb-card-pill { /* 8074; bg + border-color inline */
+    font-size: 10.5px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid transparent; color: #ffd9a3;
+}
+.artweb-card-stats { /* 7996 */
+    display: flex; gap: 8px; margin-top: 16px;
+}
+.artweb-ministat { /* _miniStat, 6394 — the Web reuses the Map's tile */
+    flex: 1; background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 8px 6px; text-align: center;
+}
+.artweb-ministat-value { /* 6395 */
+    font-size: 18px; font-weight: 800; color: #fff; line-height: 1;
+}
+.artweb-ministat-label { /* 6396 */
+    font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: rgba(255,255,255,0.45); margin-top: 4px;
+}
+.artweb-card-meter { /* 8000 */
+    margin-top: 8px; height: 6px; background: rgba(255,255,255,0.08);
+    border-radius: 3px; overflow: hidden;
+}
+.artweb-card-meter > div { /* 8001; width + background inline */
+    height: 100%;
+}
+.artweb-card-actions { /* 8003 */
+    display: flex; flex-direction: column; gap: 8px; margin-top: 18px;
+}
+.artweb-btn-primary { /* Play radio, 8004 */
+    background: #1db954; border: none; color: #0b0b0f;
+    border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 800;
+    cursor: pointer;
+}
+.artweb-btn-lens { /* Expand / Explore / Add — per-lens background inline
+    (8005, 8006, 8089) */
+    border: none; color: #0b0b0f; border-radius: 10px; padding: 10px;
+    font-size: 13px; font-weight: 800; cursor: pointer;
+}
+.artweb-btn-ghost { /* the discovery-lens Explore variant, 8006 */
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    color: #fff; border-radius: 10px; padding: 10px; font-size: 13px;
+    font-weight: 800; cursor: pointer;
+}
+#artweb-preview-btn.artweb-btn-ghost { /* the preview button's vanilla values
+    differ by a shade (8087): 0.08/0.14 and weight 700 — kept exact by id */
+    background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.14);
+    font-weight: 700;
+}
+.artweb-btn-link { /* the discography anchor, 8007 / 8091 */
+    display: block; text-align: center; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); color: #fff;
+    border-radius: 10px; padding: 9px; font-size: 12px; text-decoration: none;
+}
+.artweb-card-kicker { /* 8041 / 7788 */
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+}
+.artweb-card-kicker-spaced { /* the genre card's "Top artists" (8045);
+    its letter-spacing is 0.1em there — same 0.02em merge as the Map's */
+    margin: 16px 2px 8px;
+}
+.artweb-card-title { /* 8042 genre (margin-top:2px) and 7789 path
+    (margin:3px 0 2px) — merged on the path values, 1px apart */
+    font-size: 20px; font-weight: 800; margin: 3px 0 2px;
+}
+.artweb-card-sub { /* 8043 genre (12px/0.55/margin-top:6px) and 7790 path
+    (11.5px/0.5/margin-bottom:14px) — merged on the genre type values; the
+    14px bottom collapses against the 16px kicker above, so the genre card's
+    vanilla 16px gap is preserved exactly */
+    font-size: 12px; color: rgba(255,255,255,0.55); margin: 6px 0 14px;
+}
+.artweb-card-empty { /* 8053 */
+    color: rgba(255,255,255,0.4); padding: 8px;
+}
+
+/* ── Artist Web: genre-card member rows (8047-8052); <button>s here ── */
+.artweb-member-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; border-radius: 9px; cursor: pointer;
+    width: 100%; background: transparent; border: none;
+    color: inherit; font: inherit; text-align: left;
+}
+.artweb-member-row:hover { /* 8049 */
+    background: rgba(255,255,255,0.06);
+}
+.artweb-member-rank { /* 8050 */
+    width: 18px; text-align: center; font-size: 11px; font-weight: 700;
+    color: rgba(255,255,255,0.35);
+}
+.artweb-member-name { /* 8051 */
+    flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Artist Web: path rows (7780-7784); <button>s here ── */
+.artweb-path-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 8px; border-radius: 9px; cursor: pointer;
+    width: 100%; background: transparent; border: none;
+    color: inherit; font: inherit; text-align: left;
+}
+.artweb-path-row:hover { /* 7780 */
+    background: rgba(255,255,255,0.06);
+}
+.artweb-path-dot { /* 7781; background + endpoint ring (box-shadow) inline */
+    width: 11px; height: 11px; border-radius: 50%; flex: none;
+}
+.artweb-path-name { /* 7782; endpoint font-weight inline */
+    flex: 1; min-width: 0; font-size: 13px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artweb-path-tag { /* 7783 */
+    font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+}
+.artweb-path-link { /* the connector between rows, 7784 */
+    margin-left: 13px; height: 10px;
+    border-left: 2px solid rgba(255,255,255,0.12);
+}
+
+/* ── Artist Web: genre-filter rows (8225-8234); <button>s here ── */
+.artweb-genre-clear { /* 8225 */
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; margin-bottom: 4px; border-radius: 8px; cursor: pointer;
+    color: #fff; font-size: 12px; font-weight: 700;
+    background: rgba(255,255,255,0.06);
+    width: 100%; border: none; font-family: inherit; text-align: left;
+}
+.artweb-genre-row { /* 8228 */
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 8px; cursor: pointer;
+    width: 100%; background: transparent; border: none;
+    color: inherit; font: inherit; text-align: left;
+}
+.artweb-genre-row:hover { /* 8229 */
+    background: rgba(255,255,255,0.06);
+}
+.artweb-genre-row.active { /* 8228 (on) */
+    background: rgba(255,255,255,0.09);
+}
+.artweb-genre-row.active .artweb-genre-name { /* 8231 (on) */
+    font-weight: 700;
+}
+.artweb-genre-dot { /* 8230; per-genre background inline */
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+}
+.artweb-genre-name { /* 8231 */
+    flex: 1; min-width: 0; font-size: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.artweb-genre-count { /* 8232 */
+    font-size: 10.5px; color: rgba(255,255,255,0.4);
+}
+.artweb-genre-empty { /* 8234 */
+    color: rgba(255,255,255,0.4); padding: 8px; font-size: 12px;
+}
+
+/* ── Artist Web: floating hint pills (7811-7813, 7838-7841) ── */
+.artweb-hint {
+    position: absolute; left: 50%; transform: translateX(-50%); z-index: 25;
+    background: rgba(20,18,26,0.94); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px; font-size: 12.5px; color: rgba(255,255,255,0.88);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.artweb-path-hint { /* 7811 */
+    top: 70px; padding: 8px 16px; pointer-events: none;
+}
+.artweb-firstrun-hint { /* 7839-7841 */
+    bottom: 20px; padding: 9px 18px; transition: opacity 0.4s ease;
+}
+
+/* React discover port — div->button UA resets (live smoke-test round 2).
+   These three were DIVs in the vanilla with no background rule of their own,
+   so as <button>s they rendered the UA's white. Same reset family as the
+   #258 block above; vanilla styling stays in each class's own rule. */
+.artmap-genre-sidebar-item,
+.artist-map-search-item,
+.build-playlist-search-result,
+.artmap-explore-result {
+    background: transparent; border: none; width: 100%;
+    font: inherit; color: inherit; text-align: left;
+}

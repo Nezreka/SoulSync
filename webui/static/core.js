@@ -56,6 +56,253 @@ let activeDownloadProcesses = {};
  *
  * Returns whether a modal was shown, so the caller knows to stop.
  */
+/**
+ * Bridge for the React discover page: seed a VIRTUAL playlist and its tracks,
+ * then hand off to the shared sync engine. `playlistTrackCache` and
+ * `spotifyPlaylists` are top-level `let`s in this script's lexical scope, so a
+ * module cannot seed them itself — the same reason the function below exists.
+ * Mirrors what startDecadeSync/startDiscoverPlaylistSync did inline (discover.js
+ * 2753-2764) before the page moved to React.
+ */
+window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
+    }
+    return startPlaylistSync(virtualPlaylistId);
+};
+
+/**
+ * Bridge for the React discover download bar: expose one download's process
+ * record (status + modal handles). `activeDownloadProcesses` is a top-level
+ * `let` in this script's lexical scope — same story as everything else here.
+ */
+window.discoverDownloadProcess = function (virtualPlaylistId) {
+    return activeDownloadProcesses[virtualPlaylistId] || null;
+};
+
+
+/**
+ * Bridge for the React discover page: the ListenBrainz/Last.fm playlist
+ * DISCOVERY download flow, moved VERBATIM from discover.js's
+ * openDownloadModalForListenBrainzPlaylist (3934-4137) with one change — the
+ * tracks arrive as a parameter instead of discover.js's script-scoped
+ * listenbrainzTracksCache. Everything it touches lives in classic-script
+ * scope this file shares: listenbrainzPlaylistStates (this file),
+ * activeDownloadProcesses (this file), openDownloadMissingModalForYouTube
+ * (downloads.js), openYouTubeDiscoveryModal + startListenBrainzDiscoveryPolling
+ * + startModalDownloadPolling (sync-services.js) — all of which survive
+ * discover.js's deletion, which is why the flow lives HERE and not in a module.
+ */
+window.openLbPlaylistDiscovery = async function (identifier, title, tracks) {
+    try {
+        if (!tracks || tracks.length === 0) {
+            showToast('No tracks to download', 'error');
+            return;
+        }
+
+        console.log(`🎵 Opening ListenBrainz discovery modal: ${title}`);
+        console.log(`🔍 Looking for existing state with identifier: ${identifier}`);
+        console.log(`📋 All ListenBrainz states:`, Object.keys(listenbrainzPlaylistStates));
+
+        // Check if state already exists from backend hydration (like Beatport does)
+        const existingState = listenbrainzPlaylistStates[identifier];
+        console.log(`🔍 Existing state found:`, existingState ? `Phase: ${existingState.phase}` : 'None');
+
+        if (existingState && existingState.phase !== 'fresh') {
+            // State exists - rehydrate the modal with existing data
+            console.log(`🔄 Rehydrating existing ListenBrainz state (Phase: ${existingState.phase})`);
+
+            // If downloading/download_complete, rehydrate download modal instead
+            if ((existingState.phase === 'downloading' || existingState.phase === 'download_complete') &&
+                existingState.convertedSpotifyPlaylistId && existingState.download_process_id) {
+
+                console.log(`📥 Rehydrating download modal for ListenBrainz playlist: ${title}`);
+
+                // Implement download modal rehydration (like Beatport does)
+                const convertedPlaylistId = existingState.convertedSpotifyPlaylistId;
+
+                try {
+                    // Check if modal already exists (user just closed it)
+                    if (activeDownloadProcesses[convertedPlaylistId]) {
+                        console.log(`✅ Download modal already exists, just showing it`);
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process.modalElement) {
+                            process.modalElement.style.display = 'flex';
+                        }
+                        return;
+                    }
+
+                    // Create the download modal using the ListenBrainz state
+                    console.log(`🆕 Creating new download modal for rehydration`);
+                    // Get tracks from the existing state
+                    let spotifyTracks = [];
+
+                    if (existingState && existingState.discovery_results) {
+                        spotifyTracks = existingState.discovery_results
+                            .filter(result => result.spotify_data)
+                            .map(result => {
+                                const track = result.spotify_data;
+                                // Ensure artists is an array of strings
+                                if (track.artists && Array.isArray(track.artists)) {
+                                    track.artists = track.artists.map(artist =>
+                                        typeof artist === 'string' ? artist : (artist.name || artist)
+                                    );
+                                } else if (track.artists && typeof track.artists === 'string') {
+                                    track.artists = [track.artists];
+                                } else {
+                                    track.artists = ['Unknown Artist'];
+                                }
+                                return {
+                                    id: track.id,
+                                    name: track.name,
+                                    artists: track.artists,
+                                    album: track.album || 'Unknown Album',
+                                    duration_ms: track.duration_ms || 0,
+                                    external_urls: track.external_urls || {}
+                                };
+                            });
+                    }
+
+                    if (spotifyTracks.length > 0) {
+                        await openDownloadMissingModalForYouTube(
+                            convertedPlaylistId,
+                            title,
+                            spotifyTracks
+                        );
+
+                        // Set the modal to running state with the correct batch ID
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process) {
+                            process.status = existingState.phase === 'download_complete' ? 'complete' : 'running';
+                            process.batchId = existingState.download_process_id;
+
+                            // Update UI to running state
+                            const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                            const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                            if (beginBtn) beginBtn.style.display = 'none';
+                            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                            // Start polling for this process
+                            startModalDownloadPolling(convertedPlaylistId);
+
+                            // Add to discover download sidebar if this has discoverMetadata
+                            if (process.discoverMetadata) {
+                                const playlistName = title;
+                                const imageUrl = process.discoverMetadata.imageUrl;
+                                const type = process.discoverMetadata.type || 'album';
+                                addDiscoverDownload(convertedPlaylistId, playlistName, type, imageUrl);
+                                console.log(`📥 [REHYDRATION] Added ListenBrainz download to sidebar: ${playlistName}`);
+                            }
+
+                            // Show modal since user clicked the download button (different from background rehydration)
+                            if (process.modalElement) {
+                                process.modalElement.style.display = 'flex';
+                            }
+                            console.log(`✅ Rehydrated download modal for ListenBrainz playlist: ${title}`);
+                        }
+                    } else {
+                        console.warn(`⚠️ No Spotify tracks found for ListenBrainz download modal: ${title}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error setting up download process for ListenBrainz playlist "${title}":`, error.message);
+                }
+
+                return;
+            }
+
+            // Open discovery modal with existing state
+            openYouTubeDiscoveryModal(identifier);
+
+            // If still discovering, resume polling
+            if (existingState.phase === 'discovering') {
+                console.log(`🔄 Resuming discovery polling for: ${title}`);
+                startListenBrainzDiscoveryPolling(identifier);
+            }
+
+            return;
+        }
+
+        // No existing state - create fresh state and start discovery
+        console.log(`🆕 Creating fresh ListenBrainz state for: ${title}`);
+
+        // Create YouTube-style state entry for this ListenBrainz playlist (like Beatport does)
+        const listenbrainzState = {
+            phase: 'fresh',
+            playlist: {
+                name: title,
+                tracks: tracks.map(track => ({
+                    track_name: track.track_name,
+                    artist_name: track.artist_name,
+                    album_name: track.album_name,
+                    duration_ms: track.duration_ms || 0,
+                    mbid: track.mbid,
+                    release_mbid: track.release_mbid,
+                    album_cover_url: track.album_cover_url
+                })),
+                description: `${tracks.length} tracks from ${title}`,
+                source: 'listenbrainz'
+            },
+            is_listenbrainz_playlist: true,
+            playlist_mbid: identifier,  // Link to ListenBrainz playlist
+            // Initialize discovery state properties (both naming conventions for modal compatibility)
+            discovery_results: [],
+            discoveryResults: [],
+            discovery_progress: 0,
+            discoveryProgress: 0,
+            spotify_matches: 0,
+            spotifyMatches: 0,
+            spotify_total: tracks.length,
+            spotifyTotal: tracks.length
+        };
+
+        // Store in ListenBrainz playlist states
+        listenbrainzPlaylistStates[identifier] = listenbrainzState;
+
+        // Start discovery automatically (like Beatport and Tidal do)
+        try {
+            console.log(`🔍 Starting ListenBrainz discovery for: ${title}`);
+
+            // Call the discovery start endpoint with playlist data
+            const response = await fetch(`/api/listenbrainz/discovery/start/${identifier}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    playlist: listenbrainzState.playlist
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Update state to discovering
+                listenbrainzPlaylistStates[identifier].phase = 'discovering';
+
+                // Start polling for progress
+                startListenBrainzDiscoveryPolling(identifier);
+
+                console.log(`✅ Started ListenBrainz discovery for: ${title}`);
+            } else {
+                console.error('❌ Error starting ListenBrainz discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error starting ListenBrainz discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+
+        // Open the existing YouTube discovery modal infrastructure
+        openYouTubeDiscoveryModal(identifier);
+
+        console.log(`✅ ListenBrainz discovery modal opened for ${title} with ${tracks.length} tracks`);
+
+    } catch (error) {
+        console.error('Error opening discovery modal for ListenBrainz playlist:', error);
+        showToast('Failed to open discovery modal', 'error');
+    }
+};
+
 window.reopenActiveDownloadModal = function (virtualPlaylistId) {
     const process = activeDownloadProcesses[virtualPlaylistId];
     if (!process || !process.modalElement) return false;

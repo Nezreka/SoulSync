@@ -114,6 +114,14 @@ declare global {
     /** stats-automations.js — reads artistDetailPageState for the artist id.
      *  Must be given the id explicitly once React owns the page. */
     playArtistRadio?: (artistId?: string | number, artistName?: string) => void;
+    /** stats-automations.js — the parameterized radio core the Artist Web's
+     *  "Play radio" hands off to (survives the discover.js deletion). */
+    startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
+    /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
+     *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
+     *  spans. Shared (survives discover.js's deletion), so the React page
+     *  calls it and renders the span block it writes into. */
+    startListenBrainzPlaylistSync?: (identifier: string) => void | Promise<void>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
     /** library.js — the Download Discography modal. */
@@ -217,7 +225,68 @@ declare global {
      * down, the fetch fails and the modal the user already had would never come
      * back. Returns true when a modal was shown.
      */
+    /**
+     * downloads.js:429 — the shared download-missing modal, YouTube-track
+     * flavour. Discover's mixes, recent/seasonal/cache albums and the playlist
+     * builder all hand their converted tracks to it; artist/album context is
+     * optional and switches the modal into album mode.
+     */
+    openDownloadMissingModalForYouTube?: (
+      virtualPlaylistId: string,
+      playlistName: string,
+      spotifyTracks: unknown[],
+      artist?: unknown,
+      album?: unknown,
+    ) => void | Promise<void>;
+    /** init.js:1465 — the My Accounts / personal settings modal. */
+    openPersonalSettings?: () => void | Promise<void>;
+    /**
+     * The React download-bar store's PUBLISHED globals — the names downloads.js
+     * (954, 1806) and core.js call. Assigned at module load in
+     * -discover.use-download-bar.ts; module scripts run after classic scripts,
+     * so these assignments replace the vanilla function declarations and every
+     * bare cross-file call resolves to the one store.
+     */
+    discoverDownloads?: unknown;
+    addDiscoverDownload?: (
+      playlistId: string,
+      playlistName: string,
+      playlistType: string,
+      imageUrl?: string | null,
+    ) => void;
+    removeDiscoverDownload?: (playlistId: string) => void;
+    updateDiscoverDownloadBar?: () => void;
+    hydrateDiscoverDownloadsFromSnapshot?: () => Promise<void>;
+    /** core.js bridge: one discover download's process record, or null. */
+    discoverDownloadProcess?: (
+      virtualPlaylistId: string,
+    ) => { status?: string; modalElement?: unknown; modalId?: string } | null;
+    rehydrateDiscoverDownloadModal?: (virtualPlaylistId: string) => Promise<boolean>;
     reopenActiveDownloadModal?: (virtualPlaylistId: string) => boolean;
+    /**
+     * sync-spotify.js — hydrates listenbrainzPlaylistStates from the backend
+     * (/api/listenbrainz/playlists). The vanilla discover init called this
+     * (discover.js 244); without it the discovery flow's cross-restart
+     * resume/rehydration silently finds no state.
+     */
+    loadListenBrainzPlaylistsFromBackend?: () => Promise<void>;
+    /**
+     * core.js bridge: the LB/Last.fm playlist DISCOVERY download flow, moved
+     * verbatim from discover.js (3934-4137) with tracks as a parameter. It
+     * rehydrates an in-flight session or seeds a fresh discovery and opens the
+     * sync-services discovery modal — the exact vanilla behaviour.
+     */
+    openLbPlaylistDiscovery?: (
+      identifier: string,
+      title: string,
+      tracks: unknown[],
+    ) => Promise<void>;
+    /** core.js bridge: seed a virtual playlist + tracks, start the shared sync. */
+    startDiscoverVirtualSync?: (
+      virtualPlaylistId: string,
+      name: string,
+      spotifyTracks: unknown[],
+    ) => Promise<unknown>;
     /**
      * The basic-search results currently on screen, published for the vanilla
      * matched-download modal.
