@@ -306,6 +306,7 @@ function EnhancedAlbumWrapper({
                 isAdmin={isAdmin}
                 onArtApplied={(url) => setAlbum((current) => ({ ...current, thumb_url: url }))}
                 onAlbumDeleted={onAlbumDeleted}
+                onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
               />
               <AlbumMetaRow
                 album={album}
@@ -332,6 +333,7 @@ function EnhancedAlbumWrapper({
                     tracks: (current.tracks ?? []).filter((t) => String(t.id) !== String(trackId)),
                   }))
                 }
+                onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
               />
             </>
           ) : null}

@@ -143,6 +143,8 @@ declare global {
      * element itself, because they render progress onto it.
      */
     openAlbumArtPicker?: (album: unknown) => void;
+    /** library.js's shared page state, exported for the React artist-detail page. */
+    artistDetailPageState?: { enhancedData?: unknown; [key: string]: unknown };
     openManualMatchModal?: (
       entityType: string,
       entityId: unknown,

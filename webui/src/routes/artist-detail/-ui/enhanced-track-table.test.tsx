@@ -49,6 +49,7 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
       onSelectedChange={onSelectedChange}
       onTrackEdited={onTrackEdited}
       onTrackDeleted={onTrackDeleted}
+      onAlbumPatched={vi.fn()}
     />,
   );
   return { onSelectedChange, onTrackEdited, onTrackDeleted, ...view };
@@ -519,6 +520,7 @@ describe('row actions', () => {
           onSelectedChange={vi.fn()}
           onTrackEdited={vi.fn()}
           onTrackDeleted={vi.fn()}
+          onAlbumPatched={vi.fn()}
         />
       </div>,
     );
@@ -528,39 +530,49 @@ describe('row actions', () => {
 });
 
 describe('re-matching a track', () => {
+  /** The chip now mounts the LOCAL match modal; the default query lands in
+      its search input (trackMatchQuery drives it, pinned per service). The
+      modal auto-searches on open, so fetch gets stubbed. */
+  function openChip(album = ALBUM, chipIndex: number | 'last' = 1) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_i: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(JSON.stringify({ success: true, results: [] })),
+      ),
+    );
+    renderTable(album);
+    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
+    fireEvent.click(chips[chipIndex === 'last' ? chips.length - 1 : chipIndex]);
+    return document.querySelector('.enhanced-match-search-input') as HTMLInputElement;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
   it('opens the matcher for the clicked service, with the BARE track title', () => {
     // The album has a title here on purpose: every service except Bandcamp
     // searched better on the title alone.
-    renderTable({ ...ALBUM, title: 'SAW 85-92' });
-    fireEvent.click(rows()[0].querySelectorAll('.enhanced-track-match-chip')[1]);
-    expect(window.openManualMatchModal).toHaveBeenCalledWith('track', 1, 'musicbrainz', 'Xtal', 42);
+    const input = openChip({ ...ALBUM, title: 'SAW 85-92' }, 1);
+    expect(screen.getByText('Match track on MusicBrainz')).toBeTruthy();
+    expect(input.value).toBe('Xtal');
   });
 
   it('does not leave a leading space when the album is untitled', () => {
-    renderTable();
-    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
-    fireEvent.click(chips[chips.length - 1]);
-    expect(window.openManualMatchModal).toHaveBeenCalledWith('track', 1, 'bandcamp', 'Xtal', 42);
+    const input = openChip(ALBUM, 'last');
+    expect(input.value).toBe('Xtal');
   });
 
   it('sends the ALBUM name alongside the title for Bandcamp only', () => {
     // Bandcamp searches release pages, where a bare track title is ambiguous
     // across compilations, remixes and covers.
-    renderTable({ ...ALBUM, title: 'SAW 85-92' });
-    const chips = rows()[0].querySelectorAll('.enhanced-track-match-chip');
-    fireEvent.click(chips[chips.length - 1]);
-    expect(window.openManualMatchModal).toHaveBeenCalledWith(
-      'track',
-      1,
-      'bandcamp',
-      'SAW 85-92 Xtal',
-      42,
-    );
+    const input = openChip({ ...ALBUM, title: 'SAW 85-92' }, 'last');
+    expect(screen.getByText('Match track on Bandcamp')).toBeTruthy();
+    expect(input.value).toBe('SAW 85-92 Xtal');
   });
 
   it('is inert for a non-admin', () => {
     renderTable(ALBUM, false);
     fireEvent.click(rows()[0].querySelectorAll('.enhanced-track-match-chip')[1]);
-    expect(window.openManualMatchModal).not.toHaveBeenCalled();
+    expect(document.querySelector('.enhanced-match-search-input')).toBeNull();
   });
 });

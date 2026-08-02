@@ -29,6 +29,7 @@ function renderHeader(album: EnhancedAlbum = ALBUM, isAdmin = true) {
       isAdmin={isAdmin}
       onArtApplied={vi.fn()}
       onAlbumDeleted={vi.fn()}
+      onAlbumPatched={vi.fn()}
     />,
   );
 }
@@ -117,15 +118,25 @@ describe('match chips', () => {
   });
 
   it('opens the manual matcher for its own service', () => {
-    renderHeader();
-    fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
-    expect(window.openManualMatchModal).toHaveBeenCalledWith(
-      'album',
-      7,
-      'musicbrainz',
-      'SAW 85-92',
-      42,
+    // The chip now mounts the LOCAL match modal (auto-search stubs fetch),
+    // seeded with the album title as the default query.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_i: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(JSON.stringify({ success: true, results: [] })),
+      ),
     );
+    try {
+      renderHeader();
+      fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
+      expect(screen.getByText('Match album on MusicBrainz')).toBeTruthy();
+      expect(
+        (document.querySelector('.enhanced-match-search-input') as HTMLInputElement).value,
+      ).toBe('SAW 85-92');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not let an ID BADGE click bubble into the row toggle', () => {
@@ -141,6 +152,7 @@ describe('match chips', () => {
           isAdmin
           onArtApplied={vi.fn()}
           onAlbumDeleted={vi.fn()}
+          onAlbumPatched={vi.fn()}
         />
       </div>,
     );
@@ -160,6 +172,7 @@ describe('match chips', () => {
           isAdmin
           onArtApplied={vi.fn()}
           onAlbumDeleted={vi.fn()}
+          onAlbumPatched={vi.fn()}
         />
       </div>,
     );
@@ -190,16 +203,27 @@ describe('admin actions', () => {
     fireEvent.click(document.querySelector('.enhanced-enrich-btn') as HTMLElement);
     expect(menu.className).toContain('visible');
 
-    fireEvent.click(document.querySelectorAll('.enhanced-enrich-menu-item')[0]);
-    expect(window.runEnrichment).toHaveBeenCalledWith(
-      'album',
-      7,
-      'spotify',
-      'SAW 85-92',
-      'Aphex Twin',
-      42,
+    // Picking a source fires the local enrichment request (no window bridge).
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, results: {} })),
     );
-    expect(menu.className).not.toContain('visible');
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      fireEvent.click(document.querySelectorAll('.enhanced-enrich-menu-item')[0]);
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/enrich');
+      expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toMatchObject({
+        entity_type: 'album',
+        entity_id: 7,
+        service: 'spotify',
+        name: 'SAW 85-92',
+        artist_name: 'Aphex Twin',
+        artist_id: 42,
+      });
+      expect(menu.className).not.toContain('visible');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('wires each album action to its own handler', () => {
@@ -210,8 +234,9 @@ describe('admin actions', () => {
     fireEvent.click(document.querySelector('.enhanced-reorganize-album-btn') as HTMLElement);
     expect(window.showReorganizeModal).toHaveBeenCalledWith(7);
 
+    // Delete now opens the LOCAL two-option dialog (deleteLibraryAlbum's port).
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);
-    expect(window.deleteLibraryAlbum).toHaveBeenCalledWith(7);
+    expect(screen.getByText('Delete Album', { selector: 'h3' })).toBeTruthy();
   });
 
   it('hands the BUTTON itself to the two actions that render progress on it', () => {

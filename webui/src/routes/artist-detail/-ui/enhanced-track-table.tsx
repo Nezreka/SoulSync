@@ -17,11 +17,13 @@ import {
   trackMatchChips,
   trackMatchQuery,
 } from '../-artist-detail.enhanced-album';
+import { foldUpdatedData } from '../-artist-detail.enrich-match';
 import {
   deleteLibraryTrackRequest,
   type DeleteTrackChoice,
 } from '../-artist-detail.manage-actions';
 import { EditableCell } from './editable-cell';
+import { ManualMatchModal } from './manual-match-modal';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
 import { SourceInfoPopover } from './source-info-popover';
 
@@ -34,6 +36,8 @@ interface Props {
   onTrackEdited: (trackId: unknown, field: string, value: string | number | null) => void;
   /** Removes a deleted track from the album in the panel's state. */
   onTrackDeleted: (trackId: unknown) => void;
+  /** A fresh server copy of the album (after a track match) re-renders the panel. */
+  onAlbumPatched: (album: Record<string, unknown>) => void;
   /** Track ids currently ticked, owned by the panel so the bulk bar can read them. */
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
@@ -56,8 +60,10 @@ export function EnhancedTrackTable({
   onSelectedChange,
   onTrackEdited,
   onTrackDeleted,
+  onAlbumPatched,
 }: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
+  const [matching, setMatching] = useState<{ track: EnhancedTrack; service: string } | null>(null);
   /** One popover / one dialog for the whole table, keyed to the acting row. */
   const [sourceInfo, setSourceInfo] = useState<{
     track: EnhancedTrack;
@@ -164,6 +170,7 @@ export function EnhancedTrackTable({
               onEdited={(field, value) => onTrackEdited(track.id, field, value)}
               onSourceInfo={(anchor) => setSourceInfo({ track, anchor })}
               onDelete={() => setDeleting(track)}
+              onMatch={(service) => setMatching({ track, service })}
             />
           ))}
         </tbody>
@@ -183,6 +190,27 @@ export function EnhancedTrackTable({
           onClose={() => setDeleting(null)}
         />
       ) : null}
+      {matching ? (
+        <ManualMatchModal
+          entityType="track"
+          entityId={matching.track.id}
+          service={matching.service}
+          defaultQuery={trackMatchQuery(matching.service, matching.track, album)}
+          artistId={artist?.id ?? null}
+          onUpdated={(outcome) => {
+            if (!outcome.updatedData) return;
+            const fresh = foldUpdatedData(
+              (window.artistDetailPageState?.enhancedData ?? null) as
+                | import('../-artist-detail.enhanced').EnhancedData
+                | null,
+              outcome.updatedData,
+              album.id,
+            );
+            if (fresh) onAlbumPatched(fresh);
+          }}
+          onClose={() => setMatching(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -197,6 +225,7 @@ function TrackRow({
   onEdited,
   onSourceInfo,
   onDelete,
+  onMatch,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -207,6 +236,7 @@ function TrackRow({
   onEdited: (field: string, value: string | number | null) => void;
   onSourceInfo: (anchor: HTMLElement) => void;
   onDelete: () => void;
+  onMatch: (service: string) => void;
 }) {
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
@@ -361,17 +391,7 @@ function TrackRow({
               onClick={
                 // Re-matching is admin-only; for everyone else the chip is
                 // just a status marker.
-                isAdmin
-                  ? act(() =>
-                      window.openManualMatchModal?.(
-                        'track',
-                        track.id,
-                        chip.service,
-                        trackMatchQuery(chip.service, track, album),
-                        artist?.id ?? null,
-                      ),
-                    )
-                  : undefined
+                isAdmin ? act(() => onMatch(chip.service)) : undefined
               }
             >
               {chip.label}

@@ -8,11 +8,13 @@ import {
   albumMatchChips,
   expandedHeaderDetails,
 } from '../-artist-detail.enhanced-album';
+import { foldUpdatedData, runEnrichmentRequest } from '../-artist-detail.enrich-match';
 import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
 } from '../-artist-detail.manage-actions';
 import { ArtPicker } from './art-picker';
+import { ManualMatchModal } from './manual-match-modal';
 import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
 
 interface Props {
@@ -25,6 +27,8 @@ interface Props {
   isAdmin: boolean;
   /** A chosen cover propagates to the album record in the panel's state. */
   onArtApplied: (url: string) => void;
+  /** A fresh server copy of this album (after a match/enrich) re-renders the panel. */
+  onAlbumPatched: (album: Record<string, unknown>) => void;
   /** The album was deleted — the view drops it and its selections. */
   onAlbumDeleted: () => void;
 }
@@ -44,10 +48,31 @@ export function ExpandedAlbumHeader({
   isAdmin,
   onArtApplied,
   onAlbumDeleted,
+  onAlbumPatched,
 }: Props) {
   const [artBroken, setArtBroken] = useState(false);
   const [pickingArt, setPickingArt] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [matchingService, setMatchingService] = useState<string | null>(null);
+
+  /**
+   * A match/enrich hands back the whole payload; fold it into the loaded data
+   * (the mirror IS the object the view renders from) and re-render this panel
+   * from its fresh album.
+   */
+  const applyOutcome = (outcome: {
+    updatedData: import('../-artist-detail.enhanced').EnhancedData | null;
+  }) => {
+    if (!outcome.updatedData) return;
+    const fresh = foldUpdatedData(
+      (window.artistDetailPageState?.enhancedData ?? null) as
+        | import('../-artist-detail.enhanced').EnhancedData
+        | null,
+      outcome.updatedData,
+      album.id,
+    );
+    if (fresh) onAlbumPatched(fresh);
+  };
   const genres = Array.isArray(album.genres) ? album.genres : [];
   const badges = albumIdBadges(album);
   const chips = albumMatchChips(album);
@@ -80,6 +105,17 @@ export function ExpandedAlbumHeader({
             onArtApplied(url);
           }}
           onClose={() => setPickingArt(false)}
+        />
+      ) : null}
+      {matchingService ? (
+        <ManualMatchModal
+          entityType="album"
+          entityId={album.id}
+          service={matchingService}
+          defaultQuery={String(album.title || '')}
+          artistId={artistId}
+          onUpdated={applyOutcome}
+          onClose={() => setMatchingService(null)}
         />
       ) : null}
       {confirmingDelete ? (
@@ -170,13 +206,7 @@ export function ExpandedAlbumHeader({
               title={chip.title}
               onClick={(e) => {
                 e.stopPropagation();
-                window.openManualMatchModal?.(
-                  'album',
-                  album.id,
-                  chip.service,
-                  String(album.title || ''),
-                  artistId,
-                );
+                setMatchingService(chip.service);
               }}
             >
               {chip.label}: {chip.status}
@@ -186,7 +216,13 @@ export function ExpandedAlbumHeader({
 
         <div className="enhanced-expanded-actions">
           {isAdmin ? (
-            <AdminAlbumActions album={album} artistId={artistId} artistName={artistName} />
+            <AdminAlbumActions
+              album={album}
+              artistId={artistId}
+              artistName={artistName}
+              onDelete={() => setConfirmingDelete(true)}
+              onEnrichOutcome={applyOutcome}
+            />
           ) : null}
 
           {/* Reporting an issue is open to every user, not just admins. */}
@@ -216,10 +252,16 @@ function AdminAlbumActions({
   album,
   artistId,
   artistName,
+  onDelete,
+  onEnrichOutcome,
 }: {
   album: EnhancedAlbum;
   artistId: unknown;
   artistName: string;
+  onDelete: () => void;
+  onEnrichOutcome: (outcome: {
+    updatedData: import('../-artist-detail.enhanced').EnhancedData | null;
+  }) => void;
 }) {
   const [enrichOpen, setEnrichOpen] = useState(false);
 
@@ -244,14 +286,14 @@ function AdminAlbumActions({
               onClick={(e) => {
                 e.stopPropagation();
                 setEnrichOpen(false);
-                window.runEnrichment?.(
-                  'album',
-                  album.id,
-                  service.id,
-                  String(album.title || ''),
+                void runEnrichmentRequest({
+                  entityType: 'album',
+                  entityId: album.id,
+                  service: service.id,
+                  name: String(album.title || ''),
                   artistName,
                   artistId,
-                );
+                }).then(onEnrichOutcome);
               }}
             >
               {service.icon} {service.label}
@@ -315,7 +357,7 @@ function AdminAlbumActions({
         className="enhanced-delete-album-btn"
         onClick={(e) => {
           e.stopPropagation();
-          window.deleteLibraryAlbum?.(album.id);
+          onDelete();
         }}
       >
         Delete Album
