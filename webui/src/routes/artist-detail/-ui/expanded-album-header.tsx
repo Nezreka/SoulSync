@@ -13,7 +13,9 @@ import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
 } from '../-artist-detail.manage-actions';
+import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
 import { ArtPicker } from './art-picker';
+import { BatchTagPreviewModal } from './batch-tag-preview-modal';
 import { ManualMatchModal } from './manual-match-modal';
 import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
 
@@ -264,6 +266,8 @@ function AdminAlbumActions({
   }) => void;
 }) {
   const [enrichOpen, setEnrichOpen] = useState(false);
+  const [taggingTracks, setTaggingTracks] = useState<unknown[] | null>(null);
+  const [rgBusy, setRgBusy] = useState(false);
 
   return (
     <>
@@ -308,11 +312,26 @@ function AdminAlbumActions({
         title="Write DB metadata to file tags for all tracks in this album"
         onClick={(e) => {
           e.stopPropagation();
-          window.writeAlbumTags?.(album.id);
+          // writeAlbumTags (5449): only tracks that actually have a file.
+          const withFiles = (album.tracks ?? [])
+            .filter((t) => (t as { file_path?: string }).file_path)
+            .map((t) => t.id);
+          if (withFiles.length === 0) {
+            window.showToast?.('No tracks with files in this album', 'error');
+            return;
+          }
+          setTaggingTracks(withFiles);
         }}
       >
         ✎ Write All Tags
       </button>
+      {taggingTracks ? (
+        <BatchTagPreviewModal
+          trackIds={taggingTracks}
+          albumTitle={String(album.title || '')}
+          onClose={() => setTaggingTracks(null)}
+        />
+      ) : null}
 
       <button
         type="button"
@@ -321,10 +340,12 @@ function AdminAlbumActions({
         data-album-id={String(album.id)}
         onClick={(e) => {
           e.stopPropagation();
-          window.analyzeAlbumReplayGain?.(album.id, e.currentTarget);
+          if (rgBusy) return;
+          setRgBusy(true);
+          void analyzeAlbumReplayGainRequest(album.id, () => setRgBusy(false));
         }}
       >
-        ♫ ReplayGain
+        {rgBusy ? '♫ Analyzing…' : '♫ ReplayGain'}
       </button>
 
       <button

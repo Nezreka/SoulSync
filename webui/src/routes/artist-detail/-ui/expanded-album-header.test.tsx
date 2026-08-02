@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
@@ -38,8 +38,6 @@ const ACTIONS = [
   'openAlbumArtPicker',
   'openManualMatchModal',
   'runEnrichment',
-  'writeAlbumTags',
-  'analyzeAlbumReplayGain',
   'showReorganizeModal',
   'redownloadLibraryAlbum',
   'deleteLibraryAlbum',
@@ -228,8 +226,12 @@ describe('admin actions', () => {
 
   it('wires each album action to its own handler', () => {
     renderHeader();
+    // Write-tags is local now (writeAlbumTags's port): the fixture's tracks
+    // have no file_path, so it refuses instead of opening the batch modal.
+    window.showToast = vi.fn() as never;
     fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
-    expect(window.writeAlbumTags).toHaveBeenCalledWith(7);
+    expect(window.showToast).toHaveBeenCalledWith('No tracks with files in this album', 'error');
+    delete window.showToast;
 
     fireEvent.click(document.querySelector('.enhanced-reorganize-album-btn') as HTMLElement);
     expect(window.showReorganizeModal).toHaveBeenCalledWith(7);
@@ -239,12 +241,63 @@ describe('admin actions', () => {
     expect(screen.getByText('Delete Album', { selector: 'h3' })).toBeTruthy();
   });
 
-  it('hands the BUTTON itself to the two actions that render progress on it', () => {
-    renderHeader();
-    const rg = document.querySelector('.enhanced-rg-album-btn') as HTMLElement;
-    fireEvent.click(rg);
-    expect(window.analyzeAlbumReplayGain).toHaveBeenCalledWith(7, rg);
+  it('opens the batch tag modal when the album has on-disk files', async () => {
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, tracks: [], server_type: null })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderHeader({
+        id: 7,
+        title: 'SAW 85-92',
+        tracks: [{ id: 1, file_path: '/music/a.flac' }, { id: 2 }],
+      });
+      fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
+      expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe(
+        'Write Tags — SAW 85-92',
+      );
+      // Only the track that actually has a file goes into the batch (5449).
+      await waitFor(() =>
+        expect(
+          fetchSpy.mock.calls.some(([u]) => String(u) === '/api/library/tracks/tag-preview-batch'),
+        ).toBe(true),
+      );
+      const call = fetchSpy.mock.calls.find(
+        ([u]) => String(u) === '/api/library/tracks/tag-preview-batch',
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ track_ids: [1] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
+  it('runs album ReplayGain locally, disabling the button while it works', async () => {
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: false, error: 'no files' })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.showToast = vi.fn() as never;
+    try {
+      renderHeader();
+      const rg = document.querySelector('.enhanced-rg-album-btn') as HTMLElement;
+      fireEvent.click(rg);
+      expect(rg.textContent).toBe('♫ Analyzing…');
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/analyze-replaygain');
+      // A refused job re-enables the button via onDone.
+      await waitFor(() =>
+        expect(window.showToast).toHaveBeenCalledWith('ReplayGain: no files', 'error'),
+      );
+      await waitFor(() => expect(rg.textContent).toBe('♫ ReplayGain'));
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.showToast;
+    }
+  });
+
+  it('hands the BUTTON itself to redownload, which renders progress on it', () => {
+    renderHeader();
     const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
     fireEvent.click(redownload);
     expect(window.redownloadLibraryAlbum).toHaveBeenCalledWith(ALBUM, 'Aphex Twin', redownload);

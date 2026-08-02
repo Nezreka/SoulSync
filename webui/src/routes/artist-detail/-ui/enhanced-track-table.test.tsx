@@ -63,8 +63,6 @@ const titles = () =>
   rows().map((r) => r.querySelector('.col-title')?.textContent?.replace('Missing', '') ?? '');
 
 const ACTIONS = [
-  'showTagPreview',
-  'analyzeTrackReplayGain',
   'showTrackSourceInfo',
   'openReidentifyModal',
   'showTrackRedownloadModal',
@@ -417,9 +415,18 @@ describe('row actions', () => {
   });
 
   it('wires each admin action to its own handler', () => {
+    // Write-tags is no longer a window bridge: ✎ opens the local tag preview
+    // modal (showTagPreview's port), which fetches the diff on mount.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, diff: [], has_changes: false })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
     renderTable();
     click('.enhanced-write-tag-btn');
-    expect(window.showTagPreview).toHaveBeenCalledWith(1);
+    expect(screen.getByText('Write Tags to File')).toBeTruthy();
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/track/1/tag-preview');
+    vi.unstubAllGlobals();
 
     click('.enhanced-redownload-btn');
     expect(window.showTrackRedownloadModal).toHaveBeenCalledWith(
@@ -457,17 +464,35 @@ describe('row actions', () => {
     }
   });
 
-  it('hands the button element to the two actions that render onto it', () => {
-    renderTable();
-    const rg = rows()[0].querySelector('.enhanced-rg-btn') as HTMLElement;
-    fireEvent.click(rg);
-    expect(window.analyzeTrackReplayGain).toHaveBeenCalledWith(1, rg);
+  it('runs ReplayGain locally on the row and anchors source info to its button', async () => {
+    // Both were window bridges taking the button element; both are local now.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, track_gain: '-1.20 dB', lufs: -9.5 })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.showToast = vi.fn() as never;
+    try {
+      renderTable();
+      const rg = rows()[0].querySelector('.enhanced-rg-btn') as HTMLElement;
+      fireEvent.click(rg);
+      expect(rg.textContent).toBe('…');
+      await waitFor(() =>
+        expect(window.showToast).toHaveBeenCalledWith(
+          'ReplayGain written: -1.20 dB (-9.5 LUFS)',
+          'success',
+        ),
+      );
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/track/1/analyze-replaygain');
+      await waitFor(() => expect(rg.textContent).toBe('RG'));
 
-    // Source info is no longer a window bridge: the ℹ button opens the local
-    // popover anchored to itself (showTrackSourceInfo's port).
-    const info = rows()[0].querySelector('.enhanced-source-info-btn') as HTMLElement;
-    fireEvent.click(info);
-    expect(document.querySelector('#source-info-popover')).toBeTruthy();
+      const info = rows()[0].querySelector('.enhanced-source-info-btn') as HTMLElement;
+      fireEvent.click(info);
+      expect(document.querySelector('#source-info-popover')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.showToast;
+    }
   });
 
   it('re-identifies with the album art and title for context', () => {

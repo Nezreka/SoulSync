@@ -160,8 +160,6 @@ declare global {
       artistName: string,
       artistId: unknown,
     ) => void;
-    writeAlbumTags?: (albumId: unknown) => void;
-    analyzeAlbumReplayGain?: (albumId: unknown, button: HTMLElement) => void;
     showReorganizeModal?: (albumId: unknown) => void;
     redownloadLibraryAlbum?: (album: unknown, artistName: string, button: HTMLElement) => void;
     deleteLibraryAlbum?: (albumId: unknown) => void;
@@ -178,8 +176,6 @@ declare global {
      * popover keeps its underscore name: it is a private helper being called
      * across the boundary until the popover itself is ported.
      */
-    showTagPreview?: (trackId: unknown) => void;
-    analyzeTrackReplayGain?: (trackId: unknown, button: HTMLElement) => void;
     showTrackSourceInfo?: (track: unknown, button: HTMLElement) => void;
     openReidentifyModal?: (
       trackId: unknown,
@@ -192,14 +188,6 @@ declare global {
     deleteLibraryTrack?: (trackId: unknown, albumId: unknown) => void;
     openMissingTrackManageModal?: (track: unknown, album: unknown) => void;
     _showMobileTrackActions?: (track: unknown, album: unknown) => void;
-    /**
-     * library.js — the batch tag-preview modal. Safe to call across the
-     * boundary because it takes the track ids explicitly rather than reading
-     * the vanilla's selection state.
-     */
-    showBatchTagPreview?: (trackIds: unknown[], albumId: unknown) => void;
-    /** library.js — polls the batch ReplayGain job this page just started. */
-    _pollBatchRgStatus?: () => void;
     /** media-player.js — the play queue. */
     addToQueue?: (payload: unknown) => void;
     playNext?: (payload: unknown) => void;

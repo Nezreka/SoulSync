@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { _stopAllTagRgPollers } from '../-artist-detail.tags-rg';
 import { EnhancedBulkBar } from './enhanced-bulk-bar';
 
 let requests: { url: string; body: unknown }[] = [];
@@ -36,15 +37,12 @@ const field = (id: string) => document.getElementById(id) as HTMLInputElement;
 
 beforeEach(() => {
   window.showToast = vi.fn();
-  window.showBatchTagPreview = vi.fn();
-  window._pollBatchRgStatus = vi.fn();
   stubApi();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete window.showBatchTagPreview;
-  delete window._pollBatchRgStatus;
+  _stopAllTagRgPollers();
   // NOT document.body.innerHTML = '': these render through a portal, and
   // wiping the body out from under Testing Library's own cleanup makes it throw
   // "The node to be removed is not a child of this node". cleanup() unmounts
@@ -72,22 +70,39 @@ describe('visibility', () => {
 });
 
 describe('the simple actions', () => {
-  it('hands the ids straight to the batch tag modal', () => {
+  it('opens the batch tag modal over the ticked ids', async () => {
+    // No longer a window bridge: the bar mounts BatchTagPreviewModal itself.
     renderBar();
     fireEvent.click(document.querySelector('.tag-write') as HTMLElement);
-    expect(window.showBatchTagPreview).toHaveBeenCalledWith(['1', '2'], null);
+    expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe(
+      'Write Tags — 2 Tracks',
+    );
+    await waitFor(() =>
+      expect(requests.some((r) => r.url === '/api/library/tracks/tag-preview-batch')).toBe(true),
+    );
+    const preview = requests.find((r) => r.url === '/api/library/tracks/tag-preview-batch');
+    expect(preview?.body).toEqual({ track_ids: ['1', '2'] });
   });
 
   it('starts a batch ReplayGain job and polls it', async () => {
     renderBar();
     fireEvent.click(document.querySelector('.rg-analyze') as HTMLElement);
 
-    await waitFor(() => expect(window._pollBatchRgStatus).toHaveBeenCalled());
-    expect(requests[0].url).toBe('/api/library/tracks/analyze-replaygain-batch');
+    await waitFor(() =>
+      expect(requests[0]?.url).toBe('/api/library/tracks/analyze-replaygain-batch'),
+    );
     expect(requests[0].body).toEqual({ track_ids: ['1', '2'] });
     expect(window.showToast).toHaveBeenCalledWith(
       'ReplayGain analysis started for 2 tracks…',
       'info',
+    );
+    // The module poller's first status tick lands 800ms later (vanilla cadence).
+    await waitFor(
+      () =>
+        expect(
+          requests.some((r) => r.url === '/api/library/tracks/analyze-replaygain-batch/status'),
+        ).toBe(true),
+      { timeout: 2000 },
     );
   });
 
@@ -97,7 +112,7 @@ describe('the simple actions', () => {
     fireEvent.click(document.querySelector('.rg-analyze') as HTMLElement);
 
     await waitFor(() => expect(window.showToast).toHaveBeenCalledWith('ReplayGain: busy', 'error'));
-    expect(window._pollBatchRgStatus).not.toHaveBeenCalled();
+    expect(requests.some((r) => r.url.endsWith('/status'))).toBe(false);
   });
 
   it('clears the selection', () => {

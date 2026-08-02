@@ -22,10 +22,12 @@ import {
   deleteLibraryTrackRequest,
   type DeleteTrackChoice,
 } from '../-artist-detail.manage-actions';
+import { analyzeTrackReplayGainRequest } from '../-artist-detail.tags-rg';
 import { EditableCell } from './editable-cell';
 import { ManualMatchModal } from './manual-match-modal';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
 import { SourceInfoPopover } from './source-info-popover';
+import { TagPreviewModal } from './tag-preview-modal';
 
 interface Props {
   album: EnhancedAlbum;
@@ -64,6 +66,7 @@ export function EnhancedTrackTable({
 }: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
   const [matching, setMatching] = useState<{ track: EnhancedTrack; service: string } | null>(null);
+  const [tagPreview, setTagPreview] = useState<EnhancedTrack | null>(null);
   /** One popover / one dialog for the whole table, keyed to the acting row. */
   const [sourceInfo, setSourceInfo] = useState<{
     track: EnhancedTrack;
@@ -171,6 +174,7 @@ export function EnhancedTrackTable({
               onSourceInfo={(anchor) => setSourceInfo({ track, anchor })}
               onDelete={() => setDeleting(track)}
               onMatch={(service) => setMatching({ track, service })}
+              onTagPreview={() => setTagPreview(track)}
             />
           ))}
         </tbody>
@@ -189,6 +193,9 @@ export function EnhancedTrackTable({
           onChoose={(choice) => void performDelete(choice as DeleteTrackChoice)}
           onClose={() => setDeleting(null)}
         />
+      ) : null}
+      {tagPreview ? (
+        <TagPreviewModal trackId={tagPreview.id} onClose={() => setTagPreview(null)} />
       ) : null}
       {matching ? (
         <ManualMatchModal
@@ -226,6 +233,7 @@ function TrackRow({
   onSourceInfo,
   onDelete,
   onMatch,
+  onTagPreview,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -237,7 +245,9 @@ function TrackRow({
   onSourceInfo: (anchor: HTMLElement) => void;
   onDelete: () => void;
   onMatch: (service: string) => void;
+  onTagPreview: () => void;
 }) {
+  const [rgBusy, setRgBusy] = useState(false);
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
   const format = extractFormat(track.file_path);
@@ -436,7 +446,7 @@ function TrackRow({
                   type="button"
                   className="enhanced-write-tag-btn"
                   title="Write tags to file"
-                  onClick={act(() => window.showTagPreview?.(track.id))}
+                  onClick={act(() => onTagPreview())}
                 >
                   ✎
                 </button>
@@ -444,9 +454,15 @@ function TrackRow({
                   type="button"
                   className="enhanced-rg-btn"
                   title="Analyze &amp; write ReplayGain (track gain)"
-                  onClick={act((e) => window.analyzeTrackReplayGain?.(track.id, e.currentTarget))}
+                  disabled={rgBusy}
+                  onClick={act(() => {
+                    // Synchronous on the server (~1-3s); the button shows '…'
+                    // meanwhile, as the vanilla's did (5710-5712).
+                    setRgBusy(true);
+                    void analyzeTrackReplayGainRequest(track.id).finally(() => setRgBusy(false));
+                  })}
                 >
-                  RG
+                  {rgBusy ? '…' : 'RG'}
                 </button>
               </>
             ) : null}
