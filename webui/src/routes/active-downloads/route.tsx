@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import { ActiveDownloadsPage } from './-ui/active-downloads-page';
 
@@ -12,11 +12,7 @@ import { ActiveDownloadsPage } from './-ui/active-downloads-page';
  */
 export const Route = createFileRoute('/active-downloads')({
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('active-downloads')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'active-downloads');
   },
   component: ActiveDownloadsPage,
 });

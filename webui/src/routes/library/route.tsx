@@ -1,7 +1,7 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
 import { LegacyRouteController } from '@/platform/shell/route-controllers';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { libraryArtistsQueryOptions } from './-library.api';
@@ -23,11 +23,7 @@ function isReactOwned(): boolean {
 export const Route = createFileRoute('/library')({
   validateSearch: librarySearchSchema,
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('library')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'library');
   },
   loaderDeps: ({ search }) => search,
   loader: async ({ context, deps }) => {

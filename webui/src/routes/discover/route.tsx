@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import { DiscoverPage } from './-ui/discover-page';
 
@@ -13,11 +13,7 @@ import { DiscoverPage } from './-ui/discover-page';
  */
 export const Route = createFileRoute('/discover')({
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('discover')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'discover');
   },
   component: DiscoverPage,
 });
