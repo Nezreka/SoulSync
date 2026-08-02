@@ -13,10 +13,12 @@ import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
 } from '../-artist-detail.manage-actions';
+import { refreshReorganizeQueue, reorganizeStateForAlbum } from '../-artist-detail.reorganize';
 import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
 import { ArtPicker } from './art-picker';
 import { BatchTagPreviewModal } from './batch-tag-preview-modal';
 import { ManualMatchModal } from './manual-match-modal';
+import { ReorganizeModal } from './reorganize-modal';
 import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
 
 interface Props {
@@ -268,6 +270,7 @@ function AdminAlbumActions({
   const [enrichOpen, setEnrichOpen] = useState(false);
   const [taggingTracks, setTaggingTracks] = useState<unknown[] | null>(null);
   const [rgBusy, setRgBusy] = useState(false);
+  const [reorganizing, setReorganizing] = useState(false);
 
   return (
     <>
@@ -355,11 +358,27 @@ function AdminAlbumActions({
         data-album-id={String(album.id)}
         onClick={(e) => {
           e.stopPropagation();
-          window.showReorganizeModal?.(album.id);
+          // Already queued/running: opening the modal would be misleading —
+          // the apply click would just dedupe (showReorganizeModal, 5846).
+          const queuedState = reorganizeStateForAlbum(album.id);
+          if (queuedState) {
+            window.showToast?.(
+              queuedState === 'running'
+                ? 'Reorganize already running for this album'
+                : 'Album already queued for reorganize',
+              'info',
+            );
+            void refreshReorganizeQueue();
+            return;
+          }
+          setReorganizing(true);
         }}
       >
         📁 Reorganize
       </button>
+      {reorganizing ? (
+        <ReorganizeModal album={album} onClose={() => setReorganizing(false)} />
+      ) : null}
 
       <button
         type="button"

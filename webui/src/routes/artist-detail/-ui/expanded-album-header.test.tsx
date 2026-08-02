@@ -38,7 +38,6 @@ const ACTIONS = [
   'openAlbumArtPicker',
   'openManualMatchModal',
   'runEnrichment',
-  'showReorganizeModal',
   'redownloadLibraryAlbum',
   'deleteLibraryAlbum',
   'showReportIssueModal',
@@ -233,8 +232,19 @@ describe('admin actions', () => {
     expect(window.showToast).toHaveBeenCalledWith('No tracks with files in this album', 'error');
     delete window.showToast;
 
+    // Reorganize is local now (showReorganizeModal's port): the button
+    // mounts the modal, which loads this album's metadata sources.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ sources: [] })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
     fireEvent.click(document.querySelector('.enhanced-reorganize-album-btn') as HTMLElement);
-    expect(window.showReorganizeModal).toHaveBeenCalledWith(7);
+    expect(document.getElementById('reorganize-modal-title')?.textContent).toBe(
+      'Reorganize: SAW 85-92',
+    );
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/reorganize/sources');
+    vi.unstubAllGlobals();
 
     // Delete now opens the LOCAL two-option dialog (deleteLibraryAlbum's port).
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);

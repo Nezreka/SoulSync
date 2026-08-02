@@ -13,6 +13,7 @@ import {
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
 import { syncVanillaEnhancedData, syncVanillaSelection } from '../-artist-detail.vanilla-state';
 import { AlbumMetaRow } from './album-meta-row';
+import { ArtistMetaPanel } from './artist-meta-panel';
 import { EnhancedBulkBar } from './enhanced-bulk-bar';
 import { EnhancedTrackTable } from './enhanced-track-table';
 import { ExpandedAlbumHeader } from './expanded-album-header';
@@ -23,6 +24,8 @@ interface Props {
   status: { loading: boolean; error: string };
   /** Drives the admin-only action row inside each expanded album. */
   isAdmin: boolean;
+  /** Re-fetch the payload (Sync found changes, reorganize batch finished). */
+  onReload: () => void;
 }
 
 /**
@@ -33,13 +36,20 @@ interface Props {
  * bucket for any other record_type, and the vanilla ignored it the same way —
  * an album typed "live" is grouped and then never shown.
  */
-export function EnhancedView({ data, status, isAdmin }: Props) {
+export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
   /**
    * Selection is page-level and shared across albums, as the vanilla's single
    * artistDetailPageState.selectedTracks was: the bulk bar acts on everything
    * ticked, and expanding a second album is a normal way to build that set.
    */
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  /**
+   * The meta panel patches data.artist IN PLACE (save/match/enrich fold into
+   * the loaded payload, as the vanilla's updateLocalEnhancedData did); this
+   * counter is what re-renders from the mutated object.
+   */
+  const [, setArtistVersion] = useState(0);
 
   /**
    * The album and track actions that are still vanilla read this payload for
@@ -101,6 +111,13 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
 
   return (
     <>
+      <ArtistMetaPanel
+        artist={(data.artist ?? {}) as import('../-artist-detail.types').ArtistInfo}
+        albums={data.albums ?? []}
+        isAdmin={isAdmin}
+        onReload={onReload}
+        onArtistPatched={() => setArtistVersion((v) => v + 1)}
+      />
       <EnhancedStatsBar data={data} />
       {ENHANCED_SECTIONS.map(({ type, label }) => {
         const albums = grouped[type] ?? [];

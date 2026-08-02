@@ -387,6 +387,7 @@ export function ArtistDetailPage() {
                 data={enhancedState.data}
                 status={enhancedState.status}
                 isAdmin={Boolean(profile?.isAdmin)}
+                onReload={enhancedState.reload}
               />
             </div>
           ) : (

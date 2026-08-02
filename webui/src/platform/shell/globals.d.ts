@@ -160,7 +160,6 @@ declare global {
       artistName: string,
       artistId: unknown,
     ) => void;
-    showReorganizeModal?: (albumId: unknown) => void;
     redownloadLibraryAlbum?: (album: unknown, artistName: string, button: HTMLElement) => void;
     deleteLibraryAlbum?: (albumId: unknown) => void;
     showReportIssueModal?: (
