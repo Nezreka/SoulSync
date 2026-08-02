@@ -17,7 +17,10 @@ import { resolve } from 'node:path';
  * "matches the code it replaced" for "matches what I believed it did", which is
  * the exact failure this exists to rule out.
  */
-export const VANILLA_DISCOVER = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+export const VANILLA_DISCOVER = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 
 /**
  * Lift one function out by brace-matching, string- and regex-literal aware.

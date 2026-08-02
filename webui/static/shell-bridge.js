@@ -43,19 +43,6 @@ function setActivePageChrome(pageId) {
     currentPage = pageId;
     if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
-    const downloadSidebar = document.getElementById('discover-download-sidebar');
-    if (downloadSidebar) {
-        if (pageId === 'discover') {
-            const activeDownloads = typeof discoverDownloads !== 'undefined'
-                ? Object.keys(discoverDownloads).length
-                : 0;
-            if (activeDownloads > 0 && typeof updateDiscoverDownloadBar === 'function') {
-                updateDiscoverDownloadBar();
-            }
-        } else {
-            downloadSidebar.classList.add('hidden');
-        }
-    }
     // Defer to next frame so the page switch paints before particle/orb reinitialization
     requestAnimationFrame(() => {
         if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);

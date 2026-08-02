@@ -3283,7 +3283,7 @@ async function loadPageData(pageId) {
                 break;
             case 'discover':
                 if (!discoverPageInitialized) {
-                    await loadDiscoverPage();
+                    if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
                     discoverPageInitialized = true;
                 }
                 // Already initialized — DOM content persists, no reload needed

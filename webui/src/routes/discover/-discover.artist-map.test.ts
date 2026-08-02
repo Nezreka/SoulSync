@@ -10,7 +10,10 @@ import { ARTMAP_LIVE_OVERFLOW_LIMIT, artMap } from './-discover.artist-map';
  * calibrated against. Each is checked against the vanilla text so a silent drift
  * in either direction fails here rather than showing up as a slow map.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 
 describe('the map singleton starts where the vanilla did', () => {
   it('keeps the geometry + performance constants', () => {

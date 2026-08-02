@@ -4855,3 +4855,25 @@ function parseMusicBrainzMbid(input) {
 
     return _MB_UUID_RE.test(candidate) ? candidate : null;
 }
+
+// Relocated verbatim from discover.js (3796-3814) when the vanilla page was deleted;
+// downloads.js formatArtists still calls it.
+function cleanArtistName(artistName) {
+    if (!artistName) return artistName;
+
+    // Remove everything after common featuring patterns (case insensitive)
+    const patterns = [
+        /\s+feat\.?\s+.*/i,      // "feat." or "feat"
+        /\s+featuring\s+.*/i,    // "featuring"
+        /\s+ft\.?\s+.*/i,        // "ft." or "ft"
+        /\s+with\s+.*/i,         // "with"
+        /\s+x\s+.*/i             // " x " (common in collaborations)
+    ];
+
+    let cleaned = artistName;
+    for (const pattern of patterns) {
+        cleaned = cleaned.replace(pattern, '');
+    }
+
+    return cleaned.trim();
+}
