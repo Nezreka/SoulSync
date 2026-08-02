@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
@@ -27,6 +27,8 @@ function renderHeader(album: EnhancedAlbum = ALBUM, isAdmin = true) {
       artistId={42}
       artistName="Aphex Twin"
       isAdmin={isAdmin}
+      onArtApplied={vi.fn()}
+      onAlbumDeleted={vi.fn()}
     />,
   );
 }
@@ -86,10 +88,22 @@ describe('the header body', () => {
     expect(document.querySelector('.enhanced-expanded-art')).not.toBeNull();
   });
 
-  it('opens the art picker from the cover', () => {
-    renderHeader();
-    fireEvent.click(document.querySelector('.enhanced-expanded-art-wrap') as HTMLElement);
-    expect(window.openAlbumArtPicker).toHaveBeenCalledWith(ALBUM);
+  it('opens the art picker from the cover', async () => {
+    // No longer a window bridge: the cover click mounts the local ArtPicker
+    // (openAlbumArtPicker's port), which fetches this album's options.
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ candidates: [] })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderHeader();
+      fireEvent.click(document.querySelector('.enhanced-expanded-art-wrap') as HTMLElement);
+      expect(await screen.findByText('Choose cover art')).toBeTruthy();
+      expect(String(fetchSpy.mock.calls[0][0])).toContain('/art-options');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -125,6 +139,8 @@ describe('match chips', () => {
           artistId={42}
           artistName="Aphex Twin"
           isAdmin
+          onArtApplied={vi.fn()}
+          onAlbumDeleted={vi.fn()}
         />
       </div>,
     );
@@ -142,6 +158,8 @@ describe('match chips', () => {
           artistId={42}
           artistName="Aphex Twin"
           isAdmin
+          onArtApplied={vi.fn()}
+          onAlbumDeleted={vi.fn()}
         />
       </div>,
     );

@@ -8,6 +8,12 @@ import {
   albumMatchChips,
   expandedHeaderDetails,
 } from '../-artist-detail.enhanced-album';
+import {
+  deleteLibraryAlbumRequest,
+  type DeleteAlbumChoice,
+} from '../-artist-detail.manage-actions';
+import { ArtPicker } from './art-picker';
+import { SmartDeleteDialog, ALBUM_DELETE_COPY } from './smart-delete-dialog';
 
 interface Props {
   album: EnhancedAlbum;
@@ -17,6 +23,10 @@ interface Props {
   artistName: string;
   /** The admin action row is hidden for everyone else. */
   isAdmin: boolean;
+  /** A chosen cover propagates to the album record in the panel's state. */
+  onArtApplied: (url: string) => void;
+  /** The album was deleted — the view drops it and its selections. */
+  onAlbumDeleted: () => void;
 }
 
 /**
@@ -26,18 +36,63 @@ interface Props {
  * modals slice ports them. Two of them are handed the button element itself,
  * because they render progress onto it.
  */
-export function ExpandedAlbumHeader({ album, rows, artistId, artistName, isAdmin }: Props) {
+export function ExpandedAlbumHeader({
+  album,
+  rows,
+  artistId,
+  artistName,
+  isAdmin,
+  onArtApplied,
+  onAlbumDeleted,
+}: Props) {
   const [artBroken, setArtBroken] = useState(false);
+  const [pickingArt, setPickingArt] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const genres = Array.isArray(album.genres) ? album.genres : [];
   const badges = albumIdBadges(album);
   const chips = albumMatchChips(album);
 
+  /** deleteLibraryAlbum (library.js:4020): request, toast, then drop the album. */
+  const performDelete = async (choice: DeleteAlbumChoice) => {
+    setConfirmingDelete(false);
+    try {
+      const toast = await deleteLibraryAlbumRequest(album.id, choice);
+      window.showToast?.(toast.message, toast.tone);
+      onAlbumDeleted();
+    } catch (error) {
+      window.showToast?.(`Delete failed: ${(error as Error).message}`, 'error');
+    }
+  };
+
   return (
     <div className="enhanced-expanded-header">
+      {pickingArt ? (
+        <ArtPicker
+          target={{
+            kind: 'album',
+            id: album.id,
+            artistName,
+            albumTitle: String(album.title || ''),
+          }}
+          subtitle={String(album.title || '') + (artistName ? ' · ' + artistName : '')}
+          onApplied={(url) => {
+            setArtBroken(false);
+            onArtApplied(url);
+          }}
+          onClose={() => setPickingArt(false)}
+        />
+      ) : null}
+      {confirmingDelete ? (
+        <SmartDeleteDialog
+          copy={ALBUM_DELETE_COPY}
+          onChoose={(choice) => void performDelete(choice as DeleteAlbumChoice)}
+          onClose={() => setConfirmingDelete(false)}
+        />
+      ) : null}
       <div
         className="enhanced-expanded-art-wrap"
         title="Change cover art"
-        onClick={() => window.openAlbumArtPicker?.(album)}
+        onClick={() => setPickingArt(true)}
       >
         {/* The vanilla hid a broken cover rather than removing it, so the
             wrap keeps its size and the click target does not collapse. */}

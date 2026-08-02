@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { StreamCounts } from '../-artist-detail.completion';
@@ -235,19 +235,35 @@ describe('stats and actions', () => {
 
   it('invokes the vanilla globals rather than reimplementing them', () => {
     const radio = vi.fn();
-    const picker = vi.fn();
     const discog = vi.fn();
     window.playArtistRadio = radio;
-    window.openArtistArtPicker = picker;
     window.openDiscographyModal = discog;
     renderHero({ name: 'A' }, { albums: [{ id: 1 }] });
 
     fireEvent.click(document.getElementById('library-artist-radio-btn')!);
     expect(radio).toHaveBeenCalled();
-    fireEvent.click(document.querySelector('.artist-image-container')!);
-    expect(picker).toHaveBeenCalled();
     fireEvent.click(document.getElementById('discog-download-btn')!);
     expect(discog).toHaveBeenCalled();
+  });
+
+  it('the photo click mounts the local art picker — no longer a window bridge', async () => {
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ candidates: [] })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderHero({ id: 9, name: 'A' }, { albums: [{ id: 1 }] });
+      fireEvent.click(document.querySelector('.artist-image-container')!);
+      expect(await screen.findByText('Choose artist photo')).toBeTruthy();
+      // The hero fires other requests (top tracks) on mount — assert the
+      // picker's own request landed rather than pinning call order.
+      expect(fetchSpy.mock.calls.some((c) => String(c[0]) === '/api/artist/9/art-options')).toBe(
+        true,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not throw when those globals are absent', () => {

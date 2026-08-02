@@ -83,6 +83,22 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
     }
   };
 
+  /**
+   * A deleted album leaves the payload and takes its ticked tracks with it
+   * (deleteLibraryAlbum's state cleanup, library.js:4045-4055). The payload is
+   * a prop, so the removal mutates it in place like applyBatch does; the
+   * selection setState is what re-renders — always called, even when nothing
+   * was ticked, so the section drops the album immediately.
+   */
+  const removeAlbum = (albumId: unknown) => {
+    const albums = data.albums ?? [];
+    const album = albums.find((a) => String(a.id) === String(albumId));
+    data.albums = albums.filter((a) => String(a.id) !== String(albumId));
+    const next = new Set(selected);
+    for (const track of album?.tracks ?? []) next.delete(String(track.id));
+    setSelected(next);
+  };
+
   return (
     <>
       <EnhancedStatsBar data={data} />
@@ -101,6 +117,7 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
             isAdmin={isAdmin}
             selected={selected}
             onSelectedChange={setSelected}
+            onAlbumDeleted={removeAlbum}
           />
         );
       })}
@@ -146,6 +163,7 @@ function EnhancedSection({
   isAdmin,
   selected,
   onSelectedChange,
+  onAlbumDeleted,
 }: {
   type: string;
   label: string;
@@ -154,6 +172,7 @@ function EnhancedSection({
   isAdmin: boolean;
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
+  onAlbumDeleted: (albumId: unknown) => void;
 }) {
   return (
     <div className="enhanced-section">
@@ -172,6 +191,7 @@ function EnhancedSection({
             isAdmin={isAdmin}
             selected={selected}
             onSelectedChange={onSelectedChange}
+            onAlbumDeleted={() => onAlbumDeleted(album.id)}
             key={String(album.id)}
           />
         ))}
@@ -199,6 +219,7 @@ function EnhancedAlbumWrapper({
   isAdmin,
   selected,
   onSelectedChange,
+  onAlbumDeleted,
 }: {
   album: EnhancedAlbum;
   type: string;
@@ -206,6 +227,7 @@ function EnhancedAlbumWrapper({
   isAdmin: boolean;
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
+  onAlbumDeleted: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -282,6 +304,8 @@ function EnhancedAlbumWrapper({
                 artistId={artist?.id}
                 artistName={String(artist?.name ?? '')}
                 isAdmin={isAdmin}
+                onArtApplied={(url) => setAlbum((current) => ({ ...current, thumb_url: url }))}
+                onAlbumDeleted={onAlbumDeleted}
               />
               <AlbumMetaRow
                 album={album}
@@ -300,6 +324,12 @@ function EnhancedAlbumWrapper({
                     tracks: (current.tracks ?? []).map((t) =>
                       String(t.id) === String(trackId) ? { ...t, [field]: value } : t,
                     ),
+                  }))
+                }
+                onTrackDeleted={(trackId) =>
+                  setAlbum((current) => ({
+                    ...current,
+                    tracks: (current.tracks ?? []).filter((t) => String(t.id) !== String(trackId)),
                   }))
                 }
               />

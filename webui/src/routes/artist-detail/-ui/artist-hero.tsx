@@ -20,6 +20,7 @@ import {
   totalReleaseCount,
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
+import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { EnrichmentCoverage } from './enrichment-coverage';
 import { TopTracksSidebar } from './top-tracks-sidebar';
@@ -132,6 +133,10 @@ export function ArtistHero({
   const chips = buildGenreChips(artist);
   const bio = cleanArtistBio(artist.lastfm_bio);
   const [bioExpanded, setBioExpanded] = useState(false);
+  const [pickingPhoto, setPickingPhoto] = useState(false);
+  /** A freshly applied photo shows immediately, as the vanilla swapped the
+      hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
+  const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
   const hasReleases = totalReleaseCount(discography) > 0;
   // Only after `complete`, matching the vanilla: the set accumulates through
   // the whole stream but the block was not rendered until it ended.
@@ -139,6 +144,18 @@ export function ArtistHero({
 
   return (
     <div className="artist-hero-section" id="artist-hero-section">
+      {pickingPhoto ? (
+        <ArtPicker
+          target={{ kind: 'artist', id: artist.id }}
+          currentUrl={appliedPhoto || image.primary || null}
+          subtitle={
+            String(artist.name || '') +
+            ' · applies to SoulSync, your server, and artist.jpg on disk'
+          }
+          onApplied={(url) => setAppliedPhoto(url)}
+          onClose={() => setPickingPhoto(false)}
+        />
+      ) : null}
       <div
         className="artist-detail-hero-bg"
         id="artist-detail-hero-bg"
@@ -150,9 +167,16 @@ export function ArtistHero({
         <div
           className="artist-image-container"
           title="Change artist photo"
-          onClick={() => window.openArtistArtPicker?.()}
+          onClick={() => setPickingPhoto(true)}
         >
-          <ArtistPhoto artist={artist} discography={discography} />
+          <ArtistPhoto
+            artist={
+              appliedPhoto
+                ? { ...artist, image_url: appliedPhoto, thumb_url: appliedPhoto }
+                : artist
+            }
+            discography={discography}
+          />
           <div className="artist-image-edit-overlay">
             <svg
               viewBox="0 0 24 24"

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createShellBridge } from '@/test/shell-bridge';
@@ -39,6 +39,7 @@ const ALBUM: EnhancedAlbum = {
 function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = new Set<string>()) {
   const onSelectedChange = vi.fn();
   const onTrackEdited = vi.fn();
+  const onTrackDeleted = vi.fn();
   const view = render(
     <EnhancedTrackTable
       album={album}
@@ -47,9 +48,10 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
       selected={selected}
       onSelectedChange={onSelectedChange}
       onTrackEdited={onTrackEdited}
+      onTrackDeleted={onTrackDeleted}
     />,
   );
-  return { onSelectedChange, onTrackEdited, ...view };
+  return { onSelectedChange, onTrackEdited, onTrackDeleted, ...view };
 }
 
 const ARTIST = { id: 42, name: 'Aphex Twin', thumb_url: 'artist.jpg' };
@@ -424,8 +426,34 @@ describe('row actions', () => {
       ALBUM,
     );
 
+    // Delete is no longer a window bridge: it opens the local two-option
+    // dialog (deleteLibraryTrack's port). The full flow has its own test.
     click('.enhanced-delete-btn');
-    expect(window.deleteLibraryTrack).toHaveBeenCalledWith(1, 7);
+    expect(screen.getByText('Delete Track')).toBeTruthy();
+  });
+
+  it('deleting via the dialog fires the request and drops the row from state', async () => {
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, file_deleted: true })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.showToast = vi.fn() as never;
+    try {
+      const { onTrackDeleted } = renderTable();
+      click('.enhanced-delete-btn');
+      screen.getByText('Delete File Too').click();
+      await waitFor(() => expect(onTrackDeleted).toHaveBeenCalledWith(1));
+      expect(String(fetchSpy.mock.calls[0][0])).toContain('/api/library/track/1');
+      expect(String(fetchSpy.mock.calls[0][0])).toContain('delete_file=true');
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Track deleted from library and disk',
+        'success',
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.showToast;
+    }
   });
 
   it('hands the button element to the two actions that render onto it', () => {
@@ -434,12 +462,11 @@ describe('row actions', () => {
     fireEvent.click(rg);
     expect(window.analyzeTrackReplayGain).toHaveBeenCalledWith(1, rg);
 
+    // Source info is no longer a window bridge: the ℹ button opens the local
+    // popover anchored to itself (showTrackSourceInfo's port).
     const info = rows()[0].querySelector('.enhanced-source-info-btn') as HTMLElement;
     fireEvent.click(info);
-    expect(window.showTrackSourceInfo).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 1 }),
-      info,
-    );
+    expect(document.querySelector('#source-info-popover')).toBeTruthy();
   });
 
   it('re-identifies with the album art and title for context', () => {
@@ -491,6 +518,7 @@ describe('row actions', () => {
           selected={new Set()}
           onSelectedChange={vi.fn()}
           onTrackEdited={vi.fn()}
+          onTrackDeleted={vi.fn()}
         />
       </div>,
     );

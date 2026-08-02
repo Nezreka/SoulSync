@@ -17,7 +17,13 @@ import {
   trackMatchChips,
   trackMatchQuery,
 } from '../-artist-detail.enhanced-album';
+import {
+  deleteLibraryTrackRequest,
+  type DeleteTrackChoice,
+} from '../-artist-detail.manage-actions';
 import { EditableCell } from './editable-cell';
+import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
+import { SourceInfoPopover } from './source-info-popover';
 
 interface Props {
   album: EnhancedAlbum;
@@ -26,6 +32,8 @@ interface Props {
   artist: Record<string, unknown> | undefined;
   /** Applies a saved inline edit to the album in the panel's state. */
   onTrackEdited: (trackId: unknown, field: string, value: string | number | null) => void;
+  /** Removes a deleted track from the album in the panel's state. */
+  onTrackDeleted: (trackId: unknown) => void;
   /** Track ids currently ticked, owned by the panel so the bulk bar can read them. */
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
@@ -47,8 +55,15 @@ export function EnhancedTrackTable({
   selected,
   onSelectedChange,
   onTrackEdited,
+  onTrackDeleted,
 }: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
+  /** One popover / one dialog for the whole table, keyed to the acting row. */
+  const [sourceInfo, setSourceInfo] = useState<{
+    track: EnhancedTrack;
+    anchor: HTMLElement;
+  } | null>(null);
+  const [deleting, setDeleting] = useState<EnhancedTrack | null>(null);
   const rows = sortedTrackRows(getAlbumTrackRows(album), sort);
 
   if (rows.length === 0) {
@@ -85,49 +100,90 @@ export function EnhancedTrackTable({
     );
   };
 
+  /**
+   * The confirmed delete (deleteLibraryTrack, library.js:3096): request, the
+   * vanilla's toasts (a file error gets its own longer-lived toast), then the
+   * row leaves the panel's state and the selection.
+   */
+  const performDelete = async (choice: DeleteTrackChoice) => {
+    const track = deleting;
+    setDeleting(null);
+    if (!track) return;
+    try {
+      const toast = await deleteLibraryTrackRequest(track.id, choice);
+      window.showToast?.(toast.message, toast.tone);
+      if (toast.extra) window.showToast?.(toast.extra, 'error', 8000);
+      onTrackDeleted(track.id);
+      const next = new Set(selected);
+      next.delete(String(track.id));
+      onSelectedChange(next);
+    } catch (error) {
+      window.showToast?.(`Delete failed: ${(error as Error).message}`, 'error');
+    }
+  };
+
   return (
-    <table className="enhanced-track-table" data-album-id={String(album.id)}>
-      <thead>
-        <tr>
-          {isAdmin ? (
-            <th>
-              <input
-                type="checkbox"
-                className="enhanced-track-checkbox"
-                checked={allSelected}
-                onChange={toggleAll}
-              />
-            </th>
-          ) : null}
-          {columns.map((column) => (
-            <th
-              key={column.cls}
-              className={column.cls}
-              style={column.sortField ? { cursor: 'pointer' } : undefined}
-              data-sort-field={column.sortField}
-              data-label={column.sortField ? column.label : undefined}
-              onClick={() => clickHeader(column.sortField)}
-            >
-              {sortIndicator(column, sort)}
-            </th>
+    <>
+      <table className="enhanced-track-table" data-album-id={String(album.id)}>
+        <thead>
+          <tr>
+            {isAdmin ? (
+              <th>
+                <input
+                  type="checkbox"
+                  className="enhanced-track-checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                />
+              </th>
+            ) : null}
+            {columns.map((column) => (
+              <th
+                key={column.cls}
+                className={column.cls}
+                style={column.sortField ? { cursor: 'pointer' } : undefined}
+                data-sort-field={column.sortField}
+                data-label={column.sortField ? column.label : undefined}
+                onClick={() => clickHeader(column.sortField)}
+              >
+                {sortIndicator(column, sort)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((track) => (
+            <TrackRow
+              key={String(track.id)}
+              track={track}
+              album={album}
+              isAdmin={isAdmin}
+              artist={artist}
+              selected={selected.has(String(track.id))}
+              onToggle={() => toggleOne(String(track.id))}
+              onEdited={(field, value) => onTrackEdited(track.id, field, value)}
+              onSourceInfo={(anchor) => setSourceInfo({ track, anchor })}
+              onDelete={() => setDeleting(track)}
+            />
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((track) => (
-          <TrackRow
-            key={String(track.id)}
-            track={track}
-            album={album}
-            isAdmin={isAdmin}
-            artist={artist}
-            selected={selected.has(String(track.id))}
-            onToggle={() => toggleOne(String(track.id))}
-            onEdited={(field, value) => onTrackEdited(track.id, field, value)}
-          />
-        ))}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+      {sourceInfo ? (
+        <SourceInfoPopover
+          trackId={sourceInfo.track.id}
+          trackTitle={String(sourceInfo.track.title || '')}
+          anchor={sourceInfo.anchor}
+          onClose={() => setSourceInfo(null)}
+        />
+      ) : null}
+      {deleting ? (
+        <SmartDeleteDialog
+          copy={TRACK_DELETE_COPY}
+          onChoose={(choice) => void performDelete(choice as DeleteTrackChoice)}
+          onClose={() => setDeleting(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -139,6 +195,8 @@ function TrackRow({
   selected,
   onToggle,
   onEdited,
+  onSourceInfo,
+  onDelete,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -147,6 +205,8 @@ function TrackRow({
   selected: boolean;
   onToggle: () => void;
   onEdited: (field: string, value: string | number | null) => void;
+  onSourceInfo: (anchor: HTMLElement) => void;
+  onDelete: () => void;
 }) {
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
@@ -390,7 +450,7 @@ function TrackRow({
                   type="button"
                   className="enhanced-source-info-btn"
                   title="View download source info"
-                  onClick={act((e) => window.showTrackSourceInfo?.(track, e.currentTarget))}
+                  onClick={act((e) => onSourceInfo(e.currentTarget))}
                 >
                   ℹ
                 </button>
@@ -422,7 +482,7 @@ function TrackRow({
                   type="button"
                   className="enhanced-delete-btn"
                   title="Delete track from library"
-                  onClick={act(() => window.deleteLibraryTrack?.(track.id, album.id))}
+                  onClick={act(() => onDelete())}
                 >
                   ✕
                 </button>
