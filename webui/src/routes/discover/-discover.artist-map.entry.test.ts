@@ -47,7 +47,10 @@ import {
  * constant against the text still in discover.js, so a drift on either side
  * fails here.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 
 describe('the endpoints and copy still match discover.js', () => {
   it('keeps the four map URLs', () => {

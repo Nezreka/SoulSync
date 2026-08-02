@@ -75,7 +75,10 @@ import {
  * Artist Map's chrome uses. Everything else pins the decision plus the constant
  * it depends on against the text still in discover.js.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 /** The toolbar buttons are markup, so their ratios are pinned against the shell. */
 const OVERLAY = readFileSync(
   resolve(process.cwd(), 'src/routes/discover/-ui/artist-web-overlay.tsx'),

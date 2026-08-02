@@ -38,7 +38,7 @@ _LIBRARY_JS = (_STATIC / "library.js").read_text(encoding="utf-8")
 # would pass vacuously at exactly the moment it should fail.
 _CONTRACT = {
     "_esc": {
-        "stats-automations.js", "auto-sync.js", "discover.js",
+        "stats-automations.js", "auto-sync.js",
         "pages-extra.js", "wishlist-tools.js",
     },
     # search.js was deleted when /search became React. The two entries below

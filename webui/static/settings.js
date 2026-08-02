@@ -5206,7 +5206,7 @@ function handleSpotifyRateLimit(rateLimitInfo) {
             // Refresh discover page if user is on it — data source switched back to Spotify
             if (currentPage === 'discover') {
                 console.log('Spotify restored — refreshing discover page data');
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         }
         return;
@@ -5222,7 +5222,7 @@ function handleSpotifyRateLimit(rateLimitInfo) {
         // Refresh discover page if user is on it — data source switched to iTunes
         if (currentPage === 'discover') {
             console.log('Spotify rate limited — refreshing discover page with iTunes data');
-            loadDiscoverPage();
+            if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
         }
     }
 }
@@ -5280,7 +5280,7 @@ async function disconnectSpotifyFromRateLimit() {
             syncMetadataSourceSelection(data.source || 'deezer');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         } else {
             showToast(`Failed to disconnect: ${data.error}`, 'error');

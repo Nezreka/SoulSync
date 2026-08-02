@@ -42,6 +42,14 @@ let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
+// Relocated discover.js state the surviving flows still share: the LB caches
+// (sync-listenbrainz reads/fills them; the relocated discovery modal reads
+// them) and the init.js one-shot flag. Declared with `let` exactly as the
+// vanilla page declared them, so sync-listenbrainz's window-fallback branch
+// stays dormant and every bare read resolves to the same binding.
+let listenbrainzPlaylistsCache = {};
+let listenbrainzTracksCache = {};
+let discoverPageInitialized = false;
 /**
  * Show the modal of an already-active download process, for the React pages.
  *
@@ -994,7 +1002,7 @@ function handleServiceStatusUpdate(data) {
             _spotifyInCooldown = false;
             showToast('Spotify access restored', 'success');
             if (currentPage === 'discover') {
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         } else if (_spotifyRateLimitShown) {
             handleSpotifyRateLimit(null);
@@ -1360,3 +1368,396 @@ function getActiveMetadataSource() {
 }
 
 // ===============================
+
+// Relocated verbatim from discover.js: the dashboard discover bubble
+// (wishlist-tools.js onclick) reopens a live download modal via these.
+async function openDiscoverDownloadModal(playlistId) {
+    console.log(`📂 [DOWNLOAD BAR] Opening download modal for: ${playlistId}`);
+
+    // Check if there's an active download process with modal
+    let process = activeDownloadProcesses[playlistId];
+
+    console.log(`📋 [DOWNLOAD BAR] Process found:`, {
+        exists: !!process,
+        hasModalElement: !!(process && process.modalElement),
+        hasModalId: !!(process && process.modalId)
+    });
+
+    if (process) {
+        // Try modalElement first (album downloads)
+        if (process.modalElement) {
+            console.log(`✅ [DOWNLOAD BAR] Opening modal via modalElement`);
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+
+        // Try modalId (sync downloads)
+        if (process.modalId) {
+            const modal = document.getElementById(process.modalId);
+            if (modal) {
+                console.log(`✅ [DOWNLOAD BAR] Opening modal via modalId: ${process.modalId}`);
+                modal.style.display = 'flex';
+                return;
+            }
+        }
+    }
+
+    // If no process found, try to rehydrate from backend
+    console.log(`💧 [DOWNLOAD BAR] No modal found, attempting to rehydrate from backend...`);
+    const rehydrated = await rehydrateDiscoverDownloadModal(playlistId);
+
+    if (rehydrated) {
+        console.log(`✅ [DOWNLOAD BAR] Successfully rehydrated modal, opening it...`);
+        // Try again after rehydration
+        process = activeDownloadProcesses[playlistId];
+        if (process && process.modalElement) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+
+    // Fallback: show toast
+    const download = discoverDownloads[playlistId];
+    if (download) {
+        console.log(`ℹ️ [DOWNLOAD BAR] No modal found after rehydration attempt, showing toast`);
+        showToast(`Download: ${download.name} - ${download.status}`, 'info');
+    } else {
+        console.warn(`⚠️ [DOWNLOAD BAR] No download or process found for: ${playlistId}`);
+    }
+}
+
+async function rehydrateDiscoverDownloadModal(playlistId) {
+    /**
+     * Rehydrates a discover download modal from backend process data.
+     * Fetches tracks from backend API and recreates the modal (user-requested).
+     */
+    try {
+        console.log(`💧 [REHYDRATE] Attempting to rehydrate modal for: ${playlistId}`);
+
+        // Check if there's an active backend process for this playlist
+        const batchResponse = await fetch(`/api/download_status/batch`);
+        if (!batchResponse.ok) {
+            console.log(`⚠️ [REHYDRATE] Failed to fetch batch info`);
+            return false;
+        }
+
+        const batchData = await batchResponse.json();
+        const batches = batchData.batches || {};
+
+        // Find the batch for this playlist (batches is an object with batch_id keys)
+        let batchId = null;
+        let batch = null;
+        for (const [id, batchStatus] of Object.entries(batches)) {
+            if (batchStatus.playlist_id === playlistId) {
+                batchId = id;
+                batch = batchStatus;
+                break;
+            }
+        }
+
+        if (!batch || !batchId) {
+            console.log(`⚠️ [REHYDRATE] No active batch found for ${playlistId}`);
+            return false;
+        }
+
+        console.log(`✅ [REHYDRATE] Found active batch for ${playlistId}: ${batchId}`, batch);
+
+        // Get the download metadata from discoverDownloads
+        const downloadData = discoverDownloads[playlistId];
+        if (!downloadData) {
+            console.log(`⚠️ [REHYDRATE] No download metadata found for ${playlistId}`);
+            return false;
+        }
+
+        // Handle album downloads from Recent Releases
+        if (playlistId.startsWith('discover_album_')) {
+            const albumId = playlistId.replace('discover_album_', '');
+            console.log(`💧 [REHYDRATE] Album download - fetching album ${albumId}...`);
+
+            try {
+                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                if (!albumResponse.ok) {
+                    console.error(`❌ [REHYDRATE] Failed to fetch album: ${albumResponse.status}`);
+                    return false;
+                }
+
+                const albumData = await albumResponse.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) {
+                    console.error(`❌ [REHYDRATE] No tracks in album`);
+                    return false;
+                }
+
+                // Convert tracks to expected format
+                const spotifyTracks = albumData.tracks.map(track => {
+                    let artists = track.artists || [];
+                    if (Array.isArray(artists)) {
+                        artists = artists.map(a => a.name || a);
+                    }
+
+                    return {
+                        id: track.id,
+                        name: track.name,
+                        artists: artists,
+                        album: {
+                            name: albumData.name || downloadData.name.split(' - ')[0],
+                            images: downloadData.imageUrl ? [{ url: downloadData.imageUrl }] : []
+                        },
+                        duration_ms: track.duration_ms || 0
+                    };
+                });
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks for album`);
+
+                // Create modal
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+                // Update process
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated album modal with polling`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching album:`, error);
+                return false;
+            }
+        }
+
+        // Determine API endpoint based on playlist ID
+        let apiEndpoint;
+        if (playlistId === 'discover_release_radar') {
+            apiEndpoint = '/api/discover/release-radar';
+        } else if (playlistId === 'discover_discovery_weekly') {
+            apiEndpoint = '/api/discover/discovery-weekly';
+        } else if (playlistId === 'discover_seasonal_playlist') {
+            apiEndpoint = '/api/discover/seasonal-playlist';
+        } else if (playlistId === 'discover_popular_picks') {
+            apiEndpoint = '/api/discover/popular-picks';
+        } else if (playlistId === 'discover_hidden_gems') {
+            apiEndpoint = '/api/discover/hidden-gems';
+        } else if (playlistId === 'discover_discovery_shuffle') {
+            apiEndpoint = '/api/discover/discovery-shuffle';
+        } else if (playlistId === 'build_playlist_custom') {
+            apiEndpoint = '/api/discover/build-playlist';
+        } else if (playlistId.startsWith('discover_lb_')) {
+            // ListenBrainz playlist - fetch from cache
+            const identifier = playlistId.replace('discover_lb_', '');
+            const tracks = listenbrainzTracksCache[identifier];
+            if (!tracks || tracks.length === 0) {
+                console.log(`⚠️ [REHYDRATE] No ListenBrainz tracks in cache for ${identifier}`);
+                return false;
+            }
+
+            // Convert to Spotify format
+            const spotifyTracks = tracks.map(track => ({
+                id: track.mbid || `listenbrainz_${track.track_name}_${track.artist_name}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
+                name: track.track_name,
+                artists: [{ name: cleanArtistName(track.artist_name) }], // Proper Spotify format
+                album: {
+                    name: track.album_name,
+                    images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0,
+                mbid: track.mbid
+            }));
+
+            // Create modal and update process
+            await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+            const process = activeDownloadProcesses[playlistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = batchId;
+                subscribeToDownloadBatch(batchId);
+                const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                // Start polling for status updates
+                startModalDownloadPolling(playlistId);
+                console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz modal with polling`);
+                return true;
+            }
+            return false;
+        } else if (playlistId.startsWith('listenbrainz_')) {
+            // ListenBrainz download from discovery modal - get from backend state
+            const mbid = playlistId.replace('listenbrainz_', '');
+            console.log(`💧 [REHYDRATE] ListenBrainz download - fetching state for MBID: ${mbid}`);
+
+            try {
+                // Fetch ListenBrainz state from backend
+                const stateResponse = await fetch(`/api/listenbrainz/state/${mbid}`);
+                if (!stateResponse.ok) {
+                    console.log(`⚠️ [REHYDRATE] Failed to fetch ListenBrainz state`);
+                    return false;
+                }
+
+                const stateData = await stateResponse.json();
+                if (!stateData || !stateData.discovery_results) {
+                    console.log(`⚠️ [REHYDRATE] No discovery results in ListenBrainz state`);
+                    return false;
+                }
+
+                // Convert discovery results to Spotify tracks
+                const spotifyTracks = stateData.discovery_results
+                    .filter(result => result.spotify_data)
+                    .map(result => {
+                        const track = result.spotify_data;
+                        // Ensure artists is in proper Spotify format: [{name: ...}]
+                        let artistsArray = [];
+                        if (track.artists && Array.isArray(track.artists)) {
+                            artistsArray = track.artists.map(artist => {
+                                if (typeof artist === 'string') {
+                                    return { name: artist };
+                                } else if (artist && artist.name) {
+                                    return { name: artist.name };
+                                } else {
+                                    return { name: String(artist || 'Unknown Artist') };
+                                }
+                            });
+                        } else if (track.artists && typeof track.artists === 'string') {
+                            artistsArray = [{ name: track.artists }];
+                        } else {
+                            artistsArray = [{ name: 'Unknown Artist' }];
+                        }
+                        return {
+                            id: track.id,
+                            name: track.name,
+                            artists: artistsArray,
+                            album: track.album || { name: 'Unknown Album', images: [] },
+                            duration_ms: track.duration_ms || 0,
+                            external_urls: track.external_urls || {}
+                        };
+                    });
+
+                if (spotifyTracks.length === 0) {
+                    console.log(`⚠️ [REHYDRATE] No Spotify tracks in ListenBrainz discovery results`);
+                    return false;
+                }
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks from ListenBrainz state`);
+
+                // Create modal and update process
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz download modal with polling`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching ListenBrainz state:`, error);
+                return false;
+            }
+        } else {
+            console.error(`❌ [REHYDRATE] Unknown discover playlist type: ${playlistId}`);
+            return false;
+        }
+
+        // Fetch tracks from API
+        console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+            console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
+            return false;
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks) {
+            console.error(`❌ [REHYDRATE] Invalid track data:`, data);
+            return false;
+        }
+
+        const tracks = data.tracks;
+        console.log(`✅ [REHYDRATE] Retrieved ${tracks.length} tracks`);
+
+        // Transform tracks to Spotify format
+        const spotifyTracks = tracks.map(track => {
+            let spotifyTrack;
+            if (track.track_data_json) {
+                spotifyTrack = track.track_data_json;
+            } else {
+                spotifyTrack = {
+                    id: track.spotify_track_id,
+                    name: track.track_name,
+                    artists: [{ name: track.artist_name }],
+                    album: {
+                        name: track.album_name,
+                        images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                };
+            }
+            if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+                spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+            }
+            return spotifyTrack;
+        });
+
+        // Create the modal
+        await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+        // Update process with batch info
+        const process = activeDownloadProcesses[playlistId];
+        if (process) {
+            process.status = 'running';
+            process.batchId = batchId;
+            subscribeToDownloadBatch(batchId);
+
+            // Update button states
+            const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            // Start polling for status updates
+            startModalDownloadPolling(playlistId);
+
+            // Don't hide the modal - user clicked to open it
+            console.log(`✅ [REHYDRATE] Successfully rehydrated modal for ${downloadData.name} with polling`);
+            return true;
+        } else {
+            console.error(`❌ [REHYDRATE] Failed to find rehydrated process for ${playlistId}`);
+            return false;
+        }
+
+    } catch (error) {
+        console.error(`❌ [REHYDRATE] Error rehydrating discover download modal:`, error);
+        return false;
+    }
+}
+
+// Relocated from discover.js: the LB sync modal's entry point. The body moved
+// to window.openLbPlaylistDiscovery (parameterized by tracks) during the React
+// port; this keeps the original name + cache sourcing for sync-listenbrainz.
+async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
+    const tracks = listenbrainzTracksCache[identifier];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks to download', 'error');
+        return;
+    }
+    await window.openLbPlaylistDiscovery(identifier, title, tracks);
+}

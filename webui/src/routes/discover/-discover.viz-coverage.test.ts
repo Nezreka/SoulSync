@@ -73,7 +73,10 @@ import {
  * against the whole constant is a real check, because a mutation makes the
  * lookup fail while discover.js still holds the true string.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 
 describe('copy and endpoints still match discover.js', () => {
   it('keeps the map’s loading and search strings', () => {

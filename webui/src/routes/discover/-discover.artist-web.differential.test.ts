@@ -58,7 +58,10 @@ import {
  * NaN, the movement comparison is false, and there is still no movement. It is
  * defensive, not load-bearing.
  */
-const SOURCE = readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8');
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+  'utf8',
+);
 
 // ── A minimal graphology ─────────────────────────────────────────────────────
 

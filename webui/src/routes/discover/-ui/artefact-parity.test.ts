@@ -30,8 +30,10 @@ const UI = resolve(process.cwd(), 'src/routes/discover/-ui');
 
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 const JS =
-  readFileSync(resolve(process.cwd(), 'static/discover.js'), 'utf8') +
-  readFileSync(resolve(process.cwd(), 'static/discover-section-controller.js'), 'utf8');
+  readFileSync(
+    resolve(process.cwd(), 'src/routes/discover/__fixtures__/-vanilla-discover.js'),
+    'utf8',
+  ) + readFileSync(resolve(process.cwd(), 'static/discover-section-controller.js'), 'utf8');
 const CSS = readdirSync(resolve(process.cwd(), 'static'))
   .filter((f) => f.endsWith('.css'))
   .map((f) => readFileSync(resolve(process.cwd(), 'static', f), 'utf8'))
