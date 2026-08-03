@@ -8,7 +8,7 @@
  * rather than an accident.
  */
 
-import type { CacheHealthScore, CacheHealthStats, RepairJob } from './-tools.types';
+import type { CacheHealthScore, CacheHealthStats, RepairJob, RepairJobRun } from './-tools.types';
 
 // ── Duplicate "Keep Best" ranking ────────────────────────────────────────────
 //
@@ -524,4 +524,93 @@ export function metadataCacheCardCount(bucket: Record<string, number> | null | u
   return (
     (counts.spotify || 0) + (counts.itunes || 0) + (counts.deezer || 0) + (counts.beatport || 0)
   );
+}
+
+// ── Job card meta + settings ─────────────────────────────────────────────────
+
+/**
+ * The `metaParts` line under a job's description, joined with ' · ' by the card.
+ *
+ * From `loadRepairJobs`. Note the two different "nothing yet" answers: Last is
+ * 'Never', but Next is 'Pending' when the job is enabled and '-' when it isn't —
+ * a disabled job has no next run to wait for.
+ */
+export function repairJobMeta(
+  job: Pick<RepairJob, 'enabled' | 'next_run' | 'last_run'>,
+  now: number = Date.now(),
+): string[] {
+  const parts: string[] = [];
+  parts.push('Last: ' + (job.last_run ? formatCacheAge(job.last_run.finished_at, now) : 'Never'));
+  parts.push(
+    'Next: ' + (job.next_run ? formatCacheAge(job.next_run, now) : job.enabled ? 'Pending' : '-'),
+  );
+  if (job.last_run) {
+    parts.push(`Scanned: ${(job.last_run.items_scanned || 0).toLocaleString()}`);
+    if (job.last_run.auto_fixed) parts.push(`Fixed: ${job.last_run.auto_fixed}`);
+    if (job.last_run.duration_seconds) {
+      parts.push(`${job.last_run.duration_seconds.toFixed(1)}s`);
+    }
+  }
+  return parts;
+}
+
+export type RepairSettingInput =
+  | { kind: 'section'; title: string }
+  | { kind: 'select'; options: string[] }
+  | { kind: 'checkbox' }
+  | { kind: 'number'; allowNegative: boolean }
+  | { kind: 'text' };
+
+/**
+ * How one settings row renders. From the `settingsRows` map in `loadRepairJobs`.
+ *
+ * The negative case is real: a number setting whose current value is below zero
+ * gets no `min`, because some thresholds (e.g. a dB offset) are legitimately
+ * negative and clamping them at 0 would make them un-editable.
+ */
+export function repairSettingInput(
+  key: string,
+  value: unknown,
+  options?: unknown[] | null,
+): RepairSettingInput {
+  if (isRepairSettingSection(key)) return { kind: 'section', title: String(value) };
+  if (Array.isArray(options) && options.length) {
+    return { kind: 'select', options: options.map((option) => String(option)) };
+  }
+  if (typeof value === 'boolean') return { kind: 'checkbox' };
+  if (typeof value === 'number') return { kind: 'number', allowNegative: value < 0 };
+  return { kind: 'text' };
+}
+
+/** `saveRepairJobSettings` coerces 'true'/'false' text back to booleans. */
+export function coerceRepairSettingValue(raw: string): string | boolean {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
+}
+
+// ── History ──────────────────────────────────────────────────────────────────
+
+export type RepairHistoryStatus = 'success' | 'error' | 'running';
+
+/** From `loadRepairHistory`. Anything that is neither completed nor failed —
+ *  including a run still in flight — shows as 'running'. */
+export function repairHistoryStatusClass(status: string | null | undefined): RepairHistoryStatus {
+  if (status === 'completed') return 'success';
+  if (status === 'failed') return 'error';
+  return 'running';
+}
+
+/** The stat pills on a history row; scanned is always shown, the rest only when
+ *  non-zero. */
+export function repairHistoryStats(
+  run: Pick<RepairJobRun, 'items_scanned' | 'findings_created' | 'auto_fixed' | 'errors'>,
+): Array<{ kind: string; count: number; label: string }> {
+  const stats = [{ kind: '', count: run.items_scanned || 0, label: 'scanned' }];
+  if (run.findings_created) {
+    stats.push({ kind: 'findings', count: run.findings_created, label: 'findings' });
+  }
+  if (run.auto_fixed) stats.push({ kind: 'fixed', count: run.auto_fixed, label: 'fixed' });
+  if (run.errors) stats.push({ kind: 'errors', count: run.errors, label: 'errors' });
+  return stats;
 }

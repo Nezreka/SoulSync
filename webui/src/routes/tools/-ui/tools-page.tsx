@@ -21,6 +21,7 @@ import {
   ManualLibraryMatchCard,
   MetadataCacheCard,
 } from './launcher-cards';
+import { MaintenanceHero } from './maintenance-hero';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
 import { ToolsSection } from './tool-card';
@@ -51,6 +52,8 @@ export function ToolsPage() {
           </p>
         </div>
       </div>
+
+      <MaintenanceHero />
 
       <ToolsSection title="Database & Scanning">
         <DbUpdaterCard />
