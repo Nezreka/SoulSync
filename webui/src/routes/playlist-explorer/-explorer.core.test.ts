@@ -4,6 +4,7 @@ import type { ExplorerArtist, MirroredPlaylist } from './-explorer.types';
 
 import {
   artistHasSelection,
+  chunkArtistRows,
   clampExplorerZoom,
   EXPLORER_MAX_ZOOM,
   EXPLORER_MIN_ZOOM,
@@ -247,6 +248,15 @@ describe('the tree shape', () => {
     expect(planArtistRows(6)).toEqual([2, 3, 1]);
     expect(planArtistRows(14)).toEqual([2, 3, 4, 5]);
     expect(planArtistRows(15)).toEqual([2, 3, 4, 5, 1]);
+  });
+
+  it('cuts the artists into those rows, in order', () => {
+    expect(chunkArtistRows(['a', 'b', 'c', 'd', 'e', 'f'])).toEqual([
+      ['a', 'b'],
+      ['c', 'd', 'e'],
+      ['f'],
+    ]);
+    expect(chunkArtistRows([])).toEqual([]);
   });
 
   it('conserves the artist count across the plan', () => {

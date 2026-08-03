@@ -204,6 +204,17 @@ export function planArtistRows(artistCount: number): number[] {
   return rows;
 }
 
+/** planArtistRows applied to the artists themselves — the rendered rows. */
+export function chunkArtistRows<T>(items: T[]): T[][] {
+  const rows: T[][] = [];
+  let offset = 0;
+  for (const size of planArtistRows(items.length)) {
+    rows.push(items.slice(offset, offset + size));
+    offset += size;
+  }
+  return rows;
+}
+
 /** :470 — real Spotify id when there is one, else a positional stand-in. */
 export function explorerAlbumNodeId(
   album: ExplorerAlbum,
