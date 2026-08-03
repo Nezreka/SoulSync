@@ -233,7 +233,17 @@ export function ArtistDetailPage() {
       name: payload.artist?.name ?? null,
       source: payload.discography?.source ?? payload.artist?.source ?? null,
     });
-    return clearVanillaArtist;
+    // Repaint the sidebar breadcrumb: shell-bridge paints it on the page
+    // CHANGE, which happens before this payload lands, so "Library / <Artist>"
+    // would never appear on a React-native arrival (a library card is a plain
+    // <a href> through the router — nothing calls navigateToArtistDetail,
+    // which is what used to set the name early enough).
+    window._updateSidebarLibraryBreadcrumb?.();
+    return () => {
+      clearVanillaArtist();
+      // ...and back to a plain "Library" on the way out.
+      window._updateSidebarLibraryBreadcrumb?.();
+    };
   }, [payload]);
 
   /** Non-fatal: the page still renders, but the vanilla warned about it. */
