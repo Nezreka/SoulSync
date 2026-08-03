@@ -211,6 +211,19 @@ export interface DiscogEntry {
 }
 
 /**
+ * The body POST /api/artist/<id>/download-discography accepts.
+ *
+ * `source` is optional because the playlist explorer, which streams the SAME
+ * endpoint, sends per-album sources only — it has no batch-level source to
+ * name (pages-extra.js:820-828).
+ */
+export interface DiscographyDownloadPayload {
+  albums: { id: unknown; name: string; artist_name: string; source: string | null }[];
+  artist_name: string;
+  source?: string | null;
+}
+
+/**
  * The batch payload (855-933): entries sorted by track count DESC so Deluxe /
  * expanded editions process first and standard editions dedupe against them;
  * each gap-fill entry carries ITS source (#1067).
@@ -218,11 +231,7 @@ export interface DiscogEntry {
 export function buildDiscographyPayload(
   entries: DiscogEntry[],
   artist: { id: unknown; name: string; source: string | null },
-): {
-  albums: { id: unknown; name: string; artist_name: string; source: string | null }[];
-  artist_name: string;
-  source: string | null;
-} {
+): DiscographyDownloadPayload & { source: string | null } {
   const sourceForBatch = (artist.source || '').toString().toLowerCase() || null;
   const sorted = [...entries].sort((a, b) => b.tracks - a.tracks);
   return {
@@ -264,7 +273,7 @@ export interface DiscogAlbumUpdate {
 /** POST + NDJSON stream (936-986): per-album updates, then the completion line. */
 export async function streamDiscographyDownload(
   artistId: unknown,
-  payload: ReturnType<typeof buildDiscographyPayload>,
+  payload: DiscographyDownloadPayload,
   onAlbum: (update: DiscogAlbumUpdate) => void,
   onComplete: (totals: { total_added: number; total_skipped: number }) => void,
 ): Promise<void> {
