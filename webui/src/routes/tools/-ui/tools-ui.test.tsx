@@ -312,13 +312,19 @@ describe('ToolsPage shell', () => {
     await flush();
   });
 
-  it('places each launcher card in its vanilla section', async () => {
+  it('places each card in its vanilla section, in order', async () => {
     const { container } = render(<ToolsPage />);
     const sections = [...container.querySelectorAll('.tools-section')].map((section) => ({
       title: section.querySelector('.tools-section-title')?.textContent,
       cards: [...section.querySelectorAll('.tool-card')].map((card) => card.id),
     }));
+    // Section order and per-section card order both come from index.html.
+    // Cards land here a wave at a time; this list grows with them.
     expect(sections).toEqual([
+      {
+        title: 'Database & Scanning',
+        cards: ['db-updater-card', 'reconcile-ids-card', 'duplicate-cleaner-card'],
+      },
       {
         title: 'Metadata & Cache',
         cards: ['discovery-pool-card', 'manual-library-match-card'],

@@ -22,6 +22,7 @@ import {
   ManualLibraryMatchCard,
   MetadataCacheCard,
 } from './launcher-cards';
+import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { ToolsSection } from './tool-card';
 
 export function ToolsPage() {
@@ -50,6 +51,12 @@ export function ToolsPage() {
           </p>
         </div>
       </div>
+
+      <ToolsSection title="Database & Scanning">
+        <DbUpdaterCard />
+        <ReconcileIdsCard />
+        <DuplicateCleanerCard />
+      </ToolsSection>
 
       <ToolsSection title="Metadata & Cache">
         <DiscoveryPoolCard />
