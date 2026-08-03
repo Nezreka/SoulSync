@@ -96,8 +96,6 @@ declare global {
      *   - currentMusicSourceName decides which provider id makes an artist
      *     watchable
      */
-    openArtistExportModal?: () => void;
-    openWatchAllUnwatchedModal?: () => void;
     _handoffLibrarySearchToEnhancedSearch?: (query: string) => void;
     showLibraryDownloadsSection?: () => void;
     currentMusicSourceName?: string;
@@ -124,8 +122,6 @@ declare global {
     startListenBrainzPlaylistSync?: (identifier: string) => void | Promise<void>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
-    /** library.js — the Download Discography modal. */
-    openDiscographyModal?: () => void;
     /** shared-helpers.js / core.js — similar-artists section + its abort. */
     loadSimilarArtists?: (artistName: string) => void;
     cancelSimilarArtistsLoad?: () => void;
@@ -143,6 +139,8 @@ declare global {
      * element itself, because they render progress onto it.
      */
     openAlbumArtPicker?: (album: unknown) => void;
+    /** library.js's shared page state, exported for the React artist-detail page. */
+    artistDetailPageState?: { enhancedData?: unknown; [key: string]: unknown };
     openManualMatchModal?: (
       entityType: string,
       entityId: unknown,
@@ -158,9 +156,6 @@ declare global {
       artistName: string,
       artistId: unknown,
     ) => void;
-    writeAlbumTags?: (albumId: unknown) => void;
-    analyzeAlbumReplayGain?: (albumId: unknown, button: HTMLElement) => void;
-    showReorganizeModal?: (albumId: unknown) => void;
     redownloadLibraryAlbum?: (album: unknown, artistName: string, button: HTMLElement) => void;
     deleteLibraryAlbum?: (albumId: unknown) => void;
     showReportIssueModal?: (
@@ -176,28 +171,11 @@ declare global {
      * popover keeps its underscore name: it is a private helper being called
      * across the boundary until the popover itself is ported.
      */
-    showTagPreview?: (trackId: unknown) => void;
-    analyzeTrackReplayGain?: (trackId: unknown, button: HTMLElement) => void;
     showTrackSourceInfo?: (track: unknown, button: HTMLElement) => void;
-    openReidentifyModal?: (
-      trackId: unknown,
-      trackTitle: string,
-      artistName: string,
-      albumTitle: string,
-      albumArt: string,
-    ) => void;
     showTrackRedownloadModal?: (track: unknown, album: unknown) => void;
     deleteLibraryTrack?: (trackId: unknown, albumId: unknown) => void;
     openMissingTrackManageModal?: (track: unknown, album: unknown) => void;
     _showMobileTrackActions?: (track: unknown, album: unknown) => void;
-    /**
-     * library.js — the batch tag-preview modal. Safe to call across the
-     * boundary because it takes the track ids explicitly rather than reading
-     * the vanilla's selection state.
-     */
-    showBatchTagPreview?: (trackIds: unknown[], albumId: unknown) => void;
-    /** library.js — polls the batch ReplayGain job this page just started. */
-    _pollBatchRgStatus?: () => void;
     /** media-player.js — the play queue. */
     addToQueue?: (payload: unknown) => void;
     playNext?: (payload: unknown) => void;
@@ -402,15 +380,24 @@ declare global {
      * history.back() is unreliable through the SPA router.
      */
     _labelDetailReturnTo?: string;
-    /** library.js — wires the hero watchlist button to an identity. */
-    initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
     /** downloads.js — the Add to Wishlist modal, opened from a release card. */
     openAddToWishlistModal?: (
       album: unknown,
       artist: unknown,
       tracks: unknown[],
       albumType: unknown,
+      /** Per-track ownership map; the missing-track flow passes {name: false}. */
+      ownedMap?: Record<string, boolean>,
     ) => Promise<void> | void;
+    /** downloads.js — "Download Now" inside the wishlist modal just opened. */
+    handleWishlistDownloadNow?: () => void;
+    /** shared-helpers.js — records the album under Active Artist Downloads. */
+    registerArtistDownload?: (
+      artist: unknown,
+      album: unknown,
+      virtualPlaylistId: string,
+      albumType: string,
+    ) => void;
     /** shared-helpers.js — backfills per-track ownership behind the modal. */
     lazyLoadTrackOwnership?: (
       artistName: string,

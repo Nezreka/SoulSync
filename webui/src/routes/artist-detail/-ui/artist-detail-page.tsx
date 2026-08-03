@@ -263,13 +263,6 @@ export function ArtistDetailPage() {
     window.checkArtistEnhanceEligibility?.(payload.artist?.id);
   }, [payload, sourceOnly]);
 
-  /** The watchlist is keyed on the CANONICAL Spotify identity where one exists. */
-  useEffect(() => {
-    if (!payload) return;
-    const identity = watchlistIdentity(payload);
-    if (identity) window.initializeLibraryWatchlistButton?.(identity.id, identity.name);
-  }, [payload]);
-
   const failed = query.isError || query.data?.success === false;
   const errorMessage =
     (query.error as Error | undefined)?.message ||
@@ -367,6 +360,7 @@ export function ArtistDetailPage() {
         streamCounts={stream.counts}
         streamCompleted={stream.completed}
         enrichment={payload.enrichment_coverage}
+        watchlist={watchlistIdentity(payload)}
       />
 
       <div className="artist-detail-content">
@@ -387,6 +381,7 @@ export function ArtistDetailPage() {
                 data={enhancedState.data}
                 status={enhancedState.status}
                 isAdmin={Boolean(profile?.isAdmin)}
+                onReload={enhancedState.reload}
               />
             </div>
           ) : (

@@ -13,6 +13,7 @@ import {
 import { getAlbumTrackRows } from '../-artist-detail.enhanced-album';
 import { syncVanillaEnhancedData, syncVanillaSelection } from '../-artist-detail.vanilla-state';
 import { AlbumMetaRow } from './album-meta-row';
+import { ArtistMetaPanel } from './artist-meta-panel';
 import { EnhancedBulkBar } from './enhanced-bulk-bar';
 import { EnhancedTrackTable } from './enhanced-track-table';
 import { ExpandedAlbumHeader } from './expanded-album-header';
@@ -23,6 +24,8 @@ interface Props {
   status: { loading: boolean; error: string };
   /** Drives the admin-only action row inside each expanded album. */
   isAdmin: boolean;
+  /** Re-fetch the payload (Sync found changes, reorganize batch finished). */
+  onReload: () => void;
 }
 
 /**
@@ -33,13 +36,20 @@ interface Props {
  * bucket for any other record_type, and the vanilla ignored it the same way —
  * an album typed "live" is grouped and then never shown.
  */
-export function EnhancedView({ data, status, isAdmin }: Props) {
+export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
   /**
    * Selection is page-level and shared across albums, as the vanilla's single
    * artistDetailPageState.selectedTracks was: the bulk bar acts on everything
    * ticked, and expanding a second album is a normal way to build that set.
    */
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  /**
+   * The meta panel patches data.artist IN PLACE (save/match/enrich fold into
+   * the loaded payload, as the vanilla's updateLocalEnhancedData did); this
+   * counter is what re-renders from the mutated object.
+   */
+  const [, setArtistVersion] = useState(0);
 
   /**
    * The album and track actions that are still vanilla read this payload for
@@ -83,8 +93,31 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
     }
   };
 
+  /**
+   * A deleted album leaves the payload and takes its ticked tracks with it
+   * (deleteLibraryAlbum's state cleanup, library.js:4045-4055). The payload is
+   * a prop, so the removal mutates it in place like applyBatch does; the
+   * selection setState is what re-renders — always called, even when nothing
+   * was ticked, so the section drops the album immediately.
+   */
+  const removeAlbum = (albumId: unknown) => {
+    const albums = data.albums ?? [];
+    const album = albums.find((a) => String(a.id) === String(albumId));
+    data.albums = albums.filter((a) => String(a.id) !== String(albumId));
+    const next = new Set(selected);
+    for (const track of album?.tracks ?? []) next.delete(String(track.id));
+    setSelected(next);
+  };
+
   return (
     <>
+      <ArtistMetaPanel
+        artist={(data.artist ?? {}) as import('../-artist-detail.types').ArtistInfo}
+        albums={data.albums ?? []}
+        isAdmin={isAdmin}
+        onReload={onReload}
+        onArtistPatched={() => setArtistVersion((v) => v + 1)}
+      />
       <EnhancedStatsBar data={data} />
       {ENHANCED_SECTIONS.map(({ type, label }) => {
         const albums = grouped[type] ?? [];
@@ -101,6 +134,8 @@ export function EnhancedView({ data, status, isAdmin }: Props) {
             isAdmin={isAdmin}
             selected={selected}
             onSelectedChange={setSelected}
+            onAlbumDeleted={removeAlbum}
+            onReload={onReload}
           />
         );
       })}
@@ -146,6 +181,8 @@ function EnhancedSection({
   isAdmin,
   selected,
   onSelectedChange,
+  onAlbumDeleted,
+  onReload,
 }: {
   type: string;
   label: string;
@@ -154,6 +191,8 @@ function EnhancedSection({
   isAdmin: boolean;
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
+  onAlbumDeleted: (albumId: unknown) => void;
+  onReload: () => void;
 }) {
   return (
     <div className="enhanced-section">
@@ -172,6 +211,8 @@ function EnhancedSection({
             isAdmin={isAdmin}
             selected={selected}
             onSelectedChange={onSelectedChange}
+            onAlbumDeleted={() => onAlbumDeleted(album.id)}
+            onReload={onReload}
             key={String(album.id)}
           />
         ))}
@@ -199,6 +240,8 @@ function EnhancedAlbumWrapper({
   isAdmin,
   selected,
   onSelectedChange,
+  onAlbumDeleted,
+  onReload,
 }: {
   album: EnhancedAlbum;
   type: string;
@@ -206,6 +249,8 @@ function EnhancedAlbumWrapper({
   isAdmin: boolean;
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
+  onAlbumDeleted: () => void;
+  onReload: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -282,6 +327,9 @@ function EnhancedAlbumWrapper({
                 artistId={artist?.id}
                 artistName={String(artist?.name ?? '')}
                 isAdmin={isAdmin}
+                onArtApplied={(url) => setAlbum((current) => ({ ...current, thumb_url: url }))}
+                onAlbumDeleted={onAlbumDeleted}
+                onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
               />
               <AlbumMetaRow
                 album={album}
@@ -302,6 +350,14 @@ function EnhancedAlbumWrapper({
                     ),
                   }))
                 }
+                onTrackDeleted={(trackId) =>
+                  setAlbum((current) => ({
+                    ...current,
+                    tracks: (current.tracks ?? []).filter((t) => String(t.id) !== String(trackId)),
+                  }))
+                }
+                onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
+                onReload={onReload}
               />
             </>
           ) : null}

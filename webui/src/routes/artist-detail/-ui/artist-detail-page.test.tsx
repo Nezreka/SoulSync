@@ -26,13 +26,24 @@ let streamFrames: string[] = [];
 let gapFillBody: unknown = { success: true, gaps: {} };
 let enhancedBody: unknown = { success: true, artist: { id: 42, name: 'Aphex Twin' }, albums: [] };
 
-function stubDetail(body: unknown, status = 200) {
+function stubDetail(
+  body: unknown,
+  extra?: (url: string, requestBody: Record<string, unknown> | null) => unknown,
+  status = 200,
+) {
   requested = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       requested.push(url);
+      const extraResult = extra?.(url, init?.body ? JSON.parse(String(init.body)) : null);
+      if (extraResult) {
+        return new Response(JSON.stringify(extraResult), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.includes('/enhanced')) {
         return new Response(JSON.stringify(enhancedBody), {
           status: 200,
@@ -95,7 +106,6 @@ beforeEach(() => {
   window.loadSimilarArtists = vi.fn();
   window.cancelSimilarArtistsLoad = vi.fn();
   window.checkArtistEnhanceEligibility = vi.fn();
-  window.initializeLibraryWatchlistButton = vi.fn();
   window.observeLazyBackgrounds = vi.fn();
   streamFrames = [];
   gapFillBody = { success: true, gaps: {} };
@@ -164,14 +174,25 @@ describe('fire-and-forget side effects', () => {
   });
 
   it('wires the watchlist button to the canonical Spotify identity', async () => {
-    stubDetail({
-      ...LIBRARY,
-      spotify_artist: { spotify_artist_id: 'sp9', spotify_artist_name: 'Aphex Twin' },
-    });
+    // Local now (initializeLibraryWatchlistButton's port): the hero checks the
+    // status itself and reflects it on the button.
+    stubDetail(
+      {
+        ...LIBRARY,
+        spotify_artist: { spotify_artist_id: 'sp9', spotify_artist_name: 'Aphex Twin' },
+      },
+      (url, body) =>
+        url === '/api/watchlist/check' && body?.artist_id === 'sp9'
+          ? { success: true, is_watching: true }
+          : null,
+    );
     renderPage();
     await waitFor(() =>
-      expect(window.initializeLibraryWatchlistButton).toHaveBeenCalledWith('sp9', 'Aphex Twin'),
+      expect(document.querySelector('.watchlist-text')?.textContent).toBe('Watching...'),
     );
+    expect(
+      document.getElementById('library-artist-watchlist-btn')?.classList.contains('watching'),
+    ).toBe(true);
   });
 
   it('warns about a provider error but still renders the page', async () => {

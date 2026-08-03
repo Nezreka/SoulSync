@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { EnhancedData } from './-artist-detail.enhanced';
 
 export interface EnhancedState {
   data: EnhancedData | null;
   status: { loading: boolean; error: string };
+  /** Explicit re-fetch: Sync found changes, or a reorganize batch finished. */
+  reload: () => void;
 }
 
-const IDLE: EnhancedState = { data: null, status: { loading: false, error: '' } };
+const IDLE = { data: null, status: { loading: false, error: '' } };
 
 /**
  * Loads /api/library/artist/<id>/enhanced (loadEnhancedViewData, library.js:2857).
@@ -23,8 +25,15 @@ const IDLE: EnhancedState = { data: null, status: { loading: false, error: '' } 
  * forever, or resolving first and passing by luck.
  */
 export function useEnhancedData(artistId: unknown, enabled: boolean): EnhancedState {
-  const [state, setState] = useState<EnhancedState>(IDLE);
+  const [state, setState] = useState<Omit<EnhancedState, 'reload'>>(IDLE);
   const attemptedRef = useRef<unknown>(undefined);
+  const [fetchSeq, setFetchSeq] = useState(0);
+
+  /** Clears the one-attempt guard so the effect runs again for this artist. */
+  const reload = useCallback(() => {
+    attemptedRef.current = undefined;
+    setFetchSeq((seq) => seq + 1);
+  }, []);
 
   /**
    * A new artist invalidates the payload; kept across a Standard/Enhanced
@@ -72,7 +81,7 @@ export function useEnhancedData(artistId: unknown, enabled: boolean): EnhancedSt
     })();
 
     return () => controller.abort();
-  }, [artistId, enabled]);
+  }, [artistId, enabled, fetchSeq]);
 
-  return state;
+  return { ...state, reload };
 }

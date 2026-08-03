@@ -6,6 +6,8 @@ import {
   bulkEditUpdates,
   EMPTY_BULK_EDIT,
 } from '../-artist-detail.enhanced';
+import { pollBatchRgStatus } from '../-artist-detail.tags-rg';
+import { BatchTagPreviewModal } from './batch-tag-preview-modal';
 import { BodyPortal } from './portal';
 
 interface Props {
@@ -25,6 +27,7 @@ interface Props {
  */
 export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props) {
   const [editing, setEditing] = useState(false);
+  const [tagging, setTagging] = useState(false);
   const trackIds = [...selected];
   const visible = isAdmin && trackIds.length > 0;
 
@@ -41,7 +44,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
         return;
       }
       window.showToast?.(`ReplayGain analysis started for ${trackIds.length} tracks…`, 'info');
-      window._pollBatchRgStatus?.();
+      pollBatchRgStatus();
     } catch {
       window.showToast?.('Failed to start batch ReplayGain analysis', 'error');
     }
@@ -71,7 +74,7 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
             className="btn btn--sm btn--secondary enhanced-bulk-btn tag-write"
             // The vanilla modal takes the ids explicitly, so it works across
             // the boundary without reading the old selection state.
-            onClick={() => window.showBatchTagPreview?.(trackIds, null)}
+            onClick={() => setTagging(true)}
           >
             Write Tags
           </button>
@@ -101,6 +104,13 @@ export function EnhancedBulkBar({ selected, isAdmin, onClear, onEdited }: Props)
             onEdited(trackIds, updates);
             onClear();
           }}
+        />
+      ) : null}
+      {tagging ? (
+        <BatchTagPreviewModal
+          trackIds={trackIds}
+          albumTitle={null}
+          onClose={() => setTagging(false)}
         />
       ) : null}
     </BodyPortal>

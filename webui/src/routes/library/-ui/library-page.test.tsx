@@ -83,8 +83,6 @@ const lastQuery = () => new URL(libraryCalls().at(-1)!, 'http://x').searchParams
 beforeEach(() => {
   window.SoulSyncWebShellBridge = createShellBridge();
   window.showLibraryDownloadsSection = vi.fn();
-  window.openArtistExportModal = vi.fn();
-  window.openWatchAllUnwatchedModal = vi.fn();
   window._handoffLibrarySearchToEnhancedSearch = vi.fn();
   window.showToast = vi.fn();
   window.updateWatchlistCount = vi.fn();

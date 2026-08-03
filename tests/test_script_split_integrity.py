@@ -44,6 +44,7 @@ SPLIT_MODULES = [
     "sync-services.js",
     "api-monitor.js",
     "library.js",
+    "manual-library-match.js",
     "beatport-ui.js",
     "enrichment.js",
     "stats-automations.js",

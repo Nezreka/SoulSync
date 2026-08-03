@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnhancedAlbum } from '../-artist-detail.enhanced';
@@ -27,6 +27,9 @@ function renderHeader(album: EnhancedAlbum = ALBUM, isAdmin = true) {
       artistId={42}
       artistName="Aphex Twin"
       isAdmin={isAdmin}
+      onArtApplied={vi.fn()}
+      onAlbumDeleted={vi.fn()}
+      onAlbumPatched={vi.fn()}
     />,
   );
 }
@@ -35,10 +38,6 @@ const ACTIONS = [
   'openAlbumArtPicker',
   'openManualMatchModal',
   'runEnrichment',
-  'writeAlbumTags',
-  'analyzeAlbumReplayGain',
-  'showReorganizeModal',
-  'redownloadLibraryAlbum',
   'deleteLibraryAlbum',
   'showReportIssueModal',
 ] as const;
@@ -86,10 +85,22 @@ describe('the header body', () => {
     expect(document.querySelector('.enhanced-expanded-art')).not.toBeNull();
   });
 
-  it('opens the art picker from the cover', () => {
-    renderHeader();
-    fireEvent.click(document.querySelector('.enhanced-expanded-art-wrap') as HTMLElement);
-    expect(window.openAlbumArtPicker).toHaveBeenCalledWith(ALBUM);
+  it('opens the art picker from the cover', async () => {
+    // No longer a window bridge: the cover click mounts the local ArtPicker
+    // (openAlbumArtPicker's port), which fetches this album's options.
+    const fetchSpy = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ candidates: [] })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderHeader();
+      fireEvent.click(document.querySelector('.enhanced-expanded-art-wrap') as HTMLElement);
+      expect(await screen.findByText('Choose cover art')).toBeTruthy();
+      expect(String(fetchSpy.mock.calls[0][0])).toContain('/art-options');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -103,15 +114,25 @@ describe('match chips', () => {
   });
 
   it('opens the manual matcher for its own service', () => {
-    renderHeader();
-    fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
-    expect(window.openManualMatchModal).toHaveBeenCalledWith(
-      'album',
-      7,
-      'musicbrainz',
-      'SAW 85-92',
-      42,
+    // The chip now mounts the LOCAL match modal (auto-search stubs fetch),
+    // seeded with the album title as the default query.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_i: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(JSON.stringify({ success: true, results: [] })),
+      ),
     );
+    try {
+      renderHeader();
+      fireEvent.click(document.querySelectorAll('.enhanced-match-chip')[1]);
+      expect(screen.getByText('Match album on MusicBrainz')).toBeTruthy();
+      expect(
+        (document.querySelector('.enhanced-match-search-input') as HTMLInputElement).value,
+      ).toBe('SAW 85-92');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('does not let an ID BADGE click bubble into the row toggle', () => {
@@ -125,6 +146,9 @@ describe('match chips', () => {
           artistId={42}
           artistName="Aphex Twin"
           isAdmin
+          onArtApplied={vi.fn()}
+          onAlbumDeleted={vi.fn()}
+          onAlbumPatched={vi.fn()}
         />
       </div>,
     );
@@ -142,6 +166,9 @@ describe('match chips', () => {
           artistId={42}
           artistName="Aphex Twin"
           isAdmin
+          onArtApplied={vi.fn()}
+          onAlbumDeleted={vi.fn()}
+          onAlbumPatched={vi.fn()}
         />
       </div>,
     );
@@ -172,39 +199,148 @@ describe('admin actions', () => {
     fireEvent.click(document.querySelector('.enhanced-enrich-btn') as HTMLElement);
     expect(menu.className).toContain('visible');
 
-    fireEvent.click(document.querySelectorAll('.enhanced-enrich-menu-item')[0]);
-    expect(window.runEnrichment).toHaveBeenCalledWith(
-      'album',
-      7,
-      'spotify',
-      'SAW 85-92',
-      'Aphex Twin',
-      42,
+    // Picking a source fires the local enrichment request (no window bridge).
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, results: {} })),
     );
-    expect(menu.className).not.toContain('visible');
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      fireEvent.click(document.querySelectorAll('.enhanced-enrich-menu-item')[0]);
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/enrich');
+      expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toMatchObject({
+        entity_type: 'album',
+        entity_id: 7,
+        service: 'spotify',
+        name: 'SAW 85-92',
+        artist_name: 'Aphex Twin',
+        artist_id: 42,
+      });
+      expect(menu.className).not.toContain('visible');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('wires each album action to its own handler', () => {
     renderHeader();
+    // Write-tags is local now (writeAlbumTags's port): the fixture's tracks
+    // have no file_path, so it refuses instead of opening the batch modal.
+    window.showToast = vi.fn() as never;
     fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
-    expect(window.writeAlbumTags).toHaveBeenCalledWith(7);
+    expect(window.showToast).toHaveBeenCalledWith('No tracks with files in this album', 'error');
+    delete window.showToast;
 
+    // Reorganize is local now (showReorganizeModal's port): the button
+    // mounts the modal, which loads this album's metadata sources.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ sources: [] })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
     fireEvent.click(document.querySelector('.enhanced-reorganize-album-btn') as HTMLElement);
-    expect(window.showReorganizeModal).toHaveBeenCalledWith(7);
+    expect(document.getElementById('reorganize-modal-title')?.textContent).toBe(
+      'Reorganize: SAW 85-92',
+    );
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/reorganize/sources');
+    vi.unstubAllGlobals();
 
+    // Delete now opens the LOCAL two-option dialog (deleteLibraryAlbum's port).
     fireEvent.click(document.querySelector('.enhanced-delete-album-btn') as HTMLElement);
-    expect(window.deleteLibraryAlbum).toHaveBeenCalledWith(7);
+    expect(screen.getByText('Delete Album', { selector: 'h3' })).toBeTruthy();
   });
 
-  it('hands the BUTTON itself to the two actions that render progress on it', () => {
-    renderHeader();
-    const rg = document.querySelector('.enhanced-rg-album-btn') as HTMLElement;
-    fireEvent.click(rg);
-    expect(window.analyzeAlbumReplayGain).toHaveBeenCalledWith(7, rg);
+  it('opens the batch tag modal when the album has on-disk files', async () => {
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, tracks: [], server_type: null })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderHeader({
+        id: 7,
+        title: 'SAW 85-92',
+        tracks: [{ id: 1, file_path: '/music/a.flac' }, { id: 2 }],
+      });
+      fireEvent.click(document.querySelector('.enhanced-write-tags-album-btn') as HTMLElement);
+      expect(document.getElementById('batch-tag-preview-title')?.textContent).toBe(
+        'Write Tags — SAW 85-92',
+      );
+      // Only the track that actually has a file goes into the batch (5449).
+      await waitFor(() =>
+        expect(
+          fetchSpy.mock.calls.some(([u]) => String(u) === '/api/library/tracks/tag-preview-batch'),
+        ).toBe(true),
+      );
+      const call = fetchSpy.mock.calls.find(
+        ([u]) => String(u) === '/api/library/tracks/tag-preview-batch',
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ track_ids: [1] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-    const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
-    fireEvent.click(redownload);
-    expect(window.redownloadLibraryAlbum).toHaveBeenCalledWith(ALBUM, 'Aphex Twin', redownload);
+  it('runs album ReplayGain locally, disabling the button while it works', async () => {
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: false, error: 'no files' })),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.showToast = vi.fn() as never;
+    try {
+      renderHeader();
+      const rg = document.querySelector('.enhanced-rg-album-btn') as HTMLElement;
+      fireEvent.click(rg);
+      expect(rg.textContent).toBe('♫ Analyzing…');
+      expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/album/7/analyze-replaygain');
+      // A refused job re-enables the button via onDone.
+      await waitFor(() =>
+        expect(window.showToast).toHaveBeenCalledWith('ReplayGain: no files', 'error'),
+      );
+      await waitFor(() => expect(rg.textContent).toBe('♫ ReplayGain'));
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.showToast;
+    }
+  });
+
+  it('redownloads the album through its CANONICAL source (#911)', async () => {
+    // Local now: the flow fetches the tagged edition via /api/album/<id>/tracks
+    // and hands off to the shared Download Missing modal.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            album: { id: 'sp1', name: 'SAW 85-92' },
+            tracks: [{ id: 't1', name: 'Xtal' }],
+          }),
+        ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.openDownloadMissingModalForArtistAlbum = vi.fn() as never;
+    window.registerArtistDownload = vi.fn() as never;
+    try {
+      renderHeader();
+      const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
+      fireEvent.click(redownload);
+      expect(redownload.textContent).toBe('Loading...');
+      await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
+      const url = String(fetchSpy.mock.calls[0]?.[0]);
+      expect(url).toContain('/api/album/sp1/tracks');
+      expect(url).toContain('source=spotify');
+      const args = (window.openDownloadMissingModalForArtistAlbum as ReturnType<typeof vi.fn>).mock
+        .calls[0];
+      expect(args?.[0]).toBe('library_redownload_sp1');
+      expect(args?.[1]).toBe('[Aphex Twin] SAW 85-92');
+      expect(window.registerArtistDownload).toHaveBeenCalled();
+      await waitFor(() => expect(redownload.textContent).toBe('↻ Redownload'));
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.openDownloadMissingModalForArtistAlbum;
+      delete window.registerArtistDownload;
+    }
   });
 
   it('survives a handler that is not loaded rather than throwing', () => {

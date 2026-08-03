@@ -10,7 +10,9 @@ import { libraryArtistsQueryOptions, setArtistWatchlisted } from '../-library.ap
 import { readArtistsResponse, watchlistArtistId } from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
 import { Route } from '../route';
+import { ExportArtistsModal } from './export-modal';
 import { LibraryArtistCard } from './library-artist-card';
+import { WatchAllModal } from './watch-all-modal';
 
 const ALPHABET = ['all', ...'abcdefghijklmnopqrstuvwxyz'.split(''), '#'];
 
@@ -49,6 +51,9 @@ export function LibraryPage() {
   useLibraryChanged();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
+
+  const [exporting, setExporting] = useState(false);
+  const [watchingAll, setWatchingAll] = useState(false);
 
   // The input is local so typing stays responsive; the URL only catches up
   // after the debounce, exactly as the vanilla 300ms timer did.
@@ -187,11 +192,13 @@ export function LibraryPage() {
           type="button"
           className="library-watchlist-all-btn library-export-btn"
           title="Export artists — pick watchlist or whole library, as JSON / CSV / text"
-          onClick={() => window.openArtistExportModal?.()}
+          onClick={() => setExporting(true)}
         >
           <span className="watchlist-all-icon">⬇</span>
           <span className="watchlist-all-text">Export</span>
         </button>
+        {exporting ? <ExportArtistsModal onClose={() => setExporting(false)} /> : null}
+        {watchingAll ? <WatchAllModal onClose={() => setWatchingAll(false)} /> : null}
       </div>
 
       <div className="library-controls">
@@ -231,7 +238,7 @@ export function LibraryPage() {
           <button
             type="button"
             className={`library-watchlist-all-btn${search.watchlist === 'unwatched' ? '' : ' hidden'}`}
-            onClick={() => window.openWatchAllUnwatchedModal?.()}
+            onClick={() => setWatchingAll(true)}
           >
             <span className="watchlist-all-icon">👁️</span>
             <span className="watchlist-all-text">Watch All Unwatched</span>
