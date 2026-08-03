@@ -65,7 +65,6 @@ const titles = () =>
 
 const ACTIONS = [
   'showTrackSourceInfo',
-  'openReidentifyModal',
   'deleteLibraryTrack',
   'showReportIssueModal',
   'openManualMatchModal',
@@ -501,16 +500,27 @@ describe('row actions', () => {
     }
   });
 
-  it('re-identifies with the album art and title for context', () => {
-    renderTable({ ...ALBUM, title: 'SAW 85-92', thumb_url: 'cover.jpg' });
-    click('.enhanced-reidentify-btn');
-    expect(window.openReidentifyModal).toHaveBeenCalledWith(
-      1,
-      'Xtal',
-      'Aphex Twin',
-      'SAW 85-92',
-      'cover.jpg',
+  it('re-identifies with the album art and title for context', async () => {
+    // Local now (#889 port): ⇄ mounts the modal seeded with the row's filing,
+    // which loads the source tabs the moment it opens.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ sources: [] })),
     );
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      renderTable({ ...ALBUM, title: 'SAW 85-92', thumb_url: 'cover.jpg' });
+      click('.enhanced-reidentify-btn');
+      expect(document.getElementById('reid-hero-title')?.textContent).toBe('Xtal');
+      expect(document.getElementById('reid-hero-sub')?.textContent).toBe(
+        'Aphex Twin · currently in “SAW 85-92”',
+      );
+      await waitFor(() =>
+        expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/reidentify/sources'),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('manages a missing track from either role', () => {

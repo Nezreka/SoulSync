@@ -176,13 +176,6 @@ declare global {
      * across the boundary until the popover itself is ported.
      */
     showTrackSourceInfo?: (track: unknown, button: HTMLElement) => void;
-    openReidentifyModal?: (
-      trackId: unknown,
-      trackTitle: string,
-      artistName: string,
-      albumTitle: string,
-      albumArt: string,
-    ) => void;
     showTrackRedownloadModal?: (track: unknown, album: unknown) => void;
     deleteLibraryTrack?: (trackId: unknown, albumId: unknown) => void;
     openMissingTrackManageModal?: (track: unknown, album: unknown) => void;
@@ -391,8 +384,6 @@ declare global {
      * history.back() is unreliable through the SPA router.
      */
     _labelDetailReturnTo?: string;
-    /** library.js — wires the hero watchlist button to an identity. */
-    initializeLibraryWatchlistButton?: (artistId: unknown, artistName: string) => void;
     /** downloads.js — the Add to Wishlist modal, opened from a release card. */
     openAddToWishlistModal?: (
       album: unknown,

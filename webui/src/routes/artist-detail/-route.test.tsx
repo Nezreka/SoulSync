@@ -51,7 +51,6 @@ beforeEach(() => {
   window.loadSimilarArtists = vi.fn();
   window.cancelSimilarArtistsLoad = vi.fn();
   window.checkArtistEnhanceEligibility = vi.fn();
-  window.initializeLibraryWatchlistButton = vi.fn();
   window.observeLazyBackgrounds = vi.fn();
   stubDetail({
     success: true,

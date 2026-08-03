@@ -28,6 +28,7 @@ import { ManualMatchModal } from './manual-match-modal';
 import { MissingTrackManageModal } from './missing-track-modals';
 import { MobileTrackActions } from './mobile-track-actions';
 import { RedownloadModal } from './redownload-modal';
+import { ReidentifyModal } from './reidentify-modal';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
 import { SourceInfoPopover } from './source-info-popover';
 import { TagPreviewModal } from './tag-preview-modal';
@@ -81,6 +82,7 @@ export function EnhancedTrackTable({
   const [deleting, setDeleting] = useState<EnhancedTrack | null>(null);
   const [redownloading, setRedownloading] = useState<EnhancedTrack | null>(null);
   const [managingMissing, setManagingMissing] = useState<EnhancedTrack | null>(null);
+  const [reidentifying, setReidentifying] = useState<EnhancedTrack | null>(null);
   const rows = sortedTrackRows(getAlbumTrackRows(album), sort);
 
   if (rows.length === 0) {
@@ -185,6 +187,7 @@ export function EnhancedTrackTable({
               onTagPreview={() => setTagPreview(track)}
               onRedownload={() => setRedownloading(track)}
               onMissingManage={() => setManagingMissing(track)}
+              onReidentify={() => setReidentifying(track)}
             />
           ))}
         </tbody>
@@ -226,6 +229,16 @@ export function EnhancedTrackTable({
             if (fresh) onAlbumPatched(fresh);
           }}
           onClose={() => setMatching(null)}
+        />
+      ) : null}
+      {reidentifying ? (
+        <ReidentifyModal
+          trackId={reidentifying.id}
+          trackTitle={String(reidentifying.title || 'Unknown')}
+          artistName={String(artist?.name || '')}
+          albumTitle={String(album.title || '')}
+          imageUrl={String(album.thumb_url || '')}
+          onClose={() => setReidentifying(null)}
         />
       ) : null}
       {redownloading ? (
@@ -283,6 +296,7 @@ function TrackRow({
   onTagPreview,
   onRedownload,
   onMissingManage,
+  onReidentify,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -297,6 +311,7 @@ function TrackRow({
   onTagPreview: () => void;
   onRedownload: () => void;
   onMissingManage: () => void;
+  onReidentify: () => void;
 }) {
   const [rgBusy, setRgBusy] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -546,15 +561,7 @@ function TrackRow({
                   type="button"
                   className="enhanced-reidentify-btn"
                   title="Re-identify — file this track under a different release"
-                  onClick={act(() =>
-                    window.openReidentifyModal?.(
-                      track.id,
-                      String(track.title || 'Unknown'),
-                      artistName,
-                      String(album.title || ''),
-                      String(album.thumb_url || ''),
-                    ),
-                  )}
+                  onClick={act(() => onReidentify())}
                 >
                   ⇄
                 </button>

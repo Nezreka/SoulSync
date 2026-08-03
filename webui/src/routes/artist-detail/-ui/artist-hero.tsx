@@ -20,6 +20,7 @@ import {
   totalReleaseCount,
 } from '../-artist-detail.hero-stats';
 import { bucketCounts } from '../-artist-detail.use-completion';
+import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { EnrichmentCoverage } from './enrichment-coverage';
@@ -35,6 +36,8 @@ interface Props {
   streamCompleted?: boolean;
   /** Per-service coverage payload; the panel hides itself when absent. */
   enrichment?: Record<string, unknown>;
+  /** Canonical identity for the watchlist button; null hides its behavior. */
+  watchlist?: { id: unknown; name: string } | null;
 }
 
 /**
@@ -127,6 +130,7 @@ export function ArtistHero({
   streamCounts,
   streamCompleted = false,
   enrichment,
+  watchlist = null,
 }: Props) {
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
@@ -134,10 +138,42 @@ export function ArtistHero({
   const bio = cleanArtistBio(artist.lastfm_bio);
   const [bioExpanded, setBioExpanded] = useState(false);
   const [pickingPhoto, setPickingPhoto] = useState(false);
+  /** null = unknown (check pending/failed); the vanilla left the default label. */
+  const [watching, setWatching] = useState<boolean | null>(null);
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
   const hasReleases = totalReleaseCount(discography) > 0;
+
+  /** The watchlist is keyed on the CANONICAL Spotify identity where one exists. */
+  useEffect(() => {
+    setWatching(null);
+    if (!watchlist) return;
+    let cancelled = false;
+    void checkWatchlistRequest(watchlist.id).then((state) => {
+      if (!cancelled) setWatching(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlist]);
+
+  const toggleWatchlist = async () => {
+    if (!watchlist || watchlistBusy) return;
+    setWatchlistBusy(true);
+    try {
+      const { watching: next, message } = await toggleWatchlistRequest(
+        watchlist.id,
+        watchlist.name,
+      );
+      setWatching(next);
+      window.showToast?.(message, 'success');
+    } catch (error) {
+      window.showToast?.(`Error: ${(error as Error).message}`, 'error');
+    }
+    setWatchlistBusy(false);
+  };
   // Only after `complete`, matching the vanilla: the set accumulates through
   // the whole stream but the block was not rendered until it ended.
   const formats = streamCompleted ? artistFormatTags(streamCounts?.formats) : [];
@@ -235,20 +271,23 @@ export function ArtistHero({
               <span className="radio-text">Artist Radio</span>
             </button>
             {/*
-              Both of these are driven from outside React: the page calls
-              initializeLibraryWatchlistButton, which installs its own onclick
-              and toggles `watching`, and checkArtistEnhanceEligibility unhides
-              the enhance button and rewrites `.enhance-text` with the count.
-              They are rendered with no React state so a re-render cannot undo
-              what those globals wrote.
+              The watchlist button is local now (initializeLibraryWatchlistButton's
+              port); its ID stays because the guided tour anchors to it
+              (helper.js:1518). The enhance button is still driven from outside
+              React: checkArtistEnhanceEligibility unhides it and rewrites
+              `.enhance-text` with the count, so it has no React state.
             */}
             <button
               type="button"
-              className="library-artist-watchlist-btn"
+              className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
               id="library-artist-watchlist-btn"
+              disabled={watchlistBusy}
+              onClick={() => void toggleWatchlist()}
             >
               <span className="watchlist-icon">👁️</span>
-              <span className="watchlist-text">Add to Watchlist</span>
+              <span className="watchlist-text">
+                {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
+              </span>
             </button>
             {/* Only shown when there is something to download. */}
             <div
