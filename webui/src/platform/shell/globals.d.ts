@@ -96,8 +96,6 @@ declare global {
      *   - currentMusicSourceName decides which provider id makes an artist
      *     watchable
      */
-    openArtistExportModal?: () => void;
-    openWatchAllUnwatchedModal?: () => void;
     _handoffLibrarySearchToEnhancedSearch?: (query: string) => void;
     showLibraryDownloadsSection?: () => void;
     currentMusicSourceName?: string;
