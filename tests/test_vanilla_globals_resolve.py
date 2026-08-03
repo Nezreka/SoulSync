@@ -65,7 +65,7 @@ _BASELINE = {
     "core.js": 12,
     "downloads.js": 6,
     "init.js": 4,
-    "library.js": 18,
+    "library-globals.js": 0,
     "settings.js": 3,
     "setup-wizard.js": 1,
     "stats-automations.js": 4,

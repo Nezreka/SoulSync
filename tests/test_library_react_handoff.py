@@ -1,10 +1,11 @@
-"""/library is served by React; library.js must not repaint behind it.
+"""/library is served by React, and library.js itself is now deleted.
 
-The vanilla Library list is now DELETED — markup and functions both — so the
-two can no longer paint into the same document. What survives the handoff and
-is not visible from either side alone: the ids the React page inherited (the
-guided tour anchors to them), and the one event the still-vanilla "Watch All"
-modal uses to tell React its list changed.
+The vanilla Library list went first; the manage layer and the Watch All modal
+followed in the enhanced-view port, and the file's last residents moved to
+library-globals.js. What survives the handoff and is not visible from either
+side alone: the ids the React page inherited (the guided tour anchors to
+them), and the ss:library-changed seam — dispatch and listener both live in
+React now, pinned here so a rename on either side fails loudly.
 """
 
 from __future__ import annotations
@@ -14,18 +15,9 @@ import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_LIBRARY_JS = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
 _MANIFEST = (_ROOT / "webui" / "src" / "platform" / "shell" / "route-manifest.ts").read_text(
     encoding="utf-8"
 )
-
-
-def _fn(source: str, name: str) -> str:
-    """The body of a top-level function, up to the next top-level declaration."""
-    start = source.index(f"function {name}(")
-    rest = source[start:]
-    end = re.search(r"\n(?:async )?function ", rest[1:])
-    return rest[: end.start() + 1] if end else rest
 
 
 def test_manifest_hands_library_to_react():
@@ -33,12 +25,14 @@ def test_manifest_hands_library_to_react():
 
 
 def test_watch_all_modal_announces_its_change_to_react():
-    """The vanilla "Watch All Unwatched" modal used to refresh by calling
-    loadLibraryArtists(), which the guard above now turns into a no-op. Without
-    the event the watch badges stay stale until the user navigates away."""
-    fn = _fn(_LIBRARY_JS, "closeWatchAllUnwatchedModal")
-    assert "ss:library-changed" in fn, "React is never told the list changed"
-    assert "needsRefresh" in fn, "the event must stay gated on an actual change"
+    """The Watch All modal is React now (watch-all-modal.tsx), but the seam is
+    the same: closing after a successful add announces the change. Without the
+    event the watch badges stay stale until the user navigates away."""
+    modal = (
+        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "watch-all-modal.tsx"
+    ).read_text(encoding="utf-8")
+    assert "ss:library-changed" in modal, "React is never told the list changed"
+    assert "if (result)" in modal, "the event must stay gated on an actual change"
 
 
 def test_react_listens_for_that_exact_event():
@@ -93,8 +87,12 @@ def test_vanilla_library_list_is_gone():
         "toggleLibraryCardWatchlist",
         "showLibraryEmpty",
     ):
-        assert f"function {name}(" not in _LIBRARY_JS, f"{name} survived the cleanup"
-        assert name not in _LIBRARY_JS, f"{name} is still referenced somewhere in library.js"
+        for js in (_ROOT / "webui" / "static").glob("*.js"):
+            source = js.read_text(encoding="utf-8", errors="replace")
+            assert f"function {name}(" not in source, f"{name} survived the cleanup in {js.name}"
+            # Call syntax only — a prose mention in a comment (init.js explains
+            # WHY its old call site is gone) is not a live reference.
+            assert f"{name}(" not in source, f"{name} is still called in {js.name}"
 
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     assert 'id="library-page"' not in index

@@ -1,4 +1,4 @@
-"""What other files borrow from library.js — pinned BEFORE the artist-detail port.
+"""What other files borrow from library-globals.js — the contract that outlived library.js.
 
 The automations migration taught this lesson once: the page being replaced was
 not the only consumer of the code behind it, and the cleanup PR nearly deleted
@@ -6,9 +6,11 @@ things the video side still called. The library-list cleanup then taught it
 again the hard way, by deleting four declarations that the artist-detail page
 still needed.
 
-So this file records, up front, every name that leaves library.js. When the
-artist-detail cleanup eventually runs, anything listed here MUST survive it, or
-be migrated deliberately along with its callers.
+So this file records every name on the cross-file contract. The cleanup DID
+run: library.js is deleted, and everything below moved VERBATIM into
+library-globals.js — the deliberate migration this test existed to force.
+(`_esc` left the contract with it: library.js's copy was a known dupe of
+stats-automations.js's, which loads later and was already the winner.)
 
 The surprising ones, which is exactly why this is written down:
 
@@ -31,16 +33,12 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _STATIC = _ROOT / "webui" / "static"
-_LIBRARY_JS = (_STATIC / "library.js").read_text(encoding="utf-8")
+_LIBRARY_JS = (_STATIC / "library-globals.js").read_text(encoding="utf-8")
 
 # name -> the files that reach for it. Hardcoded on purpose: deriving this from
 # the current source would shrink whenever a consumer is deleted, and the test
 # would pass vacuously at exactly the moment it should fail.
 _CONTRACT = {
-    "_esc": {
-        "stats-automations.js", "auto-sync.js",
-        "pages-extra.js", "wishlist-tools.js",
-    },
     # search.js was deleted when /search became React. The two entries below
     # were updated DELIBERATELY, which is what this test exists to force:
     #   - playLibraryTrack's coupling did NOT go away, it moved. The React
@@ -99,13 +97,13 @@ def _strip_comments(source: str) -> str:
 
 
 @pytest.mark.parametrize("name", sorted(_CONTRACT))
-def test_library_js_still_declares_the_name(name):
+def test_library_globals_still_declares_the_name(name):
     """It must exist. This is the check the library-list cleanup did not have:
     `artistDetailPageState` was deleted as collateral and 177 references were
     left pointing at nothing, while the file still parsed cleanly."""
     assert re.search(rf"^(?:async )?function {re.escape(name)}\b", _LIBRARY_JS, re.M) or re.search(
         rf"^(?:const|let|var)\s+{re.escape(name)}\b", _LIBRARY_JS, re.M
-    ), f"library.js no longer declares {name}, which other files still call"
+    ), f"library-globals.js no longer declares {name}, which other files still call"
 
 
 @pytest.mark.parametrize("name,consumers", sorted((k, v) for k, v in _CONTRACT.items()))
@@ -173,11 +171,12 @@ def test_navigate_to_artist_detail_only_hands_off_and_never_renders():
     React and the still-vanilla Enhanced modals read back out
     (currentArtistId / currentArtistName / currentArtistSource).
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
         encoding="utf-8"
     )
     start = source.index("function navigateToArtistDetail(")
-    end = source.index("\nfunction ", start + 1)
+    next_fn = re.search(r"\n(?:async )?function ", source[start + 1 :])
+    end = start + 1 + (next_fn.start() if next_fn else len(source) - start - 1)
     body = _strip_comments(source[start:end])
 
     for name in _LEGACY_PAGE_ENTRY_POINTS:
@@ -202,7 +201,7 @@ def test_the_label_stack_is_cleared_in_place_not_reassigned():
     detached copy, and the Back button would keep naming a page you had already
     left.
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
         encoding="utf-8"
     )
     assert "_artistDetailLabelStack.length = 0" in source
@@ -216,11 +215,12 @@ def test_selected_tracks_set_identity_survives_navigation():
     React mirrors its selection into the SAME object, so replacing it here would
     leave those writes landing on a Set nobody reads.
     """
-    source = (Path(__file__).resolve().parents[1] / "webui/static/library.js").read_text(
+    source = (Path(__file__).resolve().parents[1] / "webui/static/library-globals.js").read_text(
         encoding="utf-8"
     )
     start = source.index("function navigateToArtistDetail(")
-    end = source.index("\nfunction ", start + 1)
+    next_fn = re.search(r"\n(?:async )?function ", source[start + 1 :])
+    end = start + 1 + (next_fn.start() if next_fn else len(source) - start - 1)
     body = source[start:end]
     assert "selectedTracks.clear()" in body
     assert "selectedTracks = new Set()" not in body

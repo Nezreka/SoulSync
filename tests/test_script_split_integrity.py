@@ -43,7 +43,7 @@ SPLIT_MODULES = [
     "wishlist-tools.js",
     "sync-services.js",
     "api-monitor.js",
-    "library.js",
+    "library-globals.js",
     "manual-library-match.js",
     "beatport-ui.js",
     "enrichment.js",
@@ -65,7 +65,6 @@ NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "work
 KNOWN_CROSS_FILE_DUPES = {
     "escapeHtml",        # downloads.js, shared-helpers.js
     "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
-    "_esc",              # library.js, stats-automations.js
     "_escAttr",          # downloads.js, stats-automations.js
     "_formatDuration",   # stats-automations.js, pages-extra.js
 }

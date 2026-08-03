@@ -26,7 +26,7 @@ describe('brand logos match the vanilla source', () => {
   // brand's declaration in service-switch.js stands in for it. All three files
   // are vanilla source; between them every logo still has a second declaration
   // to disagree with.
-  const vanilla = ['static/core.js', 'static/library.js', 'static/service-switch.js']
+  const vanilla = ['static/core.js', 'static/service-switch.js']
     .map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'))
     .join('\n');
 
