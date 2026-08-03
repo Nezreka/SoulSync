@@ -1559,8 +1559,12 @@ async function checkAndHideMetadataUpdaterForNonPlex() {
                     metadataCard.style.display = 'flex';
                     console.log(`Metadata updater shown: ${data.active_server} is active server`);
 
-                    // Update the header text to reflect the current server
-                    const headerElement = metadataCard.querySelector('.card-header h3');
+                    // Update the header text to reflect the current server.
+                    // The card markup is .tool-card-header > h4.tool-card-title —
+                    // the old '.card-header h3' selector matched nothing, so this
+                    // rename never happened. Same pattern the DB updater card uses
+                    // (updateDbUpdaterCardInfo in wishlist-tools.js).
+                    const headerElement = metadataCard.querySelector('.tool-card-title');
                     if (headerElement) {
                         const serverDisplayName = data.active_server.charAt(0).toUpperCase() + data.active_server.slice(1);
                         headerElement.textContent = `${serverDisplayName} Metadata Updater`;
@@ -1693,21 +1697,34 @@ async function handleMediaScanButtonClick() {
                     const maxPolls = 150; // 5 minutes
 
                     pollInterval = setInterval(async () => {
-                        if (socketConnected) return; // Phase 5: WS handles scan status
+                        // Count EVERY tick, including the ones the websocket
+                        // short-circuits below. Counting after that guard meant
+                        // pollCount never advanced on a socket-connected client
+                        // — the normal case — so this clearInterval was
+                        // unreachable and the 2s timer leaked for the life of
+                        // the page, once per Scan Library click.
                         pollCount++;
 
                         if (pollCount > maxPolls) {
                             // Polling timeout after 5 minutes
                             clearInterval(pollInterval);
-                            button.disabled = false;
-                            phaseLabel.textContent = 'Scan completed';
-                            progressBar.style.width = '0%';
-                            progressLabel.textContent = 'Ready for next scan';
-                            statusValue.textContent = 'Idle';
-                            statusValue.style.color = '#b3b3b3';
-                            showToast('✅ Media scan completed', 'success', 3000);
+                            pollInterval = null;
+                            // With a live socket updateMediaScanFromData already
+                            // owns the card, so don't stomp it with a synthetic
+                            // "completed" state we never actually observed.
+                            if (!socketConnected) {
+                                button.disabled = false;
+                                phaseLabel.textContent = 'Scan completed';
+                                progressBar.style.width = '0%';
+                                progressLabel.textContent = 'Ready for next scan';
+                                statusValue.textContent = 'Idle';
+                                statusValue.style.color = '#b3b3b3';
+                                showToast('✅ Media scan completed', 'success', 3000);
+                            }
                             return;
                         }
+
+                        if (socketConnected) return; // Phase 5: WS handles scan status
 
                         try {
                             const statusResponse = await fetch('/api/scan/status');

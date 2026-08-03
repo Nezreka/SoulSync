@@ -306,7 +306,9 @@ const HELPER_CONTENT = {
         description: 'RAM consumed by the SoulSync process. Includes web server, all background workers, metadata caches, and WebSocket connections.',
     },
 
-    // ─── DASHBOARD: TOOL CARDS ──────────────────────────────────────
+    // ─── TOOLS PAGE: TOOL CARDS ─────────────────────────────────────
+    // These all live in #tools-page. They were labelled (and routed) as
+    // dashboard cards, which sent helper search straight to the wrong page.
 
     '#db-updater-card': {
         title: 'Database Updater',
@@ -348,15 +350,9 @@ const HELPER_CONTENT = {
         ],
         docsId: 'discover'
     },
-    '#retag-tool-card': {
-        title: 'Retag Tool',
-        description: 'Queue of tracks needing metadata corrections. When enrichment detects better metadata than what\'s in your files, corrections appear here for batch review.',
-        tips: [
-            'Groups corrections by artist for efficient processing',
-            'Preview all changes before applying',
-            'Writes corrected tags directly to audio files'
-        ]
-    },
+    // (#retag-tool-card removed — no element with that id exists anywhere, so
+    // the entry could only ever produce a helper search result that goes
+    // nowhere. Library re-tagging is the `library_retag` maintenance job now.)
     '#media-scan-card': {
         title: 'Media Server Scan',
         description: 'Manually trigger a library scan on your media server. SoulSync auto-scans after downloads, but this is useful after bulk imports or external changes.',
@@ -3000,7 +2996,7 @@ const SETUP_STEPS = [
     { id: 'media-server',    label: 'Connect Media Server',         desc: 'Plex, Jellyfin, or Navidrome',                       icon: '🖥️', page: 'settings' },
     { id: 'download-source', label: 'Set Up Download Source',       desc: 'Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer',  icon: '⬇️', page: 'settings', settingsTab: 'downloads' },
     { id: 'download-paths',  label: 'Configure Download Paths',     desc: 'Where music is saved and organized',                 icon: '📁', page: 'settings', settingsTab: 'downloads' },
-    { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'dashboard', selector: '#db-updater-card' },
+    { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'tools', selector: '#db-updater-card' },
     { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'search' },
     { id: 'watchlist',       label: 'Add an Artist to Watchlist',   desc: 'Monitor for new releases automatically',             icon: '👁️', page: 'library' },
     { id: 'automation',      label: 'Create an Automation',         desc: 'Schedule tasks and build workflows',                 icon: '🤖', page: 'automations' },
@@ -3456,11 +3452,22 @@ function _guessPageFromSelector(selector) {
         'artists':     ['artists-search', 'artists-hero', 'artist-detail', 'similar-artists'],
         'automations': ['automations-', 'auto-', 'builder-'],
         'library':     ['library-', 'alphabet-selector', 'watchlist-filter'],
-        'stats':       ['stats-'],
+        // '#stats-' not 'stats-': the bare prefix also matched
+        // #listening-stats-enabled, which is a Settings control, so its helper
+        // search result navigated to the Stats page and found nothing.
+        'stats':       ['#stats-'],
         'import':      ['import-page-'],
         'settings':    ['settings-', 'stg-tab', 'api-service', 'server-toggle', 'save-button', 'spotify-client', 'soulseek-url', 'quality-profile'],
         'issues':      ['issues-'],
-        'dashboard':   ['dashboard-', 'service-card', 'watchlist-button', 'wishlist-button', 'db-updater', 'metadata-updater', 'duplicate-cleaner', 'discovery-pool-card', 'retag-tool', 'media-scan', 'backup-manager', 'metadata-cache'],
+        // The tool cards live in #tools-page, NOT on the dashboard. They were
+        // listed under 'dashboard' here, so a helper search hit navigated to the
+        // dashboard and then found nothing to point at. Must stay ABOVE
+        // 'dashboard' so 'metadata-cache'/'metadata-updater' win over any
+        // future 'dashboard-' style prefix.
+        // NB: no 'repair-' pattern here — #repair-button is the worker orb in the
+        // dashboard's markup, not a tools-page element.
+        'tools':       ['db-updater', 'reconcile-ids', 'duplicate-cleaner', 'discovery-pool-card', 'manual-library-match', 'metadata-updater', 'media-scan', 'backup-manager', 'config-migration', 'metadata-cache', 'blacklist-card'],
+        'dashboard':   ['dashboard-', 'service-card', 'watchlist-button', 'wishlist-button'],
     };
 
     const selectorLower = selector.toLowerCase();

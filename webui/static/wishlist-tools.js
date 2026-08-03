@@ -2572,11 +2572,13 @@ async function handleReconcileIdsButtonClick() {
     if (!button) return;
     if (button.textContent.trim() !== 'Scan Library') return; // already running
 
-    const ok = confirm(
-        'Scan every library file for embedded provider IDs and fill any that are ' +
-        'missing in the database?\n\nEach file is read once. Existing matches are ' +
-        'never overwritten. This can take a while on large libraries.'
-    );
+    const ok = await showConfirmDialog({
+        title: 'Import IDs from File Tags',
+        message: 'Scan every library file for embedded provider IDs and fill any that are ' +
+            'missing in the database?\n\nEach file is read once. Existing matches are ' +
+            'never overwritten. This can take a while on large libraries.',
+        confirmText: 'Scan Library'
+    });
     if (!ok) return;
 
     try {
@@ -4938,7 +4940,12 @@ function toggleMcacheClearDropdown(event) {
 }
 
 async function clearMetadataCache() {
-    if (!confirm('Clear ALL cached metadata? This removes all cached API responses.')) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Metadata Cache',
+        message: 'Clear ALL cached metadata? This removes every cached API response — lookups will have to be made again.',
+        confirmText: 'Clear All',
+        destructive: true
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -4958,7 +4965,12 @@ async function clearMetadataCache() {
 }
 
 async function clearMetadataCacheBySource(source) {
-    if (!confirm(`Clear all ${source} cached metadata?`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Cache by Source',
+        message: `Clear all ${source} cached metadata?`,
+        confirmText: 'Clear',
+        destructive: true
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -4979,7 +4991,12 @@ async function clearMetadataCacheBySource(source) {
 
 async function clearMusicBrainzCache(failedOnly = false) {
     const label = failedOnly ? 'failed MusicBrainz lookups' : 'ALL MusicBrainz cache entries';
-    if (!confirm(`Clear ${label}?`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear MusicBrainz Cache',
+        message: `Clear ${label}?`,
+        confirmText: 'Clear',
+        destructive: !failedOnly
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -5074,6 +5091,34 @@ const TOOL_HELP_CONTENT = {
 
             <h4>Note</h4>
             <p>Available for <strong>Plex</strong> and <strong>Jellyfin</strong> media servers. Each enrichment worker only runs if its service is authenticated.</p>
+        `
+    },
+    'reconcile-ids': {
+        title: 'Import IDs from File Tags',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>Reads provider IDs that are already embedded in your audio files — Spotify, MusicBrainz, iTunes, Deezer and friends — and fills them into the database where they're missing.</p>
+
+            <h4>Why it's worth running</h4>
+            <p>Every ID it recovers is one the enrichment workers no longer have to go looking for. On a large library that's a lot of API calls skipped, and matches that were already correct in your tags get used instead of being re-guessed.</p>
+
+            <h4>How safe is it?</h4>
+            <ul>
+                <li><strong>Only fills blanks.</strong> An existing match is never overwritten.</li>
+                <li><strong>Read-only on your files.</strong> Each file is opened once to read tags; nothing is written back to disk.</li>
+                <li><strong>Conflicts are skipped, not applied.</strong> If a tag disagrees with a stored ID, the row is counted under Conflicts and left alone.</li>
+            </ul>
+
+            <h4>The counters</h4>
+            <ul>
+                <li><strong>IDs Filled:</strong> individual provider IDs written</li>
+                <li><strong>Rows Updated:</strong> database rows touched (a row can gain several IDs)</li>
+                <li><strong>Conflicts:</strong> tag disagreed with an existing match — skipped</li>
+                <li><strong>Unreadable:</strong> files whose tags could not be parsed</li>
+            </ul>
+
+            <h4>Note</h4>
+            <p>Reads every file in the library, so it can take a while on large collections. Safe to re-run — a second pass only picks up what's still blank.</p>
         `
     },
     'duplicate-cleaner': {
@@ -6283,22 +6328,30 @@ const TOOL_HELP_CONTENT = {
     }
 };
 
+// Called from initializeToolsPage() on EVERY visit to the Tools page, so every
+// binding here has to be idempotent. It used to add a fresh listener per call —
+// including a document-level keydown — so N visits left N keydown handlers and N
+// click handlers per help button. Guarded the same way the tool buttons in
+// initializeToolsPage are (`_toolsWired`).
 function initializeToolHelpButtons() {
-    const helpButtons = document.querySelectorAll('.tool-help-button');
-    const modal = document.getElementById('tool-help-modal');
-    const closeButton = modal.querySelector('.tool-help-modal-close');
-
-    // Attach click handlers to all help buttons
-    helpButtons.forEach(button => {
+    document.querySelectorAll('.tool-help-button').forEach(button => {
+        if (button._toolsWired) return;
         button.addEventListener('click', (e) => {
             e.stopPropagation();
-            const toolId = button.getAttribute('data-tool');
-            openToolHelpModal(toolId);
+            openToolHelpModal(button.getAttribute('data-tool'));
         });
+        button._toolsWired = true;
     });
 
-    // Close modal when clicking close button
-    closeButton.addEventListener('click', closeToolHelpModal);
+    // The modal itself lives outside #tools-page (index.html), so it survives
+    // navigation — bind it once and never again. Also guard the lookup: a throw
+    // here used to abort initializeToolsPage before the DB/cache/pool stats and
+    // switchRepairTab('jobs') ever ran.
+    const modal = document.getElementById('tool-help-modal');
+    if (!modal || modal._toolsWired) return;
+
+    const closeButton = modal.querySelector('.tool-help-modal-close');
+    if (closeButton) closeButton.addEventListener('click', closeToolHelpModal);
 
     // Close modal when clicking outside content
     modal.addEventListener('click', (e) => {
@@ -6307,12 +6360,7 @@ function initializeToolHelpButtons() {
         }
     });
 
-    // Close modal on Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal.classList.contains('active')) {
-            closeToolHelpModal();
-        }
-    });
+    modal._toolsWired = true;
 }
 
 function openToolHelpModal(toolId) {

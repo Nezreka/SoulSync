@@ -1914,7 +1914,11 @@ async function openRepairModal() {
     navigateToPage('tools');
     // Scroll to maintenance section
     setTimeout(() => {
-        const section = document.querySelector('.tools-maintenance-section');
+        // The class is `tools-maintenance-hero`, not `-section` — the old
+        // selector matched nothing so this never scrolled. Scope it to
+        // #tools-page: the VIDEO tools subpage carries the same class and comes
+        // first in the document, so an unscoped query lands on the wrong hero.
+        const section = document.querySelector('#tools-page .tools-maintenance-hero');
         if (section) section.scrollIntoView({ behavior: 'smooth' });
     }, 100);
     _repairCurrentTab = 'jobs';
@@ -2818,7 +2822,12 @@ async function _failedMBDelete(entryId) {
 }
 
 async function _failedMBClearAll() {
-    if (!confirm(`Clear all ${_failedMBState.total} failed lookups? They will be retried on next enrichment run.`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Failed Lookups',
+        message: `Clear all ${_failedMBState.total} failed lookups? They will be retried on the next enrichment run.`,
+        confirmText: 'Clear All',
+        destructive: true
+    })) return;
     try {
         const resp = await fetch('/api/metadata-cache/clear-musicbrainz?failed_only=true', { method: 'DELETE' });
         const data = await resp.json();
