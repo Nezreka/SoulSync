@@ -190,11 +190,12 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
 
 
 def test_picker_grid_never_goes_silently_blank():
+    # The picker is React now (art-picker.tsx); same pin, new home.
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
     # dead image URLs remove tiles — an emptied grid must SAY so
-    assert "none of the images would load" in js
+    assert "none of the images would load" in tsx
 
 
 def test_spotify_free_mode_contributes(monkeypatch):
@@ -238,14 +239,12 @@ def test_image_sniffer():
 
 
 def test_picker_has_the_custom_url_row():
+    # React renders the row declaratively, so the vanilla's mount-after-reset
+    # ordering hazard is structurally impossible; only the row itself is pinned.
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "_artPickerCustomRow" in js
-    assert "paste an image URL" in js
-    # the row mounts AFTER the innerHTML reset that would wipe it
-    seg = js.split("body.appendChild(grid);")[1][:400]
-    assert "_artPickerCustomRow" in seg
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
+    assert "paste an image URL" in tsx
 
 
 def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
@@ -279,15 +278,9 @@ def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
     assert cands[0]["url"] == "https://i.scdn.co/free.jpg"
 
 
-def test_custom_row_check_icon_is_module_scope():
-    """The pickers' _checkSvg consts are function-LOCAL — the custom row
-    referencing one was a silent ReferenceError ('paste and nothing happens')."""
-    from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "const _ART_CHECK_SVG" in js
-    row = js.split("function _artPickerCustomRow")[1].split("\nfunction ")[0]
-    assert "_ART_CHECK_SVG" in row and "_checkSvg" not in row
+# test_custom_row_check_icon_is_module_scope was retired with library.js: the
+# hazard it pinned (a function-local const referenced from another function's
+# markup — a silent ReferenceError) cannot exist in the React module system.
 
 
 def test_current_photo_leads_the_grid_as_reference():
@@ -295,14 +288,11 @@ def test_current_photo_leads_the_grid_as_reference():
     it's read from the PAGE (the DB may hold a local cache path that must
     never round-trip through the apply endpoint as a source URL)."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    seg = js.split("art-picker-tile--current")[0]
-    assert "getElementById('artist-detail-image')" in js
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
     # a DIV, not a button — it can't be selected/applied
-    assert "createElement('div');\n                cur.className = 'art-picker-tile art-picker-tile--current'" \
-        .replace("\n                ", "") in js.replace("\n                ", "")
-    assert "art-picker-badge--current" in js
+    assert '<div className="art-picker-tile art-picker-tile--current">' in tsx
+    assert "art-picker-badge--current" in tsx
 
 
 

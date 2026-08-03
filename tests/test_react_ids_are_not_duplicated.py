@@ -48,13 +48,8 @@ ADOPTED: set[str] = set()
 # Not fixed here because it belongs to that port's cleanup, not to search's.
 # Deleting either side without tracing every caller is how a working page goes
 # blank. Listed explicitly so the guard protects everything else in the meantime.
-KNOWN_PRE_EXISTING = {
-    "enhanced-bulk-bar",
-    "enhanced-bulk-count",
-    "enhanced-bulk-edit-overlay",
-    "enhanced-bulk-modal-body",
-    "enhanced-bulk-modal-title",
-}
+# The last static twins died with library.js — every React id is unique now.
+KNOWN_PRE_EXISTING: set[str] = set()
 
 
 def _react_page_ids() -> dict[str, set[str]]:

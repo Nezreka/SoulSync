@@ -4133,37 +4133,6 @@
 
             <!-- Artist Detail Page -->
 
-            <!-- Enhanced Bulk Edit Modal -->
-            <div class="modal-overlay hidden" id="enhanced-bulk-edit-overlay">
-                <div class="enhanced-bulk-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="enhanced-bulk-modal-title">Batch Edit Tracks</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeBulkEditModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="enhanced-bulk-modal-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer">
-                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBulkEditModal()">Cancel</button>
-                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" onclick="executeBulkEdit()">Apply Changes</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Enhanced Bulk Actions Bar -->
-            <div class="enhanced-bulk-bar" id="enhanced-bulk-bar">
-                <div class="enhanced-bulk-bar-info">
-                    <span class="enhanced-bulk-bar-count" id="enhanced-bulk-count">0</span>
-                    <span class="enhanced-bulk-bar-label">tracks selected</span>
-                </div>
-                <div class="enhanced-bulk-bar-actions">
-                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="showBulkEditModal()">Edit Selected</button>
-                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn tag-write" onclick="batchWriteTagsSelected()">Write Tags</button>
-                    <button class="btn btn--sm btn--secondary enhanced-bulk-btn rg-analyze" onclick="batchAnalyzeReplayGainSelected()">ReplayGain</button>
-                    <button class="btn btn--sm btn--danger enhanced-bulk-btn" onclick="clearTrackSelection()">Clear Selection</button>
-                </div>
-            </div>
-
             <!-- Discover Page -->
             <!-- Discover is a React page (webui/src/routes/discover). The vanilla markup
                  that lived here died with the flip; discover.js follows in PR 2. -->
@@ -9667,7 +9636,7 @@
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='library-globals.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='manual-library-match.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,

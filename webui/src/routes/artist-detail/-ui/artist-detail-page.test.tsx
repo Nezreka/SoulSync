@@ -516,6 +516,25 @@ describe('the vanilla page-state bridge', () => {
 
   afterEach(() => {
     delete (window as unknown as { artistDetailPageState?: VanillaState }).artistDetailPageState;
+    delete window._updateSidebarLibraryBreadcrumb;
+  });
+
+  it('repaints the sidebar breadcrumb once the artist name is synced', async () => {
+    // Boulder's live catch. init.js paints the breadcrumb on the page CHANGE,
+    // which happens before this payload lands — so on a React-native arrival
+    // (a library card is a plain <a href> through the router, nothing calls
+    // navigateToArtistDetail) the name was never there in time and the
+    // breadcrumb stayed a plain "Library" forever.
+    const state = install();
+    const repaint = vi.fn(() => {
+      // The real one reads the state, so the name must already be written.
+      expect(state.currentArtistName).toBe('Aphex Twin');
+    });
+    window._updateSidebarLibraryBreadcrumb = repaint;
+    renderPage();
+
+    await screen.findByText('Aphex Twin');
+    await waitFor(() => expect(repaint).toHaveBeenCalled());
   });
 
   it('populates the artist BEFORE any hero action can be clicked', async () => {

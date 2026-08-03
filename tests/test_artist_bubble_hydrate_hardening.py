@@ -25,7 +25,6 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _HELPERS_JS = (_ROOT / "webui" / "static" / "shared-helpers.js").read_text(encoding="utf-8")
-_LIBRARY_JS = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

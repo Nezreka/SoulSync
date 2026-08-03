@@ -5,8 +5,10 @@ disc 1.
 Two parts:
   * DB: disc_number joins the track editable-fields whitelist (behavioral test).
   * Frontend: the enhanced-view render Map keys owned tracks by unique id (never
-    by disc:track slot), and the Disc column is wired for inline edit. Source-guard
-    asserts — library.js is vanilla JS with no JS test runner in this repo.
+    by disc:track slot), and the Disc column is wired for inline edit. These
+    source-guard asserts followed the code from library.js into the React
+    artist-detail modules when the page was ported; the TS side has its own
+    vitest coverage, and these stay as the cross-language pin on #1051.
 """
 
 from __future__ import annotations
@@ -20,7 +22,9 @@ import pytest
 from database.music_database import MusicDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_LIBRARY_JS = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
+_ARTIST_DETAIL = _ROOT / "webui" / "src" / "routes" / "artist-detail"
+_ALBUM_TS = (_ARTIST_DETAIL / "-artist-detail.enhanced-album.ts").read_text(encoding="utf-8")
+_TABLE_TSX = (_ARTIST_DETAIL / "-ui" / "enhanced-track-table.tsx").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -68,10 +72,10 @@ def test_disc_number_in_whitelist_constant():
 def test_owned_tracks_keyed_by_id_not_slot():
     # The render Map must key owned tracks by their unique id so two tracks that
     # collapse to the same disc:track slot never overwrite each other.
-    assert 'rowsBySlot.set(`owned:${track.id}`, track)' in _LIBRARY_JS
-    assert 'ownedSlots.add(_trackSlotKey(track))' in _LIBRARY_JS
-    # Missing-track merge now consults the slot SET, not the id-keyed row Map.
-    assert '!ownedSlots.has(key)' in _LIBRARY_JS
+    assert 'rows.set(`owned:${track.id}`, track)' in _ALBUM_TS
+    assert 'ownedSlots.add(trackSlotKey(track))' in _ALBUM_TS
+    # Missing-track merge consults the slot SET, not the id-keyed row Map.
+    assert '!ownedSlots.has(key)' in _ALBUM_TS
 
 
 # ---------------------------------------------------------------------------
@@ -79,13 +83,15 @@ def test_owned_tracks_keyed_by_id_not_slot():
 # ---------------------------------------------------------------------------
 
 def test_disc_column_is_editable_and_wired():
-    assert "discTd.className = 'col-disc' + (admin ? ' editable' : '')" in _LIBRARY_JS
-    assert "startInlineEdit(cell, 'track', track.id, 'disc_number'" in _LIBRARY_JS
-    assert "['track_number', 'disc_number', 'bpm'].includes(field)" in _LIBRARY_JS
-    assert "field === 'track_number' || field === 'disc_number'" in _LIBRARY_JS
+    assert 'className={`col-disc${editable}`}' in _TABLE_TSX
+    assert 'field="disc_number"' in _TABLE_TSX
+    assert "NUMERIC_EDIT_FIELDS.includes(field)" in _ALBUM_TS
+    assert "field === 'track_number' || field === 'disc_number'" in _ALBUM_TS
 
 
 def test_disc_not_editable_on_missing_rows():
     # Disc # only applies to a real owned file — a phantom "Missing" row must not
     # be disc-editable (mirrors the title cell).
-    assert "if (track._missingExpected) discTd.classList.remove('editable')" in _LIBRARY_JS
+    # React derives it once: a missing row is never editable, disc included.
+    assert "const editable = isAdmin && !missing ? ' editable' : '';" in _TABLE_TSX
+    assert "_missingExpected" in _TABLE_TSX

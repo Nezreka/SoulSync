@@ -190,12 +190,15 @@ def test_download_discography_modal_includes_gaps():
     releases. When the chip is on, the modal fetches gaps, dedups against its
     own list, and each entry POSTs with ITS source (backend honors per-entry
     source at entry['source'])."""
-    js = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
-    # both the page loader AND the modal call the gap-fill endpoint
-    # One caller now: the page loader moved to React, and this modal is still
-    # vanilla -- it is one of the artist-detail modals the React page drives
-    # through window.
-    assert js.count("discography/gap-fill") == 1
-    assert "gapSource: cb.dataset.gapSource" in js
-    assert "source: e.gapSource || sourceForBatch" in js
-    assert "data-gap-source=" in js
+    # The modal is React now (library.js is deleted); the same three pins
+    # hold in its module + component.
+    module = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail"
+        / "-artist-detail.discography-modal.ts"
+    ).read_text(encoding="utf-8")
+    component = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-ui" / "discography-modal.tsx"
+    ).read_text(encoding="utf-8")
+    assert "discography/gap-fill" in module
+    assert "source: e.gapSource || sourceForBatch" in module
+    assert "data-gap-source=" in component

@@ -99,6 +99,13 @@ declare global {
     _handoffLibrarySearchToEnhancedSearch?: (query: string) => void;
     showLibraryDownloadsSection?: () => void;
     currentMusicSourceName?: string;
+    /**
+     * library-globals.js — repaints the sidebar "Library / <Artist>"
+     * breadcrumb. init.js calls it on every page change; the React artist page
+     * calls it again once the payload lands, because the name it reads is only
+     * synced after that.
+     */
+    _updateSidebarLibraryBreadcrumb?: () => void;
     updateWatchlistCount?: () => void;
     /** shared-helpers.js — drops JioSaavn entries unless the experimental
      *  source is enabled. Kept as the single source of truth for that flag. */

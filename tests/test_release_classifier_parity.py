@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_VANILLA = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
 _PORT = (
     _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-artist-detail.filters.ts"
 ).read_text(encoding="utf-8")
@@ -34,29 +33,26 @@ _PAIRS = [
 ]
 
 
-def _vanilla_classifier() -> str:
-    start = _VANILLA.index("function _classifyReleaseContent")
-    return _VANILLA[start : _VANILLA.index("\nfunction ", start + 5)]
+# library.js is deleted; its classifier regexes are frozen here as literals so
+# the LAST copy cannot drift silently either. These are the exact vanilla
+# bytes the port was verified against while both existed.
+_FROZEN = {
+    "LIVE_PATTERN": r"/\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i",
+    "COMPILATION_PATTERN": r"/\b(greatest hits|best of|collection|anthology|essential)\b/i",
+    "FEATURED_PATTERN": r"/\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i",
+}
 
 
 def _regexes(source: str) -> dict[str, str]:
     return dict(re.findall(r"const (\w+) = (/.*/i);", source))
 
 
-def test_vanilla_classifier_still_exists():
-    """If it is renamed or inlined, everything below silently stops checking."""
-    fn = _vanilla_classifier()
-    assert "livePattern" in fn and "compilationPattern" in fn and "featuredPattern" in fn
-
-
 @pytest.mark.parametrize("vanilla_name,port_name", _PAIRS)
 def test_regex_is_byte_identical(vanilla_name, port_name):
-    vanilla = _regexes(_vanilla_classifier())
     port = _regexes(_PORT)
-    assert vanilla_name in vanilla, f"{vanilla_name} vanished from library.js"
     assert port_name in port, f"{port_name} vanished from the React port"
-    assert vanilla[vanilla_name] == port[port_name], (
-        f"classifier drift: library.js has {vanilla[vanilla_name]}, "
+    assert _FROZEN[port_name] == port[port_name], (
+        f"classifier drift: the frozen vanilla regex was {_FROZEN[port_name]}, "
         f"the React port has {port[port_name]}"
     )
 
@@ -64,8 +60,6 @@ def test_regex_is_byte_identical(vanilla_name, port_name):
 def test_compilation_also_keys_off_album_type():
     """The one rule that is not a regex — a release is a compilation if its
     album_type says so, REGARDLESS of title."""
-    fn = _vanilla_classifier()
-    assert "album_type === 'compilation'" in fn
     assert "album_type === 'compilation'" in _PORT
 
 
@@ -81,6 +75,4 @@ def test_port_does_not_invent_backend_fields():
 
 def test_title_and_name_are_both_read():
     """artist detail passes `title`, the download modal passes `name`."""
-    fn = _vanilla_classifier()
-    assert "release.title || release.name" in fn
     assert "release.title ?? release.name" in _PORT
