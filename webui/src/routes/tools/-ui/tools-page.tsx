@@ -10,9 +10,8 @@
  * The `#tools-page` id IS kept: helper.js's search walks up the DOM matching
  * HELPER_CONTENT selectors, and the bugfix PR pointed its page hint at 'tools'.
  *
- * Cards are being added a wave at a time; the sections below hold the ones that
- * are done. The route is not flipped until P7, so a partially-filled page is not
- * user-reachable.
+ * All twelve cards are present. Section order, and card order within each
+ * section, both come from index.html. The route is not flipped until P7.
  */
 
 import {
@@ -23,6 +22,7 @@ import {
   MetadataCacheCard,
 } from './launcher-cards';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
+import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
 import { ToolsSection } from './tool-card';
 
 export function ToolsPage() {
@@ -56,14 +56,17 @@ export function ToolsPage() {
         <DbUpdaterCard />
         <ReconcileIdsCard />
         <DuplicateCleanerCard />
+        <MediaScanCard />
       </ToolsSection>
 
       <ToolsSection title="Metadata & Cache">
+        <MetadataUpdaterCard />
         <DiscoveryPoolCard />
         <ManualLibraryMatchCard />
       </ToolsSection>
 
       <ToolsSection title="Management">
+        <BackupManagerCard />
         <ConfigMigrationCard />
         <MetadataCacheCard />
         <BlacklistCard />

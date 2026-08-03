@@ -1,5 +1,5 @@
 /**
- * Types for the Tools page — the 12 tool cards plus the Library Maintenance
+ * Types for the Tools page — the 11 tool cards plus the Library Maintenance
  * hero (jobs / findings / history).
  *
  * Shapes are taken from what the vanilla code actually reads off each endpoint,

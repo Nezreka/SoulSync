@@ -319,19 +319,30 @@ describe('ToolsPage shell', () => {
       cards: [...section.querySelectorAll('.tool-card')].map((card) => card.id),
     }));
     // Section order and per-section card order both come from index.html.
-    // Cards land here a wave at a time; this list grows with them.
+    // All ELEVEN cards are present (not twelve — the region has 11 .tool-card
+    // divs; the maintenance hero is a separate block, not a card).
     expect(sections).toEqual([
       {
         title: 'Database & Scanning',
-        cards: ['db-updater-card', 'reconcile-ids-card', 'duplicate-cleaner-card'],
+        cards: [
+          'db-updater-card',
+          'reconcile-ids-card',
+          'duplicate-cleaner-card',
+          'media-scan-card',
+        ],
       },
       {
         title: 'Metadata & Cache',
-        cards: ['discovery-pool-card', 'manual-library-match-card'],
+        cards: ['metadata-updater-card', 'discovery-pool-card', 'manual-library-match-card'],
       },
       {
         title: 'Management',
-        cards: ['config-migration-card', 'metadata-cache-card', 'blacklist-card'],
+        cards: [
+          'backup-manager-card',
+          'config-migration-card',
+          'metadata-cache-card',
+          'blacklist-card',
+        ],
       },
     ]);
     await flush();
