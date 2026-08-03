@@ -2948,7 +2948,6 @@
                             </div>
                         </article>
 
-
                         <!-- Card: Recent Syncs (full-width) -->
                     </div>
                 </div>
@@ -3140,7 +3139,6 @@
 
                             <!-- Browse Charts Tab Content -->
                             <div class="beatport-tab-content" id="beatport-browse-content">
-
 
                                 <div class="beatport-navigation">
                                     <!-- New Homepage Main View -->
@@ -4166,78 +4164,6 @@
                 </div>
             </div>
 
-            <!-- Tag Preview Modal -->
-            <div class="modal-overlay hidden" id="tag-preview-overlay">
-                <div class="enhanced-bulk-modal tag-preview-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="tag-preview-title">Write Tags to File</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeTagPreviewModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="tag-preview-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer">
-                        <label class="tag-preview-cover-label">
-                            <input type="checkbox" id="tag-preview-embed-cover" checked>
-                            Embed cover art
-                        </label>
-                        <label class="tag-preview-cover-label hidden" id="tag-preview-sync-label">
-                            <input type="checkbox" id="tag-preview-sync-server" checked>
-                            <span id="tag-preview-sync-text">Sync to server</span>
-                        </label>
-                        <div class="tag-preview-footer-actions">
-                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeTagPreviewModal()">Cancel</button>
-                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="tag-preview-write-btn" onclick="executeWriteTags()">Write Tags</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Batch Tag Preview Modal -->
-            <div class="modal-overlay hidden" id="batch-tag-preview-overlay">
-                <div class="enhanced-bulk-modal batch-tag-preview-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="batch-tag-preview-title">Write Tags</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeBatchTagPreviewModal()">&times;</button>
-                    </div>
-                    <div id="batch-tag-preview-summary"></div>
-                    <div class="enhanced-bulk-modal-body batch-tag-preview-body" id="batch-tag-preview-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer">
-                        <label class="tag-preview-cover-label">
-                            <input type="checkbox" id="batch-tag-preview-embed-cover" checked>
-                            Embed cover art
-                        </label>
-                        <label class="tag-preview-cover-label hidden" id="batch-tag-preview-sync-label">
-                            <input type="checkbox" id="batch-tag-preview-sync-server" checked>
-                            <span id="batch-tag-preview-sync-text">Sync to server</span>
-                        </label>
-                        <div class="tag-preview-footer-actions">
-                            <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeBatchTagPreviewModal()">Cancel</button>
-                            <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="batch-tag-preview-write-btn" onclick="executeBatchWriteTags()">Write Tags</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Reorganize Album Modal -->
-            <div class="modal-overlay hidden" id="reorganize-overlay">
-                <div class="enhanced-bulk-modal reorganize-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="reorganize-modal-title">Reorganize Album</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeReorganizeModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="reorganize-modal-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer" id="reorganize-modal-footer">
-                        <button class="btn btn--sm btn--secondary enhanced-bulk-btn" onclick="closeReorganizeModal()">Cancel</button>
-                        <button class="btn btn--sm btn--primary enhanced-bulk-btn" id="reorganize-apply-btn" onclick="executeReorganize()" disabled>Apply</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Discover Page -->
             <!-- Discover is a React page (webui/src/routes/discover). The vanilla markup
                  that lived here died with the flip; discover.js follows in PR 2. -->
@@ -4376,7 +4302,6 @@
                             <!-- API Configuration -->
                             <div class="settings-group" data-stg="connections" data-music-only>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
-
 
                                 <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
                                 <div class="api-service-frame">
@@ -5779,7 +5704,6 @@
                             </div>
                             <div class="settings-section-body collapsed" data-stg="downloads">
 <div class="settings-group source-settings-wrapper" data-stg="downloads">
-
 
                                 <div class="settings-subcard">
                                 <div class="form-group">
@@ -7738,7 +7662,6 @@
                             <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
 <div class="settings-group" data-stg="advanced" data-music-only>
 
-
                                 <div class="form-group">
                                     <label>Lookback Period:</label>
                                     <select id="discovery-lookback-period" class="form-select">
@@ -7854,7 +7777,6 @@
                             <div class="settings-section-body collapsed" data-stg="advanced">
 <div class="settings-group" data-stg="advanced">
 
-
                                 <div class="form-group">
                                     <label>Concurrent Workers:</label>
                                     <select id="max-workers">
@@ -7884,7 +7806,6 @@
                             <div class="settings-section-body collapsed" data-stg="advanced">
 <div class="settings-group" data-stg="advanced">
 
-
                                 <div class="form-group" id="db-maintenance-info">
                                     <label>Database Size:</label>
                                     <span id="db-size-display" class="readonly-field">Loading...</span>
@@ -7909,7 +7830,6 @@
                                 <div id="db-vacuum-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
                             </div>
                             </div><!-- end Database Maintenance body -->
-
 
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
@@ -8087,7 +8007,6 @@
                             </div>
                             <div class="settings-section-body collapsed" data-stg="advanced">
 <div class="settings-group" data-stg="advanced">
-
 
                                 <div class="form-group">
                                     <label>Log Level:</label>
@@ -8933,7 +8852,6 @@
                             </div>
                         </div>
 
-
                         <div class="tool-card" id="discovery-pool-card">
                             <div class="tool-card-header">
                                 <h4 class="tool-card-title">Discovery Pool</h4>
@@ -9331,7 +9249,6 @@
         </div>
     </div>
 
-
     <!-- Support Modal -->
     <div class="support-modal-overlay hidden" id="support-modal-overlay" onclick="closeSupportModal()">
         <div class="support-modal" onclick="event.stopPropagation()">
@@ -9442,49 +9359,6 @@
         </div>
     </div>
 
-    <!-- Re-identify Track Modal (#889) -->
-    <div class="modal-overlay hidden" id="reid-modal-overlay" onclick="if(event.target===this)closeReidentifyModal()">
-        <div class="reid-modal" id="reid-modal">
-            <div class="reid-hero">
-                <div class="reid-hero-decor">
-                    <div class="reid-hero-bg" id="reid-hero-bg"></div>
-                    <div class="reid-hero-overlay"></div>
-                </div>
-                <span class="reid-close" onclick="closeReidentifyModal()">&times;</span>
-                <div class="reid-hero-content">
-                    <div class="reid-hero-art" id="reid-hero-art"></div>
-                    <div class="reid-hero-meta">
-                        <div class="reid-hero-eyebrow">Re-identify track</div>
-                        <div class="reid-hero-title" id="reid-hero-title">Track</div>
-                        <div class="reid-hero-sub" id="reid-hero-sub"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="reid-tabs" id="reid-tabs"></div>
-
-            <div class="reid-search">
-                <svg class="reid-search-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
-                <input type="text" id="reid-search-input" class="reid-search-input"
-                    placeholder="Search for the track…" onkeydown="if(event.key==='Enter')runReidentifySearch()" />
-                <button class="reid-search-btn" id="reid-search-btn" onclick="runReidentifySearch()">Search</button>
-            </div>
-
-            <div class="reid-results" id="reid-results"></div>
-
-            <div class="reid-footer">
-                <label class="reid-replace" title="When on, the original file is deleted after the track is re-filed under the new release.">
-                    <input type="checkbox" id="reid-replace" checked />
-                    <span class="reid-replace-box"></span>
-                    <span class="reid-replace-text">Replace the original file <em>(recommended)</em></span>
-                </label>
-                <div class="reid-footer-actions">
-                    <button class="btn btn--secondary" onclick="closeReidentifyModal()">Cancel</button>
-                    <button class="btn btn--primary" id="reid-confirm-btn" disabled onclick="confirmReidentify()">Re-identify</button>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- Watchlist Artist Config Modal -->
 
     <!-- Genre Browser Modal -->
