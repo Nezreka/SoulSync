@@ -13,6 +13,7 @@ import {
   deleteLibraryAlbumRequest,
   type DeleteAlbumChoice,
 } from '../-artist-detail.manage-actions';
+import { redownloadAlbumFlow } from '../-artist-detail.redownload';
 import { refreshReorganizeQueue, reorganizeStateForAlbum } from '../-artist-detail.reorganize';
 import { analyzeAlbumReplayGainRequest } from '../-artist-detail.tags-rg';
 import { ArtPicker } from './art-picker';
@@ -271,6 +272,7 @@ function AdminAlbumActions({
   const [taggingTracks, setTaggingTracks] = useState<unknown[] | null>(null);
   const [rgBusy, setRgBusy] = useState(false);
   const [reorganizing, setReorganizing] = useState(false);
+  const [redownloadBusy, setRedownloadBusy] = useState(false);
 
   return (
     <>
@@ -384,12 +386,22 @@ function AdminAlbumActions({
         type="button"
         className="enhanced-redownload-album-btn"
         title="Redownload this album (opens Download Missing modal with force-download)"
+        disabled={redownloadBusy}
         onClick={(e) => {
           e.stopPropagation();
-          window.redownloadLibraryAlbum?.(album, artistName, e.currentTarget);
+          if (redownloadBusy) return;
+          setRedownloadBusy(true);
+          // #911: pulls the album's CANONICAL edition, then hands off to the
+          // shared Download Missing modal (redownloadLibraryAlbum's port).
+          void redownloadAlbumFlow(album, artistName)
+            .catch((error: Error) => {
+              console.error('Redownload album error:', error);
+              window.showToast?.(`Error: ${error.message}`, 'error');
+            })
+            .finally(() => setRedownloadBusy(false));
         }}
       >
-        ↻ Redownload
+        {redownloadBusy ? 'Loading...' : '↻ Redownload'}
       </button>
 
       <button

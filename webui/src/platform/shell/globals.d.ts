@@ -399,7 +399,18 @@ declare global {
       artist: unknown,
       tracks: unknown[],
       albumType: unknown,
+      /** Per-track ownership map; the missing-track flow passes {name: false}. */
+      ownedMap?: Record<string, boolean>,
     ) => Promise<void> | void;
+    /** downloads.js — "Download Now" inside the wishlist modal just opened. */
+    handleWishlistDownloadNow?: () => void;
+    /** shared-helpers.js — records the album under Active Artist Downloads. */
+    registerArtistDownload?: (
+      artist: unknown,
+      album: unknown,
+      virtualPlaylistId: string,
+      albumType: string,
+    ) => void;
     /** shared-helpers.js — backfills per-track ownership behind the modal. */
     lazyLoadTrackOwnership?: (
       artistName: string,

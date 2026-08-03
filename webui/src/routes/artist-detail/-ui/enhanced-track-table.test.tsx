@@ -50,6 +50,7 @@ function renderTable(album: EnhancedAlbum = ALBUM, isAdmin = true, selected = ne
       onTrackEdited={onTrackEdited}
       onTrackDeleted={onTrackDeleted}
       onAlbumPatched={vi.fn()}
+      onReload={vi.fn()}
     />,
   );
   return { onSelectedChange, onTrackEdited, onTrackDeleted, ...view };
@@ -65,12 +66,9 @@ const titles = () =>
 const ACTIONS = [
   'showTrackSourceInfo',
   'openReidentifyModal',
-  'showTrackRedownloadModal',
   'deleteLibraryTrack',
-  'openMissingTrackManageModal',
   'showReportIssueModal',
   'openManualMatchModal',
-  '_showMobileTrackActions',
   'addToQueue',
   'playNext',
 ] as const;
@@ -428,11 +426,19 @@ describe('row actions', () => {
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe('/api/library/track/1/tag-preview');
     vi.unstubAllGlobals();
 
-    click('.enhanced-redownload-btn');
-    expect(window.showTrackRedownloadModal).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 1 }),
-      ALBUM,
+    // Redownload is local too: ↻ mounts the 3-step modal, which searches
+    // metadata sources the moment it opens.
+    const redlSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ success: true, metadata_results: {} })),
     );
+    vi.stubGlobal('fetch', redlSpy);
+    click('.enhanced-redownload-btn');
+    expect(screen.getByText('Redownload Track')).toBeTruthy();
+    expect(String(redlSpy.mock.calls[0]?.[0])).toBe(
+      '/api/library/track/1/redownload/search-metadata',
+    );
+    vi.unstubAllGlobals();
 
     // Delete is no longer a window bridge: it opens the local two-option
     // dialog (deleteLibraryTrack's port). The full flow has its own test.
@@ -508,17 +514,18 @@ describe('row actions', () => {
   });
 
   it('manages a missing track from either role', () => {
+    // No longer a window bridge: Manage opens the local two-option chooser
+    // seeded with the missing slot's context.
     renderTable();
     click('.enhanced-missing-manage-btn', 2);
-    expect(window.openMissingTrackManageModal).toHaveBeenCalledWith(
-      expect.objectContaining({ _missingExpected: true }),
-      ALBUM,
-    );
+    expect(screen.getByText('Manage Missing Track')).toBeTruthy();
+    expect(screen.getByText('Add to Library')).toBeTruthy();
+    expect(screen.getByText('I Have This')).toBeTruthy();
+    cleanup();
 
-    document.body.innerHTML = '';
     renderTable(ALBUM, false);
     click('.enhanced-missing-manage-btn', 2);
-    expect(window.openMissingTrackManageModal).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Manage Missing Track')).toBeTruthy();
   });
 
   it('reports a track issue with its ALBUM name too', () => {
@@ -528,9 +535,13 @@ describe('row actions', () => {
   });
 
   it('opens the mobile action popover', () => {
+    // Local now: the sheet lists the row's own actions.
     renderTable();
     click('.enhanced-mobile-actions-btn');
-    expect(window._showMobileTrackActions).toHaveBeenCalled();
+    const popover = document.querySelector('.enhanced-mobile-actions-popover');
+    expect(popover).toBeTruthy();
+    expect(popover?.querySelector('.popover-title')?.textContent).toBe('Xtal');
+    expect(popover?.querySelector('.popover-delete')?.textContent).toContain('Delete Track');
   });
 
   it('does not let an action bubble into the album toggle', () => {
@@ -546,6 +557,7 @@ describe('row actions', () => {
           onTrackEdited={vi.fn()}
           onTrackDeleted={vi.fn()}
           onAlbumPatched={vi.fn()}
+          onReload={vi.fn()}
         />
       </div>,
     );

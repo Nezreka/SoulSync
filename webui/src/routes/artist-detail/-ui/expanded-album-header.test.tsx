@@ -38,7 +38,6 @@ const ACTIONS = [
   'openAlbumArtPicker',
   'openManualMatchModal',
   'runEnrichment',
-  'redownloadLibraryAlbum',
   'deleteLibraryAlbum',
   'showReportIssueModal',
 ] as const;
@@ -306,11 +305,42 @@ describe('admin actions', () => {
     }
   });
 
-  it('hands the BUTTON itself to redownload, which renders progress on it', () => {
-    renderHeader();
-    const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
-    fireEvent.click(redownload);
-    expect(window.redownloadLibraryAlbum).toHaveBeenCalledWith(ALBUM, 'Aphex Twin', redownload);
+  it('redownloads the album through its CANONICAL source (#911)', async () => {
+    // Local now: the flow fetches the tagged edition via /api/album/<id>/tracks
+    // and hands off to the shared Download Missing modal.
+    const fetchSpy = vi.fn(
+      async (_i: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            album: { id: 'sp1', name: 'SAW 85-92' },
+            tracks: [{ id: 't1', name: 'Xtal' }],
+          }),
+        ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    window.openDownloadMissingModalForArtistAlbum = vi.fn() as never;
+    window.registerArtistDownload = vi.fn() as never;
+    try {
+      renderHeader();
+      const redownload = document.querySelector('.enhanced-redownload-album-btn') as HTMLElement;
+      fireEvent.click(redownload);
+      expect(redownload.textContent).toBe('Loading...');
+      await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
+      const url = String(fetchSpy.mock.calls[0]?.[0]);
+      expect(url).toContain('/api/album/sp1/tracks');
+      expect(url).toContain('source=spotify');
+      const args = (window.openDownloadMissingModalForArtistAlbum as ReturnType<typeof vi.fn>).mock
+        .calls[0];
+      expect(args?.[0]).toBe('library_redownload_sp1');
+      expect(args?.[1]).toBe('[Aphex Twin] SAW 85-92');
+      expect(window.registerArtistDownload).toHaveBeenCalled();
+      await waitFor(() => expect(redownload.textContent).toBe('↻ Redownload'));
+    } finally {
+      vi.unstubAllGlobals();
+      delete window.openDownloadMissingModalForArtistAlbum;
+      delete window.registerArtistDownload;
+    }
   });
 
   it('survives a handler that is not loaded rather than throwing', () => {

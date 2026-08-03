@@ -135,6 +135,7 @@ export function EnhancedView({ data, status, isAdmin, onReload }: Props) {
             selected={selected}
             onSelectedChange={setSelected}
             onAlbumDeleted={removeAlbum}
+            onReload={onReload}
           />
         );
       })}
@@ -181,6 +182,7 @@ function EnhancedSection({
   selected,
   onSelectedChange,
   onAlbumDeleted,
+  onReload,
 }: {
   type: string;
   label: string;
@@ -190,6 +192,7 @@ function EnhancedSection({
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
   onAlbumDeleted: (albumId: unknown) => void;
+  onReload: () => void;
 }) {
   return (
     <div className="enhanced-section">
@@ -209,6 +212,7 @@ function EnhancedSection({
             selected={selected}
             onSelectedChange={onSelectedChange}
             onAlbumDeleted={() => onAlbumDeleted(album.id)}
+            onReload={onReload}
             key={String(album.id)}
           />
         ))}
@@ -237,6 +241,7 @@ function EnhancedAlbumWrapper({
   selected,
   onSelectedChange,
   onAlbumDeleted,
+  onReload,
 }: {
   album: EnhancedAlbum;
   type: string;
@@ -245,6 +250,7 @@ function EnhancedAlbumWrapper({
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
   onAlbumDeleted: () => void;
+  onReload: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -351,6 +357,7 @@ function EnhancedAlbumWrapper({
                   }))
                 }
                 onAlbumPatched={(fresh) => setAlbum(fresh as typeof albumProp)}
+                onReload={onReload}
               />
             </>
           ) : null}

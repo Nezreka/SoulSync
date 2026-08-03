@@ -25,6 +25,9 @@ import {
 import { analyzeTrackReplayGainRequest } from '../-artist-detail.tags-rg';
 import { EditableCell } from './editable-cell';
 import { ManualMatchModal } from './manual-match-modal';
+import { MissingTrackManageModal } from './missing-track-modals';
+import { MobileTrackActions } from './mobile-track-actions';
+import { RedownloadModal } from './redownload-modal';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from './smart-delete-dialog';
 import { SourceInfoPopover } from './source-info-popover';
 import { TagPreviewModal } from './tag-preview-modal';
@@ -43,6 +46,8 @@ interface Props {
   /** Track ids currently ticked, owned by the panel so the bulk bar can read them. */
   selected: Set<string>;
   onSelectedChange: (next: Set<string>) => void;
+  /** Full payload re-fetch (a finished redownload / a fallback-path import). */
+  onReload: () => void;
 }
 
 /**
@@ -63,6 +68,7 @@ export function EnhancedTrackTable({
   onTrackEdited,
   onTrackDeleted,
   onAlbumPatched,
+  onReload,
 }: Props) {
   const [sort, setSort] = useState<TrackSort | undefined>(undefined);
   const [matching, setMatching] = useState<{ track: EnhancedTrack; service: string } | null>(null);
@@ -70,9 +76,11 @@ export function EnhancedTrackTable({
   /** One popover / one dialog for the whole table, keyed to the acting row. */
   const [sourceInfo, setSourceInfo] = useState<{
     track: EnhancedTrack;
-    anchor: HTMLElement;
+    anchor: HTMLElement | null;
   } | null>(null);
   const [deleting, setDeleting] = useState<EnhancedTrack | null>(null);
+  const [redownloading, setRedownloading] = useState<EnhancedTrack | null>(null);
+  const [managingMissing, setManagingMissing] = useState<EnhancedTrack | null>(null);
   const rows = sortedTrackRows(getAlbumTrackRows(album), sort);
 
   if (rows.length === 0) {
@@ -175,6 +183,8 @@ export function EnhancedTrackTable({
               onDelete={() => setDeleting(track)}
               onMatch={(service) => setMatching({ track, service })}
               onTagPreview={() => setTagPreview(track)}
+              onRedownload={() => setRedownloading(track)}
+              onMissingManage={() => setManagingMissing(track)}
             />
           ))}
         </tbody>
@@ -218,6 +228,43 @@ export function EnhancedTrackTable({
           onClose={() => setMatching(null)}
         />
       ) : null}
+      {redownloading ? (
+        <RedownloadModal
+          track={redownloading}
+          album={album}
+          artistName={String(artist?.name || '')}
+          onReload={onReload}
+          onClose={() => setRedownloading(null)}
+        />
+      ) : null}
+      {managingMissing ? (
+        <MissingTrackManageModal
+          track={managingMissing}
+          album={album}
+          artist={{
+            id: artist?.id,
+            name: String(artist?.name || ''),
+            imageUrl: String(artist?.thumb_url || ''),
+          }}
+          onImported={(updatedData) => {
+            // The importer hands back the whole refreshed payload; fold it in
+            // like a match does, else fall back to a full re-fetch (5203-5209).
+            if (updatedData) {
+              const fresh = foldUpdatedData(
+                (window.artistDetailPageState?.enhancedData ?? null) as
+                  | import('../-artist-detail.enhanced').EnhancedData
+                  | null,
+                updatedData as never,
+                album.id,
+              );
+              if (fresh) onAlbumPatched(fresh);
+            } else {
+              onReload();
+            }
+          }}
+          onClose={() => setManagingMissing(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -234,6 +281,8 @@ function TrackRow({
   onDelete,
   onMatch,
   onTagPreview,
+  onRedownload,
+  onMissingManage,
 }: {
   track: EnhancedTrack;
   album: EnhancedAlbum;
@@ -242,12 +291,15 @@ function TrackRow({
   selected: boolean;
   onToggle: () => void;
   onEdited: (field: string, value: string | number | null) => void;
-  onSourceInfo: (anchor: HTMLElement) => void;
+  onSourceInfo: (anchor: HTMLElement | null) => void;
   onDelete: () => void;
   onMatch: (service: string) => void;
   onTagPreview: () => void;
+  onRedownload: () => void;
+  onMissingManage: () => void;
 }) {
   const [rgBusy, setRgBusy] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const missing = Boolean((track as { _missingExpected?: boolean })._missingExpected);
   const editable = isAdmin && !missing ? ' editable' : '';
   const format = extractFormat(track.file_path);
@@ -475,7 +527,7 @@ function TrackRow({
                   className="enhanced-missing-manage-btn"
                   data-action="manage-missing"
                   title="Manage this missing album track"
-                  onClick={act(() => window.openMissingTrackManageModal?.(track, album))}
+                  onClick={act(() => onMissingManage())}
                 >
                   Manage
                 </button>
@@ -510,7 +562,7 @@ function TrackRow({
                   type="button"
                   className="enhanced-redownload-btn"
                   title="Redownload this track"
-                  onClick={act(() => window.showTrackRedownloadModal?.(track, album))}
+                  onClick={act(() => onRedownload())}
                 >
                   ↻
                 </button>
@@ -533,7 +585,7 @@ function TrackRow({
               type="button"
               className="enhanced-missing-manage-btn"
               data-action="manage-missing"
-              onClick={act(() => window.openMissingTrackManageModal?.(track, album))}
+              onClick={act(() => onMissingManage())}
             >
               Manage
             </button>
@@ -564,10 +616,31 @@ function TrackRow({
           type="button"
           className="enhanced-mobile-actions-btn"
           title="Actions"
-          onClick={act(() => window._showMobileTrackActions?.(track, album))}
+          onClick={act(() => setMobileOpen(true))}
         >
           ⋯
         </button>
+        {mobileOpen ? (
+          <MobileTrackActions
+            track={track}
+            isAdmin={isAdmin}
+            onPlay={() => {
+              if (track.file_path) {
+                getShellBridge()?.playLibraryTrack(
+                  track as never,
+                  String(album.title || ''),
+                  artistName,
+                );
+              }
+            }}
+            onQueue={() => enqueue(false)}
+            onTagPreview={onTagPreview}
+            onSourceInfo={() => onSourceInfo(null)}
+            onRedownload={onRedownload}
+            onDelete={onDelete}
+            onClose={() => setMobileOpen(false)}
+          />
+        ) : null}
       </td>
     </tr>
   );
