@@ -25,6 +25,7 @@ import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { DiscographyModal } from './discography-modal';
 import { EnrichmentCoverage } from './enrichment-coverage';
+import { BodyPortal } from './portal';
 import { TopTracksSidebar } from './top-tracks-sidebar';
 
 interface Props {
@@ -191,16 +192,20 @@ export function ArtistHero({
         />
       ) : null}
       {pickingPhoto ? (
-        <ArtPicker
-          target={{ kind: 'artist', id: artist.id }}
-          currentUrl={appliedPhoto || image.primary || null}
-          subtitle={
-            String(artist.name || '') +
-            ' · applies to SoulSync, your server, and artist.jpg on disk'
-          }
-          onApplied={(url) => setAppliedPhoto(url)}
-          onClose={() => setPickingPhoto(false)}
-        />
+        // Portaled for the same reason as the discography modal: the hero's
+        // backdrop-filter would clamp a fixed overlay to the hero box.
+        <BodyPortal>
+          <ArtPicker
+            target={{ kind: 'artist', id: artist.id }}
+            currentUrl={appliedPhoto || image.primary || null}
+            subtitle={
+              String(artist.name || '') +
+              ' · applies to SoulSync, your server, and artist.jpg on disk'
+            }
+            onApplied={(url) => setAppliedPhoto(url)}
+            onClose={() => setPickingPhoto(false)}
+          />
+        </BodyPortal>
       ) : null}
       <div
         className="artist-detail-hero-bg"

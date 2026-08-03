@@ -17,6 +17,7 @@ import {
   loadDiscographyForModal,
   streamDiscographyDownload,
 } from '../-artist-detail.discography-modal';
+import { BodyPortal } from './portal';
 
 /**
  * The Download Discography modal (openDiscographyModal, library.js:580):
@@ -146,161 +147,170 @@ export function DiscographyModal({
     }
   };
 
+  // BodyPortal is load-bearing: this mounts from inside the hero, whose
+  // backdrop-filter makes it the containing block for position:fixed —
+  // rendered in place, the overlay is clamped to the hero box and cut off.
   return (
-    <div className="discog-modal-overlay visible" id="discog-modal-overlay">
-      <div className="discog-modal">
-        <div
-          className="discog-modal-hero"
-          style={artistImage ? { backgroundImage: `url('${artistImage}')` } : undefined}
-        >
-          <div className="discog-modal-hero-overlay" />
-          <div className="discog-modal-hero-content">
-            <h2 className="discog-modal-title">Download Discography</h2>
-            <p className="discog-modal-artist">{artistName}</p>
+    <BodyPortal>
+      <div className="discog-modal-overlay visible" id="discog-modal-overlay">
+        <div className="discog-modal">
+          <div
+            className="discog-modal-hero"
+            style={artistImage ? { backgroundImage: `url('${artistImage}')` } : undefined}
+          >
+            <div className="discog-modal-hero-overlay" />
+            <div className="discog-modal-hero-content">
+              <h2 className="discog-modal-title">Download Discography</h2>
+              <p className="discog-modal-artist">{artistName}</p>
+            </div>
+            <button className="discog-modal-close" type="button" onClick={onClose}>
+              ×
+            </button>
           </div>
-          <button className="discog-modal-close" type="button" onClick={onClose}>
-            ×
-          </button>
-        </div>
 
-        {phase === 'pick' ? (
-          <div className="discog-filter-bar">
-            <div className="discog-filters">
-              {(
-                [
-                  ['album', 'Albums'],
-                  ['ep', 'EPs'],
-                  ['single', 'Singles'],
-                  ['live', 'Live'],
-                  ['compilations', 'Compilations'],
-                  ['featured', 'Featured'],
-                ] as [keyof DiscogFilters, string][]
-              ).map(([key, label]) => (
-                <button
-                  className={`discog-filter${filters[key] ? ' active' : ''}`}
-                  type="button"
-                  key={key}
-                  onClick={() => toggleFilter(key)}
-                >
-                  {label}
+          {phase === 'pick' ? (
+            <div className="discog-filter-bar">
+              <div className="discog-filters">
+                {(
+                  [
+                    ['album', 'Albums'],
+                    ['ep', 'EPs'],
+                    ['single', 'Singles'],
+                    ['live', 'Live'],
+                    ['compilations', 'Compilations'],
+                    ['featured', 'Featured'],
+                  ] as [keyof DiscogFilters, string][]
+                ).map(([key, label]) => (
+                  <button
+                    className={`discog-filter${filters[key] ? ' active' : ''}`}
+                    type="button"
+                    key={key}
+                    onClick={() => toggleFilter(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="discog-select-actions">
+                <button className="discog-select-btn" type="button" onClick={() => selectAll(true)}>
+                  Select All
                 </button>
+                <button
+                  className="discog-select-btn"
+                  type="button"
+                  onClick={() => selectAll(false)}
+                >
+                  Deselect All
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {phase === 'pick' ? (
+            <div className="discog-grid" id="discog-grid">
+              {cards.map((card, index) => (
+                <DiscogCard
+                  key={`${card.release._type}-${String(card.release.id)}-${index}`}
+                  release={card.release}
+                  view={card.view}
+                  visible={card.visible}
+                  index={index}
+                  checked={checked.has(String(card.release.id))}
+                  onToggle={() => {
+                    const id = String(card.release.id);
+                    const next = new Set(checked);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    setChecked(next);
+                  }}
+                />
               ))}
             </div>
-            <div className="discog-select-actions">
-              <button className="discog-select-btn" type="button" onClick={() => selectAll(true)}>
-                Select All
-              </button>
-              <button className="discog-select-btn" type="button" onClick={() => selectAll(false)}>
-                Deselect All
-              </button>
+          ) : (
+            <div className="discog-progress" id="discog-progress">
+              {visibleChecked.map((card) => {
+                const state = progress[String(card.release.id)];
+                return (
+                  <div
+                    className={`discog-progress-item${state ? ` ${state.status}` : ''}`}
+                    id={`discog-prog-${String(card.release.id)}`}
+                    key={String(card.release.id)}
+                  >
+                    <div className="discog-prog-art">
+                      {card.release.image_url ? <img src={card.release.image_url} alt="" /> : '🎵'}
+                    </div>
+                    <div className="discog-prog-info">
+                      <div className="discog-prog-title">{card.view.albumName}</div>
+                      <div className="discog-prog-status">{state?.text ?? 'Waiting...'}</div>
+                    </div>
+                    <div className="discog-prog-icon">
+                      {state?.status === 'done' ? (
+                        <span className="discog-check">✓</span>
+                      ) : state?.status === 'skipped' ? (
+                        <span className="discog-skip">—</span>
+                      ) : state?.status === 'error' ? (
+                        <span className="discog-error">✗</span>
+                      ) : (
+                        <div className="discog-spinner" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        ) : null}
+          )}
 
-        {phase === 'pick' ? (
-          <div className="discog-grid" id="discog-grid">
-            {cards.map((card, index) => (
-              <DiscogCard
-                key={`${card.release._type}-${String(card.release.id)}-${index}`}
-                release={card.release}
-                view={card.view}
-                visible={card.visible}
-                index={index}
-                checked={checked.has(String(card.release.id))}
-                onToggle={() => {
-                  const id = String(card.release.id);
-                  const next = new Set(checked);
-                  if (next.has(id)) next.delete(id);
-                  else next.add(id);
-                  setChecked(next);
-                }}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="discog-progress" id="discog-progress">
-            {visibleChecked.map((card) => {
-              const state = progress[String(card.release.id)];
-              return (
-                <div
-                  className={`discog-progress-item${state ? ` ${state.status}` : ''}`}
-                  id={`discog-prog-${String(card.release.id)}`}
-                  key={String(card.release.id)}
-                >
-                  <div className="discog-prog-art">
-                    {card.release.image_url ? <img src={card.release.image_url} alt="" /> : '🎵'}
-                  </div>
-                  <div className="discog-prog-info">
-                    <div className="discog-prog-title">{card.view.albumName}</div>
-                    <div className="discog-prog-status">{state?.text ?? 'Waiting...'}</div>
-                  </div>
-                  <div className="discog-prog-icon">
-                    {state?.status === 'done' ? (
-                      <span className="discog-check">✓</span>
-                    ) : state?.status === 'skipped' ? (
-                      <span className="discog-skip">—</span>
-                    ) : state?.status === 'error' ? (
-                      <span className="discog-error">✗</span>
-                    ) : (
-                      <div className="discog-spinner" />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="discog-footer" id="discog-footer">
-          <div className="discog-footer-info" id="discog-footer-info">
-            {phase === 'pick'
-              ? footer.info
-              : totals
-                ? `Done — ${totals.total_added} tracks added, ${totals.total_skipped} skipped`
-                : 'Processing... this may take a moment'}
-          </div>
-          <div className="discog-footer-actions">
-            {phase === 'pick' ? (
-              <>
-                <button className="discog-cancel-btn" type="button" onClick={onClose}>
-                  Cancel
-                </button>
-                <button
-                  className="discog-submit-btn"
-                  id="discog-submit-btn"
-                  type="button"
-                  disabled={footer.disabled}
-                  onClick={() => void start()}
-                >
-                  <span className="discog-submit-icon">⬇</span>
-                  <span id="discog-submit-text">{footer.submitText}</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button className="discog-cancel-btn" type="button" onClick={onClose}>
-                  Close
-                </button>
-                {totals && totals.total_added > 0 ? (
+          <div className="discog-footer" id="discog-footer">
+            <div className="discog-footer-info" id="discog-footer-info">
+              {phase === 'pick'
+                ? footer.info
+                : totals
+                  ? `Done — ${totals.total_added} tracks added, ${totals.total_skipped} skipped`
+                  : 'Processing... this may take a moment'}
+            </div>
+            <div className="discog-footer-actions">
+              {phase === 'pick' ? (
+                <>
+                  <button className="discog-cancel-btn" type="button" onClick={onClose}>
+                    Cancel
+                  </button>
                   <button
                     className="discog-submit-btn"
+                    id="discog-submit-btn"
                     type="button"
-                    onClick={() => {
-                      onClose();
-                      void fetch('/api/wishlist/process', { method: 'POST' });
-                      window.showToast?.('Wishlist processing started', 'success');
-                    }}
+                    disabled={footer.disabled}
+                    onClick={() => void start()}
                   >
-                    <span className="discog-submit-icon">🚀</span>
-                    <span>Process Wishlist Now</span>
+                    <span className="discog-submit-icon">⬇</span>
+                    <span id="discog-submit-text">{footer.submitText}</span>
                   </button>
-                ) : null}
-              </>
-            )}
+                </>
+              ) : (
+                <>
+                  <button className="discog-cancel-btn" type="button" onClick={onClose}>
+                    Close
+                  </button>
+                  {totals && totals.total_added > 0 ? (
+                    <button
+                      className="discog-submit-btn"
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        void fetch('/api/wishlist/process', { method: 'POST' });
+                        window.showToast?.('Wishlist processing started', 'success');
+                      }}
+                    >
+                      <span className="discog-submit-icon">🚀</span>
+                      <span>Process Wishlist Now</span>
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </BodyPortal>
   );
 }
 

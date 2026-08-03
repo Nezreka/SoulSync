@@ -1,5 +1,7 @@
 import type { EnhancedTrack } from '../-artist-detail.enhanced';
 
+import { BodyPortal } from './portal';
+
 /**
  * The mobile action sheet (_showMobileTrackActions, library.js:2905): the
  * per-track actions as a bottom popover, since the action columns are hidden
@@ -33,8 +35,10 @@ export function MobileTrackActions({
   };
   const hasFile = Boolean(track.file_path);
 
+  // Body-level, as the vanilla appended it: the sheet is position:fixed and
+  // must not depend on the table's stacking context.
   return (
-    <>
+    <BodyPortal>
       <div className="mobile-popover-overlay" onClick={onClose} />
       <div className="enhanced-mobile-actions-popover">
         <div className="popover-title">{String(track.title || 'Track')}</div>
@@ -70,6 +74,6 @@ export function MobileTrackActions({
           Cancel
         </button>
       </div>
-    </>
+    </BodyPortal>
   );
 }
