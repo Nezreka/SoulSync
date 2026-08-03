@@ -560,7 +560,10 @@ function updateMediaScanFromData(data) {
 
     const phaseLabel = document.getElementById('media-scan-phase-label');
     const progressLabel = document.getElementById('media-scan-progress-label');
-    const button = document.getElementById('media-scan-btn');
+    // `media-scan-btn` is the CLASS; the id is `media-scan-button`. Reading the
+    // class as an id made this always null, so the websocket completion path
+    // never re-enabled the button and Scan Library stayed dead after one click.
+    const button = document.getElementById('media-scan-button');
     const progressBar = document.getElementById('media-scan-progress-bar');
     const statusValue = document.getElementById('media-scan-status');
 
