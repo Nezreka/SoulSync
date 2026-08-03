@@ -119,13 +119,57 @@ def _all_classes() -> set[str]:
     return classes
 
 
+# The `.page` divs are flat siblings inside #main-content, so each one runs from
+# its own opening tag to the next one — and the last runs to the /main-content
+# marker. That beats depth-counting the tags: an HTML tag walker has to get void
+# elements, self-closing SVG children, multi-line comment banners and quoted
+# attributes all correct, and getting any of them wrong silently truncates a
+# region (mine closed #tools-page at 248 lines instead of 424, which quietly
+# hid three of the seven help buttons from the coverage test below).
+_MAIN_CONTENT_END = "<!-- /main-content -->"
+
+
+def _page_spans() -> dict[str, tuple[int, int]]:
+    """page id -> (first line, last line) of its `<div class="page">` block."""
+    lines = _html().split("\n")
+    starts: list[tuple[int, str]] = []
+    end_of_pages = len(lines)
+    for lineno, line in enumerate(lines, 1):
+        match = re.search(r'<div class="page" id="([^"]+)"', line)
+        if match:
+            starts.append((lineno, match.group(1)))
+        elif _MAIN_CONTENT_END in line and starts:
+            end_of_pages = lineno - 1
+            break
+
+    assert starts, "found no `<div class=\"page\">` blocks in index.html"
+    spans: dict[str, tuple[int, int]] = {}
+    for position, (lineno, page_id) in enumerate(starts):
+        following = starts[position + 1][0] - 1 if position + 1 < len(starts) else end_of_pages
+        spans[page_id] = (lineno, following)
+    return spans
+
+
+def _page_of_id() -> dict[str, str]:
+    """id -> the page id containing it. Ids outside every page are absent."""
+    spans = _page_spans()
+    mapping: dict[str, str] = {}
+    for lineno, line in enumerate(_html().split("\n"), 1):
+        found = re.findall(r'\bid="([^"]+)"', line)
+        if not found:
+            continue
+        for page_id, (start, end) in spans.items():
+            if start <= lineno <= end:
+                for element_id in found:
+                    mapping.setdefault(element_id, page_id.replace("-page", ""))
+                break
+    return mapping
+
+
 def _tools_region() -> str:
     """The #tools-page markup, start tag through its matching close."""
-    html = _html()
-    start = html.index(f'<div class="page" id="{TOOLS_PAGE_ID}">')
-    # The region ends at the next sibling at the same indentation.
-    end = html.index("\n            <!--", start)
-    return html[start:end]
+    start, end = _page_spans()[TOOLS_PAGE_ID]
+    return "\n".join(_html().split("\n")[start - 1 : end])
 
 
 def test_get_element_by_id_never_names_a_css_class():
@@ -238,16 +282,7 @@ def test_helper_page_hints_never_route_to_a_page_without_the_element():
                     return page
         return None
 
-    # Map each id in index.html to the .page that contains it.
-    html_lines = _html().split("\n")
-    page_of: dict[str, str] = {}
-    current: str | None = None
-    for line in html_lines:
-        page = re.search(r'<div class="page" id="([^"]+)-page"', line)
-        if page:
-            current = page.group(1)
-        for found in re.findall(r'\bid="([^"]+)"', line):
-            page_of.setdefault(found, current)
+    page_of = _page_of_id()
 
     offenders = []
     for selector in re.findall(r"^\s{4}'(#[^']+)':\s*\{", src, re.M):
@@ -265,15 +300,7 @@ def test_setup_step_selectors_live_on_the_page_the_step_names():
     """SETUP_STEPS navigates to `page` then highlights `selector`; the first-scan
     step pointed at the dashboard while #db-updater-card is on the tools page."""
     src = _read(STATIC / "helper.js")
-    html_lines = _html().split("\n")
-    page_of: dict[str, str] = {}
-    current: str | None = None
-    for line in html_lines:
-        page = re.search(r'<div class="page" id="([^"]+)-page"', line)
-        if page:
-            current = page.group(1)
-        for found in re.findall(r'\bid="([^"]+)"', line):
-            page_of.setdefault(found, current)
+    page_of = _page_of_id()
 
     steps = re.search(r"const SETUP_STEPS = \[(.*?)\n\];", src, re.S)
     assert steps, "could not find SETUP_STEPS in helper.js"
