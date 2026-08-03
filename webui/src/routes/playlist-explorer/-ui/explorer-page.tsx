@@ -209,7 +209,12 @@ export function ExplorerPage() {
   }
 
   return (
-    <div className="page-shell explorer-container">
+    // The id is kept because helper.js's help mode walks UP the DOM matching
+    // selectors, and #playlist-explorer-page is the outermost entry — without
+    // it, clicking the page background explains nothing. The `page` CLASS is
+    // deliberately NOT here: the shell styles `.page` display:none, so a React
+    // page carrying it renders invisible with every test still passing.
+    <div className="page-shell explorer-container" id="playlist-explorer-page">
       <div className="dashboard-header" style={{ marginBottom: '12px' }}>
         <div className="dashboard-header-sweep" aria-hidden="true">
           <span />

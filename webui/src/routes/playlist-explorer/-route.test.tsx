@@ -206,6 +206,31 @@ describe('playlist-explorer route', () => {
     expect(window.showToast).toHaveBeenCalledWith('Select a playlist first', 'error');
   });
 
+  it('still answers every helper.js anchor for this page', async () => {
+    // helper.js's help mode walks UP the DOM matching these selectors
+    // (helper.js:2070-2095). They were written against the vanilla markup this
+    // port deleted; each one has to still resolve, or clicking that part of
+    // the page in help mode silently explains nothing.
+    stubFetch();
+    await buildTheTree();
+    fireEvent.click(screen.getByRole('button', { name: /Select All/ }));
+
+    for (const selector of [
+      '#playlist-explorer-page',
+      '#explorer-playlist-picker',
+      '.explorer-mode-btn',
+      '#explorer-build-btn',
+      '#explorer-action-bar',
+    ]) {
+      expect(document.querySelector(selector), `missing helper.js anchor ${selector}`).toBeTruthy();
+    }
+    // ...and the page root must NOT carry the `page` class: the shell styles
+    // `.page { display: none }`, so a React page wearing it renders invisible.
+    expect(
+      (document.querySelector('#playlist-explorer-page') as HTMLElement).classList.contains('page'),
+    ).toBe(false);
+  });
+
   it('copes with a backend that has no mirrored playlists', async () => {
     stubFetch([]);
     renderRoute();
