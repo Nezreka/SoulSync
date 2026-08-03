@@ -486,6 +486,32 @@ declare global {
       showLoadingOverlay: (message?: string) => void;
       hideLoadingOverlay: () => void;
     };
+    /**
+     * Tools page — modals that stay VANILLA and are opened, not reimplemented.
+     *
+     * Each one is either self-contained in its own file, shared with another
+     * page, or backed by markup that lives outside #tools-page:
+     *
+     * - openToolHelpModal reads TOOL_HELP_CONTENT and drives #tool-help-modal,
+     *   which sits outside the tools region in index.html
+     * - openDiscoveryPoolModal is in stats-automations.js and is also opened
+     *   from the sync page's per-playlist menu
+     * - openManualLibraryMatchTool is a self-contained file also opened from
+     *   the sync-history markup, so it cannot move with this page
+     * - openConfigExportModal is a self-contained IIFE covering BOTH sides
+     *   (music config + video settings)
+     * - openMetadataCacheModal drives #mcache-browse-modal, also outside the
+     *   tools region
+     * - openCacheHealthModal is in enrichment.js and is opened from the repair
+     *   findings dashboard as well as the Metadata Cache card
+     */
+    openToolHelpModal?: (toolId: string) => void;
+    openDiscoveryPoolModal?: (playlistId?: string | null) => void;
+    openManualLibraryMatchTool?: (prefill?: string) => void;
+    openConfigExportModal?: () => void;
+    openMetadataCacheModal?: () => void;
+    openCacheHealthModal?: () => void;
+    openBlacklistModal?: () => void;
   }
 }
 
