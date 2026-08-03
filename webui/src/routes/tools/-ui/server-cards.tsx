@@ -19,6 +19,12 @@
  *
  * Here the poll counts every tick and the hook clears it on unmount, so neither
  * can come back.
+ *
+ * P6 HANDOFF: the vanilla `updateMediaScanFromData` (media-player.js) is still
+ * bound to `scan:media` and writes straight into #media-scan-phase-label /
+ * -progress-bar / -status — ids this component now owns. Until P6 rewires the
+ * socket, both can write the same nodes. It is not harmful (they agree on the
+ * text) but it must be severed with the rest of the socket wiring, not left.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -245,6 +251,10 @@ export function MetadataUpdaterCard() {
   const [interval, setIntervalDays] = useState('30');
   const [stopping, setStopping] = useState(false);
   const announcedRef = useRef(false);
+  // The vanilla's `stopping` branch touches ONLY the button and the phase line:
+  // the progress label, the bar and the disabled select all keep whatever the
+  // running branch last set. Holding the last running values reproduces that.
+  const lastProgressRef = useRef({ details: '0 / 0 artists (0.0%)', percent: 0 });
 
   const poll = usePolledStatus<MetadataUpdateState>({
     fetcher: fetchMetadataUpdateStatus,
@@ -302,8 +312,12 @@ export function MetadataUpdaterCard() {
     const pct = state?.percentage || 0;
     details = `${state?.processed || 0} / ${state?.total || 0} artists (${pct.toFixed(1)}%)`;
     percent = pct;
+    lastProgressRef.current = { details, percent };
   } else if (state?.status === 'stopping') {
     phase = 'Current Artist: Stopping...';
+    // Frozen at the last running values — the vanilla never rewrites them here.
+    details = lastProgressRef.current.details;
+    percent = lastProgressRef.current.percent;
   } else if (state?.status === 'completed') {
     phase = 'Current Artist: Completed';
     details = `Completed: ${state.processed || 0} processed, ${state.successful || 0} successful, ${state.failed || 0} failed`;
@@ -333,7 +347,7 @@ export function MetadataUpdaterCard() {
           <select
             id="metadata-refresh-interval"
             value={interval}
-            disabled={running}
+            disabled={running || isStopping}
             onChange={(event) => setIntervalDays(event.target.value)}
           >
             <option value="180">6 months</option>

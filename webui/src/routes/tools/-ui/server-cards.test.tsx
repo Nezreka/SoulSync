@@ -86,7 +86,9 @@ describe('MediaScanCard — the two bugs the bugfix PR fixed must stay fixed', (
     const { container } = render(<MediaScanCard />);
     await act(async () => {});
     await startScan(container);
-    expect((container.querySelector('#media-scan-button') as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector('#media-scan-button') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
 
     await act(async () => {
       vi.advanceTimersByTime(1000); // countdown ends -> polling starts
@@ -179,7 +181,11 @@ describe('MediaScanCard — the two bugs the bugfix PR fixed must stay fixed', (
     await flush();
     fireEvent.click(container.querySelector('#media-scan-button') as Element);
     await flush();
-    expect(toastSpy).toHaveBeenCalledWith('❌ Scan request failed: plex unreachable', 'error', 5000);
+    expect(toastSpy).toHaveBeenCalledWith(
+      '❌ Scan request failed: plex unreachable',
+      'error',
+      5000,
+    );
     expect((container.querySelector('#media-scan-button') as HTMLButtonElement).disabled).toBe(
       false,
     );
@@ -221,9 +227,9 @@ describe('MetadataUpdaterCard', () => {
     routes({ 'active-media-server': server('plex') });
     const second = render(<MetadataUpdaterCard />);
     await waitFor(() => expect(screen.getByText('Plex Metadata Updater')).toBeTruthy());
-    expect(
-      second.container.querySelector('.metadata-updater-description')?.textContent,
-    ).toContain('Plex server');
+    expect(second.container.querySelector('.metadata-updater-description')?.textContent).toContain(
+      'Plex server',
+    );
   });
 
   it('offers the six refresh intervals with 1 month selected', async () => {
@@ -267,9 +273,9 @@ describe('MetadataUpdaterCard', () => {
     expect((container.querySelector('#metadata-update-button') as HTMLElement).textContent).toBe(
       'Stop Update',
     );
-    expect((container.querySelector('#metadata-refresh-interval') as HTMLSelectElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (container.querySelector('#metadata-refresh-interval') as HTMLSelectElement).disabled,
+    ).toBe(true);
   });
 
   it('summarises a completed run and toasts once', async () => {
@@ -312,6 +318,67 @@ describe('MetadataUpdaterCard', () => {
     );
     expect(container.querySelector('#metadata-progress-label')?.textContent).toBe(
       'spotify auth expired',
+    );
+  });
+
+  it('freezes the progress and keeps the select locked while stopping', async () => {
+    // The vanilla's `stopping` branch touches only the button and the phase
+    // line. Re-enabling the select or blanking the progress there would let the
+    // user change the interval mid-stop and would lose the last known counts.
+    let phase = 'running';
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('active-media-server')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => server('plex'),
+        } as never);
+      }
+      const status =
+        phase === 'running'
+          ? {
+              status: 'running',
+              current_artist: 'Aphex Twin',
+              processed: 7,
+              total: 10,
+              percentage: 70,
+            }
+          : { status: 'stopping' };
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, status }),
+      } as never);
+    });
+
+    vi.useFakeTimers();
+    const { container } = render(<MetadataUpdaterCard />);
+    await act(async () => {});
+    expect(container.querySelector('#metadata-progress-label')?.textContent).toBe(
+      '7 / 10 artists (70.0%)',
+    );
+
+    phase = 'stopping';
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(container.querySelector('#metadata-phase-label')?.textContent).toBe(
+      'Current Artist: Stopping...',
+    );
+    // frozen, not reset
+    expect(container.querySelector('#metadata-progress-label')?.textContent).toBe(
+      '7 / 10 artists (70.0%)',
+    );
+    expect((container.querySelector('#metadata-progress-bar') as HTMLElement).style.width).toBe(
+      '70%',
+    );
+    // still locked
+    expect(
+      (container.querySelector('#metadata-refresh-interval') as HTMLSelectElement).disabled,
+    ).toBe(true);
+    expect((container.querySelector('#metadata-update-button') as HTMLButtonElement).disabled).toBe(
+      true,
     );
   });
 
@@ -362,9 +429,7 @@ describe('BackupManagerCard', () => {
   it('renders a row per backup, with the version badge only when present', async () => {
     routes({ '/api/database/backups': twoBackups });
     const { container } = render(<BackupManagerCard />);
-    await waitFor(() =>
-      expect(container.querySelectorAll('.backup-list-item')).toHaveLength(2),
-    );
+    await waitFor(() => expect(container.querySelectorAll('.backup-list-item')).toHaveLength(2));
     expect(container.querySelectorAll('.backup-list-version')).toHaveLength(1);
     expect(container.querySelector('.backup-list-version')?.textContent).toBe('v3.1.8');
   });
@@ -380,9 +445,9 @@ describe('BackupManagerCard', () => {
     });
     const { container } = render(<BackupManagerCard />);
     await waitFor(() => expect(container.querySelector('.backup-dl-btn')).not.toBeNull());
-    expect((container.querySelector('.backup-dl-btn') as HTMLAnchorElement).getAttribute('href')).toBe(
-      '/api/database/backups/my%20backup.db/download',
-    );
+    expect(
+      (container.querySelector('.backup-dl-btn') as HTMLAnchorElement).getAttribute('href'),
+    ).toBe('/api/database/backups/my%20backup.db/download');
   });
 
   it('confirms before restoring and does nothing when declined', async () => {
