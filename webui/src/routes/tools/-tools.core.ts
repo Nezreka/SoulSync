@@ -452,10 +452,17 @@ export function formatCacheAge(
 /**
  * From `timeAgo` (stats-automations.js), used by the backup list.
  *
- * The bare-timestamp branch is load-bearing: the API returns naive UTC strings,
- * so without the 'Z' the browser would read them as LOCAL time and every backup
- * would look hours old (or in the future). `includes('-', 10)` looks for a
- * timezone offset AFTER the date part, so the date's own dashes don't count.
+ * The bare-timestamp branch is load-bearing: backups are written with
+ * `datetime.utcfromtimestamp(...)` (web_server.py, list_backups_endpoint), i.e.
+ * naive UTC, so without the 'Z' the browser reads them as LOCAL and every backup
+ * looks hours off. `includes('-', 10)` looks for a timezone offset AFTER the date
+ * part, so the date's own dashes don't count as one.
+ *
+ * IMPORTANT — the opposite is true elsewhere, and "fixing" it would break it:
+ * `last_full_refresh` is written with `datetime.now().isoformat()`
+ * (music_database.py), i.e. naive LOCAL, and the DB-updater card parses it with a
+ * bare `new Date(...)`. Local-written + local-parsed is already correct there.
+ * Do NOT normalise that one to UTC when the card is ported.
  */
 export function timeAgo(dateStr: string | null | undefined, now: number = Date.now()): string {
   if (!dateStr) return '';
