@@ -49,7 +49,15 @@ afterEach(() => {
 
 describe('DbUpdaterCard', () => {
   it('titles itself after the active server once stats land', async () => {
-    routes({ '/api/database/stats': { artists: 1, albums: 2, tracks: 3, database_size_mb: 4, server_source: 'plex' } });
+    routes({
+      '/api/database/stats': {
+        artists: 1,
+        albums: 2,
+        tracks: 3,
+        database_size_mb: 4,
+        server_source: 'plex',
+      },
+    });
     render(<DbUpdaterCard />);
     await waitFor(() => expect(screen.getByText('Plex Database Updater')).toBeTruthy());
   });
@@ -115,7 +123,11 @@ describe('DbUpdaterCard', () => {
     routes({ '/api/database/update': { success: true }, '/api/database/update/status': null });
     fetchMock.mockImplementation((url: string) => {
       if (url === '/api/database/update') {
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) } as never);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+        } as never);
       }
       // status keeps failing -> the card is stuck on "Starting..."
       return Promise.resolve({ ok: false, status: 500, json: async () => ({}) } as never);
@@ -279,7 +291,14 @@ describe('ReconcileIdsCard', () => {
 
 describe('DuplicateCleanerCard', () => {
   it('toggles between Clean Duplicates and Stop Cleaning', async () => {
-    routes({ '/api/duplicate-cleaner/status': { status: 'running', progress: 20, files_scanned: 2, total_files: 10 } });
+    routes({
+      '/api/duplicate-cleaner/status': {
+        status: 'running',
+        progress: 20,
+        files_scanned: 2,
+        total_files: 10,
+      },
+    });
     const { container } = render(<DuplicateCleanerCard />);
     await waitFor(() =>
       expect((container.querySelector('#duplicate-clean-button') as HTMLElement).textContent).toBe(
@@ -379,10 +398,18 @@ describe('polling lifecycle', () => {
       calls += 1;
       // first hydrate running, then a blip, then still running
       if (calls === 1) {
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'running', progress: 5 }) } as never);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'running', progress: 5 }),
+        } as never);
       }
       if (calls === 2) return Promise.reject(new Error('offline'));
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({ status: 'running', progress: 15 }) } as never);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'running', progress: 15 }),
+      } as never);
     });
     const { container } = render(<DuplicateCleanerCard />);
     await act(async () => {});
@@ -410,5 +437,154 @@ describe('polling lifecycle', () => {
       vi.advanceTimersByTime(10000);
     });
     expect(fetchMock.mock.calls.length).toBe(afterUnmount);
+  });
+});
+
+describe('network failure paths (the vanilla catch branches)', () => {
+  /**
+   * Without these the button strands on "Starting…" behind an unhandled
+   * rejection — the vanilla restores it and toasts. One case per catch branch.
+   */
+  function offlineAfterMount() {
+    let mounted = false;
+    fetchMock.mockImplementation((url: string) => {
+      if (!mounted && url.includes('status')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'idle' }),
+        } as never);
+      }
+      if (url.includes('/api/database/stats')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ artists: 0, albums: 0, tracks: 0, database_size_mb: 0 }),
+        } as never);
+      }
+      mounted = true;
+      return Promise.reject(new Error('offline'));
+    });
+  }
+
+  it('db updater: failed start restores the button and toasts', async () => {
+    offlineAfterMount();
+    const { container } = render(<DbUpdaterCard />);
+    await flush();
+    fireEvent.click(container.querySelector('#db-update-button') as Element);
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith('Failed to start update process.', 'error');
+    expect((container.querySelector('#db-update-button') as HTMLElement).textContent).toBe(
+      'Update Database',
+    );
+  });
+
+  it('db updater: failed stop toasts its own message', async () => {
+    let calls = 0;
+    fetchMock.mockImplementation((url: string) => {
+      calls += 1;
+      if (url.includes('/api/database/update/status')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'running', progress: 10 }),
+        } as never);
+      }
+      if (url.includes('/api/database/stats')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ artists: 0, albums: 0, tracks: 0, database_size_mb: 0 }),
+        } as never);
+      }
+      return Promise.reject(new Error('offline'));
+    });
+    const { container } = render(<DbUpdaterCard />);
+    await waitFor(() =>
+      expect((container.querySelector('#db-update-button') as HTMLElement).textContent).toBe(
+        'Stop Update',
+      ),
+    );
+    fireEvent.click(container.querySelector('#db-update-button') as Element);
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith('Error sending stop request.', 'error');
+    expect(calls).toBeGreaterThan(0);
+  });
+
+  it('reconcile: failed start restores the button and toasts', async () => {
+    offlineAfterMount();
+    const { container } = render(<ReconcileIdsCard />);
+    await flush();
+    fireEvent.click(container.querySelector('#reconcile-ids-button') as Element);
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith('Failed to start tag import.', 'error');
+    expect((container.querySelector('#reconcile-ids-button') as HTMLElement).textContent).toBe(
+      'Scan Library',
+    );
+  });
+
+  it('duplicate cleaner: failed start restores the button and toasts', async () => {
+    offlineAfterMount();
+    const { container } = render(<DuplicateCleanerCard />);
+    await flush();
+    fireEvent.click(container.querySelector('#duplicate-clean-button') as Element);
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith('Failed to start duplicate cleaner.', 'error');
+    expect((container.querySelector('#duplicate-clean-button') as HTMLElement).textContent).toBe(
+      'Clean Duplicates',
+    );
+  });
+
+  it('duplicate cleaner: failed stop toasts its own message', async () => {
+    fetchMock.mockImplementation((url: string) =>
+      url.includes('/api/duplicate-cleaner/status')
+        ? Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ status: 'running', progress: 1 }),
+          } as never)
+        : Promise.reject(new Error('offline')),
+    );
+    const { container } = render(<DuplicateCleanerCard />);
+    await waitFor(() =>
+      expect((container.querySelector('#duplicate-clean-button') as HTMLElement).textContent).toBe(
+        'Stop Cleaning',
+      ),
+    );
+    fireEvent.click(container.querySelector('#duplicate-clean-button') as Element);
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith('Error sending stop request.', 'error');
+  });
+});
+
+describe('reconcile has THREE button states, not two', () => {
+  it('shows Starting... between the click and the first running status', async () => {
+    // 'Scan Library' -> 'Starting...' (on click) -> 'Scanning…' (once the
+    // status reports running). Collapsing the middle one loses the feedback.
+    let resolveStart: (value: unknown) => void = () => {};
+    fetchMock.mockImplementation((url: string) => {
+      if (url === '/api/library/reconcile-embedded-ids') {
+        return new Promise((resolve) => {
+          resolveStart = resolve;
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'idle' }),
+      } as never);
+    });
+    const { container } = render(<ReconcileIdsCard />);
+    await flush();
+    const button = () => container.querySelector('#reconcile-ids-button') as HTMLElement;
+    expect(button().textContent).toBe('Scan Library');
+
+    fireEvent.click(button());
+    await flush();
+    expect(button().textContent).toBe('Starting...');
+
+    await act(async () => {
+      resolveStart({ ok: true, status: 200, json: async () => ({}) });
+    });
   });
 });

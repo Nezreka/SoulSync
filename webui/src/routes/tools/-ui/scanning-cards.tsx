@@ -111,22 +111,33 @@ export function DbUpdaterCard() {
         if (!ok) return;
       }
       setStarting(true);
-      const result = await startDatabaseUpdate(refreshType);
-      if (!result.ok) {
+      try {
+        const result = await startDatabaseUpdate(refreshType);
+        if (!result.ok) {
+          setStarting(false);
+          toast(`Error: ${result.error}`, 'error');
+          return;
+        }
+        toast('Database update started!', 'success');
+        await poll.refresh();
+        poll.arm();
+        safety.arm();
+      } catch {
+        // A network failure must restore the button, not strand it on
+        // "Starting…" behind an unhandled rejection.
         setStarting(false);
-        toast(`Error: ${result.error}`, 'error');
-        return;
+        toast('Failed to start update process.', 'error');
       }
-      toast('Database update started!', 'success');
-      await poll.refresh();
-      poll.arm();
-      safety.arm();
       return;
     }
     // "Stop Update" — and the "Starting…" fall-through that makes a wedged
     // start cancellable.
-    const ok = await stopDatabaseUpdate();
-    toast(ok ? 'Stop request sent.' : 'Failed to send stop request.', ok ? 'info' : 'error');
+    try {
+      const ok = await stopDatabaseUpdate();
+      toast(ok ? 'Stop request sent.' : 'Failed to send stop request.', ok ? 'info' : 'error');
+    } catch {
+      toast('Error sending stop request.', 'error');
+    }
   }, [buttonLabel, poll, refreshType, safety]);
 
   const processed = state?.processed ?? 0;
@@ -134,7 +145,9 @@ export function DbUpdaterCard() {
   const percent = state?.progress ?? 0;
 
   let phase = 'Idle';
-  let details = '';
+  // Matches the markup's initial text until the first status lands; the vanilla
+  // only blanks this once its `else` branch runs.
+  let details = state ? '' : '0 / 0 artists (0.0%)';
   let barPercent = 0;
   let barColor: string | undefined;
 
@@ -232,7 +245,11 @@ export function DbUpdaterCard() {
 
 /** `handleReconcileIdsButtonClick` + `updateReconcileIdsProgressUI`. */
 export function ReconcileIdsCard() {
-  const [busy, setBusy] = useState(false);
+  // The vanilla has THREE button states, not two: 'Scan Library' ->
+  // 'Starting...' (set on click) -> 'Scanning…' (set by the UI updater once the
+  // status says running). Collapsing the middle one loses the feedback between
+  // the click and the first status.
+  const [starting, setStarting] = useState(false);
   // The completion toast fires only if we SAW the run in progress — otherwise
   // simply opening the page after a finished scan would announce it again.
   const wasRunningRef = useRef(false);
@@ -243,12 +260,11 @@ export function ReconcileIdsCard() {
     isRunning,
     intervalMs: 1500,
     onState: (state) => {
+      setStarting(false);
       if (isRunning(state)) {
         wasRunningRef.current = true;
-        setBusy(true);
         return;
       }
-      setBusy(false);
       if (state.status === 'done' && wasRunningRef.current && !justFinished) {
         setJustFinished(true);
         toast(
@@ -266,7 +282,7 @@ export function ReconcileIdsCard() {
   const onClick = useCallback(async () => {
     // The vanilla guards on the button text; the equivalent here is the busy
     // flag, which covers the same "already running" case.
-    if (running || busy) return;
+    if (running || starting) return;
     const ok = await window.showConfirmDialog?.({
       title: 'Import IDs from File Tags',
       message:
@@ -274,18 +290,23 @@ export function ReconcileIdsCard() {
       confirmText: 'Scan Library',
     });
     if (!ok) return;
-    setBusy(true);
-    const result = await startReconcileIds();
-    if (!result.ok) {
-      setBusy(false);
-      toast(`Error: ${result.error}`, 'error');
-      return;
+    setStarting(true);
+    try {
+      const result = await startReconcileIds();
+      if (!result.ok) {
+        setStarting(false);
+        toast(`Error: ${result.error}`, 'error');
+        return;
+      }
+      toast('Tag import started!', 'success');
+      setJustFinished(false);
+      await poll.refresh();
+      poll.arm();
+    } catch {
+      setStarting(false);
+      toast('Failed to start tag import.', 'error');
     }
-    toast('Tag import started!', 'success');
-    setJustFinished(false);
-    await poll.refresh();
-    poll.arm();
-  }, [busy, poll, running]);
+  }, [poll, running, starting]);
 
   const processed = state?.processed ?? 0;
   const total = state?.total ?? 0;
@@ -337,10 +358,10 @@ export function ReconcileIdsCard() {
         <button
           type="button"
           id="reconcile-ids-button"
-          disabled={running || busy}
+          disabled={running || starting}
           onClick={() => void onClick()}
         >
-          {running || busy ? 'Scanning…' : 'Scan Library'}
+          {running ? 'Scanning…' : starting ? 'Starting...' : 'Scan Library'}
         </button>
       }
       progress={
@@ -389,20 +410,29 @@ export function DuplicateCleanerCard() {
 
   const onClick = useCallback(async () => {
     if (running) {
-      const ok = await stopDuplicateClean();
-      toast(ok ? 'Stop request sent.' : 'Failed to send stop request.', ok ? 'info' : 'error');
+      try {
+        const ok = await stopDuplicateClean();
+        toast(ok ? 'Stop request sent.' : 'Failed to send stop request.', ok ? 'info' : 'error');
+      } catch {
+        toast('Error sending stop request.', 'error');
+      }
       return;
     }
     setStarting(true);
-    const result = await startDuplicateClean();
-    if (!result.ok) {
+    try {
+      const result = await startDuplicateClean();
+      if (!result.ok) {
+        setStarting(false);
+        toast(`Error: ${result.error}`, 'error');
+        return;
+      }
+      toast('Duplicate cleaner started!', 'success');
+      await poll.refresh();
+      poll.arm();
+    } catch {
       setStarting(false);
-      toast(`Error: ${result.error}`, 'error');
-      return;
+      toast('Failed to start duplicate cleaner.', 'error');
     }
-    toast('Duplicate cleaner started!', 'success');
-    await poll.refresh();
-    poll.arm();
   }, [poll, running]);
 
   const percent = state?.progress ?? 0;
