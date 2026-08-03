@@ -412,6 +412,15 @@ declare global {
       card: unknown,
       albumName: unknown,
     ) => void;
+    /**
+     * stats-automations.js — opens the mirrored-playlist discovery modal.
+     *
+     * The explorer's Discover button calls it when it exists and falls back to
+     * sending the user to the Sync page's mirrored tab when it does not, which
+     * is exactly what the vanilla explorer did (it was already typeof-guarded
+     * there).
+     */
+    discoverMirroredPlaylist?: (playlistId: number) => void | Promise<void>;
     openWatchlistHistoryModal?: () => void;
     openBlocklistModal?: (initialType: string) => void;
     SoulSyncIssueDomain?: IssueDomainBridge;

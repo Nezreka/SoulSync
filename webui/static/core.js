@@ -855,7 +855,18 @@ function initializeWebSocket() {
 
     // Phase 5 event listeners (sync/discovery progress + scans)
     socket.on('sync:progress', (data) => { qaSignal('sync'); updateSyncProgressFromData(data); });
-    socket.on('discovery:progress', (data) => { qaSignal('sync'); updateDiscoveryProgressFromData(data); });
+    socket.on('discovery:progress', (data) => {
+        qaSignal('sync');
+        updateDiscoveryProgressFromData(data);
+        // Mirror to the React playlist-explorer page. Same `ss:` seam as
+        // ss:watchlist-scan and ss:automation-progress: `socket` is a
+        // module-scoped `let` in this file, so no module can subscribe to it,
+        // and `youtubePlaylistStates` — which the explorer's poller used to
+        // read for the finished phase — is module-scoped here too. The event
+        // carries the phase, so React needs no second bridge for it.
+        // Purely additive; the vanilla handling above is untouched.
+        window.dispatchEvent(new CustomEvent('ss:discovery-progress', { detail: data }));
+    });
     // Unscoped heartbeat for the Auto-Sync tile: sync:progress above is
     // room-scoped (only playlist watchers receive it), so the dashboard
     // relies on this 1s pulse that fires while ANY pipeline work runs —
