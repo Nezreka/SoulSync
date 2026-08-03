@@ -410,7 +410,6 @@ describe('ExplorerConnections', () => {
             stroke: 'url(#explorer-grad-root)',
             strokeWidth: '1.5',
             animated: true,
-            length: 120,
           },
           {
             id: 'p2',
@@ -418,7 +417,6 @@ describe('ExplorerConnections', () => {
             stroke: 'rgba(255,255,255,0.05)',
             strokeWidth: '0.8',
             animated: false,
-            length: 5,
           },
         ]}
       />,
@@ -428,8 +426,12 @@ describe('ExplorerConnections', () => {
 
     const paths = [...container.querySelectorAll('path')];
     expect(paths[0]?.getAttribute('class')).toBe('explorer-line explorer-line-animated');
-    expect((paths[0] as unknown as HTMLElement).style.strokeDashoffset).toBe('120');
+    // pathLength normalises the curve, so the dash is 1 whatever its real
+    // length — the keyframe animates the offset to 0 and draws it on.
+    expect(paths[0]?.getAttribute('pathLength')).toBe('1');
+    expect((paths[0] as unknown as HTMLElement).style.strokeDashoffset).toBe('1');
     expect(paths[1]?.getAttribute('class')).toBe('explorer-line');
+    expect(paths[1]?.getAttribute('pathLength')).toBeNull();
     expect((paths[1] as unknown as HTMLElement).style.strokeDashoffset).toBe('');
     // Both gradients the strokes reference must exist.
     expect(container.querySelector('#explorer-grad-root')).toBeTruthy();

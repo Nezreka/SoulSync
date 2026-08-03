@@ -1,7 +1,7 @@
 /**
  * The three bits of chrome around the tree — the sticky action bar, the build
  * progress bar, and the zoom cluster inside the viewport
- * (index.html:4180-4212, pages-extra.js:314-320).
+ * (index.html:4182-4239, and explorerBuildTree :320 for the progress numbers).
  */
 
 import { explorerSelectionLabel } from '../-explorer.core';

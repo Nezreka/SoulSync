@@ -1,6 +1,7 @@
 /**
  * The playlist picker: source tabs, the card strip, the mode toggle and the
- * build row (pages-extra.js:60-260, index.html:4149-4177).
+ * build row (_explorerLoadPlaylists :50, explorerRenderPickerCards :102,
+ * index.html:4150-4179).
  *
  * Presentational only — every decision it renders comes from
  * `explorerCardView` / `groupPlaylistsBySource`, and every action is a prop.
@@ -10,7 +11,7 @@ import type { ExplorerMode, MirroredPlaylist } from '../-explorer.types';
 
 import { explorerCardView, groupPlaylistsBySource, type ExplorerCardView } from '../-explorer.core';
 
-/** What the Discover button on a card is currently saying (:196-207). */
+/** What the Discover button on a card is currently saying (explorerStartDiscovery :196, :201). */
 export type DiscoverButtonState = 'idle' | 'starting' | 'open';
 
 const DISCOVER_LABEL: Record<DiscoverButtonState, string> = {
@@ -23,7 +24,7 @@ interface PickerCardProps {
   playlist: MirroredPlaylist;
   view: ExplorerCardView;
   active: boolean;
-  /** A live discovery percentage replaces the meta line entirely (:37-40). */
+  /** A live discovery percentage replaces the meta line entirely (initExplorer :37-40). */
   livePercent: number | null;
   discoverState: DiscoverButtonState;
   onSelect: () => void;
@@ -51,7 +52,7 @@ function PickerCard({
 
   return (
     // A card below the readiness gate had NO click handler in the vanilla, not
-    // a disabled one: clicking it does nothing at all (:158).
+    // a disabled one: clicking it does nothing at all (explorerRenderPickerCards :156).
     <div className={classes} data-id={playlist.id} onClick={view.isReady ? onSelect : undefined}>
       <div className="explorer-picker-card-art">
         {image ? (
@@ -133,7 +134,7 @@ export interface ExplorerPickerProps {
   onSetMode: (mode: ExplorerMode) => void;
   building: boolean;
   /** True once a tree has been built, which is when the vanilla's build button
-   *  loses its long label for good (:337). */
+   *  loses its long label for good (explorerBuildTree :373). */
   hasBuilt: boolean;
   onBuild: () => void;
 }
@@ -282,7 +283,7 @@ export function ExplorerPicker({
           </svg>
           {/* The vanilla's finally block reset this to the shorter "Explore"
               rather than the markup's original label, so the button keeps that
-              wording for the rest of the session (:392). */}
+              wording for the rest of the session (explorerBuildTree :373). */}
           {building ? 'Building...' : hasBuilt ? 'Explore' : 'Explore Selected Playlist'}
         </button>
       </div>

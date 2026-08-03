@@ -1,5 +1,6 @@
 /**
- * The tree itself (pages-extra.js:394-545, index.html:4205-4232).
+ * The tree itself (_explorerRenderRoot :377, _explorerRenderArtistNode :422,
+ * explorerToggleArtist :453, explorerExpandAlbumTracks :508; index.html:4211-4231).
  *
  * The vanilla appended each artist to the last row as its NDJSON line landed;
  * `chunkArtistRows` reproduces exactly that layout from the finished list, so
@@ -166,7 +167,7 @@ function ArtistBranch({
       className="explorer-branch"
       id={`explorer-branch-${key}`}
       // The stagger repeats every five nodes, so a long row still animates in
-      // waves rather than trailing off (:431).
+      // waves rather than trailing off (_explorerRenderArtistNode :432).
       style={{ '--enter-delay': `${(index % 5) * 0.1}s` } as React.CSSProperties}
     >
       <div

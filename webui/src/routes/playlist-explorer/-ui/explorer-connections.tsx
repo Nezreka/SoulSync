@@ -1,5 +1,5 @@
 /**
- * The SVG layer under the tree (pages-extra.js:870-1016).
+ * The SVG layer under the tree (_explorerEnsureDefs :886, _explorerDrawCurve :989).
  *
  * The paths themselves are measured from the laid-out DOM by the interaction
  * controller; this component only draws what it is handed. The gradients come
@@ -14,8 +14,6 @@ export interface ExplorerPath {
   strokeWidth: string;
   /** The draw-on animation only runs for the first paint after a build (:1008). */
   animated: boolean;
-  /** Path length, needed for the dash offset that animates the stroke. */
-  length: number;
 }
 
 export interface ExplorerConnectionsProps {
@@ -51,11 +49,12 @@ export function ExplorerConnections({ width, height, paths }: ExplorerConnection
           stroke={path.stroke}
           strokeWidth={path.strokeWidth}
           fill="none"
-          style={
-            path.animated
-              ? { strokeDasharray: path.length, strokeDashoffset: path.length }
-              : undefined
-          }
+          // The vanilla measured getTotalLength() to seed the dash. pathLength
+          // normalises the curve to 1 unit instead, so the same
+          // explorer-line-draw keyframe (dashoffset -> 0) draws it on exactly,
+          // with no measurement to get wrong.
+          pathLength={path.animated ? 1 : undefined}
+          style={path.animated ? { strokeDasharray: 1, strokeDashoffset: 1 } : undefined}
         />
       ))}
     </svg>

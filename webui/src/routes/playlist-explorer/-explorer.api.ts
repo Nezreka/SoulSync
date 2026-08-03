@@ -1,5 +1,5 @@
 /**
- * Playlist Explorer — the four endpoints (pages-extra.js:1-1141).
+ * Playlist Explorer — the four endpoints (pages-extra.js:1-1134).
  *
  * The wishlist submit deliberately does NOT get its own NDJSON reader: it
  * posts to /api/artist/<id>/download-discography, the same endpoint and the
@@ -22,8 +22,12 @@ import type {
 } from './-explorer.types';
 
 /**
- * :48-54 — the endpoint has returned both a bare array and a `{playlists: []}`
- * envelope over its life; the vanilla accepted either and so does this.
+ * _explorerLoadPlaylists (:50).
+ *
+ * The endpoint returns a BARE ARRAY (web_server.py `jsonify(playlists)`), and
+ * an `{error}` object with a 500 when it fails. The vanilla's
+ * `data.playlists || []` fallback therefore never fired; it is kept only so a
+ * failure yields an empty list rather than a crash on `.filter`.
  */
 export async function fetchMirroredPlaylists(): Promise<MirroredPlaylist[]> {
   const response = await fetch('/api/mirrored-playlists');
@@ -34,12 +38,12 @@ export async function fetchMirroredPlaylists(): Promise<MirroredPlaylist[]> {
 
 export interface BuildTreeHandlers {
   onMeta: (meta: ExplorerMeta) => void;
-  /** `index` is 1-based, matching the vanilla's artistCount (:305). */
+  /** `index` is 1-based, matching the vanilla's artistCount (explorerBuildTree :313). */
   onArtist: (artist: ExplorerArtist, index: number) => void;
 }
 
 /**
- * :277-330 — POST, then read NDJSON: one `meta` line, then one `artist` line
+ * explorerBuildTree (:247) — POST, then read NDJSON: one `meta` line, then one `artist` line
  * per artist, then `complete`. A malformed line is warned about and skipped,
  * never fatal: a single bad artist must not abandon the rest of the tree.
  */
@@ -55,7 +59,11 @@ export async function streamBuildTree(
   });
 
   if (!response.ok) {
-    // :283-286 — the error body is JSON even on a failure status.
+    // explorerBuildTree (:286). Every failure path in core/playlists/explorer.py
+    // returns {success, error} JSON, so the message is real; the catch is for
+    // the one case the app cannot control — a proxy returning an HTML 502,
+    // where the vanilla's bare .json() threw a SyntaxError and the toast said
+    // "Unexpected token <" instead of anything useful.
     const error = await response.json().catch(() => ({}));
     throw new Error(error?.error || 'Failed to build tree');
   }
@@ -83,7 +91,7 @@ export async function streamBuildTree(
           artistCount += 1;
           handlers.onArtist(data as ExplorerArtist, artistCount);
         }
-        // `complete` carries nothing the client needs (:322).
+        // `complete` carries nothing the client needs (explorerBuildTree :325).
       } catch (error) {
         console.warn('Explorer: failed to parse NDJSON line', error);
       }
@@ -92,7 +100,7 @@ export async function streamBuildTree(
 }
 
 /**
- * :522-527 — null, not [], when the fetch fails or the payload is
+ * explorerExpandAlbumTracks (:523) — null, not [], when the fetch fails or the payload is
  * unsuccessful. The vanilla left the tracklist container untouched in that
  * case, so the next double-click retried; an empty array would instead read as
  * "expanded, no tracks" and the retry would be lost.
@@ -110,7 +118,7 @@ export async function fetchAlbumTracks(spotifyAlbumId: string): Promise<Explorer
 }
 
 /**
- * :812-828 — one artist's albums, sorted by track count DESC so deluxe and
+ * _explorerWishlistSubmit (:809) — one artist's albums, sorted by track count DESC so deluxe and
  * expanded editions are resolved first and the standard editions dedupe
  * against them. `source` is null per album: the explorer's tree carries no
  * per-album source, so the backend resolves each id through its own lookup.
@@ -134,7 +142,7 @@ export function buildExplorerWishlistPayload(
   };
 }
 
-/** :846-852 — the per-album line in the progress list. */
+/** _explorerWishlistSubmit (:851) — the per-album line in the progress list. */
 export function explorerAlbumStatusText(update: DiscogAlbumUpdate): string {
   const added = update.tracks_added || 0;
   const skipped = (update.tracks_skipped as number) || 0;
@@ -148,9 +156,11 @@ export interface ExplorerWishlistArtist {
 }
 
 /**
- * :806-869 — one artist at a time, sequentially: the backend resolves a whole
- * artist's batch together, and the vanilla awaited each stream before starting
- * the next. A failed artist is logged and the loop continues.
+ * _explorerWishlistSubmit (:755) — one artist at a time, sequentially. The
+ * vanilla's `for...of` awaited each artist's whole stream before starting the
+ * next, so the requests never overlap; that pacing is kept rather than
+ * parallelised, because it is what the backend has been taking all along. A
+ * failed artist is logged and the loop continues.
  *
  * Returns the running total of tracks actually added, which is what both the
  * footer line and the success toast report.
@@ -173,7 +183,7 @@ export async function submitExplorerWishlist(
         },
         () => {
           // The explorer ignored the summary line and totalled the per-album
-          // updates itself (:833) — the per-artist summaries don't accumulate.
+          // updates itself (:850) — the per-artist summaries don't accumulate.
         },
       );
     } catch (error) {
