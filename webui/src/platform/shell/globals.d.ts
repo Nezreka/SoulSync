@@ -124,8 +124,6 @@ declare global {
     startListenBrainzPlaylistSync?: (identifier: string) => void | Promise<void>;
     /** library.js — artist photo picker, opened from the hero image. */
     openArtistArtPicker?: () => void;
-    /** library.js — the Download Discography modal. */
-    openDiscographyModal?: () => void;
     /** shared-helpers.js / core.js — similar-artists section + its abort. */
     loadSimilarArtists?: (artistName: string) => void;
     cancelSimilarArtistsLoad?: () => void;

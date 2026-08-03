@@ -23,6 +23,7 @@ import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
+import { DiscographyModal } from './discography-modal';
 import { EnrichmentCoverage } from './enrichment-coverage';
 import { TopTracksSidebar } from './top-tracks-sidebar';
 
@@ -141,6 +142,7 @@ export function ArtistHero({
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const [downloadingDiscog, setDownloadingDiscog] = useState(false);
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
@@ -180,6 +182,14 @@ export function ArtistHero({
 
   return (
     <div className="artist-hero-section" id="artist-hero-section">
+      {downloadingDiscog ? (
+        <DiscographyModal
+          libraryArtistId={artist.id}
+          artistName={String(artist.name || '')}
+          artistImage={appliedPhoto || image.primary || ''}
+          onClose={() => setDownloadingDiscog(false)}
+        />
+      ) : null}
       {pickingPhoto ? (
         <ArtPicker
           target={{ kind: 'artist', id: artist.id }}
@@ -299,7 +309,7 @@ export function ArtistHero({
                 type="button"
                 className="discog-download-btn discog-btn-compact"
                 id="discog-download-btn"
-                onClick={() => window.openDiscographyModal?.()}
+                onClick={() => setDownloadingDiscog(true)}
               >
                 <span className="discog-btn-icon">⬇</span>
                 <span className="discog-btn-text">Download Discography</span>
