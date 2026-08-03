@@ -34,6 +34,7 @@ import type {
   RepairFindingsPage,
   RepairJob,
   RepairJobProgress,
+  RepairJobRun,
   RepairStatus,
 } from './-tools.types';
 
@@ -128,11 +129,16 @@ export async function stopRepairJob(jobId: string): Promise<{ stopped: boolean }
   return { stopped: Boolean(data.stopped) };
 }
 
-/** `loadRepairHistory`. */
-export async function fetchRepairHistory(limit = 50): Promise<RepairJob['last_run'][]> {
+/**
+ * `loadRepairHistory`. Typed as RepairJobRun[] rather than `RepairJob['last_run'][]`
+ * — that alias includes null/undefined (a job may never have run), but a row in
+ * the history list always exists, so borrowing it would force pointless null
+ * checks all through the history tab.
+ */
+export async function fetchRepairHistory(limit = 50): Promise<RepairJobRun[]> {
   const response = await fetch(`/api/repair/history?limit=${limit}`);
   if (!response.ok) throw new Error('Failed to fetch history');
-  const data = (await response.json()) as { runs?: RepairJob['last_run'][] };
+  const data = (await response.json()) as { runs?: RepairJobRun[] };
   return data.runs || [];
 }
 
@@ -611,14 +617,26 @@ export interface BlacklistEntry {
   created_at?: string | null;
 }
 
-/** `loadBlacklistCount` and `openBlacklistModal` hit the same endpoint. */
-export async function fetchBlacklist(): Promise<BlacklistEntry[]> {
+/**
+ * `loadBlacklistCount` and `openBlacklistModal` hit the same endpoint but read
+ * it DIFFERENTLY, so both flags are returned rather than one collapsed answer:
+ *
+ * - the count does `data.entries?.length || 0` and never looks at `success`
+ * - the modal treats `!data.success` as an empty list, even if entries came back
+ *
+ * Collapsing that to "just the entries" would make the modal show rows the
+ * vanilla hides. Each caller reproduces its own behaviour from these two fields.
+ */
+export async function fetchBlacklist(): Promise<{
+  success: boolean;
+  entries: BlacklistEntry[];
+}> {
   try {
     const response = await fetch('/api/library/blacklist');
     const data = (await response.json()) as { success?: boolean; entries?: BlacklistEntry[] };
-    return data.entries || [];
+    return { success: Boolean(data.success), entries: data.entries || [] };
   } catch {
-    return [];
+    return { success: false, entries: [] };
   }
 }
 
@@ -635,16 +653,20 @@ export async function removeBlacklistEntry(id: number): Promise<boolean> {
  * `loadDiscoveryPoolStats` — just the two card counters. The modal itself stays
  * in stats-automations.js and is opened by name, so its endpoints aren't here.
  *
- * The vanilla reads `data.stats.matched` with no guard and relies on an empty
- * catch when `stats` is absent; this returns zeroes instead of throwing.
+ * NULL, not zeroes, when the payload has no `stats`. The vanilla reads
+ * `data.stats.matched` unguarded, so a missing `stats` throws into an empty
+ * catch and the card keeps whatever it was showing — which on first load is the
+ * em dash placeholder. Returning zeroes here would print a confident "0 matched"
+ * over a pool that simply failed to load.
  */
-export async function fetchDiscoveryPoolStats(): Promise<DiscoveryPoolStats> {
+export async function fetchDiscoveryPoolStats(): Promise<DiscoveryPoolStats | null> {
   try {
     const response = await fetch('/api/discovery-pool');
     const data = (await response.json()) as { stats?: DiscoveryPoolStats };
-    return { matched: data.stats?.matched || 0, failed: data.stats?.failed || 0 };
+    if (!data.stats) return null;
+    return { matched: data.stats.matched || 0, failed: data.stats.failed || 0 };
   } catch {
-    return { matched: 0, failed: 0 };
+    return null;
   }
 }
 

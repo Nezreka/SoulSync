@@ -488,13 +488,20 @@ describe('metadata cache', () => {
 });
 
 describe('blacklist', () => {
-  it('returns an empty list rather than throwing', async () => {
+  it('returns BOTH the success flag and the entries — the two callers read them differently', async () => {
+    // The count ignores `success`; the modal treats !success as empty. Collapsing
+    // these would make the modal show rows the vanilla hides.
     jsonOnce({ success: true, entries: [{ id: 1 }] });
-    await expect(fetchBlacklist()).resolves.toHaveLength(1);
+    await expect(fetchBlacklist()).resolves.toEqual({ success: true, entries: [{ id: 1 }] });
+    jsonOnce({ success: false, entries: [{ id: 1 }] });
+    await expect(fetchBlacklist()).resolves.toEqual({ success: false, entries: [{ id: 1 }] });
+  });
+
+  it('returns an empty list rather than throwing', async () => {
     jsonOnce({});
-    await expect(fetchBlacklist()).resolves.toEqual([]);
+    await expect(fetchBlacklist()).resolves.toEqual({ success: false, entries: [] });
     fetchMock.mockRejectedValueOnce(new Error('offline'));
-    await expect(fetchBlacklist()).resolves.toEqual([]);
+    await expect(fetchBlacklist()).resolves.toEqual({ success: false, entries: [] });
   });
 
   it('reports whether a removal succeeded', async () => {
@@ -512,13 +519,19 @@ describe('discovery pool stats', () => {
     await expect(fetchDiscoveryPoolStats()).resolves.toEqual({ matched: 12, failed: 3 });
   });
 
-  it('returns zeroes when stats is missing instead of throwing on undefined', async () => {
-    // The vanilla reads data.stats.matched unguarded and relies on an empty
-    // catch; the card then keeps its previous text. Zeroes are the honest read.
+  it('returns NULL when stats is missing so the card keeps its placeholder', async () => {
+    // The vanilla reads data.stats.matched unguarded, so a missing `stats`
+    // throws into an empty catch and the card keeps showing its em dash.
+    // Zeroes here would print a confident "0 matched" over a failed load.
     jsonOnce({});
-    await expect(fetchDiscoveryPoolStats()).resolves.toEqual({ matched: 0, failed: 0 });
+    await expect(fetchDiscoveryPoolStats()).resolves.toBeNull();
     fetchMock.mockRejectedValueOnce(new Error('offline'));
-    await expect(fetchDiscoveryPoolStats()).resolves.toEqual({ matched: 0, failed: 0 });
+    await expect(fetchDiscoveryPoolStats()).resolves.toBeNull();
+  });
+
+  it('still zero-fills an individual missing counter', async () => {
+    jsonOnce({ stats: { matched: 5 } });
+    await expect(fetchDiscoveryPoolStats()).resolves.toEqual({ matched: 5, failed: 0 });
   });
 });
 
