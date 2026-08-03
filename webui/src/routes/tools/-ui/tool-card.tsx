@@ -25,6 +25,13 @@ import type { ReactNode } from 'react';
 export interface ToolCardStat {
   label: string;
   value: ReactNode;
+  /**
+   * Goes on the `.stat-item-value` span ITSELF, exactly as in the markup — not
+   * on a nested node. The vanilla progress handlers look these up by id and the
+   * class is on the same element, so splitting them apart would leave anything
+   * that touches the element's class or style writing to the wrong node.
+   */
+  valueId?: string;
   /** Only the discovery pool's "Failed" counter carries its own colours. */
   valueStyle?: React.CSSProperties;
 }
@@ -95,7 +102,7 @@ export function ToolCard({
           {stats.map((stat) => (
             <div className="stat-item" key={stat.label}>
               <span className="stat-item-label">{stat.label}</span>
-              <span className="stat-item-value" style={stat.valueStyle}>
+              <span className="stat-item-value" id={stat.valueId} style={stat.valueStyle}>
                 {stat.value}
               </span>
             </div>

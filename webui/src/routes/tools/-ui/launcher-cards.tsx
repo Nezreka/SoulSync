@@ -52,10 +52,11 @@ export function DiscoveryPoolCard() {
       info="View and fix matched/failed discovery results across all mirrored playlists"
       statsId="discovery-pool-stats"
       stats={[
-        { label: 'Matched:', value: <span id="discovery-pool-matched-count">{matched}</span> },
+        { label: 'Matched:', valueId: 'discovery-pool-matched-count', value: matched },
         {
           label: 'Failed:',
-          value: <span id="discovery-pool-failed-count">{failed}</span>,
+          valueId: 'discovery-pool-failed-count',
+          value: failed,
           valueStyle: { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' },
         },
       ]}
@@ -144,10 +145,10 @@ export function MetadataCacheCard() {
       helpTool="metadata-cache"
       info={<>Cached API responses from Spotify &amp; iTunes</>}
       stats={[
-        { label: 'Artists:', value: <span id="mcache-stat-artists">{counts.artists}</span> },
-        { label: 'Albums:', value: <span id="mcache-stat-albums">{counts.albums}</span> },
-        { label: 'Tracks:', value: <span id="mcache-stat-tracks">{counts.tracks}</span> },
-        { label: 'Hits:', value: <span id="mcache-stat-hits">{counts.hits}</span> },
+        { label: 'Artists:', valueId: 'mcache-stat-artists', value: counts.artists },
+        { label: 'Albums:', valueId: 'mcache-stat-albums', value: counts.albums },
+        { label: 'Tracks:', valueId: 'mcache-stat-tracks', value: counts.tracks },
+        { label: 'Hits:', valueId: 'mcache-stat-hits', value: counts.hits },
       ]}
       controls={
         <>
@@ -194,7 +195,7 @@ export function BlacklistCard() {
       id="blacklist-card"
       title="Download Blacklist"
       info="Blocked sources that won't be used for future downloads"
-      stats={[{ label: 'Blocked:', value: <span id="blacklist-count">{count}</span> }]}
+      stats={[{ label: 'Blocked:', valueId: 'blacklist-count', value: count }]}
       controls={
         <button type="button" onClick={() => window.openBlacklistModal?.()}>
           View Blacklist

@@ -223,9 +223,12 @@ describe('DiscoveryPoolCard', () => {
 
   it('keeps the failed counter’s red pill styling', async () => {
     render(<DiscoveryPoolCard />);
-    const failed = document.querySelector('#discovery-pool-failed-count')
-      ?.parentElement as HTMLElement;
+    // The id sits ON the .stat-item-value span, exactly as in the markup — not
+    // on a nested node — so the styling and the id are the same element.
+    const failed = document.querySelector('#discovery-pool-failed-count') as HTMLElement;
+    expect(failed.classList.contains('stat-item-value')).toBe(true);
     expect(failed.style.color).toBe('rgb(239, 68, 68)');
+    expect(failed.style.backgroundColor).toBe('rgba(239, 68, 68, 0.15)');
     await flush();
   });
 });
@@ -260,6 +263,30 @@ describe('BlacklistCard', () => {
     jsonOnce({ success: false, entries: [{ id: 1 }, { id: 2 }] });
     const { container } = render(<BlacklistCard />);
     await waitFor(() => expect(container.querySelector('#blacklist-count')?.textContent).toBe('2'));
+  });
+});
+
+describe('stat ids land on the styled span', () => {
+  it('never nests the id inside .stat-item-value', async () => {
+    // The vanilla puts class AND id on the same span. Splitting them adds a DOM
+    // node and leaves anything touching the element's class or style writing to
+    // the wrong one — an artefact diff caught this, not these tests.
+    const { container } = render(<ToolsPage />);
+    await flush();
+    const ids = [
+      'discovery-pool-matched-count',
+      'discovery-pool-failed-count',
+      'mcache-stat-artists',
+      'mcache-stat-albums',
+      'mcache-stat-tracks',
+      'mcache-stat-hits',
+      'blacklist-count',
+    ];
+    for (const id of ids) {
+      const el = container.querySelector(`#${id}`) as HTMLElement;
+      expect(el, id).not.toBeNull();
+      expect(el.classList.contains('stat-item-value'), id).toBe(true);
+    }
   });
 });
 
