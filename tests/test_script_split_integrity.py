@@ -66,7 +66,11 @@ KNOWN_CROSS_FILE_DUPES = {
     "escapeHtml",        # downloads.js, shared-helpers.js
     "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
     "_escAttr",          # downloads.js, stats-automations.js
-    "_formatDuration",   # stats-automations.js, pages-extra.js
+    "_formatDuration",   # stats-automations.js, wishlist-tools.js
+                         # (pages-extra.js declared a THIRD, millisecond-based
+                         #  copy that loaded last and shadowed both; it went
+                         #  with the playlist-explorer port, which fixed the
+                         #  "0:00" durations in the download-audit UI)
 }
 # Resolved by the basic-search React port, and removed from the set above
 # because test_known_dupes_still_tracked fails on a stale entry:

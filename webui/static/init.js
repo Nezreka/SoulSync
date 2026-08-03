@@ -3288,9 +3288,10 @@ async function loadPageData(pageId) {
                 }
                 // Already initialized — DOM content persists, no reload needed
                 break;
-            case 'playlist-explorer':
-                initExplorer();
-                break;
+            // No 'playlist-explorer' case: React owns /playlist-explorer, and
+            // loadPageData only runs for legacy-kind pages. The vanilla page it
+            // used to call lived in pages-extra.js and is deleted, along with
+            // #playlist-explorer-page.
             case 'settings':
                 // Suppress auto-save while the form is being populated, so opening
                 // Settings no longer fires a spurious full save (4 POSTs + backend

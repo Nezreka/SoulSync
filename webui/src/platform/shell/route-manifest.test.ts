@@ -62,9 +62,11 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('artist-detail')?.kind).toBe('react');
     expect(getShellRouteByPageId('label-detail')?.kind).toBe('react');
     expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
+    expect(getShellRouteByPageId('playlist-explorer')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'search',
       'discover',
+      'playlist-explorer',
       'watchlist',
       'wishlist',
       'automations',

@@ -31,12 +31,13 @@ import { describe, expect, it } from 'vitest';
  * The alternative, a single global count, lets a new gap be paid for by fixing
  * an old one. That is exactly the trade this is meant to prevent.
  *
- * SCOPE: the discover route, which this migration owns. A repo-wide run reports
- * ~375 unnamed exports across the older pages; widening this is worth doing and
- * is its own job.
+ * SCOPE: the routes the in-flight migration owns — discover, and now
+ * playlist-explorer. A repo-wide run reports ~375 unnamed exports across the
+ * older pages; widening this further is worth doing and is its own job.
  */
 
 const ROOT = resolve(process.cwd(), 'src/routes/discover');
+const EXPLORER_ROOT = resolve(process.cwd(), 'src/routes/playlist-explorer');
 
 /**
  * Modules with pre-existing gaps, from the phases of this port that predate the
@@ -82,8 +83,9 @@ export function exportedNames(source: string): string[] {
   ].map((m) => m[1]);
 }
 
-describe('every export is named by a test', () => {
-  const files = walk(ROOT);
+/** The unnamed exports of one route, keyed by path relative to that route. */
+function gapsFor(root: string): Map<string, string[]> {
+  const files = walk(root);
   const corpus = files
     .filter(isTest)
     .map((f) => readFileSync(f, 'utf8'))
@@ -94,8 +96,13 @@ describe('every export is named by a test', () => {
     const missing = exportedNames(readFileSync(file, 'utf8')).filter(
       (name) => !new RegExp(`\\b${name}\\b`).test(corpus),
     );
-    if (missing.length) gaps.set(relative(ROOT, file).replace(/\\/g, '/'), missing);
+    if (missing.length) gaps.set(relative(root, file).replace(/\\/g, '/'), missing);
   }
+  return gaps;
+}
+
+describe('every export is named by a test', () => {
+  const gaps = gapsFor(ROOT);
 
   it('never leaves a NEW module partly untested', () => {
     const offenders = [...gaps.entries()].filter(([file]) => !(file in KNOWN_GAPS));
@@ -137,5 +144,23 @@ describe('every export is named by a test', () => {
       (f) => f.includes('artist-map') || f.includes('artist-web'),
     );
     expect(viz).toEqual([]);
+  });
+});
+
+describe('the playlist-explorer port is born fully covered', () => {
+  // No KNOWN_GAPS list, deliberately: this port started after the check
+  // existed, so it has no legacy to grandfather. Every module it adds is
+  // covered from its first commit or this fails.
+  it('exports nothing a test does not name', () => {
+    const offenders = [...gapsFor(EXPLORER_ROOT).entries()].map(
+      ([file, names]) => `${file}: ${names.join(', ')}`,
+    );
+    expect(
+      offenders,
+      offenders.length
+        ? `\nThese playlist-explorer modules export values no test mentions.\n` +
+            `Test them, or stop exporting them.\n`
+        : undefined,
+    ).toEqual([]);
   });
 });
