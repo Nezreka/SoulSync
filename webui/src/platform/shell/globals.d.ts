@@ -567,6 +567,15 @@ declare global {
      *   Downloads ADOPTED REGION from the four script-scoped bubble
      *   registries; React provides only the shell
      */
+    /**
+     * worker-orbs.js — the canvas orb layer. Published unconditionally at
+     * script load; setPage('dashboard') lazily re-anchors against the
+     * React-rendered header (the page component re-pings it post-mount).
+     */
+    workerOrbs?: {
+      setPage: (pageId: string) => void;
+      onStatus: (id: string, data: unknown) => void;
+    };
     openAutoSyncScheduleModal?: () => void | Promise<void>;
     openSyncDetailModal?: (entryId: number) => void | Promise<void>;
     showLoginScreen?: () => void;

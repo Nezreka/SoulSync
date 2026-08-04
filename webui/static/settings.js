@@ -219,17 +219,16 @@ function syncJiosaavnEnrichmentBubble(enabled) {
     // its JioSaavn orb shows/hides on this, since the container write below
     // only reaches the vanilla markup.
     window.dispatchEvent(new CustomEvent('ss:jiosaavn-experimental', { detail: { enabled: !!enabled } }));
-    const container = document.querySelector('.jiosaavn-button-container');
-    if (container) container.style.display = enabled ? '' : 'none';
+    // No container write since the dashboard flip — the JioSaavn orb is
+    // React-rendered and shows/hides on the dispatch above.
     if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
         refreshRateMonitorExperimentalVisibility();
     }
     if (enabled && typeof renderEnrichmentRail === 'function') {
         renderEnrichmentRail();
     }
-    if (window._lastStatusPayload?.enrichment && typeof renderEnrichmentCards === 'function') {
-        renderEnrichmentCards(window._lastStatusPayload.enrichment);
-    }
+    // The chips replay is React's now: service-cards.tsx re-renders its
+    // cached enrichment payload on the ss:jiosaavn-experimental dispatch.
 }
 
 async function onExperimentalJiosaavnToggle(checkbox) {
@@ -1922,7 +1921,10 @@ async function loadSettingsData() {
                 document.getElementById('dev-mode-status').textContent = 'Active';
                 document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
                 document.getElementById('hydrabase-nav').style.display = '';
-                document.getElementById('hydrabase-button-container').style.display = '';
+                // The Hydrabase ORB is React-rendered since the dashboard flip
+                // and shows on the dispatch above; the old container write
+                // would throw here (the node only exists while the dashboard
+                // is mounted).
             }
         } catch (error) {
             console.error('Error checking dev mode:', error);
@@ -4080,7 +4082,7 @@ async function activateDevMode() {
             document.getElementById('dev-mode-status').textContent = 'Active';
             document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
             document.getElementById('hydrabase-nav').style.display = '';
-            document.getElementById('hydrabase-button-container').style.display = '';
+            // Orb visibility rides the dispatch (React-owned since the flip).
             document.getElementById('dev-mode-password').value = '';
             showToast('Dev mode activated', 'success');
         } else {
@@ -4150,7 +4152,7 @@ async function hydrabaseDisconnect() {
     // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
     window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
     document.getElementById('hydrabase-nav').style.display = 'none';
-    document.getElementById('hydrabase-button-container').style.display = 'none';
+    // Orb visibility rides the dispatch (React-owned since the flip).
     const devStatus = document.getElementById('dev-mode-status');
     if (devStatus) {
         devStatus.textContent = 'Inactive';

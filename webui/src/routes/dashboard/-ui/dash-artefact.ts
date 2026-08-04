@@ -1,23 +1,31 @@
 /**
  * Test-only helpers for the dashboard artefact differentials: extract a
- * region of the LIVE vanilla markup from index.html and structurally compare
- * it against a React render. At P9 (markup deletion) the extraction converts
- * to recorded fixtures — the discover recording-context method.
+ * region of the RECORDED vanilla markup and structurally compare it against a
+ * React render.
+ *
+ * The source is dash-vanilla-fixture.html — a byte-for-byte capture of
+ * index.html's #dashboard-page block (lines 2225-2954) taken at the P9 flip,
+ * right before that markup was deleted. The discover arc's recording-context
+ * method: the differential keeps pinning the port against what the vanilla
+ * REALLY was, not against a hand-maintained copy.
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from 'vitest';
 
-const INDEX_HTML = join(__dirname, '..', '..', '..', '..', 'index.html');
+const FIXTURE_HTML = join(__dirname, 'dash-vanilla-fixture.html');
 
-/** Slice the dashboard `<article … data-card="X">…</article>` region.
+/** The recorded #dashboard-page block. */
+export function vanillaDashboardHtml(): string {
+  return readFileSync(FIXTURE_HTML, 'utf-8');
+}
+
+/** Slice a dashboard `<article … data-card="X">…</article>` region.
  *  Dashboard cards never nest articles, so the first close ends the region. */
 export function extractDashArticle(startMarker: string): string {
-  const html = readFileSync(INDEX_HTML, 'utf-8');
-  const pageAt = html.indexOf('id="dashboard-page"');
-  expect(pageAt).toBeGreaterThan(-1);
-  const start = html.indexOf(startMarker, pageAt);
+  const html = vanillaDashboardHtml();
+  const start = html.indexOf(startMarker);
   expect(start).toBeGreaterThan(-1);
   const end = html.indexOf('</article>', start);
   expect(end).toBeGreaterThan(start);

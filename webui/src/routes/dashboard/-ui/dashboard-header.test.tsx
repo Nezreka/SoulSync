@@ -1,29 +1,24 @@
 /**
- * DashboardHeader — the artefact differential against the LIVE vanilla region
- * (index.html's #dashboard-page .dashboard-header) plus the click seams.
+ * DashboardHeader — the artefact differential against the RECORDED vanilla
+ * region (dash-vanilla-fixture.html's .dashboard-header) plus the click seams.
  *
  * The differential walks both trees and compares tag, id, class list, the
  * attributes that matter (src/alt/title/aria-hidden/style.display) and
  * whitespace-normalized text. It is the structure check no behaviour test can
  * replace — the tools arc's nested-stat-ids and findings-badge misses were
- * both caught only by this. At P9, when the vanilla markup is deleted, convert
- * the extraction to a recorded fixture (the discover recording-context method).
+ * both caught only by this. The source converted from live index.html to the
+ * fixture at P9, when the vanilla markup was deleted.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { vanillaDashboardHtml } from './dash-artefact';
 import { DashboardHeader } from './dashboard-header';
 
-const INDEX_HTML = join(__dirname, '..', '..', '..', '..', 'index.html');
-
 function extractVanillaHeader(): string {
-  const html = readFileSync(INDEX_HTML, 'utf-8');
-  const pageAt = html.indexOf('id="dashboard-page"');
-  expect(pageAt).toBeGreaterThan(-1);
-  const start = html.indexOf('<div class="dashboard-header">', pageAt);
+  const html = vanillaDashboardHtml();
+  const start = html.indexOf('<div class="dashboard-header">');
   expect(start).toBeGreaterThan(-1);
   const re = /<div\b|<\/div>/g;
   re.lastIndex = start;

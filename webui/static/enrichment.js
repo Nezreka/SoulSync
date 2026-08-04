@@ -30,1121 +30,113 @@ function _enrichmentStatusFetch(id) {
     });
 }
 
-/**
- * Poll MusicBrainz status every 2 seconds and update UI
- */
-async function updateMusicBrainzStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await _enrichmentStatusFetch('musicbrainz');
-        if (!response.ok) { console.warn('MusicBrainz status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateMusicBrainzStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating MusicBrainz status:', error);
-    }
-}
-
 function updateMusicBrainzStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'musicbrainz', data } }));
-    const button = document.getElementById('musicbrainz-button');
-    if (!button) return;
-
-    // Update button state classes
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    // Update tooltip content
-    const tooltipStatus = document.getElementById('mb-tooltip-status');
-    const tooltipCurrent = document.getElementById('mb-tooltip-current');
-    const tooltipProgress = document.getElementById('mb-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) {
-            tooltipStatus.textContent = 'Complete';
-        } else if (data.running && !data.paused) {
-            tooltipStatus.textContent = 'Running';
-        } else if (data.paused) {
-            tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
-        } else {
-            tooltipStatus.textContent = 'Idle';
-        }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            const type = data.current_item.type || 'item';
-            const name = data.current_item.name;
-            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
-        } else {
-            tooltipCurrent.textContent = 'No active matches';
-        }
-    }
-
-    if (tooltipProgress && data.progress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type;
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total} (${albums.percent || 0}%)`;
-        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total} (${tracks.percent || 0}%)`;
-        } else {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total} (${artists.percent || 0}%)`;
-        }
-
-        tooltipProgress.textContent = progressText;
-    }
-}
-
-/**
- * Toggle MusicBrainz enrichment pause/resume
- */
-async function toggleMusicBrainzEnrichment() {
-    try {
-        const button = document.getElementById('musicbrainz-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/musicbrainz/pause' : '/api/enrichment/musicbrainz/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} MusicBrainz enrichment`);
-        }
-
-        // Immediately update UI
-        await updateMusicBrainzStatus();
-
-        console.log(`✅ MusicBrainz enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling MusicBrainz enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize MusicBrainz UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('musicbrainz-button');
-        if (button) {
-            button.addEventListener('click', toggleMusicBrainzEnrichment);
-            // Start polling
-            updateMusicBrainzStatus();
-            setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
-            console.log('✅ MusicBrainz UI initialized');
-        }
-    });
-} else {
-    const button = document.getElementById('musicbrainz-button');
-    if (button) {
-        button.addEventListener('click', toggleMusicBrainzEnrichment);
-        // Start polling
-        updateMusicBrainzStatus();
-        setInterval(updateMusicBrainzStatus, 10000); // fallback only — the websocket push owns live updates
-        console.log('✅ MusicBrainz UI initialized');
-    }
 }
 
 // ============================================================================
 // AUDIODB ENRICHMENT UI
 // ============================================================================
 
-/**
- * Poll AudioDB status every 2 seconds and update UI
- */
-async function updateAudioDBStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await _enrichmentStatusFetch('audiodb');
-        if (!response.ok) { console.warn('AudioDB status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateAudioDBStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating AudioDB status:', error);
-    }
-}
-
 function updateAudioDBStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'audiodb', data } }));
-    const button = document.getElementById('audiodb-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('audiodb-tooltip-status');
-    const tooltipCurrent = document.getElementById('audiodb-tooltip-current');
-    const tooltipProgress = document.getElementById('audiodb-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            const type = data.current_item.type || 'item';
-            const name = data.current_item.name;
-            tooltipCurrent.textContent = `${type.charAt(0).toUpperCase() + type.slice(1)}: "${name}"`;
-        } else {
-            tooltipCurrent.textContent = 'No active matches';
-        }
-    }
-
-    if (tooltipProgress && data.progress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type;
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        } else {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        }
-
-        tooltipProgress.textContent = progressText;
-    }
 }
 
 function updateDiscogsStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'discogs', data } }));
-    const button = document.getElementById('discogs-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('discogs-tooltip-status');
-    const tooltipCurrent = document.getElementById('discogs-tooltip-current');
-    const tooltipProgress = document.getElementById('discogs-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) tooltipStatus.textContent = 'Complete';
-        else if (data.running && !data.paused) tooltipStatus.textContent = 'Running';
-        else if (data.paused) tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
-        else tooltipStatus.textContent = 'Idle';
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) tooltipCurrent.textContent = 'All items processed';
-        else if (data.current_item) tooltipCurrent.textContent = `Processing: "${data.current_item}"`;
-        else tooltipCurrent.textContent = 'No active matches';
-    }
-
-    if (tooltipProgress && data.stats) {
-        const s = data.stats;
-        tooltipProgress.textContent = `Matched: ${s.matched || 0} | Not found: ${s.not_found || 0} | Pending: ${s.pending || 0}`;
-    }
-}
-
-async function toggleDiscogsEnrichment() {
-    try {
-        const button = document.getElementById('discogs-button');
-        if (!button) return;
-        const isPaused = button.classList.contains('paused') || button.classList.contains('complete');
-        const endpoint = isPaused ? '/api/enrichment/discogs/resume' : '/api/enrichment/discogs/pause';
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (response.ok) {
-            showToast(isPaused ? 'Discogs enrichment resumed' : 'Discogs enrichment paused', 'info');
-        }
-    } catch (e) {
-        showToast('Failed to toggle Discogs enrichment', 'error');
-    }
-}
-
-/**
- * Toggle AudioDB enrichment pause/resume
- */
-async function toggleAudioDBEnrichment() {
-    try {
-        const button = document.getElementById('audiodb-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/audiodb/pause' : '/api/enrichment/audiodb/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} AudioDB enrichment`);
-        }
-
-        // Immediately update UI
-        await updateAudioDBStatus();
-
-        console.log(`✅ AudioDB enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling AudioDB enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize AudioDB UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('audiodb-button');
-        if (button) {
-            button.addEventListener('click', toggleAudioDBEnrichment);
-            updateAudioDBStatus();
-            setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
-            console.log('✅ AudioDB UI initialized');
-        }
-    });
-} else {
-    const button = document.getElementById('audiodb-button');
-    if (button) {
-        button.addEventListener('click', toggleAudioDBEnrichment);
-        updateAudioDBStatus();
-        setInterval(updateAudioDBStatus, 10000); // fallback only — the websocket push owns live updates
-        console.log('✅ AudioDB UI initialized');
-    }
 }
 
 // ===================================================================
 // DEEZER ENRICHMENT STATUS
 // ===================================================================
 
-async function updateDeezerStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await _enrichmentStatusFetch('deezer');
-        if (!response.ok) { console.warn('Deezer status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateDeezerStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Deezer status:', error);
-    }
-}
-
 function updateDeezerStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'deezer', data } }));
-    const button = document.getElementById('deezer-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('deezer-tooltip-status');
-    const tooltipCurrent = document.getElementById('deezer-tooltip-current');
-    const tooltipProgress = document.getElementById('deezer-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type;
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        } else {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        }
-
-        tooltipProgress.textContent = progressText;
-    }
-}
-
-async function toggleDeezerEnrichment() {
-    try {
-        const button = document.getElementById('deezer-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/deezer/pause' : '/api/enrichment/deezer/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Deezer enrichment`);
-        }
-
-        // Immediately update UI
-        await updateDeezerStatus();
-
-        console.log(`✅ Deezer enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Deezer enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize Deezer UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('deezer-button');
-        if (button) {
-            button.addEventListener('click', toggleDeezerEnrichment);
-            updateDeezerStatus();
-            setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
-            console.log('✅ Deezer UI initialized');
-        }
-    });
-} else {
-    const button = document.getElementById('deezer-button');
-    if (button) {
-        button.addEventListener('click', toggleDeezerEnrichment);
-        updateDeezerStatus();
-        setInterval(updateDeezerStatus, 10000); // fallback only — the websocket push owns live updates
-        console.log('✅ Deezer UI initialized');
-    }
 }
 
 // ===================================================================
 // JIOSAAVN ENRICHMENT STATUS
 // ===================================================================
 
-async function updateJioSaavnStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('jiosaavn');
-        if (!response.ok) { console.warn('JioSaavn status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateJioSaavnStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating JioSaavn status:', error);
-    }
-}
-
 function updateJioSaavnStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'jiosaavn', data } }));
-    const button = document.getElementById('jiosaavn-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (!data.enabled) {
-        button.classList.add('paused');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('jiosaavn-tooltip-status');
-    const tooltipCurrent = document.getElementById('jiosaavn-tooltip-current');
-    const tooltipProgress = document.getElementById('jiosaavn-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (!data.enabled) { tooltipStatus.textContent = 'Disabled'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (!data.enabled) {
-            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-        const currentType = data.current_item?.type;
-        let progressText = '';
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        } else {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        }
-        tooltipProgress.textContent = progressText;
-    }
-}
-
-async function toggleJioSaavnEnrichment() {
-    try {
-        const button = document.getElementById('jiosaavn-button');
-        if (!button) return;
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/jiosaavn/pause' : '/api/enrichment/jiosaavn/resume';
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} JioSaavn enrichment`);
-        }
-        await updateJioSaavnStatus();
-    } catch (error) {
-        console.error('Error toggling JioSaavn enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-function initJioSaavnEnrichmentUI() {
-    const button = document.getElementById('jiosaavn-button');
-    if (!button) return;
-    button.addEventListener('click', toggleJioSaavnEnrichment);
-    updateJioSaavnStatus();
-    setInterval(updateJioSaavnStatus, 10000); // fallback only — the websocket push owns live updates
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initJioSaavnEnrichmentUI);
-} else {
-    initJioSaavnEnrichmentUI();
 }
 
 // ===================================================================
 // SPOTIFY ENRICHMENT STATUS
 // ===================================================================
 
-async function updateSpotifyEnrichmentStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await _enrichmentStatusFetch('spotify');
-        if (!response.ok) { console.warn('Spotify enrichment status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateSpotifyEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Spotify enrichment status:', error);
-    }
-}
-
 function updateSpotifyEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'spotify', data } }));
-    const button = document.getElementById('spotify-enrich-button');
-    if (!button) return;
-
-    const isRateLimited = data.rate_limited === true;
-    // The real API is unauthed/banned but the worker is still matching via the
-    // no-creds Spotify Free source — treat it as running, not stuck (#798/#887).
-    const bridgingFree = data.using_free === true;
-    // #887: a no-auth user whose enrichment runs on Spotify Free is NOT "not
-    // authenticated" for status purposes — the worker IS enriching. Only flag
-    // Not Authenticated when Free isn't carrying it.
-    const notAuthenticated = data.authenticated === false && !bridgingFree;
-    const rateLimitedStuck = isRateLimited && !bridgingFree;
-    // Budget is a real-API cap; when bridging to free it no longer applies, so
-    // only treat the budget as a stop when we're NOT serving via free (#798).
-    const budgetStuck = (data.daily_budget && data.daily_budget.exhausted) && !bridgingFree;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (notAuthenticated) {
-        button.classList.add('no-auth');
-    } else if (rateLimitedStuck || budgetStuck) {
-        button.classList.add('paused');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('spotify-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('spotify-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('spotify-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (rateLimitedStuck) { tooltipStatus.textContent = 'Rate Limited'; }
-        else if (bridgingFree) { tooltipStatus.textContent = 'Running (Spotify Free)'; }
-        else if (budgetStuck) { tooltipStatus.textContent = 'Daily Limit Reached'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.paused) {
-            tooltipCurrent.textContent = notAuthenticated ? 'Connect Spotify in Settings to enrich' : 'Click to resume';
-        } else if (notAuthenticated) {
-            tooltipCurrent.textContent = 'Connect Spotify in Settings to enrich';
-        } else if (rateLimitedStuck) {
-            const info = data.rate_limit || {};
-            const remaining = info.remaining_seconds || 0;
-            tooltipCurrent.textContent = remaining > 0 ? `Waiting ${Math.ceil(remaining / 60)}m for rate limit to clear` : 'Waiting for rate limit to clear';
-        } else if (bridgingFree && data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name} (via Spotify Free)`;
-        } else if (budgetStuck) {
-            const resets = data.daily_budget.resets_in_seconds || 0;
-            const hours = Math.floor(resets / 3600);
-            const mins = Math.floor((resets % 3600) / 60);
-            tooltipCurrent.textContent = `Resets in ${hours}h ${mins}m`;
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        } else {
-            tooltipCurrent.textContent = 'Waiting for next item...';
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (notAuthenticated) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type || '';
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist') {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType.includes('album')) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType.includes('track')) {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else if (!artistsComplete) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (!albumsComplete) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleSpotifyEnrichment() {
-    try {
-        const button = document.getElementById('spotify-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/spotify/pause' : '/api/enrichment/spotify/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            if (data.rate_limited) {
-                showToast('Cannot resume — Spotify is rate limited', 'warning');
-                return;
-            }
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Spotify enrichment`);
-        }
-
-        await updateSpotifyEnrichmentStatus();
-        console.log(`Spotify enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Spotify enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize Spotify Enrichment UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('spotify-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleSpotifyEnrichment);
-            updateSpotifyEnrichmentStatus();
-            setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('spotify-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleSpotifyEnrichment);
-        updateSpotifyEnrichmentStatus();
-        setInterval(updateSpotifyEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // ITUNES ENRICHMENT STATUS
 // ===================================================================
 
-async function updateiTunesEnrichmentStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await _enrichmentStatusFetch('itunes');
-        if (!response.ok) { console.warn('iTunes enrichment status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateiTunesEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating iTunes enrichment status:', error);
-    }
-}
-
 function updateiTunesEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'itunes', data } }));
-    const button = document.getElementById('itunes-enrich-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('itunes-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('itunes-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('itunes-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-
-        const currentType = data.current_item?.type || '';
-        let progressText = '';
-
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-
-        if (currentType === 'artist') {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType.includes('album')) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else if (currentType.includes('track')) {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        } else if (!artistsComplete) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (!albumsComplete) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        }
-
-        tooltipProgress.textContent = progressText;
-    }
-}
-
-async function toggleiTunesEnrichment() {
-    try {
-        const button = document.getElementById('itunes-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/itunes/pause' : '/api/enrichment/itunes/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} iTunes enrichment`);
-        }
-
-        await updateiTunesEnrichmentStatus();
-        console.log(`iTunes enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling iTunes enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize iTunes Enrichment UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('itunes-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleiTunesEnrichment);
-            updateiTunesEnrichmentStatus();
-            setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('itunes-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleiTunesEnrichment);
-        updateiTunesEnrichmentStatus();
-        setInterval(updateiTunesEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // LAST.FM ENRICHMENT STATUS
 // ===================================================================
 
-async function updateLastFMEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('lastfm');
-        if (!response.ok) { console.warn('Last.fm status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateLastFMEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Last.fm status:', error);
-    }
-}
-
 function updateLastFMEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'lastfm', data } }));
-    const button = document.getElementById('lastfm-enrich-button');
-    if (!button) return;
-
-    const notAuthenticated = data.authenticated === false;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (notAuthenticated) {
-        button.classList.add('no-auth');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('lastfm-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('lastfm-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('lastfm-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.paused) {
-            tooltipCurrent.textContent = notAuthenticated ? 'Add Last.fm API key in Settings to enrich' : 'Click to resume';
-        } else if (notAuthenticated) {
-            tooltipCurrent.textContent = 'Add Last.fm API key in Settings to enrich';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (notAuthenticated) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (artistsComplete && !albumsComplete)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else if (currentType === 'track' || (artistsComplete && albumsComplete)) {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            } else {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleLastFMEnrichment() {
-    try {
-        const button = document.getElementById('lastfm-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/lastfm/pause' : '/api/enrichment/lastfm/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Last.fm enrichment`);
-        }
-
-        await updateLastFMEnrichmentStatus();
-        console.log(`Last.fm enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Last.fm enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('lastfm-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleLastFMEnrichment);
-            updateLastFMEnrichmentStatus();
-            setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('lastfm-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleLastFMEnrichment);
-        updateLastFMEnrichmentStatus();
-        setInterval(updateLastFMEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // GENIUS ENRICHMENT STATUS
 // ===================================================================
 
-async function updateGeniusEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('genius');
-        if (!response.ok) { console.warn('Genius status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateGeniusEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Genius status:', error);
-    }
-}
-
 function updateGeniusEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'genius', data } }));
-    const button = document.getElementById('genius-enrich-button');
-    if (!button) return;
-
-    const notAuthenticated = data.authenticated === false;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (notAuthenticated) {
-        button.classList.add('no-auth');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('genius-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('genius-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('genius-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.paused) {
-            tooltipCurrent.textContent = notAuthenticated ? 'Add Genius access token in Settings to enrich' : 'Click to resume';
-        } else if (notAuthenticated) {
-            tooltipCurrent.textContent = 'Add Genius access token in Settings to enrich';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (notAuthenticated) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const artists = data.progress.artists || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleGeniusEnrichment() {
-    try {
-        const button = document.getElementById('genius-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/genius/pause' : '/api/enrichment/genius/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Genius enrichment`);
-        }
-
-        await updateGeniusEnrichmentStatus();
-        console.log(`Genius enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Genius enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('genius-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleGeniusEnrichment);
-            updateGeniusEnrichmentStatus();
-            setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('genius-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleGeniusEnrichment);
-        updateGeniusEnrichmentStatus();
-        setInterval(updateGeniusEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
@@ -1156,668 +148,78 @@ if (document.readyState === 'loading') {
 // (see core.metadata.registry.is_source_enabled). Progress is keyed by
 // 'albums'/'tracks' (core/bandcamp_worker.py has no artist-level pass).
 
-async function updateBandcampEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('bandcamp');
-        if (!response.ok) { console.warn('Bandcamp status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateBandcampEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Bandcamp status:', error);
-    }
-}
-
 function updateBandcampEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'bandcamp', data } }));
-    const button = document.getElementById('bandcamp-enrich-button');
-    if (!button) return;
-
-    const disabled = data.enabled === false;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (disabled) {
-        button.classList.add('no-auth');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('bandcamp-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('bandcamp-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('bandcamp-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (disabled) { tooltipStatus.textContent = 'Disabled'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (disabled) {
-            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
-        } else if (data.paused) {
-            tooltipCurrent.textContent = 'Click to resume';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (disabled) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'album' || (!albumsComplete && !currentType)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleBandcampEnrichment() {
-    try {
-        const button = document.getElementById('bandcamp-enrich-button');
-        if (!button) return;
-        if (button.classList.contains('no-auth')) return; // disabled — toggle via Settings instead
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/bandcamp/pause' : '/api/enrichment/bandcamp/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Bandcamp enrichment`);
-        }
-
-        await updateBandcampEnrichmentStatus();
-        console.log(`Bandcamp enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Bandcamp enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('bandcamp-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleBandcampEnrichment);
-            updateBandcampEnrichmentStatus();
-            setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('bandcamp-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleBandcampEnrichment);
-        updateBandcampEnrichmentStatus();
-        setInterval(updateBandcampEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // TIDAL ENRICHMENT WORKER
 // ===================================================================
 
-async function updateTidalEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('tidal');
-        if (!response.ok) { console.warn('Tidal status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateTidalEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Tidal status:', error);
-    }
-}
-
 function updateTidalEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'tidal', data } }));
-    const button = document.getElementById('tidal-enrich-button');
-    if (!button) return;
-
-    const notAuthenticated = data.authenticated === false;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (notAuthenticated) {
-        button.classList.add('no-auth');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('tidal-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('tidal-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('tidal-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.paused) {
-            tooltipCurrent.textContent = notAuthenticated ? 'Connect Tidal in Settings to enrich' : 'Click to resume';
-        } else if (notAuthenticated) {
-            tooltipCurrent.textContent = 'Connect Tidal in Settings to enrich';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (notAuthenticated) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleTidalEnrichment() {
-    try {
-        const button = document.getElementById('tidal-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/tidal/pause' : '/api/enrichment/tidal/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Tidal enrichment`);
-        }
-
-        await updateTidalEnrichmentStatus();
-        console.log(`Tidal enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Tidal enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('tidal-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleTidalEnrichment);
-            updateTidalEnrichmentStatus();
-            setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('tidal-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleTidalEnrichment);
-        updateTidalEnrichmentStatus();
-        setInterval(updateTidalEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // QOBUZ ENRICHMENT WORKER
 // ===================================================================
 
-async function updateQobuzEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('qobuz');
-        if (!response.ok) { console.warn('Qobuz status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateQobuzEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Qobuz status:', error);
-    }
-}
-
 function updateQobuzEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'qobuz', data } }));
-    const button = document.getElementById('qobuz-enrich-button');
-    if (!button) return;
-
-    const notAuthenticated = data.authenticated === false;
-
-    button.classList.remove('active', 'paused', 'complete', 'no-auth');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (notAuthenticated) {
-        button.classList.add('no-auth');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('qobuz-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('qobuz-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('qobuz-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = 'Paused'; }
-        else if (notAuthenticated) { tooltipStatus.textContent = 'Not Authenticated'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.paused) {
-            tooltipCurrent.textContent = notAuthenticated ? 'Connect Qobuz in Settings to enrich' : 'Click to resume';
-        } else if (notAuthenticated) {
-            tooltipCurrent.textContent = 'Connect Qobuz in Settings to enrich';
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        if (notAuthenticated) {
-            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
-        } else {
-            const artists = data.progress.artists || {};
-            const albums = data.progress.albums || {};
-            const tracks = data.progress.tracks || {};
-
-            const currentType = data.current_item?.type;
-            let progressText = '';
-
-            const artistsComplete = artists.matched >= artists.total;
-            const albumsComplete = albums.matched >= albums.total;
-
-            if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-                progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-            } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
-                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-            } else {
-                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-            }
-
-            tooltipProgress.textContent = progressText;
-        }
-    }
-}
-
-async function toggleQobuzEnrichment() {
-    try {
-        const button = document.getElementById('qobuz-enrich-button');
-        if (!button) return;
-
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/qobuz/pause' : '/api/enrichment/qobuz/resume';
-
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Qobuz enrichment`);
-        }
-
-        await updateQobuzEnrichmentStatus();
-        console.log(`Qobuz enrichment ${isRunning ? 'paused' : 'resumed'}`);
-
-    } catch (error) {
-        console.error('Error toggling Qobuz enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('qobuz-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleQobuzEnrichment);
-            updateQobuzEnrichmentStatus();
-            setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('qobuz-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleQobuzEnrichment);
-        updateQobuzEnrichmentStatus();
-        setInterval(updateQobuzEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // AMAZON MUSIC ENRICHMENT WORKER
 // ===================================================================
 
-async function updateAmazonEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('amazon');
-        if (!response.ok) { console.warn('Amazon enrichment status endpoint unavailable'); return; }
-        const data = await response.json();
-        updateAmazonEnrichmentStatusFromData(data);
-    } catch (error) {
-        console.error('Error updating Amazon enrichment status:', error);
-    }
-}
-
 function updateAmazonEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'amazon', data } }));
-    const button = document.getElementById('amazon-enrich-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.paused) {
-        button.classList.add('paused');
-    } else if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('amazon-enrich-tooltip-status');
-    const tooltipCurrent = document.getElementById('amazon-enrich-tooltip-current');
-    const tooltipProgress = document.getElementById('amazon-enrich-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running) { tooltipStatus.textContent = 'Running'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All items processed';
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
-        } else {
-            tooltipCurrent.textContent = 'No active matches';
-        }
-    }
-
-    if (data.progress && tooltipProgress) {
-        const artists = data.progress.artists || {};
-        const albums = data.progress.albums || {};
-        const tracks = data.progress.tracks || {};
-        const currentType = data.current_item?.type;
-        let progressText = '';
-        const artistsComplete = artists.matched >= artists.total;
-        const albumsComplete = albums.matched >= albums.total;
-        if (currentType === 'artist' || (!artistsComplete && !currentType)) {
-            progressText = `Artists: ${artists.matched || 0} / ${artists.total || 0} (${artists.percent || 0}%)`;
-        } else if (currentType === 'album' || (!albumsComplete && !currentType)) {
-            progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
-        } else {
-            progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
-        }
-        tooltipProgress.textContent = progressText;
-    }
-}
-
-async function toggleAmazonEnrichment() {
-    try {
-        const button = document.getElementById('amazon-enrich-button');
-        if (!button) return;
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/amazon/pause' : '/api/enrichment/amazon/resume';
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) {
-            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Amazon enrichment`);
-        }
-        await updateAmazonEnrichmentStatus();
-        console.log(`Amazon enrichment ${isRunning ? 'paused' : 'resumed'}`);
-    } catch (error) {
-        console.error('Error toggling Amazon enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('amazon-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleAmazonEnrichment);
-            updateAmazonEnrichmentStatus();
-            setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('amazon-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleAmazonEnrichment);
-        updateAmazonEnrichmentStatus();
-        setInterval(updateAmazonEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // SIMILAR ARTISTS (MUSICMAP) WORKER — dashboard bubble
 // ===================================================================
 
-async function updateSimilarArtistsEnrichmentStatus() {
-    if (socketConnected) return;
-    if (document.hidden) return;
-    try {
-        const response = await _enrichmentStatusFetch('similar_artists');
-        if (!response.ok) return;
-        updateSimilarArtistsEnrichmentStatusFromData(await response.json());
-    } catch (error) {
-        console.error('Error updating Similar Artists enrichment status:', error);
-    }
-}
-
 function updateSimilarArtistsEnrichmentStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'similar_artists', data } }));
-    const button = document.getElementById('similar-artists-enrich-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.paused) button.classList.add('paused');
-    else if (data.idle) button.classList.add('complete');
-    else if (data.running && !data.paused) button.classList.add('active');
-
-    const tStatus = document.getElementById('similar-artists-enrich-tooltip-status');
-    const tCurrent = document.getElementById('similar-artists-enrich-tooltip-current');
-    const tProgress = document.getElementById('similar-artists-enrich-tooltip-progress');
-
-    if (tStatus) {
-        if (data.paused) tStatus.textContent = 'Paused';
-        else if (data.idle) tStatus.textContent = 'Complete';
-        else if (data.running) tStatus.textContent = 'Running';
-        else tStatus.textContent = 'Idle';
-    }
-    if (tCurrent) {
-        if (data.idle) tCurrent.textContent = 'All library artists processed';
-        else if (data.current_item) tCurrent.textContent = `Now: ${data.current_item}`;
-        else tCurrent.textContent = 'No active matches';
-    }
-    // DB-backed artist progress (matches the Manage modal exactly).
-    if (tProgress) {
-        const a = (data.progress && data.progress.artists) || {};
-        tProgress.textContent = `Artists: ${a.matched || 0} / ${a.total || 0} (${a.percent || 0}%)`;
-    }
-}
-
-async function toggleSimilarArtistsEnrichment() {
-    // Identical logic to the other orbs (e.g. toggleAmazonEnrichment): if the orb
-    // is 'active' (running) → pause, otherwise → resume. A paused orb isn't
-    // 'active', so this resumes it.
-    try {
-        const button = document.getElementById('similar-artists-enrich-button');
-        if (!button) return;
-        const isRunning = button.classList.contains('active');
-        const endpoint = isRunning ? '/api/enrichment/similar_artists/pause' : '/api/enrichment/similar_artists/resume';
-        const response = await fetch(endpoint, { method: 'POST' });
-        if (!response.ok) throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Similar Artists enrichment`);
-        await updateSimilarArtistsEnrichmentStatus();
-    } catch (error) {
-        console.error('Error toggling Similar Artists enrichment:', error);
-        showToast(`Error: ${error.message}`, 'error');
-    }
-}
-
-// Initialize Similar Artists UI on page load — identical pattern to AudioDB/Deezer
-// (addEventListener for the click; no inline onclick on the button).
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('similar-artists-enrich-button');
-        if (button) {
-            button.addEventListener('click', toggleSimilarArtistsEnrichment);
-            updateSimilarArtistsEnrichmentStatus();
-            setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('similar-artists-enrich-button');
-    if (button) {
-        button.addEventListener('click', toggleSimilarArtistsEnrichment);
-        updateSimilarArtistsEnrichmentStatus();
-        setInterval(updateSimilarArtistsEnrichmentStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
 // HYDRABASE P2P MIRROR WORKER
 // ===================================================================
 
-async function updateHydrabaseStatus() {
-    if (socketConnected) return; // WebSocket handles this
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await fetch('/api/hydrabase-worker/status');
-        if (!response.ok) return;
-        const data = await response.json();
-        updateHydrabaseStatusFromData(data);
-    } catch (error) {
-        // Silently ignore — worker may not be available
-    }
-}
-
 function updateHydrabaseStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'hydrabase', data } }));
-    const button = document.getElementById('hydrabase-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused');
-    if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const statusEl = document.getElementById('hydrabase-tooltip-status');
-    if (statusEl) {
-        if (data.paused) {
-            statusEl.textContent = 'Paused';
-            statusEl.style.color = '#ffc107';
-        } else if (data.running) {
-            statusEl.textContent = 'Active';
-            statusEl.style.color = '#ffffff';
-        } else {
-            statusEl.textContent = 'Stopped';
-            statusEl.style.color = '#ff5252';
-        }
-    }
-}
-
-async function toggleHydrabaseWorker() {
-    const button = document.getElementById('hydrabase-button');
-    if (!button) return;
-    const isRunning = button.classList.contains('active');
-    const endpoint = isRunning ? '/api/hydrabase-worker/pause' : '/api/hydrabase-worker/resume';
-    try {
-        await fetch(endpoint, { method: 'POST' });
-        await updateHydrabaseStatus();
-    } catch (error) {
-        console.error('Error toggling Hydrabase worker:', error);
-    }
-}
-
-// Initialize Hydrabase UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('hydrabase-button');
-        if (button) {
-            button.addEventListener('click', toggleHydrabaseWorker);
-            updateHydrabaseStatus();
-            setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
-        }
-    });
-} else {
-    const button = document.getElementById('hydrabase-button');
-    if (button) {
-        button.addEventListener('click', toggleHydrabaseWorker);
-        updateHydrabaseStatus();
-        setInterval(updateHydrabaseStatus, 10000); // fallback only — the websocket push owns live updates
-    }
 }
 
 // ===================================================================
@@ -1838,134 +240,23 @@ async function updateRepairStatus() {
 }
 
 function updateRepairStatusFromData(data) {
-    // Re-broadcast FIRST, and from here rather than from the socket handler, for
-    // two reasons. (1) There are two callers: the socket, and updateRepairStatus()'s
-    // 5s HTTP poll, which is the ONLY live source on a client with no websocket —
-    // bridging just the socket would leave those clients with a frozen badge.
-    // (2) It must not sit behind the `if (!button) return;` below: #repair-button
-    // is the dashboard worker orb, and the React tools state has no business being
-    // gated on a node that belongs to another page.
+    // Dispatch-only since the dashboard flip. Two callers: the socket, and
+    // updateRepairStatus()'s app-wide 5s HTTP poll — the ONLY live source on a
+    // client with no websocket. The dashboard orb, tooltip and findings badge
+    // are React-rendered from this frame, and the tools maintenance hero
+    // consumes the same dispatch.
     window.dispatchEvent(new CustomEvent('ss:repair-status', { detail: data }));
-
-    const button = document.getElementById('repair-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'paused', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    } else if (data.paused) {
-        button.classList.add('paused');
-    }
-
-    const tooltipStatus = document.getElementById('repair-tooltip-status');
-    const tooltipCurrent = document.getElementById('repair-tooltip-current');
-    const tooltipProgress = document.getElementById('repair-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) { tooltipStatus.textContent = 'Complete'; }
-        else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
-        else { tooltipStatus.textContent = 'Idle'; }
-    }
-
-    if (tooltipCurrent) {
-        if (data.idle) {
-            tooltipCurrent.textContent = 'All jobs complete — waiting for next schedule';
-        } else if (data.current_job && data.current_job.display_name) {
-            const jobName = data.current_job.display_name;
-            const jobProgress = data.progress && data.progress.current_job;
-            if (jobProgress && jobProgress.total > 0) {
-                tooltipCurrent.textContent = `${jobName}: ${jobProgress.scanned} / ${jobProgress.total} (${jobProgress.percent}%)`;
-            } else {
-                tooltipCurrent.textContent = `Running: ${jobName}`;
-            }
-        } else if (data.current_item && data.current_item.name) {
-            tooltipCurrent.textContent = `Running: ${data.current_item.name}`;
-        } else {
-            tooltipCurrent.textContent = 'No active repairs';
-        }
-    }
-
-    if (tooltipProgress && data.progress) {
-        const tracks = data.progress.tracks || {};
-        const parts = [];
-        if (tracks.total > 0) parts.push(`Checked: ${tracks.checked || 0} / ${tracks.total || 0}`);
-        if (tracks.repaired > 0) parts.push(`Repaired: ${tracks.repaired}`);
-        const pending = data.findings_pending || 0;
-        if (pending > 0) parts.push(`Findings: ${pending}`);
-        tooltipProgress.textContent = parts.length ? parts.join(' · ') : 'No items processed yet';
-    }
-
-    // Update findings badge
-    const badge = document.getElementById('repair-findings-badge');
-    const findingsPending = data.findings_pending || 0;
-    if (badge) {
-        badge.textContent = findingsPending;
-        badge.style.display = findingsPending > 0 ? '' : 'none';
-    }
-    // The findings TAB badge and the master toggle are React-owned since the
-    // P7 flip (the hero drives both from the ss:repair-status dispatch above).
-    // Writing them from here again would set `checked` on a React-controlled
-    // input behind React's back. This handler keeps only what the dashboard
-    // owns: the orb, its tooltip, and the orb's own badge.
-
-    // Update button state
-    if (!data.enabled) {
-        button.classList.add('paused');
-        button.classList.remove('active', 'complete');
-    }
 }
 
 // ── SoulID Worker Status ──
 
 function updateSoulIDStatusFromData(data) {
-    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
-    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // Dispatch-only since the dashboard flip: the orb, its tooltip and the
+    // status classes are React-rendered from this frame (-dash.header.ts).
+    // Writing the old ids from here would fight React for its own nodes.
     // One canonical channel for all providers; the per-provider socket names
-    // are a fifth, inconsistent registry the React side should not inherit.
+    // are a fifth, inconsistent registry the React side does not inherit.
     window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'soulid', data } }));
-    const button = document.getElementById('soulid-button');
-    if (!button) return;
-
-    button.classList.remove('active', 'complete');
-    if (data.idle) {
-        button.classList.add('complete');
-    } else if (data.running && !data.paused) {
-        button.classList.add('active');
-    }
-
-    const tooltipStatus = document.getElementById('soulid-tooltip-status');
-    const tooltipCurrent = document.getElementById('soulid-tooltip-current');
-    const tooltipProgress = document.getElementById('soulid-tooltip-progress');
-
-    if (tooltipStatus) {
-        if (data.idle) tooltipStatus.textContent = 'Complete';
-        else if (data.running && !data.paused) tooltipStatus.textContent = 'Running';
-        else if (data.paused) tooltipStatus.textContent = 'Paused';
-        else tooltipStatus.textContent = 'Idle';
-    }
-
-    if (tooltipCurrent) {
-        if (data.current_item) {
-            tooltipCurrent.textContent = data.current_item;
-        } else if (data.idle) {
-            tooltipCurrent.textContent = 'All entities have soul IDs';
-        } else {
-            tooltipCurrent.textContent = 'No items processing';
-        }
-    }
-
-    if (tooltipProgress && data.stats) {
-        const s = data.stats;
-        const parts = [];
-        if (s.artists_processed) parts.push(`Artists: ${s.artists_processed}`);
-        if (s.albums_processed) parts.push(`Albums: ${s.albums_processed}`);
-        if (s.tracks_processed) parts.push(`Tracks: ${s.tracks_processed}`);
-        if (s.pending > 0) parts.push(`Pending: ${s.pending}`);
-        tooltipProgress.textContent = parts.length ? parts.join(' · ') : 'No items processed yet';
-    }
 }
 
 // ── Repair Modal State ──
@@ -2011,6 +302,23 @@ function openRepairModal() {
         const section = document.querySelector('#tools-page .tools-maintenance-hero');
         if (section) section.scrollIntoView({ behavior: 'smooth' });
     }, 100);
+}
+
+// The repair fallback poll — app-wide on purpose. updateRepairStatusFromData
+// is dispatch-only since the dashboard flip, and BOTH consumers of
+// ss:repair-status (the React dashboard pill and the tools maintenance hero)
+// rely on this 5s HTTP poll when the websocket is down. The old
+// #repair-button gate could never pass now (the orb renders after load), so
+// the poll starts unconditionally; updateRepairStatus itself already skips
+// ticks while the socket pushes or the tab is hidden.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        updateRepairStatus();
+        setInterval(updateRepairStatus, 5000);
+    });
+} else {
+    updateRepairStatus();
+    setInterval(updateRepairStatus, 5000);
 }
 
 function closeRepairModal() {
@@ -4481,25 +2789,6 @@ async function loadRepairHistory() {
     } catch (error) {
         console.error('Error loading repair history:', error);
         container.innerHTML = '<div class="repair-empty">Error loading history</div>';
-    }
-}
-
-// Initialize Repair Worker UI on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        const button = document.getElementById('repair-button');
-        if (button) {
-            button.addEventListener('click', openRepairModal);
-            updateRepairStatus();
-            setInterval(updateRepairStatus, 5000);
-        }
-    });
-} else {
-    const button = document.getElementById('repair-button');
-    if (button) {
-        button.addEventListener('click', openRepairModal);
-        updateRepairStatus();
-        setInterval(updateRepairStatus, 5000);
     }
 }
 

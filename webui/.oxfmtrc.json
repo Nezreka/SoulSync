@@ -2,17 +2,29 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
     "src/routeTree.gen.ts",
-    "src/routes/tools/duplicate-keep-parity.json"
+    "src/routes/tools/duplicate-keep-parity.json",
+    "src/routes/dashboard/-ui/dash-vanilla-fixture.html"
   ],
   "singleQuote": true,
   "sortImports": {
     "groups": [
       "type-import",
-      ["value-builtin", "value-external"],
+      [
+        "value-builtin",
+        "value-external"
+      ],
       "type-internal",
       "value-internal",
-      ["type-parent", "type-sibling", "type-index"],
-      ["value-parent", "value-sibling", "value-index"],
+      [
+        "type-parent",
+        "type-sibling",
+        "type-index"
+      ],
+      [
+        "value-parent",
+        "value-sibling",
+        "value-index"
+      ],
       "unknown"
     ]
   },

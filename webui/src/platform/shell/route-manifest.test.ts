@@ -50,6 +50,7 @@ describe('shellRouteManifest', () => {
   });
 
   it('tracks whether a route is rendered by React or the legacy shell', () => {
+    expect(getShellRouteByPageId('dashboard')?.kind).toBe('react');
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
@@ -65,6 +66,7 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('playlist-explorer')?.kind).toBe('react');
     expect(getShellRouteByPageId('tools')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
+      'dashboard',
       'search',
       'discover',
       'playlist-explorer',
@@ -80,13 +82,16 @@ describe('shellRouteManifest', () => {
       'stats',
       'issues',
     ]);
-    expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
+    // The dashboard flipped to React (the 12th and final music page).
+    expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(false);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'sync')).toBe(true);
   });
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
     expect(resolveLegacyShellPageFromPath('/sync')).toBe('sync');
-    // React owns /tools now.
+    // React owns /tools and /dashboard now.
     expect(resolveLegacyShellPageFromPath('/tools')).toBeNull();
+    expect(resolveLegacyShellPageFromPath('/dashboard')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();

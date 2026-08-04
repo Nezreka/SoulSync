@@ -355,21 +355,18 @@ describe('quick-nav counts', () => {
 });
 
 describe('fallback polling', () => {
-  it('polls the bundle+hydrabase at 10s and repair at 5s', async () => {
+  it('polls the bundle+hydrabase at 10s — and repair NEVER (the app-wide vanilla poll owns it)', async () => {
     vi.useFakeTimers();
     await mount();
-    fetchMock.mockClear();
     routes({});
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
-    });
-    expect(calledUrls()).toContain('/api/repair/status');
-    expect(calledUrls()).not.toContain('/api/enrichment/status-all');
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(10000);
     });
     expect(calledUrls()).toContain('/api/enrichment/status-all');
     expect(calledUrls()).toContain('/api/hydrabase-worker/status');
+    // enrichment.js keeps the 5s app-wide repair poll whose handler dispatches
+    // ss:repair-status; a second interval here would double the request rate.
+    expect(calledUrls()).not.toContain('/api/repair/status');
   });
 
   it('skips ticks while the socket is pushing (window._socketConnected)', async () => {
@@ -398,15 +395,11 @@ describe('fallback polling', () => {
     delete (document as { hidden?: boolean }).hidden;
   });
 
-  it('applies a polled repair payload (post-flip the vanilla 5s repair poll is gone)', async () => {
-    vi.useFakeTimers();
-    await mount();
+  it('hydrates the repair pill once on mount', async () => {
     routes({
       '/api/repair/status': { enabled: true, running: true, paused: false, findings_pending: 2 },
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
-    });
+    await mount();
     expect(state.pills.repair.stateClass).toBe('active');
     expect(state.repairBadge).toEqual({ count: 2, visible: true });
   });

@@ -106,9 +106,14 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
+            // React-owned pages have no .page.active node — the shell's
+            // currentPage covers both worlds.
             const activePage = document.querySelector('.page.active');
-            if (activePage) {
-                window.pageParticles.setPage(activePage.id.replace('-page', ''));
+            const activeId = activePage
+                ? activePage.id.replace('-page', '')
+                : (typeof currentPage !== 'undefined' ? currentPage : null);
+            if (activeId) {
+                window.pageParticles.setPage(activeId);
             }
         } else {
             window.pageParticles.stop();
@@ -123,8 +128,9 @@ function applyWorkerOrbsSetting(enabled) {
     localStorage.setItem('soulsync-worker-orbs', String(enabled));
     if (window.workerOrbs) {
         if (enabled) {
-            const activePage = document.querySelector('.page.active');
-            if (activePage && activePage.id === 'dashboard-page') {
+            // The dashboard is React-rendered (no .page.active node) — the
+            // shell's currentPage is the truth for both worlds.
+            if (typeof currentPage !== 'undefined' && currentPage === 'dashboard') {
                 window.workerOrbs.setPage('dashboard');
             }
         } else {
@@ -208,7 +214,9 @@ function applyReduceEffects(enabled) {
     } else {
         // Restore only what the user's own toggles still allow.
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -268,7 +276,9 @@ function applyMaxPerformance(enabled) {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (!reduce && window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -2895,12 +2905,10 @@ function initApp() {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             fetchAndUpdateServiceStatus();
-            // Refresh dashboard-specific data if on dashboard
-            const dashboardPage = document.getElementById('dashboard-page');
-            if (dashboardPage && dashboardPage.classList.contains('active')) {
-                fetchAndUpdateSystemStats();
-                fetchAndUpdateActivityFeed();
-            }
+            // No dashboard-specific branch since the flip: the React cards'
+            // own pollers are hidden-gated, so the tick that lands after the
+            // tab returns refreshes them (the old .page.active check could
+            // never match the React page anyway).
         }
     });
 
@@ -3174,6 +3182,14 @@ function initializeWatchlist() {
     // Update count every 10 seconds
     setInterval(updateWatchlistButtonCount, 10000);
 
+    // The wishlist SIDEBAR badge's poll. This used to start from
+    // loadDashboardData on every dashboard visit (and leak — the interval was
+    // never cleared, so in steady state it ran app-wide anyway). The dashboard
+    // is React now and loadDashboardData is gone, so the poll lives here with
+    // its watchlist twin; updateWishlistCount itself skips ticks while the
+    // socket pushes.
+    setInterval(updateWishlistCount, 10000);
+
     console.log('Watchlist system initialized');
 }
 
@@ -3266,10 +3282,10 @@ async function loadPageData(pageId) {
             cleanupBeatportContent();
         }
         switch (pageId) {
-            case 'dashboard':
-                await loadDashboardData();
-                loadDashboardSyncHistory();
-                break;
+            // No 'dashboard' case: React owns /dashboard — the whole bento
+            // grid — and loadPageData only runs for legacy-kind pages.
+            // loadDashboardData (and its three leaked intervals) is deleted;
+            // every card hydrates itself on mount.
             case 'sync':
                 initializeSyncPage();
                 await loadSyncData();

@@ -310,21 +310,22 @@ export function useDashboardHeader(): DashboardHeaderState {
       }
       if (hydrabase) applyFrame('hydrabase', hydrabase);
     };
-    const repairTick = async () => {
-      if (window._socketConnected) return;
-      if (document.hidden) return;
+    // Repair has NO interval here on purpose: enrichment.js keeps an APP-WIDE
+    // 5s fallback poll whose handler is dispatch-only (ss:repair-status), and
+    // the tools maintenance hero consumes the same channel — a second interval
+    // would double the socket-down request rate. One mount hydrate covers the
+    // gap until that poll's next tick.
+    const repairHydrate = async () => {
       const data = await fetchRepairStatus();
       if (data) applyFrame('repair', data as unknown as ProviderStatusPayload);
     };
 
     void enrichTick();
-    void repairTick();
+    void repairHydrate();
     const enrichTimer = setInterval(() => void enrichTick(), 10000);
-    const repairTimer = setInterval(() => void repairTick(), 5000);
     return () => {
       mountedRef.current = false;
       clearInterval(enrichTimer);
-      clearInterval(repairTimer);
     };
   }, [applyFrame]);
 

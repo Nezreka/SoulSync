@@ -772,10 +772,12 @@ function initializeWebSocket() {
         fetchAndUpdateServiceStatus();
         updateWatchlistButtonCount();
         resubscribeDownloadBatches();
-        // Phase 2: Refresh dashboard data if on dashboard page
+        // Phase 2: Refresh dashboard data if on dashboard page. The stats and
+        // activity refreshers are gone with the flip (the React cards fall
+        // back to their own polls when the socket drops, so a reconnect gap
+        // self-heals); the db-stats push and wishlist count still flow through
+        // their vanilla fetchers' dispatches.
         if (currentPage === 'dashboard') {
-            fetchAndUpdateSystemStats();
-            fetchAndUpdateActivityFeed();
             fetchAndUpdateDbStats();
             updateWishlistCount();
         }
@@ -958,11 +960,8 @@ function handleServiceStatusUpdate(data) {
         sanitizeMetadataSourceSelection({ quiet: true });
     }
 
-    // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
-    updateServiceStatus('media-server', data.media_server);
-    updateServiceStatus('soulseek', data.soulseek);
-
+    // The dashboard service cards are React-rendered from the dispatch above
+    // since the flip (service-cards.tsx) — only the sidebar half survives here.
     updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
@@ -987,8 +986,8 @@ function handleServiceStatusUpdate(data) {
         // (preserves display:none on undiscovered LB/Last.fm playlist sync buttons)
     });
 
-    // Update enrichment service cards
-    if (data.enrichment) renderEnrichmentCards(data.enrichment);
+    // The enrichment chips grid is React-rendered from the dispatch above
+    // since the dashboard flip (service-cards.tsx) — no vanilla write here.
 
     // Spotify rate limit / cooldown / recovery
     //
@@ -1032,31 +1031,17 @@ function handleServiceStatusUpdate(data) {
     }
 }
 
-function _updateHeroBtnCount(buttonId, badgeId, count) {
-    const badge = document.getElementById(badgeId);
-    if (badge) {
-        badge.textContent = count;
-        badge.classList.toggle('has-items', count > 0);
-    }
-}
-
 function handleWatchlistCountUpdate(data) {
     // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
     window.dispatchEvent(new CustomEvent('ss:watchlist-count', { detail: data }));
     if (data.success) {
-        _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
-        // Update sidebar nav badge
+        // Only the SIDEBAR half survives the dashboard flip — the hero button
+        // and its badge/countdown-title are React-rendered from the dispatch
+        // above (dashboard-header.tsx).
         const wlNavBadge = document.getElementById('watchlist-nav-badge');
         if (wlNavBadge) {
             wlNavBadge.textContent = data.count;
             wlNavBadge.classList.toggle('hidden', data.count === 0);
-        }
-        const watchlistButton = document.getElementById('watchlist-button');
-        if (watchlistButton) {
-            const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
-            if (countdownText) {
-                watchlistButton.title = `Next auto-scan in ${countdownText}`;
-            }
         }
     }
 }
@@ -1101,25 +1086,15 @@ function unsubscribeFromDownloadBatch(batchId) {
 // --- Phase 2: Dashboard event handlers ---
 
 function handleDashboardStats(data) {
-    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    // Dispatch-only since the dashboard flip — the stat cards are
+    // React-rendered from this frame (system-stats.tsx).
     window.dispatchEvent(new CustomEvent('ss:dashboard-stats', { detail: data }));
-    // Same logic as fetchAndUpdateSystemStats response handler
-    updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
-    updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed downloads');
-    updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
-    updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
-    updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
-    // app's actual footprint (falls back to the generic label on older backends).
-    updateStatCard('memory-card', data.memory_usage,
-        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
 }
 
 function handleDashboardActivity(data) {
-    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    // Dispatch-only since the dashboard flip — the feed is React-rendered
+    // from this frame (activity-feed.tsx).
     window.dispatchEvent(new CustomEvent('ss:dashboard-activity', { detail: data }));
-    // Same logic as fetchAndUpdateActivityFeed response handler
-    updateActivityFeed(data.activities || []);
 }
 
 function handleDashboardToast(activity) {
@@ -1138,33 +1113,24 @@ function handleDashboardToast(activity) {
 }
 
 function handleDashboardDbStats(stats) {
-    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    // Dispatch-only since the dashboard flip — the Library card is
+    // React-rendered from this frame (library-card.tsx), and the tools page's
+    // db-updater card (the old updateDbUpdaterCardInfo target) has been React
+    // since the tools flip.
     window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
-    // Same logic as fetchAndUpdateDbStats response handler
-    updateDashboardStatCards(stats);
-    updateDbUpdaterCardInfo(stats);
 }
 
 function handleDashboardWishlistCount(data) {
     // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
     window.dispatchEvent(new CustomEvent('ss:dashboard-wishlist-count', { detail: data }));
     const count = data.count || 0;
-    _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
-    // Update sidebar nav badge
+    // Only the SIDEBAR half survives the dashboard flip — the hero button,
+    // its badge and the active/inactive classes are React-rendered from the
+    // dispatch above (dashboard-header.tsx).
     const wlNavBadge = document.getElementById('wishlist-nav-badge');
     if (wlNavBadge) {
         wlNavBadge.textContent = count;
         wlNavBadge.classList.toggle('hidden', count === 0);
-    }
-    const wishlistButton = document.getElementById('wishlist-button');
-    if (wishlistButton) {
-        if (count === 0) {
-            wishlistButton.classList.remove('wishlist-active');
-            wishlistButton.classList.add('wishlist-inactive');
-        } else {
-            wishlistButton.classList.remove('wishlist-inactive');
-            wishlistButton.classList.add('wishlist-active');
-        }
     }
     checkForAutoInitiatedWishlistProcess();
 }

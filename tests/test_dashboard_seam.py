@@ -72,13 +72,14 @@ def test_every_renderer_dispatches_its_canonical_id(handler: str, provider_id: s
 
 
 @pytest.mark.parametrize("handler", sorted(ENRICH_RENDERERS))
-def test_renderer_dispatch_is_not_gated_on_the_button(handler: str) -> None:
-    """The dispatch must precede `if (!button) return;` — the React page must
-    not be gated on vanilla DOM (the tools #repair-button lesson)."""
+def test_renderers_are_dispatch_only(handler: str) -> None:
+    """DISPATCH-ONLY since the dashboard flip: the orbs, tooltips and status
+    classes are React-rendered from these frames. Any DOM access reappearing
+    in a renderer would fight React for its own nodes."""
     body = _handler_body("enrichment.js", handler)
-    dispatch_at = body.index("ss:enrich-status")
-    guard_at = body.index("if (!button) return;")
-    assert dispatch_at < guard_at, f"{handler}'s dispatch sits behind the button guard"
+    assert "getElementById" not in body and "querySelector" not in body, (
+        f"{handler} touches the DOM again — its orb is React-rendered now"
+    )
 
 
 @pytest.mark.parametrize("handler,event", sorted(CORE_HANDLERS.items()))
@@ -223,10 +224,18 @@ def test_audiodb_logo_is_a_real_file() -> None:
 
 
 def test_index_html_uses_the_file_not_the_inline_base64() -> None:
+    """The dashboard markup (and with it the old <img>) is deleted since the
+    flip — what must never return is the 40KB inline base64, and the React
+    chrome must load the extracted FILE."""
     html = (WEBUI / "index.html").read_text(encoding="utf-8", errors="replace")
-    assert '"/static/img/brands/audiodb.png"' in html
     assert "data:image/png;base64,iVBOR" not in html, (
         "the 40KB inline AudioDB logo is back in index.html"
+    )
+    chrome = (
+        WEBUI / "src" / "routes" / "dashboard" / "-ui" / "dashboard-header.tsx"
+    ).read_text(encoding="utf-8")
+    assert "'/static/img/brands/audiodb.png'" in chrome, (
+        "the React AudioDB orb no longer loads the extracted file"
     )
 
 
@@ -247,4 +256,80 @@ def test_library_helper_defers_to_core_first() -> None:
     assert "window.getAudioDBLogoURL?.()" in helper, (
         "the library page queries img.audiodb-logo directly again — off the "
         "dashboard route that node no longer exists"
+    )
+
+
+# ── The post-flip hardening sweep ────────────────────────────────────────────
+#
+# Every id inside the recorded dashboard fixture is React-rendered now. The
+# only vanilla files allowed to reference them are read-only or explicitly
+# ADOPTED writers; anything new is a foreign writer waiting to fight React
+# (the tools-flip lesson class that artefact-green tests cannot catch).
+
+FIXTURE = (
+    WEBUI / "src" / "routes" / "dashboard" / "-ui" / "dash-vanilla-fixture.html"
+)
+
+ALLOWED_DASHBOARD_ID_REFS = {
+    # helper.js: the help-search/tour CONTENT — read-only selectors resolved
+    # against React's ids.
+    "helper.js": None,  # None = any id allowed (read-only by construction)
+    # worker-orbs.js: anchors #dashboard-page .dashboard-header, reads only.
+    "worker-orbs.js": {"dashboard-page"},
+    # wishlist-tools.js: the Active Downloads ADOPTED REGION — React renders
+    # the shell, updateDashboardDownloads paints the container on purpose.
+    "wishlist-tools.js": {
+        "dashboard-active-downloads-section",
+        "dashboard-downloads-container",
+    },
+    # init.js: initializeWatchlist's two hero bindings are null-guarded no-ops
+    # (the buttons render after load); React binds its own handlers.
+    "init.js": {"watchlist-button", "wishlist-button"},
+}
+
+
+def test_no_vanilla_writers_on_react_dashboard_ids() -> None:
+    ids = sorted(set(re.findall(r'id="([^"]+)"', FIXTURE.read_text(encoding="utf-8"))))
+    assert len(ids) > 100, "fixture looks truncated"
+    offenders: list[str] = []
+    for js in sorted(STATIC.glob("*.js")):
+        if js.name.startswith("video"):
+            continue
+        allowed = ALLOWED_DASHBOARD_ID_REFS.get(js.name, set())
+        if allowed is None:
+            continue
+        code_lines = [
+            line
+            for line in js.read_text(encoding="utf-8", errors="replace").splitlines()
+            if not line.strip().startswith(("//", "*", "/*"))
+        ]
+        code = "\n".join(code_lines)
+        for dom_id in ids:
+            if dom_id in allowed:
+                continue
+            for pattern in (
+                f"getElementById('{dom_id}')",
+                f'getElementById("{dom_id}")',
+                f"'#{dom_id}'",
+                f'"#{dom_id}"',
+            ):
+                if pattern in code:
+                    offenders.append(f"{js.name}: {pattern}")
+                    break
+    assert not offenders, (
+        "surviving vanilla references React-rendered dashboard ids — read-only "
+        "or adopted refs belong in ALLOWED_DASHBOARD_ID_REFS, writers must be "
+        f"severed: {offenders}"
+    )
+
+
+def test_fixture_is_the_recorded_vanilla_page() -> None:
+    """The artefact differentials pin the port against this recording — it must
+    stay the byte capture of the deleted #dashboard-page block."""
+    fixture = FIXTURE.read_text(encoding="utf-8")
+    assert fixture.lstrip().startswith('<div class="page" id="dashboard-page">')
+    assert 'class="dash-grid"' in fixture
+    html = (WEBUI / "index.html").read_text(encoding="utf-8", errors="replace")
+    assert 'id="dashboard-page"' not in html, (
+        "the vanilla dashboard markup is back in index.html"
     )
