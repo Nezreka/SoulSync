@@ -284,6 +284,12 @@ class TestNoCrossFileWindowAssignments:
             text = _read(_STATIC / module)
             self.module_fns[module] = set(_all_function_decls(text))
             for prop, value in _WINDOW_ASSIGN_RE.findall(text):
+                # `window.flag = false;` assigns a LITERAL, not a function —
+                # the identifier regex catches keywords too (e.g. core.js's
+                # window._socketConnected mirror). Only identifier values can
+                # be cross-file ReferenceErrors.
+                if value in ("true", "false", "null", "undefined"):
+                    continue
                 self.window_assigns[module].append((prop, value))
 
     def test_no_cross_file_references(self):
