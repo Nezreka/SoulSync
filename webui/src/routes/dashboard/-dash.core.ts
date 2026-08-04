@@ -389,3 +389,345 @@ export function spotifyPill(data: ProviderStatusPayload): PillView {
 
   return { stateClass, status, current, progress };
 }
+
+// ── iTunes — MusicBrainz's gates with Form B tiers and Deezer's current ─────
+
+export function itunesPill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+  else if (data.paused) stateClass = 'paused';
+
+  let status: string;
+  if (data.idle) status = 'Complete';
+  else if (data.running && !data.paused) status = 'Running';
+  else if (data.paused) {
+    status = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
+  } else status = 'Idle';
+
+  // NO final else — stale-text quirk, like Deezer.
+  let current: string | null = null;
+  const name = itemName(data.current_item);
+  if (data.idle) current = 'All items processed';
+  else if (data.current_item && name) current = `Now: ${name}`;
+
+  let progress: string | null = null;
+  if (data.progress) {
+    const t = tiers(data.progress);
+    const tier = formBTier(t, itemType(data.current_item));
+    progress = tierLine(TIER_LABELS[tier], t[tier]);
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Genius — the authed family with a TWO-tier Form A (no albums pass) ──────
+
+export function geniusPill(data: ProviderStatusPayload): PillView {
+  const notAuthenticated = data.authenticated === false;
+
+  let stateClass: PillView['stateClass'] = null;
+  if (data.paused) stateClass = 'paused';
+  else if (notAuthenticated) stateClass = 'no-auth';
+  else if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+
+  let status: string;
+  if (data.paused) status = 'Paused';
+  else if (notAuthenticated) status = 'Not Authenticated';
+  else if (data.idle) status = 'Complete';
+  else if (data.running) status = 'Running';
+  else status = 'Idle';
+
+  let current: string | null = null;
+  const name = itemName(data.current_item);
+  if (data.paused) {
+    current = notAuthenticated
+      ? 'Add Genius access token in Settings to enrich'
+      : 'Click to resume';
+  } else if (notAuthenticated) current = 'Add Genius access token in Settings to enrich';
+  else if (data.idle) current = 'All items processed';
+  else if (data.current_item && name) current = `Now: ${name}`;
+
+  let progress: string | null = null;
+  if (data.progress) {
+    if (notAuthenticated) {
+      progress = `Pending: ${data.stats?.pending || 0} items`;
+    } else {
+      // Genius has NO albums pass: artists, else Tracks.
+      const artists = data.progress.artists || {};
+      const tracks = data.progress.tracks || {};
+      const currentType = itemType(data.current_item);
+      const artistsComplete = (artists.matched as number) >= (artists.total as number);
+      if (currentType === 'artist' || (!artistsComplete && !currentType)) {
+        progress = tierLine('Artists', artists);
+      } else {
+        progress = tierLine('Tracks', tracks);
+      }
+    }
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Bandcamp — keyless: `enabled === false` (STRICT) maps to no-auth ────────
+
+export function bandcampPill(data: ProviderStatusPayload): PillView {
+  // Strict comparison, verbatim: an ABSENT `enabled` is NOT disabled — unlike
+  // JioSaavn, whose `!data.enabled` treats missing as disabled.
+  const disabled = data.enabled === false;
+
+  let stateClass: PillView['stateClass'] = null;
+  if (disabled) stateClass = 'no-auth';
+  else if (data.paused) stateClass = 'paused';
+  else if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+
+  let status: string;
+  if (disabled) status = 'Disabled';
+  else if (data.paused) status = 'Paused';
+  else if (data.idle) status = 'Complete';
+  else if (data.running) status = 'Running';
+  else status = 'Idle';
+
+  let current: string | null = null;
+  const name = itemName(data.current_item);
+  if (disabled) current = 'Enable in Settings → Advanced → Experimental';
+  // No auth ternary here — Bandcamp's paused copy is unconditional.
+  else if (data.paused) current = 'Click to resume';
+  else if (data.idle) current = 'All items processed';
+  else if (data.current_item && name) current = `Now: ${name}`;
+
+  let progress: string | null = null;
+  if (data.progress) {
+    if (disabled) {
+      progress = `Pending: ${data.stats?.pending || 0} items`;
+    } else {
+      // Two tiers only — core/bandcamp_worker.py has no artist pass.
+      const albums = data.progress.albums || {};
+      const tracks = data.progress.tracks || {};
+      const currentType = itemType(data.current_item);
+      const albumsComplete = (albums.matched as number) >= (albums.total as number);
+      if (currentType === 'album' || (!albumsComplete && !currentType)) {
+        progress = tierLine('Albums', albums);
+      } else {
+        progress = tierLine('Tracks', tracks);
+      }
+    }
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Amazon — no auth, paused checked FIRST, Form C, keeps its else ──────────
+
+export function amazonPill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.paused) stateClass = 'paused';
+  else if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+
+  let status: string;
+  if (data.paused) {
+    status = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
+  } else if (data.idle) status = 'Complete';
+  else if (data.running) status = 'Running';
+  else status = 'Idle';
+
+  let current: string | null;
+  const name = itemName(data.current_item);
+  if (data.idle) current = 'All items processed';
+  else if (data.current_item && name) current = `Now: ${name}`;
+  else current = 'No active matches';
+
+  let progress: string | null = null;
+  if (data.progress) {
+    const t = tiers(data.progress);
+    const tier = formCTier(t, itemType(data.current_item));
+    progress = tierLine(TIER_LABELS[tier], t[tier]);
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Discogs — STRING current_item, stats not progress, pipe separators ──────
+
+export function discogsPill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+  else if (data.paused) stateClass = 'paused';
+
+  let status: string;
+  if (data.idle) status = 'Complete';
+  else if (data.running && !data.paused) status = 'Running';
+  else if (data.paused) {
+    status = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
+  } else status = 'Idle';
+
+  // The vanilla consumes current_item RAW — object payloads would stringify,
+  // but the channel carries strings here.
+  let current: string | null;
+  if (data.idle) current = 'All items processed';
+  else if (data.current_item) current = `Processing: "${data.current_item}"`;
+  else current = 'No active matches';
+
+  // Discogs reads data.stats, not data.progress — and pipes, not tiers.
+  let progress: string | null = null;
+  if (data.stats) {
+    const s = data.stats;
+    progress = `Matched: ${s.matched || 0} | Not found: ${s.not_found || 0} | Pending: ${s.pending || 0}`;
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── SimilarArtists — STRING item, UNCONDITIONAL single-tier progress ────────
+
+export function similarArtistsPill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.paused) stateClass = 'paused';
+  else if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+
+  let status: string;
+  if (data.paused) status = 'Paused';
+  else if (data.idle) status = 'Complete';
+  else if (data.running) status = 'Running';
+  else status = 'Idle';
+
+  let current: string | null;
+  if (data.idle) current = 'All library artists processed';
+  else if (data.current_item) current = `Now: ${data.current_item}`;
+  else current = 'No active matches';
+
+  // Written UNCONDITIONALLY in the vanilla — no `if (data.progress)` guard, so
+  // this is never null: an empty payload renders the zero line.
+  const a = (data.progress && data.progress.artists) || {};
+  const progress = `Artists: ${a.matched || 0} / ${a.total || 0} (${a.percent || 0}%)`;
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Hydrabase — active/paused only, inline status colors, no tooltip body ───
+
+export function hydrabasePill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.running && !data.paused) stateClass = 'active';
+  else if (data.paused) stateClass = 'paused';
+
+  let status: string;
+  let statusColor: string;
+  if (data.paused) {
+    status = 'Paused';
+    statusColor = '#ffc107';
+  } else if (data.running) {
+    status = 'Active';
+    statusColor = '#ffffff';
+  } else {
+    status = 'Stopped';
+    statusColor = '#ff5252';
+  }
+
+  // Hydrabase's tooltip has no current/progress lines at all.
+  return { stateClass, status, current: null, progress: null, statusColor };
+}
+
+// ── SoulID — STRING item shown RAW and checked FIRST; never paused ──────────
+
+export function soulidPill(data: ProviderStatusPayload): PillView {
+  // The vanilla removes only active/complete — 'paused' is never added (nor
+  // removed), even though the status chain can SAY Paused.
+  let stateClass: PillView['stateClass'] = null;
+  if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+
+  let status: string;
+  if (data.idle) status = 'Complete';
+  else if (data.running && !data.paused) status = 'Running';
+  else if (data.paused) status = 'Paused';
+  else status = 'Idle';
+
+  // current_item FIRST — it outranks idle here, unlike everywhere else — and
+  // is rendered raw with no prefix.
+  let current: string;
+  if (data.current_item) current = `${data.current_item}`;
+  else if (data.idle) current = 'All entities have soul IDs';
+  else current = 'No items processing';
+
+  let progress: string | null = null;
+  if (data.stats) {
+    const s = data.stats;
+    const parts: string[] = [];
+    if (s.artists_processed) parts.push(`Artists: ${s.artists_processed}`);
+    if (s.albums_processed) parts.push(`Albums: ${s.albums_processed}`);
+    if (s.tracks_processed) parts.push(`Tracks: ${s.tracks_processed}`);
+    if ((s.pending as number) > 0) parts.push(`Pending: ${s.pending}`);
+    progress = parts.length ? parts.join(' · ') : 'No items processed yet';
+  }
+
+  return { stateClass, status, current, progress };
+}
+
+// ── Repair — job-based, with the `!enabled` override and the orb badge ──────
+
+export function repairPill(data: ProviderStatusPayload): PillView {
+  let stateClass: PillView['stateClass'] = null;
+  if (data.idle) stateClass = 'complete';
+  else if (data.running && !data.paused) stateClass = 'active';
+  else if (data.paused) stateClass = 'paused';
+
+  let status: string;
+  if (data.idle) status = 'Complete';
+  else if (data.running && !data.paused) status = 'Running';
+  else if (data.paused) {
+    status = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
+  } else status = 'Idle';
+
+  let current: string;
+  const name = itemName(data.current_item);
+  if (data.idle) {
+    current = 'All jobs complete — waiting for next schedule';
+  } else if (data.current_job && data.current_job.display_name) {
+    const jobName = data.current_job.display_name;
+    const jobProgress = data.progress && data.progress.current_job;
+    if (jobProgress && (jobProgress.total as number) > 0) {
+      // scanned and percent are interpolated BARE in the vanilla — only total
+      // is guarded (by the > 0 test above).
+      current = `${jobName}: ${jobProgress.scanned} / ${jobProgress.total} (${jobProgress.percent}%)`;
+    } else {
+      current = `Running: ${jobName}`;
+    }
+  } else if (data.current_item && name) {
+    current = `Running: ${name}`;
+  } else {
+    current = 'No active repairs';
+  }
+
+  let progress: string | null = null;
+  if (data.progress) {
+    const tracks = data.progress.tracks || {};
+    const parts: string[] = [];
+    if ((tracks.total as number) > 0)
+      parts.push(`Checked: ${tracks.checked || 0} / ${tracks.total || 0}`);
+    if ((tracks.repaired as number) > 0) parts.push(`Repaired: ${tracks.repaired}`);
+    const pending = data.findings_pending || 0;
+    if (pending > 0) parts.push(`Findings: ${pending}`);
+    progress = parts.length ? parts.join(' · ') : 'No items processed yet';
+  }
+
+  const view: PillView = { stateClass, status, current, progress };
+  // The trailing override, verbatim: a payload without `enabled` forces paused
+  // — this runs AFTER the whole chain and beats even complete/active.
+  if (!data.enabled) view.stateClass = 'paused';
+  return view;
+}
+
+/** The repair orb's findings badge: count + shown-only-when-nonzero. */
+export function repairFindingsBadge(data: ProviderStatusPayload): {
+  count: number;
+  visible: boolean;
+} {
+  const count = data.findings_pending || 0;
+  return { count, visible: count > 0 };
+}

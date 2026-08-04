@@ -10,7 +10,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  amazonPill,
   audiodbPill,
+  bandcampPill,
+  discogsPill,
+  geniusPill,
+  hydrabasePill,
+  itunesPill,
+  repairFindingsBadge,
+  repairPill,
+  similarArtistsPill,
+  soulidPill,
   deezerPill,
   jiosaavnPill,
   lastfmPill,
@@ -339,5 +349,252 @@ describe('spotifyPill', () => {
     expect(spotifyPill({ paused: true, rate_limited: true, authenticated: false }).status).toBe(
       'Paused',
     );
+  });
+});
+
+// ═══ Wave 2: the nine oddballs ═══
+
+describe('itunesPill', () => {
+  it('keeps MusicBrainz gates but Form B tiers', () => {
+    expect(itunesPill({ paused: true, yield_reason: 'downloads' }).status).toBe(
+      'Yielding for downloads',
+    );
+    // includes() matching, artists incomplete — equality would pick artists
+    expect(
+      itunesPill({
+        ...running,
+        current_item: { name: 'x', type: 'album_group' },
+        progress: progressArtists,
+      }).progress,
+    ).toBe('Albums: 0 / 5 (0%)');
+  });
+
+  it('has no current fallback', () => {
+    expect(itunesPill({ ...running }).current).toBeNull();
+    expect(itunesPill({ ...running, current_item: { name: 'Y' } }).current).toBe('Now: Y');
+  });
+});
+
+describe('geniusPill', () => {
+  it('has NO albums pass — an album current type lands on Tracks', () => {
+    // `artist || (!artistsComplete && !currentType)` is the only artists arm;
+    // 'album' fails it and there is no albums arm at all.
+    expect(
+      geniusPill({
+        authenticated: true,
+        ...running,
+        current_item: { name: 'x', type: 'album' },
+        progress: progressArtists,
+      }).progress,
+    ).toBe('Tracks: 0 / 20 (0%)');
+    expect(
+      geniusPill({ authenticated: true, ...running, progress: progressArtists }).progress,
+    ).toBe('Artists: 3 / 10 (30%)');
+  });
+
+  it('carries the token copy', () => {
+    expect(geniusPill({ authenticated: false }).current).toBe(
+      'Add Genius access token in Settings to enrich',
+    );
+    expect(geniusPill({ paused: true, authenticated: false }).current).toBe(
+      'Add Genius access token in Settings to enrich',
+    );
+  });
+});
+
+describe('bandcampPill', () => {
+  it('gates on enabled === false STRICTLY — an absent enabled is not disabled', () => {
+    expect(bandcampPill({ enabled: false }).stateClass).toBe('no-auth');
+    expect(bandcampPill({ enabled: false }).status).toBe('Disabled');
+    // undefined enabled: NOT disabled (unlike JioSaavn's !enabled)
+    expect(bandcampPill({ ...running }).stateClass).toBe('active');
+    expect(bandcampPill({ ...running }).status).toBe('Running');
+  });
+
+  it('maps disabled to the no-auth CLASS with the experimental copy', () => {
+    const view = bandcampPill({ enabled: false, progress: {}, stats: { pending: 9 } });
+    expect(view.current).toBe('Enable in Settings → Advanced → Experimental');
+    expect(view.progress).toBe('Pending: 9 items');
+  });
+
+  it('paused copy has NO auth ternary', () => {
+    expect(bandcampPill({ paused: true }).current).toBe('Click to resume');
+  });
+
+  it('is albums-first two-tier (no artist pass)', () => {
+    expect(
+      bandcampPill({
+        ...running,
+        progress: { albums: { matched: 1, total: 4, percent: 25 }, tracks: {} },
+      }).progress,
+    ).toBe('Albums: 1 / 4 (25%)');
+    expect(
+      bandcampPill({
+        ...running,
+        current_item: { name: 'x', type: 'artist' },
+        progress: { albums: { matched: 1, total: 4, percent: 25 }, tracks: {} },
+      }).progress,
+    ).toBe('Tracks: 0 / 0 (0%)');
+  });
+});
+
+describe('amazonPill', () => {
+  it('checks paused FIRST and keeps yield_reason', () => {
+    const view = amazonPill({ paused: true, idle: true, yield_reason: 'downloads' });
+    expect(view.stateClass).toBe('paused');
+    expect(view.status).toBe('Yielding for downloads');
+  });
+
+  it('keeps its current else', () => {
+    expect(amazonPill({ ...running }).current).toBe('No active matches');
+  });
+
+  it('uses Form C: unknown type falls to Tracks', () => {
+    expect(
+      amazonPill({
+        ...running,
+        current_item: { name: 'x', type: 'weird' },
+        progress: progressArtists,
+      }).progress,
+    ).toBe('Tracks: 0 / 20 (0%)');
+  });
+});
+
+describe('discogsPill', () => {
+  it('renders the raw STRING item quoted', () => {
+    expect(discogsPill({ ...running, current_item: 'Aphex Twin - SAW' }).current).toBe(
+      'Processing: "Aphex Twin - SAW"',
+    );
+    expect(discogsPill({ ...running }).current).toBe('No active matches');
+  });
+
+  it('reads stats with pipe separators, not progress tiers', () => {
+    expect(
+      discogsPill({ ...running, stats: { matched: 5, not_found: 2, pending: 9 } }).progress,
+    ).toBe('Matched: 5 | Not found: 2 | Pending: 9');
+    // progress payload is IGNORED; only stats drives the line
+    expect(discogsPill({ ...running, progress: progressArtists }).progress).toBeNull();
+  });
+});
+
+describe('similarArtistsPill', () => {
+  it('progress is UNCONDITIONAL — an empty payload renders the zero line', () => {
+    expect(similarArtistsPill({}).progress).toBe('Artists: 0 / 0 (0%)');
+    expect(
+      similarArtistsPill({ progress: { artists: { matched: 4, total: 9, percent: 44 } } }).progress,
+    ).toBe('Artists: 4 / 9 (44%)');
+  });
+
+  it('uses the library-artists idle copy and the raw string item', () => {
+    expect(similarArtistsPill({ idle: true }).current).toBe('All library artists processed');
+    expect(similarArtistsPill({ ...running, current_item: 'Radiohead' }).current).toBe(
+      'Now: Radiohead',
+    );
+    expect(similarArtistsPill({ ...running }).current).toBe('No active matches');
+  });
+});
+
+describe('hydrabasePill', () => {
+  it('speaks its own vocabulary with inline colors', () => {
+    expect(hydrabasePill({ paused: true })).toEqual({
+      stateClass: 'paused',
+      status: 'Paused',
+      current: null,
+      progress: null,
+      statusColor: '#ffc107',
+    });
+    expect(hydrabasePill({ ...running }).status).toBe('Active');
+    expect(hydrabasePill({ ...running }).statusColor).toBe('#ffffff');
+    expect(hydrabasePill({}).status).toBe('Stopped');
+    expect(hydrabasePill({}).statusColor).toBe('#ff5252');
+  });
+
+  it('never uses complete — idle is just Stopped', () => {
+    expect(hydrabasePill({ idle: true }).stateClass).toBeNull();
+    expect(hydrabasePill({ idle: true }).status).toBe('Stopped');
+  });
+});
+
+describe('soulidPill', () => {
+  it('never carries the paused class even when the status says Paused', () => {
+    const view = soulidPill({ paused: true });
+    expect(view.status).toBe('Paused');
+    expect(view.stateClass).toBeNull();
+  });
+
+  it('the raw item OUTRANKS idle and has no prefix', () => {
+    expect(soulidPill({ idle: true, current_item: 'artist: Boards of Canada' }).current).toBe(
+      'artist: Boards of Canada',
+    );
+    expect(soulidPill({ idle: true }).current).toBe('All entities have soul IDs');
+    expect(soulidPill({}).current).toBe('No items processing');
+  });
+
+  it('joins the stats parts with middots and falls back when all are zero', () => {
+    expect(
+      soulidPill({ stats: { artists_processed: 2, tracks_processed: 5, pending: 1 } }).progress,
+    ).toBe('Artists: 2 · Tracks: 5 · Pending: 1');
+    expect(soulidPill({ stats: {} }).progress).toBe('No items processed yet');
+    expect(soulidPill({}).progress).toBeNull();
+  });
+});
+
+describe('repairPill', () => {
+  it('a payload without `enabled` is forced to paused — even complete', () => {
+    expect(repairPill({ idle: true }).stateClass).toBe('paused');
+    expect(repairPill({ idle: true, enabled: true }).stateClass).toBe('complete');
+    // ...but the STATUS chain is untouched by the override
+    expect(repairPill({ idle: true }).status).toBe('Complete');
+  });
+
+  it('renders the job line with BARE scanned/percent, gated on total > 0', () => {
+    expect(
+      repairPill({
+        enabled: true,
+        ...running,
+        current_job: { display_name: 'Orphan Detector' },
+        progress: { current_job: { scanned: 4, total: 9, percent: 44 } },
+      }).current,
+    ).toBe('Orphan Detector: 4 / 9 (44%)');
+    expect(
+      repairPill({
+        enabled: true,
+        ...running,
+        current_job: { display_name: 'Orphan Detector' },
+        progress: { current_job: { total: 0 } },
+      }).current,
+    ).toBe('Running: Orphan Detector');
+    expect(
+      repairPill({ enabled: true, ...running, current_job: { display_name: 'X' } }).current,
+    ).toBe('Running: X');
+  });
+
+  it('falls back to the item name, then to No active repairs', () => {
+    expect(
+      repairPill({ enabled: true, ...running, current_item: { name: 'track.flac' } }).current,
+    ).toBe('Running: track.flac');
+    expect(repairPill({ enabled: true, ...running }).current).toBe('No active repairs');
+    expect(repairPill({ enabled: true, idle: true }).current).toBe(
+      'All jobs complete — waiting for next schedule',
+    );
+  });
+
+  it('builds the tracks-only progress parts', () => {
+    expect(
+      repairPill({
+        enabled: true,
+        progress: { tracks: { checked: 3, total: 10, repaired: 2 } },
+        findings_pending: 4,
+      }).progress,
+    ).toBe('Checked: 3 / 10 · Repaired: 2 · Findings: 4');
+    expect(repairPill({ enabled: true, progress: {} }).progress).toBe('No items processed yet');
+    expect(repairPill({ enabled: true }).progress).toBeNull();
+  });
+});
+
+describe('repairFindingsBadge', () => {
+  it('shows only when non-zero', () => {
+    expect(repairFindingsBadge({ findings_pending: 3 })).toEqual({ count: 3, visible: true });
+    expect(repairFindingsBadge({})).toEqual({ count: 0, visible: false });
   });
 });

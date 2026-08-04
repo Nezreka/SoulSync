@@ -11,12 +11,17 @@ export interface EnrichTierProgress {
   matched?: number;
   total?: number;
   percent?: number;
+  /** Repair's tracks tier reports checked/repaired instead of matched. */
+  checked?: number;
+  repaired?: number;
 }
 
 export interface EnrichProgress {
   artists?: EnrichTierProgress;
   albums?: EnrichTierProgress;
   tracks?: EnrichTierProgress;
+  /** Repair only: the in-flight job's own counters. */
+  current_job?: { scanned?: number; total?: number; percent?: number };
 }
 
 export interface EnrichCurrentItem {
@@ -46,6 +51,9 @@ export interface ProviderStatusPayload {
   current_item?: CurrentItem | null;
   progress?: EnrichProgress | null;
   stats?: Record<string, number | undefined> | null;
+  /** Repair only. */
+  current_job?: { display_name?: string } | null;
+  findings_pending?: number;
 }
 
 /** The one state class a pill carries after the vanilla's remove-then-add. */
@@ -69,4 +77,7 @@ export interface PillView {
   status: string;
   current: string | null;
   progress: string | null;
+  /** Hydrabase only: the vanilla sets an INLINE style.color on the status
+   *  element (#ffc107 / #ffffff / #ff5252) instead of using classes. */
+  statusColor?: string;
 }
