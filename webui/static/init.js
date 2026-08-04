@@ -106,9 +106,14 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
+            // React-owned pages have no .page.active node — the shell's
+            // currentPage covers both worlds.
             const activePage = document.querySelector('.page.active');
-            if (activePage) {
-                window.pageParticles.setPage(activePage.id.replace('-page', ''));
+            const activeId = activePage
+                ? activePage.id.replace('-page', '')
+                : (typeof currentPage !== 'undefined' ? currentPage : null);
+            if (activeId) {
+                window.pageParticles.setPage(activeId);
             }
         } else {
             window.pageParticles.stop();
@@ -123,8 +128,9 @@ function applyWorkerOrbsSetting(enabled) {
     localStorage.setItem('soulsync-worker-orbs', String(enabled));
     if (window.workerOrbs) {
         if (enabled) {
-            const activePage = document.querySelector('.page.active');
-            if (activePage && activePage.id === 'dashboard-page') {
+            // The dashboard is React-rendered (no .page.active node) — the
+            // shell's currentPage is the truth for both worlds.
+            if (typeof currentPage !== 'undefined' && currentPage === 'dashboard') {
                 window.workerOrbs.setPage('dashboard');
             }
         } else {
@@ -208,7 +214,9 @@ function applyReduceEffects(enabled) {
     } else {
         // Restore only what the user's own toggles still allow.
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -268,7 +276,9 @@ function applyMaxPerformance(enabled) {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (!reduce && window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -2895,12 +2905,10 @@ function initApp() {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             fetchAndUpdateServiceStatus();
-            // Refresh dashboard-specific data if on dashboard
-            const dashboardPage = document.getElementById('dashboard-page');
-            if (dashboardPage && dashboardPage.classList.contains('active')) {
-                fetchAndUpdateSystemStats();
-                fetchAndUpdateActivityFeed();
-            }
+            // No dashboard-specific branch since the flip: the React cards'
+            // own pollers are hidden-gated, so the tick that lands after the
+            // tab returns refreshes them (the old .page.active check could
+            // never match the React page anyway).
         }
     });
 
@@ -3113,6 +3121,48 @@ function restoreNavSections() {
     });
 }
 
+/**
+ * The wishlist hero button's behaviour, extracted from initializeWatchlist's
+ * click closure to a NAMED top-level function so the React dashboard header
+ * can call it too (window.openWishlistFromHero). It stays in init.js because
+ * it reads activeDownloadProcesses / WishlistModalState / rehydrateModal —
+ * all script-scoped, unreachable from a module. The body is the closure's,
+ * verbatim.
+ */
+async function openWishlistFromHero() {
+    // Fast path: check if we already know about an active wishlist process
+    const clientProcess = activeDownloadProcesses['wishlist'];
+    if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+        clientProcess.modalElement.style.display = 'flex';
+        WishlistModalState.setVisible();
+        return;
+    }
+    // Slow path: ask the server (with timeout to prevent button feeling dead)
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const resp = await fetch('/api/active-processes', { signal: controller.signal });
+        clearTimeout(timeout);
+        if (resp.ok) {
+            const data = await resp.json();
+            const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
+            if (serverProcess) {
+                try {
+                    WishlistModalState.clearUserClosed();
+                    await rehydrateModal(serverProcess, true);
+                } catch (e) {
+                    console.debug('Rehydration failed, navigating to page:', e);
+                    navigateToPage('wishlist');
+                }
+                return;
+            }
+        }
+    } catch (e) {
+        // Timeout or network error — just navigate
+    }
+    navigateToPage('wishlist');
+}
+
 function initializeWatchlist() {
     // Watchlist button navigates to watchlist page
     const watchlistButton = document.getElementById('watchlist-button');
@@ -3123,39 +3173,7 @@ function initializeWatchlist() {
     // Wishlist button: quick check for active download, otherwise navigate to page
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
-        wishlistButton.addEventListener('click', async () => {
-            // Fast path: check if we already know about an active wishlist process
-            const clientProcess = activeDownloadProcesses['wishlist'];
-            if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
-                clientProcess.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-                return;
-            }
-            // Slow path: ask the server (with timeout to prevent button feeling dead)
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 2000);
-                const resp = await fetch('/api/active-processes', { signal: controller.signal });
-                clearTimeout(timeout);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
-                    if (serverProcess) {
-                        try {
-                            WishlistModalState.clearUserClosed();
-                            await rehydrateModal(serverProcess, true);
-                        } catch (e) {
-                            console.debug('Rehydration failed, navigating to page:', e);
-                            navigateToPage('wishlist');
-                        }
-                        return;
-                    }
-                }
-            } catch (e) {
-                // Timeout or network error — just navigate
-            }
-            navigateToPage('wishlist');
-        });
+        wishlistButton.addEventListener('click', openWishlistFromHero);
     }
 
     // Update watchlist count initially
@@ -3163,6 +3181,14 @@ function initializeWatchlist() {
 
     // Update count every 10 seconds
     setInterval(updateWatchlistButtonCount, 10000);
+
+    // The wishlist SIDEBAR badge's poll. This used to start from
+    // loadDashboardData on every dashboard visit (and leak — the interval was
+    // never cleared, so in steady state it ran app-wide anyway). The dashboard
+    // is React now and loadDashboardData is gone, so the poll lives here with
+    // its watchlist twin; updateWishlistCount itself skips ticks while the
+    // socket pushes.
+    setInterval(updateWishlistCount, 10000);
 
     console.log('Watchlist system initialized');
 }
@@ -3256,10 +3282,10 @@ async function loadPageData(pageId) {
             cleanupBeatportContent();
         }
         switch (pageId) {
-            case 'dashboard':
-                await loadDashboardData();
-                loadDashboardSyncHistory();
-                break;
+            // No 'dashboard' case: React owns /dashboard — the whole bento
+            // grid — and loadPageData only runs for legacy-kind pages.
+            // loadDashboardData (and its three leaked intervals) is deleted;
+            // every card hydrates itself on mount.
             case 'sync':
                 initializeSyncPage();
                 await loadSyncData();

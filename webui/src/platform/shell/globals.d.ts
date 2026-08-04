@@ -512,6 +512,76 @@ declare global {
     openMetadataCacheModal?: () => void;
     openCacheHealthModal?: () => void;
     openBlacklistModal?: () => void;
+    /**
+     * Dashboard header seams, all owned by vanilla and INVOKED:
+     * - openEnrichmentManager (enrichment-manager.js) — the Manage Workers
+     *   modal, self-contained with markup outside the dashboard region
+     * - openRepairModal (enrichment.js) — the repair orb's click: navigate to
+     *   tools + scroll to the maintenance hero (kept through the tools flip
+     *   exactly for this)
+     * - isJiosaavnExperimentalEnabled (shared-helpers.js) — the JioSaavn orb's
+     *   initial visibility; live toggles arrive via ss:jiosaavn-experimental
+     * - openWishlistFromHero (init.js) — the wishlist hero button's
+     *   fast/slow-path behaviour; reads activeDownloadProcesses /
+     *   WishlistModalState / rehydrateModal, all script-scoped `let`s no
+     *   module can reach
+     */
+    openEnrichmentManager?: () => void;
+    openRepairModal?: () => void;
+    isJiosaavnExperimentalEnabled?: () => boolean;
+    openWishlistFromHero?: () => void | Promise<void>;
+    /**
+     * P5 seams:
+     * - testDashboardConnection (settings.js) — the service cards' Test
+     *   buttons: overlay + POST + toast + status refresh, all vanilla
+     * - getActiveMetadataSource (core.js) — _lastStatusPayload's source with
+     *   the 'spotify' fallback; the metadata Test button's pre-payload target
+     * - switchSettingsTab (settings.js) — the chips' click-to-configure path
+     * - isBandcampExperimentalEnabled (shared-helpers.js) — chip filtering
+     * - _openRateModal (api-monitor.js) — the equalizer bars' detail modal;
+     *   appends to document.body and reads its own _rateMonitorState
+     * - _reduceEffectsActive/_maxPerfActive (init.js) — the performance
+     *   switches that suppress the equalizer's ember particles
+     */
+    testDashboardConnection?: (service: string) => void | Promise<void>;
+    getActiveMetadataSource?: () => string;
+    switchSettingsTab?: (tab: string) => void;
+    isBandcampExperimentalEnabled?: () => boolean;
+    _openRateModal?: (serviceKey: string) => void;
+    _reduceEffectsActive?: boolean;
+    _maxPerfActive?: boolean;
+    /** core.js's mirror of its script-scoped `socketConnected` — the React
+     *  fallback pollers apply the same skip-while-socket-pushes gate the
+     *  vanilla poller twins do. Kept in lockstep at every write site. */
+    _socketConnected?: boolean;
+    /**
+     * P7 seams:
+     * - openAutoSyncScheduleModal (auto-sync.js) — the Quick Actions hero tile
+     * - openSyncDetailModal (pages-extra.js) — a sync card's detail modal;
+     *   appends to document.body
+     * - showLoginScreen / showLaunchPinScreen (init.js) — the unlock screens a
+     *   lapsed session surfaces from the sync-history 401 path
+     * - checkForActiveProcesses (sync-spotify.js) — rehydrates the download
+     *   bubble registries from /api/active-processes
+     * - updateDashboardDownloads (wishlist-tools.js) — renders the Active
+     *   Downloads ADOPTED REGION from the four script-scoped bubble
+     *   registries; React provides only the shell
+     */
+    /**
+     * worker-orbs.js — the canvas orb layer. Published unconditionally at
+     * script load; setPage('dashboard') lazily re-anchors against the
+     * React-rendered header (the page component re-pings it post-mount).
+     */
+    workerOrbs?: {
+      setPage: (pageId: string) => void;
+      onStatus: (id: string, data: unknown) => void;
+    };
+    openAutoSyncScheduleModal?: () => void | Promise<void>;
+    openSyncDetailModal?: (entryId: number) => void | Promise<void>;
+    showLoginScreen?: () => void;
+    showLaunchPinScreen?: () => void;
+    checkForActiveProcesses?: () => Promise<void>;
+    updateDashboardDownloads?: () => void;
   }
 }
 

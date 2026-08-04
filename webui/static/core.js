@@ -706,6 +706,10 @@ function _isMassOrphanFix(jobId, count) {
 // ===============================
 let socket = null;
 let socketConnected = false;
+// Mirrored onto window so the React dashboard's fallback pollers can apply the
+// SAME socket gate the vanilla poller twins do (`socketConnected` is a
+// script-scoped `let` no module can read). Kept in lockstep at every write.
+window._socketConnected = false;
 
 function initializeWebSocket() {
     if (typeof io === 'undefined') {
@@ -729,6 +733,7 @@ function initializeWebSocket() {
     socket.on('connect', () => {
         console.log('WebSocket connected');
         socketConnected = true;
+        window._socketConnected = true;
         resubscribeDownloadBatches();
         // Re-subscribe to any active sync/discovery rooms after reconnect
         const activeSyncIds = Object.keys(_syncProgressCallbacks);
@@ -754,6 +759,7 @@ function initializeWebSocket() {
     socket.on('disconnect', (reason) => {
         console.warn('WebSocket disconnected:', reason);
         socketConnected = false;
+        window._socketConnected = false;
     });
 
     socket.on('reconnect', (attemptNumber) => {
@@ -766,10 +772,12 @@ function initializeWebSocket() {
         fetchAndUpdateServiceStatus();
         updateWatchlistButtonCount();
         resubscribeDownloadBatches();
-        // Phase 2: Refresh dashboard data if on dashboard page
+        // Phase 2: Refresh dashboard data if on dashboard page. The stats and
+        // activity refreshers are gone with the flip (the React cards fall
+        // back to their own polls when the socket drops, so a reconnect gap
+        // self-heals); the db-stats push and wishlist count still flow through
+        // their vanilla fetchers' dispatches.
         if (currentPage === 'dashboard') {
-            fetchAndUpdateSystemStats();
-            fetchAndUpdateActivityFeed();
             fetchAndUpdateDbStats();
             updateWishlistCount();
         }
@@ -936,6 +944,9 @@ setInterval(() => {
 }, 2000);
 
 function handleServiceStatusUpdate(data) {
+    // Re-broadcast for the React dashboard's service cards + library card
+    // (tools-seam rule: in the handler, so any future HTTP caller counts too).
+    window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
     // Cache for library status card
     _lastStatusPayload = data;
 
@@ -949,11 +960,8 @@ function handleServiceStatusUpdate(data) {
         sanitizeMetadataSourceSelection({ quiet: true });
     }
 
-    // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
-    updateServiceStatus('media-server', data.media_server);
-    updateServiceStatus('soulseek', data.soulseek);
-
+    // The dashboard service cards are React-rendered from the dispatch above
+    // since the flip (service-cards.tsx) — only the sidebar half survives here.
     updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
@@ -978,8 +986,8 @@ function handleServiceStatusUpdate(data) {
         // (preserves display:none on undiscovered LB/Last.fm playlist sync buttons)
     });
 
-    // Update enrichment service cards
-    if (data.enrichment) renderEnrichmentCards(data.enrichment);
+    // The enrichment chips grid is React-rendered from the dispatch above
+    // since the dashboard flip (service-cards.tsx) — no vanilla write here.
 
     // Spotify rate limit / cooldown / recovery
     //
@@ -1023,29 +1031,17 @@ function handleServiceStatusUpdate(data) {
     }
 }
 
-function _updateHeroBtnCount(buttonId, badgeId, count) {
-    const badge = document.getElementById(badgeId);
-    if (badge) {
-        badge.textContent = count;
-        badge.classList.toggle('has-items', count > 0);
-    }
-}
-
 function handleWatchlistCountUpdate(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:watchlist-count', { detail: data }));
     if (data.success) {
-        _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
-        // Update sidebar nav badge
+        // Only the SIDEBAR half survives the dashboard flip — the hero button
+        // and its badge/countdown-title are React-rendered from the dispatch
+        // above (dashboard-header.tsx).
         const wlNavBadge = document.getElementById('watchlist-nav-badge');
         if (wlNavBadge) {
             wlNavBadge.textContent = data.count;
             wlNavBadge.classList.toggle('hidden', data.count === 0);
-        }
-        const watchlistButton = document.getElementById('watchlist-button');
-        if (watchlistButton) {
-            const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
-            if (countdownText) {
-                watchlistButton.title = `Next auto-scan in ${countdownText}`;
-            }
         }
     }
 }
@@ -1090,24 +1086,20 @@ function unsubscribeFromDownloadBatch(batchId) {
 // --- Phase 2: Dashboard event handlers ---
 
 function handleDashboardStats(data) {
-    // Same logic as fetchAndUpdateSystemStats response handler
-    updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
-    updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed downloads');
-    updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
-    updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
-    updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
-    // app's actual footprint (falls back to the generic label on older backends).
-    updateStatCard('memory-card', data.memory_usage,
-        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
+    // Dispatch-only since the dashboard flip — the stat cards are
+    // React-rendered from this frame (system-stats.tsx).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-stats', { detail: data }));
 }
 
 function handleDashboardActivity(data) {
-    // Same logic as fetchAndUpdateActivityFeed response handler
-    updateActivityFeed(data.activities || []);
+    // Dispatch-only since the dashboard flip — the feed is React-rendered
+    // from this frame (activity-feed.tsx).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-activity', { detail: data }));
 }
 
 function handleDashboardToast(activity) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-toast', { detail: activity }));
     // Same logic as checkForActivityToasts response handler
     let toastType = 'info';
     if (activity.icon === '\u2705' || activity.title.includes('Complete')) {
@@ -1121,29 +1113,24 @@ function handleDashboardToast(activity) {
 }
 
 function handleDashboardDbStats(stats) {
-    // Same logic as fetchAndUpdateDbStats response handler
-    updateDashboardStatCards(stats);
-    updateDbUpdaterCardInfo(stats);
+    // Dispatch-only since the dashboard flip — the Library card is
+    // React-rendered from this frame (library-card.tsx), and the tools page's
+    // db-updater card (the old updateDbUpdaterCardInfo target) has been React
+    // since the tools flip.
+    window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
 }
 
 function handleDashboardWishlistCount(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-wishlist-count', { detail: data }));
     const count = data.count || 0;
-    _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
-    // Update sidebar nav badge
+    // Only the SIDEBAR half survives the dashboard flip — the hero button,
+    // its badge and the active/inactive classes are React-rendered from the
+    // dispatch above (dashboard-header.tsx).
     const wlNavBadge = document.getElementById('wishlist-nav-badge');
     if (wlNavBadge) {
         wlNavBadge.textContent = count;
         wlNavBadge.classList.toggle('hidden', count === 0);
-    }
-    const wishlistButton = document.getElementById('wishlist-button');
-    if (wishlistButton) {
-        if (count === 0) {
-            wishlistButton.classList.remove('wishlist-active');
-            wishlistButton.classList.add('wishlist-inactive');
-        } else {
-            wishlistButton.classList.remove('wishlist-inactive');
-            wishlistButton.classList.add('wishlist-active');
-        }
     }
     checkForAutoInitiatedWishlistProcess();
 }
@@ -1153,6 +1140,7 @@ function handleDashboardWishlistCount(data) {
 // ===============================
 
 // --- Service Integration Logo Constants ---
+const AUDIODB_LOGO_URL = '/static/img/brands/audiodb.png';
 const MUSICBRAINZ_LOGO_URL = '/static/img/brands/musicbrainz.png';
 const DEEZER_LOGO_URL = '/static/img/brands/deezer.png';
 const SPOTIFY_LOGO_URL = '/static/img/brands/spotify.png';
@@ -1164,7 +1152,15 @@ const QOBUZ_LOGO_URL = '/static/img/brands/qobuz.svg';
 const DISCOGS_LOGO_URL = '/static/img/brands/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
 const BANDCAMP_LOGO_URL = '/static/img/brands/bandcamp.svg';
-function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
+function getAudioDBLogoURL() {
+    // The logo used to live ONLY as a 40KB base64 line inside the dashboard
+    // markup, read off the DOM here. It is a real file now
+    // (static/img/brands/audiodb.png, extracted from that exact line), so this
+    // no longer depends on any page's markup being mounted — the DOM read is
+    // kept first purely so an override of the img keeps winning.
+    const el = document.querySelector('img.audiodb-logo');
+    return el ? el.src : AUDIODB_LOGO_URL;
+}
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {

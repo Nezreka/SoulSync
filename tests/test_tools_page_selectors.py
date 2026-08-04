@@ -483,18 +483,15 @@ def test_the_rebroadcast_lives_in_the_handler_not_the_socket_binding(event_name:
 
 
 def test_repair_status_rebroadcast_is_not_gated_on_the_dashboard_orb() -> None:
-    """The dispatch must precede `if (!button) return;`.
-
-    #repair-button is the worker orb in the DASHBOARD markup. Everything after
-    that guard — including the findings tab badge and the master toggle — used to
-    be unreachable whenever the orb was absent.
-    """
+    """DISPATCH-ONLY since the dashboard flip: the whole handler is the
+    re-broadcast. Any DOM read/write reappearing here would either gate the
+    React tools page on dashboard markup again or fight the React-rendered
+    repair orb for its own nodes."""
     body = _handler_body("enrichment.js", "updateRepairStatusFromData", strip_comments=True)
-    dispatch_at = body.index("CustomEvent('ss:repair-status'")
-    guard_at = body.index("if (!button) return;")
-    assert dispatch_at < guard_at, (
-        "the ss:repair-status re-broadcast sits behind the #repair-button guard, "
-        "so the React tools page is once again gated on dashboard markup"
+    assert "CustomEvent('ss:repair-status'" in body, "the ss:repair-status re-broadcast is gone"
+    assert "getElementById" not in body and "querySelector" not in body, (
+        "updateRepairStatusFromData touches the DOM again — the repair orb, "
+        "tooltip and findings badge are React-rendered now"
     )
 
 
@@ -566,15 +563,26 @@ def test_seam_handlers_do_not_touch_the_dom(filename: str, handler: str) -> None
 
 
 def test_repair_status_handler_keeps_the_orb_and_leaves_reacts_nodes() -> None:
-    """updateRepairStatusFromData serves the DASHBOARD (orb + tooltip + orb
-    badge) and must keep doing so — but the findings TAB badge and the master
-    toggle are React-owned, and writing `checked` on a React-controlled input
-    from outside is the exact desync the hardening removed."""
+    """Since the dashboard flip EVERY repair node is React-owned — the orb,
+    the tooltip, both badges, the master toggle. None of their ids may come
+    back as vanilla writers; and the app-wide 5s fallback poll that feeds this
+    handler must survive (it is the only live source for BOTH React consumers
+    on a client with no websocket)."""
     body = _handler_body("enrichment.js", "updateRepairStatusFromData", strip_comments=True)
-    for keep in ("repair-button", "repair-tooltip-status", "repair-findings-badge"):
-        assert keep in body, f"the orb seam lost its '{keep}' writer"
-    for gone in ("repair-findings-tab-badge", "repair-master-toggle", "repair-master-label"):
+    for gone in (
+        "repair-button",
+        "repair-tooltip-status",
+        "repair-findings-badge",
+        "repair-findings-tab-badge",
+        "repair-master-toggle",
+        "repair-master-label",
+    ):
         assert gone not in body, f"'{gone}' is React-owned; the vanilla writer is back"
+    enrichment = (WEBUI / "static" / "enrichment.js").read_text(encoding="utf-8")
+    assert enrichment.count("setInterval(updateRepairStatus, 5000)") == 2, (
+        "the app-wide repair fallback poll (both readyState arms) is gone — "
+        "socketless clients lose live repair state on the dashboard AND tools"
+    )
 
 
 def test_media_scan_completion_toast_defers_to_the_react_card_on_tools() -> None:

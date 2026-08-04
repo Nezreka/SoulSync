@@ -31,11 +31,17 @@ export function cardAnimationDelay(index: number): number {
 }
 
 /**
- * AudioDB has no fixed logo path — the vanilla card read it off an existing
- * `img.audiodb-logo` in the document. Same lookup, same "no logo, show the
- * fallback text" outcome when it is absent.
+ * AudioDB's logo. Historically this was ONLY readable off an existing
+ * `img.audiodb-logo` node — which was always present while the vanilla
+ * dashboard markup sat (hidden) in index.html. The dashboard port rehomed the
+ * asset to a real file, and core.js's getAudioDBLogoURL now falls back to that
+ * constant — so defer to it first (like artist-detail does), keep the DOM read
+ * for parity, and the empty-string tail keeps the 'no logo' text fallback for
+ * tests without the shell.
  */
 function audioDbLogo(): string {
+  const fromCore = window.getAudioDBLogoURL?.();
+  if (fromCore) return fromCore;
   if (typeof document === 'undefined') return '';
   return document.querySelector<HTMLImageElement>('img.audiodb-logo')?.src ?? '';
 }

@@ -31,7 +31,7 @@ export interface ShellRouteDefinition {
 }
 
 export const shellRouteManifest: readonly ShellRouteDefinition[] = [
-  { pageId: 'dashboard', path: '/dashboard', kind: 'legacy' },
+  { pageId: 'dashboard', path: '/dashboard', kind: 'react' },
   { pageId: 'sync', path: '/sync', kind: 'legacy' },
   { pageId: 'search', path: '/search', kind: 'react' },
   { pageId: 'discover', path: '/discover', kind: 'react' },

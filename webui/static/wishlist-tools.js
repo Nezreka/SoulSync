@@ -2493,9 +2493,6 @@ async function confirmMatch() {
     }
 }
 
-
-
-
 function matchedDownloadTrack(trackIndex) {
     const results = window.currentSearchResults;
     if (!results || !results[trackIndex]) {
@@ -6968,8 +6965,6 @@ function stopWishlistCountPolling() {
     }
 }
 
-
-
 function resetWishlistModalToIdleState() {
     // Reset wishlist modal to idle state after background processing completes
     const playlistId = 'wishlist';
@@ -7110,33 +7105,6 @@ async function initializeToolsPage() {
     toolsPageState.isInitialized = true;
 }
 
-async function loadDashboardData() {
-    // Start periodic refreshers up front (independent of the initial loads).
-    stopWishlistCountPolling(); // Ensure no duplicates
-    wishlistCountInterval = setInterval(updateWishlistCount, 10000);
-    setInterval(fetchAndUpdateSystemStats, 10000);   // dashboard-specific (service status polled globally)
-    setInterval(fetchAndUpdateActivityFeed, 2000);   // responsive activity feed
-    setInterval(checkForActivityToasts, 3000);
-
-    // Fire all independent initial loads in parallel instead of sequentially.
-    // Sequential awaits meant 6 back-to-back round-trips, each triggering its own
-    // reflow — the layout kept shifting for ~1-2s, which made the page feel
-    // unscrollable. Concurrent loads collapse that into a single settle.
-    await Promise.all([
-        updateWishlistCount(),
-        fetchAndUpdateServiceStatus(),
-        fetchAndUpdateSystemStats(),
-        fetchAndUpdateDbStats(),
-        fetchAndUpdateActivityFeed(),
-        checkForActiveProcesses(),
-    ]);
-
-    // Render existing downloads once active processes are known.
-    updateDashboardDownloads();
-
-    // Automatic wishlist processing now runs server-side
-}
-
 // --- Data Fetching and UI Updates ---
 
 async function fetchAndUpdateDbStats() {
@@ -7147,330 +7115,20 @@ async function fetchAndUpdateDbStats() {
 
         const stats = await response.json();
 
-        // This function updates the stat cards in the top grid
-        updateDashboardStatCards(stats);
-
-        // This function updates the info within the DB Updater tool card
-        updateDbUpdaterCardInfo(stats);
+        // Re-broadcast on the socket handler's channel (the poller-twin rule,
+        // same as fetchAndUpdateServiceStatus): the React dashboard Library
+        // card consumes ss:dashboard-db-stats, and the vanilla DOM halves this
+        // used to call (updateDashboardStatCards / updateDbUpdaterCardInfo)
+        // wrote what is React DOM now. Exactly one of the two dispatchers runs
+        // at a time — this one early-returns while the socket is connected.
+        window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
 
     } catch (error) {
         console.warn('Could not fetch DB stats:', error);
     }
 }
 
-function updateDashboardStatCards(stats) {
-    // Update the Library Status card on the dashboard
-    updateLibraryStatusCard(stats);
-}
-
-/**
- * Smart Library Status card on the Dashboard.
- * Shows different states: no server, empty library, healthy library, scanning.
- */
-function updateLibraryStatusCard(dbStats) {
-    const card = document.getElementById('library-status-card');
-    if (!card) return;
-
-    const title = document.getElementById('library-status-title');
-    const subtitle = document.getElementById('library-status-subtitle');
-    const statsRow = document.getElementById('library-status-stats');
-    const scanBtn = document.getElementById('library-status-scan-btn');
-    const scanLabel = document.getElementById('library-status-scan-label');
-    const deepBtn = document.getElementById('library-status-deep-btn');
-    const progressDiv = document.getElementById('library-status-progress');
-    const messageDiv = document.getElementById('library-status-message');
-
-    const artists = dbStats ? (dbStats.artists || 0) : 0;
-    const albums = dbStats ? (dbStats.albums || 0) : 0;
-    const tracks = dbStats ? (dbStats.tracks || 0) : 0;
-    const sizeMb = dbStats ? (dbStats.database_size_mb || 0) : 0;
-    const lastUpdate = dbStats ? dbStats.last_update : null;
-    const serverSource = dbStats ? dbStats.server_source : null;
-
-    // Check if a scan is in progress
-    const isScanning = window._libraryStatusScanning || false;
-
-    // Determine state
-    const serverConnected = _lastStatusPayload && _lastStatusPayload.media_server && _lastStatusPayload.media_server.connected;
-    const serverType = _lastStatusPayload && _lastStatusPayload.active_media_server;
-    const hasData = tracks > 0;
-    const hasServer = !!serverType && serverType !== 'none';
-
-    // Reset classes
-    card.className = 'library-status-card';
-
-    if (isScanning) {
-        // State: Scanning
-        card.classList.add('scanning');
-        if (title) title.textContent = 'Library Scan';
-        if (subtitle) subtitle.textContent = 'Updating library database...';
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.add('scanning');
-            scanLabel.textContent = 'Stop';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = hasData ? '' : 'none';
-        if (progressDiv) progressDiv.style.display = '';
-        if (messageDiv) messageDiv.style.display = 'none';
-
-    } else if (!hasServer) {
-        // State: No server configured
-        card.classList.add('needs-setup');
-        if (title) title.textContent = 'No Media Server';
-        if (subtitle) subtitle.textContent = 'Connect a server to get started';
-        if (scanBtn) scanBtn.style.display = 'none';
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = 'SoulSync needs a media server to manage your library. '
-                + 'Go to <span class="link" onclick="navigateToPage(\'settings\')">Settings</span> '
-                + 'to connect Plex, Jellyfin, or Navidrome.';
-        }
-
-    } else if (!serverConnected) {
-        // State: Server configured but not connected
-        card.classList.add('needs-setup');
-        const serverName = _capitalize(serverType);
-        if (title) title.textContent = `${serverName} — Disconnected`;
-        if (subtitle) subtitle.textContent = 'Cannot reach your media server';
-        if (scanBtn) scanBtn.style.display = 'none';
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = `Your ${serverName} server is configured but not responding. `
-                + 'Check that it\'s running and the connection details are correct in '
-                + '<span class="link" onclick="navigateToPage(\'settings\')">Settings</span>.';
-        }
-
-    } else if (!hasData) {
-        // State: Server connected but library is empty
-        card.classList.add('empty-library');
-        const serverName = _capitalize(serverType);
-        if (title) title.textContent = `${serverName} Connected`;
-        if (subtitle) subtitle.textContent = 'Library database is empty';
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.remove('scanning');
-            scanLabel.textContent = 'Scan Now';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = 'Your server is connected but SoulSync hasn\'t imported your library yet. '
-                + 'Click <strong>Scan Now</strong> to pull your artists, albums, and tracks into SoulSync.';
-        }
-
-    } else {
-        // State: Healthy library with data
-        card.classList.add('has-data');
-        const serverName = _capitalize(serverType);
-        let lastRefreshText = 'Never';
-        if (lastUpdate) {
-            const d = new Date(lastUpdate);
-            if (!isNaN(d.getTime())) {
-                lastRefreshText = typeof _formatTimeAgo === 'function' ? _formatTimeAgo(d) : d.toLocaleDateString();
-            }
-        }
-        if (title) title.textContent = `${serverName} Library`;
-        if (subtitle) subtitle.textContent = `Last refreshed ${lastRefreshText}`;
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.remove('scanning');
-            scanLabel.textContent = 'Refresh';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = '';
-        if (statsRow) {
-            statsRow.style.display = '';
-            document.getElementById('library-status-artists').textContent = artists.toLocaleString();
-            document.getElementById('library-status-albums').textContent = albums.toLocaleString();
-            document.getElementById('library-status-tracks').textContent = tracks.toLocaleString();
-            document.getElementById('library-status-size').textContent = sizeMb < 1 ? `${Math.round(sizeMb * 1024)} KB` : `${sizeMb.toFixed(1)} MB`;
-        }
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) messageDiv.style.display = 'none';
-    }
-}
-
 // _lastStatusPayload and _isSoulsyncStandalone are declared in core.js
-const _origFetchServiceStatus = typeof fetchAndUpdateServiceStatus === 'function' ? fetchAndUpdateServiceStatus : null;
-
-function _capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
-
-/**
- * Dashboard library scan button handler — triggers incremental DB update.
- */
-async function dashboardLibraryScan(fullRefresh = false) {
-    const scanBtn = document.getElementById('library-status-scan-btn');
-    const scanLabel = document.getElementById('library-status-scan-label');
-
-    // If already scanning, stop it
-    if (window._libraryStatusScanning) {
-        try {
-            await fetch('/api/database/update/stop', { method: 'POST' });
-            window._libraryStatusScanning = false;
-            showToast('Library scan stopped', 'info');
-            // Refresh the card
-            try {
-                const r = await fetch('/api/database/stats');
-                if (r.ok) updateLibraryStatusCard(await r.json());
-            } catch (e) {}
-        } catch (e) {
-            showToast('Failed to stop scan', 'error');
-        }
-        return;
-    }
-
-    // Start scan
-    try {
-        window._libraryStatusScanning = true;
-        updateLibraryStatusCard(null); // Update to scanning state
-
-        const response = await fetch('/api/database/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_refresh: fullRefresh })
-        });
-        const data = await response.json();
-        if (!data.success) {
-            window._libraryStatusScanning = false;
-            showToast(data.error || 'Failed to start scan', 'error');
-            return;
-        }
-
-        showToast('Library scan started', 'success');
-
-        // Poll for progress
-        const pollInterval = setInterval(async () => {
-            try {
-                const statusResp = await fetch('/api/database/update/status');
-                if (!statusResp.ok) return;
-                const status = await statusResp.json();
-
-                const phase = document.getElementById('library-status-phase');
-                const barFill = document.getElementById('library-status-bar-fill');
-                const detail = document.getElementById('library-status-progress-detail');
-
-                if (phase) phase.textContent = status.phase || 'Scanning...';
-                if (barFill) barFill.style.width = `${status.progress || 0}%`;
-                if (detail && status.processed !== undefined) {
-                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
-                }
-
-                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
-                    clearInterval(pollInterval);
-                    window._libraryStatusScanning = false;
-
-                    if (status.status === 'completed' || status.status === 'finished') {
-                        showToast('Library scan complete', 'success');
-                    } else if (status.status === 'error') {
-                        showToast(`Scan error: ${status.error_message || 'Unknown'}`, 'error');
-                    }
-
-                    // Refresh stats
-                    try {
-                        const r = await fetch('/api/database/stats');
-                        if (r.ok) updateLibraryStatusCard(await r.json());
-                    } catch (e) {}
-                }
-            } catch (e) {
-                clearInterval(pollInterval);
-                window._libraryStatusScanning = false;
-            }
-        }, 2000);
-
-    } catch (e) {
-        window._libraryStatusScanning = false;
-        showToast(`Scan failed: ${e.message}`, 'error');
-    }
-}
-
-/**
- * Dashboard deep scan — finds new tracks, removes stale ones, preserves enrichment data.
- */
-async function dashboardLibraryDeepScan() {
-    if (window._libraryStatusScanning) {
-        showToast('A scan is already running', 'warning');
-        return;
-    }
-
-    if (!await showConfirmDialog({
-        title: 'Deep Scan Library',
-        message: 'A deep scan re-checks every track in your media server library.\n\n' +
-                 '• Adds any new tracks that were missed\n' +
-                 '• Removes tracks no longer on your server\n' +
-                 '• Preserves all existing metadata and enrichment data\n\n' +
-                 'This may take a while for large libraries. Continue?',
-    })) return;
-
-    // Use the same scan flow as dashboardLibraryScan but with deep_scan flag
-    try {
-        window._libraryStatusScanning = true;
-        updateLibraryStatusCard(null);
-
-        const response = await fetch('/api/database/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ deep_scan: true })
-        });
-        const data = await response.json();
-        if (!data.success) {
-            window._libraryStatusScanning = false;
-            showToast(data.error || 'Failed to start deep scan', 'error');
-            try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
-            return;
-        }
-
-        showToast('Deep scan started — this may take a while', 'success');
-
-        const pollInterval = setInterval(async () => {
-            try {
-                const statusResp = await fetch('/api/database/update/status');
-                if (!statusResp.ok) return;
-                const status = await statusResp.json();
-
-                const phase = document.getElementById('library-status-phase');
-                const barFill = document.getElementById('library-status-bar-fill');
-                const detail = document.getElementById('library-status-progress-detail');
-
-                if (phase) phase.textContent = status.phase || 'Deep scanning...';
-                if (barFill) barFill.style.width = `${status.progress || 0}%`;
-                if (detail && status.processed !== undefined) {
-                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
-                }
-
-                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
-                    clearInterval(pollInterval);
-                    window._libraryStatusScanning = false;
-
-                    if (status.status === 'completed' || status.status === 'finished') {
-                        showToast('Deep scan complete', 'success');
-                    } else if (status.status === 'error') {
-                        showToast(`Deep scan error: ${status.error_message || 'Unknown'}`, 'error');
-                    }
-
-                    try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
-                }
-            } catch (e) {
-                clearInterval(pollInterval);
-                window._libraryStatusScanning = false;
-            }
-        }, 2000);
-
-    } catch (e) {
-        window._libraryStatusScanning = false;
-        showToast(`Deep scan failed: ${e.message}`, 'error');
-    }
-}
 
 /**
  * Update the Active Downloads section on the dashboard.
@@ -7619,38 +7277,6 @@ function createDashboardDiscoverBubble(playlistId) {
     `;
 }
 
-
-
-function updateDbUpdaterCardInfo(stats) {
-    // Update the detailed stats within the DB Updater tool card
-    const lastRefreshEl = document.getElementById('db-last-refresh');
-    const artistsStatEl = document.getElementById('db-stat-artists');
-    const albumsStatEl = document.getElementById('db-stat-albums');
-    const tracksStatEl = document.getElementById('db-stat-tracks');
-    const sizeStatEl = document.getElementById('db-stat-size');
-
-    if (lastRefreshEl) {
-        if (stats.last_full_refresh) {
-            const date = new Date(stats.last_full_refresh);
-            lastRefreshEl.textContent = date.toLocaleString();
-        } else {
-            lastRefreshEl.textContent = 'Never';
-        }
-    }
-
-    if (artistsStatEl) artistsStatEl.textContent = stats.artists.toLocaleString() || '0';
-    if (albumsStatEl) albumsStatEl.textContent = stats.albums.toLocaleString() || '0';
-    if (tracksStatEl) tracksStatEl.textContent = stats.tracks.toLocaleString() || '0';
-    if (sizeStatEl) sizeStatEl.textContent = `${stats.database_size_mb.toFixed(2)} MB`;
-
-    // Update the title of the tool card to show which server is active
-    const toolCardTitle = document.querySelector('#db-updater-card .tool-card-title');
-    if (toolCardTitle && stats.server_source) {
-        const serverName = stats.server_source.charAt(0).toUpperCase() + stats.server_source.slice(1);
-        toolCardTitle.textContent = `${serverName} Database Updater`;
-    }
-}
-
 // --- Wishlist Count Functions ---
 
 async function updateWishlistCount() {
@@ -7662,22 +7288,14 @@ async function updateWishlistCount() {
         const data = await response.json();
         const count = data.count || 0;
 
-        _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
-        // Update sidebar nav badge
+        // Only the SIDEBAR badge survives the dashboard flip — the hero
+        // button, its badge and the active/inactive classes are React-rendered
+        // (dashboard-header.tsx fetches this same endpoint on mount and
+        // consumes the socket dispatch afterwards).
         const wlNavBadge = document.getElementById('wishlist-nav-badge');
         if (wlNavBadge) {
             wlNavBadge.textContent = count;
             wlNavBadge.classList.toggle('hidden', count === 0);
-        }
-        const wishlistButton = document.getElementById('wishlist-button');
-        if (wishlistButton) {
-            if (count === 0) {
-                wishlistButton.classList.remove('wishlist-active');
-                wishlistButton.classList.add('wishlist-inactive');
-            } else {
-                wishlistButton.classList.remove('wishlist-inactive');
-                wishlistButton.classList.add('wishlist-active');
-            }
         }
 
         // Check for auto-initiated wishlist processes that user should see immediately

@@ -4016,6 +4016,13 @@ async function fetchAndUpdateServiceStatus() {
         // Cache for library status card
         _lastStatusPayload = data;
 
+        // Re-broadcast for the React dashboard (tools-seam rule: in the
+        // handler). The socket twin (handleServiceStatusUpdate) dispatches the
+        // same event; exactly one of the two runs at a time — this poller
+        // early-returns while the socket is connected — so React never sees
+        // duplicate frames.
+        window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
+
         if (typeof syncSpotifySettingsAuthState === 'function') {
             syncSpotifySettingsAuthState(data?.spotify || null);
         }
@@ -4026,10 +4033,9 @@ async function fetchAndUpdateServiceStatus() {
             sanitizeMetadataSourceSelection({ quiet: true });
         }
 
-        // Update service status indicators and text (dashboard)
-        updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
-        updateServiceStatus('media-server', data.media_server);
-        updateServiceStatus('soulseek', data.soulseek);
+        // The dashboard service cards are React-rendered from the dispatch
+        // above since the flip (service-cards.tsx) — only the sidebar half
+        // survives here.
 
         // Update sidebar service status indicators
         updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
@@ -4054,8 +4060,8 @@ async function fetchAndUpdateServiceStatus() {
             }
         });
 
-        // Update enrichment service cards
-        if (data.enrichment) renderEnrichmentCards(data.enrichment);
+        // The enrichment chips grid is React-rendered from the dispatch above
+        // since the dashboard flip (service-cards.tsx) — no vanilla write here.
 
         // Check for Spotify rate limit
         if (data.spotify && data.spotify.rate_limited && data.spotify.rate_limit) {
@@ -4162,82 +4168,6 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
     };
 }
 
-function updateServiceStatus(service, statusData, spotifyStatus = null) {
-    const serviceCard = document.getElementById(`${service}-service-card`);
-    const indicator = document.getElementById(`${service}-status-indicator`);
-    const statusText = document.getElementById(`${service}-status-text`);
-
-    if (serviceCard) {
-        serviceCard.dataset.statusReady = 'true';
-    }
-
-    if (indicator && statusText) {
-        if (service === 'metadata-source') {
-            const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
-            indicator.className = `service-card-indicator ${presentation.statusClass}`;
-            statusText.textContent = presentation.statusText;
-            statusText.className = `service-card-status-text ${presentation.statusClass}`;
-        } else {
-            if (statusData.connected) {
-                indicator.className = 'service-card-indicator connected';
-                statusText.textContent = 'Connected';
-                statusText.className = 'service-card-status-text connected';
-            } else {
-                indicator.className = 'service-card-indicator disconnected';
-                statusText.textContent = 'Disconnected';
-                statusText.className = 'service-card-status-text disconnected';
-            }
-        }
-    }
-
-    // Response time row — populated uniformly for every service card so all
-    // three read the same way (D4).
-    const responseRow = document.getElementById(`${service}-response-time`);
-    if (responseRow) {
-        const rt = statusData?.response_time;
-        responseRow.textContent = (rt !== undefined && rt !== null)
-            ? `Response: ${rt}ms`
-            : 'Response: --';
-    }
-
-    // Update music source title based on active source
-    if (service === 'metadata-source' && statusData.source) {
-        const musicSourceTitleElement = document.getElementById('metadata-source-title');
-        if (musicSourceTitleElement) {
-            const sourceName = getMetadataSourceLabel(statusData.source);
-            musicSourceTitleElement.textContent = sourceName;
-            currentMusicSourceName = sourceName;
-        }
-
-        // Keep the Spotify action buttons aligned with the actual auth session.
-        const spotifySessionActive = spotifyStatus?.authenticated === true;
-        const authBtn = document.querySelector('button[onclick="authenticateSpotify()"]');
-        const disconnectBtn = document.getElementById('spotify-disconnect-btn');
-        if (authBtn) {
-            authBtn.style.display = spotifySessionActive ? 'none' : '';
-        }
-        if (disconnectBtn) {
-            disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
-        }
-
-        syncPrimaryMetadataSourceAvailability(spotifyStatus);
-
-        const testButton = document.querySelector('#metadata-source-service-card .service-card-button');
-        if (testButton) {
-            const source = statusData.source || 'spotify';
-            testButton.setAttribute('onclick', `testDashboardConnection('${source}')`);
-        }
-    }
-
-    // Update download source title on dashboard card
-    if (service === 'soulseek' && statusData.source) {
-        const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', amazon: 'Amazon', lidarr: 'Lidarr', soundcloud: 'SoundCloud', torrent: 'Torrent', usenet: 'Usenet', hybrid: 'Hybrid' };
-        const displayName = sourceNames[statusData.source] || 'Download Source';
-        const titleEl = document.getElementById('download-source-title');
-        if (titleEl) titleEl.textContent = displayName;
-    }
-}
-
 function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
     const indicator = document.getElementById(`${service}-indicator`);
     if (indicator) {
@@ -4282,119 +4212,6 @@ function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
             if (sidebarName) sidebarName.textContent = displayName;
         }
     }
-}
-
-function renderEnrichmentCards(enrichment) {
-    const grid = document.getElementById('enrichment-status-grid');
-    if (!grid || !enrichment) return;
-
-    const jiosaavnEnabled = isJiosaavnExperimentalEnabled();
-    const bandcampEnabled = isBandcampExperimentalEnabled();
-
-    // Service display order
-    const serviceOrder = [
-        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
-        'bandcamp_enrichment', 'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
-        'acoustid', 'listenbrainz'
-    ];
-
-    // Map service keys to their settings page selector for click-to-configure
-    const settingsSelectors = {
-        'spotify_enrichment': '.spotify-title',
-        'tidal_enrichment': '.tidal-title',
-        'qobuz_enrichment': '.qobuz-title',
-        'lastfm': '.lastfm-title',
-        'genius': '.genius-title',
-        'acoustid': '.acoustid-title',
-        'listenbrainz': '.listenbrainz-title',
-    };
-
-    const chips = [];
-    for (const key of serviceOrder) {
-        if (key === 'jiosaavn_enrichment' && !jiosaavnEnabled) continue;
-        if (key === 'bandcamp_enrichment' && !bandcampEnabled) continue;
-        const svc = enrichment[key];
-        if (!svc) continue;
-
-        // Determine status class and text
-        let statusClass, statusLabel;
-        if ('running' in svc) {
-            if (!svc.configured) {
-                statusClass = 'not-configured';
-                statusLabel = 'Set up';
-            } else if (svc.paused) {
-                statusClass = 'paused';
-                statusLabel = svc.yield_reason === 'downloads' ? 'Yielding' : 'Paused';
-            } else if (svc.running) {
-                statusClass = svc.idle ? 'idle' : 'running';
-                statusLabel = svc.idle ? 'Idle' : 'Running';
-            } else {
-                statusClass = 'stopped';
-                statusLabel = 'Stopped';
-            }
-        } else {
-            statusClass = svc.configured ? 'running' : 'not-configured';
-            statusLabel = svc.configured ? 'Ready' : 'Set up';
-        }
-
-        const selector = settingsSelectors[key];
-        const clickAttr = selector
-            ? `onclick="navigateToPage('settings'); setTimeout(() => { switchSettingsTab('connections'); setTimeout(() => { const el = document.querySelector('${selector}'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); }, 50);"`
-            : '';
-
-        // Build activity display — human-readable, not cryptic numbers
-        let activityHtml = '';
-        let metaHtml = '';
-        const isSpotify = key === 'spotify_enrichment';
-
-        if ('running' in svc && svc.configured) {
-            const c1h = svc.calls_1h || 0;
-            const c24h = svc.calls_24h || 0;
-
-            if (isSpotify && svc.daily_budget) {
-                // Spotify: show budget usage prominently
-                const b = svc.daily_budget;
-                const pct = Math.min(100, Math.round((b.used / b.limit) * 100));
-                const barClass = b.exhausted ? 'exhausted' : pct > 80 ? 'high' : '';
-                activityHtml = `<span class="enrichment-chip-activity">${b.used.toLocaleString()} / ${b.limit.toLocaleString()}</span>`;
-                metaHtml = `<div class="enrichment-chip-budget">
-                    <div class="enrichment-chip-budget-bar ${barClass}" style="width: ${pct}%"></div>
-                </div>`;
-            } else if (c24h > 0) {
-                // Other services: show 24h count
-                activityHtml = `<span class="enrichment-chip-activity">${c24h.toLocaleString()} / 24h</span>`;
-            }
-        }
-
-        // Tooltip: full details including 1h breakdown
-        let tooltipLines = [svc.name + ' — ' + statusLabel];
-        if ('running' in svc && svc.configured) {
-            const c1h = svc.calls_1h || 0;
-            const c24h = svc.calls_24h || 0;
-            if (c24h > 0 || c1h > 0) tooltipLines.push('Last hour: ' + c1h + ' · Last 24h: ' + c24h);
-        }
-        if (isSpotify && svc.daily_budget) {
-            const b = svc.daily_budget;
-            tooltipLines.push('Daily budget: ' + b.used + ' / ' + b.limit + (b.exhausted ? ' (exhausted)' : ''));
-        }
-        if (selector && statusClass === 'not-configured') {
-            tooltipLines = ['Click to configure in Settings'];
-        }
-
-        const statusDisplay = statusClass === 'not-configured' && selector ? 'Configure →' : statusLabel;
-
-        chips.push(`
-            <div class="enrichment-chip status-${statusClass}" ${clickAttr} title="${tooltipLines.join('\n')}">
-                <span class="enrichment-chip-dot"></span>
-                <span class="enrichment-chip-name">${svc.name}</span>
-                ${activityHtml}
-                <span class="enrichment-chip-status">${statusDisplay}</span>
-                ${metaHtml}
-            </div>
-        `);
-    }
-
-    grid.innerHTML = chips.join('');
 }
 
 // ===============================

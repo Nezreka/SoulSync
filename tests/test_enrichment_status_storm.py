@@ -105,11 +105,20 @@ def test_pause_and_resume_reflect_instantly_despite_cache(client):
 # ---------------------------------------------------------------------------
 
 def test_fallback_pollers_are_10s_and_guarded():
+    """Post-dashboard-flip: the 13 per-provider pollers are DELETED (the React
+    dashboard runs its own socket-and-hidden-gated 10s fallback). The one
+    survivor is the app-wide repair poll at its historical 5s cadence — the
+    only socket-down live source for ss:repair-status, consumed by BOTH the
+    React dashboard pill and the tools maintenance hero. It must keep both
+    gates, and nothing faster may reappear."""
     import re
     assert not re.search(r"setInterval\(update\w+Status, 2000\)", _ENRICH_JS), \
         "a 2s status poller survived — the fallback must not race the websocket"
-    assert _ENRICH_JS.count("setInterval(update") == _ENRICH_JS.count(", 10000)") \
-        or "10000); // fallback only" in _ENRICH_JS
-    # every poller still defers to the socket + hidden tabs
-    assert _ENRICH_JS.count("if (socketConnected) return") >= 14
-    assert "if (document.hidden) return" in _ENRICH_JS
+    intervals = re.findall(r"setInterval\(update(\w+), (\d+)\)", _ENRICH_JS)
+    assert intervals == [("RepairStatus", "5000"), ("RepairStatus", "5000")], (
+        f"unexpected enrichment pollers (want only the repair 5s poll, both "
+        f"readyState arms): {intervals}"
+    )
+    body = _ENRICH_JS.split("async function updateRepairStatus")[1].split("\nfunction ")[0]
+    assert "if (socketConnected) return" in body
+    assert "if (document.hidden) return" in body

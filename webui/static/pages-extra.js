@@ -1020,115 +1020,9 @@ async function _serverRemoveTrack(trackIndex, serverTrackId) {
 }
 
 
-// Auto-refresh sync cards every 30 seconds when on dashboard
-setInterval(() => {
-    if (typeof currentPage !== 'undefined' && currentPage === 'dashboard') {
-        loadDashboardSyncHistory();
-    }
-}, 30000);
-
-async function loadDashboardSyncHistory() {
-    // Don't poll the auth-gated sync-history endpoint while the app is locked —
-    // it would 401 every 30s cycle (the result is discarded anyway). Resumes
-    // automatically on unlock (init.js removes 'app-locked').
-    if (document.body.classList.contains('app-locked')) return;
-    const container = document.getElementById('sync-history-cards');
-    if (!container) return;
-
-    try {
-        const response = await fetch('/api/sync/history?limit=10');
-        if (response.status === 401) {
-            // Session lapsed (e.g. the server restarted) while this tab still
-            // believed it was unlocked, so the guard above couldn't fire. Surface
-            // the correct unlock screen — both add 'app-locked', which stops the
-            // poll until the user re-authenticates (same as a fresh page load).
-            const info = await response.json().catch(() => ({}));
-            if (info.login_required && typeof showLoginScreen === 'function') {
-                showLoginScreen();
-            } else if (typeof showLaunchPinScreen === 'function') {
-                showLaunchPinScreen();
-            }
-            return;
-        }
-        if (!response.ok) return;
-
-        const data = await response.json();
-        // Filter to only show playlist syncs — not album downloads or wishlist processing
-        const entries = (data.entries || []).filter(e => e.sync_type === 'playlist' || !e.sync_type);
-
-        if (entries.length === 0) {
-            container.innerHTML = '<div class="sync-history-empty">No syncs yet</div>';
-            return;
-        }
-
-        container.innerHTML = entries.map((entry, cardIndex) => {
-            const found = entry.tracks_found || 0;
-            const total = entry.total_tracks || 0;
-            const downloaded = entry.tracks_downloaded || 0;
-            const failed = entry.tracks_failed || 0;
-            const pct = total > 0 ? Math.round((found / total) * 100) : 0;
-
-            // Health color
-            let healthClass = 'health-good';
-            if (pct < 50) healthClass = 'health-bad';
-            else if (pct < 80) healthClass = 'health-warn';
-
-            // Source badge
-            const sourceLabels = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer', youtube: 'YouTube', beatport: 'Beatport', wishlist: 'Wishlist' };
-            const sourceLabel = sourceLabels[entry.source] || entry.source || 'Unknown';
-
-            // Time
-            const timeStr = entry.started_at ? _relativeTime(entry.started_at) : '';
-
-            // Name
-            const name = entry.artist_name
-                ? `${entry.artist_name} — ${entry.album_name || entry.playlist_name}`
-                : entry.playlist_name || 'Unknown';
-
-            return `
-                <div class="sync-history-card ${healthClass}" onclick="openSyncDetailModal(${entry.id})" style="animation-delay: ${cardIndex * 0.05}s">
-                    <button class="sync-card-delete" onclick="event.stopPropagation(); deleteSyncHistoryCard(${entry.id}, this)" title="Remove">&times;</button>
-                    <div class="sync-card-thumb">
-                        ${entry.thumb_url ? `<img src="${entry.thumb_url}" alt="" loading="lazy">` : '<div class="sync-card-thumb-placeholder">&#9835;</div>'}
-                    </div>
-                    <div class="sync-card-info">
-                        <div class="sync-card-name">${typeof _esc === 'function' ? _esc(name) : name}</div>
-                        <div class="sync-card-meta">
-                            <span class="sync-card-source">${sourceLabel}</span>
-                            <span class="sync-card-time">${timeStr}</span>
-                        </div>
-                    </div>
-                    <div class="sync-card-stats">
-                        <div class="sync-card-pct">${pct}%</div>
-                        <div class="sync-card-bar">
-                            <div class="sync-card-bar-fill" style="width: ${pct}%"></div>
-                        </div>
-                        <div class="sync-card-counts">${found}/${total} matched${downloaded > 0 ? ` · ${downloaded} ⬇` : ''}${failed > 0 ? ` · ${failed} ✗` : ''}</div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-    } catch (e) {
-        console.warn('Failed to load sync history for dashboard:', e);
-    }
-}
-
-function _relativeTime(dateStr) {
-    try {
-        const d = new Date(dateStr);
-        const now = new Date();
-        const diffMs = now - d;
-        const mins = Math.floor(diffMs / 60000);
-        if (mins < 1) return 'just now';
-        if (mins < 60) return `${mins}m ago`;
-        const hrs = Math.floor(mins / 60);
-        if (hrs < 24) return `${hrs}h ago`;
-        const days = Math.floor(hrs / 24);
-        if (days < 7) return `${days}d ago`;
-        return d.toLocaleDateString();
-    } catch (e) { return ''; }
-}
+// The 30s dashboard sync-card cycle is gone with the flip — the React
+// Recent Syncs card (syncs-card.tsx) runs its own 30s refresh while mounted,
+// and #sync-history-cards is React-owned DOM this file must not write.
 
 // Re-add a synced unmatched track to the wishlist from the sync-detail modal, with
 // the same context the original sync used (resolved server-side from the entry).
@@ -1314,22 +1208,6 @@ async function openSyncDetailModal(entryId) {
     } catch (e) {
         hideLoadingOverlay();
         showToast('Failed to load sync details', 'error');
-    }
-}
-
-async function deleteSyncHistoryCard(entryId, btnEl) {
-    try {
-        const card = btnEl.closest('.sync-history-card');
-        if (card) {
-            card.style.opacity = '0';
-            card.style.transform = 'scale(0.9)';
-        }
-        const resp = await fetch(`/api/sync/history/${entryId}`, { method: 'DELETE' });
-        if (resp.ok) {
-            setTimeout(() => { if (card) card.remove(); }, 200);
-        }
-    } catch (e) {
-        console.warn('Failed to delete sync entry:', e);
     }
 }
 

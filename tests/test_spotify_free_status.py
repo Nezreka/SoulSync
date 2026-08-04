@@ -45,6 +45,10 @@ def _patch_registry(monkeypatch, *, free_selected, client):
     # get_client_for_source('spotify') returns None when unauthed; the direct fetch
     # is what the fix relies on, so route both through the fake.
     monkeypatch.setattr(registry, "get_spotify_client", lambda client_factory=None: client)
+    # Boot phase stays True in a test process until something imports web_server;
+    # get_primary_source_status early-returns connected=False during boot. Pin it
+    # so these tests don't depend on collection order.
+    monkeypatch.setattr("core.boot_phase.is_boot_phase", lambda: False)
 
 
 def test_unauthed_free_seen_via_direct_client(monkeypatch):
