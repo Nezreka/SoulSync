@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, List, Optional
 
+from core.text.title_match import is_version_qualifier
 from utils.logging_config import get_logger
 
 logger = get_logger("audio_verification")
@@ -25,6 +26,7 @@ MIN_ACOUSTID_SCORE = 0.80       # Minimum fingerprint score to trust a match.
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity to consider a match.
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity to consider a match.
 CLEAR_MISMATCH_THRESHOLD = 0.30  # Below this artist sim = clear wrong song.
+_DASH_QUALIFIER_RE = re.compile(r"\s*-\s*(?P<qualifier>[^-]+)$")
 
 
 class Decision(Enum):
@@ -61,11 +63,9 @@ def normalize(text: str) -> str:
     s = re.sub(r'\s*<[^>]*>', '', s)
     # Trailing featuring / version tags.
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
-    s = re.sub(
-        r'\s*-\s*(?:vocal|instrumental|acoustic|live|remix|cover|clean|explicit|'
-        r'radio\s*edit|original\s*mix|extended\s*mix|club\s*mix)\s*$',
-        '', s, flags=re.IGNORECASE,
-    )
+    dash_qualifier = _DASH_QUALIFIER_RE.search(s)
+    if dash_qualifier and is_version_qualifier(dash_qualifier.group("qualifier")):
+        s = s[:dash_qualifier.start()].rstrip()
     s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
     # Path/separator punctuation -> space so a title keeps matching a source
     # filename that substituted '_' for an illegal '/' or ':' (#851): the on-disk

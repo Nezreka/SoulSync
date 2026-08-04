@@ -132,7 +132,8 @@ _VERSION_MARKER_TOKENS = frozenset({
     "club", "mashup", "bootleg", "cover", "covers", "reprise", "session",
     "sessions", "mono", "stereo", "duet", "rework", "dub", "vip", "single",
     "radio", "alt", "alternate", "alternative", "take", "edition", "orchestral",
-    "symphonic", "piano", "acapella", "cappella", "nightcore",
+    "symphonic", "piano", "acapella", "cappella", "nightcore", "vocal",
+    "clean", "explicit",
     # Distinct-track qualifiers — '(Interlude)' etc. are SEPARATE short tracks
     # that share the base name with the full song; never treat as subtitles.
     "interlude", "intro", "outro", "skit", "freestyle", "medley", "snippet",
@@ -142,6 +143,19 @@ _VERSION_MARKER_TOKENS = frozenset({
     # Spanish (unidecode-normalized; 'versión' → 'version' is covered above)
     "directo", "vivo", "dueto",
 })
+
+
+def is_version_qualifier(text: str) -> bool:
+    """Whether ``text`` describes a recording/version rather than a subtitle.
+
+    Keep this decision shared by title matching and audio verification so a
+    provider's ``Title (Producer Remix)`` and ``Title - Producer Remix`` forms
+    cannot drift into different normalized identities.
+    """
+    return any(
+        token in _VERSION_MARKER_TOKENS
+        for token in _TOKEN_RE.findall((text or "").casefold())
+    )
 
 
 def strip_subtitle_qualifiers(title: str, other_title: str) -> str:
@@ -270,6 +284,7 @@ def choose_best_title_candidate(
 
 __all__ = [
     "titles_plausibly_same",
+    "is_version_qualifier",
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",

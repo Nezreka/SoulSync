@@ -1,5 +1,6 @@
 import sys
 import types
+from pathlib import Path
 
 from core.imports.file_ops import (
     cleanup_empty_directories,
@@ -52,6 +53,23 @@ def test_safe_move_file_replaces_existing_destination(tmp_path):
 
     assert not src.exists()
     assert dst.read_text() == "new"
+
+
+def test_safe_move_failure_preserves_existing_destination_and_source(tmp_path, monkeypatch):
+    src = tmp_path / "source.flac"
+    dst = tmp_path / "track.flac"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+
+    monkeypatch.setattr(_fo.os, "replace", lambda *_args: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left on device")
+    ))
+
+    with pytest.raises(OSError, match="No space"):
+        safe_move_file(src, dst)
+
+    assert src.read_bytes() == b"new"
+    assert dst.read_bytes() == b"old"
 
 
 def test_cleanup_empty_directories_removes_nested_empty_paths(tmp_path):
@@ -213,6 +231,45 @@ def test_cross_device_move_routes_to_atomic_and_completes(tmp_path, monkeypatch)
     assert dst.read_text() == "payload"
     assert not src.exists()
     assert not list(dstdir.glob(".*ssync-tmp"))   # complete file only, no leftover temp
+
+
+def test_cross_device_move_atomically_replaces_existing_destination(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_bytes(b"new payload")
+    dst = tmp_path / "lib" / "t.flac"
+    dst.parent.mkdir()
+    dst.write_bytes(b"old payload")
+    real_replace = os.replace
+
+    def fake_replace(a, b):
+        if Path(a) == src:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(a, b)
+
+    monkeypatch.setattr(_fo.os, "replace", fake_replace)
+    safe_move_file(src, dst)
+
+    assert not src.exists()
+    assert dst.read_bytes() == b"new payload"
+
+
+def test_cross_device_copy_failure_keeps_old_destination(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_bytes(b"new payload")
+    dst = tmp_path / "lib" / "t.flac"
+    dst.parent.mkdir()
+    dst.write_bytes(b"old payload")
+
+    monkeypatch.setattr(_fo.shutil, "copyfileobj", lambda *_args: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left on device")
+    ))
+
+    with pytest.raises(OSError, match="No space"):
+        _atomic_cross_device_move(src, dst)
+
+    assert src.read_bytes() == b"new payload"
+    assert dst.read_bytes() == b"old payload"
+    assert not list(dst.parent.glob(".*ssync-tmp"))
 
 
 def test_atomic_helper_completes_and_cleans_temp(tmp_path):
