@@ -183,6 +183,23 @@ def test_generic_token_stays_usable_for_entity_grabs():
         assert store.resolve(token) == "https://x/a.nzb"
 
 
+def test_album_candidate_cannot_be_reposted_as_track():
+    store = CandidateStore()
+    token = store.put("https://x/release.nzb", result_kind="album")
+
+    with candidate_binding(1, result_kind="track"):
+        assert store.resolve(token) is None
+    with candidate_binding(1, result_kind="album"):
+        assert store.resolve(token) == "https://x/release.nzb"
+
+
+def test_same_url_gets_distinct_track_and_album_tokens():
+    store = CandidateStore()
+    track = store.put("https://x/release.nzb", result_kind="track")
+    album = store.put("https://x/release.nzb", result_kind="album")
+    assert track != album
+
+
 # ---------------------------------------------------------------------------
 # §16.1 — shared, restart-safe backing store
 # ---------------------------------------------------------------------------

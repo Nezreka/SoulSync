@@ -235,6 +235,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         # repeated manual picks don't loop back into quarantine.
         user_manual_pick = bool(task.get('_user_manual_pick', False))
         acquisition_walk_ref = _acquisition_task_ref(task)
+        from core.imports.upgrade_intent import CONTEXT_KEY as _UPGRADE_INTENT_KEY
+        server_upgrade_intent = task.get(_UPGRADE_INTENT_KEY)
     
     # Try each candidate until one succeeds (like GUI's fallback logic)
     for candidate_index, candidate in enumerate(candidates):
@@ -524,6 +526,11 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    from core.imports.upgrade_intent import attach_upgrade_intent
+                    attach_upgrade_intent(
+                        matched_downloads_context[context_key],
+                        server_upgrade_intent,
+                    )
                     if acq_markers:
                         # Survives quarantine sidecars; pipeline_callback
                         # closes the correlated grab on success/quarantine.

@@ -107,7 +107,7 @@ def _pipeline_context(
         **track_info["album"],
         "artists": [{"name": data["artist_name"]}],
     }
-    return {
+    context = {
         "track_info": track_info,
         "lib2_entity": lib2_entity,
         "spotify_artist": artist_context,
@@ -132,6 +132,12 @@ def _pipeline_context(
         "_acquisition_track_id": track_id,
         "_acquisition_manual_pick": data.get("trigger") == "manual",
     }
+    from core.imports.upgrade_intent import attach_upgrade_intent, issue_upgrade_intent
+    attach_upgrade_intent(
+        context,
+        issue_upgrade_intent(track_id, origin=f"acquisition:{data.get('trigger') or 'unknown'}"),
+    )
+    return context
 
 
 def _stage_working_copy(

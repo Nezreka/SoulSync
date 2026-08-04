@@ -7291,12 +7291,14 @@ def start_download():
     dl_err = check_download_permission()
     if dl_err:
         return dl_err
-    data = request.get_json()
-    if not data:
+    raw_data = request.get_json()
+    if not raw_data:
         return jsonify({"error": "No download data provided."}), 400
     
     try:
-        result_type = data.get('result_type', 'track')
+        result_type = str(raw_data.get('result_type', 'track')).strip().lower()
+        if result_type not in ('track', 'album'):
+            return jsonify({"error": "Invalid result_type."}), 400
 
         # Library-v2 entity context (audit P1-16): the browser may NAME the
         # lib2 track/album this grab acts for; existence and the effective
@@ -7310,15 +7312,34 @@ def start_download():
             resolve_lib2_grab_context,
         )
         from core.download_plugins.candidate_store import candidate_binding
-        if (names_lib2_entity(data)
+        if (names_lib2_entity(raw_data)
                 and get_current_profile_id() != ADMIN_PROFILE_ID):
             return jsonify({
                 "success": False,
                 "error": "Admin access required",
             }), 403
-        _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
+        _lib2_state, _lib2_ctx = resolve_lib2_grab_context(
+            get_database(), raw_data)
         if _lib2_state == 'invalid':
             return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+        from core.imports.upgrade_intent import (
+            attach_upgrade_intent,
+            issue_upgrade_intent,
+            sanitize_client_import_metadata,
+        )
+        data = sanitize_client_import_metadata(raw_data)
+        _upgrade_intent = (
+            issue_upgrade_intent(_lib2_ctx['track_id'], origin='manual_grab')
+            if (_lib2_ctx or {}).get('track_id') is not None else None
+        )
+        if result_type == 'album' and (_lib2_ctx or {}).get('track_id') is not None:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "Album results cannot be grabbed for a track-scoped "
+                    "Library v2 search. Select one track result instead."
+                ),
+            }), 400
 
         # Candidate-token binding (audit §16.1): torrent/usenet grabs resolve
         # an opaque candidate token server-side; the store revalidates that
@@ -7332,6 +7353,7 @@ def start_download():
                 _requesting_profile,
                 lib2_track_id=(_lib2_ctx or {}).get('track_id'),
                 lib2_album_id=(_lib2_ctx or {}).get('album_id'),
+                result_kind=result_type,
             )
 
         if result_type == 'album':
@@ -7431,7 +7453,7 @@ def start_download():
                         )
                         context_key = _make_context_key(username, filename)
                         with matched_context_lock:
-                            matched_downloads_context[context_key] = {
+                            _download_context = {
                                 'search_result': {
                                     'username': username,
                                     'filename': filename,
@@ -7455,6 +7477,9 @@ def start_download():
                                 '_acquisition_grab_download_id': (
                                     _acq_markers or {}).get('download_id'),
                             }
+                            attach_upgrade_intent(
+                                _download_context, _upgrade_intent)
+                            matched_downloads_context[context_key] = _download_context
                         if _album_skip_checks:
                             _audit_manual_skip(
                                 context_key, track_data.get('title'),
@@ -7570,7 +7595,7 @@ def start_download():
                     data, _lib2_ctx, album_name=data.get('album_name'),
                 )
                 with matched_context_lock:
-                    matched_downloads_context[context_key] = {
+                    _download_context = {
                         'search_result': {
                             'username': username,
                             'filename': filename,
@@ -7594,6 +7619,8 @@ def start_download():
                         '_acquisition_grab_download_id': (
                             _acq_markers or {}).get('download_id'),
                     }
+                    attach_upgrade_intent(_download_context, _upgrade_intent)
+                    matched_downloads_context[context_key] = _download_context
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered download for post-processing: {context_key}")
 
@@ -16590,7 +16617,10 @@ def start_matched_download():
     if dl_err:
         return dl_err
     try:
-        data = request.get_json()
+        from core.imports.upgrade_intent import sanitize_client_import_metadata
+        from core.download_plugins.candidate_store import candidate_binding
+        data = sanitize_client_import_metadata(request.get_json() or {})
+        _matched_profile = get_current_profile_id()
         download_payload = data.get('search_result', {})
         spotify_artist = data.get('spotify_artist', {})
         spotify_album = data.get('spotify_album', None)
@@ -16615,7 +16645,9 @@ def start_matched_download():
             if not username or not filename:
                 return jsonify({"success": False, "error": "Missing username or filename"}), 400
 
-            download_id = run_async(download_orchestrator.download(username, filename, size))
+            with candidate_binding(_matched_profile, result_kind='track'):
+                download_id = run_async(
+                    download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -16647,7 +16679,9 @@ def start_matched_download():
         # NEW: Enhanced album download with track-to-track matching
         if enhanced_tracks:
             logger.info(f"Starting enhanced album download: {len(enhanced_tracks)} matched tracks, {len(unmatched_tracks)} unmatched")
-            started_count = _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album)
+            with candidate_binding(_matched_profile, result_kind='album'):
+                started_count = _start_enhanced_album_download(
+                    enhanced_tracks, unmatched_tracks, spotify_artist, spotify_album)
             if started_count > 0:
                 return jsonify({"success": True, "message": f"Queued {started_count} tracks with full Spotify metadata."})
             else:
@@ -16657,7 +16691,9 @@ def start_matched_download():
         is_full_album_download = bool(spotify_album and download_payload.get('result_type') == 'album')
 
         if is_full_album_download:
-            started_count = _start_album_download_tasks(download_payload, spotify_artist, spotify_album)
+            with candidate_binding(_matched_profile, result_kind='album'):
+                started_count = _start_album_download_tasks(
+                    download_payload, spotify_artist, spotify_album)
             if started_count > 0:
                 return jsonify({"success": True, "message": f"Queued {started_count} tracks for matched album download."})
             else:
@@ -16675,7 +16711,9 @@ def start_matched_download():
             download_payload['title'] = parsed_meta.get('title') or download_payload.get('title')
             download_payload['artist'] = parsed_meta.get('artist') or download_payload.get('artist')
             
-            download_id = run_async(download_orchestrator.download(username, filename, size))
+            with candidate_binding(_matched_profile, result_kind='track'):
+                download_id = run_async(
+                    download_orchestrator.download(username, filename, size))
 
             if download_id:
                 context_key = _make_context_key(username, filename)
@@ -41428,7 +41466,14 @@ def auto_import_results():
 def auto_import_approve(item_id):
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    return jsonify(auto_import_worker.approve_item(item_id))
+    result = auto_import_worker.approve_item(item_id)
+    if result.get('success') and auto_import_worker.running:
+        threading.Thread(
+            target=auto_import_worker.trigger_scan,
+            daemon=True,
+            name='AutoImportApprovalScan',
+        ).start()
+    return jsonify(result)
 
 
 @app.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
@@ -41487,6 +41532,12 @@ def auto_import_approve_all():
             result = auto_import_worker.approve_item(r['id'])
             if result.get('success'):
                 count += 1
+        if count and auto_import_worker.running:
+            threading.Thread(
+                target=auto_import_worker.trigger_scan,
+                daemon=True,
+                name='AutoImportApprovalScan',
+            ).start()
         return jsonify({"success": True, "count": count})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -41512,7 +41563,7 @@ def auto_import_clear_completed():
             cursor = conn.cursor()
             base_sql = (
                 "DELETE FROM auto_import_history "
-                "WHERE status IN ('completed', 'approved', 'failed', "
+                "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
                 "'needs_identification', 'rejected', 'processing')"
             )
             if active_hashes:
@@ -42339,6 +42390,19 @@ def _library_v2_scoped_direct_search(tracks, profile_id):
     existing worker see it.
     """
     from database.music_database import MusicDatabase
+    from core.imports.upgrade_intent import CONTEXT_KEY, issue_upgrade_intent
+    tracks = [dict(track) for track in tracks]
+    for track in tracks:
+        source_info = track.get('source_info') or {}
+        if isinstance(source_info, str):
+            try:
+                source_info = json.loads(source_info)
+            except (TypeError, ValueError):
+                source_info = {}
+        track_id = source_info.get('lib2_track_id') if isinstance(source_info, dict) else None
+        if track_id:
+            track[CONTEXT_KEY] = issue_upgrade_intent(
+                track_id, origin='scoped_automatic_search')
     db = MusicDatabase()
     runtime = _WishlistManualDownloadRuntime(
         get_music_database=lambda: db,

@@ -53,6 +53,7 @@ import re
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -188,8 +189,11 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             # The filename crosses to the browser in search responses and
             # comes back on grab. Indexer URLs can carry API keys / signed
             # params, so only an opaque server-side token travels (P0-03).
-            token = get_candidate_store().put(download_url)
-            filename = f"{token}{_FILENAME_SEP}{result.title}"
+            track_token = get_candidate_store().put(
+                download_url, result_kind="track")
+            album_token = get_candidate_store().put(
+                download_url, result_kind="album")
+            filename = f"{track_token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -227,6 +231,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 },
             )
             tracks.append(tr)
+            album_track = replace(
+                tr, filename=f"{album_token}{_FILENAME_SEP}{result.title}")
             albums.append(AlbumResult(
                 username='torrent',
                 album_path=f"torrent/{result.guid}",
@@ -234,7 +240,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 artist=parsed_artist or None,
                 track_count=1,    # unknown until download finishes
                 total_size=result.size,
-                tracks=[tr],
+                tracks=[album_track],
                 dominant_quality=quality,
                 year=None,
             ))

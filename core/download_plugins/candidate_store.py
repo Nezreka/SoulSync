@@ -65,6 +65,7 @@ class CandidateBinding:
     profile_id: int = ADMIN_PROFILE_ID
     lib2_track_id: Optional[int] = None
     lib2_album_id: Optional[int] = None
+    result_kind: Optional[str] = None
 
 
 _binding_var: ContextVar[Optional[CandidateBinding]] = ContextVar(
@@ -75,7 +76,8 @@ _binding_var: ContextVar[Optional[CandidateBinding]] = ContextVar(
 @contextlib.contextmanager
 def candidate_binding(profile_id: int,
                       lib2_track_id: Optional[int] = None,
-                      lib2_album_id: Optional[int] = None):
+                      lib2_album_id: Optional[int] = None,
+                      result_kind: Optional[str] = None):
     """Scope all candidate put/resolve calls to a profile (+ lib2 entity).
 
     Set at the API boundary (search + download handlers) and by workers
@@ -87,6 +89,7 @@ def candidate_binding(profile_id: int,
         profile_id=int(profile_id),
         lib2_track_id=lib2_track_id,
         lib2_album_id=lib2_album_id,
+        result_kind=_normalize_result_kind(result_kind),
     ))
     try:
         yield
@@ -121,6 +124,7 @@ CREATE TABLE IF NOT EXISTS candidate_tokens (
     profile_id    INTEGER NOT NULL,
     lib2_track_id INTEGER,
     lib2_album_id INTEGER,
+    result_kind   TEXT,
     expires_at    REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_candidate_tokens_url
@@ -128,6 +132,15 @@ CREATE INDEX IF NOT EXISTS idx_candidate_tokens_url
 CREATE INDEX IF NOT EXISTS idx_candidate_tokens_expires
     ON candidate_tokens(expires_at);
 """
+
+
+def _normalize_result_kind(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized not in ("track", "album"):
+        raise ValueError("candidate result kind must be track or album")
+    return normalized
 
 
 class CandidateStore:
@@ -161,6 +174,13 @@ class CandidateStore:
                 os.makedirs(parent, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            columns = {
+                row[1] for row in conn.execute(
+                    "PRAGMA table_info(candidate_tokens)").fetchall()
+            }
+            if "result_kind" not in columns:
+                conn.execute(
+                    "ALTER TABLE candidate_tokens ADD COLUMN result_kind TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._uri, uri=self._is_uri, timeout=10,
@@ -175,7 +195,7 @@ class CandidateStore:
     def is_token(value: Optional[str]) -> bool:
         return bool(value) and value.startswith(TOKEN_PREFIX)
 
-    def put(self, url: str) -> str:
+    def put(self, url: str, *, result_kind: Optional[str] = None) -> str:
         """Register a URL under the current binding; returns its token.
 
         The same URL under the same binding within the TTL returns the
@@ -184,6 +204,7 @@ class CandidateStore:
         result never doubles as profile B's grab authorization.
         """
         binding = current_binding()
+        kind = _normalize_result_kind(result_kind or binding.result_kind)
         with self._lock, contextlib.closing(self._connect()) as conn:
             with conn:
                 # Captured under the lock, not before it: expires_at must
@@ -198,9 +219,10 @@ class CandidateStore:
                 row = conn.execute(
                     "SELECT token FROM candidate_tokens WHERE url=? AND profile_id=?"
                     " AND COALESCE(lib2_track_id,-1)=COALESCE(?,-1)"
-                    " AND COALESCE(lib2_album_id,-1)=COALESCE(?,-1)",
+                    " AND COALESCE(lib2_album_id,-1)=COALESCE(?,-1)"
+                    " AND COALESCE(result_kind,'')=COALESCE(?,'')",
                     (url, binding.profile_id,
-                     binding.lib2_track_id, binding.lib2_album_id),
+                     binding.lib2_track_id, binding.lib2_album_id, kind),
                 ).fetchone()
                 if row is not None:
                     # Refresh the TTL — the candidate was just seen again.
@@ -211,10 +233,10 @@ class CandidateStore:
                 token = TOKEN_PREFIX + secrets.token_urlsafe(24)
                 conn.execute(
                     "INSERT INTO candidate_tokens"
-                    " (token, url, profile_id, lib2_track_id, lib2_album_id, expires_at)"
-                    " VALUES (?,?,?,?,?,?)",
+                    " (token, url, profile_id, lib2_track_id, lib2_album_id, result_kind, expires_at)"
+                    " VALUES (?,?,?,?,?,?,?)",
                     (token, url, binding.profile_id,
-                     binding.lib2_track_id, binding.lib2_album_id,
+                     binding.lib2_track_id, binding.lib2_album_id, kind,
                      now + self._ttl))
                 overflow = conn.execute(
                     "SELECT COUNT(*) AS n FROM candidate_tokens").fetchone()["n"] - self._max
@@ -237,7 +259,7 @@ class CandidateStore:
         with self._lock, contextlib.closing(self._connect()) as conn:
             with conn:
                 row = conn.execute(
-                    "SELECT url, profile_id, lib2_track_id, lib2_album_id, expires_at"
+                    "SELECT url, profile_id, lib2_track_id, lib2_album_id, result_kind, expires_at"
                     " FROM candidate_tokens WHERE token=?", (token,)).fetchone()
                 if row is None:
                     return None
@@ -249,6 +271,12 @@ class CandidateStore:
             logger.warning(
                 "Candidate token rejected: minted for profile %s, grabbed as "
                 "profile %s", row["profile_id"], binding.profile_id)
+            return None
+        if binding.result_kind is not None and row["result_kind"] != binding.result_kind:
+            logger.warning(
+                "Candidate token rejected: minted as %s, grabbed as %s",
+                row["result_kind"] or "legacy/unbound", binding.result_kind,
+            )
             return None
         # Entity binding is one-directional strict: a token searched FOR a
         # specific lib2 entity may not be redirected at a different one.

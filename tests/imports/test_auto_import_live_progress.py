@@ -203,6 +203,64 @@ class TestPerTrackProgressUpdates:
         # match_result.matches length the loop opened with.
         assert auto_import_worker._captured[0]['current_track_total'] == 1
 
+    def test_normal_pipeline_rejection_is_not_counted_completed(
+        self, auto_import_worker, tmp_path,
+    ):
+        source = tmp_path / "rejected.flac"
+        source.write_bytes(b"audio")
+        candidate = _FakeCandidate(path=str(tmp_path), name="Album")
+        match_result = _make_match_result()
+        match_result['matches'] = [{
+            'track': {'id': 't1', 'name': 'Rejected', 'track_number': 1},
+            'file': str(source), 'confidence': 0.95,
+        }]
+
+        def reject(_key, context, _path):
+            context['_acoustid_quarantined'] = True
+            context['_acoustid_failure_msg'] = 'wrong recording'
+
+        auto_import_worker._process_callback = reject
+        status, errors = auto_import_worker._process_matches(
+            candidate, _make_identification(), match_result,
+        )
+
+        assert status == 'failed'
+        assert errors == ['Rejected: AcoustID verification failed: wrong recording']
+        assert match_result['matches'][0]['import_status'] == 'failed'
+
+    def test_mixed_track_results_are_partial_and_persist_per_track_state(
+        self, auto_import_worker, tmp_path,
+    ):
+        files = [tmp_path / "ok.flac", tmp_path / "bad.flac"]
+        for path in files:
+            path.write_bytes(b"audio")
+        candidate = _FakeCandidate(path=str(tmp_path), name="Album")
+        match_result = _make_match_result(track_count=2)
+        match_result['matches'] = [
+            {'track': {'id': 'ok', 'name': 'OK', 'track_number': 1},
+             'file': str(files[0]), 'confidence': 0.95},
+            {'track': {'id': 'bad', 'name': 'Bad', 'track_number': 2},
+             'file': str(files[1]), 'confidence': 0.95},
+        ]
+
+        def mixed(_key, context, path):
+            if path == str(files[1]):
+                context['_silence_rejected'] = True
+                return
+            context['_final_processed_path'] = path
+            context['_pipeline_import_succeeded'] = True
+
+        auto_import_worker._process_callback = mixed
+        status, errors = auto_import_worker._process_matches(
+            candidate, _make_identification(), match_result,
+        )
+
+        assert status == 'partial'
+        assert errors == ['Bad: rejected by audio guard (incomplete or silent audio)']
+        assert [m['import_status'] for m in match_result['matches']] == [
+            'completed', 'failed',
+        ]
+
 
 # ---------------------------------------------------------------------------
 # In-progress + finalize DB round trip

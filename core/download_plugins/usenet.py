@@ -17,6 +17,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -382,8 +383,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             # The filename crosses to the browser in search responses and
             # comes back on grab. Prowlarr NZB URLs can carry API keys /
             # signed params, so only an opaque server token travels (P0-03).
-            token = get_candidate_store().put(result.download_url)
-            filename = f"{token}{_FILENAME_SEP}{result.title}"
+            track_token = get_candidate_store().put(
+                result.download_url, result_kind="track")
+            album_token = get_candidate_store().put(
+                result.download_url, result_kind="album")
+            filename = f"{track_token}{_FILENAME_SEP}{result.title}"
             quality = _guess_quality_from_title(result.title)
             parsed_artist, parsed_title = _parse_release_title(result.title)
             tr = TrackResult(
@@ -417,6 +421,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 },
             )
             tracks.append(tr)
+            album_track = replace(
+                tr, filename=f"{album_token}{_FILENAME_SEP}{result.title}")
             albums.append(AlbumResult(
                 username='usenet',
                 album_path=f"usenet/{result.guid}",
@@ -424,7 +430,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 artist=parsed_artist or None,
                 track_count=1,
                 total_size=result.size,
-                tracks=[tr],
+                tracks=[album_track],
                 dominant_quality=quality,
                 year=None,
             ))
@@ -988,4 +994,3 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         result['success'] = True
         result['files'] = copied
         return result
-
