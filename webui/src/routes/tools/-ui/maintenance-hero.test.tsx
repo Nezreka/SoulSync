@@ -539,3 +539,104 @@ describe('job help overlay', () => {
     expect(container.querySelector('#repair-help-overlay')).toBeNull();
   });
 });
+
+// ── P6: live socket frames ───────────────────────────────────────────────────
+
+describe('live repair frames', () => {
+  it('moves the tab badge and the master toggle from a pushed status frame', async () => {
+    routes({ '/api/repair/status': { enabled: false, findings_pending: 0 } });
+    render(<MaintenanceHero />);
+    await flush();
+
+    const badge = document.getElementById('repair-findings-tab-badge') as HTMLElement;
+    const toggle = document.getElementById('repair-master-toggle') as HTMLInputElement;
+    expect(badge.style.display).toBe('none');
+    expect(toggle.checked).toBe(false);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:repair-status', {
+          detail: { enabled: true, findings_pending: 12 },
+        }),
+      );
+    });
+
+    expect(badge.textContent).toBe('12');
+    expect(badge.style.display).toBe('');
+    expect(toggle.checked).toBe(true);
+    expect(document.getElementById('repair-master-label')?.textContent).toBe('Enabled');
+  });
+
+  it('hides the badge again when a frame drops the count to zero', async () => {
+    routes({ '/api/repair/status': { enabled: true, findings_pending: 5 } });
+    render(<MaintenanceHero />);
+    await flush();
+    expect(
+      (document.getElementById('repair-findings-tab-badge') as HTMLElement).style.display,
+    ).toBe('');
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:repair-status', { detail: { enabled: true, findings_pending: 0 } }),
+      );
+    });
+    expect(
+      (document.getElementById('repair-findings-tab-badge') as HTMLElement).style.display,
+    ).toBe('none');
+  });
+
+  it('MERGES a partial job-progress frame instead of replacing the map', async () => {
+    // The vanilla iterates Object.entries(data) and touches only the jobs named
+    // in the frame. Replacing the map would blank every other job's live panel
+    // the moment one job reported.
+    routes({
+      '/api/repair/jobs': {
+        jobs: [job(), job({ job_id: 'dead_file_cleaner', display_name: 'Dead File Cleaner' })],
+      },
+      '/api/repair/progress': {
+        orphan_file_detector: { status: 'running', progress: 40, phase: 'Scanning' },
+        dead_file_cleaner: { status: 'running', progress: 10, phase: 'Starting' },
+      },
+    });
+    render(<MaintenanceHero />);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.repair-progress-phase')).toHaveLength(2),
+    );
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:repair-progress', {
+          detail: { orphan_file_detector: { status: 'running', progress: 90, phase: 'Nearly' } },
+        }),
+      );
+    });
+
+    const cards = document.querySelectorAll('.repair-job-card');
+    const orphan = [...cards].find(
+      (card) => (card as HTMLElement).dataset.jobId === 'orphan_file_detector',
+    ) as HTMLElement;
+    const dead = [...cards].find(
+      (card) => (card as HTMLElement).dataset.jobId === 'dead_file_cleaner',
+    ) as HTMLElement;
+
+    expect(orphan.querySelector('.repair-progress-phase')?.textContent).toBe('Nearly');
+    // The untouched job keeps its own frame.
+    expect(dead.querySelector('.repair-progress-phase')?.textContent).toBe('Starting');
+  });
+
+  it('ignores an empty progress frame', async () => {
+    routes({
+      '/api/repair/jobs': { jobs: [job()] },
+      '/api/repair/progress': {
+        orphan_file_detector: { status: 'running', progress: 40, phase: 'Scanning' },
+      },
+    });
+    render(<MaintenanceHero />);
+    await waitFor(() => expect(document.querySelector('.repair-progress-phase')).not.toBeNull());
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('ss:repair-progress', { detail: {} }));
+    });
+    expect(document.querySelector('.repair-progress-phase')?.textContent).toBe('Scanning');
+  });
+});

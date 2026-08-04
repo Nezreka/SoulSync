@@ -9,8 +9,12 @@
  * Two contracts from the P0 that outlive this file:
  *
  * 1. `.repair-job-card[data-job-id]` is how the vanilla socket handler finds a
- *    card to write progress into. It is preserved even though React drives the
- *    panel itself, because P6 has not severed that handler yet.
+ *    card to write progress into. P6 added the `ss:repair-progress` seam this
+ *    component actually reads, but it was purely ADDITIVE — the vanilla handler
+ *    still runs and still queries that selector. It only stops mattering when P7
+ *    deletes the vanilla tools markup, at which point the selector finds nothing
+ *    and its `if (!card) continue` makes it a no-op. Keep the attribute until
+ *    then.
  *
  * 2. The class on the card is NOT the class on the status dot. An idle enabled
  *    job gets dot 'enabled' and card class '' — see repairJobCardClass.
@@ -44,6 +48,7 @@ import {
   repairJobMeta,
   repairSettingInput,
 } from '../-tools.core';
+import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { FindingsTab } from './findings-tab';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
@@ -553,6 +558,26 @@ export function MaintenanceHero() {
       setFindingsPending(status.findings_pending || 0);
     });
   }, []);
+
+  // Live push. The vanilla's `updateRepairStatusFromData` writes the orb and its
+  // tooltip (dashboard markup it owns); the same frame arrives here for the two
+  // nodes this component owns. Without it the badge and the toggle only moved
+  // when something in this page happened to refetch.
+  useRepairStatusEvent(
+    useCallback((frame) => {
+      setEnabled(Boolean(frame.enabled));
+      setFindingsPending(frame.findings_pending || 0);
+    }, []),
+  );
+
+  // Job frames are PARTIAL — the vanilla iterates Object.entries(data) and
+  // touches only the jobs named in it, leaving the rest alone. Merge, never
+  // replace, or a frame about one job would blank every other job's panel.
+  useRepairProgressEvent(
+    useCallback((frames) => {
+      if (Object.keys(frames).length) setProgress((previous) => ({ ...previous, ...frames }));
+    }, []),
+  );
 
   // `openRepairModal` hydrated the master state, the job list and any in-flight
   // progress on open; the tab switch drove the rest.

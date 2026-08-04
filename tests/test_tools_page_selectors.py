@@ -381,3 +381,68 @@ def test_repeat_bound_initialisers_are_idempotent(helper_name: str):
     assert "_toolsWired" in body, (
         f"{helper_name} runs on every Tools visit; guard its bindings with a _toolsWired flag"
     )
+
+
+# ── P6: the socket → React seam ──────────────────────────────────────────────
+#
+# core.js re-broadcasts three socket frames as window CustomEvents so the React
+# Tools page can subscribe (its `socket` is a module-scoped `let`, unreachable
+# from a module). These are the only live path for the maintenance hero's badge,
+# master toggle and job progress, and for the media-scan card — deleting one is
+# silent, so it is guarded here rather than trusted.
+
+TOOLS_SHELL_EVENTS = {
+    "ss:repair-status": "enrichment:repair",
+    "ss:repair-progress": "repair:progress",
+    "ss:media-scan": "scan:media",
+}
+
+
+@pytest.mark.parametrize("event_name,socket_name", sorted(TOOLS_SHELL_EVENTS.items()))
+def test_core_rebroadcasts_the_tools_socket_frames(event_name: str, socket_name: str) -> None:
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert f"socket.on('{socket_name}'" in core, f"{socket_name} handler is gone from core.js"
+    assert f"CustomEvent('{event_name}'" in core, (
+        f"core.js no longer re-broadcasts {socket_name} as {event_name}; the React "
+        "Tools page has no other live source for it"
+    )
+
+
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_react_subscribes_to_every_rebroadcast(event_name: str) -> None:
+    events = (WEBUI / "src" / "routes" / "tools" / "-tools.events.ts").read_text(encoding="utf-8")
+    assert f"'{event_name}'" in events, f"{event_name} is broadcast but nothing subscribes"
+
+
+def test_media_scan_never_reads_the_phantom_is_scanning_field() -> None:
+    """`is_scanning` is in no payload.
+
+    Both /api/scan/status and the scan:media emit return
+    web_scan_manager.get_scan_status(), which reports
+    status: 'idle' | 'scheduled' | 'scanning'. Branching on `is_scanning` made
+    the "Media server scanning..." arm unreachable, so the live progress message
+    never appeared.
+    """
+    handler = (STATIC / "media-player.js").read_text(encoding="utf-8")
+    body = handler.split("function updateMediaScanFromData")[1].split("\nfunction ")[0]
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if "is_scanning" in line and not line.strip().startswith("//")
+    ]
+    assert not offenders, f"updateMediaScanFromData reads a field no payload has: {offenders}"
+
+
+def test_media_scan_completion_requires_a_previous_scanning_frame() -> None:
+    """A bare idle frame is not a finished scan.
+
+    The server pushes scan:media every two seconds whether or not anything is
+    running, so without this guard every page load announced a completed scan.
+    """
+    handler = (STATIC / "media-player.js").read_text(encoding="utf-8")
+    body = handler.split("function updateMediaScanFromData")[1].split("\nfunction ")[0]
+    assert "wasScanning" in body, (
+        "updateMediaScanFromData no longer distinguishes a real completion from "
+        "the idle frame the server sends every 2s"
+    )
+    assert "if (!wasScanning) return;" in body

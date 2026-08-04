@@ -20,11 +20,22 @@
  * Here the poll counts every tick and the hook clears it on unmount, so neither
  * can come back.
  *
- * P6 HANDOFF: the vanilla `updateMediaScanFromData` (media-player.js) is still
- * bound to `scan:media` and writes straight into #media-scan-phase-label /
- * -progress-bar / -status — ids this component now owns. Until P6 rewires the
- * socket, both can write the same nodes. It is not harmful (they agree on the
- * text) but it must be severed with the rest of the socket wiring, not left.
+ * P6: the card now takes the live `scan:media` frame through `ss:media-scan`
+ * rather than waiting on its own poll. The vanilla `updateMediaScanFromData`
+ * still runs and still writes #media-scan-* — those nodes only disappear when P7
+ * deletes the vanilla markup, at which point its getElementById guards make it a
+ * no-op. Both agree on the text meanwhile.
+ *
+ * Two live bugs P6 found in that handler and fixed on BOTH sides:
+ *
+ *   - `is_scanning` is a phantom field. /api/scan/status and the scan:media emit
+ *     both return web_scan_manager.get_scan_status(), which reports
+ *     status: 'idle' | 'scheduled' | 'scanning' and has never carried
+ *     is_scanning — so the "Media server scanning…" arm was unreachable in the
+ *     vanilla AND in this card's poll, which had faithfully ported the typo.
+ *   - a bare idle frame is not a completed scan. The server pushes scan:media
+ *     every two seconds regardless of activity, so treating idle as "finished"
+ *     popped "✅ Media scan completed" about two seconds after EVERY page load.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -45,6 +56,7 @@ import {
   stopMetadataUpdate,
 } from '../-tools.api';
 import { backupSummary, backupTimestamp } from '../-tools.core';
+import { isMediaScanCompletion, mediaScanStatusKey, useMediaScanEvent } from '../-tools.events';
 import { usePolledStatus } from '../-tools.polling';
 import { ToolCard, ToolProgress } from './tool-card';
 
@@ -135,7 +147,7 @@ export function MediaScanCard() {
       }
       void fetchMediaScanStatus().then((state) => {
         if (!state) return; // a blip is not a result
-        if (state.is_scanning) {
+        if (state.status === 'scanning') {
           setPhase('Media server scanning...');
           setDetails(state.progress_message || 'Scan in progress');
         } else if (state.status === 'idle') {
@@ -144,6 +156,31 @@ export function MediaScanCard() {
       });
     }, SCAN_POLL_MS);
   }, [clearTimers, finish]);
+
+  /** The vanilla's `_lastMediaScanStatus`, per card instead of per module. */
+  const lastScanKey = useRef<string | null>(null);
+
+  // Live frames. Mirrors updateMediaScanFromData: the scanning arm only relabels,
+  // and only a scanning → idle transition counts as a completion.
+  useMediaScanEvent(
+    useCallback(
+      (frame) => {
+        if (!frame.success || !frame.status) return;
+        const key = mediaScanStatusKey(frame.status);
+        const previous = lastScanKey.current;
+        if (previous === key && key !== 'scanning') return;
+        lastScanKey.current = key;
+
+        if (key === 'scanning') {
+          setPhase('Media server scanning...');
+          setDetails(frame.status.progress_message || 'Scan in progress');
+        } else if (isMediaScanCompletion(previous, key)) {
+          finish();
+        }
+      },
+      [finish],
+    ),
+  );
 
   const onClick = useCallback(async () => {
     setBusy(true);

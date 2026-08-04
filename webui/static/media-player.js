@@ -554,7 +554,13 @@ function updateDiscoveryProgressFromData(data) {
 function updateMediaScanFromData(data) {
     if (!data.success || !data.status) return;
     const status = data.status;
-    const statusKey = status.is_scanning ? 'scanning' : (status.status || 'unknown');
+    // `is_scanning` is a phantom field. Both this socket frame and
+    // /api/scan/status return web_scan_manager.get_scan_status(), which reports
+    // status: 'idle' | 'scheduled' | 'scanning' and has NEVER carried
+    // is_scanning. Branching on it made the "Media server scanning..." arm below
+    // unreachable, so the live progress message never appeared.
+    const statusKey = status.status || 'unknown';
+    const wasScanning = _lastMediaScanStatus === 'scanning';
     if (_lastMediaScanStatus === statusKey && statusKey !== 'scanning') return;
     _lastMediaScanStatus = statusKey;
 
@@ -567,10 +573,17 @@ function updateMediaScanFromData(data) {
     const progressBar = document.getElementById('media-scan-progress-bar');
     const statusValue = document.getElementById('media-scan-status');
 
-    if (status.is_scanning) {
+    if (statusKey === 'scanning') {
         if (phaseLabel) phaseLabel.textContent = 'Media server scanning...';
         if (progressLabel) progressLabel.textContent = status.progress_message || 'Scan in progress';
-    } else if (status.status === 'idle') {
+    } else if (statusKey === 'idle') {
+        // Only a REAL completion counts. The server pushes scan:media every two
+        // seconds whether or not anything is running (web_server.py's status
+        // loop), and an idle payload is exactly what it sends when nothing has
+        // ever run — so without this guard every page load popped
+        // "Media scan completed" about two seconds in and relabelled the card
+        // as though a scan had just finished.
+        if (!wasScanning) return;
         if (button) button.disabled = false;
         if (phaseLabel) phaseLabel.textContent = 'Scan completed successfully';
         if (progressBar) progressBar.style.width = '0%';

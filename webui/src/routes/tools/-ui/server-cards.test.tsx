@@ -523,3 +523,109 @@ describe('BackupManagerCard', () => {
     });
   });
 });
+
+// ── P6: live scan:media frames ───────────────────────────────────────────────
+
+describe('MediaScanCard — live scan:media frames', () => {
+  async function mounted() {
+    routes({ 'active-media-server': server('plex') });
+    const view = render(<MediaScanCard />);
+    await waitFor(() => expect(view.container.querySelector('#media-scan-card')).not.toBeNull());
+    return view;
+  }
+
+  async function push(status: Record<string, unknown>) {
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('ss:media-scan', { detail: { success: true, status } }));
+    });
+  }
+
+  it('does NOT claim a completed scan on a bare idle frame', async () => {
+    // The server pushes scan:media every 2s regardless of activity, so this is
+    // the frame that arrives on every page load. The vanilla treated it as a
+    // finished scan and popped a success toast each time.
+    const { container } = await mounted();
+    await push({ status: 'idle' });
+
+    expect(toastSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Media scan completed'),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(container.querySelector('#media-scan-phase-label')?.textContent).toBe('Ready to scan');
+  });
+
+  it('shows live progress from a scanning frame', async () => {
+    // This is the arm the vanilla could never reach: it branched on the phantom
+    // `is_scanning`, which no payload has ever carried.
+    const { container } = await mounted();
+    await push({ status: 'scanning', progress_message: 'Indexing 402 albums' });
+
+    expect(container.querySelector('#media-scan-phase-label')?.textContent).toBe(
+      'Media server scanning...',
+    );
+    expect(container.querySelector('#media-scan-progress-label')?.textContent).toBe(
+      'Indexing 402 albums',
+    );
+  });
+
+  it('falls back to a generic message when the frame carries none', async () => {
+    const { container } = await mounted();
+    await push({ status: 'scanning' });
+    expect(container.querySelector('#media-scan-progress-label')?.textContent).toBe(
+      'Scan in progress',
+    );
+  });
+
+  it('treats scanning → idle as a real completion', async () => {
+    const { container } = await mounted();
+    await push({ status: 'scanning', progress_message: 'Working' });
+    await push({ status: 'idle' });
+
+    expect(container.querySelector('#media-scan-phase-label')?.textContent).toBe(
+      'Scan completed successfully',
+    );
+    expect(container.querySelector('#media-scan-status')?.textContent).toBe('Idle');
+    expect(toastSpy).toHaveBeenCalledWith('✅ Media scan completed', 'success', 3000);
+  });
+
+  it('reports a completion once, not on every idle frame that follows', async () => {
+    await mounted();
+    await push({ status: 'scanning' });
+    await push({ status: 'idle' });
+    await push({ status: 'idle' });
+    await push({ status: 'idle' });
+
+    const completions = toastSpy.mock.calls.filter((call) =>
+      String(call[0]).includes('Media scan completed'),
+    );
+    expect(completions).toHaveLength(1);
+  });
+
+  it('ignores a frame with no status payload', async () => {
+    const { container } = await mounted();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('ss:media-scan', { detail: { success: true } }));
+      window.dispatchEvent(
+        new CustomEvent('ss:media-scan', {
+          detail: { success: false, status: { status: 'idle' } },
+        }),
+      );
+    });
+    expect(container.querySelector('#media-scan-phase-label')?.textContent).toBe('Ready to scan');
+  });
+
+  it('detaches on unmount', async () => {
+    const { unmount } = await mounted();
+    unmount();
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:media-scan', {
+          detail: { success: true, status: { status: 'scanning' } },
+        }),
+      );
+    });
+    // Nothing left to write into, and no error from a stale listener.
+    expect(document.querySelector('#media-scan-phase-label')).toBeNull();
+  });
+});
