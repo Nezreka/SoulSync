@@ -63,6 +63,7 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('label-detail')?.kind).toBe('react');
     expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
     expect(getShellRouteByPageId('playlist-explorer')?.kind).toBe('react');
+    expect(getShellRouteByPageId('tools')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'search',
       'discover',
@@ -73,6 +74,7 @@ describe('shellRouteManifest', () => {
       'active-downloads',
       'import',
       'library',
+      'tools',
       'artist-detail',
       'label-detail',
       'stats',
@@ -83,7 +85,8 @@ describe('shellRouteManifest', () => {
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
     expect(resolveLegacyShellPageFromPath('/sync')).toBe('sync');
-    expect(resolveLegacyShellPageFromPath('/tools')).toBe('tools');
+    // React owns /tools now.
+    expect(resolveLegacyShellPageFromPath('/tools')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();

@@ -166,10 +166,19 @@ def _page_of_id() -> dict[str, str]:
     return mapping
 
 
+# P7 moved the Tools markup out of index.html and into React. These guards follow
+# it: the contract they protect (a `?` button with no help entry, a class selector
+# that matches nothing) is unchanged, only the file that renders it moved.
+TOOLS_REACT_DIR = WEBUI / "src" / "routes" / "tools"
+
+
 def _tools_region() -> str:
-    """The #tools-page markup, start tag through its matching close."""
-    start, end = _page_spans()[TOOLS_PAGE_ID]
-    return "\n".join(_html().split("\n")[start - 1 : end])
+    """Every non-test React source that renders the Tools page."""
+    return "\n".join(
+        f.read_text(encoding="utf-8")
+        for f in sorted(TOOLS_REACT_DIR.rglob("*.tsx"))
+        if ".test." not in f.name
+    )
 
 
 def test_get_element_by_id_never_names_a_css_class():
@@ -194,13 +203,26 @@ def test_get_element_by_id_never_names_a_css_class():
     assert not offenders, "getElementById called with a class name:\n  " + "\n  ".join(offenders)
 
 
+def _react_tools_classes() -> set[str]:
+    """Class names rendered by the React Tools page, both literal and templated."""
+    source = _tools_region()
+    found: set[str] = set()
+    # `className=` and any *ClassName prop ToolCard forwards to one (infoClassName,
+    # valueClassName, ...). Missing those reads a rendered class as a dead selector.
+    for match in re.finditer(r'\b\w*[Cc]lassName=["`]([^"`{}]+)["`]', source):
+        found.update(match.group(1).split())
+    for match in re.finditer(r"\b\w*[Cc]lassName=\{`([^`]*)`\}", source):
+        found.update(re.findall(r"[a-z][a-z0-9-]+", match.group(1)))
+    return found
+
+
 def test_tools_closure_class_selectors_resolve():
     """A `.foo` selector in the Tools closure must match a class that exists.
 
     `openRepairModal` scrolled to `.tools-maintenance-section` for however long;
     the hero's class is `tools-maintenance-hero`, so the scroll never happened.
     """
-    classes = _all_classes()
+    classes = _all_classes() | _react_tools_classes()
     offenders = []
     for name, src in _static_js().items():
         if name not in TOOLS_CLOSURE_FILES:
@@ -219,8 +241,14 @@ def test_repair_hero_selector_is_scoped_to_the_music_tools_page():
     """`.tools-maintenance-hero` exists TWICE — video tools uses it too, and comes
     first in the document. An unscoped query lands on the wrong hero."""
     html = _html()
-    assert html.count('class="tools-maintenance-hero"') == 2, (
-        "expected exactly two maintenance heroes (music + video); update this guard if that changed"
+    # Since P7 only the VIDEO hero is markup; the music one is rendered by React.
+    # The scoping still matters: the video hero is in the document either way, so
+    # an unscoped query from enrichment.js would land on it.
+    assert html.count('class="tools-maintenance-hero"') == 1, (
+        "expected exactly one maintenance hero in markup (video); the music one is React"
+    )
+    assert 'className="tools-maintenance-hero"' in _tools_region(), (
+        "the React maintenance hero must keep this class — openRepairModal scrolls to it"
     )
     enrichment = _read(STATIC / "enrichment.js")
     assert "'#tools-page .tools-maintenance-hero'" in enrichment, (
@@ -232,8 +260,13 @@ def test_every_tool_help_button_has_help_content():
     """A `?` button whose data-tool has no TOOL_HELP_CONTENT entry does nothing
     but log a console warning — a visibly dead control."""
     region = _tools_region()
-    declared = sorted(set(re.findall(r'data-tool="([^"]+)"', region)))
-    assert declared, "expected the Tools page to carry data-tool help buttons"
+    # ToolCard renders `data-tool` from its helpTool prop; the video tools page
+    # still uses the raw attribute, so accept both spellings.
+    declared = sorted(
+        set(re.findall(r'data-tool="([^"]+)"', region))
+        | set(re.findall(r'helpTool="([^"]+)"', region))
+    )
+    assert declared, "expected the Tools page to carry help buttons"
 
     src = _read(STATIC / "wishlist-tools.js")
     start = src.index("const TOOL_HELP_CONTENT")
