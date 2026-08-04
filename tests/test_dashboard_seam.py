@@ -113,3 +113,48 @@ def test_react_subscribes_to_every_event() -> None:
         "ss:rate-monitor",
     ]:
         assert f"'{name}'" in events, f"{name} is broadcast but -dash.events.ts never names it"
+
+
+# ── The AudioDB logo rehome (P8) ─────────────────────────────────────────────
+#
+# The logo lived ONLY as a 40KB base64 line inside the dashboard markup, and
+# TWO shipped React pages resolved it off that DOM (artist-detail via
+# getAudioDBLogoURL, library by querying img.audiodb-logo directly). Deleting
+# the markup would have silently degraded both to their text fallbacks — no
+# error, no failing test. The asset is a real file now.
+
+BRANDS = WEBUI / "static" / "img" / "brands"
+
+
+def test_audiodb_logo_is_a_real_file() -> None:
+    png = (BRANDS / "audiodb.png").read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", "audiodb.png is not a PNG"
+    assert len(png) > 10_000, "suspiciously small — extraction went wrong"
+
+
+def test_index_html_uses_the_file_not_the_inline_base64() -> None:
+    html = (WEBUI / "index.html").read_text(encoding="utf-8", errors="replace")
+    assert '"/static/img/brands/audiodb.png"' in html
+    assert "data:image/png;base64,iVBOR" not in html, (
+        "the 40KB inline AudioDB logo is back in index.html"
+    )
+
+
+def test_get_audiodb_logo_url_survives_the_markup_deletion() -> None:
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert "const AUDIODB_LOGO_URL = '/static/img/brands/audiodb.png';" in core
+    body = _handler_body("core.js", "getAudioDBLogoURL")
+    assert ": AUDIODB_LOGO_URL" in body, (
+        "getAudioDBLogoURL fell back to null again — with the dashboard markup "
+        "gone, artist-detail and library lose the logo silently"
+    )
+
+
+def test_library_helper_defers_to_core_first() -> None:
+    helper = (
+        WEBUI / "src" / "routes" / "library" / "-library.helpers.ts"
+    ).read_text(encoding="utf-8")
+    assert "window.getAudioDBLogoURL?.()" in helper, (
+        "the library page queries img.audiodb-logo directly again — off the "
+        "dashboard route that node no longer exists"
+    )

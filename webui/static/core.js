@@ -1168,6 +1168,7 @@ function handleDashboardWishlistCount(data) {
 // ===============================
 
 // --- Service Integration Logo Constants ---
+const AUDIODB_LOGO_URL = '/static/img/brands/audiodb.png';
 const MUSICBRAINZ_LOGO_URL = '/static/img/brands/musicbrainz.png';
 const DEEZER_LOGO_URL = '/static/img/brands/deezer.png';
 const SPOTIFY_LOGO_URL = '/static/img/brands/spotify.png';
@@ -1179,7 +1180,15 @@ const QOBUZ_LOGO_URL = '/static/img/brands/qobuz.svg';
 const DISCOGS_LOGO_URL = '/static/img/brands/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
 const BANDCAMP_LOGO_URL = '/static/img/brands/bandcamp.svg';
-function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
+function getAudioDBLogoURL() {
+    // The logo used to live ONLY as a 40KB base64 line inside the dashboard
+    // markup, read off the DOM here. It is a real file now
+    // (static/img/brands/audiodb.png, extracted from that exact line), so this
+    // no longer depends on any page's markup being mounted — the DOM read is
+    // kept first purely so an override of the img keeps winning.
+    const el = document.querySelector('img.audiodb-logo');
+    return el ? el.src : AUDIODB_LOGO_URL;
+}
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
