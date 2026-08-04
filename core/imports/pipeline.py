@@ -250,6 +250,26 @@ def _record_replaced_file_path(context: dict, removed_path: str) -> None:
         logger.debug("replaced-path bookkeeping skipped: %s", exc)
 
 
+def _resolve_enhance_original_path(recorded_path: str) -> str:
+    """Map an enhance's recorded library path onto this process's mounts.
+
+    Stored library paths are the media server's view ("/music/…"); this process
+    may mount the same library somewhere else entirely. Returns the recorded
+    path unchanged when it already exists or nothing better is found, so the
+    caller's existence check stays the single decision point (#1109).
+    """
+    if not recorded_path or os.path.exists(recorded_path):
+        return recorded_path
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        resolved = resolve_library_file_path(
+            recorded_path, config_manager=config_manager)
+    except Exception as exc:  # noqa: BLE001 — resolution is best-effort
+        logger.debug("[Enhance] could not resolve %r: %s", recorded_path, exc)
+        return recorded_path
+    return resolved or recorded_path
+
+
 def _retire_lib2_path_after_redownload(old_path: str, new_path: str) -> None:
     """Point the lib2 row of a redownloaded track at its new file (dd28-08).
 
@@ -1958,7 +1978,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             _journal_previous_file_replaced(context, reason=_replace_reason)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
-            original_enhance_path = _enhance_source_info['original_file_path']
+            # #1109: the recorded path is the media server's view of the
+            # library. Resolve it to this process's mount first, or the
+            # superseded file is never found — os.path.exists() said False and
+            # the branch below happily logged "Replaced in-place" while the old
+            # copy stayed on disk next to the new one.
+            _recorded_enhance_path = _enhance_source_info['original_file_path']
+            original_enhance_path = _resolve_enhance_original_path(
+                _recorded_enhance_path)
             if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
                 try:
                     os.remove(original_enhance_path)
@@ -1967,6 +1994,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     # retired explicitly — autolink keys on (track_id, path)
                     # and would otherwise just add a second row.
                     _record_replaced_file_path(context, original_enhance_path)
+                    # The catalog row may hold either form of the path; retire
+                    # both so a resolved deletion still clears the stored row.
+                    _record_replaced_file_path(context, _recorded_enhance_path)
                     old_fmt = os.path.splitext(original_enhance_path)[1]
                     new_fmt = os.path.splitext(final_path)[1]
                     logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")

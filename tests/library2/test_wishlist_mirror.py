@@ -179,3 +179,21 @@ def test_artist_mirror_uses_non_spotify_provider_identity(imported_conn):
         "source": "deezer",
         "quality_profile_id": 1,
     }
+
+
+def test_upgrade_payload_never_sets_the_legacy_enhance_flag(imported_conn):
+    """#1109 guard: the legacy Artist-Enhance flag makes the import pipeline
+    write the upgrade back to ``original_file_path``'s folder. That path is the
+    MEDIA SERVER's view of the library, which this process usually cannot
+    reach. The V2 upgrade tool must keep using the normal path template, so it
+    must never set ``enhance`` — even though it records the original path for
+    retirement/quality comparison."""
+    track_id = _seed(imported_conn, policy="until_cutoff")
+
+    payload = track_wishlist_payload(imported_conn, track_id)
+
+    assert payload is not None
+    source_info = payload["_source_info"]
+    assert source_info["upgrade_check"] is True
+    assert source_info.get("original_file_path")
+    assert "enhance" not in source_info
