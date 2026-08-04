@@ -1,0 +1,499 @@
+{
+  "_comment": "Generated from core/library/duplicate_keep.py by tests/test_duplicate_keep_ui_parity.py. Do not hand-edit \u2014 regenerate.",
+  "rank_by_path": {
+    "/m/a/song.flac": 10,
+    "/m/a/song.FLAC": 10,
+    "/m/a/song.wav": 9,
+    "/m/a/song.aiff": 9,
+    "/m/a/song.aif": 9,
+    "/m/a/song.ape": 8,
+    "/m/a/song.m4a": 7,
+    "/m/a/song.ogg": 6,
+    "/m/a/song.opus": 6,
+    "/m/a/song.mp3": 5,
+    "/m/a/song.aac": 5,
+    "/m/a/song.wma": 3,
+    "/m/a/song.xyz": 1,
+    "/m/The B.B. Band/song.flac": 10,
+    "/m/a/noextension": 1,
+    "/m/a/trailingdot.": 1,
+    "": 1,
+    "song.mp3": 5
+  },
+  "groups": [
+    {
+      "name": "lossless with no bitrate still beats a high-bitrate mp3",
+      "tracks": [
+        {
+          "id": "mp3",
+          "file_path": "/m/a/song.mp3",
+          "bitrate": 320,
+          "duration": 210,
+          "track_number": 3
+        },
+        {
+          "id": "flac",
+          "file_path": "/m/a/song.flac",
+          "bitrate": 0,
+          "duration": 210,
+          "track_number": 3
+        }
+      ],
+      "keys": [
+        [
+          5,
+          320,
+          210,
+          3
+        ],
+        [
+          10,
+          0,
+          210,
+          3
+        ]
+      ],
+      "keeper_id": "flac"
+    },
+    {
+      "name": "missing bitrate key entirely, not just zero",
+      "tracks": [
+        {
+          "id": "mp3",
+          "file_path": "/m/a/song.mp3",
+          "bitrate": 282,
+          "duration": 200,
+          "track_number": 1
+        },
+        {
+          "id": "flac",
+          "file_path": "/m/a/song.flac",
+          "duration": 200,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          5,
+          282,
+          200,
+          1
+        ],
+        [
+          10,
+          0,
+          200,
+          1
+        ]
+      ],
+      "keeper_id": "flac"
+    },
+    {
+      "name": "same format falls through to bitrate",
+      "tracks": [
+        {
+          "id": "low",
+          "file_path": "/m/a/x.mp3",
+          "bitrate": 128,
+          "duration": 180,
+          "track_number": 2
+        },
+        {
+          "id": "high",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 180,
+          "track_number": 2
+        }
+      ],
+      "keys": [
+        [
+          5,
+          128,
+          180,
+          2
+        ],
+        [
+          5,
+          320,
+          180,
+          2
+        ]
+      ],
+      "keeper_id": "high"
+    },
+    {
+      "name": "format and bitrate tied, duration breaks it",
+      "tracks": [
+        {
+          "id": "short",
+          "file_path": "/m/a/x.mp3",
+          "bitrate": 320,
+          "duration": 120,
+          "track_number": 2
+        },
+        {
+          "id": "long",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 240,
+          "track_number": 2
+        }
+      ],
+      "keys": [
+        [
+          5,
+          320,
+          120,
+          2
+        ],
+        [
+          5,
+          320,
+          240,
+          2
+        ]
+      ],
+      "keeper_id": "long"
+    },
+    {
+      "name": "only the track number differs \u2014 a real number beats a placeholder",
+      "tracks": [
+        {
+          "id": "placeholder",
+          "file_path": "/m/a/x.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 1
+        },
+        {
+          "id": "real",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 7
+        }
+      ],
+      "keys": [
+        [
+          5,
+          320,
+          200,
+          1
+        ],
+        [
+          5,
+          320,
+          200,
+          7
+        ]
+      ],
+      "keeper_id": "real"
+    },
+    {
+      "name": "total tie keeps the first",
+      "tracks": [
+        {
+          "id": "first",
+          "file_path": "/m/a/x.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 4
+        },
+        {
+          "id": "second",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 200,
+          "track_number": 4
+        }
+      ],
+      "keys": [
+        [
+          5,
+          320,
+          200,
+          4
+        ],
+        [
+          5,
+          320,
+          200,
+          4
+        ]
+      ],
+      "keeper_id": "first"
+    },
+    {
+      "name": "unknown extension ranks below every known one",
+      "tracks": [
+        {
+          "id": "weird",
+          "file_path": "/m/a/x.xyz",
+          "bitrate": 9999,
+          "duration": 999,
+          "track_number": 99
+        },
+        {
+          "id": "wma",
+          "file_path": "/m/a/y.wma",
+          "bitrate": 64,
+          "duration": 10,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          1,
+          9999,
+          999,
+          99
+        ],
+        [
+          3,
+          64,
+          10,
+          1
+        ]
+      ],
+      "keeper_id": "wma"
+    },
+    {
+      "name": "no file path at all ranks as unknown",
+      "tracks": [
+        {
+          "id": "nopath",
+          "bitrate": 9999,
+          "duration": 999,
+          "track_number": 99
+        },
+        {
+          "id": "aac",
+          "file_path": "/m/a/y.aac",
+          "bitrate": 64,
+          "duration": 10,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          1,
+          9999,
+          999,
+          99
+        ],
+        [
+          5,
+          64,
+          10,
+          1
+        ]
+      ],
+      "keeper_id": "aac"
+    },
+    {
+      "name": "extension case is ignored",
+      "tracks": [
+        {
+          "id": "shouty",
+          "file_path": "/m/a/x.FLAC",
+          "bitrate": 0,
+          "duration": 100,
+          "track_number": 1
+        },
+        {
+          "id": "mp3",
+          "file_path": "/m/a/y.mp3",
+          "bitrate": 320,
+          "duration": 100,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          10,
+          0,
+          100,
+          1
+        ],
+        [
+          5,
+          320,
+          100,
+          1
+        ]
+      ],
+      "keeper_id": "shouty"
+    },
+    {
+      "name": "dots in the directory don't confuse the extension",
+      "tracks": [
+        {
+          "id": "dotted",
+          "file_path": "/m/The B.B. Band/x.flac",
+          "bitrate": 0,
+          "duration": 100,
+          "track_number": 1
+        },
+        {
+          "id": "mp3",
+          "file_path": "/m/plain/y.mp3",
+          "bitrate": 320,
+          "duration": 100,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          10,
+          0,
+          100,
+          1
+        ],
+        [
+          5,
+          320,
+          100,
+          1
+        ]
+      ],
+      "keeper_id": "dotted"
+    },
+    {
+      "name": "aiff and aif rank the same, so bitrate decides",
+      "tracks": [
+        {
+          "id": "aif",
+          "file_path": "/m/a/x.aif",
+          "bitrate": 1000,
+          "duration": 100,
+          "track_number": 1
+        },
+        {
+          "id": "aiff",
+          "file_path": "/m/a/y.aiff",
+          "bitrate": 1411,
+          "duration": 100,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          9,
+          1000,
+          100,
+          1
+        ],
+        [
+          9,
+          1411,
+          100,
+          1
+        ]
+      ],
+      "keeper_id": "aiff"
+    },
+    {
+      "name": "ogg and opus rank the same too",
+      "tracks": [
+        {
+          "id": "opus",
+          "file_path": "/m/a/x.opus",
+          "bitrate": 128,
+          "duration": 100,
+          "track_number": 1
+        },
+        {
+          "id": "ogg",
+          "file_path": "/m/a/y.ogg",
+          "bitrate": 192,
+          "duration": 100,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          6,
+          128,
+          100,
+          1
+        ],
+        [
+          6,
+          192,
+          100,
+          1
+        ]
+      ],
+      "keeper_id": "ogg"
+    },
+    {
+      "name": "three copies across three tiers",
+      "tracks": [
+        {
+          "id": "m4a",
+          "file_path": "/m/a/x.m4a",
+          "bitrate": 256,
+          "duration": 200,
+          "track_number": 5
+        },
+        {
+          "id": "wav",
+          "file_path": "/m/a/y.wav",
+          "bitrate": 0,
+          "duration": 200,
+          "track_number": 5
+        },
+        {
+          "id": "ape",
+          "file_path": "/m/a/z.ape",
+          "bitrate": 900,
+          "duration": 200,
+          "track_number": 5
+        }
+      ],
+      "keys": [
+        [
+          7,
+          256,
+          200,
+          5
+        ],
+        [
+          9,
+          0,
+          200,
+          5
+        ],
+        [
+          8,
+          900,
+          200,
+          5
+        ]
+      ],
+      "keeper_id": "wav"
+    },
+    {
+      "name": "single track group",
+      "tracks": [
+        {
+          "id": "only",
+          "file_path": "/m/a/x.mp3",
+          "bitrate": 128,
+          "duration": 100,
+          "track_number": 1
+        }
+      ],
+      "keys": [
+        [
+          5,
+          128,
+          100,
+          1
+        ]
+      ],
+      "keeper_id": "only"
+    }
+  ]
+}

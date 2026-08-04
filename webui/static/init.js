@@ -3332,9 +3332,11 @@ async function loadPageData(pageId) {
                 // Load comparisons
                 loadHydrabaseComparisons();
                 break;
-            case 'tools':
-                await initializeToolsPage();
-                break;
+            // 'tools' is a React route now (P7). initializeToolsPage() wired the
+            // vanilla cards AND called switchRepairTab('jobs') + a 10s
+            // fetchAndUpdateDbStats interval — all of which write into ids and
+            // classes the React page renders, so leaving this case in would have
+            // it stomping React's own DOM on every visit.
             // 'wishlist' is a React route now — navigateToPage shows the React
             // host and never calls loadPageData for it.
             case 'automations':

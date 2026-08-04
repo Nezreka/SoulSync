@@ -1763,6 +1763,15 @@ async function updateRepairStatus() {
 }
 
 function updateRepairStatusFromData(data) {
+    // Re-broadcast FIRST, and from here rather than from the socket handler, for
+    // two reasons. (1) There are two callers: the socket, and updateRepairStatus()'s
+    // 5s HTTP poll, which is the ONLY live source on a client with no websocket —
+    // bridging just the socket would leave those clients with a frozen badge.
+    // (2) It must not sit behind the `if (!button) return;` below: #repair-button
+    // is the dashboard worker orb, and the React tools state has no business being
+    // gated on a node that belongs to another page.
+    window.dispatchEvent(new CustomEvent('ss:repair-status', { detail: data }));
+
     const button = document.getElementById('repair-button');
     if (!button) return;
 
@@ -1908,34 +1917,26 @@ function setRepairFindingsPageSize(value) {
 let _repairJobsCache = {}; // Cache job data for help modal
 
 /**
- * Open the Library Maintenance modal
+ * The dashboard worker orb's click target.
+ *
+ * P7: the Tools page is React now, and everything this used to do by hand — the
+ * jobs tab, the master toggle, replaying in-flight progress — the maintenance
+ * hero does for itself on mount. What it must NOT do is call switchRepairTab()
+ * or loadRepairJobs(): both are UNSCOPED (`.repair-tab`, `.repair-tab-content`,
+ * `#repair-jobs-list`) and React renders every one of those, so they would
+ * imperatively hide React's tab panels and overwrite its job list.
+ *
+ * The scroll survives because the port kept `#tools-page` and
+ * `.tools-maintenance-hero` on the React markup.
  */
-async function openRepairModal() {
+function openRepairModal() {
     navigateToPage('tools');
-    // Scroll to maintenance section
     setTimeout(() => {
-        // The class is `tools-maintenance-hero`, not `-section` — the old
-        // selector matched nothing so this never scrolled. Scope it to
-        // #tools-page: the VIDEO tools subpage carries the same class and comes
-        // first in the document, so an unscoped query lands on the wrong hero.
+        // Scope it to #tools-page: the VIDEO tools subpage carries the same hero
+        // class and comes first in the document.
         const section = document.querySelector('#tools-page .tools-maintenance-hero');
         if (section) section.scrollIntoView({ behavior: 'smooth' });
     }, 100);
-    _repairCurrentTab = 'jobs';
-    switchRepairTab('jobs');
-    // Load master toggle state
-    updateRepairStatus();
-    // Load any active job progress
-    try {
-        const resp = await fetch('/api/repair/progress');
-        if (resp.ok) {
-            const data = await resp.json();
-            if (Object.keys(data).length > 0) {
-                // Brief delay so job cards are rendered first
-                setTimeout(() => updateRepairJobProgressFromData(data), 300);
-            }
-        }
-    } catch (e) { /* ignore */ }
 }
 
 function closeRepairModal() {
@@ -2336,6 +2337,11 @@ const _repairProgressLogCounts = {};
 const _repairProgressHideTimers = {};
 
 function updateRepairJobProgressFromData(data) {
+    // Same reasoning as updateRepairStatusFromData: openRepairModal replays the
+    // in-flight frames through here on a 300ms timer, so bridging only the socket
+    // would drop that replay.
+    window.dispatchEvent(new CustomEvent('ss:repair-progress', { detail: data }));
+
     for (const [jobId, state] of Object.entries(data)) {
         const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
         if (!card) continue;

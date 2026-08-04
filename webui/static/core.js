@@ -816,6 +816,8 @@ function initializeWebSocket() {
     socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
+    // NB the ss:repair-status re-broadcast for the React tools page lives inside
+    // updateRepairStatusFromData, not here — the HTTP poller calls it too.
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed

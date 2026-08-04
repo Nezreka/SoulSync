@@ -1,6 +1,9 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["src/routeTree.gen.ts"],
+  "ignorePatterns": [
+    "src/routeTree.gen.ts",
+    "src/routes/tools/duplicate-keep-parity.json"
+  ],
   "singleQuote": true,
   "sortImports": {
     "groups": [

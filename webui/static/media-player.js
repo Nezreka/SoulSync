@@ -552,9 +552,20 @@ function updateDiscoveryProgressFromData(data) {
 }
 
 function updateMediaScanFromData(data) {
+    // Re-broadcast the frame verbatim, before this function's own guards — the
+    // bridge is a pure transport hop, and the React card applies the same checks
+    // itself. Kept here rather than in core.js so it travels with the handler.
+    window.dispatchEvent(new CustomEvent('ss:media-scan', { detail: data }));
+
     if (!data.success || !data.status) return;
     const status = data.status;
-    const statusKey = status.is_scanning ? 'scanning' : (status.status || 'unknown');
+    // `is_scanning` is a phantom field. Both this socket frame and
+    // /api/scan/status return web_scan_manager.get_scan_status(), which reports
+    // status: 'idle' | 'scheduled' | 'scanning' and has NEVER carried
+    // is_scanning. Branching on it made the "Media server scanning..." arm below
+    // unreachable, so the live progress message never appeared.
+    const statusKey = status.status || 'unknown';
+    const wasScanning = _lastMediaScanStatus === 'scanning';
     if (_lastMediaScanStatus === statusKey && statusKey !== 'scanning') return;
     _lastMediaScanStatus = statusKey;
 
@@ -567,11 +578,23 @@ function updateMediaScanFromData(data) {
     const progressBar = document.getElementById('media-scan-progress-bar');
     const statusValue = document.getElementById('media-scan-status');
 
-    if (status.is_scanning) {
+    if (statusKey === 'scanning') {
         if (phaseLabel) phaseLabel.textContent = 'Media server scanning...';
         if (progressLabel) progressLabel.textContent = status.progress_message || 'Scan in progress';
-    } else if (status.status === 'idle') {
+    } else if (statusKey === 'idle') {
+        // Re-enable on ANY return to idle, as the original did. A scheduled scan
+        // that is cancelled never reaches 'scanning', and handleMediaScanButtonClick
+        // (api-monitor.js) disables the button with nothing else to undo it —
+        // gating this behind wasScanning would strand it disabled, which is the
+        // exact bug class the bugfix PR already fixed once.
         if (button) button.disabled = false;
+        // The MESSAGING is what needs the guard. The server pushes scan:media
+        // every two seconds whether or not anything is running (web_server.py's
+        // status loop), and a bare idle payload is what it sends when nothing has
+        // ever run — so without this, every page load popped "Media scan
+        // completed" about two seconds in and relabelled the card as though a
+        // scan had just finished.
+        if (!wasScanning) return;
         if (phaseLabel) phaseLabel.textContent = 'Scan completed successfully';
         if (progressBar) progressBar.style.width = '0%';
         if (progressLabel) progressLabel.textContent = 'Ready for next scan';

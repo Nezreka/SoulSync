@@ -166,10 +166,19 @@ def _page_of_id() -> dict[str, str]:
     return mapping
 
 
+# P7 moved the Tools markup out of index.html and into React. These guards follow
+# it: the contract they protect (a `?` button with no help entry, a class selector
+# that matches nothing) is unchanged, only the file that renders it moved.
+TOOLS_REACT_DIR = WEBUI / "src" / "routes" / "tools"
+
+
 def _tools_region() -> str:
-    """The #tools-page markup, start tag through its matching close."""
-    start, end = _page_spans()[TOOLS_PAGE_ID]
-    return "\n".join(_html().split("\n")[start - 1 : end])
+    """Every non-test React source that renders the Tools page."""
+    return "\n".join(
+        f.read_text(encoding="utf-8")
+        for f in sorted(TOOLS_REACT_DIR.rglob("*.tsx"))
+        if ".test." not in f.name
+    )
 
 
 def test_get_element_by_id_never_names_a_css_class():
@@ -194,13 +203,26 @@ def test_get_element_by_id_never_names_a_css_class():
     assert not offenders, "getElementById called with a class name:\n  " + "\n  ".join(offenders)
 
 
+def _react_tools_classes() -> set[str]:
+    """Class names rendered by the React Tools page, both literal and templated."""
+    source = _tools_region()
+    found: set[str] = set()
+    # `className=` and any *ClassName prop ToolCard forwards to one (infoClassName,
+    # valueClassName, ...). Missing those reads a rendered class as a dead selector.
+    for match in re.finditer(r'\b\w*[Cc]lassName=["`]([^"`{}]+)["`]', source):
+        found.update(match.group(1).split())
+    for match in re.finditer(r"\b\w*[Cc]lassName=\{`([^`]*)`\}", source):
+        found.update(re.findall(r"[a-z][a-z0-9-]+", match.group(1)))
+    return found
+
+
 def test_tools_closure_class_selectors_resolve():
     """A `.foo` selector in the Tools closure must match a class that exists.
 
     `openRepairModal` scrolled to `.tools-maintenance-section` for however long;
     the hero's class is `tools-maintenance-hero`, so the scroll never happened.
     """
-    classes = _all_classes()
+    classes = _all_classes() | _react_tools_classes()
     offenders = []
     for name, src in _static_js().items():
         if name not in TOOLS_CLOSURE_FILES:
@@ -219,8 +241,14 @@ def test_repair_hero_selector_is_scoped_to_the_music_tools_page():
     """`.tools-maintenance-hero` exists TWICE — video tools uses it too, and comes
     first in the document. An unscoped query lands on the wrong hero."""
     html = _html()
-    assert html.count('class="tools-maintenance-hero"') == 2, (
-        "expected exactly two maintenance heroes (music + video); update this guard if that changed"
+    # Since P7 only the VIDEO hero is markup; the music one is rendered by React.
+    # The scoping still matters: the video hero is in the document either way, so
+    # an unscoped query from enrichment.js would land on it.
+    assert html.count('class="tools-maintenance-hero"') == 1, (
+        "expected exactly one maintenance hero in markup (video); the music one is React"
+    )
+    assert 'className="tools-maintenance-hero"' in _tools_region(), (
+        "the React maintenance hero must keep this class — openRepairModal scrolls to it"
     )
     enrichment = _read(STATIC / "enrichment.js")
     assert "'#tools-page .tools-maintenance-hero'" in enrichment, (
@@ -232,8 +260,13 @@ def test_every_tool_help_button_has_help_content():
     """A `?` button whose data-tool has no TOOL_HELP_CONTENT entry does nothing
     but log a console warning — a visibly dead control."""
     region = _tools_region()
-    declared = sorted(set(re.findall(r'data-tool="([^"]+)"', region)))
-    assert declared, "expected the Tools page to carry data-tool help buttons"
+    # ToolCard renders `data-tool` from its helpTool prop; the video tools page
+    # still uses the raw attribute, so accept both spellings.
+    declared = sorted(
+        set(re.findall(r'data-tool="([^"]+)"', region))
+        | set(re.findall(r'helpTool="([^"]+)"', region))
+    )
+    assert declared, "expected the Tools page to carry help buttons"
 
     src = _read(STATIC / "wishlist-tools.js")
     start = src.index("const TOOL_HELP_CONTENT")
@@ -380,4 +413,133 @@ def test_repeat_bound_initialisers_are_idempotent(helper_name: str):
     )
     assert "_toolsWired" in body, (
         f"{helper_name} runs on every Tools visit; guard its bindings with a _toolsWired flag"
+    )
+
+
+# ── P6: the socket → React seam ──────────────────────────────────────────────
+#
+# Three socket frames are re-broadcast as window CustomEvents so the React Tools
+# page can subscribe (its `socket` is a module-scoped `let`, unreachable from a
+# module). These are the only live path for the maintenance hero's badge, master
+# toggle and job progress, and for the media-scan card.
+#
+# The dispatch lives inside the HANDLER, not the socket binding, because:
+#   - updateRepairStatusFromData is also called by updateRepairStatus()'s 5s HTTP
+#     poll, which is the only live source on a client with no websocket;
+#   - updateRepairJobProgressFromData is replayed by openRepairModal on a timer;
+#   - and for repair status it must sit ABOVE `if (!button) return;` so the tools
+#     state is not gated on #repair-button, which is dashboard markup.
+# Binding the socket instead would silently drop those callers.
+
+
+def _handler_body(filename: str, handler: str, *, strip_comments: bool = False) -> str:
+    """The source of one top-level function, optionally without its comments.
+
+    The comment-stripped form matters for the ordering guards below: the
+    explanatory comments quote the exact lines being searched for, so a naive
+    `.index()` matches inside a comment and reports the wrong order.
+    """
+    source = (STATIC / filename).read_text(encoding="utf-8")
+    body = source.split(f"function {handler}")[1].split("\nfunction ")[0]
+    if not strip_comments:
+        return body
+    return "\n".join(
+        line for line in body.splitlines() if not line.strip().startswith("//")
+    )
+
+
+TOOLS_SHELL_EVENTS = {
+    # event name: (socket name, file that owns the handler, handler name)
+    "ss:repair-status": ("enrichment:repair", "enrichment.js", "updateRepairStatusFromData"),
+    "ss:repair-progress": ("repair:progress", "enrichment.js", "updateRepairJobProgressFromData"),
+    "ss:media-scan": ("scan:media", "media-player.js", "updateMediaScanFromData"),
+}
+
+
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_socket_binding_still_exists(event_name: str) -> None:
+    socket_name = TOOLS_SHELL_EVENTS[event_name][0]
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert f"socket.on('{socket_name}'" in core, f"{socket_name} handler is gone from core.js"
+
+
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_the_rebroadcast_lives_in_the_handler_not_the_socket_binding(event_name: str) -> None:
+    _socket_name, filename, handler = TOOLS_SHELL_EVENTS[event_name]
+    body = _handler_body(filename, handler)
+    assert f"CustomEvent('{event_name}'" in body, (
+        f"{handler} no longer re-broadcasts {event_name}; every non-socket caller "
+        "(the HTTP poller, the modal replay) would stop reaching the React page"
+    )
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert f"CustomEvent('{event_name}'" not in core, (
+        f"{event_name} is dispatched from core.js as well as {handler} — React "
+        "would receive every frame twice"
+    )
+
+
+def test_repair_status_rebroadcast_is_not_gated_on_the_dashboard_orb() -> None:
+    """The dispatch must precede `if (!button) return;`.
+
+    #repair-button is the worker orb in the DASHBOARD markup. Everything after
+    that guard — including the findings tab badge and the master toggle — used to
+    be unreachable whenever the orb was absent.
+    """
+    body = _handler_body("enrichment.js", "updateRepairStatusFromData", strip_comments=True)
+    dispatch_at = body.index("CustomEvent('ss:repair-status'")
+    guard_at = body.index("if (!button) return;")
+    assert dispatch_at < guard_at, (
+        "the ss:repair-status re-broadcast sits behind the #repair-button guard, "
+        "so the React tools page is once again gated on dashboard markup"
+    )
+
+
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_react_subscribes_to_every_rebroadcast(event_name: str) -> None:
+    events = (WEBUI / "src" / "routes" / "tools" / "-tools.events.ts").read_text(encoding="utf-8")
+    assert f"'{event_name}'" in events, f"{event_name} is broadcast but nothing subscribes"
+
+
+def test_media_scan_never_reads_the_phantom_is_scanning_field() -> None:
+    """`is_scanning` is in no payload.
+
+    Both /api/scan/status and the scan:media emit return
+    web_scan_manager.get_scan_status(), which reports
+    status: 'idle' | 'scheduled' | 'scanning'. Branching on `is_scanning` made
+    the "Media server scanning..." arm unreachable, so the live progress message
+    never appeared.
+    """
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
+    offenders = [line.strip() for line in body.splitlines() if "is_scanning" in line]
+    assert not offenders, f"updateMediaScanFromData reads a field no payload has: {offenders}"
+
+
+def test_media_scan_completion_requires_a_previous_scanning_frame() -> None:
+    """A bare idle frame is not a finished scan.
+
+    The server pushes scan:media every two seconds whether or not anything is
+    running, so without this guard every page load announced a completed scan.
+    """
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
+    assert "wasScanning" in body, (
+        "updateMediaScanFromData no longer distinguishes a real completion from "
+        "the idle frame the server sends every 2s"
+    )
+    assert "if (!wasScanning) return;" in body
+
+
+def test_media_scan_button_recovers_on_any_return_to_idle() -> None:
+    """The completion GUARD must not swallow the button re-enable.
+
+    handleMediaScanButtonClick (api-monitor.js) disables the button and nothing
+    else undoes it, so a scheduled scan that is cancelled — which never reaches
+    'scanning' — would strand it disabled.
+    """
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
+    idle_arm = body.split("else if (statusKey === 'idle')")[1]
+    enable_at = idle_arm.index("button.disabled = false")
+    guard_at = idle_arm.index("if (!wasScanning) return;")
+    assert enable_at < guard_at, (
+        "the button re-enable sits behind the completion guard; a cancelled "
+        "scheduled scan would leave Scan Library dead"
     )
