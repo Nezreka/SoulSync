@@ -10,7 +10,6 @@ Reference: https://github.com/transmission/transmission/blob/main/docs/rpc-spec.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import threading
 from typing import List, Optional
@@ -18,6 +17,7 @@ from typing import List, Optional
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
@@ -83,8 +83,7 @@ class TransmissionAdapter:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._check_connection_sync)
+        return await run_control(self._check_connection_sync)
 
     def _check_connection_sync(self) -> bool:
         resp = self._rpc('session-get', {})
@@ -139,10 +138,8 @@ class TransmissionAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_sync, url_or_magnet, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_sync, url_or_magnet, category, save_path)
 
     def _add_torrent_sync(
         self,
@@ -161,10 +158,8 @@ class TransmissionAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_file_sync, file_bytes, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_file_sync, file_bytes, category, save_path)
 
     def _add_torrent_file_sync(
         self,
@@ -192,8 +187,7 @@ class TransmissionAdapter:
         return str(torrent.get('hashString') or '') or None
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_status_sync, torrent_id)
+        return await run_control(self._get_status_sync, torrent_id)
 
     def _get_status_sync(self, torrent_id: str) -> Optional[TorrentStatus]:
         data = self._rpc('torrent-get', {
@@ -205,8 +199,7 @@ class TransmissionAdapter:
         return self._parse_status(data['torrents'][0])
 
     async def get_all(self) -> List[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_all_sync)
+        return await run_control(self._get_all_sync)
 
     def _get_all_sync(self) -> List[TorrentStatus]:
         data = self._rpc('torrent-get', {'fields': self._STATUS_FIELDS})
@@ -243,8 +236,7 @@ class TransmissionAdapter:
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._remove_sync, torrent_id, delete_files)
+        return await run_control(self._remove_sync, torrent_id, delete_files)
 
     def _remove_sync(self, torrent_id: str, delete_files: bool) -> bool:
         data = self._rpc('torrent-remove', {
@@ -254,15 +246,13 @@ class TransmissionAdapter:
         return data is not None
 
     async def pause(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._pause_sync, torrent_id)
+        return await run_control(self._pause_sync, torrent_id)
 
     def _pause_sync(self, torrent_id: str) -> bool:
         return self._rpc('torrent-stop', {'ids': [torrent_id]}) is not None
 
     async def resume(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._resume_sync, torrent_id)
+        return await run_control(self._resume_sync, torrent_id)
 
     def _resume_sync(self, torrent_id: str) -> bool:
         return self._rpc('torrent-start', {'ids': [torrent_id]}) is not None

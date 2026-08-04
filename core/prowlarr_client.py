@@ -25,13 +25,13 @@ Security → API Key.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_blocking
 from utils.logging_config import get_logger
 
 logger = get_logger("prowlarr_client")
@@ -141,8 +141,7 @@ class ProwlarrClient:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._check_connection_sync)
+        return await run_blocking(self._check_connection_sync)
 
     def _check_connection_sync(self) -> bool:
         data = self._api_get('system/status')
@@ -151,8 +150,7 @@ class ProwlarrClient:
     async def get_indexers(self) -> List[ProwlarrIndexer]:
         if not self.is_configured():
             return []
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_indexers_sync)
+        return await run_blocking(self._get_indexers_sync)
 
     def _get_indexers_sync(self) -> List[ProwlarrIndexer]:
         data = self._api_get('indexer')
@@ -251,9 +249,8 @@ class ProwlarrClient:
         """
         if not self.is_configured() or not query.strip():
             return []
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._search_sync, query, list(categories), list(indexer_ids or []),
+        return await run_blocking(
+            self._search_sync, query, list(categories), list(indexer_ids or []),
             limit, search_type, list(extra_params or []),
             self.resolve_search_timeout(timeout),
         )

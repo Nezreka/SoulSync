@@ -16,10 +16,10 @@ All three converge on the same eight verbs below.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, runtime_checkable
+
+from core.async_utils import run_blocking
 
 
 def normalize_client_url(raw: str) -> str:
@@ -143,12 +143,6 @@ class TorrentClientAdapter(Protocol):
 
 # ── server-side .torrent fetch (Sonarr-style handoff) ─────────────────────────
 
-_TORRENT_FETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=4,
-    thread_name_prefix="torrent-fetch",
-)
-
-
 def _strip_query(url: str) -> str:
     """Log-safe form of a download URL — Prowlarr links carry the API key in
     the query string."""
@@ -197,14 +191,7 @@ async def _fetch_torrent_payload_async(url: str):
     thread to wake that loop and avoids creating an executor Runner.close()
     must later join.
     """
-    worker = _TORRENT_FETCH_EXECUTOR.submit(fetch_torrent_payload, url)
-    try:
-        while not worker.done():
-            await asyncio.sleep(0.01)
-        return worker.result()
-    except asyncio.CancelledError:
-        worker.cancel()
-        raise
+    return await run_blocking(fetch_torrent_payload, url)
 
 
 async def add_torrent_smart(

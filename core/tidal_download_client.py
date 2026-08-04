@@ -33,6 +33,7 @@ import requests as http_requests
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.async_utils import run_blocking
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
@@ -515,8 +516,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
     async def check_connection(self) -> bool:
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self.is_available)
+            return await run_blocking(self.is_available)
         except Exception as e:
             logger.error(f"Tidal connection check failed: {e}")
             return False
@@ -637,7 +637,6 @@ class TidalDownloadClient(DownloadSourcePlugin):
             last_error: Optional[Exception] = None
             any_fallback_filtered_out = False
 
-            loop = asyncio.get_event_loop()
             for attempt_idx, attempt_query in enumerate(queries_to_try):
                 try:
                     q_copy = attempt_query
@@ -647,7 +646,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
                         results = self.session.search(q, models=[tidalapi.media.Track], limit=50)
                         return results.get('tracks', []) if isinstance(results, dict) else []
 
-                    found = await loop.run_in_executor(None, _search)
+                    found = await run_blocking(_search)
 
                     if found:
                         # Issue #589 — qualifier filter applies to ALL

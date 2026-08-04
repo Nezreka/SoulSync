@@ -11,7 +11,6 @@ and https://deluge.readthedocs.io/en/latest/reference/webapi.html
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import threading
 from itertools import count
@@ -20,6 +19,7 @@ from typing import Any, List, Optional
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
@@ -94,8 +94,7 @@ class DelugeAdapter:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._check_connection_sync)
+        return await run_control(self._check_connection_sync)
 
     def _check_connection_sync(self) -> bool:
         sess = self._ensure_session_sync()
@@ -169,10 +168,8 @@ class DelugeAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_sync, url_or_magnet, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_sync, url_or_magnet, category, save_path)
 
     def _add_torrent_sync(
         self,
@@ -203,10 +200,8 @@ class DelugeAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_file_sync, file_bytes, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_file_sync, file_bytes, category, save_path)
 
     def _add_torrent_file_sync(
         self,
@@ -237,8 +232,7 @@ class DelugeAdapter:
         self._rpc_sync('label.set_torrent', [torrent_hash, label])
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_status_sync, torrent_id)
+        return await run_control(self._get_status_sync, torrent_id)
 
     def _get_status_sync(self, torrent_id: str) -> Optional[TorrentStatus]:
         result = self._rpc_sync('core.get_torrent_status', [torrent_id, self._STATUS_FIELDS])
@@ -249,8 +243,7 @@ class DelugeAdapter:
         return self._parse_status(result)
 
     async def get_all(self) -> List[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_all_sync)
+        return await run_control(self._get_all_sync)
 
     def _get_all_sync(self) -> List[TorrentStatus]:
         result = self._rpc_sync('core.get_torrents_status', [{}, self._STATUS_FIELDS])
@@ -286,24 +279,21 @@ class DelugeAdapter:
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._remove_sync, torrent_id, delete_files)
+        return await run_control(self._remove_sync, torrent_id, delete_files)
 
     def _remove_sync(self, torrent_id: str, delete_files: bool) -> bool:
         result = self._rpc_sync('core.remove_torrent', [torrent_id, bool(delete_files)])
         return result is True
 
     async def pause(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._pause_sync, torrent_id)
+        return await run_control(self._pause_sync, torrent_id)
 
     def _pause_sync(self, torrent_id: str) -> bool:
         # Deluge 2.x core.pause_torrent takes a list of hashes.
         return self._rpc_sync('core.pause_torrent', [[torrent_id]]) is not None
 
     async def resume(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._resume_sync, torrent_id)
+        return await run_control(self._resume_sync, torrent_id)
 
     def _resume_sync(self, torrent_id: str) -> bool:
         return self._rpc_sync('core.resume_torrent', [[torrent_id]]) is not None

@@ -43,10 +43,7 @@ export function getShellContext(bridge = getShellBridge()): ShellContext | null 
 }
 
 /** Detail routes need an entity id in the URL, so they are never a landing page. */
-const HOME_FALLBACK_EXCLUDED: ReadonlySet<ShellPageId> = new Set([
-  'artist-detail',
-  'label-detail',
-]);
+const HOME_FALLBACK_EXCLUDED: ReadonlySet<ShellPageId> = new Set(['artist-detail', 'label-detail']);
 
 export function getProfileHomePath(bridge = getShellBridge()): `/${string}` {
   const pageId = bridge?.getProfileHomePage() ?? 'discover';
