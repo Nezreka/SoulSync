@@ -47,6 +47,11 @@ async function updateMusicBrainzStatus() {
 }
 
 function updateMusicBrainzStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'musicbrainz', data } }));
     const button = document.getElementById('musicbrainz-button');
     if (!button) return;
 
@@ -185,6 +190,11 @@ async function updateAudioDBStatus() {
 }
 
 function updateAudioDBStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'audiodb', data } }));
     const button = document.getElementById('audiodb-button');
     if (!button) return;
 
@@ -246,6 +256,11 @@ function updateAudioDBStatusFromData(data) {
 }
 
 function updateDiscogsStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'discogs', data } }));
     const button = document.getElementById('discogs-button');
     if (!button) return;
 
@@ -362,6 +377,11 @@ async function updateDeezerStatus() {
 }
 
 function updateDeezerStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'deezer', data } }));
     const button = document.getElementById('deezer-button');
     if (!button) return;
 
@@ -481,6 +501,11 @@ async function updateJioSaavnStatus() {
 }
 
 function updateJioSaavnStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'jiosaavn', data } }));
     const button = document.getElementById('jiosaavn-button');
     if (!button) return;
 
@@ -587,6 +612,11 @@ async function updateSpotifyEnrichmentStatus() {
 }
 
 function updateSpotifyEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'spotify', data } }));
     const button = document.getElementById('spotify-enrich-button');
     if (!button) return;
 
@@ -753,6 +783,11 @@ async function updateiTunesEnrichmentStatus() {
 }
 
 function updateiTunesEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'itunes', data } }));
     const button = document.getElementById('itunes-enrich-button');
     if (!button) return;
 
@@ -872,6 +907,11 @@ async function updateLastFMEnrichmentStatus() {
 }
 
 function updateLastFMEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'lastfm', data } }));
     const button = document.getElementById('lastfm-enrich-button');
     if (!button) return;
 
@@ -999,6 +1039,11 @@ async function updateGeniusEnrichmentStatus() {
 }
 
 function updateGeniusEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'genius', data } }));
     const button = document.getElementById('genius-enrich-button');
     if (!button) return;
 
@@ -1125,6 +1170,11 @@ async function updateBandcampEnrichmentStatus() {
 }
 
 function updateBandcampEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'bandcamp', data } }));
     const button = document.getElementById('bandcamp-enrich-button');
     if (!button) return;
 
@@ -1247,6 +1297,11 @@ async function updateTidalEnrichmentStatus() {
 }
 
 function updateTidalEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'tidal', data } }));
     const button = document.getElementById('tidal-enrich-button');
     if (!button) return;
 
@@ -1372,6 +1427,11 @@ async function updateQobuzEnrichmentStatus() {
 }
 
 function updateQobuzEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'qobuz', data } }));
     const button = document.getElementById('qobuz-enrich-button');
     if (!button) return;
 
@@ -1497,6 +1557,11 @@ async function updateAmazonEnrichmentStatus() {
 }
 
 function updateAmazonEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'amazon', data } }));
     const button = document.getElementById('amazon-enrich-button');
     if (!button) return;
 
@@ -1602,6 +1667,11 @@ async function updateSimilarArtistsEnrichmentStatus() {
 }
 
 function updateSimilarArtistsEnrichmentStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'similar_artists', data } }));
     const button = document.getElementById('similar-artists-enrich-button');
     if (!button) return;
 
@@ -1688,6 +1758,11 @@ async function updateHydrabaseStatus() {
 }
 
 function updateHydrabaseStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'hydrabase', data } }));
     const button = document.getElementById('hydrabase-button');
     if (!button) return;
 
@@ -1846,6 +1921,11 @@ function updateRepairStatusFromData(data) {
 // ── SoulID Worker Status ──
 
 function updateSoulIDStatusFromData(data) {
+    // Dispatched from the HANDLER (not the socket binding) so the 10s HTTP
+    // fallback pollers reach the React dashboard too — the tools-seam rule.
+    // One canonical channel for all providers; the per-provider socket names
+    // are a fifth, inconsistent registry the React side should not inherit.
+    window.dispatchEvent(new CustomEvent('ss:enrich-status', { detail: { id: 'soulid', data } }));
     const button = document.getElementById('soulid-button');
     if (!button) return;
 

@@ -936,6 +936,9 @@ setInterval(() => {
 }, 2000);
 
 function handleServiceStatusUpdate(data) {
+    // Re-broadcast for the React dashboard's service cards + library card
+    // (tools-seam rule: in the handler, so any future HTTP caller counts too).
+    window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
     // Cache for library status card
     _lastStatusPayload = data;
 
@@ -1032,6 +1035,8 @@ function _updateHeroBtnCount(buttonId, badgeId, count) {
 }
 
 function handleWatchlistCountUpdate(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:watchlist-count', { detail: data }));
     if (data.success) {
         _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
         // Update sidebar nav badge
@@ -1090,6 +1095,8 @@ function unsubscribeFromDownloadBatch(batchId) {
 // --- Phase 2: Dashboard event handlers ---
 
 function handleDashboardStats(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-stats', { detail: data }));
     // Same logic as fetchAndUpdateSystemStats response handler
     updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
     updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed downloads');
@@ -1103,11 +1110,15 @@ function handleDashboardStats(data) {
 }
 
 function handleDashboardActivity(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-activity', { detail: data }));
     // Same logic as fetchAndUpdateActivityFeed response handler
     updateActivityFeed(data.activities || []);
 }
 
 function handleDashboardToast(activity) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-toast', { detail: activity }));
     // Same logic as checkForActivityToasts response handler
     let toastType = 'info';
     if (activity.icon === '\u2705' || activity.title.includes('Complete')) {
@@ -1121,12 +1132,16 @@ function handleDashboardToast(activity) {
 }
 
 function handleDashboardDbStats(stats) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
     // Same logic as fetchAndUpdateDbStats response handler
     updateDashboardStatCards(stats);
     updateDbUpdaterCardInfo(stats);
 }
 
 function handleDashboardWishlistCount(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-wishlist-count', { detail: data }));
     const count = data.count || 0;
     _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
     // Update sidebar nav badge

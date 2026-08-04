@@ -83,6 +83,8 @@ function _gArc(startDeg, endDeg, radius) {
 }
 
 function _handleRateMonitorUpdate(data) {
+    // Re-broadcast for the React dashboard's equalizer (tools-seam rule).
+    window.dispatchEvent(new CustomEvent('ss:rate-monitor', { detail: data }));
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
 

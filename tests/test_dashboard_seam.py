@@ -1,0 +1,115 @@
+"""Guards for the dashboard's socket → React seam.
+
+Same contract the tools seam pinned: every re-broadcast is dispatched INSIDE
+the handler function (never the socket binding), so all of a handler's callers
+— socket frames, the 10s HTTP fallback pollers, any replay — reach the React
+dashboard; and no dispatch is duplicated at the binding, which would deliver
+every frame twice.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+WEBUI = Path(__file__).resolve().parent.parent / "webui"
+STATIC = WEBUI / "static"
+EVENTS_TS = WEBUI / "src" / "routes" / "dashboard" / "-dash.events.ts"
+
+
+def _handler_body(filename: str, handler: str, *, strip_comments: bool = True) -> str:
+    source = (STATIC / filename).read_text(encoding="utf-8")
+    tail = source.split(f"function {handler}")[1]
+    body = re.split(r"\n(?:async )?function ", tail)[0]
+    if not strip_comments:
+        return body
+    return "\n".join(line for line in body.splitlines() if not line.strip().startswith("//"))
+
+
+# The 16 provider renderers all dispatch the ONE canonical channel with their
+# own literal id — the fifth provider registry (per-provider socket names) is
+# deliberately not inherited by React.
+ENRICH_RENDERERS = {
+    "updateMusicBrainzStatusFromData": "musicbrainz",
+    "updateAudioDBStatusFromData": "audiodb",
+    "updateDiscogsStatusFromData": "discogs",
+    "updateDeezerStatusFromData": "deezer",
+    "updateJioSaavnStatusFromData": "jiosaavn",
+    "updateSpotifyEnrichmentStatusFromData": "spotify",
+    "updateiTunesEnrichmentStatusFromData": "itunes",
+    "updateLastFMEnrichmentStatusFromData": "lastfm",
+    "updateGeniusEnrichmentStatusFromData": "genius",
+    "updateBandcampEnrichmentStatusFromData": "bandcamp",
+    "updateTidalEnrichmentStatusFromData": "tidal",
+    "updateQobuzEnrichmentStatusFromData": "qobuz",
+    "updateAmazonEnrichmentStatusFromData": "amazon",
+    "updateSimilarArtistsEnrichmentStatusFromData": "similar_artists",
+    "updateHydrabaseStatusFromData": "hydrabase",
+    "updateSoulIDStatusFromData": "soulid",
+}
+
+CORE_HANDLERS = {
+    "handleWatchlistCountUpdate": "ss:watchlist-count",
+    "handleDashboardStats": "ss:dashboard-stats",
+    "handleDashboardActivity": "ss:dashboard-activity",
+    "handleDashboardToast": "ss:dashboard-toast",
+    "handleDashboardDbStats": "ss:dashboard-db-stats",
+    "handleDashboardWishlistCount": "ss:dashboard-wishlist-count",
+    "handleServiceStatusUpdate": "ss:service-status",
+}
+
+
+@pytest.mark.parametrize("handler,provider_id", sorted(ENRICH_RENDERERS.items()))
+def test_every_renderer_dispatches_its_canonical_id(handler: str, provider_id: str) -> None:
+    body = _handler_body("enrichment.js", handler)
+    needle = f"CustomEvent('ss:enrich-status', {{ detail: {{ id: '{provider_id}', data }} }})"
+    assert needle in body, (
+        f"{handler} no longer re-broadcasts ss:enrich-status with id '{provider_id}' — "
+        "its pill on the React dashboard goes dead"
+    )
+
+
+@pytest.mark.parametrize("handler", sorted(ENRICH_RENDERERS))
+def test_renderer_dispatch_is_not_gated_on_the_button(handler: str) -> None:
+    """The dispatch must precede `if (!button) return;` — the React page must
+    not be gated on vanilla DOM (the tools #repair-button lesson)."""
+    body = _handler_body("enrichment.js", handler)
+    dispatch_at = body.index("ss:enrich-status")
+    guard_at = body.index("if (!button) return;")
+    assert dispatch_at < guard_at, f"{handler}'s dispatch sits behind the button guard"
+
+
+@pytest.mark.parametrize("handler,event", sorted(CORE_HANDLERS.items()))
+def test_core_handlers_dispatch(handler: str, event: str) -> None:
+    body = _handler_body("core.js", handler)
+    assert f"CustomEvent('{event}'" in body, f"{handler} lost its {event} re-broadcast"
+
+
+def test_rate_monitor_dispatches() -> None:
+    body = _handler_body("api-monitor.js", "_handleRateMonitorUpdate")
+    assert "CustomEvent('ss:rate-monitor'" in body
+
+
+def test_no_dispatch_at_the_socket_bindings() -> None:
+    """The bindings must stay one-liners delegating to handlers — a dispatch
+    there too would deliver every frame twice."""
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    wiring = core.split("function initializeWebSocket")[1].split("\nfunction ")[0]
+    offenders = [
+        line.strip()
+        for line in wiring.splitlines()
+        if "socket.on(" in line and "ss:enrich-status" in line
+    ]
+    assert not offenders, f"enrich dispatch duplicated at the binding: {offenders}"
+
+
+def test_react_subscribes_to_every_event() -> None:
+    events = EVENTS_TS.read_text(encoding="utf-8")
+    for name in [
+        "ss:enrich-status",
+        *CORE_HANDLERS.values(),
+        "ss:rate-monitor",
+    ]:
+        assert f"'{name}'" in events, f"{name} is broadcast but -dash.events.ts never names it"
