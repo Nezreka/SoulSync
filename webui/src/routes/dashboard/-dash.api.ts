@@ -204,15 +204,17 @@ export interface ActivityItem {
 
 /** `fetchAndUpdateActivityFeed` (api-monitor.js:961) — GET /api/activity/feed.
  *  The vanilla's leftover `console.log` of every payload is deliberately NOT
- *  carried over. */
-export async function fetchActivityFeed(): Promise<ActivityItem[]> {
+ *  carried over. NULL means the fetch failed (the vanilla keeps the previous
+ *  feed); an EMPTY ARRAY is a real answer (the vanilla renders the
+ *  System-Started placeholder) — the two must stay distinguishable. */
+export async function fetchActivityFeed(): Promise<ActivityItem[] | null> {
   try {
     const response = await fetch('/api/activity/feed');
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const data = (await response.json()) as { activities?: ActivityItem[] };
     return data.activities || [];
   } catch {
-    return [];
+    return null;
   }
 }
 

@@ -149,6 +149,30 @@ def test_service_status_poller_twin_dispatches() -> None:
         assert count == expected, f"{name}: {count} ss:service-status dispatches, expected {expected}"
 
 
+def test_socket_connected_mirror_stays_in_lockstep() -> None:
+    """window._socketConnected mirrors core.js's script-scoped socketConnected
+    so React's fallback pollers can apply the vanilla twins' socket gate. All
+    three write sites (init false, connect true, disconnect false) must keep
+    the mirror in step."""
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert "let socketConnected = false;" in core
+    assert core.count("window._socketConnected = false;") == 2, (
+        "expected the mirror set false at init AND on disconnect"
+    )
+    assert core.count("window._socketConnected = true;") == 1, (
+        "expected the mirror set true on connect"
+    )
+    # Every bare-flag write has a mirror write adjacent — no site may drift.
+    bare = core.count("socketConnected = true;") + core.count("socketConnected = false;")
+    mirrored = core.count("window._socketConnected = true;") + core.count(
+        "window._socketConnected = false;"
+    )
+    assert bare == mirrored * 2, (
+        f"socketConnected writes ({bare - mirrored}) != mirror writes ({mirrored}) — "
+        "a new write site forgot the window mirror"
+    )
+
+
 def test_jiosaavn_bubble_writer_dispatches() -> None:
     body = _handler_body("settings.js", "syncJiosaavnEnrichmentBubble")
     assert "CustomEvent('ss:jiosaavn-experimental'" in body, (

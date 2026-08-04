@@ -141,7 +141,9 @@ describe('the null-on-failure fetchers', () => {
     ['fetchSystemStats', fetchSystemStats, null],
     ['fetchLibraryScanStatus', fetchLibraryScanStatus, null],
     ['fetchWishlistCount', fetchWishlistCount, null],
-    ['fetchActivityFeed', fetchActivityFeed, [] as unknown],
+    // Feed failure must be NULL, not [] — an empty array is a real answer
+    // that renders the placeholder, a failure keeps the previous feed.
+    ['fetchActivityFeed', fetchActivityFeed, null],
     ['fetchActivityToasts', fetchActivityToasts, [] as unknown],
   ])('%s swallows a network failure', async (_name, fn, empty) => {
     fetchMock.mockImplementation(() => Promise.reject(new Error('down')));

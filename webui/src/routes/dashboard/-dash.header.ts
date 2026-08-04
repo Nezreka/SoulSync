@@ -296,6 +296,10 @@ export function useDashboardHeader(): DashboardHeaderState {
     mountedRef.current = true;
 
     const enrichTick = async () => {
+      // Same gates as the vanilla poller twins: the socket push owns live
+      // updates (window._socketConnected is core.js's mirror of its
+      // script-scoped flag), and hidden tabs don't poll.
+      if (window._socketConnected) return;
       if (document.hidden) return;
       const [bundle, hydrabase] = await Promise.all([
         fetchAllProviderStatuses(),
@@ -307,6 +311,7 @@ export function useDashboardHeader(): DashboardHeaderState {
       if (hydrabase) applyFrame('hydrabase', hydrabase);
     };
     const repairTick = async () => {
+      if (window._socketConnected) return;
       if (document.hidden) return;
       const data = await fetchRepairStatus();
       if (data) applyFrame('repair', data as unknown as ProviderStatusPayload);
@@ -482,6 +487,7 @@ export function useDashboardHeader(): DashboardHeaderState {
 
   useEffect(() => {
     const watchlistTick = async () => {
+      if (window._socketConnected) return;
       if (document.hidden) return;
       const result = await fetchWatchlistCount();
       if (result) applyWatchlist(result);

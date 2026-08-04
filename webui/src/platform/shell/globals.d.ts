@@ -550,6 +550,10 @@ declare global {
     _openRateModal?: (serviceKey: string) => void;
     _reduceEffectsActive?: boolean;
     _maxPerfActive?: boolean;
+    /** core.js's mirror of its script-scoped `socketConnected` — the React
+     *  fallback pollers apply the same skip-while-socket-pushes gate the
+     *  vanilla poller twins do. Kept in lockstep at every write site. */
+    _socketConnected?: boolean;
   }
 }
 

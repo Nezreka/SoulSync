@@ -372,6 +372,18 @@ describe('fallback polling', () => {
     expect(calledUrls()).toContain('/api/hydrabase-worker/status');
   });
 
+  it('skips ticks while the socket is pushing (window._socketConnected)', async () => {
+    vi.useFakeTimers();
+    await mount();
+    window._socketConnected = true;
+    fetchMock.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    delete window._socketConnected;
+  });
+
   it('skips ticks while the tab is hidden, like the vanilla pollers', async () => {
     vi.useFakeTimers();
     await mount();

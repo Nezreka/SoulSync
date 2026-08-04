@@ -706,6 +706,10 @@ function _isMassOrphanFix(jobId, count) {
 // ===============================
 let socket = null;
 let socketConnected = false;
+// Mirrored onto window so the React dashboard's fallback pollers can apply the
+// SAME socket gate the vanilla poller twins do (`socketConnected` is a
+// script-scoped `let` no module can read). Kept in lockstep at every write.
+window._socketConnected = false;
 
 function initializeWebSocket() {
     if (typeof io === 'undefined') {
@@ -729,6 +733,7 @@ function initializeWebSocket() {
     socket.on('connect', () => {
         console.log('WebSocket connected');
         socketConnected = true;
+        window._socketConnected = true;
         resubscribeDownloadBatches();
         // Re-subscribe to any active sync/discovery rooms after reconnect
         const activeSyncIds = Object.keys(_syncProgressCallbacks);
@@ -754,6 +759,7 @@ function initializeWebSocket() {
     socket.on('disconnect', (reason) => {
         console.warn('WebSocket disconnected:', reason);
         socketConnected = false;
+        window._socketConnected = false;
     });
 
     socket.on('reconnect', (attemptNumber) => {
