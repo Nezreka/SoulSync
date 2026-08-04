@@ -14,26 +14,19 @@ und dürfen unabhängig von Library V2 gemerged werden:
 Auto Import existierte vor `library-overhaul`; seine Fixes sind ausdrücklich
 nicht Library V2 zuzurechnen.
 
-## Aktueller Commitstand
+## Branch und Commit
 
-- `f20c7b5f3` ist ein isolierter Runtime-/Test-Commit und grundsätzlich einzeln
-  cherry-pickbar.
-- `778c19cf3` mischt gemeinsame Importfixes und Library-V2-Upgrade-Sicherheit,
-  weil beide dieselben Hunks in `core/imports/pipeline.py` und `web_server.py`
-  benötigen. Diesen Commit nicht vollständig auf `dev` cherry-picken.
+`fix/pre-library-v2-audit-bugs` basiert direkt auf `dev` und enthält genau
+einen Commit: `c1fc84cd7`. Library-V2-Upgrade-Intent, CAS,
+Candidate-Kind-Bindung und Autolink sind bewusst nicht enthalten. Der Commit
+kann vor Library V2 gemerged oder einzeln cherry-gepickt werden.
 
-## Noch auszuführende Branch-Arbeit
-
-Von `dev` einen Branch `fix/pre-library-v2-audit-bugs` erstellen und dort
-genau einen dokumentierten Commit bauen. Aus `778c19cf3` nur I01/I04–I06
-übernehmen; Upgrade-Intent, Library-V2-CAS, Candidate-Kind-Bindung und
-Library-V2-Autolink bleiben draußen. Danach mindestens ausführen:
+## Verifikation
 
 ```text
 pytest -q tests/imports tests/test_async_utils.py tests/test_chat_page.py \
   tests/test_torrent_client_adapters.py tests/test_usenet_client_adapters.py
 ```
 
-Der entsprechende Fokus ist auf `library-overhaul` grün: 781 Import-/Chat-
-Tests und 86 Executor-/Adaptertests. Der neue `dev`-Branch muss trotzdem selbst
-getestet werden, weil die gemischten Pipeline-Hunks selektiv übertragen werden.
+Der Branch selbst ist geprüft: **866 Python-Tests** und der Import-UI-Test
+bestanden; `git diff --check` ist sauber.

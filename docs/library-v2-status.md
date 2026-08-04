@@ -2944,11 +2944,11 @@ Wunsch nicht benutzt.
 
 Auto Import, atomare File-Ops, Manual-Import-Containment, S06, U10 und der
 Node-26-Testfallback beheben aus `dev` geerbte Fehler; sie sind keine
-Library-V2-Features. `f20c7b5f3` ist als eigener Runtime-Commit isoliert.
-`778c19cf3` enthält wegen gemeinsamer `pipeline.py`-/`web_server.py`-Hunks
-sowohl diese Importfixes als auch Library-V2-Upgrade-Sicherheit. Der weiterhin
-geforderte Ein-Commit-Branch direkt von `dev` muss deshalb selektiv aufgebaut
-werden; `778c19cf3` darf nicht pauschal vor Library V2 cherry-gepickt werden.
+Library-V2-Features. Der Branch `fix/pre-library-v2-audit-bugs` basiert direkt
+auf `dev` und enthält mit `c1fc84cd7` genau einen geprüften Commit ohne
+Library-V2-Abhängigkeiten. Auf `library-overhaul` sind dieselben gemeinsamen
+Fixes bereits in `f20c7b5f3`/`778c19cf3` enthalten; ein doppelter Cherry-pick
+ist dort weder nötig noch sinnvoll.
 
 ### 49.3 Aktueller Gate-Stand
 
@@ -2962,6 +2962,7 @@ werden; `778c19cf3` darf nicht pauschal vor Library V2 cherry-gepickt werden.
 | Executor + Torrent-/Usenet-Adapter Fokus | **86 passed**; kein Loop-Default-Executor |
 | Import-/Chat-Suite | **781 passed** |
 | Upgrade-Intent/Pipeline/Candidate/Grab Fokus | **221 passed** |
+| Separater `dev`-Branch | **866 Python + 1 UI passed**, exakt 1 Commit |
 | Python Full Suite vor den letzten Backend-Änderungen | **12.736 passed, 5 failed, 3 skipped, 2 deselected** |
 
 Der Full-Suite-Lauf ist kein finales Gate: Er lief parallel zu späteren
@@ -2977,7 +2978,5 @@ nicht einfach ausgeblendet werden.
    `/api/download/matched`, Match-Suggestions und den Library-V2-Client bis in
    den Importkontext propagieren. Der Autolink fällt bis dahin sicher auf Namen
    zurück, kann bei Namensdrift aber legitime IDs verlieren.
-2. Den nicht-Library-V2-Block auf einem Branch direkt von `dev` als genau einen
-   dokumentierten Commit herstellen und auf `library-overhaul` wiederverwenden.
-3. Danach vollständige Python-Suite, vollständige WebUI-Gates, relevante
+2. Danach vollständige Python-Suite, vollständige WebUI-Gates, relevante
    Playwright-Live-Flows und `git diff --check` erneut ausführen.
