@@ -73,12 +73,16 @@ def goals_met(status: Any, dl: Dict[str, Any], cfg: Dict[str, Any],
 
 
 def sweep() -> Dict[str, Any]:
-    """One pass over completed torrent grabs. Returns
-    {status, checked, released, seeding, skipped?}."""
+    """One pass over completed torrent grabs. Every return carries the full
+    {status, checked, released, seeding} key set (plus reason when skipped) —
+    one shape, so callers may index directly. A concurrent sweep left in
+    flight (a background automation thread) used to return a keyless skip
+    dict and KeyError any caller that did."""
     global _running
     with _lock:
         if _running:
-            return {"status": "skipped", "reason": "already_running"}
+            return {"status": "skipped", "reason": "already_running",
+                    "checked": 0, "released": 0, "seeding": 0}
         _running = True
     try:
         return _sweep_inner()
@@ -94,7 +98,8 @@ def _sweep_inner() -> Dict[str, Any]:
     db = get_video_db()
     cfg = download_config.load(db)
     if not cfg.get("seed_ratio_goal") and not cfg.get("seed_time_goal_hours"):
-        return {"status": "skipped", "reason": "no_goals_set", "checked": 0, "released": 0}
+        return {"status": "skipped", "reason": "no_goals_set",
+                "checked": 0, "released": 0, "seeding": 0}
 
     # Client mode (arr-style): hand the ratio/time goal to the torrent client so
     # IT enforces, then release the row. If the push fails or the client can't
