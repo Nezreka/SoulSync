@@ -590,3 +590,31 @@ def test_stream_youtube_videos_search_failure_yields_empty_videos():
     out = _drain(orchestrator.stream_youtube_videos('q', _BadYT(), _sync_run_async))
     assert out[0] == {'type': 'videos', 'data': []}
     assert out[-1] == {'type': 'done'}
+
+
+def test_single_source_spotify_prefer_free_even_when_resolver_serves_the_client():
+    """REGRESSION (the 'spotify search shows deezer results' report): the
+    request-scoped free opt-in can make is_spotify_metadata_available True for
+    an explicitly-Spotify request, so resolve_client hands the client back —
+    but the actual searches run in ThreadPoolExecutor workers where the Flask
+    request context is invisible. prefer_free must be keyed on AUTH STATE, not
+    on resolve_client failing, or the workers silently serve the Deezer/iTunes
+    fallback under the Spotify label."""
+    spot = _Client(authed=False, meta_available=True, free_installed=True,
+                   artists=[_Artist('s1', 'Free Spot Artist')])
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['spotify_artists'][0]['name'] == 'Free Spot Artist'
+    assert spot.prefer_free_seen is True
+
+
+def test_single_source_spotify_authed_never_prefers_free():
+    """Authed + healthy stays on the official API — prefer_free must not fire."""
+    spot = _Client(authed=True, meta_available=True, free_installed=True,
+                   artists=[_Artist('s1', 'Official Artist')])
+    deps = _build_deps(spotify_client=spot)
+    result = orchestrator.run_enhanced_search('kendrick lamar', 'spotify', deps)
+
+    assert result['spotify_artists'][0]['name'] == 'Official Artist'
+    assert spot.prefer_free_seen is False

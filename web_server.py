@@ -6875,11 +6875,20 @@ def enhanced_search_source(source_name):
 
     try:
         client, _available = _search_orchestrator.resolve_client(source_name, deps)
+        prefer_free = False
+        if source_name == 'spotify' and deps.spotify_client:
+            try:
+                if (deps.spotify_client._free_installed()
+                        and not deps.spotify_client.is_spotify_authenticated()):
+                    client = client or deps.spotify_client
+                    prefer_free = True
+            except Exception as e:
+                logger.debug(f"Spotify free-fallback availability check failed: {e}")
         if client is None:
             return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
         return app.response_class(
-            _search_orchestrator.stream_metadata_source(source_name, query, client),
+            _search_orchestrator.stream_metadata_source(source_name, query, client, prefer_free=prefer_free),
             mimetype='application/x-ndjson',
         )
     except Exception as e:
