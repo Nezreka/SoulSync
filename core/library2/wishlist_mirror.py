@@ -97,23 +97,9 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     # never an arbitrary sibling copy of the recording.
     from core.library2.track_files import primary_file_row
     file_info = primary_file_row(conn, track_id)
-    from core.library2.profile_lookup import effective_quality_profile
-    resolved_profile = effective_quality_profile(conn, "tracks", track_id)
-    profile_row = conn.execute(
-        """SELECT id, name, upgrade_policy, upgrade_cutoff_index, ranked_targets
-             FROM quality_profiles WHERE id=?""",
-        (resolved_profile["id"],),
-    ).fetchone()
-    profile_info = {
-        "id": resolved_profile["id"],
-        "name": profile_row["name"] if profile_row else "",
-        "upgrade_policy": profile_row["upgrade_policy"] if profile_row else "acceptable",
-        "upgrade_cutoff_index": profile_row["upgrade_cutoff_index"] if profile_row else 0,
-        "ranked_targets": profile_row["ranked_targets"] if profile_row else "[]",
-        "source": resolved_profile["source"],
-        "source_id": resolved_profile["source_id"],
-        "explicit": resolved_profile["explicit"],
-    }
+    from core.library2.quality_eval import audio_quality_from_file, effective_track_profile
+    profile_info = effective_track_profile(conn, track_id)
+    original_quality = audio_quality_from_file(file_info)
 
     from core.library2.quality_eval import is_upgrade_policy
     should_queue = not bool(t["has_file"])
@@ -153,7 +139,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"],
-        "quality_profile_id": resolved_profile["id"],
+        "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
         "_has_file": bool(t["has_file"]),
@@ -163,13 +149,16 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "source": "library_v2",
             "lib2_track_id": t["track_id"],
             "lib2_album_id": t["album_id"],
-            "quality_profile_id": resolved_profile["id"],
+            "quality_profile_id": profile_info["id"],
             "quality_profile_name": profile_info["name"],
-            "quality_profile_source": resolved_profile["source"],
-            "quality_profile_source_id": resolved_profile["source_id"],
+            "quality_profile_source": profile_info["source"],
+            "quality_profile_source_id": profile_info["source_id"],
             "upgrade_policy": profile_info["upgrade_policy"],
             "upgrade_check": bool(t["has_file"]),
             "quality_evaluation": quality_evaluation,
+            "original_file_path": file_info.get("path") if file_info else None,
+            "original_file_id": file_info.get("id") if file_info else None,
+            "original_quality": original_quality.label() if original_quality else None,
             "metadata_source": source_provider,
             "track_provider_ids": track_provider_ids,
             "album_provider_ids": album_provider_ids,
@@ -311,20 +300,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
              FROM lib2_tracks t
            JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
                 AND wt.profile_id=? AND wt.wanted=1
-           -- dd28-11: joining on the DENORMALIZED t.quality_profile_id meant
-           -- the scan kept judging by whatever profile was current when the
-           -- row was inserted (a schema-trigger default). Switching the
-           -- app-wide default profile only flips `is_default`, so the scan
-           -- silently kept the old policy and returned zero candidates while
-           -- wanted_views.list_cutoff_unmet — which uses the live
-           -- effective_profile_id — listed the very same tracks as
-           -- cutoff-unmet. Guide §2.3 forbids exactly that. The projection
-           -- already resolves the cascade live; use its answer, and fall back
-           -- to the track column only when the projection has none.
-           JOIN quality_profiles qp
-                ON qp.id = COALESCE(wt.effective_profile_id, t.quality_profile_id)
           WHERE wt.projection_version=?
-            AND qp.upgrade_policy IN ('until_top', 'until_cutoff')
             AND EXISTS (SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
                            AND COALESCE(f.file_state,'active')
@@ -332,10 +308,21 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
         (int(profile_id), PROJECTION_VERSION),
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths
+    from core.library2.quality_eval import effective_track_profile, is_upgrade_policy
     protected = active_skip_paths(
         conn, ("quality", "bit_depth"), profile_id=profile_id
     )
-    return sorted({int(row["id"]) for row in rows if row["path"] not in protected})
+    candidates = set()
+    for row in rows:
+        if row["path"] in protected:
+            continue
+        try:
+            profile = effective_track_profile(conn, int(row["id"]))
+        except (LookupError, ValueError):
+            continue
+        if is_upgrade_policy(profile.get("upgrade_policy")):
+            candidates.add(int(row["id"]))
+    return sorted(candidates)
 
 
 __all__ = [

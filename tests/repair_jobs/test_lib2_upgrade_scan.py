@@ -7,7 +7,7 @@ from core.library2 import ADMIN_PROFILE_ID
 from core.library2.monitor_rules import PROVENANCE_LEGACY, record_rule
 from core.library2.schema import ensure_library_v2_schema
 from core.library2.wanted import recompute_wanted
-from core.repair_jobs.base import JobContext
+from core.repair_jobs.base import JobContext, JobResult
 from core.repair_jobs.lib2_upgrade_scan import Lib2UpgradeScanJob
 
 
@@ -148,6 +148,74 @@ def test_review_mode_creates_findings_instead_of_queueing(
     assert finding["entity_id"] == f"lib2:{cutoff}"
     assert finding["details"]["library_v2"]["track_id"] == cutoff
     assert finding["details"]["upgrade_candidate"] is True
+
+
+def test_review_and_automatic_payload_share_live_profile_cascade(library_database):
+    database, conn = library_database
+    track = _seed_track(conn, policy="until_cutoff")
+    row = conn.execute(
+        """SELECT t.album_id, al.primary_artist_id AS artist_id
+             FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
+            WHERE t.id=?""",
+        (track,),
+    ).fetchone()
+    stale = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy) "
+        "VALUES('Stale acceptable','[]','acceptable')"
+    ).lastrowid
+    live = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy) "
+        "VALUES('Live upgrade','[{\"label\":\"FLAC\",\"format\":\"flac\"}]',"
+        "'until_cutoff')"
+    ).lastrowid
+    conn.commit()
+
+    from core.library2.wishlist_mirror import track_wishlist_payload
+
+    job = Lib2UpgradeScanJob()
+    for source in ("global", "artist", "album", "track"):
+        conn.execute("UPDATE quality_profiles SET is_default=0")
+        conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=?", (stale,))
+        conn.execute(
+            "UPDATE lib2_artists SET quality_profile_id=?, quality_profile_explicit=0 "
+            "WHERE id=?", (stale, row["artist_id"]),
+        )
+        conn.execute(
+            "UPDATE lib2_albums SET quality_profile_id=?, quality_profile_explicit=0 "
+            "WHERE id=?", (stale, row["album_id"]),
+        )
+        conn.execute(
+            "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=0 "
+            "WHERE id=?", (stale, track),
+        )
+        if source == "global":
+            conn.execute("UPDATE quality_profiles SET is_default=0")
+            conn.execute("UPDATE quality_profiles SET is_default=1 WHERE id=?", (live,))
+        else:
+            table = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}[source]
+            entity_id = {"artist": row["artist_id"], "album": row["album_id"], "track": track}[source]
+            conn.execute(
+                f"UPDATE {table} SET quality_profile_id=?, quality_profile_explicit=1 WHERE id=?",
+                (live, entity_id),
+            )
+        conn.commit()
+
+        payload = track_wishlist_payload(conn, track)
+        findings = []
+        result = JobResult()
+        context = JobContext(
+            db=database,
+            transfer_folder="",
+            config_manager=_config({"mode": "review"}),
+            create_finding=lambda **kwargs: findings.append(kwargs) or True,
+        )
+        job._create_review_finding(context, conn, track, result)
+
+        assert payload["quality_profile_id"] == live
+        assert payload["quality_profile"]["source"] == source
+        assert result.findings_created == 1
+        assert findings[0]["details"]["quality_profile_id"] == live
+        assert findings[0]["details"]["quality_profile_source"] == source
 
 
 def test_fix_quality_below_cutoff_queues_the_upgrade(monkeypatch, library_database):

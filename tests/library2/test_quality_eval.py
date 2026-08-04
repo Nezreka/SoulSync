@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from core.library2.quality_eval import evaluate_file, is_upgrade_policy, profile_targets
 
 _TARGETS = json.dumps([
@@ -81,3 +83,105 @@ def test_missing_quality_without_targets_remains_unconstrained():
         "meets_profile": True,
         "upgrade_candidate": False,
     }
+
+
+@pytest.mark.parametrize(
+    "targets,old_quality,new_quality,fallback,policy,cutoff,allowed",
+    [
+        ([{"format": "flac", "bit_depth": 24}, {"format": "flac", "bit_depth": 16}],
+         ("flac", None, 44_100, 16), ("flac", None, 96_000, 24), True,
+         "until_cutoff", 0, True),
+        ([{"format": "mp3", "min_bitrate": 320}, {"format": "mp3", "min_bitrate": 128}],
+         ("mp3", 128, None, None), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, True),
+        ([{"format": "flac"}, {"format": "mp3"}],
+         ("mp3", 320, None, None), ("flac", None, 44_100, 16), True,
+         "until_cutoff", 0, True),
+        ([{"format": "flac"}, {"format": "mp3"}],
+         ("flac", None, 44_100, 16), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, False),
+        ([{"format": "mp3", "min_bitrate": 128}],
+         ("mp3", 320, None, None), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, False),
+        # A custom target order wins over the generic lossless tier score.
+        ([{"format": "mp3"}, {"format": "flac"}],
+         ("flac", None, 44_100, 16), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, True),
+        # Unmatched fallback is accepted only when the profile permits it.
+        ([{"format": "flac"}],
+         ("mp3", 128, None, None), ("mp3", 320, None, None), False,
+         "until_cutoff", 0, False),
+        ([{"format": "flac"}],
+         ("mp3", 128, None, None), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, True),
+        ([{"format": "flac"}],
+         ("aac", 256, None, None), ("ogg", 256, None, None), True,
+         "until_cutoff", 0, True),
+        # Same matched rank only uses tier score within the same format.
+        ([{"format": "flac"}, {"format": "mp3", "min_bitrate": 128}],
+         ("mp3", 128, None, None), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, True),
+        ([{"format": "flac", "bit_depth": 24}, {}],
+         ("mp3", 128, None, None), ("ogg", 320, None, None), True,
+         "until_cutoff", 0, False),
+        # Cutoff completion, intermediate progress, and until_top alias.
+        ([{"format": "flac", "bit_depth": 24}, {"format": "flac", "bit_depth": 16}],
+         ("flac", None, 44_100, 16), ("flac", None, 96_000, 24), True,
+         "until_cutoff", 1, False),
+        ([{"format": "flac", "bit_depth": 24}, {"format": "flac"},
+          {"format": "mp3", "min_bitrate": 320}, {"format": "mp3", "min_bitrate": 128}],
+         ("mp3", 128, None, None), ("mp3", 320, None, None), True,
+         "until_cutoff", 0, True),
+        ([{"format": "flac", "bit_depth": 24}, {"format": "flac", "bit_depth": 16}],
+         ("flac", None, 44_100, 16), ("flac", None, 96_000, 24), True,
+         "until_top", 1, True),
+    ],
+)
+def test_upgrade_decision_requires_strict_real_quality_improvement(
+    imported_conn, tmp_path, monkeypatch, targets, old_quality, new_quality,
+    fallback, policy, cutoff, allowed,
+):
+    from core.library2.quality_eval import decide_track_upgrade
+    from core.quality.model import AudioQuality
+
+    conn = imported_conn
+    profile_id = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy, "
+        "upgrade_cutoff_index, fallback_enabled) VALUES('Decision',?,?,?,?)",
+        (json.dumps(targets), policy, cutoff, int(fallback)),
+    ).lastrowid
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Decision Artist')"
+    ).lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Decision Album')",
+        (artist_id,),
+    ).lastrowid
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Decision Track', ?, 1)",
+        (album_id, profile_id),
+    ).lastrowid
+    old_path = tmp_path / "old.audio"
+    new_path = tmp_path / "new.audio"
+    old_path.write_bytes(b"old")
+    new_path.write_bytes(b"new")
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format) VALUES(?,?,?)",
+        (track_id, str(old_path), old_quality[0]),
+    )
+    conn.commit()
+
+    qualities = {
+        str(old_path): AudioQuality(*old_quality),
+        str(new_path): AudioQuality(*new_quality),
+    }
+    monkeypatch.setattr(
+        "core.imports.file_ops.probe_audio_quality", lambda path: qualities[str(path)]
+    )
+
+    decision = decide_track_upgrade(conn, track_id, str(new_path))
+
+    assert decision.applicable is True
+    assert decision.allowed is allowed
+    assert decision.existing_path == str(old_path)

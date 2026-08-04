@@ -59,8 +59,25 @@ def build_lib2_track_info(
     if album and not isinstance(album, dict):
         info["album"] = {"name": str(album)}
 
-    info["quality_profile_id"] = lib2_context.get("quality_profile_id")
+    for key in (
+        "quality_profile_id", "quality_profile_source",
+        "quality_profile_source_id", "quality_profile_explicit",
+    ):
+        if key in lib2_context:
+            info[key] = lib2_context[key]
     return info
+
+
+def _profile_fields(conn, entity: str, entity_id: int) -> Dict[str, Any]:
+    from core.library2.profile_lookup import effective_quality_profile
+
+    profile = effective_quality_profile(conn, entity, entity_id)
+    return {
+        "quality_profile_id": profile["id"],
+        "quality_profile_source": profile["source"],
+        "quality_profile_source_id": profile["source_id"],
+        "quality_profile_explicit": profile["explicit"],
+    }
 
 
 def build_lib2_import_pipeline_fields(
@@ -128,7 +145,7 @@ def resolve_lib2_grab_context(
     - ``('invalid', None)`` — an id was provided but doesn't parse, doesn't
       exist, or track/album don't belong together; the grab must fail.
     - ``('ok', ctx)`` — server-resolved context with ``track_id`` /
-      ``album_id`` and the entity's own ``quality_profile_id``.
+      ``album_id`` and its live effective profile plus provenance.
     """
     raw_track = data.get("lib2_track_id")
     raw_album = data.get("lib2_album_id")
@@ -144,7 +161,7 @@ def resolve_lib2_grab_context(
     try:
         if track_id is not None:
             row = conn.execute(
-                "SELECT t.id, t.album_id, t.quality_profile_id, t.title, "
+                "SELECT t.id, t.album_id, t.title, "
                 "t.track_number, t.disc_number, al.title AS album_title, "
                 "ar.name AS artist_name "
                 "FROM lib2_tracks t "
@@ -160,7 +177,7 @@ def resolve_lib2_grab_context(
             return ("ok", {
                 "track_id": row["id"],
                 "album_id": row["album_id"],
-                "quality_profile_id": row["quality_profile_id"],
+                **_profile_fields(conn, "tracks", row["id"]),
                 # The entity IS the ground truth — a manual grab targeting a
                 # known lib2 track/album routes through the full import
                 # pipeline (not the metadata-free "simple download" shortcut)
@@ -172,7 +189,7 @@ def resolve_lib2_grab_context(
                 "disc_number": row["disc_number"],
             })
         row = conn.execute(
-            "SELECT al.id, al.quality_profile_id, al.title AS album_title, "
+            "SELECT al.id, al.title AS album_title, "
             "ar.name AS artist_name "
             "FROM lib2_albums al "
             "JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
@@ -183,11 +200,11 @@ def resolve_lib2_grab_context(
             return ("invalid", None)
         return ("ok", {
             "album_id": row["id"],
-            "quality_profile_id": row["quality_profile_id"],
+            **_profile_fields(conn, "albums", row["id"]),
             "artist_name": row["artist_name"],
             "album_name": row["album_title"],
         })
-    except sqlite3.Error as e:
+    except (sqlite3.Error, LookupError, ValueError) as e:
         # lib2 tables missing (feature never enabled) etc. — an entity was
         # claimed but can't be validated, so the grab must not proceed as
         # if it had context.

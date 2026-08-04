@@ -91,14 +91,8 @@ def test_policies_other_than_new_are_untouched():
 # --------------------------------------------------------------------------
 
 
-def test_upgrade_scan_follows_the_projections_effective_profile(imported_conn, tmp_path):
-    """dd28-11: switching the app-wide default only flips ``is_default``.
-
-    Nothing rewrites ``lib2_tracks.quality_profile_id``, so joining on it meant
-    the scan kept applying the profile that was current when the row was
-    inserted — returning zero candidates while ``list_cutoff_unmet`` (which
-    reads the live ``effective_profile_id``) listed the very same tracks.
-    """
+def test_upgrade_scan_resolves_live_profile_when_projection_is_stale(imported_conn, tmp_path):
+    """The scan and review path share the live cascade, not stale projections."""
     from core.library2.wishlist_mirror import upgrade_candidate_track_ids
     from core.library2.wanted import PROJECTION_VERSION
 
@@ -123,10 +117,15 @@ def test_upgrade_scan_follows_the_projections_effective_profile(imported_conn, t
            VALUES('Upgrade until top', 'until_top', 0, '[]', 0)"""
     ).lastrowid
 
-    # The denormalized column still points at the profile that no longer
-    # upgrades; the projection knows the user has moved on.
+    conn.execute("UPDATE quality_profiles SET is_default=0")
     conn.execute(
-        "UPDATE lib2_tracks SET quality_profile_id=? WHERE id=?", (stale, track_id)
+        "UPDATE quality_profiles SET is_default=1 WHERE id=?", (upgrading,)
+    )
+    # Both compatibility projections deliberately point at the old profile;
+    # the live global assignment is authoritative.
+    conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=0 "
+        "WHERE id=?", (stale, track_id)
     )
     conn.execute(
         """INSERT INTO lib2_wanted_tracks(track_id, profile_id, wanted, reason,
@@ -135,15 +134,14 @@ def test_upgrade_scan_follows_the_projections_effective_profile(imported_conn, t
            ON CONFLICT(track_id, profile_id) DO UPDATE SET
                wanted=1, effective_profile_id=excluded.effective_profile_id,
                projection_version=excluded.projection_version""",
-        (track_id, 1, upgrading, PROJECTION_VERSION),
+        (track_id, 1, stale, PROJECTION_VERSION),
     )
     conn.commit()
 
     assert track_id in upgrade_candidate_track_ids(conn, profile_id=1)
 
 
-def test_upgrade_scan_falls_back_to_the_track_column(imported_conn, tmp_path):
-    """A projection row without an effective profile keeps the old behaviour."""
+def test_upgrade_scan_honours_explicit_track_profile(imported_conn, tmp_path):
     from core.library2.wishlist_mirror import upgrade_candidate_track_ids
     from core.library2.wanted import PROJECTION_VERSION
 
@@ -162,7 +160,8 @@ def test_upgrade_scan_falls_back_to_the_track_column(imported_conn, tmp_path):
            VALUES('Upgrade fallback', 'until_cutoff', 0, '[]', 0)"""
     ).lastrowid
     conn.execute(
-        "UPDATE lib2_tracks SET quality_profile_id=? WHERE id=?", (upgrading, track_id)
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+        "WHERE id=?", (upgrading, track_id)
     )
     conn.execute(
         """INSERT INTO lib2_wanted_tracks(track_id, profile_id, wanted, reason,

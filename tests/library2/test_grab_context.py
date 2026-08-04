@@ -44,17 +44,17 @@ def db(tmp_path):
     cur.execute("INSERT INTO lib2_artists(name) VALUES('A')")
     artist_id = cur.lastrowid
     cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
-        "VALUES(?, 'Alb', 7)", (artist_id,))
+        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Alb', 7, 1)", (artist_id,))
     album_id = cur.lastrowid
     cur.execute(
-        "INSERT INTO lib2_tracks(album_id, title, track_number, quality_profile_id) "
-        "VALUES(?, 'T', 1, 9)", (album_id,))
+        "INSERT INTO lib2_tracks(album_id, title, track_number, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'T', 1, 9, 1)", (album_id,))
     track_id = cur.lastrowid
     conn.commit()
     conn.close()
     shim = _Shim(path)
-    shim.ids = {"album": album_id, "track": track_id}
+    shim.ids = {"artist": artist_id, "album": album_id, "track": track_id}
     return shim
 
 
@@ -79,7 +79,9 @@ def test_pipeline_metadata_uses_server_resolved_profile():
 
     info = build_lib2_track_info(
         request_data,
-        {"track_id": 3, "album_id": 2, "quality_profile_id": 9},
+        {"track_id": 3, "album_id": 2, "quality_profile_id": 9,
+         "quality_profile_source": "track", "quality_profile_source_id": 3,
+         "quality_profile_explicit": True},
         album_name="Album",
     )
 
@@ -87,6 +89,9 @@ def test_pipeline_metadata_uses_server_resolved_profile():
     assert info["artists"] == [{"name": "Artist"}]
     assert info["album"] == {"name": "Album"}
     assert info["quality_profile_id"] == 9
+    assert info["quality_profile_source"] == "track"
+    assert info["quality_profile_source_id"] == 3
+    assert info["quality_profile_explicit"] is True
     assert request_data["quality_profile_id"] == 999
 
 
@@ -145,7 +150,9 @@ def test_track_resolves_with_own_profile(db):
     assert state == "ok"
     assert ctx == {
         "track_id": db.ids["track"], "album_id": db.ids["album"],
-        "quality_profile_id": 9,
+        "quality_profile_id": 9, "quality_profile_source": "track",
+        "quality_profile_source_id": db.ids["track"],
+        "quality_profile_explicit": True,
         "artist_name": "A", "album_name": "Alb", "track_title": "T",
         "track_number": 1, "disc_number": 1,
     }
@@ -157,8 +164,37 @@ def test_album_resolves_with_album_profile_not_artist(db):
     assert state == "ok"
     assert ctx == {
         "album_id": db.ids["album"], "quality_profile_id": 7,
+        "quality_profile_source": "album",
+        "quality_profile_source_id": db.ids["album"],
+        "quality_profile_explicit": True,
         "artist_name": "A", "album_name": "Alb",
     }
+
+
+def test_track_resolves_live_inherited_profile_not_stale_projection(db):
+    conn = db._get_connection()
+    conn.execute(
+        "UPDATE lib2_artists SET quality_profile_id=9, quality_profile_explicit=1 "
+        "WHERE id=?", (db.ids["artist"],),
+    )
+    conn.execute(
+        "UPDATE lib2_albums SET quality_profile_id=7, quality_profile_explicit=0 "
+        "WHERE id=?", (db.ids["album"],),
+    )
+    conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=7, quality_profile_explicit=0 "
+        "WHERE id=?", (db.ids["track"],),
+    )
+    conn.commit()
+    conn.close()
+
+    state, ctx = resolve_lib2_grab_context(db, {"lib2_track_id": db.ids["track"]})
+
+    assert state == "ok"
+    assert ctx["quality_profile_id"] == 9
+    assert ctx["quality_profile_source"] == "artist"
+    assert ctx["quality_profile_source_id"] == db.ids["artist"]
+    assert ctx["quality_profile_explicit"] is True
 
 
 def test_unknown_ids_are_invalid(db):

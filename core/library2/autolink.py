@@ -36,6 +36,30 @@ logger = get_logger("library2.autolink")
 # reusing the string keeps a later real match able to fold these rows away.
 UNKNOWN_ARTIST = "Unknown Artist"
 
+_PROVIDER_ID_PLACEHOLDERS = {
+    "auto_import", "explicit_album", "explicit_artist", "from_sync_modal",
+    "library_v2", "staging", "wishlist_album",
+}
+_PROVIDER_ID_PLACEHOLDER_PREFIXES = ("lib2-album:", "lib2-artist:", "lib2-track:")
+
+
+def _clean_provider_id(value: Any) -> Optional[str]:
+    """Return a real provider id, never an internal compatibility token."""
+    text = str(value or "").strip()
+    lowered = text.casefold()
+    if (not text or lowered in _PROVIDER_ID_PLACEHOLDERS
+            or lowered.startswith(_PROVIDER_ID_PLACEHOLDER_PREFIXES)):
+        return None
+    return text
+
+
+def _metadata_source(*values: Any) -> Optional[str]:
+    for value in values:
+        source = str(value or "").strip().lower()
+        if source and source not in _PROVIDER_ID_PLACEHOLDERS:
+            return source
+    return None
+
 
 def _get(ti: Dict[str, Any], *keys: str) -> str:
     for key in keys:
@@ -75,27 +99,33 @@ def _provider_namespace(provider_id: Optional[str],
                         source: Optional[str]) -> Optional[str]:
     """Which external-id namespace an incoming id belongs to.
 
-    - a non-Spotify provider marker is authoritative for its own id;
-    - an unmarked/'spotify' id counts as Spotify UNLESS its shape rules that
-      out (numeric = Deezer/iTunes, UUID = MusicBrainz — §62.4's poison) —
-      then it is used for matching only (``None``), never persisted into a
-      namespace it may not belong to.
+    - a provider marker is authoritative for its own id;
+    - an unmarked id is used for compatibility matching only (``None``),
+      never guessed into a namespace;
+    - even an explicitly Spotify-marked id must pass the shape guard (numeric
+      = Deezer/iTunes, UUID = MusicBrainz — §62.4's poison).
     """
+    provider_id = _clean_provider_id(provider_id)
     if not provider_id:
         return None
     src = str(source or "").strip().lower() or None
     if src and src != "spotify":
         return src
+    if src != "spotify":
+        return None
     if looks_like_foreign_provider_id(provider_id):
         return None
     return "spotify"
 
 
 def _row_external_ids(raw: Any) -> Dict[str, str]:
-    try:
-        value = json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        return {}
+    if isinstance(raw, dict):
+        value = raw
+    else:
+        try:
+            value = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            return {}
     if not isinstance(value, dict):
         return {}
     return {
@@ -105,9 +135,22 @@ def _row_external_ids(raw: Any) -> Dict[str, str]:
     }
 
 
+def _qualified_provider_id(source: Optional[str], *mappings: Any) -> Optional[str]:
+    if not source:
+        return None
+    for raw in mappings:
+        provider_id = _clean_provider_id(_row_external_ids(raw).get(source))
+        if provider_id:
+            return provider_id
+    return None
+
+
 def _adopt_external_id(conn, table: str, row_id: int, namespace: str,
                        provider_id: str) -> None:
     """setdefault-style: record the id under its namespace, never overwrite."""
+    provider_id = _clean_provider_id(provider_id)
+    if not provider_id:
+        return
     row = conn.execute(
         f"SELECT external_ids FROM {table} WHERE id=?", (row_id,)).fetchone()
     if row is None:
@@ -131,7 +174,7 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
     # ID match first: cheap (indexed) and — unlike name matching — survives
     # name-spelling variants of the same provider identity (e.g. a kanji vs.
     # romaji release credit), the case G8's alias-awareness gap calls out.
-    provider_id = str(spotify_id).strip() if spotify_id else None
+    provider_id = _clean_provider_id(spotify_id)
     namespace = _provider_namespace(provider_id, source)
     if provider_id:
         if namespace == "spotify":
@@ -140,21 +183,30 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
                 (provider_id,)).fetchone()
             if row:
                 return row["id"]
-        else:
-            # Value match for non-Spotify/unmarked ids: the proper namespace
-            # in external_ids, plus (compat, §62.4) rows whose spotify_id
-            # column was poisoned with this very id before the shape guard.
+        elif namespace is not None:
+            # A real qualified id wins over the old poisoned-column fallback.
             for candidate in conn.execute(
-                    "SELECT id, spotify_id, external_ids FROM lib2_artists "
-                    "WHERE spotify_id = ? OR external_ids LIKE ?",
-                    (provider_id, f"%{provider_id}%")):
-                if candidate["spotify_id"] == provider_id:
-                    return candidate["id"]
+                    "SELECT id, external_ids FROM lib2_artists WHERE external_ids LIKE ?",
+                    (f"%{provider_id}%",)):
                 ids = _row_external_ids(candidate["external_ids"])
-                if namespace is not None and ids.get(namespace) == provider_id:
+                if ids.get(namespace) == provider_id:
                     return candidate["id"]
-                if namespace is None and provider_id in ids.values():
-                    return candidate["id"]
+            row = conn.execute(
+                "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1",
+                (provider_id,),
+            ).fetchone()
+            if row:
+                return row["id"]
+        else:
+            # Unknown namespaces may only hit the legacy poisoned column;
+            # scanning every external_ids namespace can cross-link providers
+            # that happen to use the same opaque id.
+            row = conn.execute(
+                "SELECT id FROM lib2_artists WHERE spotify_id = ? LIMIT 1",
+                (provider_id,),
+            ).fetchone()
+            if row:
+                return row["id"]
 
     key = normalize_name(name)
     if not key:
@@ -212,7 +264,7 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                           album_type: str, spotify_album_id: Optional[str] = None,
                           source: Optional[str] = None,
                           monitored: Optional[int] = None) -> int:
-    provider_id = str(spotify_album_id).strip() if spotify_album_id else None
+    provider_id = _clean_provider_id(spotify_album_id)
     namespace = _provider_namespace(provider_id, source)
     key = release_title_key(title)
     # dd28-09: ``_find_or_create_artist`` happily resolves an ALIAS row, but
@@ -234,15 +286,12 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
         tuple(scope_ids),
     ).fetchall()
     if provider_id:
+        if namespace is not None and namespace != "spotify":
+            for row in rows:
+                if _row_external_ids(row["external_ids"]).get(namespace) == provider_id:
+                    return row["id"]
         for row in rows:
-            # spotify_id equality doubles as the §62.4 compat path for rows
-            # whose column was poisoned with a non-Spotify id earlier.
             if row["spotify_id"] == provider_id:
-                return row["id"]
-            ids = _row_external_ids(row["external_ids"])
-            if namespace is not None and ids.get(namespace) == provider_id:
-                return row["id"]
-            if namespace is None and provider_id in ids.values():
                 return row["id"]
     for row in rows:
         if release_title_key(row["title"]) == key:
@@ -281,7 +330,7 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                           disc_number: Optional[int] = None,
                           source: Optional[str] = None,
                           monitored: Optional[int] = None) -> int:
-    provider_id = str(spotify_track_id).strip() if spotify_track_id else None
+    provider_id = _clean_provider_id(spotify_track_id)
     namespace = _provider_namespace(provider_id, source)
     key = dedup_title_key(title)
     rows = conn.execute(
@@ -289,16 +338,14 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
         "FROM lib2_tracks WHERE album_id=?",
         (album_id,),
     ).fetchall()
-    for row in rows:
-        if not provider_id:
-            continue
-        if namespace == "spotify" and row["spotify_id"] == provider_id:
-            return row["id"]
-        ids = _row_external_ids(row["external_ids"])
-        if namespace is not None and ids.get(namespace) == provider_id:
-            return row["id"]
-        if namespace is None and provider_id in ids.values():
-            return row["id"]
+    if provider_id and namespace not in (None, "spotify"):
+        for row in rows:
+            if _row_external_ids(row["external_ids"]).get(namespace) == provider_id:
+                return row["id"]
+    if provider_id:
+        for row in rows:
+            if row["spotify_id"] == provider_id:
+                return row["id"]
     for row in rows:
         # dedup_title_key (§39) drops feat.-annotations so a finished
         # download's title matches a fileless wanted-row that spells the
@@ -546,21 +593,50 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         if not file_path:
             return None
 
+        # Consume the same source-neutral import contract as every legacy
+        # writer.  Auto Import deliberately keeps the canonical release and
+        # provider at context level (historically under ``spotify_album`` /
+        # ``spotify_artist`` even for non-Spotify providers); treating the
+        # narrower track payload as authoritative creates one album per track
+        # and guesses foreign ids into Spotify columns.
+        from core.imports.context import (
+            get_import_context_album,
+            get_import_context_artist,
+            get_import_source,
+            get_import_source_ids,
+        )
+
+        raw_track_info = context.get("track_info")
+        has_track_info = isinstance(raw_track_info, dict) and bool(raw_track_info)
+        ti = raw_track_info if has_track_info else (context.get("search_result") or {})
+        if not isinstance(ti, dict):
+            ti = {}
+        canonical_album = get_import_context_album(context)
+        canonical_artist = get_import_context_artist(context)
+        source_ids = get_import_source_ids(context)
+
         # A grab that started from Library v2 carries the server-resolved
         # entity (audit P1-16) — the file links to that exact row, no
         # heuristic re-matching. Scheduled Wishlist downloads carry the same
         # ids in source_info; that object survives into this pipeline context.
-        ti = context.get("track_info") or context.get("search_result") or {}
         lib2_ctx = context.get("lib2_entity") or ti.get("lib2_entity") or {}
         if not isinstance(lib2_ctx, dict):
             lib2_ctx = {}
         from core.downloads.origin import _parse_source_info
         source_info = _parse_source_info(ti.get("source_info"))
+        nested_track = ti.get("track_data") or ti.get("spotify_data") or {}
+        if not isinstance(nested_track, dict):
+            nested_track = {}
+        identity_source = _metadata_source(
+            ti.get("provider"), ti.get("source"), nested_track.get("provider"),
+            nested_track.get("source"), source_info.get("metadata_source"),
+            context.get("provider"), get_import_source(context),
+        )
         direct_track_id = lib2_ctx.get("track_id") or source_info.get("lib2_track_id")
         direct_album_id = lib2_ctx.get("album_id") or source_info.get("lib2_album_id")
 
         title = _get(ti, "name", "title")
-        artist_name = _primary_artist_name(ti)
+        artist_name = _primary_artist_name(ti) or _get(canonical_artist, "name")
         fallback: Dict[str, Any] = {}
         if not direct_track_id and not direct_album_id and (not title or not artist_name):
             # issues §7 / status §18: materialize instead of skipping. Without
@@ -573,7 +649,15 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             fallback = derived
             title = title or fallback["title"]
             artist_name = artist_name or fallback["artist"]
-        album_name = _get(ti, "album") or fallback.get("album") or title
+        # Context-level album metadata is canonical.  In particular, the
+        # AutoImportWorker puts only ``album_id`` on each track and keeps the
+        # real title/type/total under ``spotify_album``.
+        album_name = (
+            _get(canonical_album, "name", "title")
+            or _get(ti, "album")
+            or fallback.get("album")
+            or title
+        )
 
         embedded = context.get("_embedded_id_tags") or {}
         embedded_spotify_id = str(embedded.get("SPOTIFY_TRACK_ID") or "") or None
@@ -582,15 +666,36 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         # would write a Soulseek/usenet token into a provider namespace (the
         # §62.4 poisoning the guide forbids). An embedded Spotify tag read off
         # the file itself is a real qualified identity and still counts.
+        is_simple_download = bool(ti.get("is_simple_download"))
+        # Unqualified ids are still useful to match pre-existing/poisoned
+        # compatibility rows, but `_provider_namespace` will never persist
+        # them without an authoritative source.
+        use_provider_ids = bool(not fallback and not is_simple_download)
+        qualified_track_id = _qualified_provider_id(
+            identity_source, source_info.get("track_provider_ids"),
+            ti.get("provider_ids"), nested_track.get("provider_ids"),
+        )
         spotify_track_id = embedded_spotify_id or (
-            str(ti.get("id")) if ti.get("id") and not fallback else None
+            qualified_track_id or _clean_provider_id(source_ids.get("track_id"))
+            if use_provider_ids
+            else None
         )
         album_raw = ti.get("album") if isinstance(ti.get("album"), dict) else {}
-        spotify_album_id = (
-            None if fallback else (str(album_raw.get("id") or "") or None)
+        qualified_album_id = _qualified_provider_id(
+            identity_source, source_info.get("album_provider_ids"),
+            canonical_album.get("provider_ids"), canonical_album.get("external_ids"),
+            album_raw.get("provider_ids"), album_raw.get("external_ids"),
         )
-        total_tracks = album_raw.get("total_tracks")
-        album_type = str(album_raw.get("album_type") or "").lower() or (
+        spotify_album_id = (
+            qualified_album_id
+            or _clean_provider_id(source_ids.get("album_id") or album_raw.get("id"))
+            if use_provider_ids
+            else None
+        )
+        total_tracks = canonical_album.get("total_tracks") or album_raw.get("total_tracks")
+        album_type = str(
+            canonical_album.get("album_type") or album_raw.get("album_type") or ""
+        ).lower() or (
             "single" if (normalize_name(album_name) == normalize_name(title)
                          or total_tracks in (1, "1")) else "album")
         track_number = ti.get("track_number") or fallback.get("track_number")
@@ -609,8 +714,7 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
         conn = db._get_connection()
         try:
             track_id = album_id = None
-            ti_provider = str(ti.get("provider") or "").strip().lower() or None
-            track_identity_source = "spotify" if embedded_spotify_id else ti_provider
+            track_identity_source = "spotify" if embedded_spotify_id else identity_source
             if direct_track_id:
                 row = conn.execute(
                     "SELECT id, album_id FROM lib2_tracks WHERE id=?",
@@ -631,9 +735,24 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 # Entity gone or absent — heuristic name matching as before.
                 if not title or not artist_name:
                     return None
+                artists = ti.get("artists") if isinstance(ti.get("artists"), list) else []
+                primary_artist = artists[0] if artists and isinstance(artists[0], dict) else {}
+                qualified_artist_id = _qualified_provider_id(
+                    identity_source, canonical_artist.get("provider_ids"),
+                    canonical_artist.get("external_ids"), primary_artist.get("provider_ids"),
+                    primary_artist.get("external_ids"),
+                )
                 artist_id = _find_or_create_artist(
-                    conn, artist_name, spotify_id=_primary_artist_provider_id(ti),
-                    source=ti_provider)
+                    conn,
+                    artist_name,
+                    spotify_id=(
+                        qualified_artist_id
+                        or _clean_provider_id(source_ids.get("artist_id"))
+                        or _primary_artist_provider_id(ti)
+                        or None
+                    ) if use_provider_ids else None,
+                    source=identity_source,
+                )
                 if artist_id is None:
                     return None
                 # A derived identity is an observation, never an acquisition
@@ -645,7 +764,7 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
                 album_id = _find_or_create_album(
                     conn, artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
-                    source=ti_provider, monitored=derived_monitored)
+                    source=identity_source, monitored=derived_monitored)
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,

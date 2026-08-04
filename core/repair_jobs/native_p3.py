@@ -43,10 +43,28 @@ from core.repair_jobs.track_number_repair import (
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.native_p3")
+_METADATA_GAP_BATCH = 500
 
 # Sidecars `_rename_to_basename` carries along with the audio file; a rollback
 # of that rename has to bring them back too (iss29-E09).
 _CARRIED_SIDECAR_EXTS = ('.lrc',)
+
+
+def _gap_cursor(context: JobContext, key: str, value: int | None = None) -> int:
+    """Read or persist the bounded metadata-gap scan cursor."""
+    try:
+        with context.db._get_connection() as conn:
+            if value is None:
+                row = conn.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+                return int(row[0]) if row else 0
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata(key,value,updated_at) "
+                "VALUES(?,?,CURRENT_TIMESTAMP)", (key, str(value)),
+            )
+            conn.commit()
+    except Exception:  # Cursor persistence must not disable the repair tool.
+        return 0
+    return value or 0
 
 
 def _restore_sidecar(moved_audio: str, original_audio: str) -> None:
@@ -515,7 +533,19 @@ class NativeMetadataGapFillerJob(MetadataGapFillerJob):
             ).strip()
             if missing_isrc or missing_mbid:
                 subjects[track_id] = subject
-        work = list(subjects.values())[:500]
+        work = list(subjects.values())
+        work.sort(key=lambda item: int(item["track_id"]))
+        cursor_key = (
+            f"repair.metadata_gap.cursor:{int(bool(fill_isrc))}:"
+            f"{int(bool(fill_mb_id))}:{scope_key or '*'}"
+        )
+        cursor = _gap_cursor(context, cursor_key)
+        page = [item for item in work if int(item["track_id"]) > cursor][
+            :_METADATA_GAP_BATCH
+        ]
+        if not page and work:
+            page = work[:_METADATA_GAP_BATCH]
+        work = page
         total = len(work)
 
         for index, subject in enumerate(work):
@@ -602,6 +632,8 @@ class NativeMetadataGapFillerJob(MetadataGapFillerJob):
                     result.findings_skipped_dedup += 1
         if context.update_progress:
             context.update_progress(total, total)
+        if work:
+            _gap_cursor(context, cursor_key, int(work[-1]["track_id"]))
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
@@ -611,7 +643,7 @@ class NativeMetadataGapFillerJob(MetadataGapFillerJob):
                 ids = subject.get("track_source_ids") or {}
                 if not subject.get("isrc") or not ids.get("musicbrainz"):
                     track_ids.add(int(subject["track_id"]))
-            return min(len(track_ids), 500)
+            return len(track_ids)
         except Exception:
             return 0
 

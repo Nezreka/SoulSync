@@ -85,6 +85,115 @@ def test_links_new_album_track_and_file(lib2_enabled, imported_conn):
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def _legacy_auto_import_context(*, source, artist, artist_id, album, album_id,
+                                title, track_id, track_number, path):
+    """The real producer shape from ``AutoImportWorker._process_matches``.
+
+    The legacy ``spotify_*`` keys are intentionally provider-neutral aliases;
+    the canonical provider lives at context level and the track has no nested
+    album/provider object.
+    """
+    return {
+        "_final_processed_path": path,
+        "source": source,
+        "_download_username": "auto_import",
+        "spotify_artist": {"id": artist_id, "name": artist},
+        "spotify_album": {
+            "id": album_id,
+            "name": album,
+            "album_type": "album",
+            "total_tracks": 2,
+            "artists": [{"id": artist_id, "name": artist}],
+        },
+        "track_info": {
+            "id": track_id,
+            "name": title,
+            "track_number": track_number,
+            "disc_number": 1,
+            "album_id": album_id,
+            "artists": [{"name": artist}],
+        },
+        "original_search_result": {
+            "title": title,
+            "artist": artist,
+            "album": album,
+        },
+        "_embedded_id_tags": {},
+    }
+
+
+def test_auto_import_uses_canonical_album_for_every_track(
+        lib2_enabled, imported_conn):
+    first = _legacy_auto_import_context(
+        source="jiosaavn", artist="Auto Context Artist", artist_id="jio-art-1",
+        album="One Real Album", album_id="jio-album-1", title="First Song",
+        track_id="jio-track-1", track_number=1,
+        path="/music/Auto Context Artist/One Real Album/01 First Song.flac",
+    )
+    second = _legacy_auto_import_context(
+        source="jiosaavn", artist="Auto Context Artist", artist_id="jio-art-1",
+        album="One Real Album", album_id="jio-album-1", title="Second Song",
+        track_id="jio-track-2", track_number=2,
+        path="/music/Auto Context Artist/One Real Album/02 Second Song.flac",
+    )
+
+    assert A.link_download_into_library_v2(first) is not None
+    assert A.link_download_into_library_v2(second) is not None
+
+    albums = imported_conn.execute(
+        "SELECT title, spotify_id, external_ids FROM lib2_albums "
+        "WHERE primary_artist_id=(SELECT id FROM lib2_artists "
+        "WHERE name='Auto Context Artist')"
+    ).fetchall()
+    assert len(albums) == 1
+    assert albums[0]["title"] == "One Real Album"
+    assert albums[0]["spotify_id"] is None
+    assert json.loads(albums[0]["external_ids"])["jiosaavn"] == "jio-album-1"
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=(SELECT id FROM "
+        "lib2_albums WHERE title='One Real Album')"
+    ).fetchone()[0] == 2
+
+
+@pytest.mark.parametrize(
+    ("source", "prefix"),
+    [("jiosaavn", "jio"), ("qobuz", "qbz"), ("deezer", "987")],
+)
+def test_auto_import_keeps_provider_ids_in_their_canonical_namespace(
+        lib2_enabled, imported_conn, source, prefix):
+    context = _legacy_auto_import_context(
+        source=source,
+        artist=f"{source} Namespace Artist",
+        artist_id=f"{prefix}-artist",
+        album=f"{source} Namespace Album",
+        album_id=f"{prefix}-album",
+        title=f"{source} Namespace Track",
+        track_id=f"{prefix}-track",
+        track_number=1,
+        path=f"/music/{source}/namespace.flac",
+    )
+
+    file_id = A.link_download_into_library_v2(context)
+    assert file_id is not None
+    row = imported_conn.execute(
+        """SELECT ar.spotify_id AS artist_sp, ar.external_ids AS artist_ext,
+                  al.spotify_id AS album_sp, al.external_ids AS album_ext,
+                  t.spotify_id AS track_sp, t.external_ids AS track_ext
+             FROM lib2_track_files tf
+             JOIN lib2_tracks t ON t.id=tf.track_id
+             JOIN lib2_albums al ON al.id=t.album_id
+             JOIN lib2_artists ar ON ar.id=al.primary_artist_id
+            WHERE tf.id=?""",
+        (file_id,),
+    ).fetchone()
+    assert row["artist_sp"] is None
+    assert row["album_sp"] is None
+    assert row["track_sp"] is None
+    assert json.loads(row["artist_ext"])[source] == f"{prefix}-artist"
+    assert json.loads(row["album_ext"])[source] == f"{prefix}-album"
+    assert json.loads(row["track_ext"])[source] == f"{prefix}-track"
+
+
 def test_simple_download_is_materialized_from_its_filename(lib2_enabled, imported_conn):
     """Root cause behind the "Quarantine Approve later flagged as Orphan"
     report (docs/library-v2-issues.md §7): a Simple Download's
@@ -491,7 +600,9 @@ def test_find_or_create_artist_matches_by_spotify_id_despite_name_drift(
     must still resolve to the one existing row instead of minting a
     duplicate."""
     before = imported_conn.execute("SELECT COUNT(*) c FROM lib2_artists").fetchone()["c"]
-    artist_id = A._find_or_create_artist(imported_conn, "Aubrey Graham", spotify_id="sp1")
+    artist_id = A._find_or_create_artist(
+        imported_conn, "Aubrey Graham", spotify_id="sp1", source="spotify"
+    )
     drake_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
     assert artist_id == drake_id
@@ -509,7 +620,8 @@ def test_find_or_create_artist_backfills_spotify_id_on_name_match(
         "VALUES('Overseas Artist', 'Overseas Artist', 1)")
 
     artist_id = A._find_or_create_artist(
-        imported_conn, "Overseas Artist", spotify_id="sp-overseas")
+        imported_conn, "Overseas Artist", spotify_id="sp-overseas",
+        source="spotify")
     row = imported_conn.execute(
         "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
     assert row["spotify_id"] == "sp-overseas"
@@ -520,7 +632,9 @@ def test_find_or_create_artist_never_overwrites_an_existing_spotify_id(
     """Backfill only fills a NULL — a row that already carries a provider id
     must never be overwritten by a second, possibly-wrong one arriving
     through a plain name match."""
-    A._find_or_create_artist(imported_conn, "Drake", spotify_id="sp-wrong")
+    A._find_or_create_artist(
+        imported_conn, "Drake", spotify_id="sp-wrong", source="spotify"
+    )
     row = imported_conn.execute(
         "SELECT spotify_id FROM lib2_artists WHERE name='Drake'").fetchone()
     assert row["spotify_id"] == "sp1"
@@ -529,7 +643,7 @@ def test_find_or_create_artist_never_overwrites_an_existing_spotify_id(
 def test_new_artist_persists_the_spotify_id_it_was_created_with(
         lib2_enabled, imported_conn):
     artist_id = A._find_or_create_artist(
-        imported_conn, "Brand New Artist", spotify_id="sp-new")
+        imported_conn, "Brand New Artist", spotify_id="sp-new", source="spotify")
     row = imported_conn.execute(
         "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
     assert row["spotify_id"] == "sp-new"
@@ -545,7 +659,7 @@ def test_non_spotify_provider_artist_id_stays_out_of_spotify_column():
     assert A._provider_namespace("jio-123", "jiosaavn") == "jiosaavn"
     assert A._provider_namespace("1239706770", None) is None       # numeric ≠ spotify
     assert A._provider_namespace("1239706770", "spotify") is None  # shape wins
-    assert A._provider_namespace("sp-new", None) == "spotify"
+    assert A._provider_namespace("sp-new", None) is None          # never guess
 
 
 def test_end_to_end_autolink_reuses_artist_matched_purely_by_spotify_id(
@@ -881,6 +995,96 @@ def test_unmarked_numeric_id_is_not_persisted_but_matches_poisoned_rows(
         "SELECT COUNT(*) c FROM lib2_albums WHERE spotify_id='1239706770'"
     ).fetchone()["c"]
     assert rows == 1
+
+
+def test_unknown_namespace_never_cross_matches_same_opaque_external_id(
+        lib2_enabled, imported_conn):
+    deezer = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, external_ids) VALUES(?, ?)",
+        ("Opaque Deezer", json.dumps({"deezer": "shared-opaque"})),
+    ).lastrowid
+    qobuz = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, external_ids) VALUES(?, ?)",
+        ("Opaque Qobuz", json.dumps({"qobuz": "shared-opaque"})),
+    ).lastrowid
+
+    assert A._find_or_create_artist(
+        imported_conn, "Different spelling", spotify_id="shared-opaque", source="qobuz",
+    ) == qobuz
+    unknown = A._find_or_create_artist(
+        imported_conn, "Opaque Unknown", spotify_id="shared-opaque", source=None,
+    )
+    assert unknown not in {deezer, qobuz}
+
+
+def test_compatibility_placeholders_are_never_persisted_as_provider_ids(
+        lib2_enabled, imported_conn):
+    file_id = A.link_download_into_library_v2(_context(
+        _final_processed_path="/music/Placeholder/Release/01 Song.flac",
+        _embedded_id_tags={},
+        track_info={
+            "id": "lib2-track:stable-token", "name": "Placeholder Song",
+            "provider": "library_v2",
+            "artists": [{"id": "explicit_artist", "name": "Placeholder Artist"}],
+            "album": {"id": "lib2-album:stable-token", "name": "Placeholder Album"},
+            "track_number": 1,
+        },
+    ))
+    row = imported_conn.execute(
+        """SELECT ar.spotify_id artist_sp, ar.external_ids artist_ext,
+                  al.spotify_id album_sp, al.external_ids album_ext,
+                  t.spotify_id track_sp, t.external_ids track_ext
+             FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id
+             JOIN lib2_albums al ON al.id=t.album_id
+             JOIN lib2_artists ar ON ar.id=al.primary_artist_id WHERE f.id=?""",
+        (file_id,),
+    ).fetchone()
+    assert not any((row["artist_sp"], row["album_sp"], row["track_sp"]))
+    assert all(json.loads(row[key]) == {} for key in
+               ("artist_ext", "album_ext", "track_ext"))
+
+
+def test_stale_direct_context_falls_back_to_real_qualified_provider_ids(
+        lib2_enabled, imported_conn):
+    artist_id = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, external_ids) VALUES(?, ?)",
+        ("Canonical Qobuz Artist", json.dumps({"qobuz": "qb-artist"})),
+    ).lastrowid
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title, external_ids) VALUES(?,?,?)",
+        (artist_id, "Canonical Qobuz Album", json.dumps({"qobuz": "qb-album"})),
+    ).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'primary')",
+        (album_id, artist_id),
+    )
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, external_ids) VALUES(?,?,?)",
+        (album_id, "Canonical Qobuz Track", json.dumps({"qobuz": "qb-track"})),
+    ).lastrowid
+    imported_conn.commit()
+
+    file_id = A.link_download_into_library_v2(_context(
+        _final_processed_path="/music/qobuz/stale-direct.flac",
+        _embedded_id_tags={},
+        track_info={
+            "id": "lib2-track:stale", "name": "Incoming Track Spelling",
+            "artists": [{"id": "explicit_artist", "name": "Incoming Artist Spelling",
+                         "provider_ids": {"qobuz": "qb-artist"}}],
+            "album": {"id": "lib2-album:stale", "name": "Incoming Album Spelling",
+                      "provider_ids": {"qobuz": "qb-album"}},
+            "source_info": {
+                "source": "library_v2", "lib2_track_id": 999999,
+                "lib2_album_id": 999999, "metadata_source": "qobuz",
+                "track_provider_ids": {"qobuz": "qb-track"},
+                "album_provider_ids": {"qobuz": "qb-album"},
+            },
+        },
+    ))
+
+    assert imported_conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=?", (file_id,),
+    ).fetchone()["track_id"] == track_id
 
 
 def test_simple_download_never_adopts_the_source_result_id(lib2_enabled, imported_conn):

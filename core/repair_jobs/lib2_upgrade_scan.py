@@ -128,14 +128,17 @@ class Lib2UpgradeScanJob(RepairJob):
         if not context.create_finding:
             return
         try:
-            from core.library2.quality_eval import evaluate_file, profile_targets
+            from core.library2.quality_eval import (
+                effective_track_profile,
+                evaluate_file,
+                profile_targets,
+            )
             from core.library2.track_files import primary_order
 
             row = conn.execute(
                 f"""SELECT t.id, t.title, al.id AS album_id, al.title AS album_title,
                            al.primary_artist_id AS artist_id,
-                           ar.name AS artist_name, qp.name AS profile_name,
-                           qp.ranked_targets, qp.upgrade_policy, qp.upgrade_cutoff_index,
+                           ar.name AS artist_name,
                            (SELECT f.id FROM lib2_track_files f
                              WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
                                AND COALESCE(f.file_state,'active')
@@ -144,7 +147,6 @@ class Lib2UpgradeScanJob(RepairJob):
                       FROM lib2_tracks t
                       JOIN lib2_albums al ON al.id=t.album_id
                  LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
-                 LEFT JOIN quality_profiles qp ON qp.id=t.quality_profile_id
                      WHERE t.id=?""",
                 (int(track_id),),
             ).fetchone()
@@ -154,7 +156,8 @@ class Lib2UpgradeScanJob(RepairJob):
             file_row = dict(conn.execute(
                 "SELECT * FROM lib2_track_files WHERE id=?", (row["file_id"],)
             ).fetchone())
-            targets, policy, cutoff_index = profile_targets(dict(row))
+            profile = effective_track_profile(conn, int(track_id))
+            targets, policy, cutoff_index = profile_targets(profile)
             verdict = evaluate_file(file_row, targets, policy, cutoff_index)
             if verdict.get("upgrade_candidate") is not True:
                 result.skipped += 1
@@ -173,14 +176,17 @@ class Lib2UpgradeScanJob(RepairJob):
                 title=f"Below cutoff: {row['title']} — {row['artist_name'] or 'Unknown'}",
                 description=(
                     f'"{row["title"]}" ({current or "unknown quality"}) sits below the '
-                    f'upgrade cutoff of profile "{row["profile_name"] or "?"}". '
+                    f'upgrade cutoff of profile "{profile.get("name") or "?"}". '
                     "Approve to queue the upgrade search."
                 ),
                 details={
                     "title": row["title"],
                     "artist": row["artist_name"],
                     "album": row["album_title"],
-                    "profile_name": row["profile_name"],
+                    "profile_name": profile.get("name"),
+                    "quality_profile_id": profile.get("id"),
+                    "quality_profile_source": profile.get("source"),
+                    "quality_profile_source_id": profile.get("source_id"),
                     "current_quality": current or None,
                     "meets_profile": verdict.get("meets_profile"),
                     "upgrade_candidate": True,
