@@ -3113,6 +3113,48 @@ function restoreNavSections() {
     });
 }
 
+/**
+ * The wishlist hero button's behaviour, extracted from initializeWatchlist's
+ * click closure to a NAMED top-level function so the React dashboard header
+ * can call it too (window.openWishlistFromHero). It stays in init.js because
+ * it reads activeDownloadProcesses / WishlistModalState / rehydrateModal —
+ * all script-scoped, unreachable from a module. The body is the closure's,
+ * verbatim.
+ */
+async function openWishlistFromHero() {
+    // Fast path: check if we already know about an active wishlist process
+    const clientProcess = activeDownloadProcesses['wishlist'];
+    if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+        clientProcess.modalElement.style.display = 'flex';
+        WishlistModalState.setVisible();
+        return;
+    }
+    // Slow path: ask the server (with timeout to prevent button feeling dead)
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const resp = await fetch('/api/active-processes', { signal: controller.signal });
+        clearTimeout(timeout);
+        if (resp.ok) {
+            const data = await resp.json();
+            const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
+            if (serverProcess) {
+                try {
+                    WishlistModalState.clearUserClosed();
+                    await rehydrateModal(serverProcess, true);
+                } catch (e) {
+                    console.debug('Rehydration failed, navigating to page:', e);
+                    navigateToPage('wishlist');
+                }
+                return;
+            }
+        }
+    } catch (e) {
+        // Timeout or network error — just navigate
+    }
+    navigateToPage('wishlist');
+}
+
 function initializeWatchlist() {
     // Watchlist button navigates to watchlist page
     const watchlistButton = document.getElementById('watchlist-button');
@@ -3123,39 +3165,7 @@ function initializeWatchlist() {
     // Wishlist button: quick check for active download, otherwise navigate to page
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
-        wishlistButton.addEventListener('click', async () => {
-            // Fast path: check if we already know about an active wishlist process
-            const clientProcess = activeDownloadProcesses['wishlist'];
-            if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
-                clientProcess.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-                return;
-            }
-            // Slow path: ask the server (with timeout to prevent button feeling dead)
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 2000);
-                const resp = await fetch('/api/active-processes', { signal: controller.signal });
-                clearTimeout(timeout);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
-                    if (serverProcess) {
-                        try {
-                            WishlistModalState.clearUserClosed();
-                            await rehydrateModal(serverProcess, true);
-                        } catch (e) {
-                            console.debug('Rehydration failed, navigating to page:', e);
-                            navigateToPage('wishlist');
-                        }
-                        return;
-                    }
-                }
-            } catch (e) {
-                // Timeout or network error — just navigate
-            }
-            navigateToPage('wishlist');
-        });
+        wishlistButton.addEventListener('click', openWishlistFromHero);
     }
 
     // Update watchlist count initially

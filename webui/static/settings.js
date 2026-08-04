@@ -215,6 +215,10 @@ function resolveExperimentalEnableDialog(confirmed) {
 }
 
 function syncJiosaavnEnrichmentBubble(enabled) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler) —
+    // its JioSaavn orb shows/hides on this, since the container write below
+    // only reaches the vanilla markup.
+    window.dispatchEvent(new CustomEvent('ss:jiosaavn-experimental', { detail: { enabled: !!enabled } }));
     const container = document.querySelector('.jiosaavn-button-container');
     if (container) container.style.display = enabled ? '' : 'none';
     if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
@@ -1913,6 +1917,8 @@ async function loadSettingsData() {
             const devResponse = await fetch('/api/dev-mode');
             const devData = await devResponse.json();
             if (devData.enabled) {
+                // Re-broadcast for the React dashboard's Hydrabase orb.
+                window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
                 document.getElementById('dev-mode-status').textContent = 'Active';
                 document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
                 document.getElementById('hydrabase-nav').style.display = '';
@@ -4069,6 +4075,8 @@ async function activateDevMode() {
         });
         const data = await response.json();
         if (data.success) {
+            // Re-broadcast for the React dashboard's Hydrabase orb.
+            window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
             document.getElementById('dev-mode-status').textContent = 'Active';
             document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
             document.getElementById('hydrabase-nav').style.display = '';
@@ -4140,6 +4148,7 @@ async function hydrabaseDisconnect() {
     document.getElementById('hydra-connection-status').style.color = '#888';
     document.getElementById('hydra-connect-btn').textContent = 'Connect';
     // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
+    window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
     document.getElementById('hydrabase-nav').style.display = 'none';
     document.getElementById('hydrabase-button-container').style.display = 'none';
     const devStatus = document.getElementById('dev-mode-status');

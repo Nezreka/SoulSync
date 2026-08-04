@@ -731,3 +731,29 @@ export function repairFindingsBadge(data: ProviderStatusPayload): {
   const count = data.findings_pending || 0;
   return { count, visible: count > 0 };
 }
+
+// ── formatCountdownTime — the watchlist hero button's title timer ────────────
+
+/**
+ * Transcribed 1:1 from media-player.js:formatCountdownTime. The watchlist
+ * button's `Next auto-scan in …` title runs it over `next_run_in_seconds`.
+ * Ported rather than window-called because it is pure and media-player.js has
+ * no reason to export it.
+ */
+export function formatCountdownTime(seconds: number | null | undefined): string {
+  // Format seconds as countdown timer (e.g., "24m 13s", "2h 15m", "23h 59m")
+  if (seconds === null || seconds === undefined || seconds < 0) return '';
+  if (seconds === 0) return '0s'; // Show "0s" instead of hiding timer
+
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${secs}s`;
+  } else {
+    return `${secs}s`;
+  }
+}

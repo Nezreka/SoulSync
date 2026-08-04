@@ -111,8 +111,53 @@ def test_react_subscribes_to_every_event() -> None:
         "ss:enrich-status",
         *CORE_HANDLERS.values(),
         "ss:rate-monitor",
+        "ss:jiosaavn-experimental",
+        "ss:dev-mode",
     ]:
         assert f"'{name}'" in events, f"{name} is broadcast but -dash.events.ts never names it"
+
+
+# ── The header visibility + quick-nav seams (P4) ─────────────────────────────
+#
+# The JioSaavn and Hydrabase orbs are shown/hidden by SETTINGS-PAGE writers
+# (syncJiosaavnEnrichmentBubble; the three dev-mode sites). Those writers drive
+# vanilla DOM the React dashboard does not read, so each one also dispatches an
+# ss: event the React header subscribes to. The wishlist hero button's
+# fast/slow path was an anonymous closure in init.js — it is a NAMED function
+# now so the React header can invoke it (it reads script-scoped state no
+# module can reach).
+
+
+def test_jiosaavn_bubble_writer_dispatches() -> None:
+    body = _handler_body("settings.js", "syncJiosaavnEnrichmentBubble")
+    assert "CustomEvent('ss:jiosaavn-experimental'" in body, (
+        "syncJiosaavnEnrichmentBubble no longer re-broadcasts — the React "
+        "JioSaavn orb misses live experimental toggles"
+    )
+
+
+def test_dev_mode_writers_dispatch() -> None:
+    settings = (STATIC / "settings.js").read_text(encoding="utf-8")
+    enabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: true } })")
+    disabled = settings.count("CustomEvent('ss:dev-mode', { detail: { enabled: false } })")
+    assert enabled == 2, (
+        f"expected the dev-mode ENABLE dispatch at both write sites (initial "
+        f"check + activateDevMode), found {enabled}"
+    )
+    assert disabled == 1, (
+        f"expected the dev-mode DISABLE dispatch at the hydra disconnect site, found {disabled}"
+    )
+
+
+def test_wishlist_hero_behaviour_is_a_named_function() -> None:
+    init = (STATIC / "init.js").read_text(encoding="utf-8")
+    assert "async function openWishlistFromHero()" in init, (
+        "openWishlistFromHero is gone — the React wishlist hero button loses "
+        "the in-flight-download fast/slow path"
+    )
+    assert "wishlistButton.addEventListener('click', openWishlistFromHero)" in init, (
+        "the vanilla wishlist hero button no longer binds openWishlistFromHero"
+    )
 
 
 # ── The AudioDB logo rehome (P8) ─────────────────────────────────────────────

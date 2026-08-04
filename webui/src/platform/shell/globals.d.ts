@@ -512,6 +512,24 @@ declare global {
     openMetadataCacheModal?: () => void;
     openCacheHealthModal?: () => void;
     openBlacklistModal?: () => void;
+    /**
+     * Dashboard header seams, all owned by vanilla and INVOKED:
+     * - openEnrichmentManager (enrichment-manager.js) — the Manage Workers
+     *   modal, self-contained with markup outside the dashboard region
+     * - openRepairModal (enrichment.js) — the repair orb's click: navigate to
+     *   tools + scroll to the maintenance hero (kept through the tools flip
+     *   exactly for this)
+     * - isJiosaavnExperimentalEnabled (shared-helpers.js) — the JioSaavn orb's
+     *   initial visibility; live toggles arrive via ss:jiosaavn-experimental
+     * - openWishlistFromHero (init.js) — the wishlist hero button's
+     *   fast/slow-path behaviour; reads activeDownloadProcesses /
+     *   WishlistModalState / rehydrateModal, all script-scoped `let`s no
+     *   module can reach
+     */
+    openEnrichmentManager?: () => void;
+    openRepairModal?: () => void;
+    isJiosaavnExperimentalEnabled?: () => boolean;
+    openWishlistFromHero?: () => void | Promise<void>;
   }
 }
 

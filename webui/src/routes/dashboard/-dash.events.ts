@@ -30,6 +30,12 @@ export const DASHBOARD_WISHLIST_COUNT_EVENT = 'ss:dashboard-wishlist-count';
 export const WATCHLIST_COUNT_EVENT = 'ss:watchlist-count';
 export const SERVICE_STATUS_EVENT = 'ss:service-status';
 export const RATE_MONITOR_EVENT = 'ss:rate-monitor';
+/** settings.js syncJiosaavnEnrichmentBubble — the JioSaavn orb's live
+ *  show/hide when the experimental opt-in is toggled. */
+export const JIOSAAVN_EXPERIMENTAL_EVENT = 'ss:jiosaavn-experimental';
+/** settings.js dev-mode writers (initial check, activate, hydra disconnect) —
+ *  the Hydrabase orb's live show/hide. */
+export const DEV_MODE_EVENT = 'ss:dev-mode';
 
 /** The canonical provider ids `ss:enrich-status` carries. */
 export type EnrichEventId =
@@ -104,4 +110,14 @@ export function useServiceStatusEvent(onFrame: (frame: ServiceStatusPayload) => 
 
 export function useRateMonitorEvent(onFrame: (frame: Record<string, unknown>) => void): void {
   useShellEvent(RATE_MONITOR_EVENT, onFrame);
+}
+
+export function useJiosaavnExperimentalEvent(
+  onFrame: (frame: { enabled?: boolean }) => void,
+): void {
+  useShellEvent(JIOSAAVN_EXPERIMENTAL_EVENT, onFrame);
+}
+
+export function useDevModeEvent(onFrame: (frame: { enabled?: boolean }) => void): void {
+  useShellEvent(DEV_MODE_EVENT, onFrame);
 }

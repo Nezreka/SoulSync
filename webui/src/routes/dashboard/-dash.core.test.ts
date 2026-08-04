@@ -14,6 +14,7 @@ import {
   audiodbPill,
   bandcampPill,
   discogsPill,
+  formatCountdownTime,
   geniusPill,
   hydrabasePill,
   itunesPill,
@@ -596,5 +597,28 @@ describe('repairFindingsBadge', () => {
   it('shows only when non-zero', () => {
     expect(repairFindingsBadge({ findings_pending: 3 })).toEqual({ count: 3, visible: true });
     expect(repairFindingsBadge({})).toEqual({ count: 0, visible: false });
+  });
+});
+
+describe('formatCountdownTime (media-player.js transcription)', () => {
+  it('returns empty for null/undefined/negative', () => {
+    expect(formatCountdownTime(null)).toBe('');
+    expect(formatCountdownTime(undefined)).toBe('');
+    expect(formatCountdownTime(-1)).toBe('');
+  });
+
+  it('shows "0s" for exactly zero instead of hiding the timer', () => {
+    expect(formatCountdownTime(0)).toBe('0s');
+  });
+
+  it('formats seconds-only, minutes+seconds, and hours+minutes', () => {
+    expect(formatCountdownTime(45)).toBe('45s');
+    expect(formatCountdownTime(1453)).toBe('24m 13s');
+    expect(formatCountdownTime(2 * 3600 + 15 * 60)).toBe('2h 15m');
+    expect(formatCountdownTime(23 * 3600 + 59 * 60 + 59)).toBe('23h 59m');
+  });
+
+  it('drops seconds once hours appear (the vanilla shape)', () => {
+    expect(formatCountdownTime(3600 + 61)).toBe('1h 1m');
   });
 });

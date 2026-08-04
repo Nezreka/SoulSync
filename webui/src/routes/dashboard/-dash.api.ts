@@ -120,6 +120,26 @@ export async function setHydrabaseRunning(run: boolean): Promise<Response> {
   return fetch(`/api/hydrabase-worker/${run ? 'resume' : 'pause'}`, { method: 'POST' });
 }
 
+// ── Dev mode (Hydrabase orb visibility) ──────────────────────────────────────
+
+/**
+ * GET /api/dev-mode — the Hydrabase orb (and the vanilla sidebar's
+ * #hydrabase-nav) are hidden unless dev mode is active. The vanilla checks
+ * this during the settings security load (settings.js) and shows
+ * #hydrabase-button-container; the React header does its own check on mount
+ * and listens for ss:dev-mode afterwards. Errors keep it hidden, like the
+ * original's catch.
+ */
+export async function fetchDevMode(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/dev-mode');
+    const data = (await response.json()) as { enabled?: boolean };
+    return data.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Service status (/status) ─────────────────────────────────────────────────
 
 /** The subset of the `/status` payload the dashboard reads. Deliberately

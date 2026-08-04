@@ -12,6 +12,7 @@ import {
   fetchActivityToasts,
   fetchAllProviderStatuses,
   fetchDashboardSyncHistory,
+  fetchDevMode,
   fetchHydrabaseStatus,
   fetchLibraryScanStatus,
   fetchProviderStatus,
@@ -113,6 +114,22 @@ describe('toggles', () => {
     expect(fetchMock.mock.calls.every((call) => (call[1] as RequestInit).method === 'POST')).toBe(
       true,
     );
+  });
+});
+
+describe('fetchDevMode', () => {
+  it('is true only for an explicit enabled: true', async () => {
+    routes({ '/api/dev-mode': { enabled: true } });
+    expect(await fetchDevMode()).toBe(true);
+    routes({ '/api/dev-mode': { enabled: false } });
+    expect(await fetchDevMode()).toBe(false);
+    routes({ '/api/dev-mode': {} });
+    expect(await fetchDevMode()).toBe(false);
+  });
+
+  it('stays hidden (false) on a network failure', async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error('down')));
+    expect(await fetchDevMode()).toBe(false);
   });
 });
 
