@@ -621,6 +621,49 @@ describe('MediaScanCard — live scan:media frames', () => {
     expect(toastSpy).toHaveBeenCalledWith('✅ Media scan completed', 'success', 3000);
   });
 
+  it('announces a completion ONCE when the poll and the event both detect it', async () => {
+    // finish() is reachable from two detectors that race: the HTTP poll a
+    // manual scan starts, and the scanning→idle frame. Whichever fires second
+    // must not toast again.
+    vi.useFakeTimers();
+    routes({
+      'active-media-server': server('plex'),
+      '/api/scan/request': { success: true, scan_info: { delay_seconds: 1 } },
+      '/api/scan/status': { success: true, status: { status: 'idle' } },
+    });
+    const { container } = render(<MediaScanCard />);
+    await act(async () => {});
+    fireEvent.click(container.querySelector('#media-scan-button') as HTMLElement);
+    await act(async () => {});
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000); // countdown ends -> polling starts
+    });
+    // A scanning frame arrives (re-arms the latch, marks lastScanKey).
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:media-scan', {
+          detail: { success: true, status: { status: 'scanning' } },
+        }),
+      );
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2000); // poll sees idle -> finish() -> toast #1
+    });
+    // Then the scanning→idle FRAME lands — the second detector.
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:media-scan', { detail: { success: true, status: { status: 'idle' } } }),
+      );
+    });
+
+    const completions = toastSpy.mock.calls.filter((call) =>
+      String(call[0]).includes('Media scan completed'),
+    );
+    expect(completions).toHaveLength(1);
+    vi.useRealTimers();
+  });
+
   it('reports a completion once, not on every idle frame that follows', async () => {
     await mounted();
     await push({ status: 'scanning' });
