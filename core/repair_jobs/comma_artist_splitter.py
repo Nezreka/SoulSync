@@ -116,16 +116,20 @@ class CommaArtistSplitterJob(RepairJob):
         except Exception:
             return 0
 
-    def scan(self, context: JobContext) -> JobResult:
-        result = JobResult()
+    # --- catalogue boundary -------------------------------------------------
+    # ``_comma_artist_rows``/``_finding_identity``/``_library_artist_id``/
+    # ``_sample_tracks`` are the four places this job touched the catalogue.
+    # The native subclass in core.repair_jobs.native_p3 overrides all four; the
+    # legacy bodies stay for the rollback window.
 
-        rows = []
+    def _comma_artist_rows(self, context: JobContext) -> list:
+        """``(artist_id, name, thumb_url, file_count)``, biggest offenders first
+        so the per-scan cap keeps the most valuable rows. ``LIMIT+1`` detects
+        the cap."""
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
-            # ORDER BY track count so the biggest offenders are checked first
-            # when the per-scan cap bites. LIMIT+1 detects the cap.
             cursor.execute(f"""
                 SELECT ar.id, ar.name, ar.thumb_url, COUNT(t.id) AS n
                 FROM artists ar
@@ -136,14 +140,24 @@ class CommaArtistSplitterJob(RepairJob):
                 ORDER BY n DESC
                 LIMIT {SCAN_ARTIST_LIMIT + 1}
             """)
-            rows = cursor.fetchall()
+            return cursor.fetchall()
+        finally:
+            if conn:
+                conn.close()
+
+    def _finding_identity(self, artist_id) -> tuple:
+        """``(entity_id, extra_details)`` for one flagged artist."""
+        return str(artist_id), {}
+
+    def scan(self, context: JobContext) -> JobResult:
+        result = JobResult()
+
+        try:
+            rows = self._comma_artist_rows(context)
         except Exception as e:
             logger.error("Error fetching comma artists: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
 
         capped = len(rows) > SCAN_ARTIST_LIMIT
         if capped:
@@ -225,6 +239,7 @@ class CommaArtistSplitterJob(RepairJob):
                     log_line=f'"{name}" → {len(parts)} artists ({track_count} track(s))',
                     log_type='warning')
 
+            finding_entity_id, extra_details = self._finding_identity(artist_id)
             if context.create_finding:
                 try:
                     inserted = context.create_finding(
@@ -232,7 +247,7 @@ class CommaArtistSplitterJob(RepairJob):
                         finding_type='comma_artist_split',
                         severity='warning',
                         entity_type='artist',
-                        entity_id=str(artist_id),
+                        entity_id=finding_entity_id,
                         file_path=None,
                         title=f'Combined artist: {name}',
                         description=(
@@ -252,6 +267,7 @@ class CommaArtistSplitterJob(RepairJob):
                             'primary_artist': parts[0],
                             'track_count': track_count,
                             'tracks': sample_tracks,
+                            **extra_details,
                         },
                     )
                     if inserted:

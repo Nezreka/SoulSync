@@ -2388,10 +2388,7 @@ class WatchlistScanner:
                     # #831: groups wishlist rows by the scan run that added them.
                     'scan_run_id': scan_run_id or '',
                 },
-                profile_id=getattr(watchlist_artist, 'profile_id', 1),
-                quality_profile_id=getattr(
-                    watchlist_artist, 'quality_profile_id', None
-                ),
+                profile_id=getattr(watchlist_artist, 'profile_id', 1)
             )
             
             if success:

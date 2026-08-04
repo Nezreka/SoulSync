@@ -15,7 +15,6 @@ Lidarr downloads full albums — SoulSync imports only the tracks it needs.
 import os
 import re
 import time
-import asyncio
 import uuid
 import shutil
 import threading
@@ -26,6 +25,7 @@ import requests as http_requests
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.async_utils import run_blocking
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
@@ -83,8 +83,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if not self.is_configured():
             return False
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._check_connection_sync)
+            return await run_blocking(self._check_connection_sync)
         except Exception:
             return False
 
@@ -107,8 +106,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return ([], [])
 
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._search_sync, query)
+            return await run_blocking(self._search_sync, query)
         except Exception as e:
             logger.error(f"Lidarr search failed: {e}")
             return ([], [])

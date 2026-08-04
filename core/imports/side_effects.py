@@ -274,6 +274,17 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         # library_history row (the Unverified review queue needs it).
         if isinstance(_history_id, int) and _history_id > 0:
             context["_history_id"] = _history_id
+            # F-10: that stash is in-memory only and gone by the time a user
+            # approves or rejects the file. Persist the acquisition
+            # correlation on the row itself so the later decision can still
+            # be journaled. Fail-open — an ordinary import writes nothing.
+            try:
+                from core.acquisition.pipeline_callback import (
+                    persist_history_correlation,
+                )
+                persist_history_correlation(context, _history_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("history correlation persist failed: %s", exc)
     except Exception as e:
         logger.debug("library history record failed: %s", e)
 
@@ -390,6 +401,63 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         )
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
+
+    # Library v2 auto-link (opt-in, best-effort): make the imported file appear
+    # in the v2 library immediately instead of waiting for a full re-import.
+    linked_lib2_file_id = None
+    try:
+        from core.library2.autolink import link_download_into_library_v2
+        linked_lib2_file_id = link_download_into_library_v2(context)
+    except Exception as e:
+        logger.debug("library v2 autolink skipped: %s", e)
+
+    # The canonical tracklist deliberately comes from one provider, but a
+    # confirmed album can carry several provider release IDs. Reconcile those
+    # exact lists after the import so a newly landed track immediately gains
+    # every safe provider ID without making the file pipeline wait on network
+    # calls. Album-level debounce collapses a multi-file import into one run.
+    if linked_lib2_file_id is not None:
+        try:
+            from core.library2.track_reconcile_trigger import (
+                schedule_file_track_reconcile,
+            )
+            schedule_file_track_reconcile(
+                get_database(),
+                linked_lib2_file_id,
+                _get_config_manager(),
+            )
+        except Exception as e:
+            logger.debug("library v2 track-identity reconcile not scheduled: %s", e)
+
+    # ...and heal the artists that link just created. Featured credits and
+    # wishlist/discography rows are born without a provider id, so their chips
+    # stay 'pending' and they carry no artwork until something resolves them
+    # (status.md §28). Debounced — a 30-track album import fires this hook 30
+    # times and gets one run — and cooldown-guarded so unresolvable names are
+    # not re-asked at every import (issues.md §16 Finding 2).
+    try:
+        from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
+        schedule_unmapped_artist_reconcile(_get_config_manager())
+    except Exception as e:
+        logger.debug("library v2 unmapped-artist reconcile not scheduled: %s", e)
+
+    # Persistent acquisition completion is intentionally downstream of every
+    # shared pipeline guard and the Library-v2 autolink. Quarantined files never
+    # reach this point; a later manual approval re-enters the same pipeline and
+    # carries these markers in its serialized context.
+    try:
+        from core.acquisition.pipeline_callback import notify_pipeline_import_success
+        notify_pipeline_import_success(context)
+    except Exception as e:
+        logger.debug("acquisition pipeline callback skipped: %s", e)
+
+    # Correlated legacy manual grabs close their request/grab here too; the
+    # callback is a no-op for downloads without the manual-grab marker.
+    try:
+        from core.acquisition.pipeline_callback import notify_manual_grab_import_success
+        notify_manual_grab_import_success(context)
+    except Exception as e:
+        logger.debug("manual grab callback skipped: %s", e)
 
 
 def is_active_media_server_ready() -> tuple[bool, str]:

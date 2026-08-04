@@ -107,6 +107,15 @@ class _DB:
         return self._artists
 
 
+class _V2DB(_DB):
+    def __init__(self, connection, artists=None):
+        super().__init__(artists)
+        self._connection = connection
+
+    def _get_connection(self):
+        return self._connection
+
+
 class _Cfg:
     def __init__(self, values=None):
         self._v = values or {}
@@ -269,6 +278,263 @@ def test_short_query_with_explicit_source_uses_that_source_label():
     result = orchestrator.run_enhanced_search('aa', 'deezer', deps)
     assert result['primary_source'] == 'deezer'
     assert result['metadata_source'] == 'deezer'
+
+
+def test_global_search_merges_v2_only_artists_and_provider_deduplicates(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'search.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Shared Artist', 'spotify-shared');
+        INSERT INTO lib2_artists VALUES(
+            11, 'Shared Artist', NULL, 'spotify-shared', NULL, '{}', NULL, NULL
+        );
+        INSERT INTO lib2_artists VALUES(
+            12, 'V2 Native Artist', 'cover.jpg', 'spotify-native', NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    legacy = _Artist(1, 'Shared Artist')
+    deps = _build_deps(database=_V2DB(
+        sqlite3.connect(path), artists=[legacy],
+    ))
+    deps.database._connection.row_factory = sqlite3.Row
+
+    result = orchestrator.run_enhanced_search('artist', '', deps)
+
+    library = result['db_artists']
+    assert len([artist for artist in library if artist['name'] == 'Shared Artist']) == 1
+    assert next(a for a in library if a['name'] == 'Shared Artist')['library_v2_id'] == 11
+    assert next(a for a in library if a['name'] == 'V2 Native Artist') == {
+        'id': 12,
+        'library_v2_id': 12,
+        'name': 'V2 Native Artist',
+        'image_url': 'FIXED::cover.jpg',
+        # iss29-B04c: `id` is a LIB2 id here, so the generic
+        # /api/artist/<id>/image resolver must not be asked to resolve it — it
+        # forwards ids straight to the providers and returned whichever Deezer
+        # or iTunes artist happened to own that number.
+        'image_is_native': True,
+    }
+
+
+def test_global_search_links_v2_artist_without_backreference_or_provider_id(tmp_path, monkeypatch):
+    """find25-search-02: a lib2 artist born from a normal download carries no
+    ``legacy_artist_id``; when it also shares no provider id with the legacy
+    row, the merge used to leave the result without ``library_v2_id`` — so the
+    search result opened the OLD library page (and a duplicate entry appeared).
+
+    rev25-05/rev25-07: persisting the repaired link is no longer a write on
+    the search's own read connection — it's scheduled off the request thread
+    (see ``test_reconcile_legacy_artist_link`` below for the write itself).
+    This only asserts the in-memory merge and that the repair was scheduled
+    for the right pair, mirroring how the MB release-group reconcile dispatch
+    is tested in ``tests/library2/test_api_routes.py``.
+    """
+    import sqlite3
+    import threading
+
+    path = tmp_path / 'search-unlinked.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Unlinked Artist', NULL);
+        INSERT INTO lib2_artists VALUES(
+            21, 'unlinked  artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    live = sqlite3.connect(path)
+    live.row_factory = sqlite3.Row
+    deps = _build_deps(database=_V2DB(live, artists=[_Artist(1, 'Unlinked Artist')]))
+
+    called = {}
+    done = threading.Event()
+
+    def fake_reconcile(database, v2_id, legacy_id):
+        called['v2_id'] = v2_id
+        called['legacy_id'] = legacy_id
+        done.set()
+
+    monkeypatch.setattr(orchestrator, '_reconcile_legacy_artist_link', fake_reconcile)
+
+    result = orchestrator.run_enhanced_search('unlinked', '', deps)
+
+    library = result['db_artists']
+    assert len(library) == 1, 'the same artist must not appear twice'
+    assert library[0]['library_v2_id'] == 21
+    assert done.wait(timeout=5.0), 'the legacy-link repair was never scheduled'
+    assert called == {'v2_id': 21, 'legacy_id': 1}
+    # The read connection itself must stay untouched by the repair.
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT legacy_artist_id FROM lib2_artists WHERE id=21'
+    ).fetchone()['legacy_artist_id'] is None
+
+
+class _FreshConnDB:
+    """Unlike ``_V2DB``, opens a genuinely new connection per call — what the
+    reconcile needs since it may run on a different thread than the search
+    that scheduled it (matches ``database/music_database.py``'s real
+    ``_get_connection``, which is documented "NEW connection... thread-safe")."""
+
+    def __init__(self, path):
+        self._path = path
+
+    def _get_connection(self):
+        import sqlite3
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def test_reconcile_legacy_artist_link_persists_a_true_global_unique_match(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'reconcile-unique.sqlite'
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Solo Artist');
+        INSERT INTO lib2_artists VALUES(11, 'solo  artist', NULL, NULL);
+    """)
+    conn.commit()
+    conn.close()
+
+    orchestrator._reconcile_legacy_artist_link(_FreshConnDB(path), v2_id=11, legacy_id=1)
+
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT legacy_artist_id FROM lib2_artists WHERE id=11'
+    ).fetchone()['legacy_artist_id'] == 1
+
+
+def test_reconcile_legacy_artist_link_refuses_when_the_full_table_is_ambiguous(tmp_path):
+    """rev25-05: three same-named artists on each side can still look like a
+    clean 1:1 pair inside the caller's LIMIT-5/LIMIT-10 window if the others
+    are crowded out of it. The reconcile re-checks the whole table, not the
+    window the caller used to decide this pair looked unique."""
+    import sqlite3
+
+    path = tmp_path / 'reconcile-ambiguous.sqlite'
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'John Williams');
+        INSERT INTO artists VALUES(2, 'John Williams');
+        INSERT INTO artists VALUES(3, 'John Williams');
+        INSERT INTO lib2_artists VALUES(11, 'John Williams', NULL, NULL);
+        INSERT INTO lib2_artists VALUES(12, 'John Williams', NULL, NULL);
+        INSERT INTO lib2_artists VALUES(13, 'John Williams', NULL, NULL);
+    """)
+    conn.commit()
+    conn.close()
+
+    orchestrator._reconcile_legacy_artist_link(_FreshConnDB(path), v2_id=11, legacy_id=1)
+
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT COUNT(*) c FROM lib2_artists WHERE legacy_artist_id IS NOT NULL'
+    ).fetchone()['c'] == 0
+
+
+def test_reconcile_legacy_artist_link_never_steals_a_claimed_legacy_id(tmp_path):
+    import sqlite3
+
+    path = tmp_path / 'reconcile-claimed.sqlite'
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE artists(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Solo Artist');
+        INSERT INTO lib2_artists VALUES(10, 'solo artist (existing)', 1, NULL);
+        INSERT INTO lib2_artists VALUES(11, 'solo  artist', NULL, NULL);
+    """)
+    conn.commit()
+    conn.close()
+
+    orchestrator._reconcile_legacy_artist_link(_FreshConnDB(path), v2_id=11, legacy_id=1)
+
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT legacy_artist_id FROM lib2_artists WHERE id=11'
+    ).fetchone()['legacy_artist_id'] is None
+
+
+def test_global_search_leaves_ambiguous_name_matches_unlinked(tmp_path):
+    """Two lib2 rows with the same name are not evidence of identity."""
+    import sqlite3
+
+    path = tmp_path / 'search-ambiguous.sqlite'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE artists(
+            id INTEGER PRIMARY KEY, name TEXT, spotify_artist_id TEXT
+        );
+        CREATE TABLE lib2_artists(
+            id INTEGER PRIMARY KEY, name TEXT, image_url TEXT,
+            spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT,
+            legacy_artist_id INTEGER, canonical_artist_id INTEGER
+        );
+        INSERT INTO artists VALUES(1, 'Twin Artist', NULL);
+        INSERT INTO lib2_artists VALUES(
+            31, 'Twin Artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+        INSERT INTO lib2_artists VALUES(
+            32, 'Twin Artist', NULL, NULL, NULL, '{}', NULL, NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+    live = sqlite3.connect(path)
+    live.row_factory = sqlite3.Row
+    deps = _build_deps(database=_V2DB(live, artists=[_Artist(1, 'Twin Artist')]))
+
+    result = orchestrator.run_enhanced_search('twin', '', deps)
+
+    legacy_entry = next(a for a in result['db_artists'] if a['id'] == 1)
+    assert 'library_v2_id' not in legacy_entry
+    verify = sqlite3.connect(path)
+    verify.row_factory = sqlite3.Row
+    assert verify.execute(
+        'SELECT COUNT(*) c FROM lib2_artists WHERE legacy_artist_id IS NOT NULL'
+    ).fetchone()['c'] == 0
 
 
 # ---------------------------------------------------------------------------

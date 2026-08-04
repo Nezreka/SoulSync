@@ -264,7 +264,12 @@ async function playLibraryTrack(track, albumTitle, artistName) {
     // resolve-track and overwrite the caller-supplied fields with the
     // DB values. Falls back silently to the caller-supplied values on
     // any error so we never lose the play action over a metadata fetch.
-    if (track.id && (track.title || track.name) && (artistName || track.artist_name)) {
+    // Library v2 rows carry a `lib2_track_id` and address the legacy row (if it
+    // still exists) as `legacy_track_id`. `track.id` is then a v2 id, which
+    // resolve-track cannot look up — running it would overwrite good metadata
+    // with a miss, so a v2-only row skips the refresh entirely.
+    if ((track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+            (track.title || track.name) && (artistName || track.artist_name)) {
         try {
             const _dbResp = await fetch('/api/stats/resolve-track', {
                 method: 'POST',
@@ -324,7 +329,14 @@ async function playLibraryTrack(track, albumTitle, artistName) {
             is_library: true,
             image_url: albumArt,
             id: track.id,
+            lib2_track_id: track.lib2_track_id || null,
+            legacy_track_id: track.legacy_track_id || null,
+            server_track_id: track.server_track_id || null,
             artist_id: track.artist_id,
+            // iss29-B08: a V2-native track has no legacy artist id, so the
+            // player's "Go to artist" needs the lib2 one to route to
+            // /library?artist=. setTrackInfo drops anything it isn't handed.
+            lib2_artist_id: track.lib2_artist_id || null,
             album_id: track.album_id,
             bitrate: track.bitrate,
             sample_rate: track.sample_rate
@@ -347,8 +359,15 @@ async function playLibraryTrack(track, albumTitle, artistName) {
                 artist: artistName || '',
                 album: albumTitle || '',
                 // Server song id so playback can stream via the media server
-                // when the file isn't on SoulSync's disk (#809).
-                track_id: track.id || null
+                // when the file isn't on SoulSync's disk (#809). A Library v2
+                // row's `id` is a v2 id and means nothing to the media server,
+                // so only a server/legacy id may be sent as `track_id`; the
+                // typed ids ride alongside for the v2-aware endpoints.
+                track_id: track.server_track_id || track.legacy_track_id ||
+                    (track.lib2_track_id ? null : (track.id || null)),
+                lib2_track_id: track.lib2_track_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
             })
         });
 
@@ -390,4 +409,3 @@ async function playLibraryTrack(track, albumTitle, artistName) {
         clearTrack();
     }
 }
-

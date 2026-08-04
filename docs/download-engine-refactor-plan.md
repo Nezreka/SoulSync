@@ -1,5 +1,13 @@
 # Download Engine Refactor Plan
 
+> **Status 2026-07-17:** Der Refactor ist im aktuellen Branch umgesetzt. Der
+> letzte in `docs/library-v2.md` als P2-23 geführte Grenzrest ist geschlossen:
+> `DownloadEngine.dispatch_download` besitzt nun auch Source-/Alias-/Soulseek-
+> Peer-Routing; `DownloadOrchestrator.download` delegiert nur noch. Ein
+> source-übergreifender Retry desselben Target-IDs ist bewusst kein Vertrag,
+> weil IDs/Dateinamen plugin-spezifisch sind — Fallback bleibt Teil von Suche
+> und Candidate-Walk, wo pro Source echte Kandidaten vorliegen.
+
 ## Goal
 
 Mirror Cin's "metadata engine" architecture for the download dispatcher. Move shared logic OUT of the per-source clients (currently 1600+ LOC of duplicated thread workers, search retry ladders, rate-limiters, state machines) and INTO a central `DownloadEngine`. Clients become dumb: make raw API requests + manage their own auth state. Everything else is the engine.

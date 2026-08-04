@@ -15,7 +15,8 @@ picks up SoundCloud automatically without per-source special cases.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch, MagicMock
+from contextlib import ExitStack, contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,6 +26,21 @@ from core.soundcloud_client import SoundcloudClient
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@contextmanager
+def _mock_aggregate_plugins(orchestrator, method_name, soundcloud_result, other_result):
+    """Keep aggregate wiring tests independent from external client I/O."""
+    with ExitStack() as stack:
+        methods = {}
+        for source_name, plugin in orchestrator.engine._plugins.items():
+            if plugin is None:
+                continue
+            result = soundcloud_result if source_name == 'soundcloud' else other_result
+            methods[source_name] = stack.enter_context(
+                patch.object(plugin, method_name, new=AsyncMock(return_value=result))
+            )
+        yield methods
 
 
 @pytest.fixture
@@ -163,13 +179,13 @@ def test_get_all_downloads_walks_soundcloud(orchestrator: DownloadOrchestrator) 
     queue must show up in the aggregate."""
     fake_status = MagicMock(id='sc-1', filename='x', state='InProgress, Downloading')
 
-    async def _fake_get_all():
-        return [fake_status]
-
-    with patch.object(orchestrator.client('soundcloud'), 'get_all_downloads', side_effect=_fake_get_all):
+    with _mock_aggregate_plugins(
+        orchestrator, 'get_all_downloads', [fake_status], [],
+    ) as methods:
         all_dl = _run(orchestrator.get_all_downloads())
 
     assert any(d is fake_status for d in all_dl)
+    methods['soundcloud'].assert_awaited_once()
 
 
 def test_get_download_status_finds_soundcloud_id(orchestrator: DownloadOrchestrator) -> None:
@@ -177,10 +193,9 @@ def test_get_download_status_finds_soundcloud_id(orchestrator: DownloadOrchestra
     client until one finds the id."""
     fake_status = MagicMock(id='sc-2')
 
-    async def _fake_get_status(download_id):
-        return fake_status if download_id == 'sc-2' else None
-
-    with patch.object(orchestrator.client('soundcloud'), 'get_download_status', side_effect=_fake_get_status):
+    with _mock_aggregate_plugins(
+        orchestrator, 'get_download_status', fake_status, None,
+    ):
         result = _run(orchestrator.get_download_status('sc-2'))
 
     assert result is fake_status
@@ -207,12 +222,11 @@ def test_clear_completed_walks_soundcloud(orchestrator: DownloadOrchestrator) ->
     throwing). The contract this test pins is "SoundCloud is included
     in the iteration", which is what plug-and-play parity requires.
     """
-    async def _fake_clear():
-        return True
-
-    with patch.object(orchestrator.client('soundcloud'), 'clear_all_completed_downloads', side_effect=_fake_clear) as mock_clear:
+    with _mock_aggregate_plugins(
+        orchestrator, 'clear_all_completed_downloads', True, False,
+    ) as methods:
         _run(orchestrator.clear_all_completed_downloads())
-    mock_clear.assert_called_once()
+    methods['soundcloud'].assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -228,8 +242,21 @@ def test_soundcloud_only_mode_uses_soundcloud(orchestrator: DownloadOrchestrator
     async def _fake_search(query, timeout=None, progress_callback=None):
         return ([MagicMock(username='soundcloud')], [])
 
-    with patch.object(orchestrator.client('soundcloud'), 'search', side_effect=_fake_search) as mock_sc, \
-         patch.object(orchestrator.client('soulseek'), 'search', side_effect=AssertionError("soulseek must not be searched")):
+    with ExitStack() as stack:
+        mock_sc = stack.enter_context(
+            patch.object(
+                orchestrator.client('soundcloud'), 'search', side_effect=_fake_search
+            )
+        )
+        soulseek = orchestrator.client('soulseek')
+        if soulseek is not None:
+            stack.enter_context(
+                patch.object(
+                    soulseek,
+                    'search',
+                    side_effect=AssertionError("soulseek must not be searched"),
+                )
+            )
         tracks, _ = _run(orchestrator.search("any"))
 
     assert len(tracks) == 1

@@ -159,7 +159,16 @@ function setTrackInfo(track) {
 
     const gotoArtistBtn = document.getElementById('np-goto-artist');
     if (gotoArtistBtn) {
-        if (track.artist_id) {
+        // iss29-B08: a Library V2 track has no LEGACY artist id — `artist_id`
+        // is correctly null — so this button was permanently disabled for the
+        // whole of V2 playback. The V2 id travels separately and routes into
+        // the Library page, which is where that artist actually lives.
+        if (track.lib2_artist_id) {
+            gotoArtistBtn.href = `/library?artist=${encodeURIComponent(track.lib2_artist_id)}`;
+            gotoArtistBtn.style.pointerEvents = '';
+            gotoArtistBtn.setAttribute('aria-disabled', 'false');
+            gotoArtistBtn.tabIndex = 0;
+        } else if (track.artist_id) {
             gotoArtistBtn.href = buildArtistDetailPath(track.artist_id, track.artist_source || null);
             gotoArtistBtn.style.pointerEvents = '';
             gotoArtistBtn.setAttribute('aria-disabled', 'false');
@@ -3155,6 +3164,9 @@ function npMaybeLogPlay() {
             body: JSON.stringify({
                 track: {
                     id: currentTrack.id,
+                    lib2_track_id: currentTrack.lib2_track_id || null,
+                    legacy_track_id: currentTrack.legacy_track_id || null,
+                    server_track_id: currentTrack.server_track_id || null,
                     title: currentTrack.title,
                     artist: currentTrack.artist,
                     album: currentTrack.album,

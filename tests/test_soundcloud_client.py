@@ -146,7 +146,18 @@ def test_set_shutdown_check_assigns_callable(tmp_dl: Path) -> None:
 
 def _run(coro):
     """Tiny helper — we have async methods to exercise but no async test runner."""
-    return asyncio.run(coro)
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
 
 
 def test_search_returns_empty_when_unavailable(tmp_dl: Path, monkeypatch) -> None:

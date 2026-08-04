@@ -15,7 +15,6 @@ import os
 import re
 import hashlib
 import time
-import asyncio
 import uuid
 import threading
 import base64
@@ -26,6 +25,7 @@ import requests as http_requests
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.async_utils import run_blocking
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
@@ -591,8 +591,7 @@ class QobuzClient(DownloadSourcePlugin):
     async def check_connection(self) -> bool:
         """Test if Qobuz is accessible (async, Soulseek-compatible)."""
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self.is_available)
+            return await run_blocking(self.is_available)
         except Exception as e:
             logger.error(f"Qobuz connection check failed: {e}")
             return False
@@ -999,15 +998,13 @@ class QobuzClient(DownloadSourcePlugin):
         logger.info(f"Searching Qobuz for: {query}")
 
         try:
-            loop = asyncio.get_event_loop()
-
             def _search():
                 return self._api_request('track/search', {
                     'query': query,
                     'limit': 50,
                 })
 
-            data = await loop.run_in_executor(None, _search)
+            data = await run_blocking(_search)
 
             if not data or 'tracks' not in data:
                 logger.warning(f"No Qobuz results for: {query}")

@@ -126,7 +126,7 @@ class AutomationDeps:
     # Triggers a "Run Now" of a library-maintenance repair job by id (e.g.
     # 'quality_upgrade'). Returns truthy if the job was queued. Replaces the old
     # standalone quality-scanner executor/state (the scanner is now a repair job).
-    run_repair_job_now: Callable[[str], Any]
+    run_repair_job_now: Callable[..., Any]
 
     # --- Download orchestrator + queue accessors ---
     download_orchestrator: Any

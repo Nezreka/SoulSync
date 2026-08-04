@@ -5148,7 +5148,7 @@ function _gsUpdateVisibility() {
     if (!bar) return;
     // Hide on pages where global search doesn't belong, and always on the
     // video side (the global/music search is music-only).
-    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import', 'library']);
     const onVideoSide = document.body.getAttribute('data-side') === 'video';
     const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
@@ -5317,7 +5317,7 @@ function _gsRenderFromState(state) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.id ? buildArtistDetailPath(a.id, null) : '#'}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
+        h += dbArtists.map(a => `<a class="gsearch-item" href="${a.library_v2_id ? `/library?artist=${encodeURIComponent(a.library_v2_id)}` : (a.id ? buildArtistDetailPath(a.id, null) : '#')}" onclick="_gsDeactivate()" style="text-decoration:none;color:inherit;">${a.image_url ? `<div class="gsearch-item-art"><img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'"></div>` : '<div class="gsearch-item-art">🎤</div>'}<div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></a>`).join('');
         h += '</div>';
     }
 
