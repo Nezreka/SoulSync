@@ -40534,7 +40534,14 @@ def auto_import_results():
 def auto_import_approve(item_id):
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    return jsonify(auto_import_worker.approve_item(item_id))
+    result = auto_import_worker.approve_item(item_id)
+    if result.get('success') and auto_import_worker.running:
+        threading.Thread(
+            target=auto_import_worker.trigger_scan,
+            daemon=True,
+            name='AutoImportApprovalScan',
+        ).start()
+    return jsonify(result)
 
 
 @app.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
@@ -40593,6 +40600,12 @@ def auto_import_approve_all():
             result = auto_import_worker.approve_item(r['id'])
             if result.get('success'):
                 count += 1
+        if count and auto_import_worker.running:
+            threading.Thread(
+                target=auto_import_worker.trigger_scan,
+                daemon=True,
+                name='AutoImportApprovalScan',
+            ).start()
         return jsonify({"success": True, "count": count})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -40618,7 +40631,7 @@ def auto_import_clear_completed():
             cursor = conn.cursor()
             base_sql = (
                 "DELETE FROM auto_import_history "
-                "WHERE status IN ('completed', 'approved', 'failed', "
+                "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
                 "'needs_identification', 'rejected', 'processing')"
             )
             if active_hashes:

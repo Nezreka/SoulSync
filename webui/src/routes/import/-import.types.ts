@@ -226,6 +226,8 @@ export interface ImportAutoImportMatchData {
     track?: { name?: string | null };
     file?: string | null;
     confidence?: number | null;
+    import_status?: 'completed' | 'failed' | null;
+    import_error?: string | null;
   }>;
 }
 
