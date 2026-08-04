@@ -88,6 +88,23 @@ _last_api_call_time = 0
 _api_call_lock = threading.Lock()
 MIN_API_INTERVAL = 0.35  # Default: 350ms between API calls (~171/min, under Spotify's ~180/min limit)
 
+
+def _request_scoped_free_opt_in() -> bool:
+    """Whether THIS Flask request explicitly asked for Spotify.
+
+    Interactive endpoints that were explicitly pointed at Spotify (search with
+    the Spotify chip, artist detail navigated from a Spotify card, album-tracks
+    with source=spotify) set ``g._spotify_free_ok`` — clicking Spotify is
+    asking for Spotify, so the no-auth source may serve when the official API
+    can't, even without the persistent 'Spotify (no auth)' metadata-source
+    opt-in. Outside a request context (enrichment, watchlist, any background
+    thread) this is always False, so auto-scraping stays opt-in."""
+    try:
+        from flask import g, has_request_context
+        return bool(has_request_context() and getattr(g, '_spotify_free_ok', False))
+    except Exception:
+        return False
+
 def _get_min_api_interval():
     """Get configurable API interval from settings, falling back to default."""
     try:
@@ -672,12 +689,21 @@ class SpotifyClient:
         return spotify_free_installed()
 
     def _free_wanted(self) -> bool:
-        """Does the user actually want the free source? OPT-IN: only when they
-        picked 'Spotify Free'. This keeps free from auto-scraping for anyone who
-        didn't choose it — a plain-'Spotify' user just waits out a rate-limit ban
-        as before. A user on 'Spotify Free' who also connects an account uses the
-        official account normally and free only bridges their bans."""
-        return self._free_selected()
+        """Does the user actually want the free source? OPT-IN, two ways:
+
+        - they picked 'Spotify Free' as their metadata source (persistent), or
+        - THIS request explicitly targeted Spotify (the interactive endpoints —
+          search with the Spotify chip, artist detail navigated from a Spotify
+          card, album-tracks with source=spotify — mark the Flask request via
+          ``g._spotify_free_ok``). Clicking Spotify IS asking for Spotify; the
+          alternative was silently serving iTunes under a Spotify label.
+
+        Background work (enrichment, watchlist scans) runs outside a request
+        context, so the per-request path can never engage there — auto-scraping
+        stays opt-in exactly as before. Authed + healthy users are also
+        unaffected either way: the official path always wins while it works
+        (see _free_active)."""
+        return self._free_selected() or _request_scoped_free_opt_in()
 
     def _free_available(self) -> bool:
         """Free CAN serve: package installed AND the user wants Spotify."""

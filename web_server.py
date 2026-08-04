@@ -6760,6 +6760,16 @@ def search_music():
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+def _mark_request_free_ok_for_spotify(source: str) -> None:
+    """Explicit-Spotify request marker: lets the no-auth Spotify source serve
+    THIS request even without the persistent metadata-source opt-in (the
+    client's _free_wanted reads g._spotify_free_ok). Only interactive
+    endpoints where the USER pointed at Spotify call this."""
+    if (source or '').strip().lower() in ('spotify', 'spotify_free'):
+        g._spotify_free_ok = True
+
+
 @app.route('/api/enhanced-search', methods=['POST'])
 def enhanced_search():
     """Unified metadata search across configured sources + local DB artists.
@@ -6776,6 +6786,7 @@ def enhanced_search():
         requested_source = ''
     if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
         return jsonify({"error": f"Unknown source: {requested_source}"}), 400
+    _mark_request_free_ok_for_spotify(requested_source)
 
     if not query:
         return jsonify(_search_orchestrator.empty_response())
@@ -9600,6 +9611,7 @@ def get_artist_detail(artist_id):
                     "error": f"{source_param} is not enabled",
                 }), 503
 
+        _mark_request_free_ok_for_spotify(source_param)
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -10365,6 +10377,7 @@ def get_artist_discography(artist_id):
         artist_name = request.args.get('artist_name', '').strip()
         # Optional source override from multi-source search tabs
         source_override = request.args.get('source', '').strip().lower()
+        _mark_request_free_ok_for_spotify(source_override)
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
@@ -11086,6 +11099,8 @@ def get_album_tracks(album_id):
                 source_override = 'itunes'
             else:
                 source_override = 'spotify'
+
+        _mark_request_free_ok_for_spotify(source_override)
 
         from core.metadata_service import get_artist_album_tracks as _get_artist_album_tracks
 
@@ -23256,6 +23271,7 @@ def get_playlist_tracks(playlist_id):
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
 def get_spotify_album_tracks(album_id):
     """Fetches full track details for a specific album."""
+    _mark_request_free_ok_for_spotify('spotify')  # the URL itself targets Spotify
     use_hydrabase = _is_hydrabase_active()
 
     # Try Hydrabase first when active — look up by album soul_id

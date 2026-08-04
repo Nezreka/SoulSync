@@ -613,3 +613,71 @@ def test_get_artist_albums_list_fetches_singles_and_retags_types():
     by_id = {a['id']: a for a in out}
     assert by_id['sgl1']['album_type'] == 'single'   # the vanished single, correctly typed
     assert by_id['alb1']['album_type'] == 'album'
+
+
+# ── explicit-Spotify requests engage free without the persistent opt-in ──────
+#
+# Boulder's rule: clicking Spotify IS asking for Spotify. A user with
+# metadata source = Deezer and no working auth used to have their 'spotify'
+# searches silently served by the iTunes fallback, and artist pages had no
+# Spotify catalog at all. Interactive endpoints that explicitly target
+# spotify now set g._spotify_free_ok on the Flask request; _free_wanted
+# honors it FOR THAT REQUEST ONLY. No request context (enrichment, watchlist,
+# background threads) → unchanged opt-in behavior.
+
+def _flask_ctx(flag):
+    from flask import Flask, g
+    app = Flask(__name__)
+    ctx = app.test_request_context('/')
+    ctx.push()
+    if flag:
+        g._spotify_free_ok = True
+    return ctx
+
+
+def test_request_scoped_opt_in_engages_free_wanted(monkeypatch):
+    from core.spotify_client import SpotifyClient
+    c = SpotifyClient.__new__(SpotifyClient)
+    with patch('core.spotify_client.config_manager') as cm:
+        cm.get.side_effect = lambda k, d=None: d  # spotify_free NOT selected
+        assert c._free_wanted() is False          # outside any request
+        ctx = _flask_ctx(flag=False)
+        try:
+            assert c._free_wanted() is False      # request without the marker
+        finally:
+            ctx.pop()
+        ctx = _flask_ctx(flag=True)
+        try:
+            assert c._free_wanted() is True       # explicitly-Spotify request
+        finally:
+            ctx.pop()
+
+
+def test_request_scoped_opt_in_makes_metadata_available(monkeypatch):
+    """The whole downstream stack keys off is_spotify_metadata_available —
+    with the request marker set, the resolver hands out the client and the
+    strict discography serves via free instead of 'provider is unavailable'."""
+    from core.spotify_client import SpotifyClient
+    c = SpotifyClient.__new__(SpotifyClient)
+    ctx = _flask_ctx(flag=True)
+    try:
+        with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=False), \
+             patch('core.spotify_client.config_manager') as cm, \
+             patch.object(_sfm, 'spotify_free_installed', return_value=True):
+            cm.get.side_effect = lambda k, d=None: d  # NOT selected persistently
+            assert c.is_spotify_metadata_available() is True
+    finally:
+        ctx.pop()
+
+
+def test_endpoint_marker_only_fires_for_spotify():
+    import web_server
+    from flask import g
+    ctx = _flask_ctx(flag=False)
+    try:
+        web_server._mark_request_free_ok_for_spotify('deezer')
+        assert not getattr(g, '_spotify_free_ok', False)
+        web_server._mark_request_free_ok_for_spotify('spotify')
+        assert g._spotify_free_ok is True
+    finally:
+        ctx.pop()
