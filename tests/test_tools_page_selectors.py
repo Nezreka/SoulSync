@@ -440,7 +440,11 @@ def _handler_body(filename: str, handler: str, *, strip_comments: bool = False) 
     `.index()` matches inside a comment and reports the wrong order.
     """
     source = (STATIC / filename).read_text(encoding="utf-8")
-    body = source.split(f"function {handler}")[1].split("\nfunction ")[0]
+    tail = source.split(f"function {handler}")[1]
+    # End at the NEXT top-level definition — async or not. Splitting only on
+    # "\nfunction " let a following `async function` leak whole neighbouring
+    # functions into the body, which breaks any NOT-contains assertion.
+    body = re.split(r"\n(?:async )?function ", tail)[0]
     if not strip_comments:
         return body
     return "\n".join(
@@ -528,18 +532,59 @@ def test_media_scan_completion_requires_a_previous_scanning_frame() -> None:
     assert "if (!wasScanning) return;" in body
 
 
-def test_media_scan_button_recovers_on_any_return_to_idle() -> None:
-    """The completion GUARD must not swallow the button re-enable.
+# ── Post-flip hardening: vanilla may not write React-owned tools DOM ─────────
+#
+# Before the P7 flip every tools id sat (hidden) in index.html at all times, so
+# these handlers writing them was the page working. After the flip those nodes
+# exist only while the React page is mounted — and React renders them from the
+# very frames these handlers re-broadcast. A second writer is at best redundant
+# and at worst destructive: the old repair-progress body REPLACED React's Stop
+# button via outerHTML and innerHTML-wiped #repair-jobs-list via its 30s
+# loadRepairJobs timer, mutating nodes React still reconciles against. (This
+# also retires the button-recovery ordering guard that lived here: the button
+# is React-rendered now and its recovery is pinned in server-cards.test.tsx.)
 
-    handleMediaScanButtonClick (api-monitor.js) disables the button and nothing
-    else undoes it, so a scheduled scan that is cancelled — which never reaches
-    'scanning' — would strand it disabled.
-    """
+REACT_OWNED_SEAM_HANDLERS = {
+    ("enrichment.js", "updateRepairJobProgressFromData"),
+    ("media-player.js", "updateMediaScanFromData"),
+}
+
+
+@pytest.mark.parametrize("filename,handler", sorted(REACT_OWNED_SEAM_HANDLERS))
+def test_seam_handlers_do_not_touch_the_dom(filename: str, handler: str) -> None:
+    body = _handler_body(filename, handler, strip_comments=True)
+    offenders = [
+        needle
+        for needle in ("getElementById", "querySelector", "innerHTML", "outerHTML", "appendChild")
+        if needle in body
+    ]
+    assert not offenders, (
+        f"{handler} touches the DOM again ({offenders}) — every node it can reach "
+        "is rendered by the React tools page, which already consumes the same "
+        "frame via the ss: dispatch"
+    )
+
+
+def test_repair_status_handler_keeps_the_orb_and_leaves_reacts_nodes() -> None:
+    """updateRepairStatusFromData serves the DASHBOARD (orb + tooltip + orb
+    badge) and must keep doing so — but the findings TAB badge and the master
+    toggle are React-owned, and writing `checked` on a React-controlled input
+    from outside is the exact desync the hardening removed."""
+    body = _handler_body("enrichment.js", "updateRepairStatusFromData", strip_comments=True)
+    for keep in ("repair-button", "repair-tooltip-status", "repair-findings-badge"):
+        assert keep in body, f"the orb seam lost its '{keep}' writer"
+    for gone in ("repair-findings-tab-badge", "repair-master-toggle", "repair-master-label"):
+        assert gone not in body, f"'{gone}' is React-owned; the vanilla writer is back"
+
+
+def test_media_scan_completion_toast_defers_to_the_react_card_on_tools() -> None:
+    """One completion, one toast: the React card announces it on /tools, the
+    vanilla handler everywhere else."""
     body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
-    idle_arm = body.split("else if (statusKey === 'idle')")[1]
-    enable_at = idle_arm.index("button.disabled = false")
-    guard_at = idle_arm.index("if (!wasScanning) return;")
-    assert enable_at < guard_at, (
-        "the button re-enable sits behind the completion guard; a cancelled "
-        "scheduled scan would leave Scan Library dead"
+    assert "showToast" in body, "the app-wide completion toast is gone entirely"
+    toast_at = body.index("showToast")
+    gate_at = body.index("currentPage === 'tools'")
+    assert gate_at < toast_at, (
+        "the vanilla completion toast no longer defers to the tools page, so a "
+        "scan finishing there announces twice"
     )

@@ -8,13 +8,13 @@
  *
  * Two contracts from the P0 that outlive this file:
  *
- * 1. `.repair-job-card[data-job-id]` is how the vanilla socket handler finds a
- *    card to write progress into. P6 added the `ss:repair-progress` seam this
- *    component actually reads, but it was purely ADDITIVE — the vanilla handler
- *    still runs and still queries that selector. It only stops mattering when P7
- *    deletes the vanilla tools markup, at which point the selector finds nothing
- *    and its `if (!card) continue` makes it a no-op. Keep the attribute until
- *    then.
+ * 1. `.repair-job-card[data-job-id]` — the vanilla socket handler used to find
+ *    cards by this selector and write progress into them. My P6-era claim that
+ *    the markup deletion would make that a no-op was WRONG: this component
+ *    re-renders the very selector it queries, so the vanilla body was stomping
+ *    React-managed nodes. The post-flip hardening reduced that handler to its
+ *    ss:repair-progress dispatch; the attribute stays as the stable per-job
+ *    hook the tests (and any future e2e) key on.
  *
  * 2. The class on the card is NOT the class on the status dot. An idle enabled
  *    job gets dot 'enabled' and card class '' — see repairJobCardClass.

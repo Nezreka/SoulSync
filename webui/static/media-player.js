@@ -562,48 +562,26 @@ function updateMediaScanFromData(data) {
     // `is_scanning` is a phantom field. Both this socket frame and
     // /api/scan/status return web_scan_manager.get_scan_status(), which reports
     // status: 'idle' | 'scheduled' | 'scanning' and has NEVER carried
-    // is_scanning. Branching on it made the "Media server scanning..." arm below
-    // unreachable, so the live progress message never appeared.
+    // is_scanning.
     const statusKey = status.status || 'unknown';
     const wasScanning = _lastMediaScanStatus === 'scanning';
     if (_lastMediaScanStatus === statusKey && statusKey !== 'scanning') return;
     _lastMediaScanStatus = statusKey;
 
-    const phaseLabel = document.getElementById('media-scan-phase-label');
-    const progressLabel = document.getElementById('media-scan-progress-label');
-    // `media-scan-btn` is the CLASS; the id is `media-scan-button`. Reading the
-    // class as an id made this always null, so the websocket completion path
-    // never re-enabled the button and Scan Library stayed dead after one click.
-    const button = document.getElementById('media-scan-button');
-    const progressBar = document.getElementById('media-scan-progress-bar');
-    const statusValue = document.getElementById('media-scan-status');
-
-    if (statusKey === 'scanning') {
-        if (phaseLabel) phaseLabel.textContent = 'Media server scanning...';
-        if (progressLabel) progressLabel.textContent = status.progress_message || 'Scan in progress';
-    } else if (statusKey === 'idle') {
-        // Re-enable on ANY return to idle, as the original did. A scheduled scan
-        // that is cancelled never reaches 'scanning', and handleMediaScanButtonClick
-        // (api-monitor.js) disables the button with nothing else to undo it —
-        // gating this behind wasScanning would strand it disabled, which is the
-        // exact bug class the bugfix PR already fixed once.
-        if (button) button.disabled = false;
-        // The MESSAGING is what needs the guard. The server pushes scan:media
-        // every two seconds whether or not anything is running (web_server.py's
-        // status loop), and a bare idle payload is what it sends when nothing has
-        // ever run — so without this, every page load popped "Media scan
-        // completed" about two seconds in and relabelled the card as though a
-        // scan had just finished.
-        if (!wasScanning) return;
-        if (phaseLabel) phaseLabel.textContent = 'Scan completed successfully';
-        if (progressBar) progressBar.style.width = '0%';
-        if (progressLabel) progressLabel.textContent = 'Ready for next scan';
-        if (statusValue) {
-            statusValue.textContent = 'Idle';
-            statusValue.style.color = '#b3b3b3';
-        }
-        showToast('✅ Media scan completed', 'success', 3000);
-    }
+    // P7 hardening: every element this handler used to write (#media-scan-*,
+    // #media-scan-button) exists only inside the React tools page now, and the
+    // card renders this same frame itself via ss:media-scan — a second writer
+    // here would be mutating React-owned DOM. What survives app-wide is the
+    // completion toast:
+    if (statusKey !== 'idle') return;
+    // A bare idle frame is not a finished scan — the server pushes scan:media
+    // every 2s regardless of activity, and without this guard every page load
+    // announced a completed scan.
+    if (!wasScanning) return;
+    // On the tools page the React card announces it; everywhere else this is
+    // the only messenger.
+    if (typeof currentPage !== 'undefined' && currentPage === 'tools') return;
+    showToast('✅ Media scan completed', 'success', 3000);
 }
 
 let _wishlistAutoProcessingNotified = false;

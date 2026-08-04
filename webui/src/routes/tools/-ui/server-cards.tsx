@@ -105,6 +105,14 @@ export function MediaScanCard() {
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * `finish()` is reachable from BOTH detectors — the HTTP poll a manual scan
+   * starts, and the ss:media-scan event — and neither knows the other fired.
+   * Without this latch a manual scan's completion toasted twice (poll sees
+   * idle, then the scanning→idle frame arrives). Re-armed whenever a scan is
+   * running again.
+   */
+  const completionAnnouncedRef = useRef(false);
 
   const clearTimers = useCallback(() => {
     if (countdownRef.current) {
@@ -128,7 +136,10 @@ export function MediaScanCard() {
     setPercent(0);
     setDetails('Ready for next scan');
     setStatus({ text: 'Idle', color: IDLE_STATUS_COLOR });
-    toast('✅ Media scan completed', 'success', 3000);
+    if (!completionAnnouncedRef.current) {
+      completionAnnouncedRef.current = true;
+      toast('✅ Media scan completed', 'success', 3000);
+    }
   }, [clearTimers]);
 
   const startPolling = useCallback(() => {
@@ -142,12 +153,16 @@ export function MediaScanCard() {
         setPercent(0);
         setDetails('Ready for next scan');
         setStatus({ text: 'Idle', color: IDLE_STATUS_COLOR });
-        toast('✅ Media scan completed', 'success', 3000);
+        if (!completionAnnouncedRef.current) {
+          completionAnnouncedRef.current = true;
+          toast('✅ Media scan completed', 'success', 3000);
+        }
         return;
       }
       void fetchMediaScanStatus().then((state) => {
         if (!state) return; // a blip is not a result
         if (state.status === 'scanning') {
+          completionAnnouncedRef.current = false;
           setPhase('Media server scanning...');
           setDetails(state.progress_message || 'Scan in progress');
         } else if (state.status === 'idle') {
@@ -172,6 +187,7 @@ export function MediaScanCard() {
         lastScanKey.current = key;
 
         if (key === 'scanning') {
+          completionAnnouncedRef.current = false;
           setPhase('Media server scanning...');
           setDetails(frame.status.progress_message || 'Scan in progress');
           return;
@@ -190,6 +206,7 @@ export function MediaScanCard() {
   );
 
   const onClick = useCallback(async () => {
+    completionAnnouncedRef.current = false;
     setBusy(true);
     setPhase('Requesting scan...');
     setPercent(30);

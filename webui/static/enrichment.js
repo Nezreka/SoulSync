@@ -1830,17 +1830,11 @@ function updateRepairStatusFromData(data) {
         badge.textContent = findingsPending;
         badge.style.display = findingsPending > 0 ? '' : 'none';
     }
-    const tabBadge = document.getElementById('repair-findings-tab-badge');
-    if (tabBadge) {
-        tabBadge.textContent = findingsPending;
-        tabBadge.style.display = findingsPending > 0 ? '' : 'none';
-    }
-
-    // Update master toggle in modal if open
-    const masterToggle = document.getElementById('repair-master-toggle');
-    const masterLabel = document.getElementById('repair-master-label');
-    if (masterToggle) masterToggle.checked = data.enabled || false;
-    if (masterLabel) masterLabel.textContent = data.enabled ? 'Enabled' : 'Disabled';
+    // The findings TAB badge and the master toggle are React-owned since the
+    // P7 flip (the hero drives both from the ss:repair-status dispatch above).
+    // Writing them from here again would set `checked` on a React-controlled
+    // input behind React's back. This handler keeps only what the dashboard
+    // owns: the orb, its tooltip, and the orb's own badge.
 
     // Update button state
     if (!data.enabled) {
@@ -2333,128 +2327,18 @@ async function stopRepairJobNow(jobId) {
 }
 
 // ── Repair Job Live Progress ──
-const _repairProgressLogCounts = {};
-const _repairProgressHideTimers = {};
 
 function updateRepairJobProgressFromData(data) {
-    // Same reasoning as updateRepairStatusFromData: openRepairModal replays the
-    // in-flight frames through here on a 300ms timer, so bridging only the socket
-    // would drop that replay.
+    // Dispatch-only since the P7 flip. The maintenance hero is React and it
+    // renders the SAME selectors this handler used to drive — .repair-job-card
+    // [data-job-id], .repair-job-status, .repair-flow-badge, .repair-stop-btn
+    // and its own .repair-job-progress panel — so the old body was live-mutating
+    // React-managed nodes: appending duplicate log lines into React's log
+    // container, replacing React's Stop button via outerHTML (a node React
+    // still thinks it owns), and 30s after completion innerHTML-wiping
+    // #repair-jobs-list out from under React via loadRepairJobs(). The hero
+    // renders every one of those states itself from this same frame.
     window.dispatchEvent(new CustomEvent('ss:repair-progress', { detail: data }));
-
-    for (const [jobId, state] of Object.entries(data)) {
-        const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
-        if (!card) continue;
-
-        // Update status dot
-        const statusDot = card.querySelector('.repair-job-status');
-        if (statusDot) {
-            if (state.status === 'running') statusDot.className = 'repair-job-status running';
-            else if (state.status === 'finished') statusDot.className = 'repair-job-status enabled';
-            else if (state.status === 'error') statusDot.className = 'repair-job-status enabled';
-        }
-
-        // Update flow badge to show running state
-        const firstBadge = card.querySelector('.repair-flow-badge.scan');
-        if (firstBadge) {
-            if (state.status === 'running') firstBadge.innerHTML = '&#9654; Running';
-            else if (state.status === 'finished') firstBadge.innerHTML = '&#10003; Complete';
-            else if (state.status === 'error') firstBadge.innerHTML = '&#10007; Error';
-        }
-
-        // Add/update card running class
-        card.classList.toggle('running', state.status === 'running');
-        card.classList.remove('disabled');
-
-        // Create or find progress panel (bar-first layout like automation)
-        let panel = card.querySelector('.repair-job-progress');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.className = 'repair-job-progress';
-            panel.innerHTML = `
-                <div class="repair-progress-bar-wrap">
-                    <div class="repair-progress-bar" style="width:0%"></div>
-                </div>
-                <div class="repair-progress-phase"></div>
-                <div class="repair-progress-log"></div>
-            `;
-            card.appendChild(panel);
-        }
-
-        // Show panel
-        panel.classList.add('visible');
-        panel.classList.toggle('finished', state.status === 'finished');
-        panel.classList.toggle('error', state.status === 'error');
-
-        if (state.status === 'running') {
-            panel.classList.remove('finished', 'error');
-            if (_repairProgressHideTimers[jobId]) {
-                clearTimeout(_repairProgressHideTimers[jobId]);
-                delete _repairProgressHideTimers[jobId];
-            }
-            // Reset log for re-run
-            if (_repairProgressLogCounts[jobId] > 0 && state.log && state.log.length < _repairProgressLogCounts[jobId]) {
-                const existingLog = panel.querySelector('.repair-progress-log');
-                if (existingLog) existingLog.innerHTML = '';
-                _repairProgressLogCounts[jobId] = 0;
-            }
-        }
-
-        // Update progress bar
-        const bar = panel.querySelector('.repair-progress-bar');
-        if (bar) bar.style.width = (state.progress || 0) + '%';
-
-        // Update phase
-        const phaseEl = panel.querySelector('.repair-progress-phase');
-        if (phaseEl && state.phase) phaseEl.textContent = state.phase;
-
-        // Update log
-        const logEl = panel.querySelector('.repair-progress-log');
-        if (logEl && state.log) {
-            const prevCount = _repairProgressLogCounts[jobId] || 0;
-            if (state.log.length > prevCount) {
-                const newLines = state.log.slice(prevCount);
-                for (const line of newLines) {
-                    const div = document.createElement('div');
-                    div.className = 'repair-log-line ' + (line.type || 'info');
-                    div.textContent = line.text;
-                    logEl.appendChild(div);
-                }
-                logEl.scrollTop = logEl.scrollHeight;
-            }
-            _repairProgressLogCounts[jobId] = state.log.length;
-        }
-
-        // #970: the moment a run ends (finished OR stopped), flip the Stop button
-        // back to Run here — don't wait on the 30s auto-hide reload or the next
-        // poll tick, or a stopped job's button looks stuck on "Stopping…".
-        if (state.status === 'finished' || state.status === 'error') {
-            const stopBtn = card.querySelector('.repair-stop-btn');
-            if (stopBtn) {
-                stopBtn.outerHTML = `<button class="repair-run-btn" onclick="runRepairJobNow('${jobId}')" title="Run now">&#9654;</button>`;
-            }
-        }
-
-        // Auto-hide panel after completion
-        if (state.status === 'finished' || state.status === 'error') {
-            if (!_repairProgressHideTimers[jobId]) {
-                _repairProgressHideTimers[jobId] = setTimeout(() => {
-                    panel.classList.remove('visible');
-                    card.classList.remove('running');
-                    delete _repairProgressHideTimers[jobId];
-                    delete _repairProgressLogCounts[jobId];
-                    // Reload to get updated stats
-                    loadRepairJobs();
-                }, 30000);
-            }
-        } else {
-            // Clear any existing hide timer if job restarts
-            if (_repairProgressHideTimers[jobId]) {
-                clearTimeout(_repairProgressHideTimers[jobId]);
-                delete _repairProgressHideTimers[jobId];
-            }
-        }
-    }
 }
 
 async function loadRepairFindingsDashboard() {
