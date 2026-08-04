@@ -631,6 +631,18 @@ describe('library v2 scoped search api', () => {
     await expect(startLibraryV2ScopedSearch('albums', 7)).resolves.toBe('search-1');
   });
 
+  it('attaches to the existing scoped job returned with 409', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/7/search', () =>
+        HttpResponse.json(
+          { success: false, error: 'Job already running', job_id: 'search-running' },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(startLibraryV2ScopedSearch('albums', 7)).resolves.toBe('search-running');
+  });
+
   it('surfaces a server error', async () => {
     server.use(
       http.post('/api/library/v2/tracks/9/search', () =>

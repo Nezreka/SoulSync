@@ -5,14 +5,75 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { MonitoringModal, MonitorToggle, SectionBulkMonitorButton } from './library-v2-page';
+import {
+  LibraryV2CanWriteContext,
+  MirrorStatusBanner,
+  MonitoringModal,
+  MonitorToggle,
+  SectionBulkMonitorButton,
+} from './library-v2-page';
 
-function renderWithQueryClient(node: React.ReactNode) {
+function renderWithQueryClient(node: React.ReactNode, canWrite = true) {
   const queryClient = createTestQueryClient();
-  return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LibraryV2CanWriteContext.Provider value={canWrite}>{node}</LibraryV2CanWriteContext.Provider>
+    </QueryClientProvider>,
+  );
 }
 
 describe('library v2 monitoring mutations', () => {
+  it('keeps every monitoring-modal submit path read-only', () => {
+    let writes = 0;
+    server.use(
+      http.post('/api/library/v2/artists/7/releases/monitor', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true, job_id: 'unexpected' });
+      }),
+      http.post('/api/library/v2/artists/7/edit', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    renderWithQueryClient(
+      <MonitoringModal artistId={7} monitorNewItems="all" onClose={vi.fn()} />,
+      false,
+    );
+
+    for (const name of [
+      /^Monitor all releases/,
+      /^Monitor missing only/,
+      /^Unmonitor everything/,
+    ]) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(screen.getByLabelText('Future releases')).toBeDisabled();
+    expect(writes).toBe(0);
+  });
+
+  it('keeps mirror retries fail-closed for read-only profiles', async () => {
+    let writes = 0;
+    server.use(
+      http.get('/api/library/v2/mirror-status', () =>
+        HttpResponse.json({ success: true, pending: 0, failed: 1 }),
+      ),
+      http.post('/api/library/v2/mirror-retry', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    renderWithQueryClient(<MirrorStatusBanner />, false);
+
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    expect(retry).toBeDisabled();
+    fireEvent.click(retry);
+    expect(writes).toBe(0);
+  });
+
   it('shows a monitor-toggle failure and lets the same action retry', async () => {
     let attempts = 0;
     server.use(
@@ -121,7 +182,10 @@ describe('library v2 monitoring mutations', () => {
       http.post('/api/library/v2/artists/7/releases/monitor', async ({ request }) => {
         starts += 1;
         submitted.push(await request.json());
-        return HttpResponse.json({ success: true, job_id: `section-job-${starts}` });
+        return HttpResponse.json({
+          success: true,
+          job_id: `section-job-${starts}`,
+        });
       }),
       http.get('/api/library/v2/jobs/status', ({ request }) => {
         const jobId = new URL(request.url).searchParams.get('job_id');

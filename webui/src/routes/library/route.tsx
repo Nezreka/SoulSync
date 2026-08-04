@@ -4,7 +4,6 @@ import { getProfileHomePath } from '@/platform/shell/bridge';
 
 import {
   libraryV2AlbumQueryOptions,
-  libraryV2AcquisitionImportsQueryOptions,
   libraryV2ArtistsQueryOptions,
   libraryV2EnabledQueryOptions,
   libraryV2WantedQueryOptions,
@@ -39,8 +38,6 @@ export const Route = createFileRoute('/library')({
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
       );
-    } else if (deps.section === 'import-review') {
-      void context.queryClient.prefetchQuery(libraryV2AcquisitionImportsQueryOptions());
     } else if (deps.album) {
       void context.queryClient.prefetchQuery(libraryV2AlbumQueryOptions(deps.album));
     } else {

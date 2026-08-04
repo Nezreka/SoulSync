@@ -7,7 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2MatchService } from '../-library-v2.types';
 
-import { MatchChips } from './library-v2-page';
+import { LibraryV2CanWriteContext, MatchChips } from './library-v2-page';
 
 function service(overrides: Partial<LibraryV2MatchService> = {}): LibraryV2MatchService {
   return {
@@ -51,7 +51,11 @@ function renderWithClient(node: React.ReactElement) {
     }),
   );
   const queryClient = createTestQueryClient();
-  return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LibraryV2CanWriteContext.Provider value>{node}</LibraryV2CanWriteContext.Provider>
+    </QueryClientProvider>,
+  );
 }
 
 describe('library v2 match chips (deep-dive A8)', () => {

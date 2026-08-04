@@ -26,7 +26,7 @@ const coercedString = z.preprocess(
 );
 
 export const libraryV2SearchSchema = z.object({
-  section: z.enum(['artists', 'wanted', 'import-review']).default('artists').catch('artists'),
+  section: z.enum(['artists', 'wanted']).default('artists').catch('artists'),
   // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
   // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
   // `.catch('')` silently swallows the filter — the URL said one thing and the

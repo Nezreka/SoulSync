@@ -59,6 +59,14 @@ afterEach(() => {
  * repairs of them.
  */
 describe('artist-detail route', () => {
+  it('opens a legacy library id as the owned Library V2 artist', async () => {
+    const { history, router } = renderArtistDetailRoute(['/artist-detail/library/42']);
+
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(landedSearch(router).artist).toBe(42);
+    expect(landedSearch(router).discover).toBeUndefined();
+  });
+
   it('redirects into Library V2 discovery mode instead of rendering a page', async () => {
     const { history, router } = renderArtistDetailRoute([
       '/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg',

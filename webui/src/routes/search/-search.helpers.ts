@@ -323,7 +323,7 @@ export function inLibraryArtistPath(artist: {
       // (My Library / table / compact), so the same artist looked different
       // depending on whether v2 had mapped it yet.
       `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}` +
-      `&releases=all&releaseView=cards&header=rich`
+        `&releases=all&releaseView=cards&header=rich`
     : artistDetailPath(artist.id ?? '');
 }
 

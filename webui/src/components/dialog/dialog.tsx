@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 import { Dialog } from '@base-ui/react/dialog';
 import clsx from 'clsx';
@@ -8,11 +8,13 @@ import styles from './dialog.module.css';
 export function DialogFrame({
   children,
   className,
+  initialFocus,
   onOpenChange,
   open,
 }: {
   children: ReactNode;
   className?: string;
+  initialFocus?: ComponentProps<typeof Dialog.Popup>['initialFocus'];
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }) {
@@ -21,7 +23,9 @@ export function DialogFrame({
       <Dialog.Portal>
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Viewport className={styles.viewport}>
-          <Dialog.Popup className={clsx(styles.popup, className)}>{children}</Dialog.Popup>
+          <Dialog.Popup initialFocus={initialFocus} className={clsx(styles.popup, className)}>
+            {children}
+          </Dialog.Popup>
         </Dialog.Viewport>
       </Dialog.Portal>
     </Dialog.Root>
@@ -43,7 +47,7 @@ export function DialogHeader({
         <Dialog.Title className={styles.title}>{title}</Dialog.Title>
         {children ? <div className={styles.headerMeta}>{children}</div> : null}
       </div>
-      <Dialog.Close className={styles.close} aria-label={closeLabel}>
+      <Dialog.Close className={styles.close} aria-label={closeLabel} title={closeLabel}>
         ×
       </Dialog.Close>
     </div>

@@ -1,18 +1,120 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { AlbumOverflowMenu, ArtistAliases, MirrorStatusBanner } from './library-v2-page';
+import {
+  ActionButton,
+  AlbumOverflowMenu,
+  ArtistAliases,
+  LibraryV2CanWriteContext,
+  MirrorStatusBanner,
+} from './library-v2-page';
 
-function renderWithQueryClient(node: React.ReactNode) {
+function renderWithQueryClient(node: React.ReactNode, canWrite = true) {
   const queryClient = createTestQueryClient();
-  return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LibraryV2CanWriteContext.Provider value={canWrite}>{node}</LibraryV2CanWriteContext.Provider>
+    </QueryClientProvider>,
+  );
 }
 
 describe('library v2 remaining mutation boundaries', () => {
+  it('keeps view-only toolbar actions available while write actions fail closed', () => {
+    const openManageTracks = vi.fn();
+    const openHistory = vi.fn();
+    const mutate = vi.fn();
+
+    renderWithQueryClient(
+      <>
+        <ActionButton
+          icon="tracks"
+          label="Manage Tracks"
+          requiresWrite={false}
+          onClick={openManageTracks}
+        />
+        <ActionButton icon="history" label="History" requiresWrite={false} onClick={openHistory} />
+        <ActionButton icon="delete" label="Delete" onClick={mutate} />
+      </>,
+      false,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Tracks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(openManageTracks).toHaveBeenCalledOnce();
+    expect(openHistory).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('keeps album details and history visible but disables album mutations read-only', () => {
+    const album = {
+      id: 12,
+      title: 'Album',
+      year: 2026,
+      album_type: 'album',
+      release_date: '2026-01-01',
+      explicit: false,
+      label: null,
+      style: null,
+      mood: null,
+      user_overrides: {},
+      quality_profile_id: 1,
+    } as React.ComponentProps<typeof AlbumOverflowMenu>['album'];
+
+    renderWithQueryClient(<AlbumOverflowMenu album={album} />, false);
+    fireEvent.click(screen.getByTitle('More actions'));
+
+    expect(screen.getByRole('button', { name: 'Album details' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'History' })).toBeEnabled();
+    for (const name of [
+      'Preview retag',
+      'Analyze ReplayGain',
+      'Reorganize',
+      'Change cover',
+      /Enrich/,
+      'Delete',
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+  });
+
+  it('does not unlink or open alias linking for read-only profiles', async () => {
+    let writes = 0;
+    server.use(
+      http.get('/api/library/v2/artists/7/aliases', () =>
+        HttpResponse.json({
+          success: true,
+          canonical_artist_id: 7,
+          aliases: [
+            { id: 7, name: 'Canonical' },
+            { id: 8, name: 'Provider Alias' },
+          ],
+        }),
+      ),
+      http.delete('/api/library/v2/artists/8/link-alias', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    renderWithQueryClient(<ArtistAliases artistId={7} artistName="Canonical" />, false);
+
+    const unlink = await screen.findByTitle(/Unlink Provider Alias/);
+    const link = screen.getByRole('button', { name: '+ Link alias' });
+    expect(unlink).toBeDisabled();
+    expect(link).toBeDisabled();
+    fireEvent.click(unlink);
+    fireEvent.click(link);
+    expect(writes).toBe(0);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('surfaces an alias-unlink 4xx and retries the same alias', async () => {
     let attempts = 0;
     server.use(

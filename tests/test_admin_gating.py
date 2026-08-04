@@ -115,12 +115,12 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
     cur.execute("INSERT INTO lib2_artists(name) VALUES('Route Artist')")
     artist_id = cur.lastrowid
     cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id) "
-        "VALUES(?, 'Route Album', 7)", (artist_id,))
+        "INSERT INTO lib2_albums(primary_artist_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Route Album', 7, 1)", (artist_id,))
     album_id = cur.lastrowid
     cur.execute(
-        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id) "
-        "VALUES(?, 'Route Track', 7)", (album_id,))
+        "INSERT INTO lib2_tracks(album_id, title, quality_profile_id, "
+        "quality_profile_explicit) VALUES(?, 'Route Track', 7, 1)", (album_id,))
     track_id = cur.lastrowid
     conn.commit()
     conn.close()
@@ -144,6 +144,12 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
         'album_name': 'Route Album',
         'quality_profile_id': 999,
         'lib2_track_id': track_id,
+        'source_info': {
+            'upgrade_check': True,
+            'lib2_track_id': track_id + 999,
+            'quality_profile_id': 999,
+        },
+        'lib2_entity': {'track_id': track_id + 999},
     })
 
     assert response.status_code == 200
@@ -152,6 +158,45 @@ def test_library_v2_profile_reaches_download_pipeline(client, monkeypatch):
     assert context['track_info']['quality_profile_id'] == 7
     assert context['track_info']['name'] == 'Route Track'
     assert context['track_info']['artists'] == [{'name': 'Route Artist'}]
+    assert 'source_info' not in context['track_info']
+    from core.imports.upgrade_intent import get_upgrade_intent
+    assert get_upgrade_intent(context).track_id == track_id
+
+
+def test_track_scoped_album_grab_is_rejected_before_dispatch(client, monkeypatch):
+    """An album search result must never bind every bundled file to one track."""
+    from core.library2 import grab_context
+
+    monkeypatch.setattr(
+        grab_context,
+        'resolve_lib2_grab_context',
+        lambda _db, _data: ('ok', {
+            'track_id': 7,
+            'album_id': 3,
+            'quality_profile_id': 1,
+        }),
+    )
+    dispatched = []
+
+    class _DownloadOrchestrator:
+        @staticmethod
+        def download(*args):
+            dispatched.append(args)
+
+    monkeypatch.setattr(web_server, 'download_orchestrator', _DownloadOrchestrator())
+    response = client.post('/api/download', json={
+        'result_type': 'album',
+        'lib2_track_id': 7,
+        'tracks': [{
+            'username': 'peer',
+            'filename': 'album/01.flac',
+            'size': 10,
+        }],
+    })
+
+    assert response.status_code == 400
+    assert 'Album results cannot be grabbed' in response.get_json()['error']
+    assert dispatched == []
 
 
 def test_admin_manual_download_without_lib2_context_is_correlated(client, monkeypatch):

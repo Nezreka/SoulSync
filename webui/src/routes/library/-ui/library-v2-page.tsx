@@ -12,8 +12,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { createPortal } from 'react-dom';
 
+import { DialogFrame, DialogHeader } from '@/components/dialog';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -54,8 +54,6 @@ import {
   LIBRARY_V2_QUERY_KEY,
   invalidateLibraryV2,
   libraryV2AlbumMatchStatusQueryOptions,
-  libraryV2AcquisitionImportQueryOptions,
-  libraryV2AcquisitionImportsQueryOptions,
   libraryV2AlbumQueryOptions,
   libraryV2ArtistAliasesQueryOptions,
   libraryV2ArtistMatchStatusQueryOptions,
@@ -81,9 +79,6 @@ import {
   startLibraryV2DiscographyRefresh,
   reconcileUnmappedArtists,
   reconcileWishlist,
-  rescanLibraryV2AcquisitionImport,
-  resolveLibraryV2AcquisitionImport,
-  resumeLibraryV2AcquisitionImport,
   retryLibraryV2Mirror,
   runRepairJob,
   setLibraryV2Monitored,
@@ -130,7 +125,6 @@ import {
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { Route } from '../route';
-import { describeRejection } from './acquisition-rejection';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
@@ -236,7 +230,10 @@ const PLACEHOLDER_TRACK_LABEL_RE = /^Track\s+(\?|\d+)$/;
  *  and left the ENTIRE tail — track title and duplicated album context —
  *  in the query. Returns the group's inner text (or null if the string
  *  doesn't end in a balanced parenthesized group) plus the remaining prefix. */
-function splitTrailingParenGroup(s: string): { rest: string; group: string | null } {
+function splitTrailingParenGroup(s: string): {
+  rest: string;
+  group: string | null;
+} {
   const trimmed = s.replace(/\s+$/, '');
   if (!trimmed.endsWith(')')) return { rest: s.trim(), group: null };
   let depth = 0;
@@ -450,7 +447,12 @@ export function Artwork({
   // forcing every such change to load the image twice. Adjusting state during
   // render (React's documented pattern for this) means the corrected value is
   // what actually gets painted, never a transient wrong one.
-  const [state, setState] = useState({ base, failed: false, remoteFailed: false, version: 0 });
+  const [state, setState] = useState({
+    base,
+    failed: false,
+    remoteFailed: false,
+    version: 0,
+  });
   if (state.base !== base) setState({ base, failed: false, remoteFailed: false, version: 0 });
   const failed = state.base === base && state.failed;
   const remoteFailed = state.base === base && state.remoteFailed;
@@ -473,7 +475,12 @@ export function Artwork({
       if (readyVersion == null) return;
       setState((current) =>
         current.base === base
-          ? { base, failed: false, remoteFailed: current.remoteFailed, version: readyVersion }
+          ? {
+              base,
+              failed: false,
+              remoteFailed: current.remoteFailed,
+              version: readyVersion,
+            }
           : current,
       );
     });
@@ -508,6 +515,7 @@ export function Artwork({
 
 function useMonitorMutation() {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   return useMutation({
     mutationFn: async (v: {
       entity: 'artists' | 'albums' | 'tracks';
@@ -518,6 +526,7 @@ function useMonitorMutation() {
       discNumber?: number;
       title?: string;
     }) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
       let targetId = v.id;
       if (targetId == null && v.entity === 'tracks') {
         if (v.albumId == null || v.trackNumber == null) {
@@ -542,6 +551,25 @@ function mutationErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
+function QueryFailure({
+  error,
+  fallback,
+  retry,
+}: {
+  error: unknown;
+  fallback: string;
+  retry: () => void;
+}) {
+  return (
+    <div className={styles.searchError} role="alert">
+      {mutationErrorMessage(error, fallback)}{' '}
+      <button type="button" className={styles.inlineRetry} onClick={retry}>
+        Try again
+      </button>
+    </div>
+  );
+}
+
 /** Lidarr-style monitor toggle (filled bookmark = monitored). */
 export function MonitorToggle({
   entity,
@@ -561,6 +589,7 @@ export function MonitorToggle({
   title?: string;
 }) {
   const mutation = useMonitorMutation();
+  const canWrite = useLibraryV2CanWrite();
   const nextMonitored = !monitored;
   return (
     <span className={styles.monitorControl} onClick={(e) => e.stopPropagation()}>
@@ -585,8 +614,10 @@ export function MonitorToggle({
                   ? 'Monitored — click to stop'
                   : 'Not monitored — click to monitor'
         }
-        disabled={mutation.isPending}
-        onClick={() =>
+        data-requires-write=""
+        disabled={mutation.isPending || !canWrite}
+        onClick={() => {
+          if (!canWrite) return;
           mutation.mutate({
             entity,
             id,
@@ -595,8 +626,8 @@ export function MonitorToggle({
             trackNumber,
             discNumber,
             title,
-          })
-        }
+          });
+        }}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d={BOOKMARK_PATH} strokeLinejoin="round" />
@@ -622,21 +653,22 @@ export function MonitorToggle({
  * — the lib2 monitored columns are global, so a second profile's write would
  * overwrite the admin's state (P0-02). The UI knew nothing about that, so a
  * read-only profile was offered the full toolbar and every button answered 403
- * on click. Defaults to true so nothing is locked down by a missing provider.
+ * on click. Missing capability data must fail closed.
  */
-const LibraryV2CanWriteContext = createContext(true);
+export const LibraryV2CanWriteContext = createContext(false);
 
 export function useLibraryV2CanWrite(): boolean {
   return useContext(LibraryV2CanWriteContext);
 }
 
-function ActionButton({
+export function ActionButton({
   icon,
   label,
   onClick,
   title,
   busy,
   disabled,
+  requiresWrite = true,
   tone = 'default',
 }: {
   icon: IconName;
@@ -645,18 +677,21 @@ function ActionButton({
   title?: string;
   busy?: boolean;
   disabled?: boolean;
+  requiresWrite?: boolean;
   tone?: 'default' | 'danger';
 }) {
-  // Every ActionButton is a write action, so the gate belongs here rather than
-  // at each of the ~30 call sites.
   const canWrite = useLibraryV2CanWrite();
+  const writeBlocked = requiresWrite && !canWrite;
   return (
     <button
       type="button"
       className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''}`}
-      disabled={busy || disabled || !canWrite}
-      title={canWrite ? title : 'Library changes require the admin profile'}
-      onClick={onClick}
+      data-requires-write={requiresWrite ? '' : undefined}
+      disabled={busy || disabled || writeBlocked}
+      title={writeBlocked ? 'Library changes require the admin profile' : title}
+      onClick={() => {
+        if (!writeBlocked) onClick();
+      }}
     >
       <SvgIcon name={busy ? 'refresh' : icon} />
       <span>{label}</span>
@@ -669,23 +704,29 @@ function IconActionButton({
   title,
   onClick,
   disabled,
+  requiresWrite = false,
   tone = 'default',
 }: {
   icon: IconName;
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  requiresWrite?: boolean;
   tone?: 'default' | 'danger';
 }) {
+  const canWrite = useLibraryV2CanWrite();
+  const writeBlocked = requiresWrite && !canWrite;
   return (
     <button
       type="button"
       className={`${styles.iconAction} ${tone === 'danger' ? styles.toolDanger : ''}`}
-      title={title}
-      disabled={disabled}
+      aria-label={title}
+      title={writeBlocked ? 'Library changes require the admin profile' : title}
+      data-requires-write={requiresWrite ? '' : undefined}
+      disabled={disabled || writeBlocked}
       onClick={(e) => {
         e.stopPropagation();
-        onClick();
+        if (!writeBlocked) onClick();
       }}
     >
       <SvgIcon name={icon} />
@@ -750,24 +791,18 @@ function ModalShell({
   onClose: () => void;
   children: ReactNode;
 }) {
-  const modal = (
-    <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <div
-        className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''} ${settings ? styles.modalSettings : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className={styles.modalHeader}>
-          <h3>{title}</h3>
-          <IconActionButton icon="close" title="Close" onClick={onClose} />
-        </div>
-        {children}
-      </div>
-    </div>
+  return (
+    <DialogFrame
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      className={`${styles.modal} ${wide ? styles.modalWide : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''} ${settings ? styles.modalSettings : ''}`}
+    >
+      <DialogHeader title={title} closeLabel="Close" />
+      {children}
+    </DialogFrame>
   );
-  return typeof document === 'undefined' ? modal : createPortal(modal, document.body);
 }
 
 // --- metadata match chips (legacy Enhanced-View parity) ---------------------
@@ -929,6 +964,7 @@ export function MatchChips({
   artistReleases?: LibraryV2AlbumSummary[];
   watchlistRowId?: number;
 }) {
+  const canWrite = useLibraryV2CanWrite();
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const [active, setActive] = useState<LibraryV2MatchService | null>(null);
   // A8: hide chips for providers nobody configured on this instance — a
@@ -960,9 +996,12 @@ export function MatchChips({
             key={s.service}
             type="button"
             className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
-            title={tip}
-            disabled={s.legacy_entity_id == null && s.library_v2_entity_id == null}
-            onClick={() => setActive(s)}
+            title={canWrite ? tip : 'Library changes require the admin profile'}
+            data-requires-write=""
+            disabled={!canWrite || (s.legacy_entity_id == null && s.library_v2_entity_id == null)}
+            onClick={() => {
+              if (canWrite) setActive(s);
+            }}
           >
             <span>{abbreviated ? getServiceAbbreviation(s.service) : s.label}</span>
           </button>
@@ -1104,13 +1143,21 @@ function ManualMatchModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [query, setQuery] = useState(entityName);
   const search = useMutation({
-    mutationFn: () =>
-      searchLibraryV2MatchService({ service: service.service, entity_type: entityType, query }),
+    mutationFn: () => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return searchLibraryV2MatchService({
+        service: service.service,
+        entity_type: entityType,
+        query,
+      });
+    },
   });
   const apply = useMutation({
     mutationFn: (result: LibraryV2MatchSearchResult) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
       const resultService = result.provider || service.service;
       return manualMatchLibraryV2Entity({
         entity_type: entityType,
@@ -1131,8 +1178,9 @@ function ManualMatchModal({
     },
   });
   const clear = useMutation({
-    mutationFn: () =>
-      clearLibraryV2EntityMatch({
+    mutationFn: () => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return clearLibraryV2EntityMatch({
         entity_type: entityType,
         legacy_entity_id: service.legacy_entity_id as number | string,
         library_v2_entity_id: service.library_v2_entity_id,
@@ -1142,7 +1190,8 @@ function ManualMatchModal({
         WATCHLIST_MATCH_PROVIDERS.has(service.service)
           ? { watchlist_row_id: watchlistRowId }
           : {}),
-      }),
+      });
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       onClose();
@@ -1195,7 +1244,8 @@ function ManualMatchModal({
           <button
             type="button"
             className={styles.btnDangerGhost}
-            disabled={clear.isPending}
+            data-requires-write=""
+            disabled={clear.isPending || !canWrite}
             onClick={() => {
               if (window.confirm(`Clear the current ${service.label} match?`)) clear.mutate();
             }}
@@ -1214,14 +1264,17 @@ function ManualMatchModal({
           placeholder={`Search ${service.label}…`}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') search.mutate();
+            if (e.key === 'Enter' && canWrite) search.mutate();
           }}
         />
         <button
           type="button"
           className={styles.btnPrimary}
-          disabled={search.isPending || !query.trim()}
-          onClick={() => search.mutate()}
+          data-requires-write=""
+          disabled={search.isPending || !query.trim() || !canWrite}
+          onClick={() => {
+            if (canWrite) search.mutate();
+          }}
         >
           {search.isPending ? 'Searching…' : 'Search'}
         </button>
@@ -1289,7 +1342,8 @@ function ManualMatchModal({
               <button
                 type="button"
                 className={styles.btnPrimary}
-                disabled={apply.isPending || isCurrent}
+                data-requires-write=""
+                disabled={apply.isPending || isCurrent || !canWrite}
                 onClick={() => apply.mutate(r)}
               >
                 {isCurrent ? 'Current' : apply.isPending ? 'Matching…' : 'Use this match'}
@@ -1376,8 +1430,10 @@ function EnrichDropdown({
   submenu?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const mutation = useMutation({
     mutationFn: async (service: string) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
       if (service === 'all') {
         const services = ENRICH_SERVICES[entity];
         window.showToast?.(`Enriching ${entityName} from all services...`, 'info');
@@ -1427,7 +1483,8 @@ function EnrichDropdown({
       <button
         type="button"
         className={styles.enrichDropdownItem}
-        disabled={mutation.isPending}
+        data-requires-write=""
+        disabled={mutation.isPending || !canWrite}
         onClick={(e) => {
           e.stopPropagation();
           mutation.mutate('all');
@@ -1443,7 +1500,8 @@ function EnrichDropdown({
           key={s.value}
           type="button"
           className={styles.enrichDropdownItem}
-          disabled={mutation.isPending}
+          data-requires-write=""
+          disabled={mutation.isPending || !canWrite}
           onClick={(e) => {
             e.stopPropagation();
             mutation.mutate(s.value);
@@ -1493,10 +1551,14 @@ function ArtistMatchChips({
  *  suggestion/recovery UX) — that is §41's separate, larger scope. */
 export function ArtistAliases({ artistId, artistName }: { artistId: number; artistName: string }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [linking, setLinking] = useState(false);
   const query = useQuery(libraryV2ArtistAliasesQueryOptions(artistId));
   const unlink = useMutation({
-    mutationFn: (aliasId: number) => unlinkLibraryV2ArtistAlias(aliasId),
+    mutationFn: (aliasId: number) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return unlinkLibraryV2ArtistAlias(aliasId);
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     },
@@ -1511,8 +1573,11 @@ export function ArtistAliases({ artistId, artistName }: { artistId: number; arti
             type="button"
             className={styles.aliasChipRemove}
             title={`Unlink ${m.name} (it becomes a standalone artist again)`}
-            disabled={unlink.isPending}
-            onClick={() => unlink.mutate(m.id)}
+            data-requires-write=""
+            disabled={unlink.isPending || !canWrite}
+            onClick={() => {
+              if (canWrite) unlink.mutate(m.id);
+            }}
           >
             ✕
           </button>
@@ -1524,7 +1589,8 @@ export function ArtistAliases({ artistId, artistName }: { artistId: number; arti
           <button
             type="button"
             className={styles.inlineRetry}
-            disabled={unlink.isPending || unlink.variables == null}
+            data-requires-write=""
+            disabled={unlink.isPending || unlink.variables == null || !canWrite}
             onClick={() => {
               if (unlink.variables != null) unlink.mutate(unlink.variables);
             }}
@@ -1536,8 +1602,12 @@ export function ArtistAliases({ artistId, artistName }: { artistId: number; arti
       <button
         type="button"
         className={styles.aliasLinkButton}
+        data-requires-write=""
+        disabled={!canWrite}
         title="Link another artist row in your library as an alias of this one (same real artist, different provider identity)"
-        onClick={() => setLinking(true)}
+        onClick={() => {
+          if (canWrite) setLinking(true);
+        }}
       >
         + Link alias
       </button>
@@ -1564,13 +1634,17 @@ function LinkArtistAliasModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [query, setQuery] = useState('');
   const search = useMutation({
     mutationFn: (q: string) =>
       fetchLibraryV2Artists({ q, sort: 'name', page: 1, monitored: 'all' }),
   });
   const link = useMutation({
-    mutationFn: (aliasOfId: number) => linkLibraryV2ArtistAlias(artistId, aliasOfId),
+    mutationFn: (aliasOfId: number) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return linkLibraryV2ArtistAlias(artistId, aliasOfId);
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       onClose();
@@ -1620,8 +1694,11 @@ function LinkArtistAliasModal({
             <button
               type="button"
               className={styles.btnPrimary}
-              disabled={link.isPending}
-              onClick={() => link.mutate(a.id)}
+              data-requires-write=""
+              disabled={link.isPending || !canWrite}
+              onClick={() => {
+                if (canWrite) link.mutate(a.id);
+              }}
             >
               {link.isPending ? 'Linking…' : 'Link'}
             </button>
@@ -1644,6 +1721,7 @@ export function MonitoringModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [busy, setBusy] = useState<string | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [failedBulkAction, setFailedBulkAction] = useState<{
@@ -1655,7 +1733,10 @@ export function MonitoringModal({
     monitorNewItems === 'none' || monitorNewItems === 'new' ? monitorNewItems : 'all';
   const [newItems, setNewItems] = useState<'all' | 'none' | 'new'>(initialNewItems);
   const futureReleasesMutation = useMutation({
-    mutationFn: (value: 'all' | 'none' | 'new') => editLibraryV2Artist(artistId, value),
+    mutationFn: (value: 'all' | 'none' | 'new') => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return editLibraryV2Artist(artistId, value);
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
     onMutate: (value) => {
       const previous = newItems;
@@ -1672,6 +1753,7 @@ export function MonitoringModal({
   }
 
   async function apply(scope: 'all' | 'missing', monitored: boolean, label: string) {
+    if (!canWrite) return;
     setBusy(label);
     setBulkError(null);
     setFailedBulkAction(null);
@@ -1714,7 +1796,8 @@ export function MonitoringModal({
             key={o.label}
             type="button"
             className={styles.qpOption}
-            disabled={busy !== null}
+            data-requires-write=""
+            disabled={busy !== null || !canWrite}
             onClick={o.run}
           >
             <span className={styles.qpName}>{busy === o.label ? 'Applying…' : o.label}</span>
@@ -1728,6 +1811,8 @@ export function MonitoringModal({
           <button
             type="button"
             className={styles.inlineRetry}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() =>
               void apply(failedBulkAction.scope, failedBulkAction.monitored, failedBulkAction.label)
             }
@@ -1742,7 +1827,8 @@ export function MonitoringModal({
           id="lib2-monitor-new"
           className={styles.select}
           value={newItems}
-          disabled={futureReleasesMutation.isPending}
+          data-requires-write=""
+          disabled={futureReleasesMutation.isPending || !canWrite}
           onChange={(e) => {
             const value = e.target.value as 'all' | 'none' | 'new';
             saveFutureReleases(value);
@@ -1768,6 +1854,8 @@ export function MonitoringModal({
           <button
             type="button"
             className={styles.inlineRetry}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() =>
               futureReleasesMutation.mutate(futureReleasesMutation.variables ?? newItems)
             }
@@ -1796,6 +1884,7 @@ export function ArtistSettingsModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const settingsQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
     queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
@@ -1812,7 +1901,10 @@ export function ArtistSettingsModal({
   }, [settingsQuery.data?.settings]);
 
   const save = useMutation({
-    mutationFn: (value: LibraryV2ArtistSettings) => updateLibraryV2ArtistSettings(artist.id, value),
+    mutationFn: (value: LibraryV2ArtistSettings) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return updateLibraryV2ArtistSettings(artist.id, value);
+    },
     onSuccess: async (response) => {
       setDraft(response.settings);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
@@ -1824,6 +1916,7 @@ export function ArtistSettingsModal({
     monitored: boolean,
     label: string,
   ) {
+    if (!canWrite) return;
     setBulkBusy(label);
     setBulkMessage(null);
     try {
@@ -2028,7 +2121,10 @@ export function ArtistSettingsModal({
                   onChange={(event) =>
                     setDraft((current) =>
                       current
-                        ? { ...current, preferred_metadata_source: event.target.value || null }
+                        ? {
+                            ...current,
+                            preferred_metadata_source: event.target.value || null,
+                          }
                         : current,
                     )
                   }
@@ -2081,8 +2177,11 @@ export function ArtistSettingsModal({
               <button
                 type="button"
                 className={styles.btnPrimary}
-                disabled={save.isPending}
-                onClick={() => save.mutate(draft)}
+                data-requires-write=""
+                disabled={save.isPending || !canWrite}
+                onClick={() => {
+                  if (canWrite) save.mutate(draft);
+                }}
               >
                 {save.isPending ? 'Saving…' : 'Save future-release settings'}
               </button>
@@ -2099,7 +2198,8 @@ export function ArtistSettingsModal({
               <button
                 type="button"
                 className={styles.toolButton}
-                disabled={bulkBusy !== null}
+                data-requires-write=""
+                disabled={bulkBusy !== null || !canWrite}
                 onClick={() =>
                   void applyExistingReleaseStrategy('all', true, 'Monitor all existing releases')
                 }
@@ -2109,7 +2209,8 @@ export function ArtistSettingsModal({
               <button
                 type="button"
                 className={styles.toolButton}
-                disabled={bulkBusy !== null}
+                data-requires-write=""
+                disabled={bulkBusy !== null || !canWrite}
                 onClick={() =>
                   void applyExistingReleaseStrategy('missing', true, 'Monitor missing releases')
                 }
@@ -2119,7 +2220,8 @@ export function ArtistSettingsModal({
               <button
                 type="button"
                 className={styles.btnDanger}
-                disabled={bulkBusy !== null}
+                data-requires-write=""
+                disabled={bulkBusy !== null || !canWrite}
                 onClick={() =>
                   void applyExistingReleaseStrategy('all', false, 'Unmonitor existing releases')
                 }
@@ -2496,7 +2598,11 @@ function AlbumMetadataForm({
           onChange={(event) => setMood(event.target.value)}
         />
       </div>
-      {error ? <div className={styles.searchError}>{error}</div> : null}
+      {error ? (
+        <div className={styles.searchError} role="alert">
+          {error}
+        </div>
+      ) : null}
       <div className={styles.modalActions}>
         {resettable.length > 0 ? (
           <button
@@ -2543,6 +2649,7 @@ export function AlbumOverflowMenu({
   onDeleted?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
@@ -2554,6 +2661,7 @@ export function AlbumOverflowMenu({
   const wrapRef = useRef<HTMLSpanElement>(null);
   const replaygain = useMutation({
     mutationFn: async () => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
       const jobId = await startLibraryV2AlbumReplayGain(album.id);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
@@ -2594,7 +2702,10 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={styles.overflowMenuItem}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() => {
+              if (!canWrite) return;
               setShowRetag(true);
               setOpen(false);
             }}
@@ -2604,8 +2715,10 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={styles.overflowMenuItem}
-            disabled={replaygain.isPending}
+            data-requires-write=""
+            disabled={replaygain.isPending || !canWrite}
             onClick={() => {
+              if (!canWrite) return;
               replaygain.mutate();
               setOpen(false);
             }}
@@ -2615,7 +2728,10 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={styles.overflowMenuItem}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() => {
+              if (!canWrite) return;
               setShowReorganize(true);
               setOpen(false);
             }}
@@ -2625,7 +2741,10 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={styles.overflowMenuItem}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() => {
+              if (!canWrite) return;
               setShowArtPicker(true);
               setOpen(false);
             }}
@@ -2644,14 +2763,19 @@ export function AlbumOverflowMenu({
           </button>
           <div
             className={styles.submenuContainer}
-            onMouseEnter={() => setShowSubmenu(true)}
+            onMouseEnter={() => {
+              if (canWrite) setShowSubmenu(true);
+            }}
             onMouseLeave={() => setShowSubmenu(false)}
           >
             <button
               type="button"
               className={styles.overflowMenuItem}
+              data-requires-write=""
+              disabled={!canWrite}
               onClick={(e) => {
                 e.stopPropagation();
+                if (!canWrite) return;
                 setShowSubmenu((v) => !v);
               }}
             >
@@ -2675,7 +2799,10 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
+            data-requires-write=""
+            disabled={!canWrite}
             onClick={() => {
+              if (!canWrite) return;
               setShowDelete(true);
               setOpen(false);
             }}
@@ -2690,8 +2817,11 @@ export function AlbumOverflowMenu({
           <button
             type="button"
             className={styles.inlineRetry}
-            disabled={replaygain.isPending}
-            onClick={() => replaygain.mutate()}
+            data-requires-write=""
+            disabled={replaygain.isPending || !canWrite}
+            onClick={() => {
+              if (canWrite) replaygain.mutate();
+            }}
           >
             Retry
           </button>
@@ -2912,6 +3042,21 @@ const MAINTENANCE_JOBS: Array<{
   },
 ];
 
+async function awaitMaintenanceResult(
+  jobId: string,
+): Promise<Record<string, number | string | null>> {
+  for (let i = 0; i < 900; i += 1) {
+    const state = await fetchLibraryV2JobStatus(jobId);
+    if (!state.running) {
+      if (state.error) throw new Error(state.error);
+      if (!state.result) throw new Error('Job finished without a result');
+      return state.result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error('Timed out waiting for the job');
+}
+
 export function MaintenanceModal({
   artistId,
   artistName,
@@ -2921,6 +3066,8 @@ export function MaintenanceModal({
   artistName: string;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
   const [reconcile, setReconcile] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [reconcileResult, setReconcileResult] = useState<string | null>(null);
@@ -2928,24 +3075,17 @@ export function MaintenanceModal({
   const [wishlistResult, setWishlistResult] = useState<string | null>(null);
 
   const runReconcile = () => {
+    if (!canWrite) return;
     setReconcile('running');
     setReconcileResult(null);
     void reconcileUnmappedArtists()
-      .then(async (jobId) => {
-        for (let i = 0; i < 900; i += 1) {
-          const s = await fetchLibraryV2JobStatus(jobId);
-          if (!s.running) {
-            const r = (s.result ?? {}) as Record<string, number>;
-            setReconcile('done');
-            setReconcileResult(
-              `Scanned ${r.scanned ?? 0} · matched ${r.matched ?? 0} · split ${r.split ?? 0} · still unmatched ${r.unmatched ?? 0}`,
-            );
-            return;
-          }
-          await new Promise((res) => setTimeout(res, 1000));
-        }
-        setReconcile('error');
-        setReconcileResult('Timed out waiting for the job');
+      .then(awaitMaintenanceResult)
+      .then((r) => {
+        setReconcile('done');
+        setReconcileResult(
+          `Scanned ${r.scanned ?? 0} · matched ${r.matched ?? 0} · split ${r.split ?? 0} · still unmatched ${r.unmatched ?? 0}`,
+        );
+        void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       })
       .catch((e) => {
         setReconcile('error');
@@ -2954,24 +3094,17 @@ export function MaintenanceModal({
   };
 
   const runWishlistReconcile = () => {
+    if (!canWrite) return;
     setWishlist('running');
     setWishlistResult(null);
     void reconcileWishlist()
-      .then(async (jobId) => {
-        for (let i = 0; i < 900; i += 1) {
-          const s = await fetchLibraryV2JobStatus(jobId);
-          if (!s.running) {
-            const r = (s.result ?? {}) as Record<string, number>;
-            setWishlist('done');
-            setWishlistResult(
-              `${r.wanted ?? 0} wanted · ${r.wishlisted ?? 0} in wishlist · ${r.mirrored ?? 0} synced`,
-            );
-            return;
-          }
-          await new Promise((res) => setTimeout(res, 1000));
-        }
-        setWishlist('error');
-        setWishlistResult('Timed out waiting for the job');
+      .then(awaitMaintenanceResult)
+      .then((r) => {
+        setWishlist('done');
+        setWishlistResult(
+          `${r.wanted ?? 0} wanted · ${r.wishlisted ?? 0} in wishlist · ${r.mirrored ?? 0} synced`,
+        );
+        void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       })
       .catch((e) => {
         setWishlist('error');
@@ -2999,7 +3132,8 @@ export function MaintenanceModal({
             <button
               type="button"
               className={styles.qpOption}
-              disabled={reconcile === 'running'}
+              data-requires-write=""
+              disabled={reconcile === 'running' || !canWrite}
               onClick={runReconcile}
             >
               <span className={styles.qpName}>
@@ -3017,7 +3151,8 @@ export function MaintenanceModal({
             <button
               type="button"
               className={styles.qpOption}
-              disabled={wishlist === 'running'}
+              data-requires-write=""
+              disabled={wishlist === 'running' || !canWrite}
               onClick={runWishlistReconcile}
             >
               <span className={styles.qpName}>
@@ -3060,8 +3195,10 @@ export function MaintenanceModal({
                   key={job.id}
                   type="button"
                   className={styles.qpOption}
-                  disabled={state[job.id] === 'queued'}
+                  data-requires-write=""
+                  disabled={state[job.id] === 'queued' || !canWrite}
                   onClick={() => {
+                    if (!canWrite) return;
                     void runRepairJob(
                       job.id,
                       job.scope === 'artist' ? { id: artistId, name: artistName } : undefined,
@@ -3119,8 +3256,9 @@ function ManageTracksModal({ artistId, onClose }: { artistId: number; onClose: (
   );
 }
 
-function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
+export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const dupesQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'duplicates', artistId],
     queryFn: () => fetchLibraryV2Duplicates(artistId),
@@ -3145,10 +3283,12 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   }
 
   function unlink(trackId: number) {
+    if (!canWrite) return;
     withBusy(trackId, unlinkLibraryV2Duplicate(trackId));
   }
 
   function moveFile(fromTrackId: number, toTrackId: number) {
+    if (!canWrite) return;
     withBusy(fromTrackId, moveLibraryV2TrackFile(fromTrackId, toTrackId));
   }
 
@@ -3175,6 +3315,12 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
       <div className={styles.resultsWrap}>
         {dupesQuery.isLoading ? (
           <div className={styles.inlineLoading}>Scanning for duplicates…</div>
+        ) : dupesQuery.isError ? (
+          <QueryFailure
+            error={dupesQuery.error}
+            fallback="Could not check for duplicate tracks."
+            retry={() => void dupesQuery.refetch()}
+          />
         ) : pairs.length === 0 ? (
           <div className={styles.inlineLoading}>
             No single↔album duplicates found for this artist.
@@ -3222,7 +3368,8 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
                       <button
                         type="button"
                         className={styles.toolButton}
-                        disabled={busyTracks.has(p.single.track_id)}
+                        data-requires-write=""
+                        disabled={busyTracks.has(p.single.track_id) || !canWrite}
                         title="Attach the single's file to the album version instead (file stays on disk; the single stops being wanted)"
                         onClick={() => moveFile(p.single.track_id, p.album.track_id)}
                       >
@@ -3233,7 +3380,8 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
                       <button
                         type="button"
                         className={styles.toolButton}
-                        disabled={busyTracks.has(p.album.track_id)}
+                        data-requires-write=""
+                        disabled={busyTracks.has(p.album.track_id) || !canWrite}
                         title="Attach the album's file to the single version instead (file stays on disk; the album track stops being wanted)"
                         onClick={() => moveFile(p.album.track_id, p.single.track_id)}
                       >
@@ -3243,7 +3391,8 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
                     <button
                       type="button"
                       className={styles.toolButton}
-                      disabled={busyTracks.has(p.single.track_id)}
+                      data-requires-write=""
+                      disabled={busyTracks.has(p.single.track_id) || !canWrite}
                       title="Not the same recording? Unlink the pair — the single becomes independent again"
                       onClick={() => unlink(p.single.track_id)}
                     >
@@ -3264,8 +3413,9 @@ function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
  *  physical file this artist owns — bulk-delete goes through the same
  *  ADR-05 preview/execute contract as the single-entity delete flow
  *  (`DeleteConfirmModal`), scoped to the checked file ids. */
-function ArtistFilesTab({ artistId }: { artistId: number }) {
+export function ArtistFilesTab({ artistId }: { artistId: number }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -3325,6 +3475,12 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
       />
       {filesQuery.isLoading ? (
         <div className={styles.inlineLoading}>Loading files…</div>
+      ) : filesQuery.isError ? (
+        <QueryFailure
+          error={filesQuery.error}
+          fallback="Could not load artist files."
+          retry={() => void filesQuery.refetch()}
+        />
       ) : files.length === 0 ? (
         <div className={styles.inlineLoading}>No files found.</div>
       ) : (
@@ -3392,7 +3548,8 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
         <button
           type="button"
           className={styles.btnDanger}
-          disabled={selected.size === 0}
+          data-requires-write=""
+          disabled={selected.size === 0 || !canWrite}
           onClick={() => setConfirming(true)}
         >
           Delete selected…
@@ -3406,7 +3563,9 @@ function ArtistFilesTab({ artistId }: { artistId: number }) {
           onDone={() => {
             setSelected(new Set());
             setConfirming(false);
-            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+            void queryClient.invalidateQueries({
+              queryKey: LIBRARY_V2_QUERY_KEY,
+            });
           }}
           onCancel={() => setConfirming(false)}
         />
@@ -3707,6 +3866,20 @@ export function LibraryV2Page() {
   const search = Route.useSearch();
   const enabledQuery = useQuery(libraryV2EnabledQueryOptions());
 
+  if (enabledQuery.isError) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.emptyState} role="alert">
+          <h2>Library availability could not be verified</h2>
+          <p>{mutationErrorMessage(enabledQuery.error, 'The availability check failed.')}</p>
+          <button type="button" onClick={() => void enabledQuery.refetch()}>
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (enabledQuery.data?.enabled === false) {
     return (
       <div className={styles.page}>
@@ -3731,10 +3904,7 @@ export function LibraryV2Page() {
         }
       : null;
 
-  // iss29-C10: `canWrite` defaults to true while the query is still in flight
-  // and for servers that predate the field, so an admin never sees their own
-  // toolbar flicker into a disabled state.
-  const canWrite = enabledQuery.data?.canWrite !== false;
+  const canWrite = enabledQuery.data?.canWrite === true;
 
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
@@ -3756,8 +3926,6 @@ export function LibraryV2Page() {
         <ArtistDetailView artistId={search.artist} />
       ) : search.section === 'wanted' ? (
         <WantedIndexView />
-      ) : search.section === 'import-review' ? (
-        <AcquisitionImportReviewView />
       ) : (
         <ArtistIndexView />
       )}
@@ -3771,11 +3939,17 @@ export function LibraryV2Page() {
  *  learned about it. */
 export function MirrorStatusBanner() {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const statusQuery = useQuery(libraryV2MirrorStatusQueryOptions());
   const retry = useMutation({
-    mutationFn: retryLibraryV2Mirror,
+    mutationFn: () => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return retryLibraryV2Mirror();
+    },
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: [...LIBRARY_V2_QUERY_KEY, 'mirror-status'] }),
+      queryClient.invalidateQueries({
+        queryKey: [...LIBRARY_V2_QUERY_KEY, 'mirror-status'],
+      }),
   });
   const s = statusQuery.data;
   if (!s || (s.pending === 0 && s.failed === 0)) return null;
@@ -3796,7 +3970,8 @@ export function MirrorStatusBanner() {
       <button
         type="button"
         className={styles.grabBannerClose}
-        disabled={retry.isPending}
+        data-requires-write=""
+        disabled={retry.isPending || !canWrite}
         onClick={() => retry.mutate()}
       >
         {retry.isPending ? 'Retrying…' : retry.isError ? 'Retry again' : 'Retry'}
@@ -3811,8 +3986,9 @@ function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   // Debounce the filter box: navigating per keystroke fires a request each key.
-  const artistFilter = useUrlSyncedFilter(search.q, (value) =>
-    void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+  const artistFilter = useUrlSyncedFilter(
+    search.q,
+    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
   );
 
   // Only fetched for the table view (D6) — the card grid doesn't use either.
@@ -3821,7 +3997,10 @@ function ArtistIndexView() {
     ...libraryV2QualityProfilesQueryOptions(),
     enabled: isTableView,
   });
-  const prefsQuery = useQuery({ ...libraryV2UiPreferencesQueryOptions(), enabled: isTableView });
+  const prefsQuery = useQuery({
+    ...libraryV2UiPreferencesQueryOptions(),
+    enabled: isTableView,
+  });
   const profileNameById = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
   const artistTableColumns = prefsQuery.data?.artist_table.columns ?? {
     quality_profile: false,
@@ -3899,7 +4078,11 @@ function ArtistIndexView() {
           value={search.monitored}
           onChange={(e) =>
             void navigate({
-              search: (p) => ({ ...p, monitored: e.target.value as typeof p.monitored, page: 1 }),
+              search: (p) => ({
+                ...p,
+                monitored: e.target.value as typeof p.monitored,
+                page: 1,
+              }),
             })
           }
         >
@@ -3912,7 +4095,11 @@ function ArtistIndexView() {
           value={search.sort}
           onChange={(e) =>
             void navigate({
-              search: (p) => ({ ...p, sort: e.target.value as typeof p.sort, page: 1 }),
+              search: (p) => ({
+                ...p,
+                sort: e.target.value as typeof p.sort,
+                page: 1,
+              }),
             })
           }
         >
@@ -4038,308 +4225,6 @@ function LibrarySectionTabs() {
       >
         Wanted
       </button>
-      {/* No Import review entry: the user does not want that surface offered
-          right now (the guide already strikes the standalone /import-review
-          page). The section itself is left in place and still renders for
-          ?section=import-review, so this is one button to put back, not a
-          feature to rebuild. */}
-    </div>
-  );
-}
-
-function AcquisitionImportReviewView() {
-  const queryClient = useQueryClient();
-  const importsQuery = useQuery(libraryV2AcquisitionImportsQueryOptions());
-  const imports = importsQuery.data ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const activeId =
-    selectedId && imports.some((item) => item.id === selectedId)
-      ? selectedId
-      : (imports[0]?.id ?? null);
-  const detailQuery = useQuery({
-    ...libraryV2AcquisitionImportQueryOptions(activeId ?? 'none'),
-    enabled: activeId !== null,
-  });
-  const [assignments, setAssignments] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    const detail = detailQuery.data;
-    if (!detail) return;
-    setAssignments(
-      Object.fromEntries(
-        detail.matches
-          .filter((match) => match.track_id !== null)
-          .map((match) => [match.relative_path, Number(match.track_id)]),
-      ),
-    );
-  }, [detailQuery.data]);
-
-  const refresh = async (importId: string) => {
-    await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-imports'],
-      }),
-      queryClient.invalidateQueries({
-        queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-import', importId],
-      }),
-    ]);
-  };
-  const resolveMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeId) throw new Error('No import selected');
-      const payload = Object.entries(assignments).map(([relative_path, track_id]) => ({
-        relative_path,
-        track_id,
-      }));
-      await resolveLibraryV2AcquisitionImport(activeId, payload);
-      return resumeLibraryV2AcquisitionImport(activeId);
-    },
-    onSettled: async () => {
-      if (activeId) await refresh(activeId);
-    },
-  });
-  const rescanMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeId) throw new Error('No import selected');
-      await rescanLibraryV2AcquisitionImport(activeId);
-      return resumeLibraryV2AcquisitionImport(activeId);
-    },
-    onSettled: async () => {
-      if (activeId) await refresh(activeId);
-    },
-  });
-  const resumeMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeId) throw new Error('No import selected');
-      return resumeLibraryV2AcquisitionImport(activeId);
-    },
-    onSettled: async () => {
-      if (activeId) await refresh(activeId);
-    },
-  });
-
-  const detail = detailQuery.data;
-  const expectedTracks = detail?.expected_tracks.filter((track) => track.track_id !== null) ?? [];
-  const chosenTrackIds = Object.values(assignments);
-  const completeAssignment = Boolean(
-    detail &&
-    detail.inventory.length > 0 &&
-    detail.inventory.every((file) => assignments[file.relative_path]) &&
-    expectedTracks.length === detail.inventory.length &&
-    new Set(chosenTrackIds).size === chosenTrackIds.length &&
-    chosenTrackIds.length === expectedTracks.length,
-  );
-  const mutation = resolveMutation.isError
-    ? resolveMutation
-    : rescanMutation.isError
-      ? rescanMutation
-      : resumeMutation;
-  const busy = resolveMutation.isPending || rescanMutation.isPending || resumeMutation.isPending;
-
-  return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Import review</h1>
-          <p className={styles.subtitle}>
-            Resolve ambiguous bundle matches without exposing server filesystem paths.
-          </p>
-        </div>
-      </header>
-      <div className={styles.toolbar}>
-        <LibrarySectionTabs />
-      </div>
-
-      {importsQuery.isLoading ? <div className={styles.loading}>Loading review queue…</div> : null}
-      {importsQuery.isError ? (
-        <div className={styles.mutationError} role="alert">
-          {mutationErrorMessage(importsQuery.error, 'Import review queue could not be loaded')}
-        </div>
-      ) : null}
-      {!importsQuery.isLoading && imports.length === 0 ? (
-        <div className={styles.emptyState}>
-          <h2>No imports need attention</h2>
-          <p>Ambiguous or interrupted bundle imports will appear here automatically.</p>
-        </div>
-      ) : null}
-
-      {imports.length > 0 ? (
-        <div className={styles.reviewLayout}>
-          <aside className={styles.reviewQueue} aria-label="Open imports">
-            {imports.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={item.id === activeId ? styles.reviewQueueActive : ''}
-                onClick={() => setSelectedId(item.id)}
-              >
-                <strong>{item.expected_scope.replaceAll('_', ' ')}</strong>
-                <span>
-                  #{item.expected_entity_id} · {item.status.replaceAll('_', ' ')}
-                </span>
-                <small>
-                  {item.inventory_count} files · {item.rejection_count} conflicts
-                </small>
-              </button>
-            ))}
-          </aside>
-
-          <section className={styles.reviewDetail}>
-            {detailQuery.isLoading ? <div className={styles.loading}>Loading import…</div> : null}
-            {detailQuery.isError ? (
-              <div className={styles.mutationError} role="alert">
-                {mutationErrorMessage(detailQuery.error, 'Import could not be loaded')}
-              </div>
-            ) : null}
-            {detail ? (
-              <>
-                <div className={styles.reviewHeading}>
-                  <div>
-                    <h2>Bundle assignments</h2>
-                    <p className={styles.muted}>
-                      Status: {detail.status.replaceAll('_', ' ')} · attempt {detail.attempts}
-                    </p>
-                  </div>
-                  <div className={styles.headerActions}>
-                    <button
-                      type="button"
-                      className={styles.btnGhost}
-                      disabled={
-                        busy || !['pending', 'matching', 'needs_review'].includes(detail.status)
-                      }
-                      onClick={() => rescanMutation.mutate()}
-                    >
-                      {rescanMutation.isPending ? 'Rescanning…' : 'Rescan & resume'}
-                    </button>
-                    {detail.status === 'importing' ? (
-                      <button
-                        type="button"
-                        className={styles.btnPrimary}
-                        disabled={busy}
-                        onClick={() => resumeMutation.mutate()}
-                      >
-                        {resumeMutation.isPending ? 'Resuming…' : 'Resume import'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
-                {detail.rejections.length > 0 ? (
-                  <div className={styles.reviewConflicts} role="status">
-                    <strong>{detail.rejections.length} matching conflict(s)</strong>
-                    <ul>
-                      {detail.rejections.map((rejection, index) => {
-                        const line = describeRejection(rejection);
-                        return (
-                          <li key={`${line.label}-${line.detail}-${index}`}>
-                            {line.label}
-                            {line.detail ? ` · ${line.detail}` : ''}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ) : null}
-
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Bundle file</th>
-                        <th>Tags</th>
-                        <th>Expected track</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.inventory.map((file) => (
-                        <tr key={file.relative_path}>
-                          <td>{file.relative_path}</td>
-                          <td>
-                            {file.title || 'Unknown title'}
-                            <small className={styles.reviewMeta}>
-                              {file.disc_number ? `Disc ${file.disc_number} · ` : ''}
-                              {file.track_number ? `Track ${file.track_number}` : 'No position'}
-                            </small>
-                          </td>
-                          <td>
-                            <select
-                              className={styles.select}
-                              aria-label={`Expected track for ${file.relative_path}`}
-                              value={assignments[file.relative_path] ?? ''}
-                              disabled={detail.status !== 'needs_review' || busy}
-                              onChange={(event) => {
-                                const trackId = Number(event.target.value);
-                                setAssignments((current) => {
-                                  const next = { ...current };
-                                  if (trackId) next[file.relative_path] = trackId;
-                                  else delete next[file.relative_path];
-                                  return next;
-                                });
-                              }}
-                            >
-                              <option value="">Choose a track…</option>
-                              {expectedTracks.map((track) => {
-                                const trackId = Number(track.track_id);
-                                const usedElsewhere = Object.entries(assignments).some(
-                                  ([path, selected]) =>
-                                    path !== file.relative_path && selected === trackId,
-                                );
-                                return (
-                                  <option
-                                    key={track.expected_key}
-                                    value={trackId}
-                                    disabled={usedElsewhere}
-                                  >
-                                    D{track.disc_number} · {track.track_number ?? '—'} ·{' '}
-                                    {track.expected_title}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {detail.status === 'needs_review' &&
-                expectedTracks.length !== detail.inventory.length ? (
-                  <div className={styles.mutationError} role="alert">
-                    This bundle has {detail.inventory.length} files but {expectedTracks.length}{' '}
-                    assignable tracks. Rescan or correct the edition before importing; partial
-                    imports are blocked.
-                  </div>
-                ) : null}
-                {mutation.isError ? (
-                  <div className={styles.mutationError} role="alert">
-                    {mutationErrorMessage(mutation.error, 'Import action failed')}
-                  </div>
-                ) : null}
-                {detail.error ? (
-                  <div className={styles.mutationError} role="alert">
-                    {detail.error}
-                  </div>
-                ) : null}
-                {detail.status === 'needs_review' ? (
-                  <div className={styles.modalActions}>
-                    <button
-                      type="button"
-                      className={styles.btnPrimary}
-                      disabled={!completeAssignment || busy}
-                      onClick={() => resolveMutation.mutate()}
-                    >
-                      {resolveMutation.isPending
-                        ? 'Applying & resuming…'
-                        : 'Apply assignments & resume'}
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-          </section>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -4369,16 +4254,21 @@ export function formatWantedFileQuality(file: LibraryV2WantedRow['file']): strin
 
 function WantedIndexView() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const search = Route.useSearch();
-  const wantedFilter = useUrlSyncedFilter(search.q, (value) =>
-    void navigate({ search: (p) => ({ ...p, q: value, page: 1 }) }),
+  const wantedFilter = useUrlSyncedFilter(
+    search.q,
+    (value) => void navigate({ search: (p) => ({ ...p, q: value, page: 1 }) }),
   );
   // dd28-16: one shared banner + a run-sequence guard, so a slower earlier
   // search can no longer overwrite a newer one's result.
   const { banner, setBanner, busy: searchBusy, runScoped } = useScopedSearchBanner();
   const wantedQuery = useQuery(
-    libraryV2WantedQueryOptions({ q: search.q, page: search.page, wantedKind: search.wantedKind }),
+    libraryV2WantedQueryOptions({
+      q: search.q,
+      page: search.page,
+      wantedKind: search.wantedKind,
+    }),
   );
   const rows = wantedQuery.data?.tracks ?? [];
   const pagination = wantedQuery.data?.pagination;
@@ -4388,7 +4278,7 @@ function WantedIndexView() {
   }
 
   function runSearch(trackId: number) {
-    if (searchBusy) return;
+    if (searchBusy || !canWrite) return;
     runScoped('tracks', trackId);
   }
 
@@ -4497,7 +4387,9 @@ function WantedIndexView() {
                     type="button"
                     className={styles.linkButton}
                     onClick={() =>
-                      void navigate({ search: (p) => ({ ...p, album: row.album.id }) })
+                      void navigate({
+                        search: (p) => ({ ...p, album: row.album.id }),
+                      })
                     }
                   >
                     {row.album.title}
@@ -4511,6 +4403,7 @@ function WantedIndexView() {
                   <IconActionButton
                     icon="automatic"
                     title="Search this track"
+                    requiresWrite
                     // dd28-16: one banner is shared by every row, so a second
                     // search must not start until the first has reported.
                     disabled={searchBusy}
@@ -4740,8 +4633,8 @@ function ArtistTable({
 
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
   const previousArtist = Route.useSearch().artist;
-  const queryClient = useQueryClient();
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
   // release as its own page did not, so a discography-only release (a
@@ -4762,6 +4655,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   } = useScopedSearchBanner();
 
   function handleAction(action: string, entity?: Lib2EntityRef) {
+    if (!canWrite) return;
     if (INTERACTIVE_RE.test(action)) {
       setModalAction({ action, entity });
       return;
@@ -4895,6 +4789,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               )}
               qualityProfile={album.quality_profile}
               entity={modalAction.entity}
+              canWrite={canWrite}
               onClose={() => setModalAction(null)}
             />
           ) : null}
@@ -5206,7 +5101,10 @@ function providerCard(release: ProviderRelease): DiscographyCard {
 }
 
 /** The completion badge pinned to a card's corner (`library.js:2181-2220`). */
-function completionOverlay(card: DiscographyCard): { cls: string; label: string } {
+function completionOverlay(card: DiscographyCard): {
+  cls: string;
+  label: string;
+} {
   if (card.owned === null) return { cls: 'checking', label: 'Checking…' };
   if (!card.owned) return { cls: 'missing', label: 'Missing' };
   const missing = Math.max(0, card.totalTracks - card.ownedTracks);
@@ -5239,7 +5137,10 @@ function ReleaseCardGrid({
   return (
     <div className="releases-grid" ref={gridRef}>
       {cards.map((card) => {
-        const flags = classifyReleaseContent({ title: card.title, album_type: card.albumType });
+        const flags = classifyReleaseContent({
+          title: card.title,
+          album_type: card.albumType,
+        });
         const overlay = showOwnership ? completionOverlay(card) : null;
         const state =
           !showOwnership || card.owned ? '' : card.owned === null ? ' checking' : ' missing';
@@ -5319,13 +5220,21 @@ function DiscographySection({
   );
 }
 
-const CATEGORY_LABELS = { albums: 'Albums', eps: 'EPs', singles: 'Singles' } as const;
+const CATEGORY_LABELS = {
+  albums: 'Albums',
+  eps: 'EPs',
+  singles: 'Singles',
+} as const;
 const CONTENT_LABELS = {
   live: 'Live',
   compilations: 'Compilations',
   featured: 'Featured',
 } as const;
-const OWNERSHIP_LABELS = { all: 'All', owned: 'Owned', missing: 'Missing' } as const;
+const OWNERSHIP_LABELS = {
+  all: 'All',
+  owned: 'Owned',
+  missing: 'Missing',
+} as const;
 
 /** ldp-04: Show / Include / Status, straight from `index.html:4676ff`. */
 function DiscographyFilterBar({
@@ -5355,7 +5264,10 @@ function DiscographyFilterBar({
             onClick={() =>
               onChange({
                 ...state,
-                categories: { ...state.categories, [key]: !state.categories[key] },
+                categories: {
+                  ...state.categories,
+                  [key]: !state.categories[key],
+                },
               })
             }
           >
@@ -5372,7 +5284,10 @@ function DiscographyFilterBar({
             type="button"
             className={`discography-filter-btn${state.content[key] ? ' active' : ''}`}
             onClick={() =>
-              onChange({ ...state, content: { ...state.content, [key]: !state.content[key] } })
+              onChange({
+                ...state,
+                content: { ...state.content, [key]: !state.content[key] },
+              })
             }
           >
             {CONTENT_LABELS[key]}
@@ -5498,7 +5413,10 @@ function TopTracksSidebar({
     } catch (error) {
       setBookmarked((s) => ({
         ...s,
-        [track.name]: { status: 'error', message: mutationErrorMessage(error, 'Bookmark failed') },
+        [track.name]: {
+          status: 'error',
+          message: mutationErrorMessage(error, 'Bookmark failed'),
+        },
       }));
     }
   }
@@ -5556,7 +5474,11 @@ function TopTracksSidebar({
  *  this artist's tracks that actually carry that provider's id. Ported from
  *  `renderArtistEnrichmentCoverage` (`library.js:1188`) including its class
  *  names and SVG geometry, so `style.css` renders it identically. */
-const ENRICH_SERVICES_COVERAGE: Array<{ name: string; key: string; color: string }> = [
+const ENRICH_SERVICES_COVERAGE: Array<{
+  name: string;
+  key: string;
+  color: string;
+}> = [
   { name: 'Spotify', key: 'spotify', color: '#1db954' },
   { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
   { name: 'Deezer', key: 'deezer', color: '#a238ff' },
@@ -5827,7 +5749,11 @@ function DiscoveryArtistView({
   const { filters, setFilters } = useDiscographyFilters();
   const [adopting, setAdopting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const otherSources = useOtherSources({ providerId, artistName: name, baseSource: source });
+  const otherSources = useOtherSources({
+    providerId,
+    artistName: name,
+    baseSource: source,
+  });
 
   const existing = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-resolve', source, providerId, name],
@@ -5867,7 +5793,11 @@ function DiscoveryArtistView({
     setAdopting(true);
     setError(null);
     try {
-      const artistId = await materializeLibraryV2DiscoveryArtist({ source, providerId, name });
+      const artistId = await materializeLibraryV2DiscoveryArtist({
+        source,
+        providerId,
+        name,
+      });
       if (monitor) await setLibraryV2Monitored('artists', artistId, true);
       await navigate({
         search: (p) => ({
@@ -5897,7 +5827,11 @@ function DiscoveryArtistView({
         <BackLink
           onClick={() =>
             void navigate({
-              search: (p) => ({ ...p, discover: undefined, discoverName: undefined }),
+              search: (p) => ({
+                ...p,
+                discover: undefined,
+                discoverName: undefined,
+              }),
             })
           }
         >
@@ -5922,14 +5856,24 @@ function DiscoveryArtistView({
     ['EPs', discography.eps ?? []],
     ['Singles', discography.singles ?? []],
   ];
-  const categoryOf = { Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const;
+  const categoryOf = {
+    Albums: 'albums',
+    EPs: 'eps',
+    Singles: 'singles',
+  } as const;
   const bucketOf = { Albums: 'album', EPs: 'ep', Singles: 'single' } as const;
 
   return (
     <div className={styles.page}>
       <BackLink
         onClick={() =>
-          void navigate({ search: (p) => ({ ...p, discover: undefined, discoverName: undefined }) })
+          void navigate({
+            search: (p) => ({
+              ...p,
+              discover: undefined,
+              discoverName: undefined,
+            }),
+          })
         }
       >
         ← All artists
@@ -5943,7 +5887,11 @@ function DiscoveryArtistView({
         listeners={artist.lastfm_listeners ?? null}
         playcount={artist.lastfm_playcount ?? null}
         followers={artist.followers ?? null}
-        sections={groups.map(([label, releases]) => ({ label, owned: 0, total: releases.length }))}
+        sections={groups.map(([label, releases]) => ({
+          label,
+          owned: 0,
+          total: releases.length,
+        }))}
         providerId={providerId}
         source={source}
         actions={
@@ -6062,6 +6010,7 @@ function CatalogueArtistHero({
             <IconActionButton
               icon="settings"
               title="Artist Settings — Watchlist, future releases, quality and provider match"
+              requiresWrite
               onClick={onOpenSettings}
             />
           ) : null}
@@ -6075,6 +6024,7 @@ function CatalogueArtistHero({
 
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
   const search = Route.useSearch();
   const releasesMode = search.releases;
   // ldp-03/ldp-04/ldp-05: how `All Releases` renders and how rich the header
@@ -6135,7 +6085,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   async function updateDiscography() {
     setDiscographyBusy(true);
     await runBannerTask(async ({ sequence }) => {
-      publishBanner(sequence, { tone: 'busy', text: 'Fetching full discography…' });
+      publishBanner(sequence, {
+        tone: 'busy',
+        text: 'Fetching full discography…',
+      });
       try {
         // A provider catalogue walk runs as a background job: polling it means
         // a slow provider shows as "still running" instead of a timeout on
@@ -6207,6 +6160,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
    *  server-side search (deep-dive C1) — the entity ref decides whether it
    *  searches this one track, this one album, or the whole artist. */
   function handleAction(action: string, entity?: Lib2EntityRef) {
+    if (!canWrite) return;
     if (INTERACTIVE_RE.test(action)) {
       setModalAction({ action, entity });
       return;
@@ -6230,7 +6184,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
       onClick={() =>
         void navigate({
-          search: (p) => ({ ...p, header: headerMode === 'rich' ? 'compact' : 'rich' }),
+          search: (p) => ({
+            ...p,
+            header: headerMode === 'rich' ? 'compact' : 'rich',
+          }),
         })
       }
     />
@@ -6285,7 +6242,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 artistId={artistId}
                 artistName={artistName}
                 onRetag={() =>
-                  setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
+                  setRetagTarget({
+                    entity: 'artists',
+                    id: artistId,
+                    title: artist.name,
+                  })
                 }
                 onReorganizeAll={() => setShowReorganizeAll(true)}
                 onMaintenance={() => setShowMaintenance(true)}
@@ -6297,12 +6258,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 icon="tracks"
                 label="Manage Tracks"
                 title="Review single↔album duplicate recordings, files, and their monitor state"
+                requiresWrite={false}
                 onClick={() => setShowManageTracks(true)}
               />
               <ActionButton
                 icon="history"
                 label="History"
                 title="Recent downloads recorded for this artist"
+                requiresWrite={false}
                 onClick={() => setShowHistory(true)}
               />
               <ActionButton
@@ -6335,7 +6298,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 tone="danger"
                 title="Remove this artist and choose whether linked files stay on disk"
                 onClick={() =>
-                  setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
+                  setDeleteTarget({
+                    entity: 'artists',
+                    id: artistId,
+                    title: artist.name,
+                  })
                 }
               />
             </div>
@@ -6377,6 +6344,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     <IconActionButton
                       icon="settings"
                       title="Artist Settings — Watchlist, future releases, quality and provider match"
+                      requiresWrite
                       onClick={() => setShowArtistSettings(true)}
                     />
                   ) : null}
@@ -6445,14 +6413,22 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <button
                   type="button"
                   className={releaseView === 'table' ? styles.viewActive : ''}
-                  onClick={() => void navigate({ search: (p) => ({ ...p, releaseView: 'table' }) })}
+                  onClick={() =>
+                    void navigate({
+                      search: (p) => ({ ...p, releaseView: 'table' }),
+                    })
+                  }
                 >
                   Table View
                 </button>
                 <button
                   type="button"
                   className={releaseView === 'cards' ? styles.viewActive : ''}
-                  onClick={() => void navigate({ search: (p) => ({ ...p, releaseView: 'cards' }) })}
+                  onClick={() =>
+                    void navigate({
+                      search: (p) => ({ ...p, releaseView: 'cards' }),
+                    })
+                  }
                 >
                   Discover View
                 </button>
@@ -6509,7 +6485,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                       openTitle="Open release"
                       onOpen={(card) =>
                         card.albumId
-                          ? void navigate({ search: (p) => ({ ...p, album: card.albumId }) })
+                          ? void navigate({
+                              search: (p) => ({ ...p, album: card.albumId }),
+                            })
                           : undefined
                       }
                     />
@@ -6553,6 +6531,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
               qualityProfile={artist.quality_profile}
               entity={modalAction.entity}
+              canWrite={canWrite}
               onClose={() => setModalAction(null)}
             />
           ) : null}
@@ -6688,7 +6667,10 @@ async function runScopedSearch(
       text: 'Search started for the monitored missing/upgradable tracks in scope — progress on the Downloads page.',
     };
   } catch (e) {
-    return { tone: 'err', text: e instanceof Error ? e.message : 'Search failed' };
+    return {
+      tone: 'err',
+      text: e instanceof Error ? e.message : 'Search failed',
+    };
   }
 }
 
@@ -6782,11 +6764,13 @@ export function SectionBulkMonitorButton({
   albumIds: number[];
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const targetMonitored = !allMonitored;
 
   async function apply() {
+    if (!canWrite) return;
     setBusy(true);
     setError(null);
     try {
@@ -6807,7 +6791,8 @@ export function SectionBulkMonitorButton({
       <button
         type="button"
         className={styles.sectionBulk}
-        disabled={busy}
+        data-requires-write=""
+        disabled={busy || !canWrite}
         title={
           allMonitored
             ? `Stop monitoring all ${title.toLowerCase()}`
@@ -6919,7 +6904,9 @@ function AlbumBlock({
             title="Open album detail"
             onClick={(e) => {
               e.stopPropagation();
-              void navigate({ search: (previous) => ({ ...previous, album: album.id }) });
+              void navigate({
+                search: (previous) => ({ ...previous, album: album.id }),
+              });
             }}
           >
             {album.title}
@@ -6972,6 +6959,7 @@ function AlbumBlock({
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
+            requiresWrite
             onClick={() =>
               onAction(`Automatic Search: ${album.title}`, {
                 albumId: album.id,
@@ -6982,6 +6970,7 @@ function AlbumBlock({
           <IconActionButton
             icon="interactive"
             title="Interactive Search"
+            requiresWrite
             onClick={() =>
               onAction(`Interactive Search: ${album.title}`, {
                 albumId: album.id,
@@ -7398,6 +7387,7 @@ function SortableHeader({
  *  providers). Persisted server-side so picks survive a reload. */
 function useUiPreferencesMutation() {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   // dd28-45: column resizing fires one mutation per drag settle, and the
   // responses are not ordered. Writing whatever arrives last into the cache
   // meant a slower older response could overwrite a newer one — the column
@@ -7407,6 +7397,7 @@ function useUiPreferencesMutation() {
   const settledRef = useRef(0);
   return useMutation({
     mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
       const sequence = ++sequenceRef.current;
       const preferences = await updateLibraryV2UiPreferences(patch);
       return { sequence, preferences };
@@ -7469,7 +7460,12 @@ function ColumnsOptionsMenu<K extends string>({
 
   return (
     <span className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
-      <IconActionButton icon="settings" title={title} onClick={() => setOpen((v) => !v)} />
+      <IconActionButton
+        icon="settings"
+        title={title}
+        requiresWrite
+        onClick={() => setOpen((v) => !v)}
+      />
       {open ? (
         <ModalShell title={title} settings onClose={() => setOpen(false)}>
           <div className={styles.tableOptionsDialogBody}>
@@ -7589,7 +7585,9 @@ function TrackTableOptionsMenu({
                 type="checkbox"
                 checked={qualityShowFormat}
                 onChange={() =>
-                  mutation.mutate({ track_table: { quality_show_format: !qualityShowFormat } })
+                  mutation.mutate({
+                    track_table: { quality_show_format: !qualityShowFormat },
+                  })
                 }
               />
               Show format
@@ -7600,7 +7598,9 @@ function TrackTableOptionsMenu({
                 checked={qualityShowResolution}
                 onChange={() =>
                   mutation.mutate({
-                    track_table: { quality_show_resolution: !qualityShowResolution },
+                    track_table: {
+                      quality_show_resolution: !qualityShowResolution,
+                    },
                   })
                 }
               />
@@ -7611,7 +7611,9 @@ function TrackTableOptionsMenu({
                 type="checkbox"
                 checked={qualityShowBitrate}
                 onChange={() =>
-                  mutation.mutate({ track_table: { quality_show_bitrate: !qualityShowBitrate } })
+                  mutation.mutate({
+                    track_table: { quality_show_bitrate: !qualityShowBitrate },
+                  })
                 }
               />
               Show bitrate
@@ -7634,7 +7636,9 @@ function TrackTableOptionsMenu({
                 checked={showAllProviders}
                 onChange={() =>
                   mutation.mutate({
-                    track_table: { show_all_match_providers: !showAllProviders },
+                    track_table: {
+                      show_all_match_providers: !showAllProviders,
+                    },
                   })
                 }
               />
@@ -7708,7 +7712,7 @@ function ArtistTableOptionsMenu({
  *  calls the already-multi-track /tags/write job, and Delete reuses the
  *  same ADR-05 file_ids-scoped flow C2 built for the artist Files tab —
  *  just scoped to this album's selected tracks instead of the whole artist. */
-function TrackTableBulkBar({
+export function TrackTableBulkBar({
   albumId,
   tracks,
   onClear,
@@ -7718,8 +7722,14 @@ function TrackTableBulkBar({
   onClear: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState<{
+    label: string;
+    ids: number[];
+    apply: (id: number) => Promise<unknown>;
+  } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
 
@@ -7727,12 +7737,28 @@ function TrackTableBulkBar({
   const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
   const bulkProfilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
 
-  async function run(label: string, fn: () => Promise<void>) {
+  type Settled = {
+    succeeded: number[];
+    failed: Array<{ id: number; error: string }>;
+  };
+
+  async function run(label: string, fn: () => Promise<void | Settled>) {
+    if (!canWrite) return;
     setBusy(label);
     setError(null);
     try {
-      await fn();
-      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      const result = await fn();
+      if (!result || result.succeeded.length > 0) {
+        await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      }
+      if (result?.failed.length) {
+        const failedIds = result.failed.map(({ id }) => id);
+        setError(
+          `${result.succeeded.length} succeeded; ${failedIds.length} failed (track IDs: ${failedIds.join(', ')}).`,
+        );
+      } else {
+        setRetry(null);
+      }
     } catch (e) {
       setError(mutationErrorMessage(e, `${label} failed`));
     } finally {
@@ -7750,13 +7776,25 @@ function TrackTableBulkBar({
    * abandoned the remaining calls mid-flight. `allSettled` runs them all and
    * the message distinguishes total from partial failure.
    */
-  async function fanOut(ids: number[], apply: (id: number) => Promise<unknown>): Promise<void> {
+  async function fanOut(
+    label: string,
+    ids: number[],
+    apply: (id: number) => Promise<unknown>,
+  ): Promise<Settled> {
     const outcomes = await Promise.allSettled(ids.map((id) => apply(id)));
-    const failures = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
-    if (failures.length === 0) return;
-    const first = mutationErrorMessage(failures[0].reason, 'unknown error');
-    if (failures.length === ids.length) throw new Error(first);
-    throw new Error(`${failures.length} of ${ids.length} failed (first: ${first})`);
+    const failed = outcomes.flatMap((outcome, index) =>
+      outcome.status === 'rejected'
+        ? [
+            {
+              id: ids[index]!,
+              error: mutationErrorMessage(outcome.reason, 'unknown error'),
+            },
+          ]
+        : [],
+    );
+    const succeeded = ids.filter((_, index) => outcomes[index]?.status === 'fulfilled');
+    setRetry(failed.length ? { label, ids: failed.map(({ id }) => id), apply } : null);
+    return { succeeded, failed };
   }
 
   return (
@@ -7765,11 +7803,12 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={styles.bulkBarButton}
-        disabled={busy !== null}
+        data-requires-write=""
+        disabled={busy !== null || !canWrite}
         onClick={() =>
-          void run('Monitor', async () => {
-            await fanOut(trackIds, (id) => setLibraryV2Monitored('tracks', id, true));
-          })
+          void run('Monitor', () =>
+            fanOut('Monitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, true)),
+          )
         }
       >
         {busy === 'Monitor' ? 'Monitoring…' : 'Monitor'}
@@ -7777,11 +7816,12 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={styles.bulkBarButton}
-        disabled={busy !== null}
+        data-requires-write=""
+        disabled={busy !== null || !canWrite}
         onClick={() =>
-          void run('Unmonitor', async () => {
-            await fanOut(trackIds, (id) => setLibraryV2Monitored('tracks', id, false));
-          })
+          void run('Unmonitor', () =>
+            fanOut('Unmonitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, false)),
+          )
         }
       >
         {busy === 'Unmonitor' ? 'Unmonitoring…' : 'Unmonitor'}
@@ -7789,7 +7829,8 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={styles.bulkBarButton}
-        disabled={busy !== null || trackIds.length === 0}
+        data-requires-write=""
+        disabled={busy !== null || trackIds.length === 0 || !canWrite}
         onClick={() =>
           void run('Write Tags', async () => {
             const jobId = await writeLibraryV2Tags(trackIds);
@@ -7803,11 +7844,12 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={styles.bulkBarButton}
-        disabled={busy !== null || trackIds.length === 0}
+        data-requires-write=""
+        disabled={busy !== null || trackIds.length === 0 || !canWrite}
         onClick={() =>
-          void run('ReplayGain', async () => {
-            await fanOut(trackIds, (id) => analyzeLibraryV2TrackReplayGain(id));
-          })
+          void run('ReplayGain', () =>
+            fanOut('ReplayGain', trackIds, (id) => analyzeLibraryV2TrackReplayGain(id)),
+          )
         }
       >
         {busy === 'ReplayGain' ? 'Analyzing…' : 'ReplayGain'}
@@ -7821,25 +7863,24 @@ function TrackTableBulkBar({
         <span className="sr-only">Quality profile</span>
         <select
           aria-label="Quality profile for the selected tracks"
-          disabled={busy !== null || trackIds.length === 0}
+          data-requires-write=""
+          disabled={busy !== null || trackIds.length === 0 || !canWrite}
           value=""
           onChange={(event) => {
             const raw = event.target.value;
             event.target.value = '';
             if (!raw) return;
             const profileId = raw === 'inherit' ? null : Number(raw);
-            void run('Quality profile', async () => {
+            void run('Quality profile', () =>
               // A track has no children to cascade to, and §52.3 keeps the
               // profile choice orthogonal to wanted/monitoring intent.
-              await fanOut(trackIds, (id) =>
+              fanOut('Quality profile', trackIds, (id) =>
                 setLibraryV2QualityProfile('tracks', id, profileId, false, false),
-              );
-            });
+              ),
+            );
           }}
         >
-          <option value="">
-            {busy === 'Quality profile' ? 'Applying…' : 'Quality profile…'}
-          </option>
+          <option value="">{busy === 'Quality profile' ? 'Applying…' : 'Quality profile…'}</option>
           <option value="inherit">Inherit from album</option>
           {(bulkProfilesQuery.data ?? []).map((profile) => (
             <option key={profile.id} value={profile.id}>
@@ -7851,7 +7892,8 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={styles.bulkBarButton}
-        disabled={busy !== null || trackIds.length === 0}
+        data-requires-write=""
+        disabled={busy !== null || trackIds.length === 0 || !canWrite}
         onClick={() => setShowBulkEdit(true)}
       >
         Bulk edit…
@@ -7859,7 +7901,8 @@ function TrackTableBulkBar({
       <button
         type="button"
         className={`${styles.bulkBarButton} ${styles.bulkBarButtonDanger}`}
-        disabled={busy !== null || fileIds.length === 0}
+        data-requires-write=""
+        disabled={busy !== null || fileIds.length === 0 || !canWrite}
         onClick={() => setConfirmingDelete(true)}
       >
         Delete files…
@@ -7870,6 +7913,18 @@ function TrackTableBulkBar({
       {error ? (
         <span className={styles.bulkBarError} role="alert">
           {error}
+          {retry ? (
+            <button
+              type="button"
+              className={styles.inlineRetry}
+              disabled={busy !== null || !canWrite}
+              onClick={() =>
+                void run(`Retry ${retry.label}`, () => fanOut(retry.label, retry.ids, retry.apply))
+              }
+            >
+              Retry failed {retry.ids.length}
+            </button>
+          ) : null}
         </span>
       ) : null}
       {confirmingDelete ? (
@@ -7880,7 +7935,9 @@ function TrackTableBulkBar({
           onDone={() => {
             setConfirmingDelete(false);
             onClear();
-            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+            void queryClient.invalidateQueries({
+              queryKey: LIBRARY_V2_QUERY_KEY,
+            });
           }}
           onCancel={() => setConfirmingDelete(false)}
         />
@@ -7916,6 +7973,7 @@ export function BulkEditTracksModal({
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [applyStyle, setApplyStyle] = useState(false);
   const [style, setStyle] = useState('');
   const [applyMood, setApplyMood] = useState(false);
@@ -7926,6 +7984,7 @@ export function BulkEditTracksModal({
   const [explicitFlag, setExplicitFlag] = useState<'yes' | 'no'>('yes');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingTrackIds, setPendingTrackIds] = useState(trackIds);
 
   const parsedBpm = bpm.trim() === '' ? null : Number(bpm);
   const bpmValid =
@@ -7933,6 +7992,7 @@ export function BulkEditTracksModal({
   const nothingSelected = !applyStyle && !applyMood && !applyBpm && !applyExplicit;
 
   async function save() {
+    if (!canWrite) return;
     setBusy(true);
     setError(null);
     const values: Record<string, unknown> = {};
@@ -7940,16 +8000,25 @@ export function BulkEditTracksModal({
     if (applyMood) values.mood = mood.trim() || null;
     if (applyBpm) values.bpm = parsedBpm;
     if (applyExplicit) values.explicit = explicitFlag === 'yes';
-    try {
-      await Promise.all(
-        trackIds.map((id) => updateLibraryV2MetadataOverrides('track', id, values)),
-      );
+    const outcomes = await Promise.allSettled(
+      pendingTrackIds.map((id) => updateLibraryV2MetadataOverrides('track', id, values)),
+    );
+    const failedIds = pendingTrackIds.filter((_, index) => outcomes[index]?.status === 'rejected');
+    const succeededIds = pendingTrackIds.filter(
+      (_, index) => outcomes[index]?.status === 'fulfilled',
+    );
+    if (succeededIds.length) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      onSaved();
-    } catch (caught) {
-      setError(mutationErrorMessage(caught, 'Bulk edit failed'));
-      setBusy(false);
     }
+    if (failedIds.length) {
+      setPendingTrackIds(failedIds);
+      setError(
+        `Updated ${succeededIds.length} track(s)${succeededIds.length ? ` (${succeededIds.join(', ')})` : ''}; failed ${failedIds.length} (${failedIds.join(', ')}). Retry only sends the failed tracks.`,
+      );
+      setBusy(false);
+      return;
+    }
+    onSaved();
   }
 
   return (
@@ -8035,7 +8104,11 @@ export function BulkEditTracksModal({
           <option value="no">Clean</option>
         </select>
       </div>
-      {error ? <div className={styles.searchError}>{error}</div> : null}
+      {error ? (
+        <div className={styles.searchError} role="alert">
+          {error}
+        </div>
+      ) : null}
       <div className={styles.modalActions}>
         <button type="button" className={styles.btnGhost} disabled={busy} onClick={onClose}>
           Cancel
@@ -8043,12 +8116,13 @@ export function BulkEditTracksModal({
         <button
           type="button"
           className={styles.btnPrimary}
-          disabled={busy || nothingSelected || !bpmValid}
+          data-requires-write=""
+          disabled={busy || nothingSelected || !bpmValid || !canWrite}
           onClick={() => void save()}
         >
           {busy
             ? 'Saving…'
-            : `Apply to ${trackIds.length} track${trackIds.length === 1 ? '' : 's'}`}
+            : `${pendingTrackIds.length < trackIds.length ? 'Retry' : 'Apply to'} ${pendingTrackIds.length} track${pendingTrackIds.length === 1 ? '' : 's'}`}
         </button>
       </div>
     </ModalShell>
@@ -8076,6 +8150,7 @@ export function AlbumTrackTable({
    */
   queueStatusTracks?: Record<number, LibraryV2QueueStatusEntry>;
 }) {
+  const canWrite = useLibraryV2CanWrite();
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
   const matchQuery = useQuery(libraryV2AlbumMatchStatusQueryOptions(albumId));
   const profilesQuery = useQuery(libraryV2QualityProfilesQueryOptions());
@@ -8119,7 +8194,10 @@ export function AlbumTrackTable({
   );
   const [tableWrapElement, setTableWrapElement] = useState<HTMLDivElement | null>(null);
   const [tableWidth, setTableWidth] = useState<number | null>(null);
-  const resizeSnapshot = useRef<{ key: string; widths: Record<string, number> } | null>(null);
+  const resizeSnapshot = useRef<{
+    key: string;
+    widths: Record<string, number>;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const element = tableWrapElement;
@@ -8263,7 +8341,7 @@ export function AlbumTrackTable({
       onResize: resizeColumn,
       onResizeReset: resetColumnLayout,
       onKeyboardResize: resizeColumnByKeyboard,
-      resizable: visibleColumnKeys.length > 1,
+      resizable: canWrite && visibleColumnKeys.length > 1,
       resizeKey: last ? visibleColumnKeys[index - 1] : key,
       handleSide: (last ? 'left' : 'right') as 'left' | 'right',
     };
@@ -8444,7 +8522,9 @@ export function AlbumTrackTable({
           {visibleColumnKeys.map((key) => (
             <col
               key={key}
-              style={{ width: dataColumnWidth(columnWeights[key] ?? 0, tableWidth) }}
+              style={{
+                width: dataColumnWidth(columnWeights[key] ?? 0, tableWidth),
+              }}
             />
           ))}
           <col style={{ width: `${ACTION_COLUMN_WIDTH}px` }} />
@@ -8486,7 +8566,10 @@ export function AlbumTrackTable({
               key={track.id ?? `missing-${i}`}
               track={track}
               albumTitle={album.title}
-              entityBase={{ albumId: album.id, qualityProfileId: album.quality_profile?.id }}
+              entityBase={{
+                albumId: album.id,
+                qualityProfileId: album.quality_profile?.id,
+              }}
               matchServices={track.id ? (trackMatch[track.id] ?? []) : []}
               profileName={profileNameById.get(track.quality_profile_id) ?? null}
               columns={columns}
@@ -8724,7 +8807,10 @@ function TrackRow({
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
-  const entity: Lib2EntityRef = { ...entityBase, ...(track.id ? { trackId: track.id } : {}) };
+  const entity: Lib2EntityRef = {
+    ...entityBase,
+    ...(track.id ? { trackId: track.id } : {}),
+  };
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
   const widthStyle = (key: string) => {
     const raw = columnWidths[key];
@@ -8962,12 +9048,14 @@ function TrackRow({
         <IconActionButton
           icon="automatic"
           title="Automatic Search — search missing/upgradable for this track"
+          requiresWrite
           disabled={!track.id}
           onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
         />
         <IconActionButton
           icon="interactive"
           title="Interactive Search — pick the source yourself"
+          requiresWrite
           disabled={!track.id}
           onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
         />
@@ -9043,6 +9131,7 @@ export function TrackPlayButton({
  *  inline instead of a silent failed icon. */
 export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const hasRg = Boolean(track.file?.has_replaygain);
   const mutation = useMutation({
     mutationFn: () => analyzeLibraryV2TrackReplayGain(track.id as number),
@@ -9069,7 +9158,8 @@ export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
     <button
       type="button"
       className={`${styles.featureTag} ${styles.featureMissing}`}
-      disabled={mutation.isPending || !track.id}
+      data-requires-write=""
+      disabled={mutation.isPending || !track.id || !canWrite}
       title={
         mutation.isError
           ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
@@ -9077,7 +9167,7 @@ export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
       }
       onClick={(e) => {
         e.stopPropagation();
-        mutation.mutate();
+        if (canWrite) mutation.mutate();
       }}
     >
       {mutation.isPending ? '…' : 'RG'}
@@ -9095,6 +9185,7 @@ export function TrackLyricsBadge({
   onOpenLyrics: () => void;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const hasLyrics = Boolean(track.file?.has_lyrics);
   const mutation = useMutation({
     mutationFn: () => fetchLibraryV2TrackLyrics(track.id as number),
@@ -9125,7 +9216,8 @@ export function TrackLyricsBadge({
     <button
       type="button"
       className={`${styles.featureTag} ${styles.featureMissing}`}
-      disabled={mutation.isPending || !track.id}
+      data-requires-write=""
+      disabled={mutation.isPending || !track.id || !canWrite}
       title={
         mutation.isError
           ? mutationErrorMessage(mutation.error, 'Lyrics fetch failed')
@@ -9133,7 +9225,7 @@ export function TrackLyricsBadge({
       }
       onClick={(e) => {
         e.stopPropagation();
-        mutation.mutate();
+        if (canWrite) mutation.mutate();
       }}
     >
       {mutation.isPending ? '…' : 'LR'}
@@ -10010,6 +10102,15 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   if (query.isLoading) {
     return <div className={styles.inlineLoading}>Loading pipeline history…</div>;
   }
+  if (query.isError) {
+    return (
+      <QueryFailure
+        error={query.error}
+        fallback="Could not load pipeline history."
+        retry={() => void query.refetch()}
+      />
+    );
+  }
   if (rows.length === 0) return null;
   // Oldest first — a pipeline reads top-to-bottom like the journey it is;
   // the backend returns newest-first for the flat artist History table.
@@ -10017,7 +10118,8 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   return (
     <div className={styles.trackHistoryWrap}>
       <p className={styles.sourceInfoHistory}>
-        Pipeline — {chronological.length} event{chronological.length === 1 ? '' : 's'}
+        Pipeline — {chronological.length} event
+        {chronological.length === 1 ? '' : 's'}
       </p>
       <ul className={styles.pipelineTimeline}>
         {chronological.map((h, i) => (
@@ -10046,7 +10148,7 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
 /** Info tab: verification/lifecycle summary + current source (with blacklist)
  *  + the full download history — every past provenance record for this
  *  track, not just the latest. */
-function TrackInfoPanel({
+export function TrackInfoPanel({
   trackId,
   trackTitle,
   trackArtist,
@@ -10083,6 +10185,18 @@ function TrackInfoPanel({
       <>
         {lifecycle}
         <div className={styles.inlineLoading}>Loading source info…</div>
+      </>
+    );
+  }
+  if (query.isError) {
+    return (
+      <>
+        {lifecycle}
+        <QueryFailure
+          error={query.error}
+          fallback="Could not load download source data."
+          retry={() => void query.refetch()}
+        />
       </>
     );
   }
@@ -10302,10 +10416,12 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
  * upgrades can miss the active cycle. */
 export function GlobalAutomaticSearchButton() {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   async function runSearch() {
+    if (!canWrite) return;
     setBusy(true);
     setMessage('Finding missing tracks and quality upgrades…');
     let upgradesQueued = false;
@@ -10333,7 +10449,8 @@ export function GlobalAutomaticSearchButton() {
       <button
         type="button"
         className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
-        disabled={busy}
+        data-requires-write=""
+        disabled={busy || !canWrite}
         title="Search all monitored missing tracks and all files below their quality-profile cutoff"
         onClick={() => void runSearch()}
       >
@@ -10396,11 +10513,15 @@ export function ImportButton({
   pollIntervalMs?: number;
 }) {
   const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
   const importQuery = useQuery(libraryV2ImportStatusQueryOptions(pollIntervalMs));
   const observedRunning = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const startImport = useMutation({
-    mutationFn: () => startLibraryV2Import(false),
+    mutationFn: () => {
+      if (!canWrite) throw new Error('Library changes require the admin profile');
+      return startLibraryV2Import(false);
+    },
     onMutate: () => setMessage(null),
     onSuccess: () => {
       observedRunning.current = true;
@@ -10463,7 +10584,8 @@ export function ImportButton({
       <button
         type="button"
         className={prominent ? styles.btnPrimary : styles.btnGhost}
-        disabled={busy || artworkRunning}
+        data-requires-write=""
+        disabled={busy || artworkRunning || !canWrite}
         title={
           migrating
             ? 'Your library is being migrated in the background'
@@ -10471,7 +10593,9 @@ export function ImportButton({
               ? 'The library is ready; wait for background artwork caching before re-importing'
               : undefined
         }
-        onClick={() => startImport.mutate()}
+        onClick={() => {
+          if (canWrite) startImport.mutate();
+        }}
       >
         {migrating
           ? 'Migrating…'

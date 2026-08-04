@@ -7,7 +7,12 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2Track } from '../-library-v2.types';
 
-import { TrackLyricsBadge, TrackMetadataGapsCell, TrackReplayGainBadge } from './library-v2-page';
+import {
+  LibraryV2CanWriteContext,
+  TrackLyricsBadge,
+  TrackMetadataGapsCell,
+  TrackReplayGainBadge,
+} from './library-v2-page';
 
 function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
   return {
@@ -51,7 +56,11 @@ function track(overrides: Partial<LibraryV2Track> = {}): LibraryV2Track {
 
 function renderWithClient(node: React.ReactElement) {
   const queryClient = createTestQueryClient();
-  return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LibraryV2CanWriteContext.Provider value>{node}</LibraryV2CanWriteContext.Provider>
+    </QueryClientProvider>,
+  );
 }
 
 describe('library v2 RG badge (deep-dive B3)', () => {
@@ -256,13 +265,21 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
       http.get('/api/library/v2/jobs/status', () =>
         HttpResponse.json({
           running: false,
-          result: { written: 1, skipped: 0, failed: 0, enriched_from: 'deezer' },
+          result: {
+            written: 1,
+            skipped: 0,
+            failed: 0,
+            enriched_from: 'deezer',
+          },
         }),
       ),
     );
     renderWithClient(
       <TrackMetadataGapsCell
-        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['cover'] })}
+        track={track({
+          metadata_scan_status: 'scanned',
+          metadata_gaps: ['cover'],
+        })}
         onOpenTags={vi.fn()}
       />,
     );
@@ -297,7 +314,10 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     );
     renderWithClient(
       <TrackMetadataGapsCell
-        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['genre'] })}
+        track={track({
+          metadata_scan_status: 'scanned',
+          metadata_gaps: ['genre'],
+        })}
         onOpenTags={vi.fn()}
       />,
     );
@@ -323,7 +343,10 @@ describe('library v2 metadata-gaps cell (docs §79 LV2-TAG-STATUS-01/02)', () =>
     );
     renderWithClient(
       <TrackMetadataGapsCell
-        track={track({ metadata_scan_status: 'scanned', metadata_gaps: ['cover'] })}
+        track={track({
+          metadata_scan_status: 'scanned',
+          metadata_gaps: ['cover'],
+        })}
         onOpenTags={vi.fn()}
       />,
     );

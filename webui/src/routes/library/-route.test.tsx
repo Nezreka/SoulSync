@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -25,6 +25,8 @@ function renderRoute(entries = ['/library']) {
 }
 
 let requested: string[] = [];
+let requestedWrites: string[] = [];
+let canWrite = true;
 
 const artistsRequests = () => requested.filter((u) => u.includes('library/v2/artists'));
 
@@ -33,14 +35,18 @@ describe('library route (live)', () => {
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showLibraryDownloadsSection = vi.fn();
     requested = [];
+    requestedWrites = [];
+    canWrite = true;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         requested.push(url);
+        const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
+        if (method !== 'GET') requestedWrites.push(`${method} ${url}`);
         let body: unknown = {};
         if (url.includes('library/v2/enabled')) {
-          body = { success: true, enabled: true };
+          body = { success: true, enabled: true, can_write: canWrite };
         } else if (url.includes('library/v2/artists')) {
           body = {
             success: true,
@@ -104,6 +110,24 @@ describe('library route (live)', () => {
     expect(url.searchParams.get('page')).toBe('1');
   });
 
+  it('normalizes the removed import-review section without requesting it', async () => {
+    renderRoute(['/library?section=import-review']);
+    await waitFor(() => expect(artistsRequests()).not.toEqual([]));
+    expect(requested.some((url) => url.includes('library/v2/acquisition'))).toBe(false);
+    expect(requested.some((url) => url.includes('library/v2/artists'))).toBe(true);
+  });
+
+  it('fails closed when can_write is false and never submits a mutation', async () => {
+    canWrite = false;
+    const { container } = renderRoute();
+    await screen.findByText(/Read-only: library changes require the admin profile/);
+    const mutations = [...container.querySelectorAll<HTMLElement>('[data-requires-write]')];
+    expect(mutations.length).toBeGreaterThan(0);
+    expect(mutations.every((control) => control.matches(':disabled'))).toBe(true);
+    mutations.forEach((control) => fireEvent.click(control));
+    expect(requestedWrites).toEqual([]);
+  });
+
   it('still respects the page permission gate', async () => {
     window.SoulSyncWebShellBridge = createShellBridge({ isPageAllowed: vi.fn(() => false) });
     const { router } = renderRoute();
@@ -116,7 +140,7 @@ describe('library route (live)', () => {
     // guard used to redirect to the very page it had just refused.
     window.SoulSyncWebShellBridge = createShellBridge({
       isPageAllowed: vi.fn((pageId) => pageId !== 'library'),
-      getProfileHomePage: vi.fn(() => 'library'),
+      getProfileHomePage: vi.fn(() => 'library' as const),
     });
     const { router } = renderRoute();
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/library'));

@@ -76,6 +76,57 @@ describe('classifyGrabOutcome', () => {
 });
 
 describe('library v2 interactive grab', () => {
+  it('labels and initially focuses the search field, and Escape closes the dialog', async () => {
+    server.use(
+      http.get('/api/search/sources', () => HttpResponse.json({ mode: 'soulseek', sources: [] })),
+      http.post('/api/search', () => HttpResponse.json({ results: [] })),
+    );
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal canWrite initialQuery="Artist" onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Search query' });
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not let a track-scoped dialog attach an album result', async () => {
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'usenet',
+          sources: [{ name: 'usenet', display_name: 'Usenet' }],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [{ result_type: 'album', title: 'Whole Album', artist: 'Artist', size: 10 }],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal
+          canWrite
+          initialQuery="Artist Track"
+          entity={{ trackId: 42 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const blocked = await screen.findByRole('button', { name: 'Album result' });
+    expect(blocked).toBeDisabled();
+    expect(blocked).toHaveAttribute(
+      'title',
+      'An album result cannot be attached to one library track',
+    );
+  });
+
   it('keeps unknown publish dates behind known releases in both age directions', () => {
     const result = (title: string, publishDate?: string): SourceSearchResult => ({
       result_type: 'track',
@@ -147,7 +198,7 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal canWrite initialQuery="Artist Selected" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
@@ -189,6 +240,7 @@ describe('library v2 interactive grab', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveSearchModal
+          canWrite
           initialQuery="Artist Selected"
           entity={{ trackId: 321, albumId: 12 }}
           onClose={vi.fn()}
@@ -266,7 +318,7 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal canWrite initialQuery="Artist Selected" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
@@ -299,7 +351,7 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal canWrite initialQuery="Artist Selected" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
@@ -386,7 +438,7 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal canWrite initialQuery="Artist Selected" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
@@ -413,7 +465,7 @@ describe('library v2 interactive grab', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <InteractiveSearchModal initialQuery="Artist Selected" onClose={vi.fn()} />
+        <InteractiveSearchModal canWrite initialQuery="Artist Selected" onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
@@ -475,6 +527,7 @@ describe('library v2 interactive grab', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveSearchModal
+          canWrite
           initialQuery="Artist Selected"
           entity={{ qualityProfileId: 1 }}
           onClose={vi.fn()}
@@ -542,6 +595,7 @@ describe('library v2 interactive grab', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveSearchModal
+          canWrite
           initialQuery="Artist Selected"
           entity={{ qualityProfileId: 1 }}
           onClose={vi.fn()}
@@ -610,6 +664,7 @@ describe('library v2 interactive grab', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveSearchModal
+          canWrite
           initialQuery="Artist Track"
           entity={{ trackId: 42 }}
           onClose={vi.fn()}
@@ -677,6 +732,7 @@ describe('library v2 interactive grab', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <InteractiveSearchModal
+          canWrite
           initialQuery="Artist Track"
           entity={{ trackId: 42, albumId: 12 }}
           onClose={vi.fn()}

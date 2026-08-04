@@ -33,7 +33,7 @@ describe('Library V2 discovery mode', () => {
     materializeCalls = [];
     server.use(
       http.get('/api/library/v2/enabled', () =>
-        HttpResponse.json({ success: true, enabled: true }),
+        HttpResponse.json({ success: true, enabled: true, can_write: true }),
       ),
       http.get('/api/library/v2/mirror-status', () =>
         HttpResponse.json({ success: true, pending: 0, failed: 0 }),
@@ -58,7 +58,11 @@ describe('Library V2 discovery mode', () => {
           },
           discography: {
             albums: [
-              { id: 'a1', title: 'Music Has the Right to Children', release_date: '1998-04-20' },
+              {
+                id: 'a1',
+                title: 'Music Has the Right to Children',
+                release_date: '1998-04-20',
+              },
               { id: 'a2', title: 'Live at Warp', release_date: '2001-01-01' },
             ],
             eps: [],
@@ -70,12 +74,19 @@ describe('Library V2 discovery mode', () => {
         HttpResponse.json({
           success: true,
           tracks: [
-            { id: 'sp-t1', name: 'Roygbiv', album: { id: 'sp-a1', name: 'Music Has the Right' } },
+            {
+              id: 'sp-t1',
+              name: 'Roygbiv',
+              album: { id: 'sp-a1', name: 'Music Has the Right' },
+            },
           ],
         }),
       ),
       http.get('/api/artist/0/lastfm-top-tracks', () =>
-        HttpResponse.json({ success: true, tracks: [{ name: 'Roygbiv', playcount: 4_200_000 }] }),
+        HttpResponse.json({
+          success: true,
+          tracks: [{ name: 'Roygbiv', playcount: 4_200_000 }],
+        }),
       ),
       http.get('/api/library/v2/artists/55', () =>
         HttpResponse.json({ success: false, error: 'not seeded' }, { status: 404 }),

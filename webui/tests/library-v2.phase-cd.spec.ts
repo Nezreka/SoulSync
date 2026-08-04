@@ -71,7 +71,7 @@ test('Library v2 Phase C/D actions open their real Docker UI flows', async ({
   const firstRelease = [...detail.artist.albums, ...detail.artist.eps, ...detail.artist.singles][0];
   expect(firstRelease).toBeTruthy();
 
-  await page.goto(new URL('/library-v2', baseURL!).toString(), { waitUntil: 'domcontentloaded' });
+  await page.goto(new URL('/library', baseURL!).toString(), { waitUntil: 'domcontentloaded' });
   await dismissFirstRunSetup(page);
   await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
   await page
@@ -81,15 +81,15 @@ test('Library v2 Phase C/D actions open their real Docker UI flows', async ({
   await expect(page).toHaveURL(new RegExp(`artist=${firstArtist.id}`));
   await expect(page.getByRole('heading', { name: firstArtist.name })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Preview Retag', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Files/Tools', exact: true }).click();
+  await page.getByRole('button', { name: 'Preview Retag', exact: true }).click();
   await closeDialog(page, new RegExp(`Preview Retag.*${escapeRegExp(firstArtist.name)}`, 'i'));
 
-  await page.getByRole('button', { name: 'Maintenance', exact: true }).click();
+  await page.getByRole('button', { name: 'Files/Tools', exact: true }).click();
+  await page.getByRole('button', { name: 'Library Health & Repair', exact: true }).click();
   const maintenance = page.getByRole('dialog');
-  await expect(maintenance.getByRole('heading', { name: 'Maintenance' })).toBeVisible();
-  await expect(
-    maintenance.getByText(/legacy catalog|legacy \+ files|Library v2/i).first(),
-  ).toBeVisible();
+  await expect(maintenance.getByRole('heading', { name: 'Library Health & Repair' })).toBeVisible();
+  await expect(maintenance.getByText('Catalog & monitoring')).toBeVisible();
   await maintenance.getByTitle('Close').click();
 
   await page.getByRole('button', { name: 'Manage Tracks', exact: true }).click();
@@ -100,12 +100,6 @@ test('Library v2 Phase C/D actions open their real Docker UI flows', async ({
 
   await page.getByRole('button', { name: 'Edit Metadata', exact: true }).click();
   await closeDialog(page, new RegExp(`Edit.*${escapeRegExp(firstArtist.name)}`, 'i'));
-
-  await page.getByRole('button', { name: 'Monitoring', exact: true }).click();
-  await closeDialog(page, 'Artist Monitoring');
-
-  await page.getByRole('button', { name: 'Quality Profile', exact: true }).first().click();
-  await closeDialog(page, 'Quality Profile');
 
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   const deleteDialog = page.getByRole('dialog');
@@ -137,24 +131,56 @@ test('Library v2 Phase C/D actions open their real Docker UI flows', async ({
   await page.getByRole('button', { name: 'Interactive Search', exact: true }).first().click();
   await closeDialog(page, 'Interactive Search');
 
+  await page.getByRole('button', { name: 'Files/Tools', exact: true }).click();
   await page.getByRole('button', { name: 'Manual Import', exact: true }).click();
   await expect(page).toHaveURL(/\/import\/album$/);
   await expect(page.getByRole('heading', { name: 'Import Music' })).toBeVisible();
 });
 
-test('Library v2 section navigation reaches the shared playlist integration', async ({
+test('Library v2 rejects the removed import-review section without fetching it', async ({
   page,
   request,
   baseURL,
 }) => {
   if (!baseURL) test.skip();
   await selectAdmin(request, baseURL!);
-  await page.goto(new URL('/library-v2', baseURL!).toString(), { waitUntil: 'domcontentloaded' });
+  const acquisitionRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/library/v2/acquisition'))
+      acquisitionRequests.push(request.url());
+  });
+  await page.goto(new URL('/library?section=import-review', baseURL!).toString(), {
+    waitUntil: 'domcontentloaded',
+  });
   await dismissFirstRunSetup(page);
-  await page.getByRole('button', { name: 'Playlists', exact: true }).click();
-  await expect(page).toHaveURL(/section=playlists/);
-  await expect(page.getByPlaceholder('Filter playlists…')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Library' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Artists', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Import review' })).toHaveCount(0);
+  expect(acquisitionRequests).toEqual([]);
+});
+
+test('Library v2 capability response makes every exposed mutation read-only', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  if (!baseURL) test.skip();
+  await selectAdmin(request, baseURL!);
+  await page.route('**/api/library/v2/enabled', (route) =>
+    route.fulfill({ json: { success: true, enabled: true, can_write: false } }),
+  );
+  const writes: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() !== 'GET' && req.url().includes('/api/library/v2/')) writes.push(req.url());
+  });
+  await page.goto(new URL('/library', baseURL!).toString(), { waitUntil: 'domcontentloaded' });
+  await dismissFirstRunSetup(page);
   await expect(
-    page.getByText(/mirrored playlists|No mirrored playlists yet/).first(),
+    page.getByText(/Read-only: library changes require the admin profile/),
   ).toBeVisible();
+  const controls = page.locator('[data-requires-write]');
+  await expect(controls.first()).toBeVisible();
+  const count = await controls.count();
+  for (let index = 0; index < count; index += 1) await expect(controls.nth(index)).toBeDisabled();
+  expect(writes).toEqual([]);
 });

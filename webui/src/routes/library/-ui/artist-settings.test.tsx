@@ -7,7 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2ArtistDetail } from '../-library-v2.types';
 
-import { ArtistSettingsModal } from './library-v2-page';
+import { ArtistSettingsModal, LibraryV2CanWriteContext } from './library-v2-page';
 
 const artist: LibraryV2ArtistDetail = {
   id: 7,
@@ -83,15 +83,47 @@ function handlers() {
   );
 }
 
-function renderModal() {
+function renderModal(canWrite = true) {
   return render(
     <QueryClientProvider client={createTestQueryClient()}>
-      <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+      <LibraryV2CanWriteContext.Provider value={canWrite}>
+        <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+      </LibraryV2CanWriteContext.Provider>
     </QueryClientProvider>,
   );
 }
 
 describe('Library v2 Artist Settings', () => {
+  it('keeps every settings submit path read-only without issuing writes', async () => {
+    handlers();
+    let writes = 0;
+    server.use(
+      http.put('/api/library/v2/artists/7/settings', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true, settings });
+      }),
+      http.post('/api/library/v2/artists/7/releases/monitor', () => {
+        writes += 1;
+        return HttpResponse.json({ success: true, job_id: 'unexpected' });
+      }),
+    );
+
+    renderModal(false);
+    await screen.findByText('Watchlist identity');
+
+    for (const name of [
+      'Save future-release settings',
+      'Monitor all',
+      'Monitor missing only',
+      'Unmonitor all',
+    ]) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(writes).toBe(0);
+  });
+
   it('edits the existing Watchlist settings through one combined contract', async () => {
     handlers();
     let submitted: unknown;
@@ -100,7 +132,11 @@ describe('Library v2 Artist Settings', () => {
         submitted = await request.json();
         return HttpResponse.json({
           success: true,
-          settings: { ...settings, auto_download: false, include_singles: false },
+          settings: {
+            ...settings,
+            auto_download: false,
+            include_singles: false,
+          },
           metadata_sources: ['spotify', 'deezer', 'musicbrainz'],
           global_metadata_source: 'spotify',
         });
@@ -134,7 +170,10 @@ describe('Library v2 Artist Settings', () => {
     server.use(
       http.post('/api/library/v2/artists/7/releases/monitor', async ({ request }) => {
         submitted.push(await request.json());
-        return HttpResponse.json({ success: true, job_id: 'settings-monitor-job' });
+        return HttpResponse.json({
+          success: true,
+          job_id: 'settings-monitor-job',
+        });
       }),
       http.get('/api/library/v2/jobs/status', () =>
         HttpResponse.json({ running: false, error: null }),

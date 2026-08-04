@@ -1,6 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { DialogFrame, DialogHeader } from '@/components/dialog';
+
 import type { LibraryV2QualityProfile, LibraryV2RankedTarget } from '../-library-v2.types';
 
 import {
@@ -369,6 +371,7 @@ export function InteractiveSearchModal({
   initialQuery,
   qualityProfile,
   entity,
+  canWrite,
   onClose,
 }: {
   initialQuery: string;
@@ -377,6 +380,7 @@ export function InteractiveSearchModal({
   /** Which lib2 entity grabs from this window act for. Sent with every grab
    *  so the pipeline keeps entity + profile context (audit P1-16). */
   entity?: Lib2EntityRef;
+  canWrite: boolean;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -417,6 +421,7 @@ export function InteractiveSearchModal({
   // (the user is done watching, and the component is about to unmount).
   const cancelledRef = useRef(false);
   const runSequenceRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(
     () => () => {
       cancelledRef.current = true;
@@ -561,6 +566,7 @@ export function InteractiveSearchModal({
   }, [searchSourcesQuery.isLoading]);
 
   async function grab(r: SourceSearchResult) {
+    if (!canWrite || (entity?.trackId && r.result_type === 'album')) return;
     // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
     // but only downloadable via a separate, explicitly confirmed Force action
     // when the user has turned the Quality check off — the pipeline audits the
@@ -656,196 +662,207 @@ export function InteractiveSearchModal({
   }
 
   return (
-    <div className={styles.modalBackdrop} role="presentation" onClick={onClose}>
-      <div
-        className={`${styles.modal} ${styles.modalWide}`}
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className={styles.modalHeader}>
-          <h3>Interactive Search</h3>
-          <button type="button" className={styles.iconAction} title="Close" onClick={onClose}>
-            ✕
-          </button>
-        </div>
+    <DialogFrame
+      open
+      initialFocus={searchInputRef}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      className={`${styles.modal} ${styles.modalWide}`}
+    >
+      <DialogHeader title="Interactive Search" closeLabel="Close" />
 
-        <div className={styles.searchBar}>
-          <input
-            className={styles.searchInput}
-            value={query}
-            placeholder="Search query…"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void run(query);
-            }}
-          />
+      <div className={styles.searchBar}>
+        <input
+          ref={searchInputRef}
+          className={styles.searchInput}
+          aria-label="Search query"
+          value={query}
+          placeholder="Search query…"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void run(query);
+          }}
+        />
+        <button
+          type="button"
+          className={styles.btnPrimary}
+          disabled={loading}
+          onClick={() => void run(query)}
+        >
+          {loading ? 'Searching…' : 'Search'}
+        </button>
+      </div>
+
+      {allSources.length > 1 ? (
+        <div className={styles.sourceChips} role="group" aria-label="Download sources">
           <button
             type="button"
-            className={styles.btnPrimary}
-            disabled={loading}
-            onClick={() => void run(query)}
+            className={styles.sourceChip}
+            aria-pressed={selectedSources.size === 0}
+            disabled={loading || searchSourcesQuery.isLoading}
+            onClick={() => setSelectedSources(new Set())}
           >
-            {loading ? 'Searching…' : 'Search'}
+            All sources
           </button>
-        </div>
-
-        {allSources.length > 1 ? (
-          <div className={styles.sourceChips} role="group" aria-label="Download sources">
+          {allSources.map((source) => (
             <button
+              key={source.name}
               type="button"
               className={styles.sourceChip}
-              aria-pressed={selectedSources.size === 0}
+              aria-pressed={selectedSources.has(source.name)}
               disabled={loading || searchSourcesQuery.isLoading}
-              onClick={() => setSelectedSources(new Set())}
+              onClick={() => toggleSource(source.name)}
             >
-              All sources
+              {source.display_name}
             </button>
-            {allSources.map((source) => (
-              <button
-                key={source.name}
-                type="button"
-                className={styles.sourceChip}
-                aria-pressed={selectedSources.has(source.name)}
-                disabled={loading || searchSourcesQuery.isLoading}
-                onClick={() => toggleSource(source.name)}
-              >
-                {source.display_name}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        <div className={styles.searchOptions}>
-          <label className={styles.toggleOption}>
-            <input
-              type="checkbox"
-              className={styles.toggleInput}
-              checked={qualityCheck}
-              onChange={(e) => setQualityCheck(e.target.checked)}
-            />
-            <span className={styles.toggleSwitch} aria-hidden="true" />
-            Quality check
-          </label>
-          <label className={styles.toggleOption}>
-            <input
-              type="checkbox"
-              className={styles.toggleInput}
-              checked={acoustidCheck}
-              onChange={(e) => setAcoustidCheck(e.target.checked)}
-            />
-            <span className={styles.toggleSwitch} aria-hidden="true" />
-            AcoustID check
-          </label>
-          <span className={styles.optionHint}>applied to grabs from this window</span>
-          {canFilterByCutoff ? (
-            <label className={styles.toggleOption}>
-              <input
-                type="checkbox"
-                className={styles.toggleInput}
-                checked={cutoffOnly}
-                onChange={(e) => setCutoffOnly(e.target.checked)}
-              />
-              <span className={styles.toggleSwitch} aria-hidden="true" />
-              Only show results meeting cutoff
-            </label>
-          ) : null}
+          ))}
         </div>
+      ) : null}
 
-        {error ? <div className={styles.searchError}>{error}</div> : null}
-        {!error && sourceFailures.length > 0 ? (
-          <div className={styles.searchWarning} role="status">
-            {sourceFailures.length === 1
-              ? `${sourceFailures[0].displayName} could not be searched (${sourceFailures[0].message}) — these results are from the other sources only.`
-              : `${sourceFailures.map((f) => `${f.displayName} (${f.message})`).join(', ')} could not be searched — these results are from the other sources only.`}
-          </div>
+      <div className={styles.searchOptions}>
+        <label className={styles.toggleOption}>
+          <input
+            type="checkbox"
+            className={styles.toggleInput}
+            checked={qualityCheck}
+            onChange={(e) => setQualityCheck(e.target.checked)}
+          />
+          <span className={styles.toggleSwitch} aria-hidden="true" />
+          Quality check
+        </label>
+        <label className={styles.toggleOption}>
+          <input
+            type="checkbox"
+            className={styles.toggleInput}
+            checked={acoustidCheck}
+            onChange={(e) => setAcoustidCheck(e.target.checked)}
+          />
+          <span className={styles.toggleSwitch} aria-hidden="true" />
+          AcoustID check
+        </label>
+        <span className={styles.optionHint}>applied to grabs from this window</span>
+        {canFilterByCutoff ? (
+          <label className={styles.toggleOption}>
+            <input
+              type="checkbox"
+              className={styles.toggleInput}
+              checked={cutoffOnly}
+              onChange={(e) => setCutoffOnly(e.target.checked)}
+            />
+            <span className={styles.toggleSwitch} aria-hidden="true" />
+            Only show results meeting cutoff
+          </label>
         ) : null}
+      </div>
 
-        <div className={styles.resultsWrap}>
-          {loading && results.length === 0 ? (
-            <div className={styles.inlineLoading}>
-              {activeSources.length === 1
-                ? `Searching ${activeSources[0].display_name}…`
-                : activeSources.length > 1
-                  ? `Searching ${activeSources.map((s) => s.display_name).join(', ')}…`
-                  : 'Searching…'}
-            </div>
-          ) : results.length === 0 ? (
-            <div className={styles.inlineLoading}>
-              {error ? 'Search failed.' : 'No results — refine the query and search again.'}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className={styles.inlineLoading}>
-              No results meet{' '}
-              {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
-              turn off the filter to see them all.
-            </div>
-          ) : (
-            <>
-              {loading ? (
-                <div className={styles.inlineLoading} role="status">
-                  Showing available results while the remaining sources are still searching…
-                </div>
-              ) : null}
-              <table className={styles.trackTable}>
-                <thead>
-                  <tr>
-                    <SortTh label="Source" k="source" className={styles.isSource} />
-                    <SortTh label="Title" k="title" />
-                    <th className={styles.isArtist}>Artist</th>
-                    <SortTh label="Quality" k="quality" className={styles.isQuality} />
-                    <SortTh label="Size" k="size" className={styles.colNum} />
-                    <SortTh label="Age" k="age" className={styles.colNum} />
-                    <SortTh label="Availability" k="availability" className={styles.isAvail} />
-                    <th className={styles.isGrab}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r, i) => {
-                    const key = resultKey(r);
-                    const state = grabbed[key];
-                    const isAlbum = r.result_type === 'album';
-                    return (
-                      <tr key={`${key}-${i}`}>
-                        <td>
-                          <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
-                            {sourceLabel(r)}
+      {error ? <div className={styles.searchError}>{error}</div> : null}
+      {!error && sourceFailures.length > 0 ? (
+        <div className={styles.searchWarning} role="status">
+          {sourceFailures.length === 1
+            ? `${sourceFailures[0].displayName} could not be searched (${sourceFailures[0].message}) — these results are from the other sources only.`
+            : `${sourceFailures.map((f) => `${f.displayName} (${f.message})`).join(', ')} could not be searched — these results are from the other sources only.`}
+        </div>
+      ) : null}
+
+      <div className={styles.resultsWrap}>
+        {loading && results.length === 0 ? (
+          <div className={styles.inlineLoading}>
+            {activeSources.length === 1
+              ? `Searching ${activeSources[0].display_name}…`
+              : activeSources.length > 1
+                ? `Searching ${activeSources.map((s) => s.display_name).join(', ')}…`
+                : 'Searching…'}
+          </div>
+        ) : results.length === 0 ? (
+          <div className={styles.inlineLoading}>
+            {error ? 'Search failed.' : 'No results — refine the query and search again.'}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className={styles.inlineLoading}>
+            No results meet{' '}
+            {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
+            turn off the filter to see them all.
+          </div>
+        ) : (
+          <>
+            {loading ? (
+              <div className={styles.inlineLoading} role="status">
+                Showing available results while the remaining sources are still searching…
+              </div>
+            ) : null}
+            <table className={styles.trackTable}>
+              <thead>
+                <tr>
+                  <SortTh label="Source" k="source" className={styles.isSource} />
+                  <SortTh label="Title" k="title" />
+                  <th className={styles.isArtist}>Artist</th>
+                  <SortTh label="Quality" k="quality" className={styles.isQuality} />
+                  <SortTh label="Size" k="size" className={styles.colNum} />
+                  <SortTh label="Age" k="age" className={styles.colNum} />
+                  <SortTh label="Availability" k="availability" className={styles.isAvail} />
+                  <th className={styles.isGrab}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r, i) => {
+                  const key = resultKey(r);
+                  const state = grabbed[key];
+                  const isAlbum = r.result_type === 'album';
+                  const wrongScope = Boolean(entity?.trackId && isAlbum);
+                  return (
+                    <tr key={`${key}-${i}`}>
+                      <td>
+                        <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
+                          {sourceLabel(r)}
+                        </span>
+                        {sourceDetail(r) ? (
+                          <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
+                        ) : null}
+                      </td>
+                      <td title={r.filename}>
+                        <span className={styles.isTitle}>{resultTitle(r)}</span>
+                        {isAlbum ? (
+                          <span className={styles.albumResultBadge}>
+                            album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
                           </span>
-                          {sourceDetail(r) ? (
-                            <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
-                          ) : null}
-                        </td>
-                        <td title={r.filename}>
-                          <span className={styles.isTitle}>{resultTitle(r)}</span>
-                          {isAlbum ? (
-                            <span className={styles.albumResultBadge}>
-                              album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
-                            </span>
-                          ) : null}
-                        </td>
-                        <td>{r.artist ?? '—'}</td>
-                        <td className={styles.qualityText}>
-                          <span className={styles.qualityCellRow}>
-                            {resultQuality(r)}
-                            <ProfileBadge result={r} profile={effectiveProfile} />
-                          </span>
-                        </td>
-                        <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
-                        <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
-                          {ageText(effMeta(r).publish_date)}
-                        </td>
-                        <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
-                        <td>
-                          <span className={styles.grabAction}>
-                            <button
-                              type="button"
-                              className={styles.toolButton}
-                              disabled={
-                                state === 'pending' || state === 'done' || state === 'verifying'
-                              }
-                              onClick={() => void grab(r)}
-                            >
-                              {state === 'done'
+                        ) : null}
+                      </td>
+                      <td>{r.artist ?? '—'}</td>
+                      <td className={styles.qualityText}>
+                        <span className={styles.qualityCellRow}>
+                          {resultQuality(r)}
+                          <ProfileBadge result={r} profile={effectiveProfile} />
+                        </span>
+                      </td>
+                      <td className={styles.colNum}>{fmtBytes(resultSize(r))}</td>
+                      <td className={styles.colNum} title={effMeta(r).publish_date ?? undefined}>
+                        {ageText(effMeta(r).publish_date)}
+                      </td>
+                      <td className={styles.isAvailCell}>{availabilityCell(r)}</td>
+                      <td>
+                        <span className={styles.grabAction}>
+                          <button
+                            type="button"
+                            className={styles.toolButton}
+                            data-requires-write=""
+                            title={
+                              wrongScope
+                                ? 'An album result cannot be attached to one library track'
+                                : undefined
+                            }
+                            disabled={
+                              !canWrite ||
+                              wrongScope ||
+                              state === 'pending' ||
+                              state === 'done' ||
+                              state === 'verifying'
+                            }
+                            onClick={() => void grab(r)}
+                          >
+                            {wrongScope
+                              ? 'Album result'
+                              : state === 'done'
                                 ? 'Grabbed ✓'
                                 : state === 'pending'
                                   ? '…'
@@ -854,29 +871,28 @@ export function InteractiveSearchModal({
                                     : state === 'error'
                                       ? 'Retry'
                                       : 'Download'}
-                            </button>
-                            {state === 'error' ? (
-                              <span className={styles.grabError} role="alert">
-                                {grabErrors[key] ?? 'Download failed'}
-                              </span>
-                            ) : null}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </>
-          )}
-        </div>
-
-        <div className={styles.modalFootNote}>
-          Downloads run through the normal SoulSync pipeline (staging → processing → tagging) and
-          are linked into the v2 library automatically once the file lands — no manual “Refresh
-          &amp; Scan” needed.
-        </div>
+                          </button>
+                          {state === 'error' ? (
+                            <span className={styles.grabError} role="alert">
+                              {grabErrors[key] ?? 'Download failed'}
+                            </span>
+                          ) : null}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
       </div>
-    </div>
+
+      <div className={styles.modalFootNote}>
+        Downloads run through the normal SoulSync pipeline (staging → processing → tagging) and are
+        linked into the v2 library automatically once the file lands — no manual “Refresh &amp;
+        Scan” needed.
+      </div>
+    </DialogFrame>
   );
 }

@@ -76,153 +76,9 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
   const payload = await readJson<EnabledResponse>(apiClient.get('library/v2/enabled'));
   return {
     enabled: Boolean(payload.enabled),
-    // Older servers do not send the field; assume writable there so an
-    // upgrade cannot lock an admin out of their own library.
-    canWrite: payload.can_write !== false,
+    // Missing capability data is not permission to mutate.
+    canWrite: payload.can_write === true,
   };
-}
-
-export interface LibraryV2AcquisitionImportSummary {
-  id: string;
-  request_id: string;
-  download_id: string;
-  status: 'pending' | 'matching' | 'needs_review' | 'importing' | 'recovered_to_staging';
-  expected_scope: string;
-  expected_entity_id: number;
-  inventory_count: number;
-  match_count: number;
-  rejection_count: number;
-  attempts: number;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface LibraryV2AcquisitionInventoryFile {
-  relative_path: string;
-  title?: string | null;
-  artist?: string | null;
-  album?: string | null;
-  track_number?: number | null;
-  disc_number?: number | null;
-  duration_seconds?: number | null;
-  container?: string | null;
-}
-
-export interface LibraryV2AcquisitionExpectedTrack {
-  expected_key: string;
-  release_track_id: number | null;
-  recording_id: number | null;
-  track_id: number | null;
-  disc_number: number;
-  track_number: number | null;
-  expected_title: string;
-  expected_duration_seconds: number | null;
-}
-
-/** One bundle-matching conflict from `bundle_matching.py::match_bundle`.
- *  `code` is always present; which of the rest travels with it depends on the
- *  code (a missing track knows its position, an unmatched file knows its path).
- */
-export interface LibraryV2AcquisitionRejection {
-  code: string;
-  relative_path?: string | null;
-  reason?: string | null;
-  title?: string | null;
-  expected_key?: string | null;
-  expected_title?: string | null;
-  disc_number?: number | null;
-  track_number?: number | null;
-  similarity?: number | null;
-  confidence?: number | null;
-}
-
-export interface LibraryV2AcquisitionImportDetail extends LibraryV2AcquisitionImportSummary {
-  inventory: LibraryV2AcquisitionInventoryFile[];
-  expected_tracks: LibraryV2AcquisitionExpectedTrack[];
-  matches: Array<{ relative_path: string; track_id: number | null }>;
-  rejections: LibraryV2AcquisitionRejection[];
-  quarantined: Array<Record<string, unknown>>;
-  processed_count: number;
-  quarantined_count: number;
-}
-
-export async function fetchLibraryV2AcquisitionImports(): Promise<
-  LibraryV2AcquisitionImportSummary[]
-> {
-  const payload = await readJson<{
-    success: boolean;
-    imports?: LibraryV2AcquisitionImportSummary[];
-    error?: string;
-  }>(apiClient.get('library/v2/acquisition/imports'));
-  if (!payload.success) throw new Error(payload.error || 'Failed to load import review queue');
-  return payload.imports ?? [];
-}
-
-export function libraryV2AcquisitionImportsQueryOptions() {
-  return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-imports'],
-    queryFn: fetchLibraryV2AcquisitionImports,
-    refetchInterval: 5_000,
-  });
-}
-
-export async function fetchLibraryV2AcquisitionImport(
-  importId: string,
-): Promise<LibraryV2AcquisitionImportDetail> {
-  const payload = await readJson<{
-    success: boolean;
-    import?: LibraryV2AcquisitionImportDetail;
-    error?: string;
-  }>(apiClient.get(`library/v2/acquisition/imports/${importId}`));
-  if (!payload.success || !payload.import) {
-    throw new Error(payload.error || 'Failed to load import review');
-  }
-  return payload.import;
-}
-
-export function libraryV2AcquisitionImportQueryOptions(importId: string) {
-  return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'acquisition-import', importId],
-    queryFn: () => fetchLibraryV2AcquisitionImport(importId),
-    refetchInterval: 5_000,
-  });
-}
-
-async function mutateLibraryV2AcquisitionImport(
-  importId: string,
-  action: 'resolve' | 'rescan' | 'resume',
-  json?: Record<string, unknown>,
-): Promise<LibraryV2AcquisitionImportDetail> {
-  const payload = await readJson<{
-    success: boolean;
-    import?: LibraryV2AcquisitionImportDetail;
-    error?: string;
-  }>(
-    apiClient.post(`library/v2/acquisition/imports/${importId}/${action}`, {
-      ...(json ? { json } : {}),
-      timeout: 120_000,
-    }),
-  );
-  if (!payload.success || !payload.import) {
-    throw new Error(payload.error || `Failed to ${action} import`);
-  }
-  return payload.import;
-}
-
-export function resolveLibraryV2AcquisitionImport(
-  importId: string,
-  assignments: Array<{ relative_path: string; track_id: number }>,
-) {
-  return mutateLibraryV2AcquisitionImport(importId, 'resolve', { assignments });
-}
-
-export function rescanLibraryV2AcquisitionImport(importId: string) {
-  return mutateLibraryV2AcquisitionImport(importId, 'rescan');
-}
-
-export function resumeLibraryV2AcquisitionImport(importId: string) {
-  return mutateLibraryV2AcquisitionImport(importId, 'resume');
 }
 
 export async function fetchLibraryV2Artists(
@@ -1505,10 +1361,15 @@ export async function startLibraryV2ScopedSearch(
   id: number,
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
-    apiClient.post(`library/v2/${entity}/${id}/search`, { json: {} }),
+    apiClient.post(`library/v2/${entity}/${id}/search`, {
+      json: {},
+      throwHttpErrors: false,
+    }),
   );
-  if (!payload.success) throw new Error(payload.error || 'Search failed');
-  if (!payload.job_id) throw new Error('Search did not return a job id');
+  // 409 means this exact scoped job is already running. The server returns
+  // its job id so another tab/remount attaches to it instead of showing an
+  // error while the real search continues.
+  if (!payload.job_id) throw new Error(payload.error || 'Search did not return a job id');
   return payload.job_id;
 }
 

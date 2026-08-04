@@ -7,7 +7,7 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2ArtistSummary } from '../-library-v2.types';
 
-import { ArtistCard } from './library-v2-page';
+import { ArtistCard, LibraryV2CanWriteContext } from './library-v2-page';
 
 const artist: LibraryV2ArtistSummary = {
   id: 7,
@@ -40,11 +40,15 @@ describe('library v2 artist card semantics', () => {
     const queryClient = createTestQueryClient();
     const { container } = render(
       <QueryClientProvider client={queryClient}>
-        <ArtistCard artist={artist} onOpen={onOpen} />
+        <LibraryV2CanWriteContext.Provider value>
+          <ArtistCard artist={artist} onOpen={onOpen} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
-    const open = screen.getByRole('button', { name: 'Open Independent Controls' });
+    const open = screen.getByRole('button', {
+      name: 'Open Independent Controls',
+    });
     const monitor = screen.getByRole('button', { name: 'Start monitoring' });
 
     expect(container.querySelector('button button')).toBeNull();

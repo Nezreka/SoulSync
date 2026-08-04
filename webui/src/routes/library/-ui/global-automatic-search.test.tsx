@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { GlobalAutomaticSearchButton, ImportButton } from './library-v2-page';
+import {
+  GlobalAutomaticSearchButton,
+  ImportButton,
+  LibraryV2CanWriteContext,
+} from './library-v2-page';
 
 describe('Library v2 global Automatic Search', () => {
   it('queues cutoff upgrades before starting the shared Wishlist processor', async () => {
@@ -60,12 +64,16 @@ describe('Library v2 global Automatic Search', () => {
 
     render(
       <QueryClientProvider client={createTestQueryClient()}>
-        <GlobalAutomaticSearchButton />
-        <ImportButton hasArtists />
+        <LibraryV2CanWriteContext.Provider value>
+          <GlobalAutomaticSearchButton />
+          <ImportButton hasArtists />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
-    const automaticSearch = screen.getByRole('button', { name: 'Automatic Search' });
+    const automaticSearch = screen.getByRole('button', {
+      name: 'Automatic Search',
+    });
     const reimport = screen.getByRole('button', { name: 'Re-import library' });
     expect(automaticSearch.className.split(' ')).toContain(reimport.className);
     expect(automaticSearch.querySelector('svg')).toBeInTheDocument();

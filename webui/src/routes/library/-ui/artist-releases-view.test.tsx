@@ -50,7 +50,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     window.SoulSyncWebShellBridge = createShellBridge();
     server.use(
       http.get('/api/library/v2/enabled', () =>
-        HttpResponse.json({ success: true, enabled: true }),
+        HttpResponse.json({ success: true, enabled: true, can_write: true }),
       ),
       http.get('/api/library/v2/mirror-status', () =>
         HttpResponse.json({ success: true, pending: 0, failed: 0 }),
@@ -90,7 +90,11 @@ describe('Library V2 artist detail — All Releases views', () => {
         HttpResponse.json({ success: true, tracks: {}, albums: {} }),
       ),
       http.get('/api/library/v2/artists/1/aliases', () =>
-        HttpResponse.json({ success: true, canonical_artist_id: 1, aliases: [] }),
+        HttpResponse.json({
+          success: true,
+          canonical_artist_id: 1,
+          aliases: [],
+        }),
       ),
       http.get('/api/library/v2/artists/1/match-status', () =>
         HttpResponse.json({
@@ -106,7 +110,11 @@ describe('Library V2 artist detail — All Releases views', () => {
               available: true,
             },
           ],
-          enrichment_coverage: { total_tracks: 20, spotify: 80, musicbrainz: 25 },
+          enrichment_coverage: {
+            total_tracks: 20,
+            spotify: 80,
+            musicbrainz: 25,
+          },
         }),
       ),
       http.get('/api/library/v2/ui-preferences', () =>
@@ -140,7 +148,9 @@ describe('Library V2 artist detail — All Releases views', () => {
     const legacy = await screen.findByRole('button', { name: 'Discover View' });
     fireEvent.click(legacy);
     await waitFor(() =>
-      expect(router.state.location.search).toMatchObject({ releaseView: 'cards' }),
+      expect(router.state.location.search).toMatchObject({
+        releaseView: 'cards',
+      }),
     );
     // The legacy card markup — including the `.discography-sections` ancestry
     // the card CSS depends on to cancel `.release-card`'s fixed 300px height,
@@ -334,7 +344,13 @@ describe('Library V2 artist detail — All Releases views', () => {
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({
           success: true,
-          tracks: [{ id: 'sp-t1', name: 'Glory Box', album: { id: 'sp-a1', name: 'Dummy' } }],
+          tracks: [
+            {
+              id: 'sp-t1',
+              name: 'Glory Box',
+              album: { id: 'sp-a1', name: 'Dummy' },
+            },
+          ],
         }),
       ),
       http.get('/api/library/v2/discovery/track-status', () =>

@@ -11,6 +11,7 @@ import {
   AlbumTrackTable,
   AlbumSizeBadge,
   clampColumnWidth,
+  LibraryV2CanWriteContext,
   mergeColumnOrder,
   normalizeColumnWidths,
   resizeColumnWidths,
@@ -105,7 +106,9 @@ describe('library v2 album track table', () => {
     const defaultLayout = normalizeColumnWidths(['number', 'title']);
     expect(defaultLayout).toEqual({ number: 3, title: 97 });
 
-    const normalized = normalizeColumnWidths(['number', 'title', 'file_size'], { file_size: 120 });
+    const normalized = normalizeColumnWidths(['number', 'title', 'file_size'], {
+      file_size: 120,
+    });
     expect(Object.values(normalized).reduce((sum, value) => sum + value, 0)).toBeCloseTo(100);
     expect(normalized.title).toBeGreaterThan(normalized.file_size);
     expect(normalized.number).toBe(3);
@@ -301,7 +304,9 @@ describe('library v2 album track table', () => {
     rerender(
       <TrackCheckBadge
         file={trackFile({
-          pipeline_result: { acoustid_message: 'scanner disabled for this run' },
+          pipeline_result: {
+            acoustid_message: 'scanner disabled for this run',
+          },
         })}
       />,
     );
@@ -332,13 +337,17 @@ describe('library v2 album track table', () => {
 
     const { container } = render(
       <QueryClientProvider client={createTestQueryClient()}>
-        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        <LibraryV2CanWriteContext.Provider value>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
     await screen.findByRole('table');
     fireEvent.click(
-      screen.getByRole('button', { name: 'Table options — columns & match providers' }),
+      screen.getByRole('button', {
+        name: 'Table options — columns & match providers',
+      }),
     );
 
     const dialog = screen.getByRole('dialog', {
@@ -346,11 +355,54 @@ describe('library v2 album track table', () => {
     });
     expect(dialog).toBeInTheDocument();
     expect(container).not.toContainElement(dialog);
-    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    expect(document.body).toContainElement(dialog);
     expect(within(dialog).getByText('Visible columns')).toBeInTheDocument();
     expect(within(dialog).getByText('Quality & sizing')).toBeInTheDocument();
     expect(within(dialog).getByText('Match providers')).toBeInTheDocument();
     expect(within(dialog).getByText('Check')).toBeInTheDocument();
+  });
+
+  it('keeps table preference writes and column resize fail-closed read-only', async () => {
+    let writes = 0;
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({ success: true, album: album([track()]) }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+      http.put('/api/library/v2/ui-preferences', () => {
+        writes += 1;
+        return HttpResponse.json({
+          success: true,
+          preferences: { track_table: {} },
+        });
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole('table');
+    const settings = screen.getByRole('button', {
+      name: 'Table options — columns & match providers',
+    });
+    expect(settings).toBeDisabled();
+    expect(screen.queryByRole('separator', { name: /Resize/ })).not.toBeInTheDocument();
+    fireEvent.click(settings);
+    expect(writes).toBe(0);
   });
 
   it('shows no queue-status badge once the track has no in-flight entry', async () => {
@@ -470,8 +522,18 @@ describe('library v2 album track table', () => {
         HttpResponse.json({
           success: true,
           album: album([
-            track({ id: 8, title: 'Large', track_number: 2, file: file(5 * 1024 * 1024) }),
-            track({ id: 7, title: 'Small', track_number: 1, file: file(1024 * 1024) }),
+            track({
+              id: 8,
+              title: 'Large',
+              track_number: 2,
+              file: file(5 * 1024 * 1024),
+            }),
+            track({
+              id: 7,
+              title: 'Small',
+              track_number: 1,
+              file: file(1024 * 1024),
+            }),
           ]),
         }),
       ),
@@ -506,7 +568,9 @@ describe('library v2 album track table', () => {
     });
     render(
       <QueryClientProvider client={createTestQueryClient()}>
-        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        <LibraryV2CanWriteContext.Provider value>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
@@ -523,8 +587,14 @@ describe('library v2 album track table', () => {
 
     const numberColumn = tableColumns[2];
     const initialNumberWidth = Number.parseFloat(numberColumn.style.width);
-    const numberHandle = screen.getByRole('separator', { name: 'Resize number column' });
-    fireEvent.pointerDown(numberHandle, { button: 0, pointerId: 6, clientX: 100 });
+    const numberHandle = screen.getByRole('separator', {
+      name: 'Resize number column',
+    });
+    fireEvent.pointerDown(numberHandle, {
+      button: 0,
+      pointerId: 6,
+      clientX: 100,
+    });
     fireEvent.pointerMove(numberHandle, { pointerId: 6, clientX: 75 });
     expect(Number.parseFloat(numberColumn.style.width)).toBeLessThan(initialNumberWidth);
     fireEvent.pointerUp(numberHandle, { pointerId: 6, clientX: 75 });
@@ -541,7 +611,9 @@ describe('library v2 album track table', () => {
     fireEvent.click(screen.getByRole('button', { name: 'File size' }));
     expect(visibleTitles()).toEqual(['Large', 'Small']);
 
-    const handle = screen.getByRole('separator', { name: 'Resize file_size column' });
+    const handle = screen.getByRole('separator', {
+      name: 'Resize file_size column',
+    });
     fireEvent.pointerDown(handle, { button: 0, pointerId: 7, clientX: 100 });
     fireEvent.pointerMove(handle, { pointerId: 7, clientX: 150 });
     fireEvent.pointerUp(handle, { pointerId: 7, clientX: 150 });

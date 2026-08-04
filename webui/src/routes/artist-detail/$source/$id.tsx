@@ -11,7 +11,8 @@ import { artistDetailSearchSchema } from '../-artist-detail.types';
  * links and browser history working, which is why the redirect lives here and
  * not in each caller.
  *
- * `discover=<source>:<id>` is the discovery mode: V2 renders a provider artist
+ * `library:<numeric id>` opens the owned catalogue row through `artist=<id>`.
+ * `discover=<source>:<id>` is the provider discovery mode: V2 renders an artist
  * that has no catalogue row yet, read-only, and materialises one only when the
  * user bookmarks the artist or opens a release (ldp-02/ldp-06).
  *
@@ -23,18 +24,24 @@ import { artistDetailSearchSchema } from '../-artist-detail.types';
 export const Route = createFileRoute('/artist-detail/$source/$id')({
   validateSearch: artistDetailSearchSchema,
   beforeLoad: ({ params, search }) => {
+    const source = params.source.toLowerCase();
+    const ownedArtistId =
+      source === 'library' && /^\d+$/.test(params.id) ? Number(params.id) : null;
     throw redirect({
       to: '/library',
-      search: {
-        discover: `${params.source.toLowerCase()}:${params.id}`,
-        discoverName: search.name || undefined,
-        // Coming from a search result means landing on what the legacy artist
-        // page showed: the full discography, as cards, with the rich header
-        // (ldp-05).
-        releases: 'all' as const,
-        releaseView: 'cards' as const,
-        header: 'rich' as const,
-      },
+      search:
+        ownedArtistId == null
+          ? {
+              discover: `${source}:${params.id}`,
+              discoverName: search.name || undefined,
+              // Coming from a search result means landing on what the legacy artist
+              // page showed: the full discography, as cards, with the rich header
+              // (ldp-05).
+              releases: 'all' as const,
+              releaseView: 'cards' as const,
+              header: 'rich' as const,
+            }
+          : { artist: ownedArtistId },
       replace: true,
     });
   },

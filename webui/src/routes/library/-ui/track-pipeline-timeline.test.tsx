@@ -13,6 +13,19 @@ function renderWithClient(node: React.ReactElement) {
 }
 
 describe('library v2 track pipeline timeline (§52.9)', () => {
+  it('shows a retryable 500 instead of hiding the timeline', async () => {
+    server.use(
+      http.get('/api/library/v2/tracks/9/history', () =>
+        HttpResponse.json({ success: false, error: 'history unavailable' }, { status: 500 }),
+      ),
+    );
+
+    renderWithClient(<TrackPipelineTimeline trackId={9} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('history unavailable');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
   it('renders nothing once loaded when the track has no pipeline history', async () => {
     server.use(
       http.get('/api/library/v2/tracks/9/history', () =>

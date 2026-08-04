@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
-import { ArtistRefreshButton } from './library-v2-page';
+import { ArtistRefreshButton, LibraryV2CanWriteContext } from './library-v2-page';
 
 describe('library v2 artist refresh mutation', () => {
   it('shows a rejected refresh and turns the same control into a retry', async () => {
@@ -13,7 +13,10 @@ describe('library v2 artist refresh mutation', () => {
     server.use(
       http.post('/api/library/v2/artists/7/refresh', () => {
         attempts += 1;
-        return HttpResponse.json({ success: true, job_id: `refresh-${attempts}` });
+        return HttpResponse.json({
+          success: true,
+          job_id: `refresh-${attempts}`,
+        });
       }),
       http.get('/api/library/v2/jobs/status', ({ request }) => {
         const jobId = new URL(request.url).searchParams.get('job_id');
@@ -29,7 +32,9 @@ describe('library v2 artist refresh mutation', () => {
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
-        <ArtistRefreshButton artistId={7} />
+        <LibraryV2CanWriteContext.Provider value>
+          <ArtistRefreshButton artistId={7} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 

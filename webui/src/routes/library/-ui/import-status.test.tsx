@@ -13,6 +13,7 @@ import {
   describeLibraryV2ImportProgress,
   describeLibraryV2Migration,
   ImportButton,
+  LibraryV2CanWriteContext,
   LibraryEmptyState,
 } from './library-v2-page';
 
@@ -170,7 +171,9 @@ describe('library v2 import progress', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <ImportButton hasArtists={false} pollIntervalMs={50} />
+        <LibraryV2CanWriteContext.Provider value>
+          <ImportButton hasArtists={false} pollIntervalMs={50} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
@@ -205,7 +208,9 @@ describe('library v2 import progress', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <ImportButton hasArtists pollIntervalMs={20} />
+        <LibraryV2CanWriteContext.Provider value>
+          <ImportButton hasArtists pollIntervalMs={20} />
+        </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
 
@@ -237,15 +242,25 @@ describe('automatic migration of an upgrading installation', () => {
   it('reports a migration this browser session never started', () => {
     expect(
       describeLibraryV2Migration(
-        importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+        importState({
+          running: false,
+          stage: null,
+          bootstrap: bootstrapState(),
+        }),
       ),
-    ).toEqual({ tone: 'busy', text: 'Migrating your library · Importing albums · 40/100 · 40%' });
+    ).toEqual({
+      tone: 'busy',
+      text: 'Migrating your library · Importing albums · 40/100 · 40%',
+    });
   });
 
   it('says nothing once the migration is done', () => {
     expect(
       describeLibraryV2Migration(
-        importState({ running: false, bootstrap: bootstrapState({ status: 'done' }) }),
+        importState({
+          running: false,
+          bootstrap: bootstrapState({ status: 'done' }),
+        }),
       ),
     ).toBeNull();
     expect(describeLibraryV2Migration(importState({ running: false }))).toBeNull();
@@ -255,7 +270,10 @@ describe('automatic migration of an upgrading installation', () => {
     const described = describeLibraryV2Migration(
       importState({
         running: false,
-        bootstrap: bootstrapState({ status: 'failed', last_error: 'disk full' }),
+        bootstrap: bootstrapState({
+          status: 'failed',
+          last_error: 'disk full',
+        }),
       }),
     );
     expect(described?.tone).toBe('error');
@@ -267,7 +285,11 @@ describe('automatic migration of an upgrading installation', () => {
     server.use(
       http.get('/api/library/v2/import/status', () =>
         HttpResponse.json(
-          importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+          importState({
+            running: false,
+            stage: null,
+            bootstrap: bootstrapState(),
+          }),
         ),
       ),
     );
@@ -290,7 +312,11 @@ describe('automatic migration of an upgrading installation', () => {
     server.use(
       http.get('/api/library/v2/import/status', () =>
         HttpResponse.json(
-          importState({ running: false, stage: null, bootstrap: bootstrapState() }),
+          importState({
+            running: false,
+            stage: null,
+            bootstrap: bootstrapState(),
+          }),
         ),
       ),
     );
@@ -313,7 +339,10 @@ describe('automatic migration of an upgrading installation', () => {
           importState({
             running: false,
             stage: null,
-            bootstrap: bootstrapState({ status: 'waiting_for_source', stage: null }),
+            bootstrap: bootstrapState({
+              status: 'waiting_for_source',
+              stage: null,
+            }),
           }),
         ),
       ),
