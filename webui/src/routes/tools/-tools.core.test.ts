@@ -27,7 +27,15 @@ import {
   findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
+  findingsBulkBarState,
   findingsPagination,
+  bulkFixLoopMessage,
+  bulkFixRunMessage,
+  commaSplitChips,
+  fakeLosslessSpectrum,
+  genericDetailRows,
+  incompleteAlbumCompletion,
+  libraryRetagDetail,
   formatCacheAge,
   formatFileSize,
   formatFreedSpace,
@@ -498,5 +506,242 @@ describe('metadataCacheCardCount', () => {
     expect(metadataCacheCardCount({ spotify: 5 })).toBe(5);
     expect(metadataCacheCardCount(null)).toBe(0);
     expect(metadataCacheCardCount(undefined)).toBe(0);
+  });
+});
+
+// ── P5: finding detail + bulk fix ────────────────────────────────────────────
+
+describe('fakeLosslessSpectrum', () => {
+  it('scales both markers against the nyquist frequency', () => {
+    expect(
+      fakeLosslessSpectrum({ detected_cutoff_khz: 16, expected_min_khz: 20, nyquist_khz: 22.05 }),
+    ).toEqual({ cutoff: 16, expectedMin: 20, cutoffPct: 73, expectedPct: 91 });
+  });
+
+  it('falls back to sample_rate / 2000 when nyquist_khz is absent', () => {
+    expect(
+      fakeLosslessSpectrum({ detected_cutoff_khz: 22, expected_min_khz: 44, sample_rate: 176400 }),
+    ).toEqual({ cutoff: 22, expectedMin: 44, cutoffPct: 25, expectedPct: 50 });
+  });
+
+  it('clamps a cutoff above nyquist to 100%', () => {
+    expect(fakeLosslessSpectrum({ detected_cutoff_khz: 40, expected_min_khz: 20 })?.cutoffPct).toBe(
+      100,
+    );
+  });
+
+  it('renders no bar unless BOTH the cutoff and the expected minimum are present', () => {
+    expect(fakeLosslessSpectrum({ detected_cutoff_khz: 16 })).toBeNull();
+    expect(fakeLosslessSpectrum({ expected_min_khz: 20 })).toBeNull();
+    expect(fakeLosslessSpectrum({ detected_cutoff_khz: 0, expected_min_khz: 20 })).toBeNull();
+    expect(fakeLosslessSpectrum(null)).toBeNull();
+  });
+});
+
+describe('incompleteAlbumCompletion', () => {
+  it('reports the percentage of expected tracks present', () => {
+    expect(incompleteAlbumCompletion({ actual_tracks: 9, expected_tracks: 12 })).toEqual({
+      actual: 9,
+      expected: 12,
+      percent: 75,
+    });
+  });
+
+  it('skips the bar entirely when the expected count is missing or zero', () => {
+    expect(incompleteAlbumCompletion({ actual_tracks: 9 })).toBeNull();
+    expect(incompleteAlbumCompletion({ actual_tracks: 9, expected_tracks: 0 })).toBeNull();
+  });
+
+  it('treats a missing actual count as zero rather than NaN', () => {
+    expect(incompleteAlbumCompletion({ expected_tracks: 10 })).toEqual({
+      actual: 0,
+      expected: 10,
+      percent: 0,
+    });
+  });
+});
+
+describe('libraryRetagDetail', () => {
+  it('joins the meta line with a spaced middot and only the present fields', () => {
+    expect(libraryRetagDetail({ source: 'spotify', mode: 'safe' }).meta).toBe(
+      'Source: spotify  ·  Mode: safe',
+    );
+    expect(libraryRetagDetail({ cover_action: 'refresh' }).meta).toBe('Cover: refresh');
+  });
+
+  it('renders an empty old value as ∅ so a filled-in blank tag is visible', () => {
+    const detail = libraryRetagDetail({
+      tracks: [{ title: 'Song', changes: { album_artist: { old: '', new: 'Nine Inch Nails' } } }],
+    });
+    expect(detail.tracks[0].rows).toEqual([
+      ['album artist', '∅   →   Nine Inch Nails', 'highlight'],
+    ]);
+  });
+
+  it('shows the filename only when it differs from the label', () => {
+    const withTitle = libraryRetagDetail({
+      tracks: [
+        { title: 'Song', file_path: '/m/a/01 Song.flac', changes: { year: { old: 1, new: 2 } } },
+      ],
+    });
+    expect(withTitle.tracks[0]).toMatchObject({ label: 'Song', filename: '01 Song.flac' });
+
+    const noTitle = libraryRetagDetail({
+      tracks: [{ file_path: '/m/a/01 Song.flac', changes: { year: { old: 1, new: 2 } } }],
+    });
+    expect(noTitle.tracks[0]).toMatchObject({ label: '01 Song.flac', filename: null });
+  });
+
+  it('drops tracks with no changes and caps the rest at 40', () => {
+    const tracks = Array.from({ length: 45 }, (_, index) => ({
+      title: `T${index}`,
+      changes: { year: { old: 1, new: 2 } },
+    }));
+    tracks.push({ title: 'unchanged', changes: {} } as (typeof tracks)[number]);
+    const detail = libraryRetagDetail({ tracks });
+    expect(detail.tracks).toHaveLength(40);
+    expect(detail.overflow).toBe(5);
+  });
+
+  it('flags cover-only when nothing changes but a cover action is set', () => {
+    expect(libraryRetagDetail({ cover_action: 'refresh', tracks: [] }).coverOnly).toBe(true);
+    expect(libraryRetagDetail({ tracks: [] }).coverOnly).toBe(false);
+    // BOTH halves matter: a cover action alongside real tag changes is an
+    // ordinary retag, not a cover-only refresh.
+    expect(
+      libraryRetagDetail({
+        cover_action: 'refresh',
+        tracks: [{ title: 'T', changes: { year: { old: 1, new: 2 } } }],
+      }).coverOnly,
+    ).toBe(false);
+  });
+});
+
+describe('commaSplitChips', () => {
+  it('marks library members and source-verified parts differently', () => {
+    expect(
+      commaSplitChips({
+        parts_resolution: [
+          { name: 'A', in_library: true, library_artist_id: 7 },
+          { name: 'B', verified_via: 'MusicBrainz' },
+          { name: 'C' },
+        ],
+      }),
+    ).toEqual([
+      { name: 'A', mark: ' ✓ in your library', inLibrary: true, libraryArtistId: '7' },
+      { name: 'B', mark: ' ✓ MusicBrainz', inLibrary: false, libraryArtistId: null },
+      { name: 'C', mark: '', inLibrary: false, libraryArtistId: null },
+    ]);
+  });
+
+  it('falls back to the bare split names, all unverified', () => {
+    expect(commaSplitChips({ split_artists: ['A', 'B'] })).toEqual([
+      { name: 'A', mark: '', inLibrary: false, libraryArtistId: null },
+      { name: 'B', mark: '', inLibrary: false, libraryArtistId: null },
+    ]);
+  });
+
+  it('keeps an alphanumeric artist id as a string rather than coercing it', () => {
+    expect(
+      commaSplitChips({
+        parts_resolution: [{ name: 'A', in_library: true, library_artist_id: 'ab12' }],
+      })[0].libraryArtistId,
+    ).toBe('ab12');
+  });
+});
+
+describe('genericDetailRows', () => {
+  it('title-cases the key and skips objects and thumb urls', () => {
+    expect(
+      genericDetailRows({
+        some_key: 'value',
+        count: 3,
+        nested: { a: 1 },
+        album_thumb_url: 'http://x',
+      }),
+    ).toEqual([
+      ['Some Key', 'value'],
+      ['Count', '3'],
+    ]);
+  });
+
+  it('returns nothing for an empty payload', () => {
+    expect(genericDetailRows(null)).toEqual([]);
+  });
+});
+
+describe('findingsBulkBarState', () => {
+  it('hides the bar until something is selected', () => {
+    expect(findingsBulkBarState(0, 30, 100)).toMatchObject({ showBar: false, countLabel: '' });
+    expect(findingsBulkBarState(2, 30, 100)).toMatchObject({
+      showBar: true,
+      countLabel: '2 selected',
+    });
+  });
+
+  it('offers Fix All only once the whole page is selected AND more pages exist', () => {
+    expect(findingsBulkBarState(30, 30, 100)).toMatchObject({
+      showFixAll: true,
+      fixAllLabel: 'Fix All 100',
+    });
+    expect(findingsBulkBarState(29, 30, 100).showFixAll).toBe(false);
+    expect(findingsBulkBarState(30, 30, 30).showFixAll).toBe(false);
+  });
+
+  it('drives the select-all tri-state', () => {
+    expect(findingsBulkBarState(0, 30, 100)).toMatchObject({
+      selectAllChecked: false,
+      selectAllIndeterminate: false,
+    });
+    expect(findingsBulkBarState(5, 30, 100)).toMatchObject({
+      selectAllChecked: false,
+      selectAllIndeterminate: true,
+    });
+    expect(findingsBulkBarState(30, 30, 100)).toMatchObject({
+      selectAllChecked: true,
+      selectAllIndeterminate: false,
+    });
+    expect(findingsBulkBarState(0, 0, 0).selectAllChecked).toBe(false);
+  });
+});
+
+describe('bulkFixRunMessage', () => {
+  it('reports fixed of total', () => {
+    expect(bulkFixRunMessage({ fixed: 8, failed: 0, total: 8 })).toEqual({
+      message: 'Fixed 8 of 8',
+      type: 'success',
+    });
+  });
+
+  it('appends the failure count and the first error', () => {
+    expect(
+      bulkFixRunMessage({ fixed: 6, failed: 2, total: 8, errors: [{ error: 'disk full' }] }),
+    ).toEqual({ message: 'Fixed 6, 2 failed of 8: disk full', type: 'success' });
+  });
+
+  it('lowercases the first letter behind the stopped prefix', () => {
+    expect(bulkFixRunMessage({ fixed: 3, failed: 0, total: 9, stopped: true }).message).toBe(
+      'Bulk fix stopped — fixed 3 of 9',
+    );
+  });
+
+  it('is an error when nothing was fixed, even with no failures', () => {
+    expect(bulkFixRunMessage({ fixed: 0, failed: 0, total: 4 }).type).toBe('error');
+  });
+});
+
+describe('bulkFixLoopMessage', () => {
+  it('omits the "of N" the background run reports', () => {
+    expect(bulkFixLoopMessage(5, 0, '')).toEqual({ message: 'Fixed 5', type: 'success' });
+  });
+
+  it('appends the last error only when something failed', () => {
+    expect(bulkFixLoopMessage(4, 1, 'nope').message).toBe('Fixed 4, 1 failed: nope');
+    expect(bulkFixLoopMessage(4, 1, '').message).toBe('Fixed 4, 1 failed');
+    expect(bulkFixLoopMessage(0, 2, 'nope').type).toBe('error');
+    // The `failed` half of the guard is load-bearing even though the caller only
+    // ever sets lastError alongside a failure — a stale error must not surface
+    // on a clean run.
+    expect(bulkFixLoopMessage(5, 0, 'stale').message).toBe('Fixed 5');
   });
 });

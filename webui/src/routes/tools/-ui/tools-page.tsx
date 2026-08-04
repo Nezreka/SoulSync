@@ -10,7 +10,7 @@
  * The `#tools-page` id IS kept: helper.js's search walks up the DOM matching
  * HELPER_CONTENT selectors, and the bugfix PR pointed its page hint at 'tools'.
  *
- * All twelve cards are present. Section order, and card order within each
+ * All eleven cards are present. Section order, and card order within each
  * section, both come from index.html. The route is not flipped until P7.
  */
 

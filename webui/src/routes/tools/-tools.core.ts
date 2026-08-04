@@ -8,7 +8,13 @@
  * rather than an accident.
  */
 
-import type { CacheHealthScore, CacheHealthStats, RepairJob, RepairJobRun } from './-tools.types';
+import type {
+  BulkFixStatus,
+  CacheHealthScore,
+  CacheHealthStats,
+  RepairJob,
+  RepairJobRun,
+} from './-tools.types';
 
 // ── Duplicate "Keep Best" ranking ────────────────────────────────────────────
 //
@@ -613,4 +619,219 @@ export function repairHistoryStats(
   if (run.auto_fixed) stats.push({ kind: 'fixed', count: run.auto_fixed, label: 'fixed' });
   if (run.errors) stats.push({ kind: 'errors', count: run.errors, label: 'errors' });
   return stats;
+}
+
+// ── Finding detail ───────────────────────────────────────────────────────────
+
+/** One `_gridRows` row: label, value, optional value class. */
+export type FindingDetailRow = [key: string, value: string, cls?: string];
+
+type Details = Record<string, unknown>;
+
+/** Detail values are scalars in practice; the cast tells the linter so. An
+ *  unexpected object still stringifies exactly as the vanilla's `String(v)` did. */
+type Scalar = string | number | boolean | bigint | null | undefined;
+const str = (v: unknown): string => (v == null ? '' : String(v as Scalar));
+const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v) || 0);
+const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+/**
+ * From the `fake_lossless` branch. The bar is only drawn when BOTH the detected
+ * cutoff and the expected minimum are present and non-zero; the nyquist fallback
+ * chain (`nyquist_khz` → `sample_rate / 2000` → 22.05) is the vanilla's.
+ */
+export function fakeLosslessSpectrum(
+  details: Details | null | undefined,
+): { cutoff: number; expectedMin: number; cutoffPct: number; expectedPct: number } | null {
+  const d = details || {};
+  const cutoff = num(d.detected_cutoff_khz);
+  const expectedMin = num(d.expected_min_khz);
+  if (!cutoff || !expectedMin) return null;
+  const nyquist = num(d.nyquist_khz) || (d.sample_rate ? num(d.sample_rate) / 2000 : 22.05);
+  return {
+    cutoff,
+    expectedMin,
+    cutoffPct: Math.min(100, Math.round((cutoff / nyquist) * 100)),
+    expectedPct: Math.min(100, Math.round((expectedMin / nyquist) * 100)),
+  };
+}
+
+/** From the `incomplete_album` branch — the completion bar is skipped entirely
+ *  when the expected track count is missing or zero. */
+export function incompleteAlbumCompletion(
+  details: Details | null | undefined,
+): { actual: number; expected: number; percent: number } | null {
+  const d = details || {};
+  const actual = num(d.actual_tracks);
+  const expected = num(d.expected_tracks);
+  if (expected <= 0) return null;
+  return { actual, expected, percent: Math.round((actual / expected) * 100) };
+}
+
+export interface LibraryRetagTrack {
+  label: string;
+  /** Shown under the label only when it differs from it — i.e. the track had a
+   *  title, so the label is NOT already the filename. */
+  filename: string | null;
+  rows: FindingDetailRow[];
+}
+
+export interface LibraryRetagDetail {
+  meta: string;
+  /** True when nothing would change tag-wise but a cover refresh would happen. */
+  coverOnly: boolean;
+  tracks: LibraryRetagTrack[];
+  overflow: number;
+  unmatched: string[];
+}
+
+/** Cap from the vanilla — huge albums would otherwise render thousands of rows. */
+export const LIBRARY_RETAG_TRACK_CAP = 40;
+
+/** From the `library_retag` branch. An empty `old` renders as ∅ so a blank tag
+ *  being filled in is visible rather than looking like a no-op. */
+export function libraryRetagDetail(details: Details | null | undefined): LibraryRetagDetail {
+  const d = details || {};
+  const meta: string[] = [];
+  if (d.source) meta.push(`Source: ${str(d.source)}`);
+  if (d.mode) meta.push(`Mode: ${str(d.mode)}`);
+  if (d.cover_action) meta.push(`Cover: ${str(d.cover_action)}`);
+
+  const all = arr<{ file_path?: string; title?: string; changes?: Record<string, unknown> }>(
+    d.tracks,
+  );
+  const changed = all.filter((t) => t.changes && Object.keys(t.changes).length > 0);
+
+  const tracks = changed.slice(0, LIBRARY_RETAG_TRACK_CAP).map((t) => {
+    const filename = (t.file_path || '').split(/[\\/]/).pop() || '';
+    const label = t.title || filename || 'Unknown';
+    const rows: FindingDetailRow[] = Object.entries(t.changes || {}).map(([field, change]) => {
+      const c = (change || {}) as { old?: unknown; new?: unknown };
+      const before = c.old === '' || c.old == null ? '∅' : str(c.old);
+      return [field.replace(/_/g, ' '), `${before}   →   ${str(c.new)}`, 'highlight'];
+    });
+    return { label, filename: filename && filename !== label ? filename : null, rows };
+  });
+
+  return {
+    meta: meta.join('  ·  '),
+    coverOnly: changed.length === 0 && Boolean(d.cover_action),
+    tracks,
+    overflow: Math.max(0, changed.length - LIBRARY_RETAG_TRACK_CAP),
+    unmatched: arr<string>(d.unmatched),
+  };
+}
+
+export interface CommaSplitChip {
+  name: string;
+  /** The trailing verification mark, '' when the part is neither in the library
+   *  nor verified against a source. */
+  mark: string;
+  inLibrary: boolean;
+  libraryArtistId: string | null;
+}
+
+/** From the `comma_artist_split` branch. When the backend sent no per-part
+ *  resolution we fall back to the bare split names, all unverified. */
+export function commaSplitChips(details: Details | null | undefined): CommaSplitChip[] {
+  interface ResolvedPart {
+    name?: string;
+    in_library?: boolean;
+    verified_via?: string;
+    library_artist_id?: string | number | null;
+  }
+  const d = details || {};
+  const resolution = arr<ResolvedPart>(d.parts_resolution);
+  const source: ResolvedPart[] = resolution.length
+    ? resolution
+    : arr<string>(d.split_artists).map((name) => ({ name }));
+
+  return source.map((p) => {
+    const inLibrary = Boolean(p.in_library);
+    const id = p.library_artist_id;
+    return {
+      name: str(p.name),
+      mark: inLibrary ? ' ✓ in your library' : p.verified_via ? ` ✓ ${p.verified_via}` : '',
+      inLibrary,
+      libraryArtistId: id != null && id !== '' ? String(id) : null,
+    };
+  });
+}
+
+/** Cap on the comma-split track list, same value and intent as the retag cap. */
+export const COMMA_SPLIT_TRACK_CAP = 40;
+
+/**
+ * The `default:` arm — dump every scalar detail key as a row. Nested objects are
+ * skipped (they have no sensible one-line form) and so are the `*_thumb_url`
+ * keys, which are already rendered as images by the media strip.
+ */
+export function genericDetailRows(details: Details | null | undefined): FindingDetailRow[] {
+  return Object.entries(details || {})
+    .filter(([k, v]) => typeof v !== 'object' && !k.endsWith('_thumb_url'))
+    .map(([k, v]) => [k.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()), String(v)]);
+}
+
+// ── Bulk fix ─────────────────────────────────────────────────────────────────
+
+export interface FindingsBulkBarState {
+  showBar: boolean;
+  countLabel: string;
+  showFixAll: boolean;
+  fixAllLabel: string;
+  selectAllChecked: boolean;
+  selectAllIndeterminate: boolean;
+}
+
+/**
+ * From `_updateFindingsBulkBar`. "Fix All" only appears once the whole page is
+ * selected AND there are more matching findings than that page holds — it is the
+ * escape hatch from per-page selection to the filter-wide background run.
+ */
+export function findingsBulkBarState(
+  selectedCount: number,
+  cardsOnPage: number,
+  total: number,
+): FindingsBulkBarState {
+  const allPageSelected = selectedCount > 0 && selectedCount >= cardsOnPage;
+  return {
+    showBar: selectedCount > 0,
+    countLabel: selectedCount > 0 ? `${selectedCount} selected` : '',
+    showFixAll: total > 0 && allPageSelected && total > selectedCount,
+    fixAllLabel: `Fix All ${total}`,
+    selectAllChecked: cardsOnPage > 0 && selectedCount >= cardsOnPage,
+    selectAllIndeterminate: selectedCount > 0 && selectedCount < cardsOnPage,
+  };
+}
+
+/**
+ * From the tail of `_watchBulkFixRun`. A stopped run keeps the same sentence with
+ * its first letter lowercased and a prefix in front — hence the charAt dance.
+ * Severity is keyed on `fixed`, so a run that fixed nothing reports as an error
+ * even when nothing actually failed.
+ */
+export function bulkFixRunMessage(
+  status: Pick<BulkFixStatus, 'fixed' | 'failed' | 'total' | 'stopped' | 'errors'>,
+): { message: string; type: 'success' | 'error' } {
+  const fixed = status.fixed || 0;
+  const failed = status.failed || 0;
+  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''} of ${status.total || 0}`;
+  if (status.stopped) {
+    message = `Bulk fix stopped — ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
+  }
+  const errors = status.errors;
+  if (errors && errors.length > 0) message += `: ${errors[0].error}`;
+  return { message, type: fixed > 0 ? 'success' : 'error' };
+}
+
+/** From the tail of `bulkFixFindings` — the per-id loop's own summary. Note it
+ *  omits the "of N" that the background run reports. */
+export function bulkFixLoopMessage(
+  fixed: number,
+  failed: number,
+  lastError: string,
+): { message: string; type: 'success' | 'error' } {
+  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`;
+  if (failed && lastError) message += `: ${lastError}`;
+  return { message, type: fixed > 0 ? 'success' : 'error' };
 }

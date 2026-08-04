@@ -1,7 +1,10 @@
 /**
- * The Library Maintenance hero — master toggle, three tabs, the job list and the
- * run history. The Findings tab's contents are P5; its button and empty content
- * panel exist here because they are part of the hero's markup.
+ * The Library Maintenance hero — master toggle, three tabs, the job list, the run
+ * history and (via FindingsTab) the findings pane.
+ *
+ * The hero owns the job list because two tabs need it: the Jobs tab renders it,
+ * and the Findings tab's filter dropdown is populated from it — which is exactly
+ * why the vanilla filled that `<select>` from inside `loadRepairJobs`.
  *
  * Two contracts from the P0 that outlive this file:
  *
@@ -41,6 +44,7 @@ import {
   repairJobMeta,
   repairSettingInput,
 } from '../-tools.core';
+import { FindingsTab } from './findings-tab';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
 const PROGRESS_HIDE_MS = 30000;
@@ -509,12 +513,7 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
 
 // ── The hero ─────────────────────────────────────────────────────────────────
 
-export interface MaintenanceHeroProps {
-  /** The Findings tab's contents (P5). Rendered inside its tab panel. */
-  findings?: React.ReactNode;
-}
-
-export function MaintenanceHero({ findings }: MaintenanceHeroProps) {
+export function MaintenanceHero() {
   const [tab, setTab] = useState<RepairTab>('jobs');
   const [enabled, setEnabled] = useState(false);
   // Driven by the same /api/repair/status payload as the master toggle. Hidden
@@ -543,6 +542,16 @@ export function MaintenanceHero({ findings }: MaintenanceHeroProps) {
     } catch {
       setHistoryError(true);
     }
+  }, []);
+
+  /** `updateRepairStatus` — the findings tab calls this after every mutation so
+   *  the pending badge tracks what it just changed. */
+  const refreshStatus = useCallback(() => {
+    void fetchRepairStatus().then((status) => {
+      if (!status) return;
+      setEnabled(Boolean(status.enabled));
+      setFindingsPending(status.findings_pending || 0);
+    });
   }, []);
 
   // `openRepairModal` hydrated the master state, the job list and any in-flight
@@ -688,7 +697,11 @@ export function MaintenanceHero({ findings }: MaintenanceHeroProps) {
         id="repair-tab-findings"
         style={{ display: tab === 'findings' ? '' : 'none' }}
       >
-        {findings}
+        <FindingsTab
+          jobs={jobs || []}
+          active={tab === 'findings'}
+          onStatusChanged={refreshStatus}
+        />
       </div>
 
       <div
