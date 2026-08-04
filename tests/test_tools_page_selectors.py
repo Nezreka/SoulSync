@@ -385,26 +385,79 @@ def test_repeat_bound_initialisers_are_idempotent(helper_name: str):
 
 # ── P6: the socket → React seam ──────────────────────────────────────────────
 #
-# core.js re-broadcasts three socket frames as window CustomEvents so the React
-# Tools page can subscribe (its `socket` is a module-scoped `let`, unreachable
-# from a module). These are the only live path for the maintenance hero's badge,
-# master toggle and job progress, and for the media-scan card — deleting one is
-# silent, so it is guarded here rather than trusted.
+# Three socket frames are re-broadcast as window CustomEvents so the React Tools
+# page can subscribe (its `socket` is a module-scoped `let`, unreachable from a
+# module). These are the only live path for the maintenance hero's badge, master
+# toggle and job progress, and for the media-scan card.
+#
+# The dispatch lives inside the HANDLER, not the socket binding, because:
+#   - updateRepairStatusFromData is also called by updateRepairStatus()'s 5s HTTP
+#     poll, which is the only live source on a client with no websocket;
+#   - updateRepairJobProgressFromData is replayed by openRepairModal on a timer;
+#   - and for repair status it must sit ABOVE `if (!button) return;` so the tools
+#     state is not gated on #repair-button, which is dashboard markup.
+# Binding the socket instead would silently drop those callers.
+
+
+def _handler_body(filename: str, handler: str, *, strip_comments: bool = False) -> str:
+    """The source of one top-level function, optionally without its comments.
+
+    The comment-stripped form matters for the ordering guards below: the
+    explanatory comments quote the exact lines being searched for, so a naive
+    `.index()` matches inside a comment and reports the wrong order.
+    """
+    source = (STATIC / filename).read_text(encoding="utf-8")
+    body = source.split(f"function {handler}")[1].split("\nfunction ")[0]
+    if not strip_comments:
+        return body
+    return "\n".join(
+        line for line in body.splitlines() if not line.strip().startswith("//")
+    )
+
 
 TOOLS_SHELL_EVENTS = {
-    "ss:repair-status": "enrichment:repair",
-    "ss:repair-progress": "repair:progress",
-    "ss:media-scan": "scan:media",
+    # event name: (socket name, file that owns the handler, handler name)
+    "ss:repair-status": ("enrichment:repair", "enrichment.js", "updateRepairStatusFromData"),
+    "ss:repair-progress": ("repair:progress", "enrichment.js", "updateRepairJobProgressFromData"),
+    "ss:media-scan": ("scan:media", "media-player.js", "updateMediaScanFromData"),
 }
 
 
-@pytest.mark.parametrize("event_name,socket_name", sorted(TOOLS_SHELL_EVENTS.items()))
-def test_core_rebroadcasts_the_tools_socket_frames(event_name: str, socket_name: str) -> None:
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_socket_binding_still_exists(event_name: str) -> None:
+    socket_name = TOOLS_SHELL_EVENTS[event_name][0]
     core = (STATIC / "core.js").read_text(encoding="utf-8")
     assert f"socket.on('{socket_name}'" in core, f"{socket_name} handler is gone from core.js"
-    assert f"CustomEvent('{event_name}'" in core, (
-        f"core.js no longer re-broadcasts {socket_name} as {event_name}; the React "
-        "Tools page has no other live source for it"
+
+
+@pytest.mark.parametrize("event_name", sorted(TOOLS_SHELL_EVENTS))
+def test_the_rebroadcast_lives_in_the_handler_not_the_socket_binding(event_name: str) -> None:
+    _socket_name, filename, handler = TOOLS_SHELL_EVENTS[event_name]
+    body = _handler_body(filename, handler)
+    assert f"CustomEvent('{event_name}'" in body, (
+        f"{handler} no longer re-broadcasts {event_name}; every non-socket caller "
+        "(the HTTP poller, the modal replay) would stop reaching the React page"
+    )
+    core = (STATIC / "core.js").read_text(encoding="utf-8")
+    assert f"CustomEvent('{event_name}'" not in core, (
+        f"{event_name} is dispatched from core.js as well as {handler} — React "
+        "would receive every frame twice"
+    )
+
+
+def test_repair_status_rebroadcast_is_not_gated_on_the_dashboard_orb() -> None:
+    """The dispatch must precede `if (!button) return;`.
+
+    #repair-button is the worker orb in the DASHBOARD markup. Everything after
+    that guard — including the findings tab badge and the master toggle — used to
+    be unreachable whenever the orb was absent.
+    """
+    body = _handler_body("enrichment.js", "updateRepairStatusFromData", strip_comments=True)
+    dispatch_at = body.index("CustomEvent('ss:repair-status'")
+    guard_at = body.index("if (!button) return;")
+    assert dispatch_at < guard_at, (
+        "the ss:repair-status re-broadcast sits behind the #repair-button guard, "
+        "so the React tools page is once again gated on dashboard markup"
     )
 
 
@@ -423,13 +476,8 @@ def test_media_scan_never_reads_the_phantom_is_scanning_field() -> None:
     the "Media server scanning..." arm unreachable, so the live progress message
     never appeared.
     """
-    handler = (STATIC / "media-player.js").read_text(encoding="utf-8")
-    body = handler.split("function updateMediaScanFromData")[1].split("\nfunction ")[0]
-    offenders = [
-        line.strip()
-        for line in body.splitlines()
-        if "is_scanning" in line and not line.strip().startswith("//")
-    ]
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
+    offenders = [line.strip() for line in body.splitlines() if "is_scanning" in line]
     assert not offenders, f"updateMediaScanFromData reads a field no payload has: {offenders}"
 
 
@@ -439,10 +487,26 @@ def test_media_scan_completion_requires_a_previous_scanning_frame() -> None:
     The server pushes scan:media every two seconds whether or not anything is
     running, so without this guard every page load announced a completed scan.
     """
-    handler = (STATIC / "media-player.js").read_text(encoding="utf-8")
-    body = handler.split("function updateMediaScanFromData")[1].split("\nfunction ")[0]
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
     assert "wasScanning" in body, (
         "updateMediaScanFromData no longer distinguishes a real completion from "
         "the idle frame the server sends every 2s"
     )
     assert "if (!wasScanning) return;" in body
+
+
+def test_media_scan_button_recovers_on_any_return_to_idle() -> None:
+    """The completion GUARD must not swallow the button re-enable.
+
+    handleMediaScanButtonClick (api-monitor.js) disables the button and nothing
+    else undoes it, so a scheduled scan that is cancelled — which never reaches
+    'scanning' — would strand it disabled.
+    """
+    body = _handler_body("media-player.js", "updateMediaScanFromData", strip_comments=True)
+    idle_arm = body.split("else if (statusKey === 'idle')")[1]
+    enable_at = idle_arm.index("button.disabled = false")
+    guard_at = idle_arm.index("if (!wasScanning) return;")
+    assert enable_at < guard_at, (
+        "the button re-enable sits behind the completion guard; a cancelled "
+        "scheduled scan would leave Scan Library dead"
+    )

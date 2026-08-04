@@ -1763,6 +1763,15 @@ async function updateRepairStatus() {
 }
 
 function updateRepairStatusFromData(data) {
+    // Re-broadcast FIRST, and from here rather than from the socket handler, for
+    // two reasons. (1) There are two callers: the socket, and updateRepairStatus()'s
+    // 5s HTTP poll, which is the ONLY live source on a client with no websocket —
+    // bridging just the socket would leave those clients with a frozen badge.
+    // (2) It must not sit behind the `if (!button) return;` below: #repair-button
+    // is the dashboard worker orb, and the React tools state has no business being
+    // gated on a node that belongs to another page.
+    window.dispatchEvent(new CustomEvent('ss:repair-status', { detail: data }));
+
     const button = document.getElementById('repair-button');
     if (!button) return;
 
@@ -2336,6 +2345,11 @@ const _repairProgressLogCounts = {};
 const _repairProgressHideTimers = {};
 
 function updateRepairJobProgressFromData(data) {
+    // Same reasoning as updateRepairStatusFromData: openRepairModal replays the
+    // in-flight frames through here on a 300ms timer, so bridging only the socket
+    // would drop that replay.
+    window.dispatchEvent(new CustomEvent('ss:repair-progress', { detail: data }));
+
     for (const [jobId, state] of Object.entries(data)) {
         const card = document.querySelector(`.repair-job-card[data-job-id="${jobId}"]`);
         if (!card) continue;

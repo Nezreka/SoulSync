@@ -816,24 +816,12 @@ function initializeWebSocket() {
     socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
-    socket.on('enrichment:repair', (data) => {
-        updateRepairStatusFromData(data);
-        // Re-broadcast to the React tools page. Same `ss:` seam as
-        // ss:watchlist-scan below — purely additive, the vanilla handler above
-        // is untouched. The vanilla keeps driving the worker orb and its
-        // tooltip (dashboard markup); React drives the tab badge and the
-        // master toggle, which are its own nodes.
-        window.dispatchEvent(new CustomEvent('ss:repair-status', { detail: data }));
-    });
+    // NB the ss:repair-status re-broadcast for the React tools page lives inside
+    // updateRepairStatusFromData, not here — the HTTP poller calls it too.
+    socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
-    socket.on('repair:progress', (data) => {
-        qaSignal('tools');
-        updateRepairJobProgressFromData(data);
-        // The live job frames the React maintenance hero renders into its own
-        // job cards.
-        window.dispatchEvent(new CustomEvent('ss:repair-progress', { detail: data }));
-    });
+    socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); });
     // Server Activity live push — feed the open drawer (Tautulli replacement)
     socket.on('activity:update', (data) => {
         if (window.ServerActivity && window.ServerActivity._onSocket) window.ServerActivity._onSocket(data);
@@ -897,12 +885,7 @@ function initializeWebSocket() {
         // Purely additive — the vanilla handlers above are untouched.
         window.dispatchEvent(new CustomEvent('ss:watchlist-scan', { detail: data }));
     });
-    socket.on('scan:media', (data) => {
-        if (_qaToolBusy(data)) qaSignal('tools');
-        updateMediaScanFromData(data);
-        // Feeds the React Media Server Scan card.
-        window.dispatchEvent(new CustomEvent('ss:media-scan', { detail: data }));
-    });
+    socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
     socket.on('automation:progress', (data) => {

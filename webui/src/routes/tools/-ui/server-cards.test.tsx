@@ -555,6 +555,38 @@ describe('MediaScanCard — live scan:media frames', () => {
     expect(container.querySelector('#media-scan-phase-label')?.textContent).toBe('Ready to scan');
   });
 
+  it('re-enables the button on ANY return to idle, not only a real completion', async () => {
+    // handleMediaScanButtonClick disables it and nothing else undoes that, so a
+    // scheduled scan that is cancelled would otherwise strand the button dead —
+    // the same bug class the bugfix PR already fixed once.
+    routes({
+      'active-media-server': server('plex'),
+      // A long delay keeps the card in its countdown, so the click's disabled
+      // state is still in place when the frames arrive.
+      '/api/scan/request': { success: true, scan_info: { delay_seconds: 600 } },
+    });
+    const { container } = render(<MediaScanCard />);
+    await waitFor(() => expect(container.querySelector('#media-scan-card')).not.toBeNull());
+    fireEvent.click(container.querySelector('#media-scan-button') as HTMLElement);
+    await flush();
+    expect((container.querySelector('#media-scan-button') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    await push({ status: 'scheduled' });
+    await push({ status: 'idle' });
+
+    expect((container.querySelector('#media-scan-button') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    // ...but it still must not claim a scan finished.
+    expect(toastSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Media scan completed'),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('shows live progress from a scanning frame', async () => {
     // This is the arm the vanilla could never reach: it branched on the phantom
     // `is_scanning`, which no payload has ever carried.

@@ -552,6 +552,11 @@ function updateDiscoveryProgressFromData(data) {
 }
 
 function updateMediaScanFromData(data) {
+    // Re-broadcast the frame verbatim, before this function's own guards — the
+    // bridge is a pure transport hop, and the React card applies the same checks
+    // itself. Kept here rather than in core.js so it travels with the handler.
+    window.dispatchEvent(new CustomEvent('ss:media-scan', { detail: data }));
+
     if (!data.success || !data.status) return;
     const status = data.status;
     // `is_scanning` is a phantom field. Both this socket frame and
@@ -577,14 +582,19 @@ function updateMediaScanFromData(data) {
         if (phaseLabel) phaseLabel.textContent = 'Media server scanning...';
         if (progressLabel) progressLabel.textContent = status.progress_message || 'Scan in progress';
     } else if (statusKey === 'idle') {
-        // Only a REAL completion counts. The server pushes scan:media every two
-        // seconds whether or not anything is running (web_server.py's status
-        // loop), and an idle payload is exactly what it sends when nothing has
-        // ever run — so without this guard every page load popped
-        // "Media scan completed" about two seconds in and relabelled the card
-        // as though a scan had just finished.
-        if (!wasScanning) return;
+        // Re-enable on ANY return to idle, as the original did. A scheduled scan
+        // that is cancelled never reaches 'scanning', and handleMediaScanButtonClick
+        // (api-monitor.js) disables the button with nothing else to undo it —
+        // gating this behind wasScanning would strand it disabled, which is the
+        // exact bug class the bugfix PR already fixed once.
         if (button) button.disabled = false;
+        // The MESSAGING is what needs the guard. The server pushes scan:media
+        // every two seconds whether or not anything is running (web_server.py's
+        // status loop), and a bare idle payload is what it sends when nothing has
+        // ever run — so without this, every page load popped "Media scan
+        // completed" about two seconds in and relabelled the card as though a
+        // scan had just finished.
+        if (!wasScanning) return;
         if (phaseLabel) phaseLabel.textContent = 'Scan completed successfully';
         if (progressBar) progressBar.style.width = '0%';
         if (progressLabel) progressLabel.textContent = 'Ready for next scan';

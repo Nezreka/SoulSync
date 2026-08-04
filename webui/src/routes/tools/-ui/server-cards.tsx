@@ -174,11 +174,18 @@ export function MediaScanCard() {
         if (key === 'scanning') {
           setPhase('Media server scanning...');
           setDetails(frame.status.progress_message || 'Scan in progress');
-        } else if (isMediaScanCompletion(previous, key)) {
-          finish();
+          return;
         }
+        if (key !== 'idle') return;
+        // The button recovers on ANY return to idle, matching the vanilla's
+        // unconditional `button.disabled = false`. A scheduled scan that gets
+        // cancelled never reaches 'scanning', and nothing else re-enables it.
+        clearTimers();
+        setBusy(false);
+        // Only the MESSAGING is gated: a bare idle frame is not a finished scan.
+        if (isMediaScanCompletion(previous, key)) finish();
       },
-      [finish],
+      [clearTimers, finish],
     ),
   );
 
