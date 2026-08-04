@@ -1,8 +1,14 @@
 /**
  * `_renderFindingDetail` — the per-type expanded body of a finding card.
  *
- * Twenty explicit cases plus a generic fallback, each reading a different slice
- * of the finding's `details` payload. Every case is transcribed from the vanilla
+ * NINETEEN explicit cases plus a generic fallback — twenty branches in all, which
+ * is where "the 20-type renderer" comes from. Note FINDING_TYPE_LABELS carries 22
+ * entries: `missing_lossy_copy`, `quality_upgrade` and `replaygain_retag` have
+ * labels and fix buttons but no case of their own, so they render through the
+ * generic arm. That asymmetry is the vanilla's.
+ *
+ * Each case reads a different slice of the finding's `details` payload, and every
+ * one is transcribed from the vanilla
  * switch in enrichment.js; the ordering of rows, the exact labels, and which
  * blocks are conditional are all load-bearing for the artefact diff.
  *

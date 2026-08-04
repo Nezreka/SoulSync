@@ -26,6 +26,14 @@
  *    while the server quietly kept fixing. The start endpoint returns
  *    immediately, a 2s poll drives the bulk bar, and a reload mid-run picks the
  *    progress back up (`_checkBulkFixResume`).
+ *
+ * ONE deliberate deviation. In the vanilla the job chips' `active` highlight is
+ * baked in when the dashboard renders, and the filter `<select>`'s onchange calls
+ * only `loadRepairFindings()` — so picking a job from the dropdown leaves the
+ * chip highlight pointing at the wrong job until something else reloads the
+ * dashboard. Here the highlight is derived from `jobFilter` state, so it is
+ * always right. Reproducing the stale highlight would mean deliberately
+ * snapshotting the filter value, i.e. building the bug on purpose.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -136,12 +144,25 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
 
   // ── Loading ────────────────────────────────────────────────────────────────
 
+  /** Set below, so `loadCounts` can call the watcher without the two useCallbacks
+   *  depending on each other in a cycle. */
+  const watchBulkFixRef = useRef<() => void>(() => {});
+
   const loadCounts = useCallback(async () => {
+    // `_checkBulkFixResume` runs at the TOP of every dashboard load in the
+    // vanilla, not just on open — so a run started from another tab is picked up
+    // by the next refresh rather than only by a re-entry into this tab.
+    void fetchBulkFixStatus().then((status) => {
+      if (status?.running) watchBulkFixRef.current();
+    });
     try {
       setCounts(await fetchFindingCounts());
     } catch {
-      // `dashboard.innerHTML = ''` — the whole dashboard goes away on error.
+      // `dashboard.innerHTML = ''` — the whole dashboard goes away on error, and
+      // the cache-health call never happens: the vanilla only reaches
+      // `_loadCacheHealthStats` on the success path.
       setCounts(null);
+      return;
     }
     setCacheHealth(await fetchCacheHealth());
   }, []);
@@ -157,6 +178,7 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
       });
       setLoadError(false);
       setSelected(new Set());
+      setBusyFix(new Set());
       setTotal(data.total);
       setServerPage(data.page);
 
@@ -222,6 +244,8 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
     void poll();
   }, [refreshAll]);
 
+  watchBulkFixRef.current = watchBulkFixRun;
+
   useEffect(
     () => () => {
       if (bulkTimer.current) clearInterval(bulkTimer.current);
@@ -230,14 +254,12 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
     [],
   );
 
+  // `switchRepairTab('findings')` loaded both halves; loadCounts carries the
+  // bulk-fix resume check with it.
   useEffect(() => {
     if (!active) return;
     void loadCounts();
-    // `_checkBulkFixResume` — a reload mid-run picks the progress back up.
-    void fetchBulkFixStatus().then((status) => {
-      if (status?.running) watchBulkFixRun();
-    });
-  }, [active, loadCounts, watchBulkFixRun]);
+  }, [active, loadCounts]);
 
   useEffect(() => {
     if (!active) return;
@@ -352,10 +374,11 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
         refreshAll();
       } catch {
         toast('Error applying fix', 'error');
-      } finally {
-        // The vanilla only restores the button on the error path, because the
-        // success path reloads the list out from under it. Clearing either way
-        // is equivalent here and avoids a stuck "..." if a reload is skipped.
+        // Restored ONLY on the error path, as the vanilla does. On success the
+        // button stays disabled until the reload lands — which is what stops a
+        // second click firing a second fix while the request is in flight. The
+        // reload clears the whole set (see loadFindings); the vanilla got the
+        // same effect for free by replacing the list's innerHTML.
         setBusyFix((current) => {
           const next = new Set(current);
           next.delete(finding.id);

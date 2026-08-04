@@ -271,6 +271,10 @@ function QualityPrompt({ resolve }: { resolve: (value: QualityFixAction | null) 
  * `_promptDiscographyBackfillAction`. Every label switches on count <= 1, and the
  * vanilla sets them via textContent rather than interpolating into the HTML —
  * React escapes by default, so the reason for that split disappears here.
+ *
+ * That also drops the `_dbf-header` / `_dbf-body` ids: they existed ONLY as
+ * textContent targets, nothing queries or styles them. It is the one id
+ * difference an artefact diff of this file will report.
  */
 function BackfillPrompt({
   count,

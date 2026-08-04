@@ -217,6 +217,18 @@ describe('dashboard', () => {
     expect(document.querySelector('.repair-dashboard-summary')).toBeNull();
   });
 
+  it('never asks for cache health when the counts call failed', async () => {
+    // The vanilla only reaches `_loadCacheHealthStats` on the success path — a
+    // dashboard that blanked itself does not then go fetch a bar to put in it.
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes(COUNTS)) return Promise.reject(new Error('nope'));
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never);
+    });
+    renderTab();
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/cache-health'))).toBe(false);
+  });
+
   it('shows the cache health bar with its scored dot', async () => {
     routes({
       [COUNTS]: { pending: 1 },
@@ -640,6 +652,57 @@ describe('per-finding actions', () => {
     );
   });
 
+  it('keeps the fix button disabled through a successful fix until the list reloads', async () => {
+    // The vanilla leaves the button on "..." until the reload replaces the list's
+    // innerHTML — which is what stops a second click firing a second fix.
+    const reload: { release: (() => void) | null } = { release: null };
+    let listCalls = 0;
+    fetchMock.mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.endsWith('/1/fix')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
+      }
+      if (target.includes(FINDINGS) && !target.includes(COUNTS)) {
+        listCalls += 1;
+        if (listCalls > 1) {
+          // Hold the reload open so the in-flight state stays observable.
+          return new Promise((resolve) => {
+            reload.release = () =>
+              resolve({
+                ok: true,
+                status: 200,
+                json: async () => page([finding({ id: 1, finding_type: 'empty_folder' })]),
+              });
+          });
+        }
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () =>
+          target.includes(FINDINGS) && !target.includes(COUNTS)
+            ? page([finding({ id: 1, finding_type: 'empty_folder' })])
+            : {},
+      });
+    });
+
+    renderTab();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+
+    const button = document.querySelector('.repair-finding-btn.fix') as HTMLButtonElement;
+    expect(button.textContent).toBe('...');
+    expect(button.disabled).toBe(true);
+
+    reload.release?.();
+    await flush();
+    await flush();
+    expect((document.querySelector('.repair-finding-btn.fix') as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it('dismisses a finding and refreshes', async () => {
     routes({ [FINDINGS]: page([finding({ id: 8 })]) });
     const { onStatusChanged } = renderTab();
@@ -883,6 +946,29 @@ describe('fix all', () => {
       ),
     );
     expect(toastSpy).toHaveBeenCalledWith('Fixing 200 findings in the background...', 'info');
+  });
+
+  it('re-checks for an outside bulk run on every dashboard refresh', async () => {
+    // `_checkBulkFixResume` sits at the top of loadRepairFindingsDashboard, so a
+    // run started in another tab is picked up by the next refresh — not only by
+    // a re-entry into the tab.
+    routes({
+      [FINDINGS]: page([finding({ id: 8 })]),
+      '/api/repair/bulk-fix/status': { running: false },
+    });
+    renderTab();
+    await flush();
+    const before = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).includes('/bulk-fix/status'),
+    ).length;
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.dismiss') as HTMLElement);
+    await flush();
+
+    const after = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).includes('/bulk-fix/status'),
+    ).length;
+    expect(after).toBeGreaterThan(before);
   });
 
   it('picks up a run that is already going', async () => {
