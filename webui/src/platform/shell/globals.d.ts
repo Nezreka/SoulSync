@@ -554,6 +554,25 @@ declare global {
      *  fallback pollers apply the same skip-while-socket-pushes gate the
      *  vanilla poller twins do. Kept in lockstep at every write site. */
     _socketConnected?: boolean;
+    /**
+     * P7 seams:
+     * - openAutoSyncScheduleModal (auto-sync.js) — the Quick Actions hero tile
+     * - openSyncDetailModal (pages-extra.js) — a sync card's detail modal;
+     *   appends to document.body
+     * - showLoginScreen / showLaunchPinScreen (init.js) — the unlock screens a
+     *   lapsed session surfaces from the sync-history 401 path
+     * - checkForActiveProcesses (sync-spotify.js) — rehydrates the download
+     *   bubble registries from /api/active-processes
+     * - updateDashboardDownloads (wishlist-tools.js) — renders the Active
+     *   Downloads ADOPTED REGION from the four script-scoped bubble
+     *   registries; React provides only the shell
+     */
+    openAutoSyncScheduleModal?: () => void | Promise<void>;
+    openSyncDetailModal?: (entryId: number) => void | Promise<void>;
+    showLoginScreen?: () => void;
+    showLaunchPinScreen?: () => void;
+    checkForActiveProcesses?: () => Promise<void>;
+    updateDashboardDownloads?: () => void;
   }
 }
 
