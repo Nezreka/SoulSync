@@ -25,12 +25,22 @@ _video_db_lock = threading.Lock()
 def get_video_db():
     """Return the shared VideoDatabase instance (created on first use)."""
     global _video_db
-    if _video_db is None:
+    db = _video_db
+    if db is None:
         with _video_db_lock:
-            if _video_db is None:
+            db = _video_db
+            if db is None:
                 from database.video_database import VideoDatabase
-                _video_db = VideoDatabase()
-    return _video_db
+                db = VideoDatabase()
+                # Anyone installing a handle from outside must hold
+                # _video_db_lock, and an installed handle outranks a lazily
+                # built one — publish only if the slot is still empty, and
+                # yield to an install that beat us to it.
+                if _video_db is None:
+                    _video_db = db
+                else:
+                    db = _video_db
+    return db
 
 
 def create_video_blueprint() -> Blueprint:

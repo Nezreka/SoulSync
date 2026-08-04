@@ -1161,7 +1161,21 @@ def _video_db_assignment_tripwire():
     the one the test's own fixture just installed, with the lazy-create path
     proven silent — so some test-side code ASSIGNS the global out of turn.
     Modules accept a __class__ swap to a ModuleType subclass, which lets us
-    hook attribute assignment without touching production code."""
+    hook attribute assignment without touching production code.
+
+    NO LONGER DIAGNOSTIC-ONLY — this hook is also THE FIX for the phantom
+    (CI Aug 4 2026 finally caught the mechanism in the act): a daemon thread
+    leaked by an earlier test hits get_video_db() while the global is None and
+    starts the slow VideoDatabase build under _video_db_lock; the next test's
+    fixture then installs its own handle WITHOUT the lock, and the build
+    publishes last — clobbering the install with the session-default db.
+    Taking _video_db_lock here serializes every test-side install/teardown
+    against that critical section: an install that arrives mid-build waits and
+    then overwrites (install wins), and a lazy-create that starts after an
+    install sees a non-None slot and never assigns (get_video_db's
+    publish-only-if-still-empty re-check is the production-side belt). Either
+    way, a running test's handle can no longer be replaced under it.
+    Pinned by tests/test_video_db_install_race.py."""
     import os
     import threading
     import traceback
@@ -1181,6 +1195,13 @@ def _video_db_assignment_tripwire():
                          threading.current_thread().name,
                          os.environ.get("PYTEST_CURRENT_TEST", "?"), caller),
                       flush=True)
+                # Serialize against get_video_db()'s lazy-create critical
+                # section so a slow in-flight build can't publish over this
+                # install (see docstring). The lock is never held by a thread
+                # that assigns through here, so this cannot deadlock.
+                with videoapi._video_db_lock:
+                    super().__setattr__(name, value)
+                return
             super().__setattr__(name, value)
 
     videoapi.__class__ = _TracedModule
