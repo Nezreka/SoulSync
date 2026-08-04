@@ -590,29 +590,40 @@ def test_get_album_no_free_no_auth_exact_source_still_none():
 # ── the vanished singles (artist discography sections) ───────────────────────
 
 def test_get_artist_albums_list_fetches_singles_and_retags_types():
-    """SpotipyFree's artist_albums defaults to include_groups='album' and its
-    formatter hardcodes album_type='album' — so free users lost every single
-    and saw EPs typed as albums. The adapter must fetch each section and re-tag."""
-    calls = []
+    """One upstream call serves the whole listing: the raw discography payload
+    already carries id/name/date/art/count for all three sections. The old
+    path (SpotipyFree.artist_albums) re-scraped every release individually —
+    minutes for a big artist — and only ever fetched the albums section with
+    everything typed 'album'."""
+    def _release(rid, name, year=2024, count=10):
+        return {'id': rid, 'uri': f'spotify:album:{rid}', 'name': name,
+                'date': {'year': year},
+                'coverArt': {'sources': [{'url': f'https://img/{rid}.jpg'}]},
+                'tracks': {'totalCount': count}}
 
-    class _FakeSF:
-        def artist_albums(self, artist_id, include_groups=None, **kwargs):
-            calls.append(include_groups)
-            items = {
-                'album': [{'id': 'alb1', 'name': 'Album One', 'album_type': 'album'}],
-                'single': [{'id': 'sgl1', 'name': "WOMAN'S WORLD", 'album_type': 'album'}],
-                'compilation': [],
-            }[include_groups]
-            return {'items': items}
-
+    discog = {
+        'albums': {'items': [{'releases': {'items': [_release('alb1', 'Album One')]}}]},
+        'singles': {'items': [{'releases': {'items': [_release('sgl1', "WOMAN'S WORLD", count=1)]}}]},
+        'compilations': {'items': []},
+    }
     client = SpotifyFreeMetadataClient()
-    client._sf_client = lambda: _FakeSF()
+    client._fetch_discography_sections = lambda artist_id: discog
     out = client.get_artist_albums_list('artist123')
 
-    assert calls == ['album', 'single', 'compilation']
     by_id = {a['id']: a for a in out}
     assert by_id['sgl1']['album_type'] == 'single'   # the vanished single, correctly typed
     assert by_id['alb1']['album_type'] == 'album'
+    assert by_id['sgl1']['total_tracks'] == 1
+    assert by_id['alb1']['release_date'] == '2024'
+    assert by_id['alb1']['images'][0]['url'] == 'https://img/alb1.jpg'
+
+
+def test_get_artist_albums_list_survives_upstream_failure():
+    client = SpotifyFreeMetadataClient()
+    def _boom(artist_id):
+        raise RuntimeError('scrape died')
+    client._fetch_discography_sections = _boom
+    assert client.get_artist_albums_list('artist123') == []
 
 
 # ── explicit-Spotify requests engage free without the persistent opt-in ──────
