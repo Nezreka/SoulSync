@@ -503,3 +503,113 @@ def test_prefer_free_inert_when_package_not_installed(monkeypatch):
     monkeypatch.setattr(SpotifyClient, '_free_installed', lambda self: False)
     assert c.search_tracks('q', limit=5, prefer_free=True) == ['ITUNES']
     c._free_meta_client.search_tracks.assert_not_called()
+
+
+# ── exact-source lookups must serve via free (the wrong-tracklist bug) ────────
+#
+# The exact-source metadata layer (core/metadata/album_tracks.py's source chain,
+# the strict discography providers) calls the entity lookups with
+# allow_fallback=False — "this Spotify id, this catalog, don't switch sources."
+# The free branches used to be gated on allow_fallback, so a 'Spotify (no auth)'
+# user got None from the spotify hop and the chain fell through to Deezer/iTunes
+# WITH THE SAME SPOTIFY ID — an id-space collision that served a completely
+# unrelated release's tracklist (Katy Perry EP → 10-track trance compilation).
+# Free IS Spotify (same catalog, same base-62 ids): it must serve regardless of
+# allow_fallback.
+
+def _entity_client(fake_free):
+    c = SpotifyClient.__new__(SpotifyClient)
+    c._free_meta_client = fake_free
+    fake_cache = type('C', (), {
+        'get_entity': lambda *a, **k: None,
+        'store_entity': lambda *a, **k: None,
+    })()
+    ctx = (
+        patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=False),
+        patch('core.spotify_client.config_manager'),
+        patch('core.spotify_client._is_globally_rate_limited', return_value=False),
+        patch('core.spotify_client.get_metadata_cache', return_value=fake_cache),
+        patch.object(_sfm, 'spotify_free_installed', return_value=True),
+    )
+    return c, ctx
+
+
+def _enter_all(ctx):
+    entered = [c.__enter__() for c in ctx]
+    cm = entered[1]
+    cm.get_spotify_config.return_value = {}
+    cm.get.side_effect = lambda k, d=None: True if k == 'metadata.spotify_free' else d
+    return entered
+
+
+def _exit_all(ctx):
+    for c in reversed(ctx):
+        c.__exit__(None, None, None)
+
+
+def test_get_album_exact_source_serves_via_free():
+    free = SpotifyFreeMetadataClient()
+    free.get_album = lambda album_id: {'id': album_id, 'name': "WOMAN'S WORLD",
+                                       'tracks': {'items': [{'name': "WOMAN'S WORLD"}]}}
+    c, ctx = _entity_client(free)
+    _enter_all(ctx)
+    try:
+        album = c.get_album('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert album is not None and album['name'] == "WOMAN'S WORLD"
+
+
+def test_get_album_tracks_exact_source_serves_via_free():
+    free = SpotifyFreeMetadataClient()
+    free.get_album_tracks = lambda album_id: {'items': [{'name': "WOMAN'S WORLD"}]}
+    c, ctx = _entity_client(free)
+    _enter_all(ctx)
+    try:
+        tracks = c.get_album_tracks('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert tracks is not None and tracks['items'][0]['name'] == "WOMAN'S WORLD"
+
+
+def test_get_album_no_free_no_auth_exact_source_still_none():
+    """Plain-spotify user with no token: exact-source lookup stays None — the
+    ungating must not conjure data when free isn't selected."""
+    free = SpotifyFreeMetadataClient()
+    free.get_album = lambda album_id: {'id': album_id, 'name': 'SHOULD NOT SERVE'}
+    c, ctx = _entity_client(free)
+    entered = _enter_all(ctx)
+    entered[1].get.side_effect = lambda k, d=None: d  # spotify_free NOT selected
+    try:
+        album = c.get_album('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert album is None
+
+
+# ── the vanished singles (artist discography sections) ───────────────────────
+
+def test_get_artist_albums_list_fetches_singles_and_retags_types():
+    """SpotipyFree's artist_albums defaults to include_groups='album' and its
+    formatter hardcodes album_type='album' — so free users lost every single
+    and saw EPs typed as albums. The adapter must fetch each section and re-tag."""
+    calls = []
+
+    class _FakeSF:
+        def artist_albums(self, artist_id, include_groups=None, **kwargs):
+            calls.append(include_groups)
+            items = {
+                'album': [{'id': 'alb1', 'name': 'Album One', 'album_type': 'album'}],
+                'single': [{'id': 'sgl1', 'name': "WOMAN'S WORLD", 'album_type': 'album'}],
+                'compilation': [],
+            }[include_groups]
+            return {'items': items}
+
+    client = SpotifyFreeMetadataClient()
+    client._sf_client = lambda: _FakeSF()
+    out = client.get_artist_albums_list('artist123')
+
+    assert calls == ['album', 'single', 'compilation']
+    by_id = {a['id']: a for a in out}
+    assert by_id['sgl1']['album_type'] == 'single'   # the vanished single, correctly typed
+    assert by_id['alb1']['album_type'] == 'album'

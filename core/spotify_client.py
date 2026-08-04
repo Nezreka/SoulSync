@@ -1870,8 +1870,13 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # No-creds Spotify (SpotipyFree) for a real Spotify track id when
-        # official Spotify is unavailable (no auth / rate-limited).
-        if allow_fallback and self._free_active() and not self._is_itunes_id(track_id):
+        # official Spotify is unavailable (no auth / rate-limited). NOT gated on
+        # allow_fallback: free IS Spotify (same catalog, same ids), while
+        # allow_fallback governs switching to OTHER sources. Exact-source
+        # callers (album_tracks' source chain passes allow_fallback=False) used
+        # to get None here, fall through to another catalog with this Spotify
+        # id, and serve a random colliding release's tracklist.
+        if self._free_active() and not self._is_itunes_id(track_id):
             free = self._free_meta.get_track_details(track_id)
             if free:
                 return free
@@ -1969,7 +1974,7 @@ class SpotifyClient:
 
         # No-creds Spotify (SpotipyFree) for a real Spotify album id when
         # official Spotify is unavailable (no auth / rate-limited).
-        if allow_fallback and self._free_active() and not self._is_itunes_id(album_id):
+        if self._free_active() and not self._is_itunes_id(album_id):  # not allow_fallback-gated: free IS Spotify (see get_track_details)
             free = self._free_meta.get_album(album_id)
             if free:
                 return free
@@ -2053,7 +2058,7 @@ class SpotifyClient:
 
         # No-creds Spotify (SpotipyFree) for a real Spotify album id when
         # official Spotify is unavailable (no auth / rate-limited).
-        if allow_fallback and self._free_active() and not self._is_itunes_id(album_id):
+        if self._free_active() and not self._is_itunes_id(album_id):  # not allow_fallback-gated: free IS Spotify (see get_track_details)
             free = self._free_meta.get_album_tracks(album_id)
             if free:
                 return free
@@ -2171,7 +2176,7 @@ class SpotifyClient:
         # No-creds Spotify (SpotipyFree) for a real Spotify artist id when
         # official Spotify is unavailable (no auth / rate-limited). The free
         # discography is already album-shaped — project to Album dataclasses.
-        if allow_fallback and self._free_active() and not self._is_itunes_id(artist_id):
+        if self._free_active() and not self._is_itunes_id(artist_id):  # not allow_fallback-gated: free IS Spotify (see get_track_details)
             try:
                 free = [Album.from_spotify_album(a)
                         for a in self._free_meta.get_artist_albums_list(artist_id, limit)]
@@ -2236,7 +2241,7 @@ class SpotifyClient:
 
         # No-creds Spotify (SpotipyFree) for a real Spotify artist id when
         # official Spotify is unavailable (no auth / rate-limited).
-        if allow_fallback and self._free_active() and not self._is_itunes_id(artist_id):
+        if self._free_active() and not self._is_itunes_id(artist_id):  # not allow_fallback-gated: free IS Spotify (see get_track_details)
             free = self._free_meta.get_artist(artist_id)
             if free:
                 return free

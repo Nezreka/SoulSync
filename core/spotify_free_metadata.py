@@ -278,9 +278,21 @@ class SpotifyFreeMetadataClient:
             return None
 
     def get_artist_albums_list(self, artist_id: str, limit: int = 50) -> list[dict]:
-        try:
-            res = self._sf_client().artist_albums(artist_id) or {}
-            return (res.get('items') or [])[:limit]
-        except Exception as e:
-            logger.debug(f"SpotipyFree get_artist_albums_list({artist_id}) failed: {e}")
-            return []
+        # SpotipyFree's artist_albums defaults to include_groups="album" — the
+        # singles/compilations discography sections are simply never fetched,
+        # which made every artist's singles vanish for free users. Fetch each
+        # section explicitly, and re-tag album_type per section because the
+        # package's formatAlbum hardcodes album_type="album" for everything.
+        items: list[dict] = []
+        for group in ('album', 'single', 'compilation'):
+            try:
+                res = self._sf_client().artist_albums(artist_id, include_groups=group) or {}
+                section = res.get('items') or []
+            except Exception as e:
+                logger.debug(f"SpotipyFree artist_albums({artist_id}, {group}) failed: {e}")
+                continue
+            for item in section:
+                if isinstance(item, dict):
+                    item['album_type'] = group
+                    items.append(item)
+        return items[:limit]
