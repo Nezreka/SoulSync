@@ -5,28 +5,11 @@ Commit-Referenzen, Teststände und Release-Einschätzung. Guide, Features und
 Issues beschreiben ausschließlich Zweck, gewünschtes Verhalten und technische
 Diagnosen.
 
-Stand: 28. Juli 2026. Zuletzt umgesetzt: §42, die Legacy-Artist-/
-Discovery-Parität (ldp-01…ldp-09) — der letzte bekannte Blocker vor
-PR-Entwurf und Löschung der alten Library. Davor: die sieben realen UI-Findings aus §39 öffneten Teile der
-am 27. Juli als abgeschlossen geführten UI-03/UI-05/F-13/F-16-Arbeit wieder
-und sind im aktuellen Arbeitsstand implementiert und regressionsgeprüft.
-Zuvor: einschließlich Foundation-Rebase (§14), der an diesem
-Tag umgesetzten Korrekturen §20–§24 (Pfad-Desync, Manual-Match-Timeout,
-Orphan-Approve-Materialisierung, F-10-Korrelation, Artwork-Kaltstart-
-Nachlieferung), §26 (nativer Subject-Row-Versatz in den Repair-Scannern,
-Abbau der vorbestehenden Testfehler), §27 (erster Lauf gegen einen Snapshot
-der Produktiv-DB, Album-Twin-Scan für jeden Artist, Frontend-Gate), §28
-(Reconcile-Unmapped-Artists-Diagnose: Namens-only-Matching, fehlender
-Cooldown — beide anschließend in §30 korrigiert und mit dem
-Post-Import-Autotrigger verdrahtet), §29 (Werkzeug-↔-V2-Konvergenz: Legacy-Findings,
-Cover-/Tag-Schreibpfad, Verification-Spalte — fünf Korrekturen, Genre-Lücke
-als Produktentscheidung offen) sowie §34–§36 (Live-Feedback iss27-12/13/14,
-Multi-Provider-Track-Reconcile, sofortige UI-Neuladung und Python-3.14-
-Async-Deadlock) und §37 (Abschluss der offenen F-13/F-15/UI-03/UI-05-
-Oberflächenpunkte plus zwei unabhängige Webclient-Fehler).
-Playlist UI bleibt geparkt. Der werkzeugweise Integrations-Deep-Dive über alle
-25 registrierten Repair-Jobs wurde in §30 abgeschlossen
-([issues.md §19](library-v2-issues.md#19-ergebnis-des-werkzeugweisen-deep-dive-26-juli-2026-nacht)).
+Stand: 4. August 2026. Letzter Arbeitscheckpoint: Remediation und Übergabe in §49
+([Issues §30](library-v2-issues.md#30-finaler-multi-agent-audit-des-branch-heads-4-august-2026)).
+Der Audit aus §48 wurde in vier geprüften Commits remediated. Offen bleiben die
+Provider-Propagation aus §49.4, das Cross-Process-TOCTOU-Risiko aus Issues §31
+und der finale Full-Suite-/Live-Browser-Gate. Bei Widersprüchen gilt §49.
 
 ## 1. Statusbegriffe
 
@@ -57,12 +40,12 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 | [F-07](library-v2-features.md#feat-duplicate) | Artist-/Album-/Edition-Dedup | Implemented | §62/§63, P3, §27 | Album-Twin-Pass läuft seit §27 für jeden Artist, nicht nur für Merge-Survivor; Dry Run gegen die Produktiv-DB gelaufen. Rest: Track-Zeilen-Duplikate (§27 Teil 3) brauchen eine Produktentscheidung |
 | [F-08](library-v2-features.md#feat-unmapped) | V2-native/Collaboration Artists | Implemented | §68, Regression M-11, §28 | Enrich/Smart-Split und globale Suche abgedeckt; Reconcile-Job bleibt namensbasiert ohne Strong-ID-Cross-Check und ohne Cooldown, siehe §28 |
 | [F-09](library-v2-features.md#feat-playlists) | Library-v2-Playlist-Oberfläche | Deferred | `library-v2-playlist-ui` | Vollständig aus dem aktiven Overhaul entfernt und separat geparkt |
-| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23 | Feed, File-Ergebnis und Albumzweig vorhanden; `previous_file_replaced` (§17) sowie `human_verified`/`rejected` über die neue `library_history`-Korrelation (§23) im Eventvokabular. Rest: kein Backfill für Altzeilen |
+| [F-10](library-v2-features.md#feat-history) | Korrelierte Pipeline-History | Implemented | §35/§37/§57/§58, §17, §23, §49 | Feed, File-Ergebnis, Albumzweig und Korrelation vorhanden; Auto-Import terminalisiert nun wahrheitsgemäß als completed/partial/failed |
 | [F-11](library-v2-features.md#feat-playback) | Track Playback / Preview | Implemented | §36, Regression H-14 | Bestehender Player reused; typisierte ID-Korrektur im Regression-Checkpoint |
-| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Removed / Deferred | §31, Entscheidung 27. Juli | `import-review`-Route und UI-Oberfläche per Nutzerentscheidung aus dieser PR entfernt |
-| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Verified | §29/§31/§33/§36/§37/§39, [iss28-03](library-v2-issues.md#iss28-03) | Suchablauf verified; globale Startseitenaktion heißt `Automatic Search` und teilt den neutralen Basisstil des Re-Import-Nachbarbuttons, ergänzt um das Automatic-Icon |
-| [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §30/§54/§60, Review 1, §31 | Delete, File-Scope und Pfadsync abgedeckt; `Reorganize All` Ablauf bei Einstellungsänderung spezifiziert |
-| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Verified | §28–§37, [iss27-02](library-v2-issues.md#iss27-02), [iss27-05](library-v2-issues.md#iss27-05), [iss27-07](library-v2-issues.md#iss27-07) | Multi-Provider-IDs, Post-Import-Erkennung, Verification-Read, Tag-Gap-Write, Tags-Breakdown und stabile Album/EP/Single-Gruppierung geprüft |
+| [F-12](library-v2-features.md#feat-acq-review) | Acquisition Review / Bundle Assignment UI | Verified removed | §49 | Deep-Link, Loader, UI und mutierende Client-Helfer entfernt; Routentest verhindert Wiederkehr |
+| [F-13](library-v2-features.md#feat-search) | Scoped Search, Manual Grab, Acquisition | Implemented | §49, Issues §31 | Automatic Upgrades, Track-vs.-Album-Grenze, 409-Attach und servergebundene Candidate-Kinds geprüft; vollständige Provider-Propagation bleibt Restpunkt |
+| [F-14](library-v2-features.md#feat-files) | Manage Files, Delete, Reorganize, Replacement | Implemented | §49, Issues §31 | Atomare Dateioperationen, Transform-before-compare, per-Track-Lock und CAS schützen die Primary; Cross-Process-Minifenster ist dokumentiert |
+| [F-15](library-v2-features.md#feat-metadata) | Refresh, Retag, Metadata, RG/Lyrics | Implemented | §49 | Meta Gap Filler rotiert in begrenzten 500er-Seiten; Toolfehler besitzen sichtbare Retry-Zustände |
 | [F-16](library-v2-features.md#feat-wanted) | Wanted Views, Entity Queue, Diskspace | Verified | §72–§74, `2e227c1b`, §39 | Rollups plus neutrales Größen-Badge mit Symbol in jeder eingeklappten Album-/EP-/Single-Zeile, einschließlich `0 B` |
 
 ### UI-Status
@@ -71,10 +54,10 @@ Der Release-Gate-Stand steht in Abschnitt 8.
 |---|---|---|---|
 | [UI-01](library-v2-features.md#ui-icons) | Icons/Nomenklatur | Verified | Automatic=Lupe, Interactive=User, Quality=Stern, Track=Pencil |
 | [UI-03](library-v2-features.md#ui-columns) | Table Options / Spalten | Implemented | §39: separate generische Check-Spalte (Verified/Human verified/Skipped/Not scanned); normalisierte benachbarte Relativbreiten; feste zentrierte Quality-Unterbereiche; viewport-gebundener Einstellungsdialog; gezielte Tests und Build grün, manueller Browser-Gate mangels installiertem Chromium ausstehend |
-| [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Implemented | Monitor, Profil, RG, Tags, Delete und Rich Bulk Edit |
-| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | Navigation/Maintenance sowie die als `Automatic Search` benannte und an den Re-Import-Nachbarbutton angeglichene globale Startseitenaktion geprüft (§39) |
+| [UI-04](library-v2-features.md#ui-bulk) | Multi-Select/Bulk Bar | Verified | §49: Teilerfolge werden vollständig abgewartet, invalidiert und als Failed-Subset retrybar gehalten |
+| [UI-05](library-v2-features.md#ui-actions) | Actions, Nav & Maintenance | Verified | §49: Mutationen fail-closed; Read-only-History bleibt verfügbar; Fehler sind sichtbar und retrybar |
 | [UI-09](library-v2-features.md#ui-artist-header) | Artist-Kopf kompakt ↔ legacy-reich | Implemented | §42: Umschalter am Kopf, aus der Suche reich vorbelegt; Listeners/Plays/Bio namensbasiert, Top-Track-Aktion heißt `Bookmark` (ldp-05/ldp-06); Metadaten-Quellen-Panel bewusst nicht portiert (ldp-08) |
-| F-12 UI | Acquisition Review | Removed | Per Nutzerentscheidung aus PR entfernt und gelöscht |
+| F-12 UI | Acquisition Review | Verified removed | Alter Section-Wert normalisiert auf Artists und löst keinen Acquisition-Request aus |
 
 
 ---
@@ -2824,3 +2807,177 @@ Die vier roten webui-Dateien unter `src/routes/artist-detail/` sind
 **vorbestehend** und keine Regression: sie scheitern an `localStorage` in dieser
 Node-Umgebung (`--localstorage-file` nicht gesetzt) und fallen mit exakt
 denselben 131 Fehlern aus, wenn man den Änderungssatz wegstasht.
+
+---
+
+## 48. Finaler Multi-Agent-Audit des Branch-HEADs (4. August 2026)
+
+### 48.1 Scope und Release-Entscheid
+
+Geprüft wurde `library-overhaul` auf `6c7066cbb9566118a20236bd9cb46d842589ebb2`
+gegen `library-v2-guide.md`, `library-v2-features.md` und den bisherigen
+Statusvertrag. Drei parallele Reviews untersuchten:
+
+1. Import, Auto-Import, Autolink, File-Operationen und Bootstrap;
+2. Automatic/Interactive Search, Quality Upgrades, History und native
+   Repair-Tools;
+3. React-UI, Shell/Redirects, API-Tool-Calls, Berechtigungen, Bulk-Aktionen und
+   Browser-Gates.
+
+**Release-Entscheid: nicht PR-/release-ready.** Der HEAD enthält einen
+reproduzierbaren Datenverlust-Blocker und einundzwanzig weitere offene Findings.
+Dieser Durchgang hat sie diagnostiziert und in
+[Issues §30](library-v2-issues.md#30-finaler-multi-agent-audit-des-branch-heads-4-august-2026)
+mit Korrekturverträgen festgehalten; Produktcode wurde in diesem Audit bewusst
+nicht verändert.
+
+Die 22 Findings sind Findings **am HEAD**, nicht 22 durch `library-overhaul`
+eingeführte Regressionen. Der Auftrag schloss ausdrücklich auch das bereits
+vorhandene Importverhalten ein; deshalb bleiben geerbte Probleme
+release-relevant, werden aber im Folgenden getrennt attribuiert.
+
+### 48.2 Verbindlicher Finding-Status
+
+| Herkunft im Import-Cluster | Findings | Einordnung |
+|---|---|---|
+| Branch-neue Library-V2-Integration | I02, I03 | Der neue V2-Autolink konsumiert den unveränderten Legacy-Importkontext falsch |
+| Aus `dev` geerbte gemeinsame Importpfade | I01, I04, I05, I06 | Root Causes bereits auf Basis `d0cb43db5` vorhanden; I04/I05 sind Auto Import, I06 ist Manual Import, I01 ist der gemeinsame File-Helper. Der Branch vergrößert bei I01/I04/I06 lediglich die V2-Downstream-Folgen |
+
+`core/auto_import_worker.py`, `core/imports/routes.py` und
+`core/imports/file_ops.py` sind zwischen Basis und HEAD byteidentisch. Die
+Herkunft der Search-, Tool- und UI-Findings steht jeweils im verlinkten
+Detail-Finding; die Tabelle hier bewertet weiterhin ihre Wirkung am HEAD.
+
+| ID | Priorität | Status | Auswirkung |
+|---|---|---|---|
+| [iss30-I01](library-v2-issues.md#iss30-i01) | **Blocker** | Offen — reproduziert | ENOSPC/Move-Fehler kann die bisherige gute Datei vor dem Replacement löschen |
+| [iss30-I02](library-v2-issues.md#iss30-i02) | Major | Offen — Real-SQLite-Repro | Der branch-neue V2-Autolink materialisiert Auto-Import-Tracks als künstliche Tracktitel-Alben |
+| [iss30-I03](library-v2-issues.md#iss30-i03) | Major | Offen — reproduziert | Der branch-neue V2-Autolink ignoriert den Legacy-Provider; IDs können im falschen Provider-Namensraum landen |
+| [iss30-I04](library-v2-issues.md#iss30-i04) | Major | Offen — reproduziert | Terminal abgelehnte Auto-Imports erscheinen als `completed` und werden nicht erneut verarbeitet |
+| [iss30-I05](library-v2-issues.md#iss30-i05) | Major | Offen — Real-SQLite-Repro | Approve/Approve All läuft zurück nach `pending_review`, ohne Import |
+| [iss30-I06](library-v2-issues.md#iss30-i06) | Major/Security | Offen — reproduziert | Manual Import akzeptiert beliebige absolute bzw. per Symlink entkommene Serverpfade |
+| [iss30-S01](library-v2-issues.md#iss30-s01) | Major | Offen — End-to-end-Pfad bestätigt | Automatic Search findet Upgrades, der Import ersetzt aber nicht anhand der realen Qualitätsverbesserung |
+| [iss30-S02](library-v2-issues.md#iss30-s02) | Major | Offen — Produktionspfad bestätigt | Track-Interactive-Search kann ein komplettes Album an eine Track-ID binden |
+| [iss30-S03](library-v2-issues.md#iss30-s03) | Medium | Offen — API/UI-Vertrag bestätigt | Ein bereits laufender scoped Search-Job (409) wird als Fehler statt als Attach behandelt |
+| [iss30-S04](library-v2-issues.md#iss30-s04) | Medium | Offen — Resolverpfade bestätigt | Upgrade Review und Automatic Search können verschiedene effektive Profile bewerten |
+| [iss30-S05](library-v2-issues.md#iss30-s05) | Medium | Offen — Algorithmus bestätigt | Metadata Gap Filler wiederholt stets die ersten 500 Subjects; spätere Tracks verhungern |
+| [iss30-S06](library-v2-issues.md#iss30-s06) | Major/Lifecycle | Offen — isoliert reproduziert | Prowlarr belegt die Python-3.14.6-Shutdown-Lücke; statisch bleiben 55 Default-Executor-Call-Sites |
+| [iss30-U01](library-v2-issues.md#iss30-u01) | Major | Offen — Route bestätigt | Die als entfernt dokumentierte F-12-Import-Review ist per Deep Link voll mutierend erreichbar |
+| [iss30-U02](library-v2-issues.md#iss30-u02) | Major | Offen — Requestmodell bestätigt | Rich Bulk Edit kann teilweise committen und gleichzeitig Totalausfall/stale UI melden |
+| [iss30-U03](library-v2-issues.md#iss30-u03) | Major | Offen — Requestmodell bestätigt | Bulk-Bar invalidiert nach Teilerfolg nicht; erfolgreiche Writes bleiben unsichtbar |
+| [iss30-U04](library-v2-issues.md#iss30-u04) | Major | Offen — Komponenten-Audit | `can_write=false` deaktiviert den Großteil der Library-Mutationen nicht |
+| [iss30-U05](library-v2-issues.md#iss30-u05) | Medium | Offen — Pollingpfad bestätigt | Maintenance-Backendfehler erscheinen als grüner Null-Erfolg |
+| [iss30-U06](library-v2-issues.md#iss30-u06) | Medium | Offen — Komponenten-Audit | Duplicates/Files/Source/History rendern API-Fehler als valide Empty-States |
+| [iss30-U07](library-v2-issues.md#iss30-u07) | Medium/A11y | Offen — Komponenten-Audit | Dialoge besitzen keinen Focus-Trap, Escape- oder Focus-Restore-Vertrag |
+| [iss30-U08](library-v2-issues.md#iss30-u08) | Test-Gate | Offen — Specs geprüft | Playwright erwartet entfernte Tabs, Buttons und die alte Artist-Detail-Route |
+| [iss30-U09](library-v2-issues.md#iss30-u09) | Test-Gate | Offen — reproduziert | Format, ein TypeScript-Mock und Node-26-`localStorage` halten das vollständige WebUI-Gate rot |
+| [iss30-U10](library-v2-issues.md#iss30-u10) | Test-Gate | Offen — isoliert reproduziert | Python-Pin-Test verwechselt einen längeren Kommentar mit fehlendem Chat-Routing |
+
+### 48.3 Ergebnis entlang der angefragten Produktverträge
+
+| Vertrag | Ergebnis am HEAD |
+|---|---|
+| Import und Autolink | **Nicht freigabefähig:** V2-Integrationsfehler I02/I03 sowie die geerbten gemeinsamen Importfehler I01/I04–I06 sind am HEAD offen |
+| `/library-v2` und Search-Weiterleitungen | **Verifiziert:** Alias erhält Querystring; Library-Treffer gehen über `?artist=`, Provider-Treffer über den Stub nach `?discover=` |
+| Tool-Calls in der UI | **Teilweise korrekt:** Native Registry und Repair-Fix-Pipeline stimmen; Error-Truthfulness, Write-Gating und mehrere Pollingpfade nicht |
+| Automatic Search wie Lidarr | **Nur teilweise:** Upgrade-Scan läuft vor Wishlist-Verarbeitung und respektiert Profil/Cutoff bei der Queue-Bildung; der reale Import vergleicht bzw. ersetzt nicht zuverlässig nach besserer Qualität |
+| Interactive Search | **Teilweise:** Fan-out und Outcome-Polling stimmen; Album-Ergebnisse im Track-Dialog verletzen den Entity-Vertrag, Prowlarr gefährdet den Loop-/Prozess-Shutdown |
+| Search History / Pipeline History | **Library-V2-F-10 implementiert:** Feed und Korrelation sind vorhanden. Separat kann die geerbte Auto-Import-History abgelehnte Dateien fälschlich als abgeschlossen journalisieren (I04) |
+| Bulk Edits | **Nicht zuverlässig:** Teilerfolge sind nicht atomar und bleiben in zwei UI-Pfaden stale |
+| Metadata Gap Filler und angepasste Tools | **Teilweise:** Nativer Override aktiv, aber Gap-Filler ohne Fortschritt nach Subject 500 und mehrere Toolfehler werden verschluckt |
+| Read-only- und Fehler-UI | **Nicht erfüllt:** Mutationen bleiben aktiv; Backendfehler können als Erfolg oder leerer Datenbestand erscheinen |
+
+### 48.4 Verifikation am unveränderten Produktcode
+
+| Prüfung | Ergebnis |
+|---|---|
+| Relevante Backend-Suiten: `tests/library2 imports acquisition search repair repair_jobs wishlist watchlist quality` | **3.083 passed, 3 skipped** |
+| Import-/Pipeline-/Auto-Import-Fokus des Teilreviews | **318 passed**: 119 Import/Pipeline/Routes/Auto, 78 Autolink/Multi-file, 121 Importer/Bootstrap |
+| Vollständige Python-Suite, `--maxfail=1` | **6.853 passed, 3 skipped, 2 deselected**, dann iss30-U10; isoliert identischer False-Negative |
+| Vollständige Python-Suite ohne exakt iss30-U10 | Erreicht **67 %**, stoppt dann reproduzierbar in iss30-S06; 45-s-Faulthandler bestätigt `Runner.close`/Default-Executor |
+| Isolierter Prowlarr-Test / minimale Runtime-Probe | Test terminiert nach **15 s** nicht; `asyncio.run(asyncio.to_thread(lambda: []))` überschreitet **20 s** unter Python 3.14.6 |
+| Full Suite ohne U10 und die 31 Prowlarr-Hardening-Tests aus S06 | **12.675 passed, 3 skipped, 3 deselected**, 674 Warnungen in 644,21 s |
+| Aktuelle React-Routen: Library, Search, Shell und Artist-Detail-Redirect | **60 Dateien / 696 Tests passed** |
+| Vollständige Vitest-Suite | **1.978 passed, 131 failed** in vier Legacy-Artist-Detail-Dateien wegen undefiniertem Node-26-`localStorage` |
+| `npm run build` | **passed**; 1,56-MB-Hauptchunk mit Größenwarnung |
+| `npm run check` plus separater Typecheck | **failed**: drei Formatdateien; TS2322 im Library-Routen-Mock; Oxlint zusätzlich 298 Warnungen |
+| Playwright | **35 Tests in 7 Dateien kompilieren/listen**; kein Live-Lauf ohne Server auf `localhost:8008`, zudem iss30-U08-Stale-Specs |
+| Failure-Injection / Real-SQLite-Proofs | iss30-I01, I02, I03, I04, I05 und I06 reproduziert |
+| `git diff --check` | **passed** |
+
+Die 3.083 grünen Fachtests sind wertvolle Negativnachweise, widerlegen die
+gezielten Reproduktionen aber nicht: Die problematischen Failure-, Payload- und
+Partial-Success-Formen fehlen in der bisherigen Testsuite.
+
+### 48.5 Reihenfolge zum erneuten Schließen des Gates
+
+1. **P0:** iss30-I01 atomar und failure-safe korrigieren; erst danach weitere
+   Replacement-/Upgrade-Tests ausführen.
+2. **P1 Import:** I02–I06 mit gemeinsamen Import-Context-Helpern,
+   exactly-once Approval und serverseitigem Staging-Containment schließen.
+3. **P1 Search:** S01/S02 als echte Entity-/Quality-Verträge bis zum Import
+   transportieren; S06 ohne Loop-Default-Executor schließen; danach S03/S04
+   und Gap-Filler-Paging.
+4. **P1 UI:** U01 entfernen; Bulk-Partial-Success, `can_write` und ehrliche
+   Tool-/Maintenance-Fehler zentralisieren.
+5. **Gate:** U08–U10 reparieren, vollständige Python-/Vitest-/Typecheck-Gates
+   grün ausführen und die aktualisierte Playwright-Suite gegen eine reale
+   Testinstanz laufen lassen.
+
+---
+
+## 49. Remediation- und Übergabecheckpoint (4. August 2026)
+
+### 49.1 Gesicherte Commits
+
+| Commit | Inhalt | Verifikation |
+|---|---|---|
+| `3535e3d73` | U01–U10: entfernte Import-Review-UI, fail-closed Rechte, Bulk-Teilerfolge, ehrliche Tool-/Maintenance-Fehler, Dialoge, Search-/Artist-Redirects und aktuelle E2E-Verträge | 144 Vitest-Dateien / 2.066 Tests; Library 37 / 255; `npm run check`; Build; 25 Chat-Tests |
+| `56738ab80` | I02/I03 sowie S01/S04/S05: provider-sicherer Autolink, zentrale Upgrade-/Fallback-/Cutoff-Entscheidung, live effektive Profile und rotierendes 500er-Meta-Gap-Paging | 112 fokussierte Tests; Agent-Gate zusätzlich 33 angrenzende Tests |
+| `f20c7b5f3` | S06/U10 und Test-Runtime: getrennte Slow-/Control-Executors ohne Loop-Default-Executor, robuste Throttle-/Chat-/Node-26-Gates | 86 Executor-/Torrent-/Usenet-Tests plus Soulseek-Throttle |
+| `778c19cf3` | I01/I04–I06 und iss31 Upgrade-Härtung: atomare File-Ops, exactly-once Approval, Staging-Containment, serverseitiger Upgrade-Intent, Transform-before-compare, per-Track-Lock/CAS und Candidate-Kind-Bindung | 221 Security-/Pipeline-Tests; 781 Import-/Chat-Tests; 1 Import-UI-Test |
+
+Alle Commits liegen auf `library-overhaul`. Graphify wurde auf ausdrücklichen
+Wunsch nicht benutzt.
+
+### 49.2 Herkunft und Cherry-Pick-Grenze
+
+Auto Import, atomare File-Ops, Manual-Import-Containment, S06, U10 und der
+Node-26-Testfallback beheben aus `dev` geerbte Fehler; sie sind keine
+Library-V2-Features. `f20c7b5f3` ist als eigener Runtime-Commit isoliert.
+`778c19cf3` enthält wegen gemeinsamer `pipeline.py`-/`web_server.py`-Hunks
+sowohl diese Importfixes als auch Library-V2-Upgrade-Sicherheit. Der weiterhin
+geforderte Ein-Commit-Branch direkt von `dev` muss deshalb selektiv aufgebaut
+werden; `778c19cf3` darf nicht pauschal vor Library V2 cherry-gepickt werden.
+
+### 49.3 Aktueller Gate-Stand
+
+| Prüfung | Ergebnis |
+|---|---|
+| Vollständige WebUI-Vitest-Suite | **2.066 passed** |
+| Library-V2-Vitest | **255 passed** |
+| `npm run check` / `npm run build` | **passed**; nur bestehende Warnungen bzw. Chunk-Hinweis |
+| Playwright Discovery | **38 Tests in 7 Dateien**; kein Live-Browserlauf dokumentiert |
+| Autolink/Profile/Upgrade-Scan/Gap-Paging Fokus | **112 passed** |
+| Executor + Torrent-/Usenet-Adapter Fokus | **86 passed**; kein Loop-Default-Executor |
+| Import-/Chat-Suite | **781 passed** |
+| Upgrade-Intent/Pipeline/Candidate/Grab Fokus | **221 passed** |
+| Python Full Suite vor den letzten Backend-Änderungen | **12.736 passed, 5 failed, 3 skipped, 2 deselected** |
+
+Der Full-Suite-Lauf ist kein finales Gate: Er lief parallel zu späteren
+Änderungen. Ein Materialize-Test wurde durch den danach committed Autolink-Fix
+adressiert; drei Manual-Import-Tests verwenden Pfade außerhalb der nun
+erzwungenen Staging-Grenze; der Soulseek-Test sah noch den inzwischen entfernten
+10-ms-Polling-Helper. Alle fünf müssen im abschließenden Lauf neu bewertet und
+nicht einfach ausgeblendet werden.
+
+### 49.4 Verbleibende Reihenfolge für den nächsten Chat
+
+1. Qualifizierten Metadata-Provider durch `/api/download`,
+   `/api/download/matched`, Match-Suggestions und den Library-V2-Client bis in
+   den Importkontext propagieren. Der Autolink fällt bis dahin sicher auf Namen
+   zurück, kann bei Namensdrift aber legitime IDs verlieren.
+2. Den nicht-Library-V2-Block auf einem Branch direkt von `dev` als genau einen
+   dokumentierten Commit herstellen und auf `library-overhaul` wiederverwenden.
+3. Danach vollständige Python-Suite, vollständige WebUI-Gates, relevante
+   Playwright-Live-Flows und `git diff --check` erneut ausführen.

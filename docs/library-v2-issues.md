@@ -4889,3 +4889,498 @@ library-weite Fall läuft über das chunk-sichere `sql_util.select_existing_ids`
 `_owned_import`s scheinbar ungebundenes `owner` (gebunden bei
 `api/library_v2.py:996`), und `ReportedPathHealth.to_public_dict` redigiert
 korrekt.
+
+---
+
+## 30. Finaler Multi-Agent-Audit des Branch-HEADs (4. August 2026)
+
+Dieser Read-only-Durchgang prüfte den finalen Stand `6c7066cbb` gegen Guide,
+Featurevertrag und Statusdatei. Drei unabhängige Teilprüfungen deckten
+Import/Backend, Search/Upgrades/Repair sowie UI/Navigation/Tools ab. Die
+Diagnosen unten sind nach Root Cause getrennt; ihr aktueller
+Remediationstatus steht ausschließlich in
+[status.md §48](library-v2-status.md#48-finaler-multi-agent-audit-des-branch-heads-4-august-2026).
+
+**Herkunft ist nicht gleich Release-Relevanz:** Dieser Audit beschreibt den
+Zustand des Branch-HEADs, nicht automatisch durch den Branch eingeführte
+Regressionen. Der Vergleich mit der `dev`-Basis `d0cb43db5` zeigt:
+`core/auto_import_worker.py`, `core/imports/routes.py` und
+`core/imports/file_ops.py` sind byteidentisch. iss30-I01 sowie I04–I06 sind
+daher geerbte Baseline-Fehler. Branch-neu ist die Library-V2-Materialisierung
+über `core/library2/autolink.py`; nur iss30-I02/I03 sind in diesem Cluster
+Library-V2-Integrationsfehler. Bei I01/I04/I06 vergrößert der Branch allerdings
+die Downstream-Folgen; das ändert nicht die Herkunft ihrer Root Causes.
+
+### 30.1 Blocker
+
+#### <a name="iss30-i01"></a> iss30-I01 — Fehlgeschlagenes Replacement löscht die bisherige gute Datei
+
+**Ort:** `core/imports/file_ops.py:142-205`,
+`core/imports/pipeline.py:1583-1636,1671`
+
+**Herkunft:** geerbt, keine Library-V2-Regression. `file_ops.py` hat auf Basis
+und HEAD denselben Blob `725ab6c0d9`; der Branch erweitert lediglich die
+Replacement-/Katalogpfade, die auf diesen gemeinsamen Helper treffen.
+
+`safe_move_file` entfernt ein vorhandenes Ziel vor `os.replace`. Die Pipeline
+löscht dasselbe Ziel zusätzlich bereits bei Quality-Upgrade, Enhance, Force
+und dem Metadata-Fallback, obwohl der eigentliche Move erst deutlich später
+erfolgt. Eine ENOSPC-Failure-Injection reproduziert den Datenverlust:
+
+```text
+OSError: [Errno 28] No space
+source_exists=True destination_exists=False destination_bytes=LOST
+```
+
+Die neue Datei bleibt im Staging erhalten, die verifizierte Bibliotheksdatei
+ist jedoch bereits weg. Das widerspricht der Invariante in Guide §5, dass die
+alte Datei bis zum vollständig erfolgreichen Import erhalten bleibt.
+
+**Korrekturvertrag:** Kein Pre-Unlink. Same-FS direkt atomar ersetzen;
+Cross-FS in eine Geschwister-Tempdatei kopieren, flush/fsync ausführen und erst
+dann atomar veröffentlichen. Die Quelle wird ausschließlich nach erfolgreicher
+Publikation entfernt. Failure-Injection muss die alten Bytes unverändert
+nachweisen.
+
+### 30.2 Major — Import und Autolink
+
+#### <a name="iss30-i02"></a> iss30-I02 — V2-Autolink materialisiert Auto-Import-Tracks als falsche Alben
+
+**Ort:** `core/auto_import_worker.py:1870-1944`,
+`core/library2/autolink.py:553-595`
+
+**Herkunft:** Library-V2-Integrationsfehler. Der unveränderte Auto-Importer
+liefert seinen bisherigen Kontext; der branch-neue V2-Autolink konsumiert
+diesen Kontext falsch.
+
+Der Auto-Importer liefert das kanonische Album top-level als `spotify_album`;
+im Track steht nur die Album-ID. Autolink liest dagegen ausschließlich
+`track_info.album` und fällt bei dessen Fehlen auf den Tracktitel zurück. Der
+Real-SQLite-Repro erzeugte für „Song One“ ein Album „Song One“, keine
+Album-Provider-ID und **keine** Zeile für den wirklichen Albumtitel. Ein Album
+mit mehreren Tracks kann so in mehrere künstliche Single-Alben zerfallen.
+
+**Korrekturvertrag:** Den Kontext über die gemeinsamen Import-Helper
+normalisieren; das kanonische top-level Album und dessen qualifizierte IDs
+haben Vorrang. Ein Integrationstest führt zwei Tracks desselben Auto-Imports
+durch Pipeline und Autolink und erwartet genau ein Album.
+
+#### <a name="iss30-i03"></a> iss30-I03 — V2-Autolink verliert den kanonischen Auto-Import-Provider
+
+**Ort:** `core/auto_import_worker.py:1871-1876`,
+`core/imports/album.py:294-309`, `core/library2/autolink.py:61-91,612-653`
+
+**Herkunft:** Library-V2-Integrationsfehler. Der top-level Provider existierte
+bereits vor dem Branch; erst der neue Autolink ignoriert ihn und rät einen
+Namensraum.
+
+Importkontexte definieren `source` top-level als autoritativ. Autolink liest
+nur `track_info.provider`. Fehlt dieser Wert, klassifiziert die Shape-Heuristik
+alphanumerische IDs standardmäßig als Spotify. JioSaavn-, Qobuz- und ähnliche
+IDs können dadurch in `spotify_id` landen. Numerische Deezer-IDs fallen nur
+zufällig nicht in denselben Fehler.
+
+**Korrekturvertrag:** Provider über `get_import_source(context)` oder explizit
+qualifizierte Embedded-Tags bestimmen; unbekannte IDs nie erraten. Tests müssen
+JioSaavn, Qobuz und Deezer durch den echten Auto-/Manual-Album-Autolink führen.
+
+#### <a name="iss30-i04"></a> iss30-I04 — Terminal abgelehnte Auto-Imports werden als abgeschlossen gezählt
+
+**Ort:** `core/imports/pipeline.py:453-481`,
+`core/auto_import_worker.py:669-686,1954-1955,1991`,
+`web_server.py:41326-41330`
+
+**Herkunft:** geerbter Auto-Import-Fehler. Callback-Wiring, bedingungsloses
+`processed += 1` und `return processed > 0` stammen aus den April-/Mai-
+Commits und sind in der Branchbasis identisch vorhanden.
+
+Der Branch verschärft den vorhandenen Fehler: `1f2c4aa76` ergänzt eine weitere
+vom Worker ignorierte Rejection-Klasse, und die falsche grüne History kann nun
+zusätzlich von V2-Katalog und Acquisition-Status abweichen. Der Root Cause
+bleibt dennoch vorbestehend.
+
+Die gemeinsame Pipeline meldet Integrity-, AcoustID-, Silence-, Race- und
+Context-Rejections über Context-Flags und normale Rückkehr. Auto-Import erhöht
+nach jedem Callback trotzdem bedingungslos `processed`; bereits ein Callback
+macht den ganzen Kandidaten erfolgreich. Ein Repro mit
+`_acoustid_quarantined=True` lieferte `process_matches=True`, obwohl kein
+Finalpfad entstand und die Quelldatei liegen blieb. Die History zeigt dann
+`completed`, und der Folder-Hash wird nicht erneut verarbeitet.
+
+**Korrekturvertrag:** Nach jedem Callback `import_rejection_reason(context)`
+und den realen Finalpfad auswerten. Per-Track-Ergebnisse persistieren;
+`completed` erst setzen, wenn alle zugeordneten Dateien erfolgreich
+synchronisiert sind. Partial und Failed müssen unterscheidbar bleiben.
+
+#### <a name="iss30-i05"></a> iss30-I05 — „Approve“ und „Approve All“ führen nie zum Import
+
+**Ort:** `core/auto_import_worker.py:643-708,962-971,2130-2156`,
+`web_server.py:41478-41490`
+
+**Herkunft:** geerbter Auto-Import-Fehler. Sowohl `approve_item` als auch
+Approve-All und der erneute Confidence-Pfad existieren unverändert in der
+`dev`-Basis.
+
+Approval setzt nur die History-Zeile auf `approved`. Dadurch ist der Ordner
+beim nächsten Scan zwar wieder zulässig, läuft aber erneut durch dieselbe
+Confidence-Entscheidung und erzeugt wieder `pending_review`. Reproduziert wurde
+die Statusfolge `approved → pending_review`, ohne Pipeline-Callback.
+
+**Korrekturvertrag:** Approval als atomare, einmal konsumierbare Entscheidung
+am Folder-/Content-Hash speichern und beim Folgescan nur den
+Confidence-Grenzwert übersteuern; alle Safety-Gates bleiben aktiv. Approve,
+Approve All, Rejection nach Approval und Exactly-once-Konsum benötigen Tests.
+
+#### <a name="iss30-i06"></a> iss30-I06 — Manual Import vertraut beliebigen absoluten Client-Dateipfaden
+
+**Ort:** `core/imports/routes.py:517-546,610-657`,
+`web_server.py:41292-41316`
+
+**Herkunft:** geerbter Manual-Import-Fehler, nicht Auto Import und nicht
+Library V2. `routes.py` hat auf Basis und HEAD denselben Blob `1d87a2ddcc`.
+
+Album- und Single-Import prüfen nur `os.path.isfile(full_path)`. Ein
+manipulierter Request kann deshalb eine beliebige serverlesbare Audiodatei
+außerhalb des konfigurierten Stagings an Pipeline, Move, Retag und mögliche
+Löschpfade übergeben; Symlink-Escapes sind ebenfalls möglich. Der Repro rief
+die Pipeline erfolgreich mit `outside-library.flac` auf.
+
+**Korrekturvertrag:** Staging und Datei mit `Path.resolve(strict=True)`
+kanonisieren und Containment prüfen. Bevorzugt sendet der Client nur eine
+opaque Scan-ID; der Server löst sie gegen den aktuellen Scan neu auf. Tests:
+Outside-Root, `..`, Symlink-Escape und gefälschtes Match-Payload.
+
+### 30.3 Search, Upgrade-Semantik und Repair-Tools
+
+#### <a name="iss30-s01"></a> iss30-S01 — Automatic Search erkennt Upgrades, ersetzt aber nicht nach realer Qualität
+
+**Ort:** `core/library2/wishlist_mirror.py:96-176`,
+`core/downloads/task_worker.py:72-106`, `core/downloads/candidates.py:213-240`,
+`core/imports/guards.py:164-215`, `core/imports/pipeline.py:1576-1696`,
+`core/imports/file_ops.py:445-474`
+
+Der Upgrade-Scan bewertet die vorhandene Primärdatei korrekt genug, um einen
+Wishlist-Kandidaten zu erzeugen. Diese Entscheidung wird jedoch nicht als
+Replacement-Vertrag bis zum Import transportiert. Der Import prüft nur, ob
+die neue Datei irgendeinem Profilziel entspricht, und vergleicht bei gleichem
+Zielpfad anschließend ausschließlich grobe Extension-Tiers.
+
+Konkrete Folgen:
+
+- FLAC 16 Bit → FLAC 24 Bit und MP3 128 → MP3 320 gelten als gleiche Stufe und
+  werden verworfen;
+- MP3 → FLAC landet unter einem anderen Pfad, ohne die alte normale V2-Datei
+  sicher zu retiren;
+- ein Kandidat kann akzeptabel, aber nicht strikt besser als die vorhandene
+  Datei sein;
+- das Entfernen über `original_file_path` greift nur für den separaten
+  Enhance-Pfad.
+
+Damit ist die UI-Abfolge „Upgrade Scan → Wishlist Process“ zwar korrekt, die
+versprochene Lidarr-Semantik aber nicht end-to-end erfüllt.
+
+**Korrekturvertrag:** Eine zentrale serverseitige `UpgradeDecision` vergleicht
+beide realen `AudioQuality`-Werte mit effektivem Profil, Rangfolge und Cutoff.
+Sie trägt die alte konkrete Track-Datei als Replacement-Ziel bis zum
+verifizierten Import. Tests: FLAC16→24, MP3 128→320, MP3→FLAC,
+gleich/schlechter, Custom-Rangfolge, Quarantänefehler und exakt eine retirte
+Primärdatei.
+
+#### <a name="iss30-s02"></a> iss30-S02 — Track-Interactive-Search kann ein ganzes Album an einen Track binden
+
+**Ort:** `webui/src/routes/library/-ui/interactive-search.tsx:563-591,807-857`,
+`webui/src/routes/library/-library-v2.api.ts:2220-2227`,
+`web_server.py:7358-7455`, `core/library2/grab_context.py:92-109`,
+`core/library2/autolink.py:549-560,614-619`
+
+Der Track-Dialog zeigt Album-Ergebnisse mit aktivem Download-Button. Beim Grab
+sendet der Client alle Album-Tracks, der Server gibt jedem Eintrag jedoch
+denselben ausgewählten `lib2_track_id`-Kontext. Der Grab-Context überschreibt
+Titel, Nummer und Album mit dem Zieltrack; Autolink bindet jede fertige Datei
+direkt an diese eine Track-Zeile. Mehrere Dateien können sich damit gegenseitig
+überschreiben, überspringen oder falsch demselben Track zugeordnet werden.
+
+**Korrekturvertrag:** Bei gesetzter `lib2_track_id` Album-Ergebnisse
+serverseitig ablehnen und in der UI ausblenden. Alternativ darf der Server
+exakt einen stark gematchten Bundle-Eintrag extrahieren. Der aktuell tote
+`autoGrabBest`-Filter schützt den echten Interactive-Pfad nicht.
+
+#### <a name="iss30-s03"></a> iss30-S03 — Scoped Automatic Search zeigt einen laufenden Job als Fehler
+
+**Ort:** `api/library_v2.py:4597-4605`,
+`webui/src/routes/library/-library-v2.api.ts:1486-1512`,
+`webui/src/app/api-client.ts:24-33`,
+`webui/src/routes/library/-ui/library-v2-page.tsx:6674-6706`
+
+Der Server antwortet bei demselben bereits laufenden Scope korrekt mit 409
+und dessen `job_id`. Der globale Helper akzeptiert das mittels
+`throwHttpErrors:false`; der scoped Helper nicht. `ky` wirft deshalb vor dem
+Body-Parsing, und ein zweiter Tab oder Remount zeigt „Search failed“, obwohl
+der richtige Job weiterläuft.
+
+**Korrekturvertrag:** 200 und 409 als Attach-Vertrag behandeln und in beiden
+Fällen die `job_id` pollen. API- und UI-Test für den Duplicate-Start ergänzen.
+
+#### <a name="iss30-s04"></a> iss30-S04 — Upgrade-Review und Automatic Search können verschiedene Profile bewerten
+
+**Ort:** `core/library2/wishlist_mirror.py:298-338`,
+`core/repair_jobs/lib2_upgrade_scan.py:125-160`
+
+Automatic Search benutzt die effektiv projizierte Track→Album→Artist→Global-
+Vererbung. Der Review-Finding-Pfad joint dagegen direkt
+`t.quality_profile_id`. Bei Migration, Drift oder unvollständiger Projektion
+entstehen andere Cutoffs, übersprungene Findings oder falsche Profilnamen —
+gerade in den Reparaturfällen, für die Review existiert.
+
+**Korrekturvertrag:** Beide Modi müssen denselben Live-Resolver und Evaluator
+verwenden. Ein Paritätstest deckt jede Vererbungsstufe und absichtlich driftende
+Kompatibilitätsspalten ab.
+
+#### <a name="iss30-s05"></a> iss30-S05 — Metadata Gap Filler erreicht nach Track 500 dauerhaft nichts
+
+**Ort:** `core/repair_jobs/native_p3.py:485-526,607-615`
+
+Der aktive native Job schneidet die deterministisch sortierten Subjects mit
+`[:500]` ab. Es gibt weder Keyset-Paging noch einen rotierenden Cursor oder
+einen Ausschluss bereits offener Findings. Solange die ersten 500 Lücken nicht
+behoben werden, untersucht jeder Lauf dieselbe Menge; Track 501+ bleibt
+unsichtbar. `estimate_scope` deckelt ebenfalls auf 500 und verbirgt den Rest.
+
+**Korrekturvertrag:** Keyset-Paging über alle Subjects oder persistenter
+Cursor; alternativ bestehende aktive Findings aus der Arbeitsmenge entfernen.
+Ein Mehrfachlauf-Test mit mindestens 1.001 Subjects beweist Fortschritt.
+
+#### <a name="iss30-s06"></a> iss30-S06 — Prowlarr belegt eine noch 55-fach vorhandene Python-3.14-Default-Executor-Lücke
+
+**Ort:** `core/prowlarr_client.py:141-155,229-259`,
+`tests/test_prowlarr_search_hardening.py:135-168`; weitere Treffer in Tidal,
+Qobuz, HiFi, Deezer, YouTube, SoundCloud, Lidarr sowie Torrent-/Usenet-Clients
+(`rg "run_in_executor\\(None" core`: 55 Call-Sites insgesamt)
+
+`check_connection`, `get_indexers` und insbesondere `search` schicken ihre
+synchronen Requests über `loop.run_in_executor(None, ...)`. Genau diese
+Default-Executor-Klasse wurde für serverseitige Torrent-Fetches bereits in
+§25.4 entfernt: Unter der aktuellen Python-3.14.6-Runtime hängt
+`asyncio.run()` anschließend in `Runner.close()` /
+`shutdown_default_executor()`.
+
+Der Prowlarr-Pfad reproduziert das unabhängig von Netzwerk und Prowlarr: Der
+HTTP-Call ist auf eine sofort zurückkehrende Funktion gemockt, das Resultat ist
+fertig, aber der isolierte Test terminiert selbst nach 15 Sekunden nicht. Der
+Faulthandler zeigt den Besitzerloop in `asyncio.runners.Runner.close`. Selbst
+die minimale Runtime-Probe
+`asyncio.run(asyncio.to_thread(lambda: []))` überschreitet 20 Sekunden. Im
+Produktionspfad mit langlebigem gemeinsamem Loop kann der Request zuvor
+zurückkehren; jeder kurzlebige Besitzerloop sowie ein sauberer Loop-/Prozess-
+Shutdown bleiben jedoch gefährdet. Deshalb stoppt auch die Full Suite
+reproduzierbar bei 67 Prozent an diesem Test. Der statische Folgeaudit zeigt,
+dass Prowlarr nur der erste im Collection-Order erreichte Beweis ist, nicht der
+einzige verbliebene Default-Executor-Nutzer.
+
+**Korrekturvertrag:** Einen zentralen begrenzten Prozess-Executor-Helper nach
+dem Muster `_fetch_torrent_payload_async` bereitstellen und dessen
+`concurrent.futures.Future` aus dem Owner-Loop pollen, ohne dessen
+Default-Executor anzulegen. Zuerst müssen Prowlarr Connection, Indexer-Liste
+und Search denselben Helper verwenden; danach ist jeder der 55 Treffer zu
+migrieren oder mit einer begründeten Besitzerloop-Garantie zu schließen.
+Regressionstests prüfen pro Clientfamilie `loop._default_executor is None`,
+Erfolg, Timeoutfehler, Cancellation und sauberes `asyncio.run()`-Ende unter
+Python 3.14.
+
+### 30.4 UI, Rechte, Tool-Feedback und Browser-Gates
+
+#### <a name="iss30-u01"></a> iss30-U01 — Die laut F-12 entfernte Import-Review-UI ist mutierend erreichbar
+
+**Ort:** `webui/src/routes/library/-library-v2.types.ts:28-30`,
+`webui/src/routes/library/route.tsx:38-44`,
+`webui/src/routes/library/-ui/library-v2-page.tsx:3757-3761,4041-4345`,
+`webui/src/routes/library/-library-v2.api.ts:150-225`
+
+`/library?section=import-review` wird weiterhin validiert, prefetched und als
+vollständige View gerendert. Resolve, Rescan, Assignment und Resume mutieren
+Backendzustand. Ein Kommentar bestätigt, dass nur der sichtbare Tab entfernt,
+der Deep Link aber absichtlich behalten wurde. Das widerspricht Guide §1/§5,
+Features F-12 und dem bisherigen Status „Removed/Deleted“.
+
+**Korrekturvertrag:** Section, Loader-Branch, Render-Branch und aktive
+UI-Helfer entfernen. Ein negativer Routentest muss den alten Wert auf Artists
+normalisieren und **keinen** Acquisition-Request auslösen.
+
+#### <a name="iss30-u02"></a> iss30-U02 — Rich Bulk Edit kann teilweise committen und dennoch Totalausfall melden
+
+**Ort:** `webui/src/routes/library/-ui/library-v2-page.tsx:7909-7952`,
+`webui/src/routes/library/-library-v2.api.ts:1045-1061`,
+`api/library_v2.py:3791-3864`
+
+Das Modal startet je Track eine eigene Transaktion via fail-fast
+`Promise.all`. Bei 200/409-Mischung ist der erste Track dauerhaft geändert,
+aber der Catch invalidiert keine Queries und lässt Modal sowie Auswahl stale.
+Ein früher Reject setzt `busy=false`, während andere Requests noch laufen;
+ein Retry kann sich mit ihnen überlappen.
+
+**Korrekturvertrag:** Bevorzugt ein atomarer Batch-Endpunkt. Andernfalls alle
+Requests settlen lassen, immer passend invalidieren, Success-/Failure-IDs
+anzeigen und nur das Failed-Subset retryen.
+
+#### <a name="iss30-u03"></a> iss30-U03 — Bulk-Bar bleibt trotz `allSettled` nach Teilerfolg stale
+
+**Ort:** `webui/src/routes/library/-ui/library-v2-page.tsx:7730-7759,7769-7849`
+
+`fanOut` wartet inzwischen korrekt auf alle Requests, wirft bei Teilfehler aber
+anschließend. `run` invalidiert nur im Success-Zweig. Erfolgreiche Monitor-,
+Unmonitor-, ReplayGain- oder Quality-Profile-Writes sind daher committed,
+bleiben in der Tabelle jedoch unsichtbar. Die frühere C07-Remediation löste das
+Warten, nicht die Zustandswahrheit.
+
+**Korrekturvertrag:** Settled-Ergebnis statt Throw-only zurückgeben; bei jedem
+Teilerfolg invalidieren, Zahlen/IDs ausweisen und Failed-Subset retrybar halten.
+
+#### <a name="iss30-u04"></a> iss30-U04 — `can_write=false` erzeugt keine wirklich read-only Library
+
+**Ort:** `api/library_v2.py:250-270,349-361`,
+`webui/src/routes/library/-ui/library-v2-page.tsx:546-694,3704-3746,6805-6817,7762-7866,9044-9141,10303-10475`
+
+Nur `ActionButton` konsumiert den Write-Context. MonitorToggle,
+IconActionButton, Bulk-Aktionen, Inline-RG/Lyrics, Import und globale Search-
+Mutationen bleiben aktiv und produzieren für Nicht-Admins garantierte 403s.
+Schlägt `/enabled` fehl, fällt die Seite sogar optimistisch auf
+`canWrite=true` zurück.
+
+**Korrekturvertrag:** Jede Mutation bekommt einen zentralen `requiresWrite`-
+Gate und einen finalen Submit-Guard; View/History bleiben verfügbar. Ein
+Availability-Fehler ist explizit und niemals default-writable. UI-Test mit
+`can_write=false`: keine aktivierbare Mutation und kein POST.
+
+#### <a name="iss30-u05"></a> iss30-U05 — Maintenance-Fehler werden als grüner Null-Erfolg dargestellt
+
+**Ort:** `webui/src/routes/library/-ui/library-v2-page.tsx:2930-2979`,
+`webui/src/routes/library/-library-v2.types.ts:539-549`,
+`api/library_v2.py:3294-3298,3338-3342`
+
+Unmapped- und Wishlist-Reconcile behandeln jedes `running=false` als Erfolg,
+lesen ein fehlendes Resultat als Nullen und ignorieren `status.error`. Ein
+Backendfehler wie `database locked` erscheint dadurch als „done, 0“.
+
+**Korrekturvertrag:** Terminales `error` vor Result/Done auswerten, sichtbaren
+Retry anbieten und Query-Invalidierung nur nach echtem Erfolg auslösen.
+
+#### <a name="iss30-u06"></a> iss30-U06 — Mehrere Tools verwandeln API-Fehler in valide Empty-States
+
+**Ort:** `webui/src/routes/library/-ui/library-v2-page.tsx:3122-3181,3274-3329,10004-10013,10060-10097`
+
+Duplicates, Artist Files, Track Source Info und Pipeline History prüfen ihren
+Query-Fehler nicht. 500/Netzfehler erscheinen als „keine Duplikate“, „keine
+Dateien“, „keine Source-Daten“ oder verschwinden vollständig. Das verletzt die
+Error-Truthfulness-Invariante und kann einen beschädigten Katalog wie einen
+sauberen aussehen lassen.
+
+**Korrekturvertrag:** Eigener Error-/Retry-Zweig pro Tool; Empty-State erst
+nach erfolgreicher Response. Je ein 500- und Network-Failure-Test.
+
+#### <a name="iss30-u07"></a> iss30-U07 — Dialoge halten Tastaturfokus nicht im Modal
+
+**Ort:** `webui/src/routes/library/-ui/library-v2-page.tsx:732-770`,
+`webui/src/routes/library/-ui/interactive-search.tsx:658-665`
+
+Die Dialoge setzen zwar `role=dialog` und `aria-modal`, besitzen aber keinen
+initialen Fokus, Focus-Trap, Escape-Handler oder Focus-Restore. Tab erreicht
+den verdeckten Hintergrund; Escape schließt nicht. Die Interactive-Suche hat
+zusätzlich kein zugängliches Label am Suchfeld.
+
+**Korrekturvertrag:** Eine gemeinsame zugängliche Dialogkomponente mit
+Heading-ID, Initialfokus, Trap, Escape und Restore; Keyboard-Regressionstests.
+
+#### <a name="iss30-u08"></a> iss30-U08 — Playwright prüft entfernte Features und alte Routen
+
+**Ort:** `webui/tests/library-v2.phase-cd.spec.ts:74-108,145-159`,
+`webui/tests/pages/artist-detail.spec.ts:5-76`,
+`webui/tests/shell-routes.smoke.spec.ts:239-260`
+
+Die Browser-Suite erwartet den entfernten Playlists-Tab, alte Library-Buttons
+und ein verbleibendes Legacy-Artist-Detail-DOM. Der aktuelle Vertrag redirectet
+`/artist-detail/:source/:id` dagegen bewusst nach
+`/library?discover=...`, Library-eigene Artists nach `?artist=...`. Selbst mit
+laufendem Server können diese Tests die aktuelle V2 nicht abnehmen.
+
+**Korrekturvertrag:** Specs auf `?artist`/`?discover` und aktuelle Tool-Flows
+umschreiben; F-12-Negativtest und Non-Admin-Read-only-E2E ergänzen.
+
+#### <a name="iss30-u09"></a> iss30-U09 — Das vollständige WebUI-Gate ist am Branch-HEAD rot
+
+`npm run check` stoppt an Formatabweichungen in `bridge.ts`,
+`library-v2-page.tsx` und `-search.helpers.ts`. Der separat ausgeführte
+Typecheck meldet TS2322 in `src/routes/library/-route.test.tsx:119`. Die volle
+Vitest-Suite hat zusätzlich 131 kaskadierende Fehler in vier verbliebenen
+Legacy-Artist-Detail-Dateien, weil die aktuelle Node-Runtime ein vorhandenes,
+aber undefiniertes globales `localStorage` bereitstellt. Letzteres reproduziert
+laut früherem Audit identisch auf Upstream und ist kein Beleg für 131
+Produktregressionen; es macht das Gate trotzdem unbrauchbar.
+
+**Korrekturvertrag:** Format und Mock-Typ korrigieren; Test-Setup muss
+`globalThis.localStorage` unter Node 26 stabil installieren. Danach Full Suite
+und die aktualisierten Playwright-Specs gegen eine Testinstanz ausführen.
+
+#### <a name="iss30-u10"></a> iss30-U10 — Ein Legacy-Pin-Test koppelt Routing an ein 400-Zeichen-Fenster
+
+**Ort:** `tests/test_chat_page.py:38-42`, `webui/static/init.js:2939-2950`
+
+Der vollständige Python-Lauf stoppt reproduzierbar in
+`TestRouting.test_music_deeplink_and_loader`, obwohl `chat` tatsächlich Element
+von `_DEEPLINK_VALID_PAGES` ist und der Loader weiterhin `case 'chat'` samt
+`window.ChatPage.open()` enthält. Der Test betrachtet lediglich die ersten 400
+Zeichen nach dem Variablennamen. Der ausführlichere Library-V2-Alias-Kommentar
+schiebt den späteren Listeneintrag aus diesem Fenster; Produktionsrouting und
+die beiden übrigen Assertions sind intakt. Isoliert entsteht derselbe
+False-Negative.
+
+**Korrekturvertrag:** Den Set-Initializer syntaktisch bis `]);` abgrenzen oder
+das Modul über eine kleine exportierbare Routing-Funktion testen; niemals
+Quelltextposition bzw. Kommentar-Länge als Verhaltensvertrag verwenden. Dieser
+Testfehler ist kein Produktdefekt, hält aber das Full-Suite-Release-Gate rot.
+
+### 30.5 Geprüft und ohne neuen Befund
+
+- `/library-v2` redirectet mit vollständigem Querystring nach `/library`.
+- Search-Owned-Links benutzen `?artist=<v2-id>`; Provider-Treffer laufen über
+  den getesteten Artist-Detail-Stub nach `?discover=<source>:<id>`, einschließlich
+  numerischer Namen und IDs mit Slash.
+- Shell-Ankerinterception erhält Query und Hash und respektiert Permissions.
+- Global Automatic Search orchestriert Upgrade-Scan vor Wishlist-Verarbeitung;
+  iss30-S01 liegt **nach** dieser korrekten Orchestrierung im
+  Qualitäts-/Replacement-Vertrag.
+- Interactive-Search-Fan-out, Source-Teilfehler, Run-Sequenz und Outcome-Polling
+  sind außerhalb des Album-im-Track-Falls konsistent.
+- Der Registry-Override auf den nativen Metadata Gap Filler funktioniert;
+  Repair-Fixes laufen grundsätzlich durch Maintenance-Sync, Rescan,
+  Invalidation, Wanted und History.
+- Bootstrap erhält opaque Legacy-IDs, Resume-Run-ID und Watermark-Vertrag;
+  Credits, Editionen und Wanted werden neu projiziert. Direkte V2-IDs haben im
+  Autolink Vorrang vor heuristischem Matching.
+- `autoGrabBest` ist Runtime-Dead-Code (nur Definition und Unit-Test). Sein
+  Track-vs.-Album-Filter schützt daher keinen Produktionspfad.
+
+---
+
+## 31. Adversarialer Folgeaudit der Remediation (4. August 2026)
+
+Nach den ersten iss30-Fixes wurde der neue Upgrade-/Autolink-Vertrag erneut
+gegen manipulierte Requests, Parallelität und Transformfehler geprüft. Die
+Diagnosen und ihre abschließende Behandlung sind:
+
+| ID | Diagnose | Remediation |
+|---|---|---|
+| iss31-A01 | Client-`source_info` konnte eine fremde `lib2_track_id` als Upgrade-Ziel vortäuschen | `778c19cf3`: rekursive Sanitization an `/api/download` und `/api/download/matched`; nur ein serverseitiges, nicht JSON-serialisierbares Upgrade-Intent autorisiert Replacement |
+| iss31-A02 | Die Qualitätsentscheidung betrachtete die Rohdatei vor Downsample/Lossy-Transform | `778c19cf3`: Transform vor Vergleich; geprüft wird genau das später behaltene Artefakt mit einem live aufgelösten Profilsnapshot |
+| iss31-A03 | Zwei gleichzeitige Upgrades konnten dieselbe alte Primary vergleichen und nacheinander veröffentlichen | `778c19cf3`: per-Track-Serialisierung und CAS-Re-read unmittelbar vor Publish |
+| iss31-A04 | `fallback_enabled=false` war im zentralen Quality-Vertrag wirkungslos | `56738ab80`: strict fallback, unmatched/unmatched und same-rank Cross-Format zentral definiert und getestet |
+| iss31-A05 | Kompatibilitäts-Platzhalter konnten als echte Provider-ID dauerhaft persistiert werden | `56738ab80`: Sentinel-/`lib2-*`-Filter; unbekannte Namespaces matchen nicht quer durch fremde `external_ids` |
+| iss31-A06 | Reale Matched-Download-Payloads verlieren teilweise den Metadata-Provider | Sicherer Namensfallback ist aktiv; vollständige Provider-Propagation durch Legacy-Match-UI und beide Download-Endpunkte bleibt offen, siehe Status §49.4 |
+| iss31-A07 | Grab-Kontext las denormalisierte statt live effektiv vererbte Profile | `56738ab80`: gemeinsamer Resolver plus Profil-Provenienz |
+| iss31-A08 | Ein Album-Candidate-Token konnte als Track erneut gepostet werden | `778c19cf3`: Token bindet `result_kind`; serverseitige Revalidierung lehnt Kind-Spoofing ab |
+| iss31-A09 | Ein gemeinsamer Blocking-Pool konnte Download-Control hinter Provideraufrufen verhungern lassen | `f20c7b5f3`: getrennte begrenzte Slow-/Control-Pools; 86 Executor-/Adaptertests |
+| iss31-A10 | Unbegrenztes Entfernen des 500er-Caps hätte bei großen Libraries unbounded Providerlast erzeugt | `56738ab80`: persistenter, stabil sortierter 500er-Cursor; 1.001-Subject-Mehrfachlauftest |
+
+Restrisiko von A03: Der Lock ist pro Prozess. Der CAS-Check liegt direkt vor
+dem atomaren Publish und verkleinert das Cross-Process-TOCTOU-Fenster, ersetzt
+aber keinen datenbankweiten Publish-Lock. Dies ist im nächsten Architekturpass
+zu entscheiden, kein verschwiegenes „verified“.
