@@ -530,6 +530,26 @@ declare global {
     openRepairModal?: () => void;
     isJiosaavnExperimentalEnabled?: () => boolean;
     openWishlistFromHero?: () => void | Promise<void>;
+    /**
+     * P5 seams:
+     * - testDashboardConnection (settings.js) — the service cards' Test
+     *   buttons: overlay + POST + toast + status refresh, all vanilla
+     * - getActiveMetadataSource (core.js) — _lastStatusPayload's source with
+     *   the 'spotify' fallback; the metadata Test button's pre-payload target
+     * - switchSettingsTab (settings.js) — the chips' click-to-configure path
+     * - isBandcampExperimentalEnabled (shared-helpers.js) — chip filtering
+     * - _openRateModal (api-monitor.js) — the equalizer bars' detail modal;
+     *   appends to document.body and reads its own _rateMonitorState
+     * - _reduceEffectsActive/_maxPerfActive (init.js) — the performance
+     *   switches that suppress the equalizer's ember particles
+     */
+    testDashboardConnection?: (service: string) => void | Promise<void>;
+    getActiveMetadataSource?: () => string;
+    switchSettingsTab?: (tab: string) => void;
+    isBandcampExperimentalEnabled?: () => boolean;
+    _openRateModal?: (serviceKey: string) => void;
+    _reduceEffectsActive?: boolean;
+    _maxPerfActive?: boolean;
   }
 }
 

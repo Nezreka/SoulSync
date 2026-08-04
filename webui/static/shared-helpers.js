@@ -4016,6 +4016,13 @@ async function fetchAndUpdateServiceStatus() {
         // Cache for library status card
         _lastStatusPayload = data;
 
+        // Re-broadcast for the React dashboard (tools-seam rule: in the
+        // handler). The socket twin (handleServiceStatusUpdate) dispatches the
+        // same event; exactly one of the two runs at a time — this poller
+        // early-returns while the socket is connected — so React never sees
+        // duplicate frames.
+        window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
+
         if (typeof syncSpotifySettingsAuthState === 'function') {
             syncSpotifySettingsAuthState(data?.spotify || null);
         }

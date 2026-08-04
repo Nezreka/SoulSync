@@ -128,6 +128,27 @@ def test_react_subscribes_to_every_event() -> None:
 # module can reach).
 
 
+def test_service_status_poller_twin_dispatches() -> None:
+    """The five poll↔socket twin pairs have separate code paths. For
+    service-status, the HTTP poller (fetchAndUpdateServiceStatus, the app-wide
+    5s sidebar interval) must dispatch the SAME ss:service-status event the
+    socket handler does — it early-returns while the socket is connected, so
+    exactly one source fires at a time and React needs no poll of its own."""
+    body = _handler_body("shared-helpers.js", "fetchAndUpdateServiceStatus")
+    assert "CustomEvent('ss:service-status'" in body, (
+        "fetchAndUpdateServiceStatus lost its re-broadcast — with the socket "
+        "down the React service cards freeze"
+    )
+    # The socket twin keeps its own dispatch (pinned by CORE_HANDLERS above);
+    # nothing else may dispatch this event.
+    for name in ["core.js", "shared-helpers.js", "enrichment.js", "api-monitor.js"]:
+        count = (STATIC / name).read_text(encoding="utf-8").count(
+            "CustomEvent('ss:service-status'"
+        )
+        expected = 1 if name in ("core.js", "shared-helpers.js") else 0
+        assert count == expected, f"{name}: {count} ss:service-status dispatches, expected {expected}"
+
+
 def test_jiosaavn_bubble_writer_dispatches() -> None:
     body = _handler_body("settings.js", "syncJiosaavnEnrichmentBubble")
     assert "CustomEvent('ss:jiosaavn-experimental'" in body, (
