@@ -42,9 +42,30 @@ export function getShellContext(bridge = getShellBridge()): ShellContext | null 
   return { bridge, profile };
 }
 
+/** Detail routes need an entity id in the URL, so they are never a landing page. */
+const HOME_FALLBACK_EXCLUDED: ReadonlySet<ShellPageId> = new Set(['artist-detail', 'label-detail']);
+
 export function getProfileHomePath(bridge = getShellBridge()): `/${string}` {
   const pageId = bridge?.getProfileHomePage() ?? 'discover';
-  return getShellRouteByPageId(pageId)?.path ?? '/discover';
+  const isAllowed = (id: ShellPageId) => bridge?.isPageAllowed(id) ?? true;
+
+  // iss29-B10: every route guard redirects here when it denies access, so a
+  // home page the profile may not open hands the router straight back to the
+  // page that just refused it — that is an endless redirect, not a bounce. The
+  // vanilla shell has always checked this (`navigateToPage` in init.js); the
+  // React guards inherited the version that does not. Newly reachable because
+  // the legacy `library-v2` page id normalizes to `library`, so a profile whose
+  // home is the old id lands on a page its allowed_pages need not contain.
+  if (isAllowed(pageId)) {
+    return getShellRouteByPageId(pageId)?.path ?? '/discover';
+  }
+
+  const reachable = shellRouteManifest.find(
+    (route) => !HOME_FALLBACK_EXCLUDED.has(route.pageId) && isAllowed(route.pageId),
+  );
+  // `help` needs no permission in the shell's own gate, so it is the one path
+  // that stays truthful even for a profile allowed nothing else.
+  return reachable?.path ?? '/help';
 }
 
 export async function waitForShellContext(): Promise<ShellContext> {
@@ -120,6 +141,14 @@ export function bindWindowWebRouter(router: AnyRouter) {
       }
 
       await router.navigate({ href, replace: options?.replace === true });
+      return true;
+    },
+    async navigateToHref(href, options) {
+      // Only same-origin app paths; anything else belongs to the browser.
+      if (!href.startsWith('/') || href.startsWith('//')) return false;
+      const pageId = resolveShellPageFromPath(new URL(href, window.location.origin).pathname);
+      if (!pageId || getShellRouteByPageId(pageId)?.kind !== 'react') return false;
+      await router.navigate({ href: href as `/${string}`, replace: options?.replace === true });
       return true;
     },
   };

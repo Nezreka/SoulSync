@@ -92,6 +92,7 @@ def _runtime_with_post_process(post_process):
     ctx = {}
 
     return ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [tempfile.gettempdir()],
         get_single_track_import_context=lambda *a, **k: {"context": ctx, "source": "local"},
         normalize_import_context=lambda c: c,
         get_import_context_artist=lambda c: {"name": "Coldplay"},

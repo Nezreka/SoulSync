@@ -1,0 +1,21 @@
+        // Source info button (admin)
+        if (target.closest('.enhanced-source-info-btn')) {
+            e.stopPropagation();
+            showTrackSourceInfo(track, target.closest('.enhanced-source-info-btn'));
+            return;
+        }
+
+        // Re-identify button (admin) — #889
+        if (target.closest('.enhanced-reidentify-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            openReidentifyModal(track.id, track.title || 'Unknown', artistName,
+                                album.title || '', album.thumb_url || '');
+            return;
+        }
+
+        // Redownload button (admin)
+        if (target.closest('.enhanced-redownload-btn')) {
+            e.stopPropagation();
+            showTrackRedownloadModal(track, album);
+            return;

@@ -37,7 +37,8 @@ class TestNavAndPage:
 
 class TestRouting:
     def test_music_deeplink_and_loader(self):
-        assert "'chat'" in _INIT_JS.split("_DEEPLINK_VALID_PAGES")[1][:400]
+        deeplink_pages = _INIT_JS.split("_DEEPLINK_VALID_PAGES", 1)[1].split("]);", 1)[0]
+        assert "'chat'" in deeplink_pages
         assert "case 'chat':" in _INIT_JS
         assert "window.ChatPage.open()" in _INIT_JS
 

@@ -87,6 +87,72 @@ def test_fill_only_simple_download_tags_empty_input_short_circuits(monkeypatch):
     assert calls == []   # never even reads the file when there's nothing to fill
 
 
+def test_post_move_recovery_reconciles_real_destination_without_append_only_replay(
+    tmp_path, monkeypatch,
+):
+    """A failure after the move must not leave a physical DB orphan."""
+    destination = tmp_path / "Library" / "Artist" / "Track.flac"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"audio")
+    context = {"_final_processed_path": str(destination)}
+    calls = []
+
+    import core.acquisition.pipeline_callback as acquisition_callback
+    import core.library2.autolink as autolink
+
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda ctx, artist, album: calls.append(("legacy", artist, album)),
+    )
+    monkeypatch.setattr(
+        autolink,
+        "link_download_into_library_v2",
+        lambda ctx: calls.append(("lib2", ctx["_final_processed_path"])),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_pipeline_import_success",
+        lambda ctx: calls.append(("acquisition",)),
+    )
+    monkeypatch.setattr(
+        acquisition_callback,
+        "notify_manual_grab_import_success",
+        lambda ctx: calls.append(("correlated_grab",)),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        context,
+        {"name": "Artist"},
+        {"album_name": "Album"},
+    )
+
+    assert recovered is True
+    assert context["_post_move_recovered"] is True
+    assert calls == [
+        ("legacy", {"name": "Artist"}, {"album_name": "Album"}),
+        ("lib2", str(destination)),
+        ("acquisition",),
+        ("correlated_grab",),
+    ]
+
+
+def test_post_move_recovery_requires_a_real_destination(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "record_soulsync_library_entry",
+        lambda *args: calls.append(args),
+    )
+
+    recovered = import_pipeline._recover_moved_file_bookkeeping(
+        {"_final_processed_path": str(tmp_path / "missing.flac")},
+    )
+
+    assert recovered is False
+    assert calls == []
+
+
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     transfer_root = tmp_path / "Transfer"
     transfer_root.mkdir()
@@ -107,6 +173,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         "is_album_download": False,
         "task_id": task_id,
         "batch_id": batch_id,
+        "_skip_quarantine_check": "acoustid",
     }
 
     mark_calls = []
@@ -153,6 +220,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
+    check_events = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: check_events.append(event) or True,
+    )
 
     runtime_state.matched_downloads_context[context_key] = context
     runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
@@ -178,6 +251,14 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert scan_calls == ["Simple download completed"]
         assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
         assert activity_calls
+        acoustic = [
+            event for event in check_events if event["check"] == "acoustic_id"
+        ]
+        assert len(acoustic) == 1
+        assert acoustic[0]["status"] == "skipped"
+        assert acoustic[0]["reason_code"] == "user_override"
+        assert acoustic[0]["actor"] == "user"
+        assert context["_acoustid_result"] == "skip"
     finally:
         runtime_state.matched_downloads_context.clear()
         runtime_state.matched_downloads_context.update(original_matched_context)
@@ -344,6 +425,212 @@ def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_numbe
     return library_calls
 
 
+def test_replacement_move_failure_keeps_existing_library_file(tmp_path, monkeypatch):
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"new audio")
+    target_path = tmp_path / "Library" / "track.flac"
+    target_path.parent.mkdir()
+    target_path.write_bytes(b"known good audio")
+    _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=1, is_album_download=True,
+    )
+    monkeypatch.setattr(import_pipeline, "_replacement_length_is_safe", lambda *_args: True)
+
+    def fail_move(_src, _dst):
+        assert target_path.read_bytes() == b"known good audio"
+        raise OSError("injected move failure")
+
+    monkeypatch.setattr(import_pipeline, "safe_move_file", fail_move)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+    }
+    runtime = types.SimpleNamespace(
+        automation_engine=None, on_download_completed=None,
+        web_scan_manager=None, repair_worker=None,
+    )
+
+    import_pipeline.post_process_matched_download(
+        "replacement-failure", context, str(source_path), runtime,
+    )
+
+    assert source_path.read_bytes() == b"new audio"
+    assert target_path.read_bytes() == b"known good audio"
+    assert "injected move failure" in context["_context_failure_msg"]
+    assert context.get("_pipeline_import_succeeded") is not True
+
+
+class _UpgradeDatabase:
+    class _Connection:
+        def close(self):
+            pass
+
+    def _get_connection(self):
+        return self._Connection()
+
+
+def _wire_server_upgrade(monkeypatch, context, old_path, decision):
+    from core.imports.upgrade_intent import attach_upgrade_intent, issue_upgrade_intent
+
+    attach_upgrade_intent(
+        context, issue_upgrade_intent(decision.track_id, origin="test"))
+    snapshot = import_pipeline._UpgradeSnapshot(
+        track_id=decision.track_id,
+        primary_id=1,
+        primary_path=str(old_path),
+        primary_resolved_path=str(old_path),
+        profile={},
+        profile_fingerprint="profile",
+    )
+    monkeypatch.setattr(import_pipeline, "_load_upgrade_snapshot", lambda _track_id: snapshot)
+    monkeypatch.setattr(
+        import_pipeline, "_prepare_upgrade_artifact",
+        lambda path, _context, _profile: (path, []),
+    )
+    monkeypatch.setattr(import_pipeline, "_decide_snapshot_upgrade", lambda *_args: decision)
+    monkeypatch.setattr(import_pipeline, "_upgrade_snapshot_still_current", lambda _snapshot: True)
+
+
+def test_verified_cross_format_upgrade_retires_exactly_the_previous_file(
+    tmp_path, monkeypatch,
+):
+    from core.library2.quality_eval import UpgradeDecision
+
+    source_path = tmp_path / "incoming.flac"
+    source_path.write_bytes(b"new flac")
+    old_path = tmp_path / "Library" / "track.mp3"
+    old_path.parent.mkdir()
+    old_path.write_bytes(b"old mp3")
+    target_path = old_path.with_suffix(".flac")
+    _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=1, is_album_download=True)
+    monkeypatch.setattr(import_pipeline.time, "sleep", lambda _seconds: None)
+    decision = UpgradeDecision(
+        True, True, "upgrade", 9, profile_id=1,
+        existing_path=str(old_path), existing_resolved_path=str(old_path),
+    )
+
+    def move(src, dst):
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        import os
+        os.replace(src, dst)
+
+    monkeypatch.setattr(import_pipeline, "safe_move_file", move)
+    context = {
+        "track_info": {"source_info": {"upgrade_check": True, "lib2_track_id": 9}},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+        "_skip_quarantine_check": "acoustid",
+    }
+    _wire_server_upgrade(monkeypatch, context, old_path, decision)
+    runtime = types.SimpleNamespace(
+        automation_engine=None, on_download_completed=None,
+        web_scan_manager=None, repair_worker=None,
+    )
+
+    import_pipeline.post_process_matched_download(
+        "verified-upgrade", context, str(source_path), runtime)
+
+    assert target_path.read_bytes() == b"new flac"
+    assert not old_path.exists()
+    assert not source_path.exists()
+    assert context["_replaced_file_paths"] == [str(old_path)]
+
+
+def test_cross_format_upgrade_rolls_back_when_previous_file_cannot_be_retired(
+    tmp_path, monkeypatch,
+):
+    from core.library2.quality_eval import UpgradeDecision
+
+    source_path = tmp_path / "incoming.flac"
+    source_path.write_bytes(b"new flac")
+    old_path = tmp_path / "Library" / "track.mp3"
+    old_path.parent.mkdir()
+    old_path.write_bytes(b"old mp3")
+    target_path = old_path.with_suffix(".flac")
+    _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=1, is_album_download=True)
+    monkeypatch.setattr(import_pipeline.time, "sleep", lambda _seconds: None)
+    decision = UpgradeDecision(
+        True, True, "upgrade", 9, profile_id=1,
+        existing_path=str(old_path), existing_resolved_path=str(old_path),
+    )
+
+    import os
+    monkeypatch.setattr(import_pipeline, "safe_move_file", os.replace)
+    real_remove = os.remove
+
+    def fail_old_retirement(path):
+        if path == str(old_path):
+            raise OSError("library read-only")
+        real_remove(path)
+
+    monkeypatch.setattr(import_pipeline.os, "remove", fail_old_retirement)
+    context = {
+        "track_info": {"source_info": {"upgrade_check": True, "lib2_track_id": 9}},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+        "_skip_quarantine_check": "acoustid",
+    }
+    _wire_server_upgrade(monkeypatch, context, old_path, decision)
+    runtime = types.SimpleNamespace(
+        automation_engine=None, on_download_completed=None,
+        web_scan_manager=None, repair_worker=None,
+    )
+
+    import_pipeline.post_process_matched_download(
+        "rollback-upgrade", context, str(source_path), runtime)
+
+    assert old_path.read_bytes() == b"old mp3"
+    assert source_path.read_bytes() == b"new flac"
+    assert not target_path.exists()
+    assert "Could not retire previous upgrade file" in context["_context_failure_msg"]
+    assert context.get("_replaced_file_paths") is None
+
+
+def test_rejected_upgrade_keeps_old_and_incoming_when_quarantine_fails(
+    tmp_path, monkeypatch,
+):
+    from core.library2.quality_eval import UpgradeDecision
+
+    source_path = tmp_path / "incoming.mp3"
+    source_path.write_bytes(b"same quality")
+    old_path = tmp_path / "Library" / "track.mp3"
+    old_path.parent.mkdir()
+    old_path.write_bytes(b"known good")
+    _wire_post_process_common(
+        monkeypatch, tmp_path, old_path, track_number=1, is_album_download=True)
+    monkeypatch.setattr(import_pipeline.time, "sleep", lambda _seconds: None)
+    decision = UpgradeDecision(
+        True, False, "not strictly better", 9, profile_id=1,
+        existing_path=str(old_path), existing_resolved_path=str(old_path),
+    )
+    monkeypatch.setattr(
+        import_pipeline, "move_to_quarantine",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("quarantine offline")),
+    )
+    context = {
+        "track_info": {"source_info": {"upgrade_check": True, "lib2_track_id": 9}},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+        "_skip_quarantine_check": "acoustid",
+    }
+    _wire_server_upgrade(monkeypatch, context, old_path, decision)
+    runtime = types.SimpleNamespace(
+        automation_engine=None, on_download_completed=None,
+        web_scan_manager=None, repair_worker=None,
+    )
+
+    import_pipeline.post_process_matched_download(
+        "rejected-upgrade", context, str(source_path), runtime)
+
+    assert old_path.read_bytes() == b"known good"
+    assert source_path.read_bytes() == b"same quality"
+    assert context["_upgrade_rejected"] is True
+    assert "not strictly better" in context["_upgrade_failure_msg"]
+
+
 def test_scan_order_fallback_used_for_album_bundle_download(tmp_path, monkeypatch):
     """A genuine album-bundle download (files staged into one directory
     dedicated to this album) with no per-track number from any source
@@ -430,6 +717,12 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
                         lambda fp, ctx, reason, eng, trigger=None: triggers.append(trigger) or "/q/x.flac.quarantined")
     monkeypatch.setattr(import_pipeline, "_mark_task_quarantined", lambda *a, **k: None)
     monkeypatch.setattr(import_pipeline, "_requeue_quarantined_task_for_retry", lambda *a, **k: False)
+    journal = []
+    monkeypatch.setattr(
+        import_pipeline,
+        "_journal_pipeline_check",
+        lambda _context, **event: journal.append(event) or True,
+    )
 
     # Spy: AcoustID must NOT be constructed when quality already rejected.
     acoustid_constructed = []
@@ -448,6 +741,11 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
     assert triggers == ["quality"]            # quarantined for quality
     assert acoustid_constructed == []         # AcoustID never ran
     assert context.get("_audio_quality") == "FLAC 16bit/44.1kHz"  # recorded for the sidecar
+    assert [(event["check"], event["status"], event["reason_code"])
+            for event in journal] == [
+        ("quality", "failed", "quality_not_allowed"),
+        ("acoustic_id", "not_run", "blocked_by_quality"),
+    ]
 
 
 def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():

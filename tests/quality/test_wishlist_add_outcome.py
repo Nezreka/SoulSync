@@ -38,7 +38,9 @@ def test_first_add_reports_created(db):
     assert outcome["status"] == "created"
     assert outcome["created"] is True
     assert outcome["applied"] is True
-    assert outcome["track_id"] == "t-1"
+    # Composite key canonical from the first insert (P1-09) — see
+    # tests/wishlist/test_wishlist_idempotency.py for the full contract.
+    assert outcome["track_id"] == "t-1::alb-1"
 
 
 def test_authoritative_refresh_reports_updated_not_failure(db):
@@ -52,7 +54,7 @@ def test_authoritative_refresh_reports_updated_not_failure(db):
     assert outcome["status"] == "updated"
     assert outcome["applied"] is True, "a refreshed row is not a failure"
     assert outcome["created"] is False
-    assert db.get_wishlist_track("t-1")["quality_profile_id"] == profile_id
+    assert db.get_wishlist_track("t-1::alb-1")["quality_profile_id"] == profile_id
 
 
 def test_enhance_rerun_is_not_reported_as_failed(db):

@@ -117,12 +117,13 @@ def _build_deps(
 
 
 def _seed_task(task_id, *, status="pending", track_info=None, used_sources=None,
-               download_id=None):
+               download_id=None, profile_id=1):
     download_tasks[task_id] = {
         "status": status,
         "track_info": track_info or {},
         "used_sources": used_sources or set(),
         "download_id": download_id,
+        "profile_id": profile_id,
     }
 
 
@@ -143,6 +144,30 @@ def test_first_candidate_starts_download_and_returns_true():
     assert deps.download_orchestrator.download_calls == [("user1", "best.flac", 1000)]
     assert download_tasks["t1"]["download_id"] == "dl-1"
     assert "user1::best.flac" in matched_downloads_context
+
+
+def test_retry_context_preserves_exact_library_entity_from_track_info():
+    deps = _build_deps()
+    entity = {"track_id": 42, "album_id": 7, "quality_profile_id": 3}
+    _seed_task("t_lib2", track_info={
+        "name": "Song Title",
+        "artists": [{"name": "Artist Name"}],
+        "album": {"name": "Album Name"},
+        "lib2_entity": entity,
+        "_acquisition_import_id": "aim1-test",
+    })
+
+    result = dc.attempt_download_with_candidates(
+        "t_lib2",
+        [_Candidate(filename="retry.flac")],
+        _Track(),
+        deps=deps,
+    )
+
+    assert result is True
+    context = matched_downloads_context["user1::retry.flac"]
+    assert context["track_info"]["lib2_entity"] == entity
+    assert context["track_info"]["_acquisition_import_id"] == "aim1-test"
 
 
 def test_candidates_tried_in_confidence_order():
@@ -245,9 +270,16 @@ def test_active_download_id_skips_new_download():
     assert deps.download_orchestrator.download_calls == []
 
 
-def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
+def test_cancellation_after_download_starts_calls_cancel_and_lifecycle(monkeypatch):
     """If task is cancelled after download_id assigned, cancel_download fires + on_complete(False)."""
     completion_calls = []
+    acquisition_cancels = []
+    from core.acquisition import pipeline_callback
+    monkeypatch.setattr(
+        pipeline_callback,
+        "notify_correlated_grab_cancelled",
+        lambda download_id: acquisition_cancels.append(download_id),
+    )
     deps = _build_deps(on_complete=lambda batch_id, task_id, success=None: completion_calls.append((batch_id, task_id, success)))
     _seed_task("t7")
     candidates = [_Candidate()]
@@ -271,6 +303,7 @@ def test_cancellation_after_download_starts_calls_cancel_and_lifecycle():
     assert result is False
     # cancel_download was called for the in-flight transfer
     assert deps.download_orchestrator.cancel_calls
+    assert acquisition_cancels == ["dl-1"]
     # on_download_completed fired with success=False to free the worker slot
     assert completion_calls == [("b7", "t7", False)]
 
@@ -526,6 +559,235 @@ def test_no_skip_acoustid_flag_keeps_verification():
     assert result is True
     ctx = matched_downloads_context["user1::verify.flac"]
     assert "_skip_quarantine_check" not in ctx
+
+
+# ---------------------------------------------------------------------------
+# Scheduled acquisition correlation (roadmap 3 slice 2): a wishlist-worker
+# dispatch whose track_info rides lib2 mirror context correlates into the
+# acquisition contract and stamps the grab marker into the post-process
+# context. Strictly observational — a failing correlation must never touch
+# the download itself.
+# ---------------------------------------------------------------------------
+
+_LIB2_SOURCE_INFO = {
+    "source": "library_v2",
+    "lib2_track_id": 42,
+    "lib2_album_id": 7,
+    "quality_profile_id": 3,
+}
+
+
+def _capture_scheduled_correlation(monkeypatch, markers=None, order=None):
+    calls = []
+
+    def _fake(**kwargs):
+        if order is not None:
+            order.append("prepare")
+        calls.append(kwargs)
+        return markers
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(manual_grab, "try_prepare_scheduled_grab", _fake)
+    return calls
+
+
+def test_wishlist_lib2_dispatch_correlates_and_stamps_grab_marker(monkeypatch):
+    order = []
+    calls = _capture_scheduled_correlation(
+        monkeypatch,
+        markers={"download_id": "scheduled-x", "request_id": "arq1-x"},
+        order=order,
+    )
+
+    class _OrderedSoulseek(_FakeSoulseek):
+        async def download(self, username, filename, size):
+            order.append("dispatch")
+            return await super().download(username, filename, size)
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        "bind_correlated_grab_transfer",
+        lambda markers, transfer_id: order.append(
+            ("bind", markers["download_id"], transfer_id)),
+    )
+    deps = _build_deps(soulseek=_OrderedSoulseek())
+    _seed_task("t_wl", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+
+    result = dc.attempt_download_with_candidates(
+        "t_wl", [_Candidate(filename="wl.flac")], _Track(), batch_id="b_wl", deps=deps)
+
+    assert result is True
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"] == {
+        "track_id": 42, "album_id": 7, "quality_profile_id": 3}
+    assert calls[0]["task_id"] == "t_wl"
+    assert calls[0]["batch_id"] == "b_wl"
+    assert calls[0]["source"] == "soulseek"
+    assert calls[0]["search_result"]["filename"] == "wl.flac"
+    assert order == [
+        "prepare", "dispatch", ("bind", "scheduled-x", "dl-1")]
+    ctx = matched_downloads_context["user1::wl.flac"]
+    assert ctx["_acquisition_grab_download_id"] == "scheduled-x"
+    assert ctx["track_info"]["source_info"]["lib2_track_id"] == 42
+
+
+def test_wishlist_source_info_json_string_is_parsed(monkeypatch):
+    import json
+    calls = _capture_scheduled_correlation(
+        monkeypatch, markers={"download_id": "scheduled-y", "request_id": "arq1-y"})
+    deps = _build_deps()
+    _seed_task("t_wl_json", track_info={
+        "source_info": json.dumps(_LIB2_SOURCE_INFO)})
+
+    dc.attempt_download_with_candidates(
+        "t_wl_json", [_Candidate(filename="wlj.flac")], _Track(), deps=deps)
+
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"]["track_id"] == 42
+
+
+def test_native_acquisition_dispatch_is_not_double_correlated(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task("t_native", track_info={
+        "source_info": dict(_LIB2_SOURCE_INFO),
+        "_acquisition_import_id": "aim1-test",
+    })
+
+    dc.attempt_download_with_candidates(
+        "t_native", [_Candidate(filename="native.flac")], _Track(), deps=deps)
+
+    assert calls == []
+    assert "_acquisition_grab_download_id" not in (
+        matched_downloads_context["user1::native.flac"])
+
+
+def test_user_manual_pick_is_not_scheduled_correlated(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    deps = _build_deps()
+    _seed_task("t_pick", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+    download_tasks["t_pick"]["_user_manual_pick"] = True
+
+    dc.attempt_download_with_candidates(
+        "t_pick", [_Candidate(filename="pick.flac")], _Track(), deps=deps)
+
+    assert calls == []
+
+
+def test_wishlist_without_lib2_context_uses_legacy_shadow_correlation(monkeypatch):
+    calls = _capture_scheduled_correlation(
+        monkeypatch, markers={"download_id": "scheduled-shadow", "request_id": "arq1-z"})
+    deps = _build_deps()
+    _seed_task("t_pl", track_info={
+        "id": "spotify-track-123",
+        "name": "Song Title",
+        "artists": [{"name": "Artist Name"}],
+        "source_info": {"playlist_name": "My Playlist"},
+    })
+
+    dc.attempt_download_with_candidates(
+        "t_pl", [_Candidate(filename="pl.flac")], _Track(), deps=deps)
+
+    assert len(calls) == 1
+    assert calls[0]["lib2_context"] is None
+    assert calls[0]["target_context"]["id"] == "spotify-track-123"
+    assert matched_downloads_context[
+        "user1::pl.flac"]["_acquisition_grab_download_id"] == "scheduled-shadow"
+
+
+def test_nonadmin_wishlist_dispatch_stays_outside_admin_acquisition(monkeypatch):
+    calls = _capture_scheduled_correlation(monkeypatch)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, "correlation_enforcement_enabled", lambda: True)
+    deps = _build_deps()
+    _seed_task(
+        "t_other_profile",
+        profile_id=2,
+        track_info={"id": "spotify-track-123", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_other_profile", [_Candidate(filename="other.flac")], _Track(), deps=deps)
+
+    assert result is True
+    assert calls == []
+
+
+def test_enforcement_blocks_scheduled_dispatch_without_preparation(monkeypatch):
+    _capture_scheduled_correlation(monkeypatch, markers=None)
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab, "correlation_enforcement_enabled", lambda: True)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        "record_correlation_outcome_fail_open",
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
+    soulseek = _FakeSoulseek()
+    deps = _build_deps(soulseek=soulseek)
+    _seed_task(
+        "t_enforced",
+        track_info={"id": "spotify-track-e", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_enforced", [_Candidate(filename="enforced.flac")], _Track(), deps=deps)
+
+    assert result is False
+    assert soulseek.download_calls == []
+    assert outcomes == [("scheduled", "blocked")]
+
+
+def test_failed_correlation_never_blocks_the_download(monkeypatch):
+    def _boom(**kwargs):
+        raise RuntimeError("correlation exploded")
+
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(manual_grab, "try_prepare_scheduled_grab", _boom)
+    outcomes = []
+    from core.acquisition import correlation_coverage
+    monkeypatch.setattr(
+        correlation_coverage,
+        "record_correlation_outcome_fail_open",
+        lambda consumer, outcome: outcomes.append((consumer, outcome)),
+    )
+    deps = _build_deps()
+    _seed_task("t_boom", track_info={"source_info": dict(_LIB2_SOURCE_INFO)})
+
+    result = dc.attempt_download_with_candidates(
+        "t_boom", [_Candidate(filename="boom.flac")], _Track(), deps=deps)
+
+    assert result is True
+    ctx = matched_downloads_context["user1::boom.flac"]
+    assert "_acquisition_grab_download_id" not in ctx
+    assert outcomes == [("scheduled", "unprepared_dispatched")]
+
+
+def test_rejected_scheduled_dispatch_closes_prepared_correlation(monkeypatch):
+    markers = {"download_id": "scheduled-rejected", "request_id": "arq1-r"}
+    _capture_scheduled_correlation(monkeypatch, markers=markers)
+    failures = []
+    from core.acquisition import manual_grab
+    monkeypatch.setattr(
+        manual_grab,
+        "fail_prepared_correlated_grab",
+        lambda prepared, error: failures.append((prepared, error)),
+    )
+    deps = _build_deps(soulseek=_FakeSoulseek(download_id=None))
+    _seed_task(
+        "t_rejected",
+        track_info={"id": "spotify-track-r", "name": "Song Title"},
+    )
+
+    result = dc.attempt_download_with_candidates(
+        "t_rejected", [_Candidate(filename="rejected.flac")], _Track(), deps=deps)
+
+    assert result is False
+    assert failures == [(markers, "legacy client rejected the dispatch")]
 
 
 def test_equal_confidence_candidates_prefer_better_peer_quality():

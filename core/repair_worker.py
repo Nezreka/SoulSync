@@ -8,6 +8,7 @@ The worker is deactivated by default — the user must explicitly enable it.
 """
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -31,6 +32,11 @@ from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
+
+# dd28-30: how many in-scan mutations may sit unsynced before the Library-v2
+# bridge is drained. Small enough that a process death costs at most this many
+# rescans/history entries, large enough not to open a connection per file.
+_CHANGE_SYNC_BATCH = 25
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
@@ -132,6 +138,20 @@ def _resolve_file_path(file_path, transfer_folder, download_folder=None,
     )
 
 
+def _lib2_id(entity_id) -> Optional[int]:
+    """Native Library-v2 finding subjects use ``lib2:<row_id>`` entity ids so
+    they can never collide with legacy integer ids. Returns the row id, or
+    None for legacy subjects."""
+    text = str(entity_id or '')
+    if not text.startswith('lib2:'):
+        return None
+    try:
+        value = int(text.split(':', 1)[1])
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -178,6 +198,9 @@ class RepairWorker:
         # Forced job queue (for "Run Now" button — processed by main loop)
         self._force_run_queue: List[str] = []
         self._force_run_lock = threading.Lock()
+        # Optional per-run scope for user-triggered runs (job_id -> scope dict,
+        # e.g. {'artist_name': ...}); consumed by _run_job, never persisted.
+        self._force_run_scopes: Dict[str, dict] = {}
 
         # Automation-engine emit hook (set by web_server to engine.emit).
         # Fire-and-forget: repair events power the 'Maintenance Finding
@@ -232,6 +255,82 @@ class RepairWorker:
         # Load master enabled state
         if config_manager:
             self.enabled = config_manager.get('repair.master_enabled', True)
+            self._migrate_legacy_job_configs(config_manager)
+
+    @staticmethod
+    def _merge_migrated_configs(configs: List[dict], existing: Optional[dict],
+                                *, force_review: bool = False) -> dict:
+        """Merge old job configs without silently weakening automation.
+
+        Activation is the union of the old jobs, the shortest positive
+        interval wins, and settings merge in the caller's stable priority
+        order. Explicit fields already stored under the new id always win.
+        """
+        valid = [dict(cfg) for cfg in configs if isinstance(cfg, dict)]
+        current = dict(existing) if isinstance(existing, dict) else {}
+        merged: dict = {}
+        if valid:
+            merged['enabled'] = any(bool(cfg.get('enabled', False)) for cfg in valid)
+            intervals = []
+            for cfg in valid:
+                try:
+                    value = float(cfg.get('interval_hours'))
+                    if value > 0:
+                        intervals.append(value)
+                except (TypeError, ValueError):
+                    pass
+            if intervals:
+                shortest = min(intervals)
+                merged['interval_hours'] = int(shortest) if shortest.is_integer() else shortest
+        settings: dict = {}
+        for cfg in valid:
+            if isinstance(cfg.get('settings'), dict):
+                settings.update(cfg['settings'])
+        if isinstance(current.get('settings'), dict):
+            settings.update(current['settings'])
+        if force_review and 'mode' not in (current.get('settings') or {}):
+            settings['mode'] = 'review'
+        if settings:
+            merged['settings'] = settings
+        for key in ('enabled', 'interval_hours'):
+            if key in current:
+                merged[key] = current[key]
+        return merged
+
+    def _migrate_legacy_job_configs(self, config_manager) -> None:
+        """Migrate stable pre-V2 repair identities once, without deleting them."""
+        quality_old = [
+            config_manager.get('repair.jobs.quality_upgrade', None),
+            config_manager.get('repair.jobs.quality_upgrade_scanner', None),
+        ]
+        quality_new = config_manager.get('repair.jobs.quality_upgrade_scan', None)
+        if any(isinstance(cfg, dict) for cfg in quality_old):
+            merged = self._merge_migrated_configs(
+                quality_old, quality_new, force_review=True)
+            config_manager.set('repair.jobs.quality_upgrade_scan', merged)
+
+        disc_old = config_manager.get('repair.jobs.discography_backfill', None)
+        disc_new = config_manager.get('repair.jobs.monitored_discography_refresh', None)
+        if isinstance(disc_old, dict):
+            # The old job was review-first. Preserve that contract explicitly;
+            # the native job's review mode creates album-level findings and
+            # only materializes/wishlists after approval.
+            merged = self._merge_migrated_configs(
+                [disc_old], disc_new, force_review=True)
+            settings = merged.setdefault('settings', {})
+            settings.setdefault('migration_source', 'discography_backfill')
+            config_manager.set('repair.jobs.monitored_discography_refresh', merged)
+
+        # P3 implementation-prefix renames are lossless one-to-one copies.
+        from core.repair_jobs import JOB_ID_MIGRATIONS
+        for old_id, new_id in JOB_ID_MIGRATIONS.items():
+            if old_id in {'quality_upgrade', 'quality_upgrade_scanner',
+                           'discography_backfill'}:
+                continue
+            old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+            new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
+            if new_cfg is None and isinstance(old_cfg, dict):
+                config_manager.set(f'repair.jobs.{new_id}', old_cfg)
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
@@ -408,6 +507,7 @@ class RepairWorker:
                 'description': job.description,
                 'help_text': job.help_text,
                 'icon': job.icon,
+                'library_v2_effects': sorted(job.library_v2_effects),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
                 'interval_hours': config['interval_hours'],
@@ -450,12 +550,42 @@ class RepairWorker:
         if self.running:
             logger.warning("Repair worker already running")
             return
+        self._prune_retired_job_findings()
         self.running = True
         self.should_stop = False
         self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Repair worker started")
+
+    def _prune_retired_job_findings(self):
+        """Drop pending findings of explicitly retired jobs (their function
+        moved to a native Library-v2 engine; the native scan regenerates
+        anything still relevant). Resolved/dismissed history is kept."""
+        try:
+            from core.repair_jobs import (
+                PRESERVED_RETIRED_FINDING_IDS,
+                RETIRED_JOB_IDS,
+            )
+            prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS
+            if not prune_ids:
+                return
+            conn = self.db._get_connection()
+            try:
+                marks = ','.join('?' for _ in prune_ids)
+                cursor = conn.execute(
+                    f"DELETE FROM repair_findings WHERE status = 'pending' "
+                    f"AND job_id IN ({marks})",
+                    tuple(sorted(prune_ids)),
+                )
+                if cursor.rowcount:
+                    logger.info("Pruned %d pending findings of retired jobs",
+                                cursor.rowcount)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Retired-findings prune skipped: %s", e)
 
     def stop(self):
         if not self.running:
@@ -731,11 +861,78 @@ class RepairWorker:
                 except Exception as e:
                     logger.debug("on_job_progress callback failed: %s", e)
 
+        # Per-run scope (user-triggered only; scheduled runs never carry one).
+        with self._force_run_lock:
+            run_scope = self._force_run_scopes.pop(job_id, None) if forced else None
+
         # Build context
+        reported_changes: List[dict] = []
+        seen_changes: set = set()
+        sync_errors = [0]
+
+        def _flush_reported_changes():
+            """Push buffered in-scan mutations into the Library-v2 bridge.
+
+            dd28-30: this used to run ONCE, after the whole scan. A large
+            auto-fix run (e.g. track numbers with dry_run False) had already
+            committed its file mutations and DB writes, so a process death
+            before the end lost the rescan, tag-cache/artwork invalidation and
+            history for the entire run — with no record that anything was
+            pending. ``fix_finding`` (the single-fix path) always got this
+            right. Flushing in batches bounds the loss to the current batch.
+            """
+            if not reported_changes:
+                return
+            batch = list(reported_changes)
+            reported_changes.clear()
+            try:
+                from core.library2.maintenance_sync import sync_repair_change
+
+                for change in batch:
+                    dedup_key = (
+                        change.get('finding_type'), change.get('action'),
+                        change.get('entity_type'), str(change.get('entity_id')),
+                        str(change.get('file_path')),
+                    )
+                    if dedup_key in seen_changes:
+                        continue
+                    seen_changes.add(dedup_key)
+                    sync_repair_change(
+                        self.db,
+                        self._config_manager,
+                        job_id=job_id,
+                        finding_type=change.get('finding_type'),
+                        action=change.get('action') or 'auto_fixed',
+                        entity_type=change.get('entity_type'),
+                        entity_id=change.get('entity_id'),
+                        file_path=change.get('file_path'),
+                        details=change.get('details'),
+                        result=change.get('result'),
+                    )
+            except Exception as e:
+                logger.error(
+                    "Library-v2 post-job sync failed for %s: %s", job_id, e,
+                    exc_info=True,
+                )
+                sync_errors[0] += 1
+
+        def _report_change(**change):
+            """Collect successful in-scan mutations for the post-job bridge.
+
+            Jobs report only after their own file/DB write succeeded, so the
+            buffer can be drained mid-scan without writing into a job's own
+            open transaction.
+            """
+            if isinstance(change, dict):
+                reported_changes.append(dict(change))
+                if len(reported_changes) >= _CHANGE_SYNC_BATCH:
+                    _flush_reported_changes()
+
         context = JobContext(
             db=self.db,
             transfer_folder=self.transfer_folder,
             config_manager=self._config_manager,
+            scope=run_scope,
             spotify_client=self.spotify_client,
             itunes_client=self.itunes_client,
             mb_client=self.mb_client,
@@ -747,6 +944,7 @@ class RepairWorker:
             is_paused=(lambda: False) if forced else (lambda: not self.enabled),
             update_progress=self._update_progress,
             report_progress=_report_progress,
+            report_change=_report_change,
         )
 
         start_time = time.time()
@@ -757,6 +955,12 @@ class RepairWorker:
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
+
+        # Optional Library-v2 interoperability pass. The callee repeats the
+        # strict feature gate; failures are counted because the underlying
+        # mutation succeeded but its Library-v2 view did not converge.
+        _flush_reported_changes()
+        result.errors += sync_errors[0]
 
         duration = time.time() - start_time
 
@@ -810,21 +1014,32 @@ class RepairWorker:
             remaining -= chunk
         return self._stop_event.is_set()
 
-    def run_job_now(self, job_id: str):
+    def run_job_now(self, job_id: str, scope: Optional[dict] = None):
         """Queue a job for immediate execution by the main worker loop.
 
         Uses a thread-safe queue instead of spawning a separate thread
         to avoid race conditions with the main loop's _run_job().
+
+        ``scope`` (e.g. ``{'artist_name': 'Drake'}``) narrows the run for jobs
+        that declare ``supports_artist_scope``; others ignore it and run
+        library-wide as always.
         """
+        from core.repair_jobs import JOB_ID_MIGRATIONS
+
+        job_id = JOB_ID_MIGRATIONS.get(job_id, job_id)
         self._ensure_jobs_loaded()
         if job_id not in self._jobs:
             logger.warning("Unknown job: %s", job_id)
-            return
+            return False
 
         with self._force_run_lock:
+            if scope:
+                self._force_run_scopes[job_id] = scope
             if job_id not in self._force_run_queue:
                 self._force_run_queue.append(job_id)
-                logger.info("Job %s queued for immediate run", job_id)
+                logger.info("Job %s queued for immediate run%s", job_id,
+                            f" (scope: {scope})" if scope else "")
+        return True
 
     def _update_progress(self, scanned: int, total: int):
         """Callback for jobs to report progress."""
@@ -857,17 +1072,71 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Dedup check: skip if same finding already exists (pending, resolved, OR dismissed)
-            cursor.execute("""
-                SELECT id FROM repair_findings
-                WHERE job_id = ? AND finding_type = ?
-                  AND status IN ('pending', 'resolved', 'dismissed')
-                  AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
-                LIMIT 1
-            """, (job_id, finding_type, entity_type, entity_id, file_path))
+            enriched_details = details or {}
+            try:
+                from core.library2.maintenance_sync import annotate_finding_details
 
-            if cursor.fetchone():
-                return False  # Already exists or was already fixed
+                enriched_details = annotate_finding_details(
+                    self.db,
+                    self._config_manager,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    file_path=file_path,
+                    details=enriched_details,
+                )
+            except Exception as e:
+                # Finding creation remains fail-open: a bridge problem must not
+                # hide the repair issue itself.
+                logger.debug("Library-v2 finding annotation skipped: %s", e)
+
+            fingerprint_payload = dict(enriched_details)
+            if file_path and os.path.isfile(file_path):
+                try:
+                    stat = os.stat(file_path)
+                    fingerprint_payload["_file_stat"] = {
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                    }
+                except OSError:
+                    pass
+            dedup_fingerprint = hashlib.sha256(
+                json.dumps(
+                    fingerprint_payload, sort_keys=True, separators=(',', ':'),
+                    default=str,
+                ).encode('utf-8')
+            ).hexdigest()
+            enriched_details = dict(enriched_details)
+            enriched_details["_dedup_fingerprint"] = dedup_fingerprint
+
+            # A file finding is keyed by its concrete path, not merely by its
+            # parent track: multiple active files for one track are independent
+            # repair subjects. Pending rows always suppress duplicates. A prior
+            # resolved/dismissed row suppresses only the same file/config
+            # fingerprint, so a replacement file or changed quality target can
+            # legitimately surface again.
+            if file_path is not None:
+                cursor.execute("""
+                    SELECT status, details_json FROM repair_findings
+                    WHERE job_id=? AND finding_type=?
+                      AND status IN ('pending','resolved','dismissed')
+                      AND file_path=?
+                """, (job_id, finding_type, file_path))
+            else:
+                cursor.execute("""
+                    SELECT status, details_json FROM repair_findings
+                    WHERE job_id=? AND finding_type=?
+                      AND status IN ('pending','resolved','dismissed')
+                      AND entity_type=? AND entity_id=? AND file_path IS NULL
+                """, (job_id, finding_type, entity_type, entity_id))
+            for previous in cursor.fetchall():
+                if previous["status"] == "pending":
+                    return False
+                try:
+                    old_details = json.loads(previous["details_json"] or "{}")
+                except (TypeError, ValueError):
+                    old_details = {}
+                if old_details.get("_dedup_fingerprint") == dedup_fingerprint:
+                    return False
 
             cursor.execute("""
                 INSERT INTO repair_findings
@@ -877,7 +1146,7 @@ class RepairWorker:
             """, (
                 job_id, finding_type, severity, entity_type, entity_id,
                 file_path, title, description,
-                json.dumps(details) if details else '{}'
+                json.dumps(enriched_details) if enriched_details else '{}'
             ))
             conn.commit()
             # getattr, not attribute access: tests build workers via __new__
@@ -1025,7 +1294,58 @@ class RepairWorker:
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
 
             if result.get('success'):
-                self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+                try:
+                    from core.library2.maintenance_sync import sync_repair_change
+
+                    result['library_v2_sync'] = sync_repair_change(
+                        self.db,
+                        self._config_manager,
+                        job_id=job_id,
+                        finding_type=finding_type,
+                        action=result.get('action', 'auto_fix'),
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        file_path=file_path,
+                        details=details,
+                        result=result,
+                    )
+                except Exception as sync_error:
+                    logger.error(
+                        "Finding %s applied but Library-v2 sync failed: %s",
+                        finding_id, sync_error, exc_info=True,
+                    )
+                    result['library_v2_sync'] = {
+                        'enabled': True,
+                        'reason': 'error',
+                        'error': str(sync_error),
+                    }
+                sync_state = result.get('library_v2_sync') or {}
+                if sync_state.get('reason') == 'error':
+                    # The physical mutation happened, but the catalogue is not
+                    # converged. Keep the finding as the durable retry anchor.
+                    result['success'] = False
+                    result['error'] = (
+                        'Repair applied, but Library V2 sync failed; finding '
+                        'left pending for retry'
+                    )
+                    result['retryable'] = True
+                else:
+                    # issues.md T-02: a repair that landed on disk but reached
+                    # no catalogue row is NOT a full success. It stays resolved
+                    # (some jobs legitimately have no lib2 subject, e.g. the
+                    # empty-folder cleaner), but the caller must be able to
+                    # tell "converged" from "file changed, catalogue untouched"
+                    # instead of reading a bare success and assuming both.
+                    if sync_state.get('converged') is False:
+                        result['library_v2_converged'] = False
+                        logger.warning(
+                            "Finding %s (%s/%s) applied without a Library-v2 "
+                            "subject (%s) — catalogue snapshots not refreshed",
+                            finding_id, job_id, finding_type,
+                            sync_state.get('reason'),
+                        )
+                    self.resolve_finding(
+                        finding_id, action=result.get('action', 'auto_fix'))
 
             return result
 
@@ -1052,28 +1372,24 @@ class RepairWorker:
             'missing_lyrics': self._fix_missing_lyrics,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
-            'empty_folder': self._fix_empty_folder,
             'expired_download': self._fix_expired_download,
+            'empty_folder': self._fix_empty_folder,
             'metadata_gap': self._fix_metadata_gap,
-            'duplicate_tracks': self._fix_duplicates,
-            'single_album_redundant': self._fix_single_album_redundant,
-            'mbid_mismatch': self._fix_mbid_mismatch,
-            'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
-            'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
-            'unknown_artist': self._fix_unknown_artist,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
-            'quality_upgrade': self._fix_quality_upgrade,
-            'missing_discography_track': self._fix_discography_backfill,
-            'library_retag': self._fix_library_retag,
+            'quality_below_cutoff': self._fix_quality_below_cutoff,
+            'quality_upgrade': self._fix_legacy_quality_upgrade,
+            'missing_discography_track': self._fix_legacy_discography_track,
+            'missing_discography_release': self._fix_discography_release,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
             'comma_artist_split': self._fix_comma_artist_split,
+            'stale_index_path': self._fix_stale_index_path,
         }
 
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
@@ -1084,6 +1400,36 @@ class RepairWorker:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
 
+    def _fix_stale_index_path(self, entity_type, entity_id, file_path, details):
+        """pathdrift25-01 — repoint one index row at the file it describes.
+
+        Index-only: the proposal named a file that is already on disk, so this
+        moves nothing. Ambiguous findings carry no proposal and stay
+        unfixable on purpose — the operator resolves those by renaming or by
+        re-running the scan, never by the worker guessing."""
+        file_id = _lib2_id(entity_id)
+        if file_id is None:
+            return {'success': False, 'error': 'Finding has no Library v2 file id'}
+        proposed = str((details or {}).get('proposed_path') or '').strip()
+        if not proposed:
+            return {'success': False,
+                    'error': 'Finding is ambiguous — no single file was proposed'}
+        from core.library2.path_drift import apply_path_drift_fix
+
+        result = apply_path_drift_fix(
+            self.db, file_id, proposed, config_manager=self._config_manager,
+        )
+        if result.get('success'):
+            logger.info("Stale index path repointed: file %s -> %s",
+                        file_id, result.get('path'))
+            return {
+                'success': True,
+                'action': 'path_repointed',
+                'message': f'Index now points at {os.path.basename(proposed)}',
+                'library_v2_path': result.get('path'),
+            }
+        return result
+
     def _fix_genre_cleanup(self, entity_type, entity_id, file_path, details):
         """#1057 — rewrite a stored genre list to only its whitelisted genres.
 
@@ -1093,15 +1439,23 @@ class RepairWorker:
         kept = details.get('kept_genres')
         if not isinstance(kept, list):
             return {'success': False, 'error': 'Finding has no kept_genres list'}
-        table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+        # T-11: native findings name a lib2 row. The native columns are
+        # NOT NULL DEFAULT '[]', so "no genres left" is an empty list there,
+        # not the legacy NULL.
+        native_id = _lib2_id(entity_id)
+        if native_id is not None:
+            table = {'artist': 'lib2_artists', 'album': 'lib2_albums'}.get(entity_type)
+            row_id, value = native_id, json.dumps(kept)
+        else:
+            table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+            row_id, value = entity_id, (json.dumps(kept) if kept else None)
         if table is None:
             return {'success': False, 'error': f'Unsupported entity type: {entity_type}'}
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            value = json.dumps(kept) if kept else None
-            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, entity_id))  # noqa: S608 - table from fixed map
+            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, row_id))  # noqa: S608 - table from fixed map
             if cursor.rowcount == 0:
                 conn.commit()
                 return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
@@ -1143,13 +1497,28 @@ class RepairWorker:
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
 
+        native_id = _lib2_id(entity_id)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT file_path FROM tracks WHERE artist_id = ? "
-                "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
+            if native_id is not None:
+                # T-11: same "credited on the track OR primary on its album"
+                # boundary the native scan used to find the artist.
+                cursor.execute(
+                    "SELECT f.path FROM lib2_track_files f "
+                    "JOIN lib2_tracks t ON t.id = f.track_id "
+                    "LEFT JOIN lib2_albums al ON al.id = t.album_id "
+                    "WHERE COALESCE(f.file_state,'active')='active' "
+                    "  AND f.path IS NOT NULL AND f.path <> '' "
+                    "  AND (al.primary_artist_id = ? "
+                    "       OR EXISTS (SELECT 1 FROM lib2_track_artists ta "
+                    "                   WHERE ta.track_id = t.id AND ta.artist_id = ?))",
+                    (native_id, native_id))
+            else:
+                cursor.execute(
+                    "SELECT file_path FROM tracks WHERE artist_id = ? "
+                    "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
             files = [r[0] for r in cursor.fetchall()]
         except Exception as e:
             return {'success': False, 'error': str(e)}
@@ -1184,9 +1553,16 @@ class RepairWorker:
         fixed = stale = missing = errors = 0
 
         for fp in files:
-            resolved = resolve_library_file_path(
-                fp, transfer_folder=self.transfer_folder,
-                config_manager=self._config_manager)
+            if native_id is not None:
+                # Guide §5: every V2 file access goes through the lib2 resolver
+                # — the stored path can be the media-server view.
+                from core.library2.paths import resolve_lib2_path
+                resolved = fp if os.path.isfile(fp) else resolve_lib2_path(
+                    fp, config_manager=self._config_manager)
+            else:
+                resolved = resolve_library_file_path(
+                    fp, transfer_folder=self.transfer_folder,
+                    config_manager=self._config_manager)
             if not resolved or not os.path.exists(resolved):
                 missing += 1
                 continue
@@ -1307,165 +1683,171 @@ class RepairWorker:
             'message': f'Pinned {source} release {canonical_album_id} as canonical for "{label}"',
         }
 
-    def _fix_discography_backfill(self, entity_type, entity_id, file_path, details):
-        """Add missing discography track to wishlist."""
-        track_data = details.get('track_data')
-        if not track_data:
-            return {'success': False, 'error': 'No track data in finding'}
-        try:
-            success = self.db.add_to_wishlist(
-                spotify_track_data=track_data,
-                failure_reason='Discography backfill — missing from library',
-                source_type='repair',
-                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')}
-            )
-            track_name = track_data.get('name', '?')
-            if success:
-                return {'success': True, 'action': 'added_to_wishlist',
-                        'message': f"Added '{track_name}' to wishlist"}
-            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+    def _fix_expired_download(self, entity_type, entity_id, file_path, details):
+        """Apply an expired-origin finding through the cleaner's safe helper."""
+        from core.repair_jobs.expired_download_cleaner import delete_origin_download
 
-    def _track_identity_for_redownload(self, entity_id, details: dict) -> Optional[dict]:
-        """Resolve a library track's own identity into wishlist-ready spotify-
-        shaped track data, for findings that never pre-searched a replacement
-        (e.g. the Quality Check scanner — unlike the active Quality Upgrade
-        Finder, it only flags, it doesn't match). Mirrors the DB lookup
-        `_fix_dead_file`'s redownload flow uses, minus the DB-row deletion
-        (a quality-upgrade redownload keeps the low-quality file/row in place
-        until the replacement actually imports)."""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id,
-                       ar.name AS artist_name,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            track_name = row['title'] or details.get('expected_title', 'Unknown')
-            artist_name = row['artist_name'] or details.get('expected_artist', 'Unknown Artist')
-            album_title = row['album_title'] or details.get('album_title', '')
-            wishlist_id = (row['spotify_track_id'] or row['itunes_track_id']
-                           or row['deezer_id'] or f"redownload_{entity_id}")
-            album_images = []
-            album_thumb = row['album_thumb'] or details.get('album_thumb_url')
-            if album_thumb:
-                album_images = [{'url': album_thumb}]
-
+        entry = {
+            'id': details.get('history_id') or entity_id,
+            'file_path': details.get('file_path') or file_path,
+        }
+        if not entry['id']:
+            return {'success': False, 'error': 'No history id in finding'}
+        outcome = delete_origin_download(self.db, entry, self._config_manager)
+        if outcome.get('error'):
             return {
-                'id': wishlist_id,
-                'name': track_name,
-                'artists': [{'name': artist_name}],
-                'album': {
-                    'name': album_title or track_name,
-                    'id': row['spotify_album_id'] or '',
-                    'release_date': str(row['year']) if row['year'] else '',
-                    'images': album_images,
-                    'album_type': row['record_type'] or 'album',
-                    'total_tracks': row['track_count'] or 0,
-                    'artists': [{'name': artist_name}],
-                },
-                'duration_ms': row['duration'] or 0,
-                'track_number': row['track_number'] or 1,
-                'disc_number': 1,
-                'explicit': False,
-                'external_urls': {},
-                'popularity': 0,
-                'preview_url': None,
-                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
-                'is_local': False,
+                'success': False,
+                'action': 'deleted_expired',
+                'error': f"Could not delete file: {outcome['error']}",
             }
-        except Exception as e:
-            logger.warning("Track identity lookup failed for track %s: %s", entity_id, e)
-            return None
-        finally:
-            if conn:
-                conn.close()
+        verb = (
+            'deleted file + entry' if outcome.get('file_deleted')
+            else 'removed entry (file already gone)'
+        )
+        return {
+            'success': True,
+            'action': 'deleted_expired',
+            'message': f'Expired download — {verb}',
+        }
 
-    def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Apply a Quality Upgrade finding (user-approved; the old Quality
-        Scanner did this without review). Action via ``details['_fix_action']``:
-
-           'redownload' (default): add the matched higher-quality version to the
-               wishlist (with album context) for a profile-gated re-download.
-               The low-quality file stays in place — it's replaced only after the
-               better version actually imports (safe pattern; auto-delete-on-
-               import is handled separately). Findings from the flag-only
-               Quality Check scanner never carry a pre-searched match
-               (`matched_track_data`) — for those, the track's own identity is
-               resolved from the DB and re-queued so the normal search
-               pipeline finds the replacement.
-           'delete': remove the low-quality file + its DB row outright.
-           'ignore' is handled in the UI by dismissing the finding — never here.
-        """
-        fix_action = details.get('_fix_action', 'redownload')
-
-        if fix_action == 'delete':
-            if file_path:
-                resolved = _resolve_file_path(
-                    file_path, self.transfer_folder,
-                    config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        self._cleanup_empty_parents(resolved)
-                    except Exception as e:
-                        logger.warning("Could not delete low-quality file %s: %s",
-                                       resolved, e)
-            if entity_id:
-                try:
-                    conn = self.db._get_connection()
-                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-                    conn.commit()
-                    conn.close()
-                except Exception as e:
-                    return {'success': False, 'error': f'DB delete failed: {e}'}
-            return {'success': True, 'action': 'deleted_file',
-                    'message': f'Deleted low-quality file: '
-                               f'{os.path.basename(file_path or "")}'}
-
-        track_data = details.get('matched_track_data')
-        if not track_data and entity_id:
-            track_data = self._track_identity_for_redownload(entity_id, details)
+    def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
+        """Approve a preserved pre-V2 quality finding without deleting its file."""
+        track_data = details.get('matched_track_data') or details.get('track_data')
         if not track_data:
-            return {'success': False, 'error': 'No matched track in finding'}
+            return {
+                'success': False,
+                'error': 'Legacy quality finding has no reusable track payload; rerun the native review scan',
+            }
         try:
-            success = self.db.add_to_wishlist(
+            added = self.db.add_to_wishlist(
                 spotify_track_data=track_data,
-                failure_reason=f"Quality upgrade — current file is {details.get('current_format', 'low quality')}",
+                failure_reason='Quality upgrade (migrated review finding)',
                 source_type='repair',
                 source_info={
-                    'job': 'quality_upgrade',
+                    'job': 'quality_upgrade_scan',
+                    'legacy_job': details.get('job_id') or 'quality_upgrade',
                     'original_file_path': file_path,
-                    'original_format': details.get('current_format'),
-                    'original_bitrate': details.get('current_bitrate'),
-                    'album_title': details.get('album_title'),
-                    'quality_profile_id': details.get('quality_profile_id'),
-                    'quality_profile_name': details.get('quality_profile_name'),
-                    'match_confidence': details.get('match_confidence'),
-                    'provider': details.get('provider'),
                 },
                 quality_profile_id=details.get('quality_profile_id'),
             )
-            track_name = track_data.get('name', '?')
-            if success:
-                return {'success': True, 'action': 'added_to_wishlist',
-                        'message': f"Added '{track_name}' to wishlist for re-download"}
-            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist or be blocklisted)"}
+            if not added:
+                return {'success': False, 'error': 'Track is already queued or could not be added'}
+            return {'success': True, 'action': 'added_to_wishlist'}
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+
+    def _fix_legacy_discography_track(self, entity_type, entity_id, file_path, details):
+        """Approve a preserved pre-V2 discography finding."""
+        track_data = details.get('track_data')
+        if not track_data:
+            return {'success': False, 'error': 'Legacy discography finding has no track payload'}
+        try:
+            added = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason='Discography backfill (migrated review finding)',
+                source_type='repair',
+                source_info={
+                    'job': 'monitored_discography_refresh',
+                    'legacy_job': 'discography_backfill',
+                    'artist': details.get('artist_name', ''),
+                },
+            )
+            if not added:
+                return {'success': False, 'error': 'Track is already queued or could not be added'}
+            return {'success': True, 'action': 'added_to_wishlist'}
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+
+    def _fix_discography_release(self, entity_type, entity_id, file_path, details):
+        """Approve a native review-mode monitor-new-items release."""
+        album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
+        if album_id is None:
+            return {'success': False, 'error': 'Not a Library-v2 album finding'}
+        conn = self.db._get_connection()
+        try:
+            cursor = conn.execute(
+                """UPDATE lib2_albums
+                      SET monitored=1, tracklist_status='pending',
+                          tracklist_error=NULL, tracklist_retry_at=NULL,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+                (int(album_id),),
+            )
+            if cursor.rowcount == 0:
+                return {'success': False, 'error': 'Library-v2 album no longer exists'}
+            conn.commit()
+        finally:
+            conn.close()
+        try:
+            from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.discography import auto_monitor_releases
+            mirrored = auto_monitor_releases(
+                self.db, self._config_manager, [int(album_id)],
+                wishlist_profile_id=ADMIN_PROFILE_ID,
+            )
+            return {
+                'success': True,
+                'action': 'approved_new_release',
+                'mirrored_tracks': mirrored,
+            }
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+
+    def _fix_quality_below_cutoff(self, entity_type, entity_id, file_path, details):
+        """Approve a native quality-review finding: queue the upgrade search
+        for this one Library-v2 track — the per-track equivalent of the scan's
+        'automatic' mode."""
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is None:
+            return {'success': False, 'error': 'Not a Library-v2 track finding'}
+        conn = None
+        try:
+            from core.library2 import ADMIN_PROFILE_ID
+            from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
+
+            conn = self.db._get_connection()
+            queued = mirror_projected_tracks_wishlist(
+                self.db, conn, [native_track_id], profile_id=ADMIN_PROFILE_ID,
+            )
         except Exception as e:
+            logger.error("quality_below_cutoff fix failed for %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
+        finally:
+            if conn:
+                conn.close()
+        if queued:
+            return {'success': True, 'action': 'queued_upgrade',
+                    'message': 'Queued the upgrade search'}
+        return {'success': True, 'action': 'already_queued',
+                'message': 'Upgrade already queued (or no longer a candidate)'}
+
+    def _other_usable_lib2_files(self, track_id, excluded_path) -> list:
+        """Live file rows of a track other than the one being removed (dd28-32)."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                """SELECT id, path FROM lib2_track_files
+                    WHERE track_id=? AND path IS NOT NULL AND path <> ''
+                      AND COALESCE(file_state,'active')
+                          NOT IN ('missing_confirmed','deleted')""",
+                (int(track_id),),
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001 - never block the fix on this
+            logger.debug("multi-file check failed for track %s: %s", track_id, exc)
+            return []
+        finally:
+            if conn:
+                conn.close()
+        target = os.path.normcase(os.path.normpath(str(excluded_path or ''))) \
+            if excluded_path else ''
+        others = []
+        for row in rows:
+            stored = os.path.normcase(os.path.normpath(str(row['path'])))
+            if target and stored == target:
+                continue
+            others.append(row['id'])
+        return others
 
     def _fix_dead_file(self, entity_type, entity_id, file_path, details):
         """Fix a dead file reference. Action depends on details['_fix_action']:
@@ -1476,6 +1858,41 @@ class RepairWorker:
             return {'success': False, 'error': 'No track ID associated with this finding'}
 
         fix_action = details.get('_fix_action', 'redownload')
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            title = row.get('title') or details.get('title') or 'Unknown'
+            # dd28-32: 'remove' means "drop this dead FILE reference", but the
+            # repair_intent below unmonitors the whole TRACK with user
+            # provenance. With a second intact file (an MP3 next to a missing
+            # FLAC) that silently un-wanted a track the user still owns and
+            # still wants upgraded. ADR-03: a file-semantic finding is about a
+            # file — only the LAST file leaving makes it a track decision.
+            other_files = self._other_usable_lib2_files(
+                native_track_id, file_path or details.get('file_path'),
+            )
+            payload = {
+                'success': True,
+                'action': 'removed' if fix_action == 'remove' else 'redownload',
+                'message': (
+                    f'Removed missing file reference for "{title}"'
+                    if fix_action == 'remove'
+                    else f'Queued "{title}" for re-download'
+                ),
+                'library_v2_file_deleted': True,
+            }
+            if fix_action != 'remove':
+                payload['repair_intent'] = 'redownload'
+            elif not other_files:
+                payload['repair_intent'] = 'remove'
+            else:
+                payload['message'] = (
+                    f'Removed missing file reference for "{title}" — the track '
+                    f'keeps its other file and stays monitored'
+                )
+            return payload
 
         # Simple removal — just delete the dead track record
         if fix_action == 'remove':
@@ -1583,13 +2000,113 @@ class RepairWorker:
             conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
-                    'message': f'Added "{track_name}" to wishlist for re-download'}
+                    'message': f'Added "{track_name}" to wishlist for re-download',
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Dead file re-download failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
         finally:
             if conn:
                 conn.close()
+
+    def _load_lib2_redownload_row(self, native_track_id: int) -> Optional[Dict[str, Any]]:
+        """Load the redownload payload fields for a native Library-v2 track in
+        the same shape the legacy ``tracks`` SELECT produces, so the preview/
+        corrupt delete+rewishlist handlers work identically for both."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute("""
+                SELECT t.id, t.title, t.track_number, t.duration, t.isrc,
+                       t.spotify_id AS spotify_track_id,
+                       t.external_ids AS external_ids,
+                       ar.name AS artist_name,
+                       ar.spotify_id AS spotify_artist_id,
+                       al.title AS album_title,
+                       al.spotify_id AS spotify_album_id,
+                       al.album_type AS record_type,
+                       al.track_count, al.year,
+                       al.image_url AS album_thumb
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE t.id = ?
+            """, (native_track_id,)).fetchone()
+            if row is None:
+                return None
+            payload = dict(row)
+            external = {}
+            try:
+                parsed = json.loads(payload.pop('external_ids', None) or '{}')
+                if isinstance(parsed, dict):
+                    external = parsed
+            except (TypeError, ValueError):
+                pass
+            payload['itunes_track_id'] = external.get('itunes')
+            payload['deezer_id'] = external.get('deezer')
+            payload.setdefault('bitrate', None)
+            return payload
+        finally:
+            if conn:
+                conn.close()
+
+    def _remove_native_repair_file(self, file_path: str, details: dict) -> dict:
+        """Physically remove one reviewed native file; DB lifecycle follows
+        through ``sync_repair_change`` after this handler succeeds."""
+        target = file_path or details.get('original_path') or details.get('file_path')
+        if not target:
+            return {'success': True, 'deleted_file': False}
+        from core.library2.paths import (
+            missing_path_root_is_healthy, resolve_lib2_path,
+        )
+
+        resolved = target if os.path.isfile(target) else resolve_lib2_path(
+            target, config_manager=self._config_manager,
+        )
+        if not resolved or not os.path.exists(resolved):
+            # dd28-19: reporting success here made every caller announce
+            # ``library_v2_file_deleted: True``; ``sync_repair_change`` then set
+            # file_state='deleted' and flipped monitoring/wishlist. On an
+            # unmounted NAS or a path-mapping miss, confirming one of these
+            # findings therefore "deleted" a file that still exists on disk and
+            # queued a redownload of it. ``dead_file_cleaner`` guards against
+            # exactly this with a root-health check; the DELETING fixes did not.
+            if not missing_path_root_is_healthy(
+                resolved or target, self._config_manager,
+            ):
+                return {
+                    'success': False,
+                    'error': (
+                        'Storage for this file is not reachable right now — '
+                        'refusing to record it as deleted. Check the mount or '
+                        'path mapping and try again.'
+                    ),
+                }
+            return {'success': True, 'deleted_file': False}
+        # iss29-E04: only delete a RESOLVER-GUESSED path when it sits inside a
+        # configured library root. The suffix walk tries the transfer folder
+        # first and imports use the same Artist/Album layout, so a finding on a
+        # library file that has since moved could otherwise resolve onto a
+        # freshly downloaded replacement and destroy it.
+        from core.library2.file_delete import fuzzy_resolved_path_is_deletable
+
+        if not fuzzy_resolved_path_is_deletable(
+            target, resolved, self._config_manager,
+        ):
+            return {
+                'success': False,
+                'error': (
+                    'The file at the recorded path is gone and the only match '
+                    'found lies outside your library folders — refusing to '
+                    'delete it. Re-scan the library so the catalogue points at '
+                    'the real file.'
+                ),
+            }
+        try:
+            os.remove(resolved)
+            return {'success': True, 'deleted_file': True, 'resolved_path': resolved}
+        except OSError as exc:
+            return {'success': False, 'error': f'Could not delete file: {exc}'}
 
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
@@ -1598,22 +2115,45 @@ class RepairWorker:
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            removed = self._remove_native_repair_file(file_path, details)
+            if not removed.get('success'):
+                return removed
+            title = row.get('title') or details.get('title') or 'Unknown'
+            return {
+                'success': True,
+                'action': 'redownload',
+                'message': (
+                    f'Deleted preview clip and queued "{title}" for full download'
+                    if removed.get('deleted_file')
+                    else f'Queued "{title}" for full download (file already gone)'
+                ),
+                'library_v2_file_deleted': True,
+                'repair_intent': 'redownload',
+            }
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
+            if native_track_id is not None:
+                row = self._load_lib2_redownload_row(native_track_id)
+            else:
+                cursor.execute("""
+                    SELECT t.id, t.title, t.track_number, t.duration, t.bitrate,
+                           t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                           ar.name AS artist_name, ar.spotify_artist_id,
+                           al.title AS album_title, al.spotify_album_id,
+                           al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                    FROM tracks t
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE t.id = ?
+                """, (entity_id,))
+                row = cursor.fetchone()
             if not row:
                 return {'success': False, 'error': 'Track not found in database'}
 
@@ -1677,25 +2217,47 @@ class RepairWorker:
             deleted_file = False
             target_path = file_path or details.get('original_path')
             if target_path:
-                download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        deleted_file = True
-                    except Exception as e:
-                        logger.warning("Could not delete preview file %s: %s", resolved, e)
+                if native_track_id is not None:
+                    from core.library2.paths import resolve_lib2_path
+                    resolved = target_path if os.path.isfile(target_path) else (
+                        resolve_lib2_path(target_path, config_manager=self._config_manager))
+                else:
+                    download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+                    resolved = _resolve_file_path(target_path, self.transfer_folder,
+                                                  download_folder=download_folder,
+                                                  config_manager=self._config_manager)
+                from core.library2.file_delete import fuzzy_resolved_path_is_deletable
 
-            # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+                if resolved and os.path.exists(resolved):
+                    # iss29-E04: a guessed path must be inside a library root —
+                    # the resolver tries the transfer folder first, where fresh
+                    # downloads live under the same Artist/Album layout.
+                    if not fuzzy_resolved_path_is_deletable(
+                        target_path, resolved, self._config_manager,
+                    ):
+                        logger.warning(
+                            "Refusing to delete preview candidate outside the library "
+                            "roots: %s (recorded as %s)", resolved, target_path,
+                        )
+                    else:
+                        try:
+                            os.remove(resolved)
+                            deleted_file = True
+                        except Exception as e:
+                            logger.warning("Could not delete preview file %s: %s", resolved, e)
+
+            # Drop the legacy DB row so the track shows as missing. Native V2
+            # subjects have no legacy row; the maintenance bridge marks the V2
+            # file deleted and recomputes Wanted from the fix result instead.
+            if native_track_id is None:
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted preview clip and re-wishlisted "{track_name}" for full download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (preview file already gone)')}
+                                f'Re-wishlisted "{track_name}" (preview file already gone)'),
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Preview-clip fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -1711,22 +2273,45 @@ class RepairWorker:
         """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            row = self._load_lib2_redownload_row(native_track_id)
+            if not row:
+                return {'success': False, 'error': 'Track not found in Library v2'}
+            removed = self._remove_native_repair_file(file_path, details)
+            if not removed.get('success'):
+                return removed
+            title = row.get('title') or details.get('title') or 'Unknown'
+            return {
+                'success': True,
+                'action': 'redownload',
+                'message': (
+                    f'Deleted corrupt file and queued "{title}" for download'
+                    if removed.get('deleted_file')
+                    else f'Queued "{title}" for download (file already gone)'
+                ),
+                'library_v2_file_deleted': True,
+                'repair_intent': 'redownload',
+            }
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, t.track_number, t.duration,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
-                       ar.name AS artist_name, ar.spotify_artist_id,
-                       al.title AS album_title, al.spotify_album_id,
-                       al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.id = ?
-            """, (entity_id,))
-            row = cursor.fetchone()
+            if native_track_id is not None:
+                row = self._load_lib2_redownload_row(native_track_id)
+            else:
+                cursor.execute("""
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           t.spotify_track_id, t.itunes_track_id, t.deezer_id, t.isrc,
+                           ar.name AS artist_name, ar.spotify_artist_id,
+                           al.title AS album_title, al.spotify_album_id,
+                           al.record_type, al.track_count, al.year, al.thumb_url AS album_thumb
+                    FROM tracks t
+                    LEFT JOIN artists ar ON ar.id = t.artist_id
+                    LEFT JOIN albums al ON al.id = t.album_id
+                    WHERE t.id = ?
+                """, (entity_id,))
+                row = cursor.fetchone()
             if not row:
                 return {'success': False, 'error': 'Track not found in database'}
 
@@ -1788,10 +2373,15 @@ class RepairWorker:
             deleted_file = False
             target_path = file_path or details.get('original_path')
             if target_path:
-                download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-                resolved = _resolve_file_path(target_path, self.transfer_folder,
-                                              download_folder=download_folder,
-                                              config_manager=self._config_manager)
+                if native_track_id is not None:
+                    from core.library2.paths import resolve_lib2_path
+                    resolved = target_path if os.path.isfile(target_path) else (
+                        resolve_lib2_path(target_path, config_manager=self._config_manager))
+                else:
+                    download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+                    resolved = _resolve_file_path(target_path, self.transfer_folder,
+                                                  download_folder=download_folder,
+                                                  config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1799,14 +2389,18 @@ class RepairWorker:
                     except Exception as e:
                         logger.warning("Could not delete corrupt file %s: %s", resolved, e)
 
-            # Drop the DB row so the track shows as missing.
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
-            conn.commit()
+            # Drop the legacy DB row so the track shows as missing. Native V2
+            # subjects have no legacy row; the maintenance bridge marks the V2
+            # file deleted and recomputes Wanted from the fix result instead.
+            if native_track_id is None:
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                conn.commit()
 
             return {'success': True, 'action': 'added_to_wishlist',
                     'message': (f'Deleted corrupt file and re-wishlisted "{track_name}" for download'
                                 if deleted_file else
-                                f'Re-wishlisted "{track_name}" (corrupt file already gone)')}
+                                f'Re-wishlisted "{track_name}" (corrupt file already gone)'),
+                    'library_v2_file_deleted': True}
         except Exception as e:
             logger.error("Corrupt-file fix failed for track %s: %s", entity_id, e)
             return {'success': False, 'error': str(e)}
@@ -1898,14 +2492,12 @@ class RepairWorker:
         if correct_num is None:
             return {'success': False, 'error': 'No correct track number in finding details'}
 
-        # If we have an entity_id (track DB ID), update DB directly
-        if entity_id:
-            try:
-                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
-            except Exception as e:
-                logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
-
-        # Fix the file tag (the primary fix — works even without entity_id)
+        # iss29-E10: prove the file is reachable BEFORE touching the catalogue.
+        # The catalogue write used to be committed first and the file check ran
+        # afterwards, so on an unmounted root or a path-mapping miss the track
+        # was renumbered in both catalogues while the file on disk kept its old
+        # number — the two then disagreed permanently, with the finding left
+        # open against a track whose DB row already claims to be fixed.
         if not file_path:
             return {'success': False, 'error': 'No file path associated with this finding'}
 
@@ -1918,6 +2510,38 @@ class RepairWorker:
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
 
+        # If we have an entity_id (track DB ID), update DB directly
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            conn = self.db._get_connection()
+            try:
+                legacy = conn.execute(
+                    "SELECT legacy_track_id FROM lib2_tracks WHERE id=?",
+                    (native_track_id,),
+                ).fetchone()
+                cursor = conn.execute(
+                    "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?",
+                    (int(correct_num), native_track_id),
+                )
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                if legacy and legacy[0] is not None:
+                    conn.execute(
+                        "UPDATE tracks SET track_number=? WHERE id=?",
+                        (int(correct_num), legacy[0]),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        elif entity_id:
+            try:
+                self.db.update_track_fields(int(entity_id), {'track_number': int(correct_num)})
+            except Exception as e:
+                logger.debug("DB track number update failed for entity %s: %s", entity_id, e)
+
+        # Fix the file tag (the primary fix — works even without entity_id).
+        # `resolved` was established above, before the catalogue write.
         try:
             from core.repair_jobs.track_number_repair import (
                 _fix_track_number_tag,
@@ -1941,7 +2565,18 @@ class RepairWorker:
                     except Exception as e:
                         logger.debug("Failed to read total_tracks tag from file: %s", e)
                 total_tracks = int(total_tracks or 0)
-                _fix_track_number_tag(resolved, int(correct_num), total_tracks)
+                # iss29-E07: an aborted atomic save leaves the original
+                # untouched and the tags unwritten. Renaming on top of that
+                # produces a filename that contradicts the tag AND resolves the
+                # finding, so nothing ever revisits it.
+                if not _fix_track_number_tag(resolved, int(correct_num), total_tracks):
+                    return {
+                        'success': False,
+                        'error': (
+                            'Track number tag could not be written '
+                            f'({os.path.basename(resolved)}) — file left unchanged'
+                        ),
+                    }
 
             # #1075: per-disc numbering needs the disc tag written too — the
             # scan rode disc_ok/disc_number/total_discs in the finding, so
@@ -1950,8 +2585,18 @@ class RepairWorker:
             # the old behavior.
             if not details.get('disc_ok', True) and details.get('disc_number'):
                 from core.repair_jobs.track_number_repair import _fix_disc_number_tag
-                _fix_disc_number_tag(resolved, int(details['disc_number']),
-                                     int(details.get('total_discs') or 0))
+                # Same contract as the track tag above (iss29-E07): per-disc
+                # numbering is only enforceable when the disc tag actually
+                # landed, so a failed write must not reach the rename.
+                if not _fix_disc_number_tag(resolved, int(details['disc_number']),
+                                            int(details.get('total_discs') or 0)):
+                    return {
+                        'success': False,
+                        'error': (
+                            'Disc number tag could not be written '
+                            f'({os.path.basename(resolved)}) — file left unchanged'
+                        ),
+                    }
 
             # Rename to EXACTLY what the finding promised (#1009 — the old code
             # recomputed the prefix here and mangled 4-digit disc+track names:
@@ -1974,8 +2619,20 @@ class RepairWorker:
                         new_filename = candidate + ext
             new_path = None
             if new_filename:
-                new_path = _rename_to_basename(resolved, fname,
-                                               os.path.splitext(new_filename)[0])
+                # iss29-E08: a refused rename (destination occupied, source
+                # gone) must not be reported as a completed fix — that resolved
+                # the finding for a file still carrying the wrong name, and
+                # nothing would ever raise it again.
+                from core.repair_jobs.track_number_repair import rename_to_basename_result
+
+                new_path, rename_error = rename_to_basename_result(
+                    resolved, fname, os.path.splitext(new_filename)[0],
+                )
+                if rename_error:
+                    return {
+                        'success': False,
+                        'error': f'Could not rename {fname}: {rename_error}',
+                    }
 
             # Update DB file path if renamed
             if new_path:
@@ -1983,14 +2640,53 @@ class RepairWorker:
                 try:
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                                   (new_path, file_path))
-                    if cursor.rowcount == 0:
+                    if native_track_id is not None:
+                        file_id = ((details.get('library_v2') or {}).get('file_id')
+                                   or details.get('file_id'))
+                        if file_id:
+                            cursor.execute(
+                                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE id=?",
+                                (new_path, int(file_id)),
+                            )
+                        else:
+                            cursor.execute(
+                                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE track_id=? AND path IN (?,?)",
+                                (new_path, native_track_id, file_path, resolved),
+                            )
+                        legacy_ids = [row[0] for row in cursor.execute(
+                            """SELECT DISTINCT COALESCE(f.legacy_track_id, t.legacy_track_id)
+                                 FROM lib2_tracks t
+                            LEFT JOIN lib2_track_files f ON f.track_id=t.id
+                                WHERE t.id=?
+                                  AND COALESCE(f.legacy_track_id, t.legacy_track_id) IS NOT NULL""",
+                            (native_track_id,),
+                        ).fetchall()]
+                        for legacy_track_id in legacy_ids:
+                            cursor.execute(
+                                "UPDATE tracks SET file_path=? WHERE id=?",
+                                (new_path, legacy_track_id),
+                            )
+                    else:
                         cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                                       (new_path, resolved))
+                                       (new_path, file_path))
+                        if cursor.rowcount == 0:
+                            cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                                           (new_path, resolved))
                     conn.commit()
                 except Exception as e:
-                    logger.debug("Failed to update DB file_path after rename: %s", e)
+                    logger.error("Failed to update dual DB file_path after rename: %s", e)
+                    try:
+                        if new_path and os.path.exists(new_path) and not os.path.exists(resolved):
+                            os.replace(new_path, resolved)
+                    except OSError as rollback_error:
+                        logger.error("Could not roll back track-number rename: %s", rollback_error)
+                    return {
+                        'success': False,
+                        'error': f'Could not synchronize renamed file path: {e}',
+                        'retryable': True,
+                    }
                 finally:
                     if conn:
                         conn.close()
@@ -2012,10 +2708,17 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
-                (artist_url, album_id))
+            native_album_id = _lib2_id(album_id)
+            if native_album_id is not None:
+                cursor.execute(
+                    "UPDATE lib2_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)",
+                    (artist_url, native_album_id))
+            else:
+                cursor.execute(
+                    "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                    (artist_url, album_id))
             conn.commit()
             if cursor.rowcount == 0:
                 return {'success': False, 'error': 'Artist not found for this album'}
@@ -2062,31 +2765,58 @@ class RepairWorker:
         album_title = details.get('album_title')
         artist_name = details.get('artist')
         mbid = details.get('musicbrainz_release_id')
+        native_album_id = _lib2_id(album_id)
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                           (artwork_url, album_id))
-            conn.commit()
-            if cursor.rowcount == 0:
-                return {'success': False, 'error': 'Album not found in database'}
+            if native_album_id is not None:
+                if artwork_url:
+                    cursor.execute(
+                        "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (artwork_url, native_album_id))
+                    conn.commit()
+                    if cursor.rowcount == 0:
+                        return {'success': False, 'error': 'Album not found in database'}
+                cursor.execute("""
+                    SELECT al.title, ar.name, al.musicbrainz_id
+                    FROM lib2_albums al LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE al.id = ?
+                """, (native_album_id,))
+                meta_row = cursor.fetchone()
+                if meta_row:
+                    album_title = album_title or meta_row[0]
+                    artist_name = artist_name or meta_row[1]
+                    mbid = mbid or meta_row[2]
+                cursor.execute("""
+                    SELECT f.path FROM lib2_track_files f
+                    JOIN lib2_tracks t ON t.id = f.track_id
+                    WHERE t.album_id = ? AND f.path IS NOT NULL AND f.path != ''
+                      AND COALESCE(f.file_state,'active') = 'active'
+                """, (native_album_id,))
+                track_paths = [r[0] for r in cursor.fetchall()]
+            else:
+                cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                               (artwork_url, album_id))
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return {'success': False, 'error': 'Album not found in database'}
 
-            # Pull album metadata + local track paths so we can write art to disk.
-            cursor.execute("""
-                SELECT al.title, ar.name, al.musicbrainz_release_id
-                FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
-                WHERE al.id = ?
-            """, (album_id,))
-            meta_row = cursor.fetchone()
-            if meta_row:
-                album_title = album_title or meta_row[0]
-                artist_name = artist_name or meta_row[1]
-                mbid = mbid or meta_row[2]
-            cursor.execute("""
-                SELECT file_path FROM tracks
-                WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
-            """, (album_id,))
-            track_paths = [r[0] for r in cursor.fetchall()]
+                # Pull album metadata + local track paths so we can write art to disk.
+                cursor.execute("""
+                    SELECT al.title, ar.name, al.musicbrainz_release_id
+                    FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_id
+                    WHERE al.id = ?
+                """, (album_id,))
+                meta_row = cursor.fetchone()
+                if meta_row:
+                    album_title = album_title or meta_row[0]
+                    artist_name = artist_name or meta_row[1]
+                    mbid = mbid or meta_row[2]
+                cursor.execute("""
+                    SELECT file_path FROM tracks
+                    WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
+                """, (album_id,))
+                track_paths = [r[0] for r in cursor.fetchall()]
         finally:
             if conn:
                 conn.close()
@@ -2095,7 +2825,11 @@ class RepairWorker:
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
         resolved = []
         for p in track_paths:
-            rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
+            if native_album_id is not None:
+                from core.library2.paths import resolve_lib2_path
+                rp = resolve_lib2_path(p, config_manager=self._config_manager) or p
+            else:
+                rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
             if os.path.isfile(rp):
                 resolved.append(rp)
 
@@ -2123,8 +2857,31 @@ class RepairWorker:
         # apply_art_to_album_files, silently skipping the cover.jpg write while
         # embedding (which uses the resolved paths) still worked — Sokhi's
         # "embeds art but never writes cover.jpgs".
-        folder = os.path.dirname(resolved[0])
-        art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
+        # dd28-33: an album is not always one folder — CD1/CD2 and separate
+        # edition folders are ordinary. Writing only into the FIRST file's
+        # directory left every other folder permanently without a sidecar, and
+        # because the finding is per release group it never came back to say
+        # so. Group the resolved files by directory and write one sidecar per
+        # folder; embedding is per file either way.
+        by_folder: dict = {}
+        for path in resolved:
+            by_folder.setdefault(os.path.dirname(path), []).append(path)
+        art_result = {}
+        for folder, folder_files in sorted(by_folder.items()):
+            folder_result = apply_art_to_album_files(
+                folder_files, metadata, album_info, folder=folder,
+            )
+            if not art_result:
+                art_result = dict(folder_result)
+                continue
+            for key in ('embedded', 'skipped', 'failed'):
+                art_result[key] = art_result.get(key, 0) + folder_result.get(key, 0)
+            art_result['cover_written'] = (
+                art_result.get('cover_written') or folder_result.get('cover_written')
+            )
+            art_result['read_only_fs'] = (
+                art_result.get('read_only_fs') or folder_result.get('read_only_fs')
+            )
 
         embedded = art_result.get('embedded', 0)
         if art_result.get('read_only_fs'):
@@ -2172,15 +2929,54 @@ class RepairWorker:
             msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}
 
+    def _resolve_finding_path(self, entity_id, raw_path):
+        """Resolve a finding's stored path the same way its scan did.
+
+        Native (``lib2:<id>``) findings must resolve through ``resolve_lib2_path``
+        — the same resolver the Lyrics Filler/ReplayGain Filler scans use to
+        confirm a file exists — not the generic/legacy ``_resolve_file_path``.
+        The two can disagree (mount/container mapping), which is exactly what
+        produced a false "File not found on disk" for a file Library v2 could
+        still play (docs §79, LV2-LYRICS-01). Returns ``(resolved_path, native_track_id)``.
+        """
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            from core.library2.paths import resolve_lib2_path
+            resolved = resolve_lib2_path(raw_path, config_manager=self._config_manager) or raw_path
+        else:
+            download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+            resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                          config_manager=self._config_manager) or raw_path
+        return resolved, native_track_id
+
+    def _refresh_lib2_tag_cache(self, details, resolved_path):
+        """Re-read a native file's tags right after an apply that changed them,
+        so the tags/lyrics/ReplayGain badges reflect the write immediately
+        instead of waiting for the next Refresh & Scan (docs §79, LV2-LYRICS-01
+        acceptance criterion 3). ``details['library_v2']['file_id']`` is set by
+        ``subject_details()`` for native findings and by the legacy-finding
+        convergence sync — a finding without it is a no-op, not an error."""
+        file_id = (details.get('library_v2') or {}).get('file_id')
+        if not file_id:
+            return
+        try:
+            from core.library2.tag_cache import read_and_persist_tag_cache
+            conn = self.db._get_connection()
+            try:
+                read_and_persist_tag_cache(conn, int(file_id), resolved_path)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Failed to refresh lib2 tag cache for file %s: %s", file_id, e)
+
     def _fix_missing_lyrics(self, entity_type, entity_id, file_path, details):
         """Apply a missing-lyrics finding: fetch + write the .lrc sidecar and
         embed the lyrics, via the same LyricsClient the import pipeline uses."""
         raw_path = details.get('file_path') or file_path
         if not raw_path:
             return {'success': False, 'error': 'No file path in finding'}
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
-                                      config_manager=self._config_manager) or raw_path
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
@@ -2199,6 +2995,8 @@ class RepairWorker:
         if not ok:
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
 
     def _fix_missing_replaygain(self, entity_type, entity_id, file_path, details):
@@ -2207,9 +3005,7 @@ class RepairWorker:
         raw_path = details.get('file_path') or file_path
         if not raw_path:
             return {'success': False, 'error': 'No file path in finding'}
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
-                                      config_manager=self._config_manager) or raw_path
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
@@ -2226,6 +3022,8 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
         if not ok:
             return {'success': False, 'error': 'Could not write ReplayGain tags'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
 
@@ -2253,61 +3051,6 @@ class RepairWorker:
         return {'success': True, 'action': 'removed_empty_folder',
                 'message': f'Removed empty folder: {_name}'}
 
-    def _fix_expired_download(self, entity_type, entity_id, file_path, details):
-        """Apply an expired-download finding: delete the file + library row +
-        history entry, via the same helper the cleaner's auto mode uses."""
-        from core.repair_jobs.expired_download_cleaner import delete_origin_download
-        entry = {'id': details.get('history_id') or entity_id,
-                 'file_path': details.get('file_path') or file_path}
-        if not entry['id']:
-            return {'success': False, 'error': 'No history id in finding'}
-        res = delete_origin_download(self.db, entry, self._config_manager)
-        if res.get('error'):
-            return {'success': False, 'action': 'deleted_expired',
-                    'error': f"Could not delete file: {res['error']}"}
-        verb = 'deleted file + entry' if res.get('file_deleted') else 'removed entry (file already gone)'
-        return {'success': True, 'action': 'deleted_expired', 'message': f'Expired download — {verb}'}
-
-    def _fix_library_retag(self, entity_type, entity_id, file_path, details):
-        """Apply a library re-tag finding: write each track's planned tags in
-        place (core.tag_writer.write_tags_to_file) + optionally embed/refresh
-        cover art. Only ADDS/overwrites the planned fields — no moves/renames."""
-        tracks = details.get('tracks') or []
-        if not tracks:
-            return {'success': False, 'error': 'No tracks to re-tag in finding'}
-
-        # Resolve container/host path mismatches, then delegate to the shared
-        # apply path the job's auto-fix mode also uses.
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
-        resolved_plans = []
-        for t in tracks:
-            raw = t.get('file_path')
-            if not raw:
-                continue
-            rp = _resolve_file_path(raw, self.transfer_folder, download_folder,
-                                    config_manager=self._config_manager) or raw
-            plan = {'file_path': rp, 'db_data': t.get('db_data') or {}}
-            if t.get('full_meta'):
-                plan['full_meta'] = t['full_meta']
-            if t.get('lyrics_meta'):
-                plan['lyrics_meta'] = t['lyrics_meta']   # read-only lyrics query metadata
-            resolved_plans.append(plan)
-
-        from core.repair_jobs.library_retag import apply_track_plans
-        res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=(details.get('depth') == 'full'),
-                                lyrics_action=details.get('lyrics_action', False))
-
-        if res['written'] == 0 and not res['cover_written'] and not res.get('lyrics_written'):
-            return {'success': False,
-                    'error': 'Nothing could be written — files unreachable or read-only?'}
-        msg = f"Re-tagged {res['written']} track(s)"
-        if res['failed']:
-            msg += f" ({res['failed']} failed)"
-        if res['cover_written']:
-            msg += ' + refreshed cover.jpg'
-        return {'success': True, 'action': 'library_retag', 'message': msg, **res}
-
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
         found_fields = details.get('found_fields')
@@ -2315,6 +3058,39 @@ class RepairWorker:
             return {'success': False, 'error': 'No metadata fields found in finding details'}
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+
+        native_track_id = _lib2_id(entity_id)
+        if native_track_id is not None:
+            native_columns = {
+                'isrc': 'isrc',
+                'musicbrainz_recording_id': 'musicbrainz_id',
+                'spotify_track_id': 'spotify_id',
+                'bpm': 'bpm', 'tempo': 'bpm',
+                'explicit': 'explicit',
+                'style': 'style', 'mood': 'mood',
+            }
+            native_updates = {}
+            for key, value in found_fields.items():
+                column = native_columns.get(key.lower())
+                if column:
+                    native_updates[column] = value
+            if not native_updates:
+                return {'success': False, 'error': 'No applicable metadata fields to update'}
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                set_parts = [f"{column} = ?" for column in native_updates]
+                conn.execute(
+                    f"UPDATE lib2_tracks SET {', '.join(set_parts)}, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (*native_updates.values(), native_track_id),
+                )
+                conn.commit()
+            finally:
+                if conn:
+                    conn.close()
+            return {'success': True, 'action': 'applied_metadata',
+                    'message': f'Applied metadata: {", ".join(native_updates)}'}
 
         # Map found_fields to DB-updatable fields
         field_map = {
@@ -2362,208 +3138,6 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def _fix_duplicates(self, entity_type, entity_id, file_path, details):
-        """Keep the selected or best quality duplicate and remove the rest from the database."""
-        tracks = details.get('tracks', [])
-        if len(tracks) < 2:
-            return {'success': False, 'error': 'Not enough duplicate info to determine best copy'}
-
-        # If user specified which track to keep, use that
-        keep_id = details.get('_fix_action')
-        if keep_id:
-            best = next((t for t in tracks if str(t.get('track_id') or t.get('id')) == str(keep_id)), None)
-            if not best:
-                return {'success': False, 'error': f'Selected track ID {keep_id} not found in duplicates'}
-            best_id = keep_id
-        else:
-            # Auto-pick the keeper: lossless format first (so a FLAC beats an
-            # MP3 even when the FLAC's bitrate is missing in the DB), then
-            # bitrate, duration, and track number as tie-breakers.
-            from core.library.duplicate_keep import pick_duplicate_to_keep
-            best = pick_duplicate_to_keep(tracks)
-            best_id = best.get('track_id') or best.get('id')
-
-        if not best_id:
-            return {'success': False, 'error': 'Could not determine best track ID'}
-
-        remove_ids = []
-        for t in tracks:
-            tid = t.get('track_id') or t.get('id')
-            if tid and str(tid) != str(best_id):
-                remove_ids.append(tid)
-
-        if not remove_ids:
-            return {'success': False, 'error': 'No duplicates to remove'}
-
-        # Collect file paths before deleting DB entries
-        remove_paths = []
-        for t in tracks:
-            tid = t.get('track_id') or t.get('id')
-            if tid and str(tid) != str(best_id) and t.get('file_path'):
-                remove_paths.append(t['file_path'])
-
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(remove_ids))
-            cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", remove_ids)
-            conn.commit()
-            removed = cursor.rowcount
-        finally:
-            if conn:
-                conn.close()
-
-        # Move duplicate files to the <transfer>/deleted quarantine instead of hard
-        # deleting them — recoverable, and consistent with the older duplicate
-        # cleaner (the reorganizer already skips <transfer>/deleted, #746). Resolve
-        # paths first for cross-environment (Docker) compat.
-        download_folder = None
-        if self._config_manager:
-            download_folder = self._config_manager.get('soulseek.download_path', '')
-        transfer_norm = os.path.normpath(self.transfer_folder)
-        deleted_root = os.path.join(self.transfer_folder, 'deleted')
-        files_deleted = 0
-        files_failed = 0
-        for fpath in remove_paths:
-            resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
-            if not resolved or not os.path.exists(resolved):
-                # #971/Docker: the stored path didn't map to a file the container
-                # can see. Previously this was skipped silently — the DB row was
-                # removed, the file left on disk, and NO log explained why. Surface
-                # it so the user can fix their volume mapping / Music Paths.
-                files_failed += 1
-                logger.warning(
-                    "Duplicate cleanup: could not locate file to remove (DB path %r "
-                    "did not resolve to an existing file). DB entry removed, file left "
-                    "on disk — check your Docker volume mapping and Settings > Library "
-                    "> Music Paths.", fpath)
-                continue
-            try:
-                dest = self._quarantine_dest(resolved, deleted_root)
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                shutil.move(resolved, dest)
-                files_deleted += 1
-            except OSError as e:
-                # Was `except OSError: pass` — a Docker PUID/PGID permission mismatch
-                # on the media volume silently no-op'd the removal with no log.
-                files_failed += 1
-                logger.warning(
-                    "Duplicate cleanup: failed to move %s to the deleted folder (%s). "
-                    "DB entry removed, file left on disk — in Docker this is usually a "
-                    "PUID/PGID permission mismatch on the media volume.", resolved, e)
-                continue
-            # Clean up empty parent directories (best effort, cosmetic; never remove
-            # the transfer folder itself). A failure here must not count as a failed
-            # removal — the file WAS moved out.
-            try:
-                parent = os.path.dirname(resolved)
-                for _ in range(3):
-                    if (parent and os.path.isdir(parent)
-                            and os.path.normpath(parent) != transfer_norm
-                            and not os.listdir(parent)):
-                        os.rmdir(parent)
-                        parent = os.path.dirname(parent)
-                    else:
-                        break
-            except OSError:
-                pass
-
-        msg = f'Kept best quality copy, removed {removed} duplicate(s)'
-        if files_deleted:
-            msg += f' and moved {files_deleted} file(s) to the deleted folder'
-        if files_failed:
-            msg += f' — {files_failed} file(s) could NOT be removed (see logs)'
-        return {'success': True, 'action': 'removed_duplicates', 'message': msg,
-                'files_deleted': files_deleted, 'files_failed': files_failed}
-
-    def _quarantine_dest(self, resolved: str, deleted_root: str) -> str:
-        """Destination under <transfer>/deleted for a removed duplicate.
-
-        Mirrors the duplicate-cleaner convention (#746): preserve the path relative
-        to the transfer folder when the file lives there, else fall back to the
-        basename (files resolved from the media library live outside transfer).
-        Never escapes ``deleted_root``; de-collides with a numeric suffix so two
-        same-named duplicates don't clobber each other in quarantine."""
-        try:
-            rel = os.path.relpath(resolved, self.transfer_folder)
-        except ValueError:
-            # Windows: file and transfer folder on different drives — relpath
-            # raises (and ValueError isn't caught by the caller's except OSError).
-            rel = os.path.basename(resolved)
-        if rel.startswith('..') or os.path.isabs(rel):
-            rel = os.path.basename(resolved)
-        dest = os.path.join(deleted_root, rel)
-        base, ext = os.path.splitext(dest)
-        n = 1
-        while os.path.exists(dest):
-            dest = f"{base}_{n}{ext}"
-            n += 1
-        return dest
-
-    def _fix_single_album_redundant(self, entity_type, entity_id, file_path, details):
-        """Remove the single/EP version, keeping the album version."""
-        single_info = details.get('single_track', {})
-        album_info = details.get('album_track', {})
-        single_id = single_info.get('id') or entity_id
-        single_path = single_info.get('file_path') or file_path
-
-        if not single_id:
-            return {'success': False, 'error': 'No single track ID to remove'}
-
-        # Verify the album track still exists before removing the single
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            album_id = album_info.get('id')
-            if album_id:
-                cursor.execute("SELECT id FROM tracks WHERE id = ?", (album_id,))
-                if not cursor.fetchone():
-                    return {'success': False, 'error': 'Album version no longer exists in library — keeping single'}
-
-            # Remove single from DB
-            cursor.execute("DELETE FROM tracks WHERE id = ?", (single_id,))
-            conn.commit()
-            removed = cursor.rowcount
-        finally:
-            if conn:
-                conn.close()
-
-        if removed == 0:
-            return {'success': True, 'action': 'already_removed', 'message': 'Single track was already removed'}
-
-        # Delete single file from disk
-        file_deleted = False
-        if single_path:
-            download_folder = None
-            if self._config_manager:
-                download_folder = self._config_manager.get('soulseek.download_path', '')
-            try:
-                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    os.remove(resolved)
-                    file_deleted = True
-                    # Clean up empty parent directories
-                    transfer_norm = os.path.normpath(self.transfer_folder)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
-                                and not os.listdir(parent)):
-                            os.rmdir(parent)
-                            parent = os.path.dirname(parent)
-                        else:
-                            break
-            except OSError:
-                pass  # Best effort — DB entry already removed
-
-        album_name = album_info.get('album', 'unknown album')
-        msg = f'Removed single, album version on "{album_name}" kept'
-        if file_deleted:
-            msg += ' (file deleted)'
-        return {'success': True, 'action': 'removed_single', 'message': msg}
-
     def _fix_unwanted_content(self, entity_type, entity_id, file_path, details):
         """Remove unwanted content (live, commentary, interview, spoken word) from library."""
         track_info = details.get('track', {})
@@ -2573,6 +3147,21 @@ class RepairWorker:
 
         if not track_id:
             return {'success': False, 'error': 'No track ID to remove'}
+        native_track_id = _lib2_id(track_id)
+        if native_track_id is not None:
+            removed = self._remove_native_repair_file(track_path, details)
+            if not removed.get('success'):
+                return removed
+            return {
+                'success': True,
+                'action': 'removed_content',
+                'message': (
+                    f'{type_label} track removed from Library v2'
+                    + (' (file deleted)' if removed.get('deleted_file') else '')
+                ),
+                'library_v2_file_deleted': True,
+                'repair_intent': 'remove',
+            }
 
         # Remove from DB
         conn = None
@@ -2609,7 +3198,14 @@ class RepairWorker:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
                 resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
+                from core.library2.file_delete import fuzzy_resolved_path_is_deletable
+
+                if (resolved and os.path.exists(resolved)
+                        # iss29-E04: never act on a resolver GUESS that landed
+                        # outside the library roots — the walk tries transfer
+                        # first, where a fresh download of this very track sits.
+                        and fuzzy_resolved_path_is_deletable(
+                            track_path, resolved, self._config_manager)):
                     os.remove(resolved)
                     file_deleted = True
                     # Clean up empty parent directories
@@ -2631,125 +3227,6 @@ class RepairWorker:
             msg += ' (file deleted)'
         return {'success': True, 'action': 'removed_content', 'message': msg}
 
-    def _fix_unknown_artist(self, entity_type, entity_id, file_path, details):
-        """Fix an Unknown Artist track — re-tag, move to correct path, update DB."""
-        track_id = details.get('track_id')
-        corrected_artist = details.get('corrected_artist', '')
-        corrected_album = details.get('corrected_album', '')
-        corrected_title = details.get('corrected_title', '')
-        corrected_track_number = details.get('corrected_track_number')
-        corrected_year = details.get('corrected_year', '')
-        cover_url = details.get('cover_url', '')
-        expected_path = details.get('expected_path', '')
-
-        if not corrected_artist or not track_id:
-            return {'success': False, 'error': 'Missing corrected artist or track ID'}
-
-        # Resolve file
-        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) if file_path else None
-        if not resolved or not os.path.exists(resolved):
-            return {'success': False, 'error': f'File not found: {file_path}'}
-
-        # Step 1: Re-tag file
-        try:
-            from core.tag_writer import write_tags_to_file
-            db_data = {
-                'title': corrected_title,
-                'artist_name': corrected_artist,
-                'album_title': corrected_album,
-                'year': corrected_year,
-                'track_number': corrected_track_number,
-            }
-            write_tags_to_file(resolved, db_data, embed_cover=bool(cover_url), cover_url=cover_url or None)
-        except Exception as e:
-            logger.warning(f"Tag write failed during unknown artist fix: {e}")
-
-        # Step 2: Move file if expected path differs — but ONLY when the file lives
-        # under the SoulSync transfer folder. For a media-server / non-transfer
-        # library the resolved file is elsewhere, and building the destination from
-        # transfer_folder would YANK it into the transfer folder, away from its real
-        # library (same class as #978). There we just re-tag + fix the DB metadata and
-        # leave the file where it is (physical reorg is Library Reorganize's job).
-        transfer_norm = os.path.normpath(self.transfer_folder) if self.transfer_folder else ''
-        under_transfer = bool(transfer_norm) and os.path.normpath(resolved).lower().startswith(
-            transfer_norm.lower() + os.sep)
-        final_path = resolved if under_transfer else file_path
-        if expected_path and under_transfer:
-            expected_abs = os.path.normpath(os.path.join(self.transfer_folder, expected_path))
-            if os.path.normpath(resolved).lower() != expected_abs.lower():
-                try:
-                    os.makedirs(os.path.dirname(expected_abs), exist_ok=True)
-                    if sys.platform in ('win32', 'darwin') and os.path.exists(expected_abs):
-                        tmp = expected_abs + '.tmp_rename'
-                        shutil.move(resolved, tmp)
-                        shutil.move(tmp, expected_abs)
-                    else:
-                        shutil.move(resolved, expected_abs)
-                    final_path = expected_abs
-
-                    # Move sidecars
-                    src_dir = os.path.dirname(resolved)
-                    dst_dir = os.path.dirname(expected_abs)
-                    src_stem = os.path.splitext(os.path.basename(resolved))[0]
-                    dst_stem = os.path.splitext(os.path.basename(expected_abs))[0]
-                    for ext in ('.lrc', '.jpg', '.jpeg', '.png', '.txt'):
-                        s = os.path.join(src_dir, src_stem + ext)
-                        if os.path.isfile(s):
-                            d = os.path.join(dst_dir, dst_stem + ext)
-                            if not os.path.exists(d):
-                                try:
-                                    shutil.move(s, d)
-                                except Exception as e:
-                                    logger.debug("Failed to move sidecar %s: %s", s, e)
-
-                    # Clean up empty dirs
-                    self._cleanup_empty_parents(resolved)
-                except Exception as e:
-                    logger.error(f"File move failed: {e}")
-
-        # Step 3: Update DB
-        try:
-            conn = self.db._get_connection()
-            try:
-                cursor = conn.cursor()
-                # Find or create artist
-                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (corrected_artist,))
-                row = cursor.fetchone()
-                new_artist_id = row[0] if row else None
-                if not new_artist_id:
-                    safe_artist_name = re.sub(
-                        r'[^A-Za-z0-9_.-]+',
-                        '_',
-                        corrected_artist.strip() or 'unknown'
-                    )
-                    new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
-                    cursor.execute(
-                        "INSERT INTO artists (id, name) VALUES (?, ?)",
-                        (new_artist_id, corrected_artist),
-                    )
-
-                cursor.execute("UPDATE tracks SET artist_id = ?, file_path = ? WHERE id = ?",
-                               (new_artist_id, final_path, track_id))
-                if corrected_track_number:
-                    cursor.execute("UPDATE tracks SET track_number = ? WHERE id = ?",
-                                   (corrected_track_number, track_id))
-                album_id = details.get('album_id')
-                if album_id:
-                    if corrected_album:
-                        cursor.execute("UPDATE albums SET title = ? WHERE id = ?", (corrected_album, album_id))
-                    if corrected_year and corrected_year.isdigit():
-                        cursor.execute("UPDATE albums SET year = ? WHERE id = ?", (int(corrected_year), album_id))
-                    cursor.execute("UPDATE albums SET artist_id = ? WHERE id = ?", (new_artist_id, album_id))
-                conn.commit()
-            finally:
-                conn.close()
-        except Exception as e:
-            return {'success': False, 'error': f'DB update failed: {e}'}
-
-        return {'success': True, 'action': 'fixed_unknown_artist',
-                'message': f'Fixed: {corrected_artist} - {corrected_title}'}
-
     def _fix_acoustid_mismatch(self, entity_type, entity_id, file_path, details):
         """Fix an AcoustID mismatch. Actions:
            'retag' (default): Update DB title/artist to match the actual audio content
@@ -2758,6 +3235,148 @@ class RepairWorker:
         """
         fix_action = details.get('_fix_action', 'retag')
         track_id = entity_id
+        native_track_id = _lib2_id(track_id)
+        if native_track_id is not None:
+            if fix_action in {'delete', 'redownload'}:
+                removed = self._remove_native_repair_file(file_path, details)
+                if not removed.get('success'):
+                    return removed
+                expected = details.get('expected_title') or 'track'
+                return {
+                    'success': True,
+                    'action': 'redownload' if fix_action == 'redownload' else 'deleted',
+                    'message': (
+                        f'Queued "{expected}" for re-download and removed wrong file'
+                        if fix_action == 'redownload'
+                        else 'Removed wrong audio file'
+                    ),
+                    'library_v2_file_deleted': True,
+                    'repair_intent': (
+                        'redownload' if fix_action == 'redownload' else 'remove'
+                    ),
+                }
+            if fix_action == 'relocate':
+                from core.library2.paths import resolve_lib2_path
+                from core.imports.file_ops import safe_move_file
+                from core.repair_jobs.relocate import relocate_mismatch_to_staging
+                from core.tag_writer import write_tags_to_file
+
+                resolved = resolve_lib2_path(
+                    file_path, config_manager=self._config_manager,
+                ) if file_path else None
+                if not resolved or not os.path.isfile(resolved):
+                    return {'success': False, 'error': f'File not found: {file_path}'}
+                staging = self._resolve_path(
+                    self._config_manager.get('import.staging_path', './Staging')
+                    if self._config_manager else './Staging'
+                )
+                os.makedirs(staging, exist_ok=True)
+                updates = {'title': details.get('acoustid_title') or ''}
+                if details.get('acoustid_artist'):
+                    updates['artist_name'] = details['acoustid_artist']
+                    updates['artists_list'] = _split_acoustid_credit(
+                        details['acoustid_artist'])
+                try:
+                    destination = relocate_mismatch_to_staging(
+                        resolved, staging, updates,
+                        write_tags=write_tags_to_file,
+                        move_file=safe_move_file,
+                        drop_db_row=lambda: None,
+                        exists=os.path.exists,
+                    )
+                except Exception as exc:
+                    return {'success': False, 'error': f'Relocate failed: {exc}'}
+                return {
+                    'success': True,
+                    'action': 'relocated',
+                    'message': f'Moved to staging for re-import: {os.path.basename(destination)}',
+                    'library_v2_file_deleted': True,
+                }
+
+            # Retag means accepting the fingerprinted recording. Re-home the
+            # file onto a native identity for that recording instead of
+            # overwriting the expected track's canonical provider metadata.
+            actual_title = str(details.get('acoustid_title') or '').strip()
+            actual_artist = str(details.get('acoustid_artist') or '').strip()
+            if not actual_title or not actual_artist:
+                return {'success': False, 'error': 'AcoustID title/artist missing'}
+            conn = self.db._get_connection()
+            try:
+                from core.library2.autolink import (
+                    find_or_create_album,
+                    find_or_create_artist,
+                    find_or_create_track,
+                )
+                artist_id = find_or_create_artist(conn, actual_artist, source='acoustid')
+                album_id = find_or_create_album(
+                    conn,
+                    artist_id,
+                    details.get('actual_album_title') or actual_title,
+                    album_type='single',
+                    source='acoustid',
+                )
+                actual_track_id = find_or_create_track(
+                    conn,
+                    album_id,
+                    artist_id,
+                    actual_title,
+                    track_number=details.get('track_number') or 1,
+                )
+                file_ids = (details.get('library_v2') or {}).get('file_ids') or []
+                if file_ids:
+                    marks = ','.join('?' for _ in file_ids)
+                    conn.execute(
+                        f"UPDATE lib2_track_files SET track_id=?, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({marks})",
+                        (actual_track_id, *[int(value) for value in file_ids]),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE lib2_track_files SET track_id=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE track_id=? AND path=?",
+                        (actual_track_id, native_track_id, file_path),
+                    )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                return {'success': False, 'error': f'Library-v2 re-home failed: {exc}'}
+            finally:
+                conn.close()
+            # dd28-20: re-homing the file leaves the ORIGINAL (expected) track
+            # with no file at all. `acoustid_scanner`'s declared effects are
+            # {observe,tags,metadata} — no 'wanted' — and 'retagged' is neither
+            # a delete action nor sets repair_intent, so nothing ever called
+            # recompute_wanted. The emptied track was never projected as
+            # missing: the album read as complete while one of its tracks had
+            # no file. Say so in the result so the sync bridge reprojects.
+            emptied_track = native_track_id
+            if file_path:
+                from core.library2.paths import resolve_lib2_path
+                resolved = resolve_lib2_path(file_path, config_manager=self._config_manager)
+                if resolved and os.path.isfile(resolved):
+                    try:
+                        from core.tag_writer import write_tags_to_file
+                        write_tags_to_file(
+                            resolved,
+                            {
+                                'title': actual_title,
+                                'artist_name': actual_artist,
+                                'artists_list': _split_acoustid_credit(actual_artist),
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning('Native AcoustID retag write failed: %s', exc)
+            return {
+                'success': True,
+                'action': 'retagged',
+                'message': f'Re-homed file as "{actual_title}" by {actual_artist}',
+                'library_v2_rehomed_track_id': actual_track_id,
+                # dd28-20: forces the wanted reprojection the effect set does
+                # not imply, so the now-fileless original track is projected as
+                # missing instead of the album silently reading as complete.
+                'library_v2_recompute_wanted': True,
+                'library_v2_emptied_track_id': emptied_track,
+            }
 
         if fix_action == 'delete':
             # Delete file + DB record
@@ -2940,77 +3559,6 @@ class RepairWorker:
         return {'success': True, 'action': 'retagged',
                 'message': f'Updated to: "{aid_title}" by {aid_artist}'}
 
-    def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
-        """Remove the mismatched MusicBrainz recording ID from the audio file."""
-        if not file_path:
-            return {'success': False, 'error': 'No file path associated with this finding'}
-
-        # Resolve path
-        download_folder = None
-        if self._config_manager:
-            download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-        if not resolved or not os.path.exists(resolved):
-            return {'success': False, 'error': f'File not found: {file_path}'}
-
-        try:
-            from core.repair_jobs.mbid_mismatch_detector import _remove_mbid_from_file
-            removed = _remove_mbid_from_file(resolved)
-            if removed:
-                mbid = details.get('mbid', 'unknown')
-                mb_title = details.get('mb_title', 'unknown')
-                title = details.get('title', 'unknown')
-                return {
-                    'success': True,
-                    'action': 'removed_mbid',
-                    'message': f'Removed wrong MBID ({mbid[:8]}...) from "{title}" — was pointing to "{mb_title}"'
-                }
-            else:
-                return {'success': False, 'error': 'MBID tag not found in file (may have been removed already)'}
-        except Exception as e:
-            return {'success': False, 'error': f'Failed to remove MBID: {str(e)}'}
-
-    def _fix_album_mbid_mismatch(self, entity_type, entity_id, file_path, details):
-        """Rewrite the dissenting track's album MBID to match the consensus.
-
-        The detector flagged this track because its embedded
-        MUSICBRAINZ_ALBUMID disagreed with the consensus across the
-        album's other tracks. Fix is to rewrite the dissenter's tag —
-        does NOT touch the other tracks (they're already in agreement).
-        """
-        consensus_mbid = details.get('consensus_mbid')
-        if not consensus_mbid:
-            return {'success': False, 'error': 'No consensus MBID in finding details'}
-        if not file_path:
-            return {'success': False, 'error': 'No file path associated with this finding'}
-
-        download_folder = None
-        if self._config_manager:
-            download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
-                                      config_manager=self._config_manager)
-        if not resolved or not os.path.exists(resolved):
-            return {'success': False, 'error': f'File not found: {file_path}'}
-
-        try:
-            from core.repair_jobs.mbid_mismatch_detector import _write_album_mbid_to_file
-            ok = _write_album_mbid_to_file(resolved, consensus_mbid)
-            if ok:
-                wrong = (details.get('wrong_mbid') or '')[:8]
-                consensus_short = consensus_mbid[:8]
-                title = details.get('title', 'track')
-                return {
-                    'success': True,
-                    'action': 'rewrote_album_mbid',
-                    'message': (
-                        f'Updated album MBID on "{title}" '
-                        f'({wrong}… → {consensus_short}…)'
-                    ),
-                }
-            return {'success': False, 'error': 'Could not write album MBID — unsupported format or write failed'}
-        except Exception as e:
-            return {'success': False, 'error': f'Failed to rewrite album MBID: {str(e)}'}
-
     def _fix_album_tag_inconsistency(self, entity_type, entity_id, file_path, details):
         """Normalize inconsistent tags across all tracks in an album to the canonical (majority) value."""
         inconsistencies = details.get('inconsistencies', [])
@@ -3037,6 +3585,11 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder, config_manager=self._config_manager)
+            if not resolved and details.get('library_v2_native'):
+                from core.library2.paths import resolve_lib2_path
+                resolved = resolve_lib2_path(track_file, config_manager=self._config_manager)
+            if not resolved and os.path.isfile(track_file):
+                resolved = track_file
             if not resolved or not os.path.exists(resolved):
                 continue
 
@@ -3191,632 +3744,6 @@ class RepairWorker:
         )
         return ' '.join(lines)
 
-    def _fix_incomplete_album(self, entity_type, entity_id, file_path, details):
-        """Auto-fill an incomplete album by finding missing tracks in the library.
-
-        For each missing track:
-        1. Search library for matching tracks
-        2. Quality gate — candidate must meet album's minimum quality
-        3. Single source (1-track album) → MOVE file; multi-track → COPY
-        4. Retag the file with correct album metadata
-        5. If no candidate found or quality too low → add to wishlist
-        """
-        album_id = details.get('album_id')
-        missing_tracks = details.get('missing_tracks', [])
-        album_title = details.get('album_title', 'Unknown Album')
-        artist_name = details.get('artist', 'Unknown Artist')
-        spotify_album_id = details.get('spotify_album_id', '')
-
-        if not album_id:
-            return {'success': False, 'error': 'Missing album_id in finding details'}
-
-        # If missing_tracks list is empty (scanner couldn't identify them), try to fetch now
-        if not missing_tracks:
-            missing_tracks = self._refetch_missing_tracks(album_id, details)
-            if not missing_tracks:
-                # Refetch found 0 missing — album is now complete (stale finding)
-                return {'success': True, 'action': 'auto_resolve',
-                        'message': f'Album "{album_title}" is now complete — no missing tracks found'}
-
-        # Phase 1: Gather context from existing album tracks
-        existing_tracks = self.db.get_tracks_by_album(album_id)
-        if not existing_tracks:
-            return {'success': False, 'error': 'No existing tracks found for this album — cannot determine album folder or quality'}
-
-        # Compute quality floor from existing tracks
-        quality_scores = [self._quality_score(t.file_path, t.bitrate) for t in existing_tracks]
-        album_quality_floor = min(quality_scores) if quality_scores else 0
-
-        # Infer album folder from existing track file paths
-        download_folder = None
-        if self._config_manager:
-            download_folder = self._config_manager.get('soulseek.download_path', '')
-
-        album_folder = None
-        last_attempt = None
-        sample_db_path = None
-        for t in existing_tracks:
-            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
-            resolved, attempt = resolve_library_file_path_with_diagnostic(
-                t.file_path, transfer_folder=self.transfer_folder,
-                download_folder=download_folder, config_manager=self._config_manager,
-            )
-            last_attempt = attempt
-            if sample_db_path is None and isinstance(t.file_path, str) and t.file_path:
-                sample_db_path = t.file_path
-            if resolved and os.path.exists(resolved):
-                album_folder = os.path.dirname(resolved)
-                break
-
-        if not album_folder:
-            return {'success': False,
-                    'error': self._build_unresolvable_album_folder_error(last_attempt, sample_db_path)}
-
-        # Detect filename pattern
-        resolved_paths = []
-        for t in existing_tracks:
-            rp = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-            if rp:
-                resolved_paths.append(rp)
-        filename_pattern = self._detect_filename_pattern(resolved_paths)
-
-        # Filter out tracks that have been added since the scan (stale finding)
-        owned_track_numbers = {t.track_number for t in existing_tracks if t.track_number}
-        missing_tracks = [mt for mt in missing_tracks
-                          if mt.get('track_number') not in owned_track_numbers]
-        if not missing_tracks:
-            return {'success': True, 'action': 'auto_resolve',
-                    'message': f'Album "{album_title}" is now complete — all tracks present'}
-
-        # Phase 2-4: Process each missing track
-        fixed_count = 0
-        wishlisted_count = 0
-        skipped_count = 0
-        track_details = []
-        existing_track_ids = {t.id for t in existing_tracks}
-
-        for mt in missing_tracks:
-            track_name = mt.get('name', '')
-            track_number = mt.get('track_number', 0)
-            disc_number = mt.get('disc_number', 1)
-            track_artists = mt.get('artists', [])
-            source = mt.get('source', '') or 'spotify'
-            source_track_id = mt.get('source_track_id', '') or mt.get('track_id', '') or mt.get('spotify_track_id', '')
-            spotify_track_id = mt.get('spotify_track_id', '') or (source_track_id if source == 'spotify' else '')
-            artist_search = track_artists[0] if track_artists else artist_name
-
-            if not track_name:
-                skipped_count += 1
-                track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no track name'})
-                continue
-
-            if not _album_fill_target_artist_allows_track(artist_name, track_artists):
-                skipped_count += 1
-                logger.warning(
-                    "Album auto-fill skipped '%s': source artist(s) %s do not match target album artist '%s'",
-                    track_name, track_artists, artist_name,
-                )
-                track_details.append({
-                    'track': track_name,
-                    'status': 'skipped',
-                    'reason': 'source artist does not match target album artist',
-                    'source_artists': track_artists,
-                    'target_artist': artist_name,
-                })
-                continue
-
-            # Search library for this track
-            candidates = self.db.search_tracks(title=track_name, artist=artist_search, limit=20)
-
-            # Filter: exclude tracks already in target album, require title similarity
-            best_candidate = None
-            best_score = -1
-
-            for cand in candidates:
-                if cand.id in existing_track_ids:
-                    continue
-                if str(cand.album_id) == str(album_id):
-                    continue
-
-                # Fuzzy title match
-                title_sim = SequenceMatcher(None, track_name.lower(), cand.title.lower()).ratio()
-                if title_sim < 0.70:
-                    continue
-
-                # Artist match (more lenient)
-                cand_artist = getattr(cand, 'artist_name', '') or ''
-                candidate_artist_fields = [
-                    cand_artist,
-                    getattr(cand, 'track_artist', '') or '',
-                ]
-                expected_artist_names = track_artists or [artist_name]
-                if not any(
-                    _album_fill_artist_names_match(expected, candidate)
-                    for expected in expected_artist_names
-                    for candidate in candidate_artist_fields
-                ):
-                    logger.debug(
-                        "Album auto-fill rejected candidate '%s' by '%s' for expected artist(s) %s",
-                        getattr(cand, 'title', ''),
-                        cand_artist,
-                        expected_artist_names,
-                    )
-                    continue
-
-                # Quality gate
-                cand_quality = self._quality_score(cand.file_path, cand.bitrate)
-                if cand_quality < album_quality_floor:
-                    continue
-
-                # Score: prefer higher quality, then better title match
-                score = cand_quality * 1000 + title_sim * 100
-                if score > best_score:
-                    best_score = score
-                    best_candidate = cand
-
-            if best_candidate:
-                # Phase 3: File operation
-                result = self._perform_album_fill(
-                    best_candidate, album_id, album_title, artist_name,
-                    track_name, track_number, disc_number,
-                    album_folder, filename_pattern, download_folder
-                )
-                if result.get('success'):
-                    fixed_count += 1
-                    track_details.append({
-                        'track': track_name,
-                        'status': 'fixed',
-                        'action': result.get('action', ''),
-                        'message': result.get('message', '')
-                    })
-                    # Add the candidate ID to existing so we don't reuse it
-                    existing_track_ids.add(best_candidate.id)
-                    continue
-                else:
-                    # File operation failed — fall through to wishlist
-                    logger.warning("File operation failed for '%s': %s", track_name, result.get('error'))
-
-            # Phase 4: Wishlist fallback
-            if source_track_id:
-                try:
-                    # Build album images from finding thumb URL
-                    album_images = []
-                    album_thumb = details.get('album_thumb_url', '')
-                    if album_thumb:
-                        album_images = [{'url': album_thumb, 'height': 300, 'width': 300}]
-
-                    wishlist_data = {
-                        'id': source_track_id,
-                        'name': track_name,
-                        'artists': [{'name': a} for a in track_artists] if track_artists else [{'name': artist_name}],
-                        'album': {
-                            'name': album_title,
-                            'id': spotify_album_id or details.get('itunes_album_id', '') or details.get('deezer_album_id', ''),
-                            'images': album_images,
-                            'release_date': '',
-                            'album_type': 'album',
-                            'total_tracks': details.get('expected_tracks', 0),
-                        },
-                        'duration_ms': mt.get('duration_ms', 0),
-                        'track_number': track_number,
-                        'disc_number': disc_number,
-                        'uri': f"{source}:track:{source_track_id}" if source and source_track_id else '',
-                    }
-                    source_info = {
-                        'album_title': album_title,
-                        'artist': artist_name,
-                        'track_number': track_number,
-                        'disc_number': disc_number,
-                        'spotify_album_id': spotify_album_id,
-                        'source': source,
-                        'source_track_id': source_track_id,
-                        'is_album': True,
-                        'reason': 'album_completeness_auto_fill',
-                    }
-                    self.db.add_to_wishlist(
-                        wishlist_data,
-                        failure_reason='Missing from incomplete album',
-                        source_type='album',
-                        source_info=source_info,
-                    )
-                    wishlisted_count += 1
-                    track_details.append({
-                        'track': track_name,
-                        'status': 'wishlisted',
-                        'reason': 'no suitable candidate in library' if not best_candidate else 'quality too low'
-                    })
-                except Exception as e:
-                    logger.debug("Failed to add '%s' to wishlist: %s", track_name, e)
-                    skipped_count += 1
-                    track_details.append({'track': track_name, 'status': 'skipped', 'reason': f'wishlist error: {e}'})
-            else:
-                skipped_count += 1
-                track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no source_track_id for wishlist'})
-
-        # Build result message
-        parts = []
-        if fixed_count:
-            parts.append(f'{fixed_count} track(s) filled')
-        if wishlisted_count:
-            parts.append(f'{wishlisted_count} added to wishlist')
-        if skipped_count:
-            parts.append(f'{skipped_count} skipped')
-        message = f'Album "{album_title}": ' + ', '.join(parts) if parts else 'No tracks processed'
-
-        success = fixed_count > 0 or wishlisted_count > 0
-        return {
-            'success': success,
-            'action': 'auto_fill_album',
-            'message': message,
-            'fixed': fixed_count,
-            'wishlisted': wishlisted_count,
-            'skipped': skipped_count,
-            'details': track_details,
-        }
-
-    def _refetch_missing_tracks(self, album_id, details):
-        """Re-fetch missing track list from APIs when the stored list is empty."""
-        configured_primary_source = get_primary_source()
-        spotify_album_id = details.get('spotify_album_id', '')
-        itunes_album_id = details.get('itunes_album_id', '')
-        deezer_album_id = details.get('deezer_album_id', '')
-        discogs_album_id = details.get('discogs_album_id', '')
-        hydrabase_album_id = details.get('hydrabase_album_id', '')
-        primary_source = details.get('primary_source') or configured_primary_source
-        logger.debug(
-            "Refetch missing tracks for album %s: primary=%s spotify=%s itunes=%s deezer=%s discogs=%s hydrabase=%s",
-            album_id, primary_source, spotify_album_id, itunes_album_id, deezer_album_id, discogs_album_id,
-            hydrabase_album_id
-        )
-
-        # Get track numbers we already own
-        owned_numbers = set()
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT track_number FROM tracks WHERE album_id = ? AND track_number IS NOT NULL",
-                (album_id,)
-            )
-            for row in cursor.fetchall():
-                owned_numbers.add(row[0])
-        except Exception:
-            return []
-        finally:
-            if conn:
-                conn.close()
-
-        current_source = primary_source
-        api_tracks = None
-        album_sources = {
-            'spotify': spotify_album_id,
-            'itunes': itunes_album_id,
-            'deezer': deezer_album_id,
-            'discogs': discogs_album_id,
-            'hydrabase': hydrabase_album_id,
-        }
-
-        for source in get_source_priority(primary_source):
-            fid = album_sources.get(source, '')
-            if not fid:
-                continue
-            try:
-                api_tracks = get_album_tracks_for_source(source, fid)
-                if api_tracks and 'items' in (api_tracks or {}):
-                    current_source = source
-                    break
-            except Exception as e:
-                logger.debug("Refetch: %s album tracks failed for %s: %s", source, fid, e)
-
-        if not api_tracks or 'items' not in api_tracks:
-            return []
-
-        missing = []
-        for item in api_tracks['items']:
-            tn = item.get('track_number')
-            if tn and tn not in owned_numbers:
-                track_artists = []
-                for a in item.get('artists', []):
-                    if isinstance(a, dict):
-                        track_artists.append(a.get('name', ''))
-                    elif isinstance(a, str):
-                        track_artists.append(a)
-                missing.append({
-                    'track_number': tn,
-                    'name': item.get('name', ''),
-                    'disc_number': item.get('disc_number', 1),
-                    'source': current_source or 'spotify',
-                    'source_track_id': item.get('id', ''),
-                    'track_id': item.get('id', ''),
-                    'spotify_track_id': item.get('id', ''),
-                    'duration_ms': item.get('duration_ms', 0),
-                    'artists': track_artists,
-                })
-        return missing
-
-    def _perform_album_fill(self, candidate, album_id, album_title, artist_name,
-                            track_name, track_number, disc_number,
-                            album_folder, filename_pattern, download_folder):
-        """Move or copy a candidate track into the album folder and update DB."""
-        try:
-            def _fallback_server_source():
-                if getattr(candidate, 'server_source', None):
-                    return candidate.server_source
-                if self._config_manager:
-                    getter = getattr(self._config_manager, 'get_active_media_server', None)
-                    if callable(getter):
-                        return getter() or 'plex'
-                    return self._config_manager.get('active_media_server', 'plex')
-                return 'plex'
-
-            def _resolve_target_context(cursor):
-                cursor.execute(
-                    """
-                    SELECT artist_id, server_source
-                    FROM tracks
-                    WHERE album_id = ?
-                    ORDER BY track_number, title
-                    LIMIT 1
-                    """,
-                    (album_id,),
-                )
-                row = cursor.fetchone()
-                if row:
-                    return row[0] or candidate.artist_id, row[1] or _fallback_server_source()
-
-                try:
-                    cursor.execute(
-                        "SELECT artist_id, server_source FROM albums WHERE id = ? LIMIT 1",
-                        (album_id,),
-                    )
-                except sqlite3.OperationalError:
-                    row = None
-                else:
-                    row = cursor.fetchone()
-
-                if row:
-                    return row[0] or candidate.artist_id, row[1] or _fallback_server_source()
-
-                return candidate.artist_id, _fallback_server_source()
-
-            # Resolve source file
-            src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
-            if not src_path or not os.path.exists(src_path):
-                return {'success': False, 'error': f'Source file not found: {candidate.file_path}'}
-
-            # Determine source type: single (1-track album) vs multi-track
-            source_album_tracks = self.db.get_tracks_by_album(candidate.album_id)
-            is_single_source = len(source_album_tracks) <= 1
-
-            # Build target filename
-            src_ext = os.path.splitext(src_path)[1]  # e.g. '.flac'
-            # Sanitize title for filesystem
-            safe_title = re.sub(r'[<>:"/\\|?*]', '', track_name).strip()
-            target_name = filename_pattern.format(num=track_number, title=safe_title) + src_ext
-            target_path = os.path.join(album_folder, target_name)
-
-            # Avoid overwriting existing files
-            if os.path.exists(target_path):
-                return {'success': False, 'error': f'Target file already exists: {target_path}'}
-
-            # Ensure album folder exists
-            os.makedirs(album_folder, exist_ok=True)
-
-            conn = None
-            try:
-                if is_single_source:
-                    # MOVE: relocate file and update DB record
-                    shutil.move(src_path, target_path)
-                    action = 'moved'
-
-                    # Update existing DB record to point to new album and path
-                    conn = self.db._get_connection()
-                    cursor = conn.cursor()
-                    target_artist_id, target_server_source = _resolve_target_context(cursor)
-                    cursor.execute("""
-                        UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?,
-                            file_path = ?, track_number = ?, server_source = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (album_id, target_artist_id, track_name,
-                          target_path, track_number, target_server_source, candidate.id))
-
-                    # Clean up the source single's album if it's now empty
-                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (candidate.album_id,))
-                    remaining = cursor.fetchone()[0]
-                    if remaining == 0:
-                        cursor.execute("DELETE FROM albums WHERE id = ?", (candidate.album_id,))
-
-                    conn.commit()
-
-                    # Clean up empty source directories
-                    self._cleanup_empty_dirs(os.path.dirname(src_path))
-                else:
-                    # COPY: duplicate file, create new DB record
-                    shutil.copy2(src_path, target_path)
-                    action = 'copied'
-                    source_track_id = re.sub(
-                        r'[^A-Za-z0-9_.-]+',
-                        '_',
-                        str(getattr(candidate, 'id', 'unknown'))
-                    )
-                    new_track_id = f"album_fill_{source_track_id}_{uuid.uuid4().hex[:8]}"
-
-                    conn = self.db._get_connection()
-                    cursor = conn.cursor()
-                    target_artist_id, target_server_source = _resolve_target_context(cursor)
-
-                    cursor.execute("""
-                        INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration,
-                                            file_path, bitrate, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (new_track_id, album_id, target_artist_id, track_name, track_number,
-                          candidate.duration, target_path, candidate.bitrate, target_server_source))
-                    conn.commit()
-
-            finally:
-                if conn:
-                    conn.close()
-
-            # Enhance the file with full metadata pipeline (same as fresh downloads)
-            # Clears existing tags, writes standard + source IDs, embeds cover art
-            self._enhance_placed_track(
-                target_path, album_id, album_title, artist_name,
-                track_name, track_number, disc_number
-            )
-
-            return {
-                'success': True,
-                'action': action,
-                'message': f'{action.title()} "{track_name}" from {"single" if is_single_source else "compilation"}'
-            }
-
-        except Exception as e:
-            logger.error("Error filling track '%s': %s", track_name, e, exc_info=True)
-            return {'success': False, 'error': str(e)}
-
-    def _cleanup_empty_dirs(self, directory):
-        """Remove empty parent directories up to 3 levels, never removing transfer folder."""
-        if not directory:
-            return
-        transfer_norm = os.path.normpath(self.transfer_folder)
-        parent = directory
-        for _ in range(3):
-            if (parent and os.path.isdir(parent)
-                    and os.path.normpath(parent) != transfer_norm
-                    and not os.listdir(parent)):
-                try:
-                    os.rmdir(parent)
-                except OSError:
-                    break
-                parent = os.path.dirname(parent)
-            else:
-                break
-
-    def _enhance_placed_track(self, file_path, album_id, album_title, artist_name,
-                              track_name, track_number, disc_number):
-        """Run full metadata enhancement on a placed track.
-
-        Uses the injected _enhance_file_metadata from web_server.py (same pipeline
-        as fresh downloads) — clears tags, writes standard metadata, embeds source
-        IDs from MusicBrainz/Deezer/etc., and embeds cover art.
-
-        Falls back to basic tag_writer if the enhancer isn't available.
-        """
-        # Fetch album metadata from DB for building synthetic context
-        album_year = None
-        album_genres = []
-        album_thumb = None
-        album_track_count = None
-        spotify_album_id = None
-        conn_meta = None
-        try:
-            conn_meta = self.db._get_connection()
-            cursor_meta = conn_meta.cursor()
-            cursor_meta.execute(
-                "SELECT year, genres, thumb_url, track_count, spotify_album_id FROM albums WHERE id = ?",
-                (album_id,)
-            )
-            album_row = cursor_meta.fetchone()
-            if album_row:
-                album_year = album_row[0]
-                if album_row[1]:
-                    try:
-                        parsed = json.loads(album_row[1])
-                        if isinstance(parsed, list):
-                            album_genres = parsed
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                album_thumb = album_row[2]
-                album_track_count = album_row[3]
-                spotify_album_id = album_row[4] if len(album_row) > 4 else None
-        except Exception as e:
-            logger.debug("Failed to load album metadata for retag: %s", e)
-        finally:
-            if conn_meta:
-                conn_meta.close()
-
-        # Try full enhancement pipeline if available AND enabled in config
-        # _enhance_file_metadata returns True without writing when enhancement is disabled,
-        # so we must check the config ourselves to avoid skipping the basic fallback
-        enhancement_enabled = (
-            self._enhance_file_metadata is not None
-            and self._config_manager
-            and self._config_manager.get('metadata_enhancement.enabled', True)
-        )
-        if enhancement_enabled:
-            try:
-                # Build synthetic context dicts (same pattern as _execute_retag in web_server.py)
-                context = {
-                    'original_search_result': {
-                        'spotify_clean_title': track_name,
-                        'title': track_name,
-                        'disc_number': disc_number,
-                        'artists': [{'name': artist_name}],
-                    },
-                    'spotify_album': {
-                        'id': spotify_album_id or '',
-                        'name': album_title,
-                        'release_date': str(album_year) if album_year else '',
-                        'total_tracks': album_track_count or 1,
-                        'image_url': album_thumb or '',
-                    },
-                    'track_info': {
-                        'id': '',  # No specific track ID available
-                    },
-                }
-                artist = {
-                    'name': artist_name,
-                    'id': '',
-                    'genres': album_genres[:2] if album_genres else [],
-                }
-                album_info = {
-                    'is_album': True,
-                    'album_name': album_title,
-                    'track_number': track_number,
-                    'total_tracks': album_track_count or 1,
-                    'disc_number': disc_number,
-                    'clean_track_name': track_name,
-                    'album_image_url': album_thumb or '',
-                }
-
-                result = self._enhance_file_metadata(file_path, context, artist, album_info)
-                if result:
-                    logger.info("Full metadata enhancement applied to '%s'", track_name)
-                    return
-                else:
-                    logger.warning("Full enhancement returned False for '%s', falling back to basic tags", track_name)
-            except Exception as e:
-                logger.warning("Full enhancement failed for '%s': %s — falling back to basic tags", track_name, e)
-
-        # Fallback: basic tag writer (title, artist, album, track#, disc#, year, genre, cover art)
-        # Used when: enhancer not injected, metadata enhancement disabled, or enhancer failed
-        try:
-            from core.tag_writer import write_tags_to_file
-            tag_data = {
-                'title': track_name,
-                'artist': artist_name,
-                'album_artist': artist_name,
-                'album': album_title,
-                'track_number': track_number,
-                'disc_number': disc_number,
-            }
-            if album_year:
-                tag_data['year'] = album_year
-            if album_genres:
-                tag_data['genre'] = ', '.join(album_genres[:5])
-            if album_track_count:
-                tag_data['total_tracks'] = album_track_count
-
-            write_tags_to_file(file_path, tag_data,
-                               embed_cover=bool(album_thumb),
-                               cover_url=album_thumb)
-            logger.info("Basic tag enhancement applied to '%s'", track_name)
-        except Exception as e:
-            logger.warning("Retagging failed for '%s' (file still placed): %s", file_path, e)
-
     def _fix_path_mismatch(self, entity_type, entity_id, file_path, details):
         """Move a file from its current location to the expected template path."""
         rel_from = details.get('from', '')
@@ -3891,6 +3818,7 @@ class RepairWorker:
 
             # Update DB file path
             conn = None
+            db_update_error = None
             try:
                 conn = self.db._get_connection()
                 cursor = conn.cursor()
@@ -3900,7 +3828,11 @@ class RepairWorker:
                 # from the resolved path we just moved, which is exactly the #978
                 # population (so without this the file moves but the DB stays stale).
                 try:
-                    tid = int(entity_id) if entity_id not in (None, '') else None
+                    legacy_track_id = details.get('legacy_track_id')
+                    raw_track_id = (
+                        legacy_track_id if legacy_track_id not in (None, '') else entity_id
+                    )
+                    tid = int(raw_track_id) if raw_track_id not in (None, '') else None
                 except (TypeError, ValueError):
                     tid = None
                 if tid is not None:
@@ -3920,12 +3852,40 @@ class RepairWorker:
                             (dst, '%/' + escaped))
                     except Exception as e:
                         logger.debug("Suffix-match DB path update failed: %s", e)
+                lib2_track_id = details.get('lib2_track_id')
+                try:
+                    lib2_track_id = int(lib2_track_id) if lib2_track_id is not None else None
+                except (TypeError, ValueError):
+                    lib2_track_id = None
+                if lib2_track_id is not None:
+                    cursor.execute(
+                        "UPDATE lib2_track_files SET path=? "
+                        "WHERE track_id=? AND (path=? OR path=?)",
+                        (dst, lib2_track_id, src, rel_from),
+                    )
                 conn.commit()
             except Exception as e:
-                logger.debug("DB path update failed for %s: %s", src, e)
+                # dd28-19/dd28-28: the file is already at `dst`. Swallowing this
+                # and still reporting success left lib2_track_files pointing at
+                # the OLD location with nothing left to reconcile it —
+                # path_drift_reconcile matches on the stored path, which no
+                # longer exists anywhere. Report the failure so the finding
+                # stays open and the user knows the catalog is out of sync.
+                logger.error("DB path update failed for %s: %s", src, e)
+                db_update_error = str(e)
             finally:
                 if conn:
                     conn.close()
+            if db_update_error:
+                return {
+                    'success': False,
+                    'action': 'moved_file',
+                    'error': (
+                        f'File was moved to {rel_to}, but the catalog could not '
+                        f'be updated ({db_update_error}). Re-run this fix or a '
+                        f'path reconcile to finish it.'
+                    ),
+                }
 
             # Clean up empty source directories
             parent = os.path.dirname(src)
@@ -4005,7 +3965,8 @@ class RepairWorker:
                              f'choose a different lossy codec'}
         if os.path.exists(out_path):
             return {'success': True, 'action': 'already_exists',
-                    'message': f'{quality_label} copy already exists'}
+                    'message': f'{quality_label} copy already exists',
+                    'output_path': out_path}
 
         import subprocess
         try:
@@ -4111,12 +4072,14 @@ class RepairWorker:
                         except Exception as e:
                             logger.debug("Failed to update DB path after lossy conversion: %s", e)
                         return {'success': True, 'action': 'converted_and_deleted',
-                                'message': f'Converted to {quality_label} and deleted original'}
+                                'message': f'Converted to {quality_label} and deleted original',
+                                'output_path': out_path}
                 except Exception as e:
                     logger.debug("Blasphemy mode error: %s", e)
 
             return {'success': True, 'action': 'converted',
-                    'message': f'Created {quality_label} copy'}
+                    'message': f'Created {quality_label} copy',
+                    'output_path': out_path}
 
         except subprocess.TimeoutExpired:
             if os.path.exists(out_path):

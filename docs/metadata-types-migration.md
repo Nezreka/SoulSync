@@ -1,5 +1,17 @@
 # Typed Metadata Migration Plan
 
+## Current status (2026-07-12)
+
+The foundation is no longer purely additive. Library v2 now has a typed boundary
+in `core/library2/provider_adapters.py` for discography and tracklist results.
+Normalized results are persisted through `core/library2/provider_snapshots.py`
+with provider/entity/scope provenance, completeness, cursor/page count,
+parser version, and a canonical payload hash.
+
+This is intentionally a scoped migration, not a claim that the global metadata
+pipeline is fully typed. Consumers outside the Library-v2 discography/tracklist
+paths still use compatibility dictionaries and remain on the roadmap below.
+
 ## Why
 
 Right now the metadata pipeline has no real contract about the shape
@@ -68,7 +80,7 @@ nothing else needs to change.
 existing import / download pipelines expect — the bridge between
 typed data and the current dict-passing internal API.
 
-## What this PR DOES NOT do
+## Original foundation scope
 
 This PR does not migrate any consumer. No behavior changes. The new
 types and converters are pure additive — every existing code path

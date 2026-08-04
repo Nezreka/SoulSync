@@ -587,11 +587,6 @@ class PlaylistSyncService:
                                 'timestamp': datetime.now().isoformat()
                             },
                             profile_id=getattr(self, '_active_profile_id', None) or 1,
-                            quality_profile_id=(
-                                original_track_data.get('quality_profile_id')
-                                if isinstance(original_track_data, dict)
-                                else None
-                            ),
                         )
 
                         if success:

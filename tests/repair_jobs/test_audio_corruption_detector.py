@@ -14,12 +14,41 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import core.repair_jobs.audio_corruption_detector as mod
 from core.repair_jobs.audio_corruption_detector import (
     AudioCorruptionDetectorJob,
     check_flac_integrity,
 )
 from core.repair_jobs.base import JobContext
+
+
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Feed the scanner native subject rows; it must never query old tracks."""
+
+    def subjects(database, _config_manager, **_kwargs):
+        return [
+            {
+                "file_id": row["id"],
+                "track_id": row["id"],
+                "album_id": 1,
+                "artist_id": 1,
+                "title": row["title"],
+                "artist_name": row["artist_name"],
+                "album_title": row["album_title"],
+                "path": row["file_path"],
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            }
+            for row in database._rows
+        ]
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
 
 
 # --- check_flac_integrity (decode test) --------------------------------------
@@ -139,7 +168,7 @@ def test_scan_flags_corrupt_flac(tmp_path, monkeypatch):
     assert result.findings_created == 1
     f = findings[0]
     assert f["finding_type"] == "corrupt_audio"
-    assert f["entity_type"] == "track" and f["entity_id"] == "7"
+    assert f["entity_type"] == "track" and f["entity_id"] == "lib2:7"
     assert "FRAME_CRC_MISMATCH" in f["description"]
 
 

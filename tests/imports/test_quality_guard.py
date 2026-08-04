@@ -17,6 +17,7 @@ import types
 import pytest
 
 import core.imports.guards as guards
+import core.imports.pipeline as pipeline
 import core.imports.file_ops as file_ops
 import core.quality.selection as selection
 from core.imports.pipeline import _should_skip_quarantine_check
@@ -116,6 +117,45 @@ def test_manual_import_bypass_list_skips_quality_but_not_acoustid():
     assert _should_skip_quarantine_check(ctx, 'acoustid') is False
     assert _should_skip_quarantine_check(ctx, 'integrity') is False
     assert _should_skip_quarantine_check(ctx, 'silence') is False
+
+
+def test_force_grab_approval_is_narrow_and_marks_context(monkeypatch):
+    calls = []
+
+    def approve(context, *, reason_code, trigger, reason):
+        calls.append((reason_code, trigger, reason))
+        return reason_code == 'quality_not_allowed'
+
+    monkeypatch.setattr(
+        'core.acquisition.pipeline_callback.notify_force_quarantine_auto_approved',
+        approve,
+    )
+    context = {'_acquisition_import_id': 'aim1-test'}
+
+    assert pipeline._try_force_grab_quarantine_approval(
+        context,
+        reason_code='quality_not_allowed',
+        trigger='quality',
+        reason='Below profile',
+    ) is True
+    assert context['_force_approved_quarantine_reason'] == 'quality_not_allowed'
+    assert calls == [('quality_not_allowed', 'quality', 'Below profile')]
+
+
+def test_force_grab_approval_fail_closed_for_other_reason(monkeypatch):
+    monkeypatch.setattr(
+        'core.acquisition.pipeline_callback.notify_force_quarantine_auto_approved',
+        lambda *_args, **_kwargs: False,
+    )
+    context = {'_acquisition_import_id': 'aim1-test'}
+
+    assert pipeline._try_force_grab_quarantine_approval(
+        context,
+        reason_code='acoustid_mismatch',
+        trigger='acoustid',
+        reason='Fingerprint mismatch',
+    ) is False
+    assert '_force_approved_quarantine_reason' not in context
 
 
 def test_quality_quarantine_persists_quality_trigger(monkeypatch, tmp_path):

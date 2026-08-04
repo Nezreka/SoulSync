@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import subprocess
-import time
+import tempfile
 from pathlib import Path
 from typing import Iterable, List
 
@@ -115,9 +115,13 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
     null/incomplete metadata (tracks landing with no disc). Cleans up the temp on failure.
     """
     src, dst = Path(src), Path(dst)
-    tmp = dst.parent / f".{dst.name}.ssync-tmp"
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{dst.name}.", suffix=".ssync-tmp", dir=dst.parent,
+    )
+    tmp = Path(tmp_name)
     try:
-        with open(src, "rb") as f_src, open(tmp, "wb") as f_dst:
+        with open(src, "rb") as f_src, os.fdopen(fd, "wb") as f_dst:
+            fd = -1
             shutil.copyfileobj(f_src, f_dst)
             f_dst.flush()
             os.fsync(f_dst.fileno())
@@ -127,6 +131,8 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
             pass
         os.replace(str(tmp), str(dst))            # atomic within dst's filesystem
     except Exception:
+        if fd >= 0:
+            os.close(fd)
         try:
             if tmp.exists():
                 tmp.unlink()
@@ -140,7 +146,7 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
 
 
 def safe_move_file(src, dst):
-    """Move a file safely across filesystems."""
+    """Atomically publish ``src`` at ``dst`` without pre-deleting ``dst``."""
     src = Path(src)
     dst = Path(dst)
 
@@ -152,19 +158,7 @@ def safe_move_file(src, dst):
             return
         raise FileNotFoundError(f"Source file not found and destination does not exist: {src}")
 
-    if dst.exists():
-        for _attempt in range(3):
-            try:
-                dst.unlink()
-                break
-            except PermissionError:
-                if _attempt < 2:
-                    time.sleep(1)
-                else:
-                    logger.warning(f"Could not remove locked destination after 3 attempts: {dst.name}")
-            except Exception:
-                break
-
+    destination_preexisted = dst.exists()
     try:
         # Same-filesystem move: an atomic rename that also overwrites dst. A media-server
         # watcher (Jellyfin/Plex real-time monitoring) therefore never sees a partial file
@@ -175,17 +169,16 @@ def safe_move_file(src, dst):
         os.replace(str(src), str(dst))
         return
     except FileNotFoundError:
-        if dst.exists():
+        if not destination_preexisted and not src.exists() and dst.exists():
             logger.info(f"Source moved by another thread, destination exists: {dst.name}")
             return
         raise
     except (OSError, PermissionError) as e:
-        if dst.exists() and dst.stat().st_size > 0:
-            logger.warning(f"Move raised {type(e).__name__} but destination exists, treating as success: {e}")
-            try:
-                src.unlink()
-            except Exception:
-                logger.info(f"Could not delete source file (may be owned by another process): {src}")
+        # Some filesystems report an error after committing the rename. Only
+        # the disappeared source proves that happened; an existing destination
+        # may simply be the old library file and must never be treated as proof.
+        if not destination_preexisted and not src.exists() and dst.exists():
+            logger.warning(f"Move raised {type(e).__name__} after transfer completed: {e}")
             return
 
         error_msg = str(e).lower()

@@ -413,7 +413,6 @@ async function loadRepairJobs() {
             const statusClass = job.is_running ? 'running' : (job.enabled ? 'idle' : 'disabled');
             const dotClass = job.is_running ? 'running' : (job.enabled ? 'enabled' : 'disabled');
             const cardClass = job.is_running ? 'running' : (!job.enabled ? 'disabled' : '');
-
             // Build flow badges
             const flowParts = [];
             flowParts.push(`<span class="repair-flow-badge scan">${job.is_running ? '&#9654; Running' : 'Scan'}</span>`);
@@ -512,7 +511,9 @@ async function loadRepairJobs() {
                 <div class="repair-job-main">
                     <div class="repair-job-status ${dotClass}"></div>
                     <div class="repair-job-info">
-                        <div class="repair-job-name">${job.display_name}</div>
+                        <div class="repair-job-name-row">
+                            <div class="repair-job-name">${job.display_name}</div>
+                        </div>
                         <div class="repair-job-desc">${job.description || ''}</div>
                         <div class="repair-job-flow">${flowParts.join('')}</div>
                         <div class="repair-job-meta">${metaParts.join(' &middot; ')}</div>
@@ -1360,7 +1361,8 @@ async function loadRepairFindings() {
             missing_replaygain: 'No ReplayGain', replaygain_retag: 'RG Re-analyze',
             empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
-            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
+            quality_upgrade: 'Low Quality', quality_below_cutoff: 'Below Cutoff',
+            short_preview_track: 'Preview Clip',
             genre_cleanup: 'Genres',
             comma_artist_split: 'Comma Artist'
         };
@@ -1381,8 +1383,7 @@ async function loadRepairFindings() {
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
-            quality_upgrade: 'Upgrade',
-            missing_discography_track: 'Add to Wishlist',
+            quality_below_cutoff: 'Queue Upgrade',
             library_retag: 'Apply Tags',
             short_preview_track: 'Re-download',
             genre_cleanup: 'Clean Genres',
@@ -2793,4 +2794,3 @@ async function loadRepairHistory() {
 }
 
 // ===================================================================
-

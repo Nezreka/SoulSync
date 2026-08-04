@@ -183,15 +183,18 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
-def test_torrent_project_falls_back_to_indexer_name_when_title_lacks_dash() -> None:
+def test_torrent_project_falls_back_to_placeholder_when_title_lacks_dash() -> None:
     """When the title has no 'Artist -' prefix we'd auto-parse the
     filename (which starts with the indexer download URL) and end
     up showing the URL in the UI's 'by' field. Pre-filling artist
-    with the indexer name avoids that."""
+    with a generic placeholder avoids that — the indexer name (e.g.
+    "NZBGeek") must NOT be used as a stand-in artist: it's a source,
+    not a performer, and showing it as one is misleading."""
     plugin = TorrentDownloadPlugin()
     tracks, _ = plugin._project_results([_make_torrent_result(title='JustATitle')])
-    assert tracks[0].artist == 'Indexer'
-    # And the URL is definitely not the artist.
+    assert tracks[0].artist == 'Unknown Artist'
+    # The indexer name only belongs in source metadata, never the artist.
+    assert tracks[0].artist != 'Indexer'
     assert 'http' not in tracks[0].artist
     assert '||' not in tracks[0].artist
 
@@ -413,6 +416,18 @@ def test_usenet_project_encodes_token_in_filename() -> None:
     # Artist + title should be parsed out, not auto-extracted from filename.
     assert tracks[0].artist == 'Some Artist'
     assert tracks[0].title == 'Some Album'
+
+
+def test_usenet_project_falls_back_to_placeholder_when_title_lacks_dash() -> None:
+    """Sibling of the torrent-plugin regression: an indexer name (e.g.
+    "NZBGeek") must never stand in for the artist when the release title
+    has no 'Artist - Title' separator."""
+    plugin = UsenetDownloadPlugin()
+    tracks, _ = plugin._project_results(
+        [_make_usenet_result(title='JustATitle', indexer_name='NZBGeek')]
+    )
+    assert tracks[0].artist == 'Unknown Artist'
+    assert tracks[0].artist != 'NZBGeek'
 
 
 def test_usenet_finalize_picks_first_audio_file(tmp_path: Path) -> None:

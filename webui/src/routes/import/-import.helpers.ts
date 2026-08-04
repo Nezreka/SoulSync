@@ -171,7 +171,10 @@ export function getAutoImportCounts(results: ImportAutoImportResult[]) {
     ).length,
     review: results.filter((result) => result.status === 'pending_review').length,
     failed: results.filter(
-      (result) => result.status === 'failed' || result.status === 'needs_identification',
+      (result) =>
+        result.status === 'failed' ||
+        result.status === 'partial' ||
+        result.status === 'needs_identification',
     ).length,
   };
 }
@@ -188,7 +191,10 @@ export function filterAutoImportResults(
   }
   if (filter === 'failed') {
     return results.filter(
-      (result) => result.status === 'failed' || result.status === 'needs_identification',
+      (result) =>
+        result.status === 'failed' ||
+        result.status === 'partial' ||
+        result.status === 'needs_identification',
     );
   }
   return results;
@@ -287,6 +293,7 @@ export function getAutoImportStatusMeta(status: string): {
     pending_review: 'Needs Review',
     needs_identification: 'Unidentified',
     failed: 'Failed',
+    partial: 'Partially Imported',
     scanning: 'Scanning...',
     matched: 'Matched',
     rejected: 'Dismissed',
@@ -299,6 +306,7 @@ export function getAutoImportStatusMeta(status: string): {
     pending_review: '⚠',
     needs_identification: '✗',
     failed: '✗',
+    partial: '⚠',
     scanning: '⌛',
     matched: '✓',
     rejected: '✕',
@@ -314,7 +322,7 @@ export function getAutoImportStatusMeta(status: string): {
         ? 'completed'
         : status === 'pending_review'
           ? 'review'
-          : status === 'failed' || status === 'needs_identification'
+          : status === 'failed' || status === 'partial' || status === 'needs_identification'
             ? 'failed'
             : status === 'processing'
               ? 'processing'

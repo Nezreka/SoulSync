@@ -344,7 +344,10 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         # Run post-processing (tagging, AcoustID verification, path building)
         context_key = f"staging_{task_id}"
         with tasks_lock:
-            track_info = download_tasks.get(task_id, {}).get('track_info', {})
+            _task = download_tasks.get(task_id, {})
+            track_info = _task.get('track_info', {})
+            from core.imports.upgrade_intent import CONTEXT_KEY as _UPGRADE_INTENT_KEY
+            server_upgrade_intent = _task.get(_UPGRADE_INTENT_KEY)
         if not isinstance(track_info, dict):
             track_info = {}
         else:
@@ -473,6 +476,8 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             'has_clean_spotify_data': has_clean_data,
             'staging_source': True,
         }
+        from core.imports.upgrade_intent import attach_upgrade_intent
+        attach_upgrade_intent(context, server_upgrade_intent)
 
         # Store context in the matched downloads context store (used by post-processing)
         with matched_context_lock:

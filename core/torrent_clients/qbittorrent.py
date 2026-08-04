@@ -11,13 +11,13 @@ Reference: https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorren
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from typing import List, Optional
 
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
@@ -67,7 +67,9 @@ class QBittorrentAdapter:
         self._url = normalize_client_url(config_manager.get('torrent_client.url', ''))
         self._username = config_manager.get('torrent_client.username', '') or ''
         self._password = config_manager.get('torrent_client.password', '') or ''
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
         # Drop any existing session — credentials may have changed.
         with self._session_lock:
@@ -84,8 +86,7 @@ class QBittorrentAdapter:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._check_connection_sync)
+        return await run_control(self._check_connection_sync)
 
     def _check_connection_sync(self) -> bool:
         try:
@@ -165,10 +166,8 @@ class QBittorrentAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_sync, url_or_magnet, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_sync, url_or_magnet, category, save_path)
 
     def _add_torrent_sync(
         self,
@@ -238,10 +237,8 @@ class QBittorrentAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_torrent_file_sync, file_bytes, category, save_path
-        )
+        return await run_control(
+            self._add_torrent_file_sync, file_bytes, category, save_path)
 
     def _add_torrent_file_sync(
         self,
@@ -263,8 +260,7 @@ class QBittorrentAdapter:
         return self._poll_for_new_hash(before)
 
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_status_sync, torrent_id)
+        return await run_control(self._get_status_sync, torrent_id)
 
     def _get_status_sync(self, torrent_id: str) -> Optional[TorrentStatus]:
         resp = self._call('GET', '/api/v2/torrents/info', params={'hashes': torrent_id})
@@ -280,8 +276,7 @@ class QBittorrentAdapter:
         return self._parse_status(items[0])
 
     async def get_all(self) -> List[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_all_sync)
+        return await run_control(self._get_all_sync)
 
     def _get_all_sync(self) -> List[TorrentStatus]:
         resp = self._call('GET', '/api/v2/torrents/info')
@@ -313,8 +308,7 @@ class QBittorrentAdapter:
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._remove_sync, torrent_id, delete_files)
+        return await run_control(self._remove_sync, torrent_id, delete_files)
 
     def _remove_sync(self, torrent_id: str, delete_files: bool) -> bool:
         resp = self._call('POST', '/api/v2/torrents/delete', data={
@@ -324,15 +318,13 @@ class QBittorrentAdapter:
         return bool(resp and resp.ok)
 
     async def pause(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._pause_sync, torrent_id)
+        return await run_control(self._pause_sync, torrent_id)
 
     def _pause_sync(self, torrent_id: str) -> bool:
         return self._stop_start('/api/v2/torrents/stop', '/api/v2/torrents/pause', torrent_id)
 
     async def resume(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._resume_sync, torrent_id)
+        return await run_control(self._resume_sync, torrent_id)
 
     def _resume_sync(self, torrent_id: str) -> bool:
         return self._stop_start('/api/v2/torrents/start', '/api/v2/torrents/resume', torrent_id)
@@ -353,9 +345,8 @@ class QBittorrentAdapter:
         enforces them (arr-style). ``ratio_limit`` / ``seeding_time_limit`` use
         qBit's sentinels: -1 = no limit, -2 = use global. ``seeding_time_limit``
         is in MINUTES (qBit's unit). Returns True on a 2xx."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._set_share_limits_sync, torrent_id, ratio_limit, seeding_time_limit)
+        return await run_control(
+            self._set_share_limits_sync, torrent_id, ratio_limit, seeding_time_limit)
 
     def _set_share_limits_sync(self, torrent_id: str, ratio_limit: float,
                                seeding_time_limit: int) -> bool:

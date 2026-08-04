@@ -1624,7 +1624,7 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
         os.remove(resolved_src)
     except OSError as rm_err:
         logger.warning(f"[Reorganize] Couldn't remove original {resolved_src}: {rm_err}")
-    _delete_track_sidecars(resolved_src)
+    _carry_track_sidecars(resolved_src, new_path)
     return True
 
 
@@ -2005,10 +2005,11 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
         if os.path.exists(new_abs) and not same:
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
-        # Carry sibling-format audio to the same destination with the renamed stem —
-        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
-        for sibling_src in _find_sibling_audio_files(current_abs):
-            _move_sibling_to_destination(sibling_src, new_abs)
+        # Siblings are collected BEFORE the rename (the source stem is gone
+        # afterwards) but carried AFTER it succeeds (iss29-E02): moving them
+        # first meant a failed canonical rename left the album split across two
+        # directories, with no error path that could put it back.
+        siblings = _find_sibling_audio_files(current_abs)
         try:
             os.rename(current_abs, new_abs)
         except OSError as e:
@@ -2016,6 +2017,10 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
                 shutil.move(current_abs, new_abs)  # crosses a filesystem boundary
             else:
                 raise
+        # Carry sibling-format audio to the same destination with the renamed stem —
+        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
+        for sibling_src in siblings:
+            _move_sibling_to_destination(sibling_src, new_abs)
         return True, None
     except Exception as e:
         return False, str(e)
@@ -2320,6 +2325,14 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
 
     Returns the destination path on success, None on failure (logged
     at warning, doesn't raise — sibling moves are best-effort).
+
+    iss29-E02: refuses to overwrite a DIFFERENT file already at the
+    destination, exactly like ``_rename_track_in_place``. ``shutil.move``
+    resolves to ``os.rename`` for a regular file on POSIX and overwrites
+    silently — no error, no log, no counter. With lossy-copy enabled and a
+    destination already holding a file under the canonical's post-rename stem
+    (an earlier partial run, a second edition), that destroyed a file nothing
+    in the catalogue was tracking.
     """
     dst_dir = os.path.dirname(canonical_dst)
     canonical_stem = os.path.splitext(os.path.basename(canonical_dst))[0]
@@ -2327,6 +2340,13 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
     sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
     if os.path.normpath(sibling_src) == os.path.normpath(sibling_dst):
         return sibling_dst  # already at the right place
+    if os.path.exists(sibling_dst):
+        logger.warning(
+            "[Reorganize] Not moving sibling-format file %s → %s: destination "
+            "already exists; leaving the source in place",
+            sibling_src, sibling_dst,
+        )
+        return None
     try:
         os.makedirs(dst_dir, exist_ok=True)
         shutil.move(sibling_src, sibling_dst)
@@ -2339,19 +2359,49 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
         return None
 
 
-def _delete_track_sidecars(audio_path: str) -> None:
-    """Delete per-track sidecars (.lrc / .nfo / .txt / .cue / .json) that
-    sit alongside `audio_path` and share its filename stem. Best-effort —
-    individual failures are logged at debug and never raised."""
-    src_dir = os.path.dirname(audio_path)
-    stem = os.path.splitext(os.path.basename(audio_path))[0]
+def _carry_track_sidecars(src_audio: str, dst_audio: str) -> None:
+    """Move per-track sidecars (.lrc / .nfo / .txt / .cue / .json) to sit
+    alongside the moved audio, under the destination's stem.
+
+    iss29-E05: these used to be DELETED at the source. The full reorganize run
+    stages only the audio file (``_stage_track``), so the sidecar was never
+    carried across — meaning "Fetch Lyrics" followed by "Reorganize" on the same
+    page silently emptied the lyrics column. Library V2 writes exactly these
+    files (``core/library2/lyrics.py``), so reorganize was deleting its own
+    application's data. Every other mover in the project already carries them:
+    ``_fix_path_mismatch`` and ``_rename_to_basename`` both move the sidecar —
+    reorganize was the outlier.
+
+    A sidecar whose destination name is already taken is removed rather than
+    moved: the destination copy belongs to the same track at the same path, so
+    the source one is a leftover and keeping it would block the empty-folder
+    cleanup this function exists to enable. Best-effort throughout — individual
+    failures are logged at debug and never raised.
+    """
+    src_dir = os.path.dirname(src_audio)
+    src_stem = os.path.splitext(os.path.basename(src_audio))[0]
+    dst_dir = os.path.dirname(dst_audio)
+    dst_stem = os.path.splitext(os.path.basename(dst_audio))[0]
     for ext in _TRACK_SIDECAR_EXTS:
-        sidecar = os.path.join(src_dir, stem + ext)
-        if os.path.isfile(sidecar):
+        sidecar_src = os.path.join(src_dir, src_stem + ext)
+        if not os.path.isfile(sidecar_src):
+            continue
+        sidecar_dst = os.path.join(dst_dir, dst_stem + ext)
+        if os.path.normpath(sidecar_src) == os.path.normpath(sidecar_dst):
+            continue
+        if os.path.exists(sidecar_dst):
             try:
-                os.remove(sidecar)
+                os.remove(sidecar_src)
             except OSError as e:
-                logger.debug(f"[Reorganize] Couldn't remove sidecar {sidecar}: {e}")
+                logger.debug(f"[Reorganize] Couldn't remove sidecar {sidecar_src}: {e}")
+            continue
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+            shutil.move(sidecar_src, sidecar_dst)
+        except OSError as e:
+            logger.debug(
+                f"[Reorganize] Couldn't carry sidecar {sidecar_src} → {sidecar_dst}: {e}"
+            )
 
 
 def _delete_album_sidecars(src_dir: str) -> None:

@@ -26,6 +26,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from core.downloads.source_policy import (
+    RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
+    STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES,
+)
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -100,13 +104,9 @@ class StatusDeps:
     get_unverified_download_history: Optional[Callable[[], list[dict]]] = None
 
 
-# Streaming sources the engine fallback applies to. Soulseek goes through
-# slskd's live_transfers path and must NOT hit the engine fallback.
-_STREAMING_SOURCE_NAMES = frozenset((
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
-    'torrent', 'usenet',
-))
-_RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
+# _STREAMING_SOURCE_NAMES (imported above): the engine fallback below applies
+# only to these. Soulseek goes through slskd's live_transfers path and must
+# NOT hit the engine fallback.
 
 # Keep these in sync with the engine plugins' state strings.
 _ENGINE_FAILURE_STATES = ('Errored', 'Failed', 'Rejected', 'TimedOut', 'Aborted')

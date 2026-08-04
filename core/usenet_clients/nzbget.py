@@ -9,7 +9,6 @@ Reference: https://nzbget.com/documentation/api/
 
 from __future__ import annotations
 
-import asyncio
 import base64
 from itertools import count
 from typing import Any, List, Optional, Union
@@ -17,6 +16,7 @@ from typing import Any, List, Optional, Union
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_control
 from core.usenet_clients.base import UsenetStatus
 from utils.logging_config import get_logger
 
@@ -62,7 +62,9 @@ class NZBGetAdapter:
         self._url = (config_manager.get('usenet_client.url', '') or '').rstrip('/')
         self._username = config_manager.get('usenet_client.username', '') or ''
         self._password = config_manager.get('usenet_client.password', '') or ''
-        self._category = config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('usenet_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
 
     def reload_settings(self) -> None:
         self._load_config()
@@ -73,8 +75,7 @@ class NZBGetAdapter:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._check_connection_sync)
+        return await run_control(self._check_connection_sync)
 
     def _check_connection_sync(self) -> bool:
         return self._rpc_sync('version', []) is not None
@@ -111,10 +112,8 @@ class NZBGetAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._add_nzb_sync, url_or_bytes, category, save_path
-        )
+        return await run_control(
+            self._add_nzb_sync, url_or_bytes, category, save_path)
 
     def _add_nzb_sync(
         self,
@@ -152,8 +151,7 @@ class NZBGetAdapter:
         return None
 
     async def get_status(self, job_id: str) -> Optional[UsenetStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_status_sync, job_id)
+        return await run_control(self._get_status_sync, job_id)
 
     def _get_status_sync(self, job_id: str) -> Optional[UsenetStatus]:
         for status in self._get_all_sync():
@@ -162,8 +160,7 @@ class NZBGetAdapter:
         return None
 
     async def get_all(self) -> List[UsenetStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_all_sync)
+        return await run_control(self._get_all_sync)
 
     def _get_all_sync(self) -> List[UsenetStatus]:
         out: List[UsenetStatus] = []
@@ -254,8 +251,7 @@ class NZBGetAdapter:
         return None
 
     async def remove(self, job_id: str, delete_files: bool = False) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._remove_sync, job_id, delete_files)
+        return await run_control(self._remove_sync, job_id, delete_files)
 
     def _remove_sync(self, job_id: str, delete_files: bool) -> bool:
         # editqueue commands take a list of NZBIDs. ``GroupFinalDelete``
@@ -271,8 +267,7 @@ class NZBGetAdapter:
         return bool(result)
 
     async def pause(self, job_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._pause_sync, job_id)
+        return await run_control(self._pause_sync, job_id)
 
     def _pause_sync(self, job_id: str) -> bool:
         try:
@@ -282,8 +277,7 @@ class NZBGetAdapter:
         return bool(self._rpc_sync('editqueue', ['GroupPause', 0, '', [id_int]]))
 
     async def resume(self, job_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._resume_sync, job_id)
+        return await run_control(self._resume_sync, job_id)
 
     def _resume_sync(self, job_id: str) -> bool:
         try:
