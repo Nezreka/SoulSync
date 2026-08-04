@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import threading
+import uuid
 import weakref
 from types import SimpleNamespace
 from typing import Any
@@ -280,7 +281,12 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         _raw_audio_save(audio_file, symbols)
         return True
 
-    tmp = f"{path}.sstmp"
+    # dd28-31: a FIXED temp name is only safe if writers to one file are
+    # serialized, and they are not — a bulk-fix thread and a scan's own
+    # auto-fix can reach the same file at the same time. The loser then fell
+    # into the generic except branch and dropped back to the non-atomic
+    # in-place save this whole function exists to replace.
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex[:8]}.sstmp"
     try:
         shutil.copy2(path, tmp)               # snapshot original (audio + tags)
         _raw_audio_save(audio_file, symbols, target=tmp)  # write new tags into the copy

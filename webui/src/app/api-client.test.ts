@@ -38,6 +38,26 @@ describe('readJson', () => {
     await expect(result).rejects.toHaveProperty('message', 'Nope');
   });
 
+  it('surfaces the standard public-API error.message envelope', async () => {
+    const error = createHttpError(
+      {
+        success: false,
+        data: null,
+        error: { code: 'CONFLICT', message: 'Wishlist processing is already running.' },
+      },
+      409,
+    );
+    const json = vi.fn().mockRejectedValue(error);
+    const promise = { json } as unknown as ResponsePromise<unknown>;
+    const result = readJson(promise);
+
+    await expect(result).rejects.toBe(error);
+    await expect(result).rejects.toHaveProperty(
+      'message',
+      'Wishlist processing is already running.',
+    );
+  });
+
   it('falls back to the HTTPError message when the payload is unhelpful', async () => {
     const error = createHttpError({ detail: 'missing error field' }, 404);
     const json = vi.fn().mockRejectedValue(error);

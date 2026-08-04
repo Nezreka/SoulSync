@@ -41,3 +41,29 @@ def test_close_variant_still_matches():
 
 def test_empty_results_is_none():
     assert pick([], "The Outfield") is None
+
+
+def test_among_exact_duplicates_prefers_largest_catalog():
+    """§62.5: Deezer has five artists ALL named exactly "Hiroyuki Sawano" —
+    fragments with 1-4 albums plus the real entry with the full catalog.
+    First-exact-match used to pick a fragment; the catalog-size signal must
+    break exact-name ties."""
+    results = [
+        _r("Hiroyuki Sawano", "234170331") | {"nb_album": 4, "nb_fan": 50},
+        _r("Hiroyuki Sawano", "1315147") | {"nb_album": 104, "nb_fan": 24000},
+        _r("Hiroyuki Sawano", "218685045") | {"nb_album": 1},
+    ]
+    assert pick(results, "Hiroyuki Sawano")["id"] == "1315147"
+
+
+def test_spotify_follower_shape_breaks_exact_ties():
+    results = [
+        _r("Hiroyuki Sawano", "fragment") | {"followers": {"total": 10}},
+        _r("Hiroyuki Sawano", "real") | {"followers": {"total": 500000}},
+    ]
+    assert pick(results, "Hiroyuki Sawano")["id"] == "real"
+
+
+def test_single_exact_match_without_signals_still_wins():
+    results = [_r("The Beatles", "1"), _r("The Outfield", "99")]
+    assert pick(results, "The Outfield")["id"] == "99"

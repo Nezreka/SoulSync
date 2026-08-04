@@ -7,7 +7,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
@@ -506,6 +506,33 @@ def _coerce_int(value: Any, default: int = 1) -> int:
     return coerced if coerced > 0 else default
 
 
+def _reachable_original_dir(original_path: Any) -> Optional[str]:
+    """Directory of an enhance/upgrade's existing library file, or ``None``.
+
+    ``None`` means "do not replace in place": either the recorded path can't be
+    mapped onto anything this process can see, or its folder no longer exists.
+    The caller then builds the normal template destination (#1109) instead of
+    trying to ``makedirs`` a media-server-only root such as ``/music``.
+    """
+    if not isinstance(original_path, str) or not original_path.strip():
+        return None
+    candidates = [original_path]
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        resolved = resolve_library_file_path(
+            original_path, config_manager=_get_config_manager())
+        if resolved:
+            candidates.append(resolved)
+    except Exception as exc:  # noqa: BLE001 - resolution is best-effort
+        logger.debug("[Enhance] library path resolution failed for %r: %s",
+                     original_path, exc)
+    for candidate in candidates:
+        parent = os.path.dirname(candidate)
+        if parent and os.path.isdir(parent):
+            return parent
+    return None
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -535,13 +562,24 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         except (json.JSONDecodeError, TypeError):
             source_info = {}
     if source_info.get("enhance") and source_info.get("original_file_path"):
-        original_path = source_info["original_file_path"]
-        original_dir = os.path.dirname(original_path)
-        original_stem = os.path.splitext(os.path.basename(original_path))[0]
-        final_path = os.path.join(original_dir, original_stem + file_ext)
-        _ensure_dir(original_dir, exist_ok=True)
-        logger.info("[Enhance] Using original file location: %s", final_path)
-        return final_path, True
+        original_dir = _reachable_original_dir(source_info["original_file_path"])
+        if original_dir:
+            original_stem = os.path.splitext(
+                os.path.basename(source_info["original_file_path"]))[0]
+            final_path = os.path.join(original_dir, original_stem + file_ext)
+            logger.info("[Enhance] Using original file location: %s", final_path)
+            return final_path, True
+        # #1109: the recorded path is the MEDIA SERVER's view of the library
+        # ("/music/…"), which this process usually cannot reach — the old code
+        # tried to *create* that root and died with PermissionError, aborting
+        # post-processing and leaving the finished download unsorted. An
+        # unreachable original is not a destination; fall through to the normal
+        # template so the upgrade still lands in Artist/Album under Transfer.
+        logger.warning(
+            "[Enhance] Original file location %r is not reachable from here — "
+            "filing the upgrade through the normal path template instead",
+            source_info["original_file_path"],
+        )
 
     year = ""
     if album_context and album_context.get("release_date"):

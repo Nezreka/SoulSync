@@ -875,3 +875,128 @@ def test_collab_mode_all_keeps_the_combined_folder(monkeypatch):
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _collab_cfg(mode="all"))
     folder, _ = import_paths.get_file_path_from_template(_single_ctx(), "single_path")
     assert folder.split(os.sep)[0] == "Larry June, Currensy & The Alchemist"
+
+
+# ── #1109: an enhance/upgrade must never makedirs an unmapped library root ──
+#
+# The stored library path is the MEDIA SERVER's view ("/music/..."). Inside the
+# SoulSync container that root is usually not mounted at all, so the old code's
+# unconditional makedirs(dirname(original_file_path)) tried to CREATE "/music"
+# and died with PermissionError — post-processing aborted, the finished file
+# was left unsorted, and the retry loop repeated the same crash forever.
+
+def _enhance_config(tmp_path):
+    return _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/$albumartist - $album/$track - $title",
+            "single_path": "$artist/$artist - $title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+
+
+def _enhance_context(original_file_path):
+    ctx = _album_context()
+    ctx["track_info"]["source_info"] = {
+        "enhance": True,
+        "original_file_path": original_file_path,
+    }
+    return ctx
+
+
+def test_enhance_never_creates_an_unreachable_library_root(monkeypatch, tmp_path):
+    """#1109: '/music/...' is not mounted here. The builder must NOT try to
+    create it — it must fall back to the normal template destination."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _enhance_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    unreachable = str(tmp_path / "not-mounted" / "Lenka" / "Lenka" / "01 - The Show.mp3")
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _enhance_context(unreachable), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac",
+    )
+
+    assert created is True
+    assert not (tmp_path / "not-mounted").exists()
+    assert final_path == str(
+        tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac")
+
+
+def test_enhance_replaces_in_place_when_the_original_dir_exists(monkeypatch, tmp_path):
+    """The normal case is unchanged: the old file is reachable, so the upgrade
+    keeps its exact folder and stem (only the extension follows the new file)."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _enhance_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    album_dir = tmp_path / "Library" / "Lenka" / "Lenka"
+    album_dir.mkdir(parents=True)
+    original = album_dir / "01 - The Show.mp3"
+    original.write_bytes(b"old")
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _enhance_context(str(original)), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac",
+    )
+
+    assert created is True
+    assert final_path == str(album_dir / "01 - The Show.flac")
+
+
+def test_enhance_resolves_a_media_server_path_to_its_local_mount(monkeypatch, tmp_path):
+    """The DB stores the media server's path. When the same file IS reachable
+    under a configured library root, the upgrade must land on the LOCAL path —
+    not on the unmapped server path, and not in the transfer root."""
+    music_root = tmp_path / "mnt" / "music"
+    album_dir = music_root / "Lenka" / "Lenka"
+    album_dir.mkdir(parents=True)
+    (album_dir / "01 - The Show.mp3").write_bytes(b"old")
+
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "library.music_paths": [str(music_root)],
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$albumartist/$albumartist - $album/$track - $title",
+            "single_path": "$artist/$artist - $title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    }))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    server_path = "/music/Lenka/Lenka/01 - The Show.mp3"
+
+    final_path, created = import_paths.build_final_path_for_track(
+        _enhance_context(server_path), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac",
+    )
+
+    assert created is True
+    assert final_path == str(album_dir / "01 - The Show.flac")
+
+
+def test_enhance_preview_still_creates_nothing(monkeypatch, tmp_path):
+    """create_dirs=False (reorganize dry run) must stay side-effect free."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _enhance_config(tmp_path))
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    album_dir = tmp_path / "Library" / "Lenka" / "Lenka"
+    album_dir.mkdir(parents=True)
+    original = album_dir / "01 - The Show.mp3"
+    original.write_bytes(b"old")
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        _enhance_context(str(original)), {"name": "Lenka"},
+        {"is_album": True, "album_name": "Lenka", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    assert final_path == str(album_dir / "01 - The Show.flac")
+    assert not (tmp_path / "Transfer").exists()

@@ -225,6 +225,23 @@ def test_qbit_parse_status_zeros_eta_when_unknown() -> None:
     assert status.eta is None
 
 
+def test_qbit_set_share_limits_uses_web_api_fields_and_minutes() -> None:
+    adapter = _qbit_with_config()
+    adapter._call = MagicMock(return_value=_mock_response(200))
+
+    assert adapter._set_share_limits_sync("abc123", 1.5, 120) is True
+    adapter._call.assert_called_once_with(
+        "POST",
+        "/api/v2/torrents/setShareLimits",
+        data={
+            "hashes": "abc123",
+            "ratioLimit": 1.5,
+            "seedingTimeLimit": 120,
+            "inactiveSeedingTimeLimit": -1,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Transmission adapter
 # ---------------------------------------------------------------------------
