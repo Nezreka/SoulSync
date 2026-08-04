@@ -57,6 +57,16 @@ describe('musicbrainzPill', () => {
     expect(musicbrainzPill({ ...running }).current).toBe('No active matches');
   });
 
+  it('a STRING current_item behaves like property access — no name, fallback', () => {
+    // The vanilla reads `.name` off whatever arrives; a string yields undefined
+    // and the fallback branch runs. The reducer must not "helpfully" treat the
+    // string as a name — that would be behavior the vanilla does not have.
+    expect(musicbrainzPill({ ...running, current_item: 'raw string' }).current).toBe(
+      'No active matches',
+    );
+    expect(deezerPill({ ...running, current_item: 'raw string' }).current).toBeNull();
+  });
+
   it('renders the BARE total — a missing total prints "undefined"', () => {
     // Verbatim vanilla quirk: MusicBrainz is the only provider without `|| 0`
     // on the total slot. Fixing it here would be silent drift.

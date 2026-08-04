@@ -28,9 +28,16 @@ import type {
 } from './-dash.types';
 
 // ── current_item accessors (object | string union) ───────────────────────────
+//
+// Every wave-1 provider reads `data.current_item.name` / `.type` — PROPERTY
+// ACCESS. On a string payload that yields `undefined` and the vanilla falls to
+// its fallback branch; it never formats the string itself. These accessors
+// reproduce exactly that. The three string-item providers (Discogs,
+// SimilarArtists, SoulID) do NOT use them — their originals consume
+// `data.current_item` raw, and their reducers will too.
 
 function itemName(item: CurrentItem | null | undefined): string | undefined {
-  if (typeof item === 'string') return item;
+  if (typeof item === 'string') return undefined;
   return item?.name;
 }
 
