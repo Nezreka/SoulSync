@@ -78,8 +78,13 @@ export function SourceModals({
   const onDownloadMissing = useCallback(
     async (options?: { forcePlaylistFolder?: boolean }) => {
       if (!state || openId === null) return;
-      // The vanilla's two distinct guards (10715-10716, 10755-10757).
-      if (state.rawResults.length === 0) {
+      // The vanilla's two distinct guards (10715-10716, 10755-10757). The
+      // FIRST tests ABSENCE (`!discoveryResults`), not emptiness, so an empty
+      // array falls through to the second. Both are defensive in the port:
+      // the footer early-returns on !hasResults (discovery-modal 349), so the
+      // Download button never renders with no rows. Transcribed faithfully
+      // anyway rather than left as a silent expression drift.
+      if (!state.rawResults) {
         window.showToast?.('No discovery results available for download', 'error');
         return;
       }

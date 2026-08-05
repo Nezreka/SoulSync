@@ -256,7 +256,14 @@ export function FixModal({ config, sourceId, row, onClose, onFixed }: FixModalPr
           <div className="search-results-section">
             <h3>Results</h3>
             <div className="fix-modal-results">
-              {statusText && <div className="loading">{statusText}</div>}
+              {/* The vanilla uses three status classes, and .error-message is
+                  styled red (style.css 33945-33956); rendering every message
+                  as .loading loses that (wishlist-tools.js 291/305/311/317). */}
+              {statusText && (
+                <div className={statusText.startsWith('❌') ? 'error-message' : 'loading'}>
+                  {statusText}
+                </div>
+              )}
               {results.map((track, index) => (
                 <div
                   key={track.id ?? index}

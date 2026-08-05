@@ -1665,6 +1665,24 @@ all mapped in the ecosystem section).
   ahead of the page shell); _AUTO_SYNC_SOURCE_LOGOS is the one pure auto-sync
   constant with no ported home, due with the board phase.
 
+- Review backlog CLEARED — the four LOW-severity behavioural divergences the
+  modal review logged are now fixed, not just recorded:
+  * **the #863 artist fallback could never fire.** The vanilla tests the RAW
+    field, where an absent artist is '' (9984-9985). The port's transform
+    renders absent as 'Unknown' (-sync.transform.ts 107/113/123), which is
+    truthy and is not the literal 'Unknown Artist' the check looked for — so
+    the port's own normalisation defeated its own fallback and the column
+    showed 'Unknown' where the vanilla showed the matched artist. 'Unknown'
+    now counts as absent.
+  * `sync_complete` no longer renders the no-results warning or Retry Failed:
+    both belong to the vanilla's DISCOVERED arm only (9603-9605, 9686); its
+    separate sync_complete case (9809-9903) has neither.
+  * fix-modal errors regain the vanilla's red .error-message class
+    (style.css 33945-33956) instead of rendering every status as .loading.
+  * the first download guard tests ABSENCE like the vanilla, not emptiness.
+    Verified defensive in both worlds — the footer early-returns on
+    !hasResults — so this is expression fidelity, not a user-visible change.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

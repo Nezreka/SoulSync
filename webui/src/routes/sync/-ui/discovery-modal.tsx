@@ -464,8 +464,15 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                   <tr key={row.index} id={`sync-discovery-row-${fakeHash}-${row.index}`}>
                     <td className="yt-track">{row.yt_track}</td>
                     <td className="yt-artist">
-                      {/* #863: an unknown/blank source artist falls back to the matched one. */}
-                      {(row.yt_artist === 'Unknown Artist' || !row.yt_artist) &&
+                      {/* #863: an unknown/blank source artist falls back to the
+                          matched one (9981-9985). The vanilla tests the RAW
+                          field, where absent is ''; the transform renders
+                          absent as 'Unknown' (-sync.transform.ts 107/113/123),
+                          so that spelling has to count as absent too or the
+                          fallback can never fire. */}
+                      {(row.yt_artist === 'Unknown Artist' ||
+                        row.yt_artist === 'Unknown' ||
+                        !row.yt_artist) &&
                       row.spotify_artist !== '-'
                         ? row.spotify_artist
                         : row.yt_artist}
