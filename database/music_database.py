@@ -661,6 +661,26 @@ class MusicDatabase:
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS genre_translation_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    whitelist_hash TEXT NOT NULL,
+                    source_genre TEXT NOT NULL,
+                    normalized_source_genre TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    matched_genre TEXT,
+                    score REAL,
+                    margin REAL,
+                    candidates_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 1,
+                    UNIQUE(whitelist_hash, normalized_source_genre)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gtc_hash ON genre_translation_cache (whitelist_hash)")
+
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mirrored_playlists (
