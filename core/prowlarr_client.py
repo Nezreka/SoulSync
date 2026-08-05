@@ -100,7 +100,7 @@ class ProwlarrSearchResult:
 class ProwlarrClient:
     """Thin sync-backed async wrapper around the Prowlarr v1 API."""
 
-    DEFAULT_TIMEOUT = 15
+    DEFAULT_TIMEOUT = 120
 
     def __init__(self) -> None:
         self._load_config()
