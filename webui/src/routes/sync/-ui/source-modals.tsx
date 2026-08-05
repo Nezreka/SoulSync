@@ -3,9 +3,14 @@
  * shared DiscoveryModal for the open playlist, mounts the React-native
  * FixModal (key'd by row index — its prefill and auto-search read the row
  * once), runs unmatch with the vanilla's toasts (wishlist-tools.js 701-703),
- * and hands downloads to the vanilla engine
- * (openDownloadMissingModalForYouTube with the config's vpid + the two-format
- * track builder, startYouTubeDownloadMissing 10755-10775).
+ * and hands downloads to the vanilla engine with the config's vpid + the
+ * two-format track builder. WHICH engine entry is per-source drift
+ * (ux.downloadEntry): tidal/qobuz/deezer/spotify_public/itunes_link go to the
+ * generic openDownloadMissingModalForTidal (sync-services.js 1312 — it alone
+ * takes options and hydrates the organize preference at 1494);
+ * youtube/beatport/listenbrainz/mirrored go to
+ * openDownloadMissingModalForYouTube (downloads.js 429, no options), which is
+ * what startYouTubeDownloadMissing 10755-10775 calls.
  */
 
 import { useCallback, useState } from 'react';
@@ -26,8 +31,8 @@ function statePlaylistTracks(state: SourcePlaylistState): unknown[] {
   return Array.isArray(state.playlist?.tracks) ? (state.playlist.tracks as unknown[]) : [];
 }
 
-// openDownloadMissingModalForYouTube is declared by the shell globals
-// (globals.d.ts) with the engine's full signature.
+// Both engine entries are declared by the shell globals (globals.d.ts) with
+// their real signatures.
 
 export interface SourceModalsProps {
   config: SourceVerticalConfig;

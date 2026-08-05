@@ -211,12 +211,6 @@ declare global {
      * back. Returns true when a modal was shown.
      */
     /**
-     * downloads.js:429 — the shared download-missing modal, YouTube-track
-     * flavour. Discover's mixes, recent/seasonal/cache albums and the playlist
-     * builder all hand their converted tracks to it; artist/album context is
-     * optional and switches the modal into album mode.
-     */
-    /**
      * The generic engine entry (misnamed ForTidal) that tidal/qobuz/deezer/
      * spotify-public/itunes use — sync-services.js 1312. Unlike the YouTube
      * one it takes options and hydrates the organize preference (1494).
@@ -227,6 +221,12 @@ declare global {
       spotifyTracks: unknown[],
       options?: { forcePlaylistFolder?: boolean },
     ) => Promise<void> | void;
+    /**
+     * downloads.js:429 — the shared download-missing modal, YouTube-track
+     * flavour. Discover's mixes, recent/seasonal/cache albums and the playlist
+     * builder all hand their converted tracks to it; artist/album context is
+     * optional and switches the modal into album mode.
+     */
     openDownloadMissingModalForYouTube?: (
       virtualPlaylistId: string,
       playlistName: string,

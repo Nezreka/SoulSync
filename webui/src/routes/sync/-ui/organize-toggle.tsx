@@ -17,7 +17,13 @@ import { useEffect, useState } from 'react';
 import { fetchOrganizePreference, setOrganizePreference } from '../-sync.fix';
 
 export interface OrganizeToggleProps {
-  /** The mirror-resolution ref — the download vpid (spotify_public_<hash>). */
+  /**
+   * The mirror-resolution ref — the BARE source id, NOT the prefixed vpid.
+   * The vanilla builds spotify_public_<hash> (sync-services.js 9557) and then
+   * normalizePlaylistOrganizeRef strips it straight back off
+   * (shared-helpers.js 1113-1115), so the backend only ever matches the bare
+   * hash. Sending the prefixed form was the P4b review's caught bug.
+   */
   playlistRef: string;
   /** The mirror source hint ('spotify_public'). */
   source: string;

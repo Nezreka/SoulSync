@@ -1,5 +1,9 @@
 /**
- * The playlist card's progress line — ONE renderer for every vertical.
+ * The playlist card's progress line for the URL-import and account
+ * verticals. NOT every vertical: the ListenBrainz/Last.fm cards render
+ * lbCardProgressLine (-sync.lb-tabs.ts), whose sync percentage is
+ * matched/total — real parity, sync-listenbrainz.js 271, not a drift to
+ * unify away — and the SoulSync Discovery tab paints its own result line.
  *
  * The vanilla painted this element from two different writers and the second
  * is easy to miss: updateXCardProgress writes the DISCOVERY line (tidal
