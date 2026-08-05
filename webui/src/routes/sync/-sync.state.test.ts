@@ -99,6 +99,11 @@ describe('sync lifecycle', () => {
     expect(applySyncStatus(syncing, { sync_status: 'cancelled' }).phase).toBe('discovered');
   });
 
+  it("the HTTP poll's boolean complete finishes too (tidal poll 1078 vs socket 'finished')", () => {
+    const syncing = applySyncStarted(discovered, { sync_playlist_id: 'sp1' });
+    expect(applySyncStatus(syncing, { complete: true }).phase).toBe('sync_complete');
+  });
+
   it('in-flight progress lands in lastSyncProgress for the card re-render restore', () => {
     const syncing = applySyncStatus(discovered, {
       status: 'syncing',

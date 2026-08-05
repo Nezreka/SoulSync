@@ -122,10 +122,15 @@ describe('the unified status ladder', () => {
     expect(toDiscoveryRow('tidal', 'lenient', {}, 0).status).toBe('❌ Not Found');
   });
 
-  it('keeps LB authoritative indexes and gives LB rows a duration', () => {
+  it('authoritative indexes for beatport+LB only; the object-track sources stay positional', () => {
     const lb = toDiscoveryRow('listenbrainz', 'lenient', { index: 7, lb_track: 'T' }, 3);
     expect(lb.index).toBe(7);
     expect(lb.duration).toBe('0:00');
+    expect(toDiscoveryRow('beatport', 'lenient', { index: 9 }, 3).index).toBe(9);
+    // The tidal/qobuz/deezer/sp/itunes mappers use position UNCONDITIONALLY
+    // (637, 1841, 3064...) — a backend index on those rows must be ignored,
+    // because the Fix-modal posts this value back (review finding #5).
+    expect(toDiscoveryRow('tidal', 'lenient', { index: 9 }, 3).index).toBe(3);
     const positional = toDiscoveryRow('tidal', 'lenient', {}, 3);
     expect(positional.index).toBe(3);
     expect(positional.duration).toBeUndefined();

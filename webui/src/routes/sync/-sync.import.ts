@@ -293,10 +293,11 @@ export interface MirrorPayload {
   name: string;
   tracks: {
     track_name: string;
-    artist_name: string;
+    /** undefined (key dropped from the JSON) when artists is an empty array — vanilla precedence. */
+    artist_name: string | undefined;
     album_name: string;
     duration_ms: number;
-    image_url: string | null;
+    image_url: string | null | undefined;
     source_track_id: string | number;
     extra_data: unknown;
   }[];
@@ -317,6 +318,9 @@ export function buildMirrorPayload(
   tracks: MirrorSourceTrack[],
   metadata: { description?: string; owner?: string; image_url?: string } = {},
 ): MirrorPayload {
+  // Operator precedence transcribed exactly (stats-automations.js 471-477):
+  // the artist `|| ''` binds only to the NON-array branch, so empty-array
+  // artists yield undefined and the key drops from the JSON body.
   const normalizedTracks = tracks.map((t) => ({
     track_name: t.track_name || t.name || '',
     artist_name:
@@ -324,16 +328,15 @@ export function buildMirrorPayload(
       (Array.isArray(t.artists)
         ? typeof t.artists[0] === 'object'
           ? (t.artists[0] as { name?: string }).name
-          : t.artists[0]
-        : t.artists) ||
-      '',
+          : (t.artists[0] as string | undefined)
+        : t.artists || ''),
     album_name:
       t.album_name || (typeof t.album === 'object' ? t.album && t.album.name : t.album) || '',
     duration_ms: t.duration_ms || 0,
     image_url:
       t.image_url ||
       (t.album && typeof t.album === 'object' && t.album.images && t.album.images[0]
-        ? (t.album.images[0].url ?? null)
+        ? t.album.images[0].url
         : null),
     source_track_id: t.source_track_id || t.id || t.spotify_track_id || '',
     extra_data: t.extra_data || null,

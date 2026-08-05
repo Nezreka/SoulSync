@@ -121,11 +121,16 @@ describe('transports', () => {
     }
   });
 
-  it('the alternate matched/total percent formula is exactly beatport + listenbrainz', () => {
+  it('the matched/total MODAL formula is beatport alone; LB carries it as a LISTING drift', () => {
     const alternates = SOURCE_IDS.filter(
       (id) => SYNC_SOURCES[id].sync.percentFormula === 'matched',
     );
-    expect(alternates.sort()).toEqual(['beatport', 'listenbrainz']);
+    expect(alternates).toEqual(['beatport']);
+    // LB's modal goes through the SHARED processed painter (10684); only its
+    // listing cards compute matched/total (11393).
+    expect(SYNC_SOURCES.listenbrainz.sync.percentFormula).toBe('processed');
+    expect(SYNC_SOURCES.listenbrainz.sync.listingPercentFormula).toBe('matched');
+    expect(SYNC_SOURCES.tidal.sync.listingPercentFormula).toBeUndefined();
   });
 });
 
@@ -140,11 +145,13 @@ describe('ux drift', () => {
     expect(qobuzVariant).toEqual(['qobuz']);
   });
 
-  it('only Deezer renders the check-note spans card progress', () => {
+  it('the check-note-spans card progress is deezer AND its two link clones', () => {
+    // updateSpotifyPublicCardProgress (7283) and updateITunesLinkCardProgress
+    // (8309) render the same spans as deezer's painter — review finding #2.
     const spans = SOURCE_IDS.filter(
       (id) => SYNC_SOURCES[id].ux.cardProgressFormat === 'check-note-spans',
     );
-    expect(spans).toEqual(['deezer']);
+    expect(spans.sort()).toEqual(['deezer', 'itunes_link', 'spotify_public']);
   });
 
   it('hero labels agree with the heroSourceLabel ladder in -sync.core', () => {

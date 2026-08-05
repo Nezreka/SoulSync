@@ -10,6 +10,7 @@
 
 import type { MirrorPayload } from './-sync.import';
 import type { SourceVerticalConfig } from './-sync.sources';
+import type { RawDiscoveryResult } from './-sync.transform';
 
 /* ── Shared response shapes (fields the vanilla actually read) ────────────── */
 
@@ -20,13 +21,15 @@ export interface DiscoveryStatusResponse {
   spotify_matches?: number;
   spotify_total?: number;
   complete?: boolean;
-  results?: unknown[];
+  results?: RawDiscoveryResult[];
 }
 
 export interface SourceSyncStatusResponse {
   error?: string;
   status?: string;
   sync_status?: string;
+  /** The HTTP poll's completion signal is this BOOLEAN (tidal poll, 1078). */
+  complete?: boolean;
   progress?: {
     progress?: number;
     total_tracks?: number;

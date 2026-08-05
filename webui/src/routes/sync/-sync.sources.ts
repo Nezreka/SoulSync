@@ -97,14 +97,20 @@ export interface SourceVerticalConfig {
     startBody: 'none' | 'playlist' | 'chart_data';
   };
   sync: {
-    /** All sync polls skip when the socket is connected (Tidal 1112 shape). */
+    /** All sync polls skip when the socket is connected (Tidal 1063 shape). */
     pollMs: number;
     /**
-     * Modal/listing percent formula: 'processed' = (matched+failed)/total;
-     * 'matched' = matched/total — the beatport (5481) + listenbrainz (11313)
-     * alternate.
+     * MODAL percent formula: 'processed' = (matched+failed)/total (the shared
+     * painter, 10684); 'matched' = matched/total — beatport's own modal
+     * painter (5574). NOTE LB's modal uses the SHARED painter (processed);
+     * only its LISTING cards use matched/total — see listingPercentFormula.
      */
     percentFormula: 'processed' | 'matched';
+    /**
+     * The LB listing drift (11393): its tab cards compute matched/total where
+     * every other listing surface shows processed. Absent = same as the modal.
+     */
+    listingPercentFormula?: 'matched';
   };
   ux: {
     /**
@@ -115,9 +121,11 @@ export interface SourceVerticalConfig {
      */
     openModalImmediately: boolean;
     /**
-     * Card discovery-progress rendering: 'slash-text' = "♪ T / ✓ M / ✗ F (P%)"
-     * (tidal 951); 'check-note-spans' = HTML spans "✓ M / ♪ T", no failed, no
-     * percent (deezer divergence 4).
+     * Card discovery-progress rendering: 'slash-text' = "♪ T / ✓ M / ✗ F / P%"
+     * (tidal 966 — slashes throughout, no parentheses); 'check-note-spans' =
+     * HTML spans "✓ M / ♪ T", no failed, no percent, only when total > 0 —
+     * deezer (its divergence 4) AND its two clones spotify_public (7283) +
+     * itunes_link (8309).
      */
     cardProgressFormat: 'slash-text' | 'check-note-spans';
     /** isFound union variant (see isFoundRowLenient/isFoundRowQobuz). */
@@ -282,7 +290,11 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'check-note-spans',
+      foundVariant: 'lenient',
+    },
   },
 
   itunes_link: {
@@ -308,7 +320,11 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'check-note-spans',
+      foundVariant: 'lenient',
+    },
   },
 
   listenbrainz: {
@@ -344,7 +360,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       wingItInPoll: false,
       startBody: 'playlist',
     },
-    sync: { pollMs: 1000, percentFormula: 'matched' },
+    sync: { pollMs: 1000, percentFormula: 'processed', listingPercentFormula: 'matched' },
     ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
   },
 

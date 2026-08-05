@@ -133,7 +133,10 @@ export function applySyncStatus(
   payload: SourceSyncStatusResponse,
 ): SourcePlaylistState {
   const status = payload.status || payload.sync_status;
-  if (status === 'finished' || status === 'complete') {
+  // The two transports signal completion differently: the socket frame says
+  // status 'finished' (1030); the HTTP poll sets the BOOLEAN complete (1078).
+  // No transport emits a 'complete' STRING — deliberately not accepted.
+  if (payload.complete || status === 'finished') {
     return {
       ...state,
       phase: 'sync_complete',

@@ -17,6 +17,9 @@
  * 3. Spotify artists render as the full joined list (the tidal socket mapper,
  *    sync-services.js 641-650); LB's first-artist-only variant (11049) is
  *    dropped.
+ * 4. Missing-field sanitizing: a spotify_data with no name renders '-' (the
+ *    vanilla interpolates the literal string "undefined"), and a null album
+ *    renders '-' (the vanilla throws — typeof null === 'object' → .name).
  *
  * Row field names keep the vanilla's yt_* spelling — they are the shared
  * discovery modal's wire format (generateTableRowsFromState reads them), and
@@ -177,10 +180,14 @@ export function toDiscoveryRow(
 
   const { track, artist } = sourceTrackFields(source, r);
 
+  // Beatport (4735) and LB (11043) prefer the row's own index; the five
+  // object-track mappers use POSITION unconditionally (637, 1841, 3064...)
+  // even when the backend row carries an index — and the Fix-modal posts this
+  // value back, so the split must be preserved exactly.
+  const preferAuthoritativeIndex = source === 'beatport' || source === 'listenbrainz';
+
   const row: DiscoveryRow = {
-    // LB results carry authoritative indexes (11043); everyone else is keyed
-    // by position, same as the vanilla mappers.
-    index: r.index !== undefined ? r.index : positionIndex,
+    index: preferAuthoritativeIndex && r.index !== undefined ? r.index : positionIndex,
     yt_track: track,
     yt_artist: artist,
     status: isWingIt ? '🎯 Wing It' : isError ? '❌ Error' : isFound ? '✅ Found' : '❌ Not Found',

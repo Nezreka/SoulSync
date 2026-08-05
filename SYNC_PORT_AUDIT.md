@@ -1341,6 +1341,41 @@ all mapped in the ecosystem section).
   wing-it on every source+transport, the error arm everywhere, joined
   Spotify artists (LB's first-only dropped).
 
+- VERIFICATION PASS (Boulder-requested) findings, fixed before commit:
+  the sync HTTP poll signals completion with a BOOLEAN `status.complete`
+  (tidal 1078) while the socket frame says status 'finished' (1030) — the
+  P3b reducer only handled the string; applySyncStatus now accepts both.
+  The poll's error arm checks `sync_status === 'error'` only (no
+  'cancelled'); the reducer's acceptance of cancelled via either field is a
+  harmless superset. All config transport facts re-verified against the
+  pollers themselves (deezer skip@1000, LB always@1000, beatport 2000 both,
+  beatport sync skip).
+- INDEPENDENT REVIEW (Boulder-requested verify pass) — verdict: endpoints,
+  transports, id spaces, core ladders, urls/import/autosync modules all
+  verified clean; five findings, all fixed:
+  1. applySyncStatus missed the HTTP poll's boolean `complete` (caught by
+     both the self-review and the reviewer; fixed + pinned per transport).
+  2. spotify_public + itunes_link card progress is CHECK-NOTE-SPANS (their
+     painters clone deezer's, 7283/8309) — config had slash-text, and the
+     pinning test agreed with the wrong table. Both fixed.
+  3. LB percentFormula: matched/total is its LISTING only (11393); its MODAL
+     uses the shared processed painter (10684). Config now carries
+     percentFormula 'processed' + listingPercentFormula 'matched'.
+  4. slash-text doc string had parentheses the card painter doesn't (966).
+  5. Authoritative result indexes are beatport+LB ONLY — the object-track
+     mappers are positional unconditionally, and the Fix modal posts the
+     index back; transform now splits exactly.
+  Plus wire-exactness: buildMirrorPayload's artist `|| ''` now binds to the
+  non-array branch only (empty-array artists drop the key, proven by a
+  JSON round-trip differential), image_url passes undefined through.
+- P3c landed: `-sync.use-vertical.ts` — useSourceVertical(config), ONE hook
+  for the nine verticals' polling/lifecycle plumbing: ss:discovery-progress
+  frames + HTTP backstop at the config cadence, optimistic discovery start
+  with the beatport/LB failure revert, sync poll to both terminal shapes,
+  cancel with local revert, the gated close-reset writing phase through the
+  config's drift endpoint, seed/hydrate for tab loads. Tested with fake
+  timers + dispatched CustomEvents + captured fetch.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

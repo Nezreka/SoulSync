@@ -311,6 +311,10 @@ describe('buildMirrorPayload (differential vs mirrorPlaylist)', () => {
     // extra_data passthrough + empty track
     { name: 'Z', extra_data: { discovered: true, confidence: 1 } },
     {},
+    // EMPTY-array artists: the vanilla's `|| ''` binds only to the non-array
+    // branch, so artist_name comes out undefined and the key drops from the
+    // wire body (review note) — the round-trip compare below proves it.
+    { name: 'EmptyArtists', artists: [] },
   ];
 
   it('the payload matches the vanilla wire body byte for byte', () => {
@@ -324,7 +328,9 @@ describe('buildMirrorPayload (differential vs mirrorPlaylist)', () => {
       description: 'https://x',
       image_url: 'http://img/c',
     });
-    expect(ours).toEqual(theirs);
+    // Compare the actual JSON wire form: undefined keys must DROP exactly
+    // where the vanilla's drop (theirs comes parsed from the captured body).
+    expect(JSON.parse(JSON.stringify(ours))).toEqual(theirs);
   });
 
   it('pins the tolerant extraction as literals', () => {
