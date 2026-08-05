@@ -221,6 +221,24 @@ describe('LastfmSyncTab', () => {
   });
 });
 
+describe('LastfmSyncTab — the nameFallback wiring', () => {
+  it('a radio with name but no title falls to the DEFAULT, not the name (sync-lastfm.js 68)', async () => {
+    stubFetch();
+    responder = (url) =>
+      url.includes('lastfm-radio')
+        ? { playlists: [{ playlist: { identifier: 'x/rad1', name: 'named-not-titled' } }] }
+        : {};
+    function Harness() {
+      const vertical = useSourceVertical(SYNC_SOURCES.listenbrainz);
+      return <LastfmSyncTab vertical={vertical} onOpen={() => undefined} />;
+    }
+    render(<Harness />);
+    // LB would title this 'named-not-titled'; Last.fm must not.
+    await waitFor(() => expect(screen.getByText('by Last.fm')).toBeInTheDocument());
+    expect(screen.queryByText('named-not-titled')).not.toBeInTheDocument();
+  });
+});
+
 describe('SoulsyncDiscoveryTab', () => {
   it('Refresh & Mirror: generator POST → mirror POST → toast + detail modal + card update', async () => {
     const toast = vi.fn();
@@ -341,6 +359,35 @@ describe('SourceModals', () => {
     expect(engine).toHaveBeenCalledWith('listenbrainz_mbid-1', 'Jams', [
       { id: 'sp1', name: 'Matched' },
     ]);
+  });
+
+  it('the fix modal is NESTED inside the discovery overlay, not a sibling (9426)', async () => {
+    responder = () => ({});
+    stubFetch();
+    render(<Harness />);
+    fireEvent.click(screen.getByText('open-it'));
+    fireEvent.click(screen.getByTitle('Change this match'));
+    const overlay = document.querySelector('.modal-overlay')!;
+    const fix = document.querySelector('.discovery-fix-modal-overlay')!;
+    expect(fix).toBeTruthy();
+    // .discovery-fix-modal-overlay is z-index 1000 "Above parent modal
+    // content"; .modal-overlay is 10000. As a sibling it paints underneath.
+    expect(overlay.contains(fix)).toBe(true);
+  });
+
+  it('the hand-off does NOT run the close-reset (no update_phase POST)', async () => {
+    window.openDownloadMissingModalForYouTube = vi.fn(async () => {});
+    responder = () => ({});
+    stubFetch();
+    render(<Harness />);
+    fireEvent.click(screen.getByText('open-it'));
+    fireEvent.click(screen.getByText('🔍 Download Missing Tracks'));
+    await act(async () => {});
+    // startYouTubeDownloadMissing only hides (10768-10772); the reset +
+    // update_phase POST belong to the Close button (10253-10455).
+    expect(
+      calls.some((c) => c.url.includes('update-phase') || c.url.includes('update_phase')),
+    ).toBe(false);
   });
 
   it('unmatch POSTs, toasts, and flips the row back to Not Found', async () => {

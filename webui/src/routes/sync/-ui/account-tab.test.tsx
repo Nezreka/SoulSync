@@ -282,7 +282,7 @@ describe('TidalTab', () => {
     expect(screen.queryByText('♪ 10 / ✓ 4 / ✗ 6 / 40%')).not.toBeInTheDocument();
   });
 
-  it('a non-fresh card with nothing to report renders the bar visible and empty', async () => {
+  it('a non-fresh account card at zero shows the zero line, bar visible (961-967)', async () => {
     stubFetch();
     responder = (url) => {
       if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Quiet', track_count: 0 }];
@@ -296,7 +296,7 @@ describe('TidalTab', () => {
     await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
     const bar = document.querySelector('#tidal-card-t1 .playlist-card-progress')!;
     expect(bar.className).not.toContain('hidden');
-    expect(bar.textContent).toBe('');
+    expect(bar.textContent).toBe('♪ 0 / ✓ 0 / ✗ 0 / 0%');
   });
 });
 

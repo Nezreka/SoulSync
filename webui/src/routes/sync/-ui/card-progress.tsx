@@ -79,7 +79,10 @@ export function cardProgressLine(
     );
   }
 
-  if (state.spotifyTotal <= 0) return '';
+  // NO total>0 gate here: the slash-text writers paint unconditionally
+  // (tidal 961-967, qobuz 2165-2171, youtube 9120-9125) — a 0-track card
+  // shows '♪ 0 / ✓ 0 / ✗ 0 / 0%'. Only the check-note writers gate (deezer
+  // 3372, spotify-public 7298, itunes 8324), which checkNoteCounts does.
   return slashTextProgressLine({
     spotify_total: state.spotifyTotal,
     spotify_matches: state.spotifyMatches,

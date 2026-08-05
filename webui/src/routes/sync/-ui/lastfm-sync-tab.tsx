@@ -60,10 +60,11 @@ export function LastfmSyncTab({
   return (
     <div>
       <div className="playlist-header">
-        <h3>Last.fm Radio</h3>
+        <h3>Your Last.fm Radio Playlists</h3>
         <button
           type="button"
-          className="refresh-button"
+          className="refresh-button lastfm"
+          id="lastfm-sync-refresh-btn"
           disabled={refreshing}
           onClick={() => void load()}
         >

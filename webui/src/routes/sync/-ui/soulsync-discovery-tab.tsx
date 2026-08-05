@@ -143,10 +143,11 @@ export function SoulsyncDiscoveryTab() {
   return (
     <div>
       <div className="playlist-header">
-        <h3>SoulSync Discovery</h3>
+        <h3>SoulSync Discovery Playlists</h3>
         <button
           type="button"
-          className="refresh-button"
+          className="refresh-button soulsync-discovery"
+          id="soulsync-discovery-sync-refresh-btn"
           disabled={refreshing}
           onClick={() => void load()}
         >

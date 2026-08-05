@@ -154,11 +154,28 @@ export function ListenBrainzSyncTab({
 
   return (
     <div>
+      {/* The sub-tabs live INSIDE the header row (index.html 3202-3210) —
+          .listenbrainz-sub-tabs is inline-flex with margin-left:16px
+          (style.css 14864), so as a sibling they'd drop to their own line. */}
       <div className="playlist-header">
-        <h3>ListenBrainz Playlists</h3>
+        <h3>Your ListenBrainz Playlists</h3>
+        <div className="listenbrainz-sub-tabs">
+          {LB_SUB_TABS.map((tab) => (
+            <button
+              key={tab.type}
+              type="button"
+              className={`listenbrainz-sub-tab-btn ${subTab === tab.type ? 'active' : ''}`}
+              data-lb-type={tab.type}
+              onClick={() => setSubTab(tab.type)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
-          className="refresh-button"
+          className="refresh-button listenbrainz"
+          id="listenbrainz-sync-refresh-btn"
           disabled={refreshing}
           onClick={() => {
             // Backend refetch first (best-effort), then reload the caches (348-356).
@@ -167,19 +184,6 @@ export function ListenBrainzSyncTab({
         >
           {refreshing ? '🔄 Loading...' : '🔄 Refresh'}
         </button>
-      </div>
-      <div className="listenbrainz-sub-tabs">
-        {LB_SUB_TABS.map((tab) => (
-          <button
-            key={tab.type}
-            type="button"
-            className={`listenbrainz-sub-tab-btn ${subTab === tab.type ? 'active' : ''}`}
-            data-lb-type={tab.type}
-            onClick={() => setSubTab(tab.type)}
-          >
-            {tab.label}
-          </button>
-        ))}
       </div>
       <div className="playlist-scroll-container">
         {byType === null || cards.length === 0 ? (

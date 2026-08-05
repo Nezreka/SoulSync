@@ -496,6 +496,53 @@ describe('YouTubeTab', () => {
     expect(toast).toHaveBeenCalledWith('YouTube playlist parsed: Fresh YT (1 tracks)', 'success');
   });
 
+  it('two URL variants resolving to ONE url_hash produce ONE card', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/youtube/playlists') return { playlists: [] };
+      if (url === '/api/youtube/parse') {
+        // The backend canonicalises both youtube.com and music.youtube.com
+        // to the same hash.
+        return { url_hash: 'samehash', name: 'One List', tracks: [{ title: 'T' }] };
+      }
+      return { success: true };
+    };
+    render(<YtHarness />);
+    const input = screen.getByPlaceholderText('Paste YouTube Music Playlist URL...');
+    fireEvent.change(input, { target: { value: 'https://youtube.com/playlist?list=A' } });
+    fireEvent.click(screen.getByText('Parse Playlist'));
+    await waitFor(() => expect(cardName('One List')).toBeDefined());
+    fireEvent.change(input, { target: { value: 'https://music.youtube.com/playlist?list=A' } });
+    fireEvent.click(screen.getByText('Parse Playlist'));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === '/api/youtube/parse')).toHaveLength(2),
+    );
+    expect(
+      screen.getAllByText('One List').filter((el) => el.className === 'playlist-card-name'),
+    ).toHaveLength(1);
+  });
+
+  it('YouTube mirrors even a ZERO-track playlist — the drift at 8861 (no length guard)', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/youtube/playlists') return { playlists: [] };
+      if (url === '/api/youtube/parse') return { url_hash: 'empty1', name: 'Empty YT', tracks: [] };
+      return { success: true };
+    };
+    render(<YtHarness />);
+    fireEvent.change(screen.getByPlaceholderText('Paste YouTube Music Playlist URL...'), {
+      target: { value: 'https://youtube.com/playlist?list=E' },
+    });
+    fireEvent.click(screen.getByText('Parse Playlist'));
+    await waitFor(() => expect(cardName('Empty YT')).toBeDefined());
+    // deezer/spotify-public/itunes all gate on tracks.length > 0; YouTube does not.
+    const mirror = calls.find((c) => c.url === '/api/mirror-playlist');
+    expect(mirror).toBeDefined();
+    expect((mirror!.body as { tracks: unknown[] }).tracks).toEqual([]);
+  });
+
   it('a parse error toasts and removes the temp card', async () => {
     stubFetch();
     const toast = vi.fn();

@@ -38,6 +38,8 @@
  *   'Match removed' / failure toasts) for onUnmatchTrack.
  */
 
+import type { ReactNode } from 'react';
+
 import { useState } from 'react';
 
 import type { SourceVerticalConfig } from '../-sync.sources';
@@ -95,6 +97,14 @@ export interface DiscoveryModalProps {
   /** The Fix Track Match intents — implemented by the P4b fix modal. */
   onFixTrack?: (row: DiscoveryRow) => void;
   onUnmatchTrack?: (row: DiscoveryRow) => void;
+  /**
+   * Rendered INSIDE the overlay. The vanilla nests the fix overlay in the
+   * discovery modal ('Discovery Fix Modal (nested inside)', sync-services.js
+   * 9426) and .discovery-fix-modal-overlay is z-index 1000 "Above parent
+   * modal content" (style.css 33628-33640) — as a SIBLING of the z-index
+   * 10000 .modal-overlay it would paint underneath an opaque backdrop.
+   */
+  children?: ReactNode;
 }
 
 /** The wing-it source word the engine expects (_wingItAction, downloads.js 80). */
@@ -255,9 +265,9 @@ function WingItButton({
             data-action="download"
             onClick={() => run('download')}
           >
-            <span className="wing-it-dropdown-icon">📥</span>
+            <span className="wing-it-dropdown-icon">⬇️</span>
             <span className="wing-it-dropdown-label">Download</span>
-            <span className="wing-it-dropdown-hint">Grab the source tracks directly</span>
+            <span className="wing-it-dropdown-hint">Raw names</span>
           </button>
           <button
             type="button"
@@ -267,7 +277,7 @@ function WingItButton({
           >
             <span className="wing-it-dropdown-icon">🔄</span>
             <span className="wing-it-dropdown-label">Sync to Server</span>
-            <span className="wing-it-dropdown-hint">Match against the server library</span>
+            <span className="wing-it-dropdown-hint">Best-effort</span>
           </button>
         </div>
       )}
@@ -389,7 +399,7 @@ function FooterActions(props: DiscoveryModalProps) {
 }
 
 export function DiscoveryModal(props: DiscoveryModalProps) {
-  const { config, state, mirroredSource, onClose, onFixTrack, onUnmatchTrack } = props;
+  const { config, state, mirroredSource, onClose, onFixTrack, onUnmatchTrack, children } = props;
   const fakeHash = state.fakeHash;
 
   const sourceLabel = modalSourceLabel(config.id, fakeHash, mirroredSource);
@@ -514,6 +524,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
           </div>
         </div>
       </div>
+      {children}
     </div>
   );
 }

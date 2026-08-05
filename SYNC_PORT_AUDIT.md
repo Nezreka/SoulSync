@@ -1564,6 +1564,57 @@ all mapped in the ecosystem section).
     user had cleared); its 'only if empty' guard is moot here because the
     input does not exist before the first read and clear() empties it.
 
+- FULL-PR REVIEW (six slices; three completed: transform/state/hooks, modal
+  layer, cards/tabs). Every finding below was verified against BOTH sides
+  before acting; unverifiable suspicions were dropped. Fixed:
+  * **The fix modal rendered where nobody could see it.** The vanilla nests
+    the fix overlay INSIDE the discovery modal ('Discovery Fix Modal (nested
+    inside)', 9426) and .discovery-fix-modal-overlay is z-index 1000 "Above
+    parent modal content" (style.css 33628-33640). The port rendered it as a
+    SIBLING of the z-index-10000 .modal-overlay, so it painted under an
+    opaque backdrop — the Fix/unmatch feature was unusable. DiscoveryModal
+    now takes children and SourceModals nests the FixModal; pinned by a test
+    asserting overlay.contains(fix).
+  * **Every source handed downloads to the wrong engine entry.** The vanilla
+    routes tidal/qobuz/deezer/spotify_public/itunes_link through the generic
+    (misnamed) openDownloadMissingModalForTidal — which alone takes options
+    and hydrates the organize preference (1494) — and reserves
+    openDownloadMissingModalForYouTube (downloads.js 429, no options) for
+    youtube/beatport/LB/mirrored via startYouTubeDownloadMissing. The port
+    used ForYouTube for all nine. Now a ux.downloadEntry config field, and
+    ForTidal is declared in globals.d.ts.
+  * **'📁 Download to Playlist Folder' did nothing special**: the modal sent
+    {forcePlaylistFolder:true} but the handler took no parameters, so TS
+    accepted it and the flag was dropped. It now reaches ForTidal's options.
+  * **The hand-off ran the close-RESET.** close() → closeModalReset patches
+    the phase back to 'discovered' and POSTs update_phase; the vanilla only
+    HIDES on hand-off (10768-10772), reserving the reset for the Close button
+    (10253-10455). Split into hideWithoutReset; pinned by a test asserting no
+    update_phase POST.
+  * Invented wing-it dropdown copy (📥/'Grab the source tracks directly'/
+    'Match against the server library') replaced with the engine's own
+    ⬇️/'Raw names'/'Best-effort' (downloads.js 23-33) — the same class of bug
+    as the organize tooltip.
+  * fromBackendState dropped Beatport's playlist payload: its endpoints name
+    it chart_data (web_server.py 37340, 38297) and the vanilla renames it at
+    5123-5127. Added to the pick list (latent — no beatport tab yet).
+  * The card progress line wrongly generalised the check-note writers'
+    total>0 gate to the slash-text sources; tidal/qobuz/youtube paint
+    unconditionally (961-967), so a 0-track card must read
+    '♪ 0 / ✓ 0 / ✗ 0 / 0%'. Two of my own tests had pinned the bug.
+  * The three small tabs: h3 titles restored to the vanilla's ('Your
+    ListenBrainz Playlists' etc.), the LB sub-tabs moved back INSIDE
+    .playlist-header (they are inline-flex with margin-left:16px, style.css
+    14864 — as a sibling they dropped to their own line), and the refresh
+    buttons regained their modifier class + id.
+  Verified clean and NOT changed: all modal titles/labels/descriptions, the
+  footer gating ladder, buildDownloadTracks, the wing-it engine calls, the
+  whole fix cascade + confirm dialog + update_match body, the unmatch ladder,
+  XSS (no dangerouslySetInnerHTML anywhere), the id namespace (no collision
+  with any live vanilla selector), both sync-completion signals, every
+  discovery stop condition, the socket platform filter, syncPercent, and
+  applyFixedMatch/applyUnmatched field-by-field against wishlist-tools.js.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

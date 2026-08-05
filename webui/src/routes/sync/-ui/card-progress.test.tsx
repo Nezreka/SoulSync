@@ -92,8 +92,13 @@ describe('cardProgressLine', () => {
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
   });
 
-  it("non-fresh with nothing to report is '' — visible and empty, not hidden", () => {
-    expect(cardProgressLine(stateWith({ phase: 'discovering' }), SYNC_SOURCES.tidal)).toBe('');
+  it('a slash-text source at zero paints the ZERO LINE, not an empty bar (961-967)', () => {
+    // The vanilla slash-text writers have no total>0 gate — only the
+    // check-note ones do (deezer 3372). A 0-track discovering card shows
+    // the full zero line; the deezer twin shows an empty (but visible) bar.
+    expect(cardProgressLine(stateWith({ phase: 'discovering' }), SYNC_SOURCES.tidal)).toBe(
+      '♪ 0 / ✓ 0 / ✗ 0 / 0%',
+    );
     expect(cardProgressLine(stateWith({ phase: 'discovering' }), SYNC_SOURCES.deezer)).toBe('');
   });
 });

@@ -329,7 +329,9 @@ export function fromBackendState(
 
   const rawResults =
     pick<RawDiscoveryResult[]>('discovery_results', 'discoveryResults', 'results') ?? [];
-  const playlist = pick<Record<string, unknown>>('playlist');
+  // Beatport's status/list endpoints name it chart_data, not playlist
+  // (web_server.py 37340, 38297) — the vanilla renames it at 5123-5127.
+  const playlist = pick<Record<string, unknown>>('playlist', 'chart_data');
   const trackCount =
     pick<number>('track_count') ??
     (Array.isArray(playlist?.tracks) ? (playlist.tracks as unknown[]).length : undefined);

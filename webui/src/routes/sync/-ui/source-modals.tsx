@@ -60,37 +60,60 @@ export function SourceModals({
     onClose();
   }, [openId, vertical, onClose]);
 
-  const onDownloadMissing = useCallback(() => {
-    if (!state || openId === null) return;
-    // The vanilla's two distinct guards (10715-10716, 10755-10757).
-    if (state.rawResults.length === 0) {
-      window.showToast?.('No discovery results available for download', 'error');
-      return;
-    }
-    const tracks = buildDownloadTracks(state.rawResults);
-    if (tracks.length === 0) {
-      window.showToast?.('No Spotify matches found for download', 'error');
-      return;
-    }
-    const vpid = `${config.ids.vpidPrefix}${openId}`;
-    const name = typeof state.playlist?.name === 'string' ? state.playlist.name : 'Playlist';
-    // The vanilla stores the hand-off on the STATE (10765) — the converted id
-    // keeps the Download button available and lets rehydration find the
-    // engine modal later.
-    vertical.patchState(openId, (s) => ({ ...s, convertedSpotifyPlaylistId: vpid }));
-    // The vanilla hides the discovery modal BEFORE opening the engine's
-    // (10768-10771) — the engine modal is z-index 9000 vs the overlay's
-    // 10000, so leaving ours open would bury it.
-    close();
-    try {
-      void window.openDownloadMissingModalForYouTube?.(vpid, name, tracks);
-    } catch (error) {
-      window.showToast?.(
-        `Error starting downloads: ${error instanceof Error ? error.message : 'unknown error'}`,
-        'error',
-      );
-    }
-  }, [config, vertical, state, openId, close]);
+  /**
+   * Hide WITHOUT the close-reset. startYouTubeDownloadMissing only hides the
+   * modal (10768-10772); the phase reset + update_phase POST live solely in
+   * closeYouTubeDiscoveryModal (10253-10455), i.e. the Close button.
+   */
+  const hideWithoutReset = useCallback(() => {
+    setFixRow(null);
+    onClose();
+  }, [onClose]);
+
+  const onDownloadMissing = useCallback(
+    async (options?: { forcePlaylistFolder?: boolean }) => {
+      if (!state || openId === null) return;
+      // The vanilla's two distinct guards (10715-10716, 10755-10757).
+      if (state.rawResults.length === 0) {
+        window.showToast?.('No discovery results available for download', 'error');
+        return;
+      }
+      const tracks = buildDownloadTracks(state.rawResults);
+      if (tracks.length === 0) {
+        window.showToast?.('No Spotify matches found for download', 'error');
+        return;
+      }
+      const vpid = `${config.ids.vpidPrefix}${openId}`;
+      const name = typeof state.playlist?.name === 'string' ? state.playlist.name : 'Playlist';
+      // The vanilla stores the hand-off on the STATE (10765) — the converted
+      // id keeps the Download button available and lets rehydration find the
+      // engine modal later.
+      vertical.patchState(openId, (s) => ({ ...s, convertedSpotifyPlaylistId: vpid }));
+      // Hide ours BEFORE the engine's opens (10768-10771): the engine modal is
+      // z-index 9000 vs this overlay's 10000.
+      hideWithoutReset();
+      try {
+        // WHICH entry point is per-source drift: tidal/qobuz/deezer/
+        // spotify_public/itunes_link go through the generic (misnamed)
+        // ...ForTidal, which takes options and hydrates the organize
+        // preference (1494); youtube + beatport use ...ForYouTube, which has
+        // no options parameter (downloads.js 429).
+        if (config.ux.downloadEntry === 'tidal') {
+          await window.openDownloadMissingModalForTidal?.(vpid, name, tracks, {
+            forcePlaylistFolder: options?.forcePlaylistFolder ?? false,
+          });
+        } else {
+          await window.openDownloadMissingModalForYouTube?.(vpid, name, tracks);
+        }
+      } catch (error) {
+        window.showToast?.(
+          `Error starting downloads: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [config, vertical, state, openId, hideWithoutReset],
+  );
 
   const onUnmatchTrack = useCallback(
     async (row: DiscoveryRow) => {
@@ -141,20 +164,21 @@ export function SourceModals({
         }}
         onStartSync={() => void vertical.startSync(openId)}
         onCancelSync={() => void vertical.cancelSync(openId)}
-        onDownloadMissing={onDownloadMissing}
+        onDownloadMissing={(options) => void onDownloadMissing(options)}
         onFixTrack={(row) => setFixRow(row)}
         onUnmatchTrack={(row) => void onUnmatchTrack(row)}
-      />
-      {fixRow && (
-        <FixModal
-          key={fixRow.index}
-          config={config}
-          sourceId={openId}
-          row={fixRow}
-          onClose={() => setFixRow(null)}
-          onFixed={onFixed}
-        />
-      )}
+      >
+        {fixRow && (
+          <FixModal
+            key={fixRow.index}
+            config={config}
+            sourceId={openId}
+            row={fixRow}
+            onClose={() => setFixRow(null)}
+            onFixed={onFixed}
+          />
+        )}
+      </DiscoveryModal>
     </>
   );
 }

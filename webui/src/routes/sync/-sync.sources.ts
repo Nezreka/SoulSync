@@ -130,6 +130,16 @@ export interface SourceVerticalConfig {
     cardProgressFormat: 'slash-text' | 'check-note-spans';
     /** isFound union variant (see isFoundRowLenient/isFoundRowQobuz). */
     foundVariant: 'lenient' | 'qobuz';
+    /**
+     * WHICH engine entry the download hand-off calls. The vanilla routes
+     * tidal/qobuz/deezer/spotify_public/itunes_link through the generic
+     * openDownloadMissingModalForTidal (sync-services.js 276/1302/1758/2426/
+     * 2916/3683/7615/8641) — it takes options and hydrates the organize
+     * preference at 1494 — and reserves openDownloadMissingModalForYouTube
+     * (downloads.js 429, no options) for youtube + beatport (5275/5721).
+     * The YouTube modal alone adds the M3U export + quality-profile chrome.
+     */
+    downloadEntry: 'tidal' | 'youtube';
   };
 }
 
@@ -161,7 +171,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: true, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: true,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      downloadEntry: 'tidal',
+    },
   },
 
   qobuz: {
@@ -183,7 +198,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'qobuz' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'qobuz',
+      downloadEntry: 'tidal',
+    },
   },
 
   deezer: {
@@ -209,6 +229,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       openModalImmediately: false,
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
+      downloadEntry: 'tidal',
     },
   },
 
@@ -234,7 +255,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      downloadEntry: 'youtube',
+    },
   },
 
   beatport: {
@@ -263,7 +289,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'chart_data',
     },
     sync: { pollMs: 2000, percentFormula: 'matched' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      downloadEntry: 'youtube',
+    },
   },
 
   spotify_public: {
@@ -294,6 +325,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       openModalImmediately: false,
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
+      downloadEntry: 'tidal',
     },
   },
 
@@ -324,6 +356,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       openModalImmediately: false,
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
+      downloadEntry: 'tidal',
     },
   },
 
@@ -361,7 +394,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'playlist',
     },
     sync: { pollMs: 1000, percentFormula: 'processed', listingPercentFormula: 'matched' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      downloadEntry: 'youtube',
+    },
   },
 
   mirrored: {
@@ -391,7 +429,12 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       startBody: 'none',
     },
     sync: { pollMs: 1000, percentFormula: 'processed' },
-    ux: { openModalImmediately: false, cardProgressFormat: 'slash-text', foundVariant: 'lenient' },
+    ux: {
+      openModalImmediately: false,
+      cardProgressFormat: 'slash-text',
+      foundVariant: 'lenient',
+      downloadEntry: 'youtube',
+    },
   },
 };
 

@@ -99,7 +99,7 @@ describe('ImportFileTab — CSV', () => {
     const albumWrap = Array.from(mapping.querySelectorAll('.import-file-col-map')).find((w) =>
       w.textContent?.startsWith('Album'),
     )!;
-    expect(albumWrap.className).toContain('mapped-album');
+    expect(albumWrap.className.split(' ')).toContain('mapped-album');
     fireEvent.change(within(albumWrap as HTMLElement).getByRole('combobox'), {
       target: { value: 'skip' },
     });
@@ -122,7 +122,7 @@ describe('ImportFileTab — CSV', () => {
       target: { value: 'track_name' },
     });
     expect(previewRows()).toEqual([['1', 'A', '', '']]);
-    expect(wraps[0].className).not.toContain('mapped-track');
+    expect(wraps[0].className.split(' ')).not.toContain('mapped-track');
   });
 
   it('a row whose only content sits in an unmapped column renders invalid (309, 344-346)', async () => {
