@@ -1314,6 +1314,16 @@ all mapped in the ecosystem section).
   classification, download-task status map + final-progress formula, both M3U
   prefix lists (the autoSave/export drift preserved).
 
+- P2 landed: `-sync.sources.ts` — the drift catalog as a typed config table
+  (endpoints incl. hyphen/underscore drift + LB's borrowed youtube cancel,
+  id prefixes incl. the spotifypublic_/spotify_public_ pair, transports:
+  always-poll vs skip-when-connected vs beatport's 2000ms, wing-it per
+  transform, percent formulas, #867 flag, found variants) + `-sync.api.ts` —
+  config-driven vertical calls + the page-level endpoints, every path pinned
+  by a captured-fetch test. Two controller normalizations DECLARED (not yet
+  built): wing-it handled on every transport, discovery via
+  ss:discovery-progress + per-source HTTP backstop.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
