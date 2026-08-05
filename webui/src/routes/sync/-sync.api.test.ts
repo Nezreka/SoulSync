@@ -41,9 +41,15 @@ interface Call {
   url: string;
   method: string;
   body: unknown;
+  headers: Record<string, string> | undefined;
 }
 
 let calls: Call[] = [];
+
+/** The pre-headers shape — for assertions that pin url/method/body exactly. */
+function wire(c: Call): Omit<Call, 'headers'> {
+  return { url: c.url, method: c.method, body: c.body };
+}
 
 function stubFetch(response: unknown = {}): void {
   calls = [];
@@ -54,6 +60,7 @@ function stubFetch(response: unknown = {}): void {
         url,
         method: init?.method ?? 'GET',
         body: init?.body ? JSON.parse(init.body as string) : undefined,
+        headers: init?.headers as Record<string, string> | undefined,
       });
       return new Response(JSON.stringify(response));
     }),
@@ -69,7 +76,7 @@ describe('config-driven vertical calls', () => {
   it('startSourceDiscovery sends nothing for a standard vertical', async () => {
     stubFetch({});
     await startSourceDiscovery(SYNC_SOURCES.tidal, '77');
-    expect(calls).toEqual([
+    expect(calls.map(wire)).toEqual([
       { url: '/api/tidal/discovery/start/77', method: 'POST', body: undefined },
     ]);
   });
@@ -77,13 +84,13 @@ describe('config-driven vertical calls', () => {
   it('startSourceDiscovery wraps the beatport chart and passes the LB playlist verbatim', async () => {
     stubFetch({});
     await startSourceDiscovery(SYNC_SOURCES.beatport, 'h4sh', { name: 'Top 100' });
-    expect(calls[0]).toEqual({
+    expect(wire(calls[0])).toEqual({
       url: '/api/beatport/discovery/start/h4sh',
       method: 'POST',
       body: { chart_data: { name: 'Top 100' } },
     });
     await startSourceDiscovery(SYNC_SOURCES.listenbrainz, 'mbid-1', { title: 'Weekly Jams' });
-    expect(calls[1]).toEqual({
+    expect(wire(calls[1])).toEqual({
       url: '/api/listenbrainz/discovery/start/mbid-1',
       method: 'POST',
       body: { title: 'Weekly Jams' },
@@ -109,7 +116,7 @@ describe('config-driven vertical calls', () => {
     stubFetch({});
     await updateSourcePhase(SYNC_SOURCES.beatport, 'h', { phase: 'fresh', reset: true });
     await updateSourcePhase(SYNC_SOURCES.tidal, '3', { phase: 'discovered' });
-    expect(calls).toEqual([
+    expect(calls.map(wire)).toEqual([
       {
         url: '/api/beatport/charts/update-phase/h',
         method: 'POST',
@@ -177,7 +184,7 @@ describe('page-level endpoints', () => {
     stubFetch({ success: true });
     const payload = buildMirrorPayload('tidal', 5, 'List', [{ name: 'X', artists: ['A'] }]);
     await postMirrorPlaylist(payload);
-    expect(calls[0]).toEqual({ url: '/api/mirror-playlist', method: 'POST', body: payload });
+    expect(wire(calls[0])).toEqual({ url: '/api/mirror-playlist', method: 'POST', body: payload });
   });
 
   it('generatePlaylistM3u posts the documented body shape', async () => {
@@ -235,5 +242,34 @@ describe('parse + delete endpoints', () => {
       'DELETE /api/youtube/delete/h4sh',
       'DELETE /api/beatport/charts/delete/ch4rt',
     ]);
+  });
+});
+
+describe('JSON bodies carry Content-Type', () => {
+  // Flask's request.get_json() yields nothing without this header, so a
+  // missing one makes the LB discovery start 400 with 'Playlist data
+  // required' (web_server.py 34966-34970). The old helper recorded only
+  // {url, method, body}, so every header was unpinned.
+  it('every POST that sends a body sets application/json', async () => {
+    stubFetch({});
+    await startSourceDiscovery(SYNC_SOURCES.listenbrainz, 'mbid-1', {
+      playlist: { name: 'X', tracks: [] },
+    });
+    await startSourceDiscovery(SYNC_SOURCES.beatport, 'ch4rt', { name: 'c' });
+    await updateSourcePhase(SYNC_SOURCES.tidal, '9', { phase: 'discovered' });
+    await postMirrorPlaylist(buildMirrorPayload('tidal', 5, 'L', []));
+    for (const call of calls) {
+      expect(call.body, `${call.url} sent a body`).toBeDefined();
+      expect(call.headers, `${call.url} must set Content-Type`).toMatchObject({
+        'Content-Type': 'application/json',
+      });
+    }
+  });
+
+  it('a bodyless POST sends no Content-Type (the vanilla sends none either)', async () => {
+    stubFetch({});
+    await startSourceSync(SYNC_SOURCES.tidal, '9');
+    expect(calls[0].body).toBeUndefined();
+    expect(calls[0].headers).toBeUndefined();
   });
 });
