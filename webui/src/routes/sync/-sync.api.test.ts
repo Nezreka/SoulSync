@@ -317,10 +317,25 @@ describe('mirrored playlist endpoints', () => {
     await patchMirroredCustomName(7, '');
     expect(calls[0].body).toEqual({ custom_name: '' });
 
+    // The two guard arms, isolated. A 409 WITH an error body fires both, so
+    // it proves neither on its own.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ error: 'taken' }), { status: 409 })),
     );
     await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('taken');
+    // 200 + an error body — only the data.error arm can catch this.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'soft' }))),
+    );
+    await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('soft');
+    // non-ok with NO error body — only the !response.ok arm catches it, and
+    // the message falls back (auto-sync.js 2396).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({}), { status: 500 })),
+    );
+    await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('Failed to update name');
   });
 });

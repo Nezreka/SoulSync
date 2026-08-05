@@ -130,6 +130,38 @@ describe('mirroredPhaseLine — the unified renderer', () => {
     });
   });
 
+  it('the counters default to 0 when the state lacks them (549/557/560)', () => {
+    // hydrateMirroredDiscoveryStates (988-1010) writes no pipeline_* keys, so
+    // a pipeline_running phase over a hydrated state hits this default.
+    expect(mirroredPhaseLine('pipeline_running', {}, row)).toEqual({
+      text: 'Pipeline running 0%',
+      color: '#38bdf8',
+    });
+    expect(mirroredPhaseLine('discovering', {}, row)).toEqual({
+      text: 'Discovering 0%',
+      color: '#a78bfa',
+    });
+    expect(mirroredPhaseLine('discovered', {}, row)).toEqual({
+      text: 'Discovered 0/25',
+      color: '#22c55e',
+    });
+    expect(mirroredPhaseLine('pipeline_running', null, row)).toEqual({
+      text: 'Pipeline running 0%',
+      color: '#38bdf8',
+    });
+  });
+
+  it('a row with no track_count renders 0, not undefined (declared divergence)', () => {
+    // The vanilla chain ENDS at p.track_count (561), so it would render
+    // 'Discovered 3/undefined'. Unreachable live — mirrored_playlists.
+    // track_count is INTEGER DEFAULT 0 (music_database.py 674) — but the
+    // extra link is ours, so it is pinned rather than left implicit.
+    expect(mirroredPhaseLine('discovered', { spotifyMatches: 3 }, { id: 1 })).toEqual({
+      text: 'Discovered 3/0',
+      color: '#22c55e',
+    });
+  });
+
   it('no phase, or an unknown one, renders nothing', () => {
     expect(mirroredPhaseLine(null, null, row)).toBeNull();
     expect(mirroredPhaseLine('fresh', null, row)).toBeNull();
@@ -183,6 +215,8 @@ describe('timeAgo (1045-1061) — differential against the vanilla body', () => 
         '2025-12-15T12:00:00Z',
         '2025-12-01T12:00:00Z',
         // inputs that land BETWEEN thresholds, so each bound discriminates
+        '2026-01-15T11:59:55Z',
+        '2026-01-13T20:00:00Z',
         '2026-01-15T11:59:56Z',
         '2026-01-15T11:05:00Z',
         '2026-01-14T14:00:00Z',
@@ -220,6 +254,11 @@ describe('timeAgo (1045-1061) — differential against the vanilla body', () => 
     expect(timeAgo('2026-01-15T11:05:00Z', NOW)).toBe('55m ago'); // 55m, bound is 60
     expect(timeAgo('2026-01-14T14:00:00Z', NOW)).toBe('22h ago'); // 22h, bound is 24
     expect(timeAgo('2025-11-01T12:00:00Z', NOW)).toBe('2mo ago'); // 75d, divisor is 30
+    // exactly 5s bounds `secs < 5` from ABOVE (4s alone only bounds it below)
+    expect(timeAgo('2026-01-15T11:59:55Z', NOW)).toBe('5s ago');
+    // 40h: floor gives 1d, round would give 2d — every other days-case is an
+    // exact 24h multiple, where the two agree
+    expect(timeAgo('2026-01-13T20:00:00Z', NOW)).toBe('1d ago');
     expect(timeAgo(null, NOW)).toBe('');
   });
 
