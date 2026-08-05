@@ -46,6 +46,8 @@ export interface SourceVertical {
   seed: (sourceId: string, playlist?: Record<string, unknown>) => void;
   /** Replace a playlist's state from a backend state payload. */
   hydrate: (sourceId: string, backend: Record<string, unknown>) => void;
+  /** Apply a pure reducer to one playlist's state (fix/unmatch flows). */
+  patchState: (sourceId: string, fn: (state: SourcePlaylistState) => SourcePlaylistState) => void;
   /**
    * Start discovery: optimistic 'discovering' (the #867/YT pattern — the card
    * flips before the backend acks), revert to fresh on error, then event +
@@ -293,6 +295,7 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
     states,
     seed,
     hydrate,
+    patchState: patch,
     startDiscovery,
     resumeDiscovery,
     startSync,

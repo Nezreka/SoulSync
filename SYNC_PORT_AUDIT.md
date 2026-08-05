@@ -1441,6 +1441,37 @@ all mapped in the ecosystem section).
   render FixModal with key={row.index}, run postUnmatch+applyUnmatched with
   the vanilla toasts, and the quality-profile select in the organize footer.
 
+- P5a landed (built → line-by-line reviewed → 8 findings fixed, per the loop):
+  the first tab wave — -sync.lb-tabs.ts (JSPF unwrap with the parameterized
+  inner.name fallback LB has and lastfm doesn't, auth detect off the
+  created-for response only, the ♪/✓/✗ card progress line with the exact
+  matched_tracks||spotify_matches fallback chains, SSD synthetic-singleton
+  filter + staleness incl. the curly quotes + mirror projection with the
+  spotify>itunes>deezer provider ladder and JSON-string extra_data),
+  -ui/source-card.tsx (the shared card archetype; null hides the progress
+  line, '' renders it visible-and-empty — the vanilla's
+  unhidden-while-refreshing state), -ui/source-modals.tsx (the wiring host
+  every tab shares: DiscoveryModal + key'd FixModal + unmatch toasts +
+  the download hand-off), and the three tabs (LB sub-tabs, Last.fm Radio,
+  SoulSync Discovery Refresh & Mirror). The vanilla's 500ms card refresh
+  loop dies here — cards re-render off state. Review findings fixed: the
+  hand-off must close() the React modal first (engine modal is z-index 9000
+  vs the overlay's 10000 — it would open buried), and must patchState
+  convertedSpotifyPlaylistId (the vanilla stores it at 10765; the hasConverted
+  footer gate + rehydration key off it); the LB {playlist} start body is now
+  DERIVED inside SourceModals from config.discovery.startBody so page wiring
+  can't drop it (the endpoint 400s without it); the two distinct download
+  guards (no-results vs no-matches) + the engine-error toast; lastfm unwrap
+  lost the inner.name fallback; SSD shows the empty progress bar while
+  refreshing and writes '♪ N / ✓ N / mirrored' after (236-238), busy state is
+  a per-card Set. Declared improvements: SSD card re-renders with new
+  count+Ready after mirror (vanilla left the DOM stale); React guards the
+  whole card against re-entry (vanilla's card body was re-entrant). Declared
+  divergence: card click seeds the React vertical + DiscoveryModal instead of
+  openDownloadModalForListenBrainzPlaylist (script-scoped registries,
+  unreachable). patchState added to useSourceVertical (exposes the stable
+  patch; missing-id falls to freshSourceState where reducers no-op safely).
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
