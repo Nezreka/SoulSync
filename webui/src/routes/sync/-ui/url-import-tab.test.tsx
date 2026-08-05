@@ -203,8 +203,13 @@ describe('DeezerLinkTab', () => {
     });
     fireEvent.click(screen.getByText('Load Playlist'));
     await waitFor(() => expect(cardName('Mid')).toBeDefined());
-    await waitFor(() =>
-      expect(calls.some((c) => c.url.includes('/api/deezer/discovery/status/5'))).toBe(true),
+    // Discovery polling has NO immediate first tick — the vanilla's
+    // startXDiscoveryPolling is setInterval-only (unlike the sync poll, which
+    // ticks at once, 1105). So the first status call lands one full cadence
+    // (1000ms) out and the default 1000ms waitFor races it under load.
+    await waitFor(
+      () => expect(calls.some((c) => c.url.includes('/api/deezer/discovery/status/5'))).toBe(true),
+      { timeout: 4000 },
     );
   });
 
