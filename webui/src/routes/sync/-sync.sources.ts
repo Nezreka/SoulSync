@@ -30,7 +30,13 @@ export type SyncSourceId =
 
 export interface SourceVerticalConfig {
   id: SyncSourceId;
-  /** Hero 'owner' label (must agree with heroSourceLabel in -sync.core). */
+  /**
+   * A human display name for the source. NOT the engine's hero 'owner' label
+   * — that comes from heroSourceLabel (-sync.core.ts 101), whose vanilla
+   * ladder (sync-services.js 1362-1375) has no deezer_ arm and never sees a
+   * mirrored vpid, so both resolve to 'YouTube' there. These two must not be
+   * conflated.
+   */
   heroLabel: string;
   /**
    * API path builders. `id` is the source's own id: numeric id (tidal/qobuz/
@@ -115,8 +121,10 @@ export interface SourceVerticalConfig {
   ux: {
     /**
      * The #867 open-modal-immediately UX: ONLY Tidal got it (fresh click opens
-     * the modal before the ~10s track fetch; Qobuz/Deezer/SpotifyPublic/iTunes
-     * block on the fetch first). Port recommendation: unify to true — a
+     * the modal before the ~10s track fetch). Of the rest only QOBUZ actually
+     * blocks on a fetch (1649-1680); deezer/spotify_public/itunes open
+     * immediately too, just from already-loaded data (2856, 6774, 7800) —
+     * they simply never had the #867 treatment. Port recommendation: unify to true — a
      * knowing change, decided at the vertical-UI phase, not here.
      */
     openModalImmediately: boolean;
@@ -136,7 +144,8 @@ export interface SourceVerticalConfig {
      * openDownloadMissingModalForTidal (sync-services.js 276/1302/1758/2426/
      * 2916/3683/7615/8641) — it takes options and hydrates the organize
      * preference at 1494 — and reserves openDownloadMissingModalForYouTube
-     * (downloads.js 429, no options) for youtube + beatport (5275/5721).
+     * (downloads.js 429, no options) for youtube, beatport, listenbrainz and
+     * mirrored — the latter two reach it through startYouTubeDownloadMissing.
      * The YouTube modal alone adds the M3U export + quality-profile chrome.
      */
     downloadEntry: 'tidal' | 'youtube';
@@ -340,7 +349,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       reset: null,
     },
     ids: {
-      fakeHashPrefix: 'itunes_link_',
+      fakeHashPrefix: 'ituneslink_',
       vpidPrefix: 'itunes_link_',
       stateFlag: 'is_itunes_link_playlist',
     },
@@ -420,7 +429,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
     // The registry key IS the source id ('mirrored_<n>' — the literal prefix
     // is PART of the id, never prepended; frame ids and API paths carry the
     // same full string, stats-automations.js 2045/2084).
-    ids: { fakeHashPrefix: '', vpidPrefix: 'youtube_', stateFlag: '' },
+    ids: { fakeHashPrefix: '', vpidPrefix: 'youtube_', stateFlag: 'is_mirrored_playlist' },
     discovery: {
       pollMs: 1000,
       pollPolicy: 'always',

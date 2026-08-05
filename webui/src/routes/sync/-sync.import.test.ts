@@ -360,3 +360,40 @@ describe('buildMirrorPayload (differential vs mirrorPlaylist)', () => {
     });
   });
 });
+
+describe('gaps the PR review proved unpinned', () => {
+  it('blank lines are dropped BEFORE the header is read (stats-automations.js 46)', () => {
+    // Without the filter a leading blank line becomes the header row.
+    expect(importFileParseCsv('\n\nname,artist\nA,B', ',')).toEqual({
+      headers: ['name', 'artist'],
+      rows: [['A', 'B']],
+    });
+    expect(importFileParseCsv('name,artist\n\n', ',')).toEqual({ headers: [], rows: [] });
+  });
+
+  it('a trailing #EXTINF with no title and no artist yields NO track (104)', () => {
+    // The pushTrack guard. Without it the final flushPending emits a phantom
+    // empty row. Note there is NO path line here — that is what makes the
+    // pending entry reach flushPending still empty.
+    expect(importFileParseM3u('#EXTM3U\n#EXTINF:10,').tracks).toEqual([]);
+  });
+
+  it('an empty #EXTINF FOLLOWED by a path falls to filename derivation', () => {
+    // The else-branch at 139-145: an empty pending is discarded and the track
+    // is derived from the file name (extension stripped, ' - ' split). This is
+    // the simple-playlist path, and it is why the guard above needs no path.
+    expect(importFileParseM3u('#EXTM3U\n#EXTINF:10,\n/music/Band - Song.mp3').tracks).toEqual([
+      { track_name: 'Song', artist_name: 'Band', album_name: '', duration_ms: 0 },
+    ]);
+  });
+
+  it('the duration heuristic switches at >10000, not lower (257)', () => {
+    const dur = (v: string) =>
+      importTracksFromCsv([['T', 'A', v]], { 0: 'track_name', 1: 'artist_name', 2: 'duration' })[0]
+        .duration_ms;
+    // The whole (1000, 10000] band must still be read as SECONDS.
+    expect(dur('5000')).toBe(5000000);
+    expect(dur('10000')).toBe(10000000);
+    expect(dur('10001')).toBe(10001);
+  });
+});

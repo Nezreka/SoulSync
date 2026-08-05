@@ -1615,6 +1615,56 @@ all mapped in the ecosystem section).
   discovery stop condition, the socket platform filter, syncPercent, and
   applyFixedMatch/applyUnmatched field-by-field against wishlist-tools.js.
 
+- FULL-PR REVIEW COMPLETE — all six slices. The three later ones:
+  * **pure core: ZERO parity divergences.** Not just read — the reviewer
+    lifted the real vanilla bodies and executed both sides over 432
+    discoveryRowAction rows, all 32 vpid flag combinations, 84 download-status
+    combos, 27 hero ids, 25 formatDuration inputs and the full import matrix.
+    All agreed. A scan of all 238 string literals found NO invented
+    user-visible string. The formatDuration load-order claim was verified
+    against the real <script> order in index.html (8372/8376/8382).
+  * **config/api found a REAL transcription bug**: itunes_link's
+    fakeHashPrefix was 'itunes_link_'; the vanilla spells the fake hash
+    `ituneslink_` (sync-services.js 7885, 8273, 8276) while the vpid is
+    `itunes_link_` (7859, 8626). So iTunes is a SECOND mismatched hash/vpid
+    pair — the table's comment had called spotify_public's "the" inconsistent
+    pair. Fixed, and both pairs are now anchored to the live sources so
+    neither can drift silently. Also fixed: mirrored's stateFlag was '' but
+    is_mirrored_playlist is real and read four times by the shared modal
+    (9354/9682/9969/10172); the wishlist response types named a field the
+    backend never sends (`processed` vs `processed_count`) and omitted
+    `success`, which the vanilla branches on; and three doc claims were wrong
+    (heroLabel is a display name, NOT heroSourceLabel's output — the vanilla
+    ladder has no deezer_ arm and never sees a mirrored vpid, so both resolve
+    to 'YouTube' there; only QOBUZ actually blocks on a fetch, not four
+    sources; the YouTube download entry serves four sources, not two).
+  * **cross-cutting: clean on behaviour.** No import cycles, no
+    window.confirm/alert, no dangerouslySetInnerHTML, no console noise, no
+    TODOs, no `any`/@ts-ignore; 284 test blocks with zero assertion-free
+    tests and no .skip/.only; order-independent across two runs plus a
+    shuffled one; nothing outside routes/sync imports it and none of it
+    reaches the bundle. It also re-verified the dossier's own claims and
+    found none the code contradicts. Four documentation statements had gone
+    false and were corrected (card-progress is NOT the one renderer — LB uses
+    lbCardProgressLine with a matched/total sync percentage, which is real
+    parity; the organize-toggle prop doc still described the prefixed ref the
+    P4b review had fixed; source-modals named only one engine entry after the
+    routing split; the ForTidal declaration had orphaned the YouTube
+    docblock).
+  Test debt closed from the survivor lists: the minute-interval clamp (a
+  sub-30-minute schedule would have read as unscheduled), the all:'true'
+  string arm, the synthetic kind+variant match, the Apple `pl.` playlist
+  anchor, the CSV blank-line filter, the empty-#EXTINF guard (and the
+  filename-derivation branch it sits next to), the >10000 ms/seconds band,
+  the four history-pill icons, and the whole endpoint table.
+  KNOWN, NOT FIXED: the export-coverage gate is mention-only and matches only
+  `export function|const`, so 47 type exports are invisible to it — verified
+  NOT currently gamed (0 mention-only exports); routes/sync is not yet in the
+  weak-assertion gate (adding it needs 3 pin-ok annotations); sourceForFakeHash
+  /sourceForVpid and 11 api functions have no production caller yet (staged
+  ahead of the page shell); _AUTO_SYNC_SOURCE_LOGOS is the one pure auto-sync
+  constant with no ported home, due with the board phase.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

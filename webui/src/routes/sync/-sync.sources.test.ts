@@ -12,6 +12,15 @@ import { describe, expect, it } from 'vitest';
 import { SOURCE_IDS, SYNC_SOURCES, sourceForFakeHash, sourceForVpid } from './-sync.sources';
 
 const SYNC_SERVICES = readFileSync(resolve(process.cwd(), 'static/sync-services.js'), 'utf8');
+const SYNC_SPOTIFY = readFileSync(resolve(process.cwd(), 'static/sync-spotify.js'), 'utf8');
+const STATS_AUTOMATIONS = readFileSync(
+  resolve(process.cwd(), 'static/stats-automations.js'),
+  'utf8',
+);
+const SYNC_LISTENBRAINZ = readFileSync(
+  resolve(process.cwd(), 'static/sync-listenbrainz.js'),
+  'utf8',
+);
 
 describe('endpoint families', () => {
   it('the hyphen/underscore update-phase drift is exactly beatport + listenbrainz', () => {
@@ -170,7 +179,7 @@ describe('resolvers', () => {
     expect(sourceForFakeHash('qobuz_9')?.id).toBe('qobuz');
     expect(sourceForFakeHash('deezer_9')?.id).toBe('deezer');
     expect(sourceForFakeHash('spotifypublic_h4sh')?.id).toBe('spotify_public');
-    expect(sourceForFakeHash('itunes_link_h4sh')?.id).toBe('itunes_link');
+    expect(sourceForFakeHash('ituneslink_h4sh')?.id).toBe('itunes_link');
     expect(sourceForFakeHash('mirrored_5')?.id).toBe('mirrored');
     // Bare mbids / chart hashes / yt url-hashes need flag dispatch, not prefixes.
     expect(sourceForFakeHash('0b5eff34-mbid')).toBe(null);
@@ -187,5 +196,45 @@ describe('resolvers', () => {
     expect(sourceForVpid('spotify_public_h')?.id).toBe('spotify_public');
     expect(sourceForVpid('itunes_link_h')?.id).toBe('itunes_link');
     expect(sourceForVpid('spotify:playlist:x')).toBe(null); // account playlists are not a vertical
+  });
+});
+
+describe('the endpoint table is anchored to the live vanilla', () => {
+  // B's mutation run showed most endpoint strings could be renamed with the
+  // suite green. These assert the real paths appear in the real sources.
+  it('every configured endpoint path exists in webui/static', () => {
+    const ids = Object.keys(SYNC_SOURCES) as (keyof typeof SYNC_SOURCES)[];
+    for (const id of ids) {
+      const api = SYNC_SOURCES[id].api;
+      const paths = [
+        api.discoveryStart('X'),
+        api.discoveryStatus('X'),
+        api.syncStart('X'),
+        api.syncStatus('X'),
+        api.updatePhase('X'),
+        api.state?.('X'),
+        api.playlistsStates,
+      ].filter(Boolean) as string[];
+      for (const p of paths) {
+        // Strip the id segment; the vanilla builds these with a template.
+        const stem = p.replace(/\/X$/, '/');
+        expect(SYNC_SERVICES + SYNC_SPOTIFY + STATS_AUTOMATIONS + SYNC_LISTENBRAINZ).toContain(
+          stem,
+        );
+      }
+    }
+  });
+
+  it('BOTH mismatched hash/vpid pairs are real, and spelled differently', () => {
+    // spotify_public: spotifypublic_ vs spotify_public_
+    expect(SYNC_SERVICES).toContain('spotifypublic_');
+    expect(SYNC_SERVICES).toContain('spotify_public_');
+    expect(SYNC_SOURCES.spotify_public.ids.fakeHashPrefix).toBe('spotifypublic_');
+    expect(SYNC_SOURCES.spotify_public.ids.vpidPrefix).toBe('spotify_public_');
+    // itunes_link: ituneslink_ vs itunes_link_ — the pair B caught.
+    expect(SYNC_SERVICES).toContain('`ituneslink_${');
+    expect(SYNC_SERVICES).toContain('`itunes_link_${');
+    expect(SYNC_SOURCES.itunes_link.ids.fakeHashPrefix).toBe('ituneslink_');
+    expect(SYNC_SOURCES.itunes_link.ids.vpidPrefix).toBe('itunes_link_');
   });
 });

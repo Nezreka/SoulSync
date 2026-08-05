@@ -563,3 +563,45 @@ describe('personalized rows (differential)', () => {
     expect(ours.groups[0].rows.map((r) => r.id)).toEqual([2, 4]);
   });
 });
+
+describe('gaps the PR review proved unpinned (each mutation-verified)', () => {
+  it('sub-hour minute intervals CLAMP to 1, never round to 0 (auto-sync.js 106)', () => {
+    // Round alone would make a 10-minute schedule read as UNSCHEDULED.
+    expect(autoSyncHoursFromTrigger({ interval: 10, unit: 'minutes' })).toBe(1);
+    expect(autoSyncHoursFromTrigger({ interval: 29, unit: 'minutes' })).toBe(1);
+    expect(autoSyncHoursFromTrigger({ interval: 30, unit: 'minutes' })).toBe(1);
+    expect(autoSyncHoursFromTrigger({ interval: 90, unit: 'minutes' })).toBe(2);
+  });
+
+  it("all:'true' as a STRING still means all-playlists, even with a playlist_id", () => {
+    // Without the string arm this pins an all-playlists schedule to one row.
+    expect(
+      autoSyncPlaylistIdFromAutomation({
+        action_type: 'playlist_pipeline',
+        action_config: { all: 'true', playlist_id: '42' },
+      } as Parameters<typeof autoSyncPlaylistIdFromAutomation>[0]),
+    ).toBeNull();
+    expect(
+      autoSyncPlaylistIdFromAutomation({
+        action_type: 'playlist_pipeline',
+        action_config: { all: true, playlist_id: '42' },
+      } as Parameters<typeof autoSyncPlaylistIdFromAutomation>[0]),
+    ).toBeNull();
+    expect(
+      autoSyncPlaylistIdFromAutomation({
+        action_type: 'playlist_pipeline',
+        action_config: { playlist_id: '42' },
+      } as Parameters<typeof autoSyncPlaylistIdFromAutomation>[0]),
+    ).toBe(42);
+  });
+
+  it('the synthetic fallback matches on kind AND variant (auto-sync.js 442)', () => {
+    const rows = [
+      { id: 7, _personalized: true, kind: 'decade', variant: '1990s' },
+      { id: 8, _personalized: true, kind: 'decade', variant: '2000s' },
+    ] as Parameters<typeof autoSyncRowIdForPersonalized>[1];
+    // Kind alone would hand back the 1990s row for a 2000s entry.
+    expect(autoSyncRowIdForPersonalized({ kind: 'decade', variant: '2000s' }, rows)).toBe(8);
+    expect(autoSyncRowIdForPersonalized({ kind: 'decade', variant: '1990s' }, rows)).toBe(7);
+  });
+});

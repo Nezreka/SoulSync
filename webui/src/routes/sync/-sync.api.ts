@@ -199,15 +199,16 @@ export async function generatePlaylistM3u(body: {
 
 /** POST /api/wishlist/cleanup (cleanupWishlist, sync-services.js 4114). */
 export async function postWishlistCleanup(): Promise<{
+  success?: boolean;
   removed_count?: number;
-  processed?: number;
+  processed_count?: number;
   error?: string;
 }> {
   return readJson(await fetch('/api/wishlist/cleanup', { method: 'POST' }));
 }
 
 /** POST /api/wishlist/clear (clearWishlist, sync-services.js 4176). */
-export async function postWishlistClear(): Promise<{ error?: string }> {
+export async function postWishlistClear(): Promise<{ success?: boolean; error?: string }> {
   return readJson(await fetch('/api/wishlist/clear', { method: 'POST' }));
 }
 

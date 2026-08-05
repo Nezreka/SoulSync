@@ -225,3 +225,21 @@ describe('id extractors (differential vs extractITunesLinkId + _isUrlAlreadyLoad
     });
   });
 });
+
+describe('gaps the PR review proved unpinned', () => {
+  it('an Apple playlist id MUST start with pl. (sync-services.js 8788)', () => {
+    expect(extractITunesLinkId('https://music.apple.com/us/playlist/x/pl.abc123')).toEqual({
+      type: 'playlist',
+      id: 'pl.abc123',
+    });
+    // Without the pl. anchor this would match any trailing path segment.
+    expect(extractITunesLinkId('https://music.apple.com/us/playlist/x/notpl')).toBeNull();
+  });
+
+  it('the four history-pill icons are user-visible and verbatim (8655-8658)', () => {
+    expect(URL_HISTORY_SOURCES.youtube.icon).toBe('▶');
+    expect(URL_HISTORY_SOURCES.deezer.icon).toBe('🎵');
+    expect(URL_HISTORY_SOURCES['spotify-public'].icon).toBe('🎧');
+    expect(URL_HISTORY_SOURCES['itunes-link'].icon).toBe('♪');
+  });
+});
