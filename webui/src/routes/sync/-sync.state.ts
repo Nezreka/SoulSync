@@ -16,6 +16,7 @@ import type { SyncStartResponse, SourceSyncStatusResponse } from './-sync.api';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { DiscoveryRow, RawDiscoveryResult } from './-sync.transform';
 
+import { formatDuration } from './-sync.core';
 import { toDiscoveryRows } from './-sync.transform';
 
 export interface SyncProgressSnapshot {
@@ -188,6 +189,124 @@ export function resetAfterModalClose(state: SourcePlaylistState): SourcePlaylist
     downloadProcessId: undefined,
     syncPlaylistId: undefined,
     lastSyncProgress: undefined,
+  };
+}
+
+/** A fixed-match track, as the fix modal hands it over. */
+export interface FixedMatchTrack {
+  id?: string;
+  name?: string;
+  artists?: (string | { name?: string })[] | string;
+  album?: string | Record<string, unknown>;
+  duration_ms?: number;
+  image_url?: string | null;
+}
+
+/**
+ * Apply a confirmed manual match — the frontend half of
+ * selectDiscoveryFixTrack (wishlist-tools.js 476-541): the raw result becomes
+ * found + manual_match with a spotify_data whose album is ALWAYS an object
+ * (cover art for the download pipeline, 497-521); the matches counter
+ * increments only when the row was previously unmatched, and the progress
+ * repaints as matches/total (524-541 — the vanilla reuses the discovery bar
+ * for match percentage after a fix).
+ */
+export function applyFixedMatch(
+  state: SourcePlaylistState,
+  config: SourceVerticalConfig,
+  trackIndex: number,
+  track: FixedMatchTrack,
+): SourcePlaylistState {
+  const previous = state.rawResults[trackIndex];
+  if (!previous) return state;
+  const wasNotFound = previous.status !== 'found' && previous.status_class !== 'found';
+
+  const imageUrl = track.image_url || '';
+  let albumObject: Record<string, unknown>;
+  if (track.album && typeof track.album === 'object') {
+    albumObject = { ...track.album };
+    if (imageUrl && !albumObject.image_url) albumObject.image_url = imageUrl;
+    if (imageUrl && !albumObject.images) albumObject.images = [{ url: imageUrl }];
+  } else {
+    albumObject = { name: track.album || '' };
+    if (imageUrl) {
+      albumObject.image_url = imageUrl;
+      albumObject.images = [{ url: imageUrl }];
+    }
+  }
+
+  const rawResults = state.rawResults.slice();
+  rawResults[trackIndex] = {
+    ...previous,
+    status: '✅ Found',
+    status_class: 'found',
+    manual_match: true,
+    wing_it_fallback: false,
+    spotify_id: track.id,
+    // LB rows display the raw result's duration (490-492).
+    duration: formatDuration(track.duration_ms ?? 0),
+    spotify_data: {
+      id: track.id,
+      name: track.name,
+      artists: track.artists,
+      album: albumObject,
+      duration_ms: track.duration_ms,
+      image_url: imageUrl,
+    } as RawDiscoveryResult['spotify_data'],
+  };
+
+  const spotifyMatches = wasNotFound ? (state.spotifyMatches || 0) + 1 : state.spotifyMatches;
+  const total =
+    state.spotifyTotal ||
+    (Array.isArray(state.playlist?.tracks) ? (state.playlist.tracks as unknown[]).length : 0);
+
+  return {
+    ...state,
+    rawResults,
+    rows: toDiscoveryRows(config.id, config.ux.foundVariant, rawResults),
+    spotifyMatches,
+    // The vanilla repaints matches/total, 0 when total is 0 (529).
+    discoveryProgress: wasNotFound
+      ? total > 0
+        ? Math.round((spotifyMatches / total) * 100)
+        : 0
+      : state.discoveryProgress,
+  };
+}
+
+/**
+ * Apply a confirmed unmatch — the frontend half of unmatchDiscoveryTrack
+ * (wishlist-tools.js 676-688): the row reverts to not-found with everything
+ * matched cleared. NOTE the vanilla does NOT decrement the matches counter —
+ * transcribed as-is.
+ */
+export function applyUnmatched(
+  state: SourcePlaylistState,
+  config: SourceVerticalConfig,
+  trackIndex: number,
+): SourcePlaylistState {
+  const previous = state.rawResults[trackIndex];
+  if (!previous) return state;
+  const rawResults = state.rawResults.slice();
+  rawResults[trackIndex] = {
+    ...previous,
+    status: '❌ Not Found',
+    status_class: 'not-found',
+    spotify_track: undefined,
+    spotify_artist: undefined,
+    spotify_album: undefined,
+    spotify_data: null,
+    // Knowing improvement: the vanilla leaves spotify_id stale here.
+    spotify_id: undefined,
+    matched_data: null,
+    confidence: 0,
+    wing_it_fallback: false,
+    manual_match: false,
+  };
+  return {
+    ...state,
+    rawResults,
+    rows: toDiscoveryRows(config.id, config.ux.foundVariant, rawResults),
   };
 }
 

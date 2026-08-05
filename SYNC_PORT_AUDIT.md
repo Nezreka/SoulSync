@@ -1422,6 +1422,25 @@ all mapped in the ecosystem section).
   converted-id doc corrected (no status endpoint returns it — the ||-keep is
   defensive).
 
+- P4b landed (built → line-by-line reviewed → findings fixed, per the loop):
+  the React-NATIVE Fix Track Match flow (-sync.fix.ts + -ui/fix-modal.tsx —
+  the search cascade active-source-first with bug-#5 actually working, the
+  MBID escape hatch with the vanilla's two distinct not-found messages, the
+  confirm-through-SoulSync-dialog → update_match POST, applyFixedMatch /
+  applyUnmatched reducers with the vanilla's exact counter/progress/album-
+  object semantics) + the spotify_public organize toggle (-ui/organize-
+  toggle.tsx — resolve ref is the BARE hash; the review caught the port
+  sending the prefixed ref, which the vanilla normalizes away and the
+  backend would never match). The vanilla's identifier ladder dissolved:
+  React states are keyed by the source's own id, which IS the backend
+  identifier everywhere. LIVE BUG #8 catalogued by the reviewer: the
+  vanilla fix modal has no qobuz arm in its state ladder (22-43), so qobuz
+  rows could never be fixed at all — the React port makes them fixable
+  (update_match endpoint exists); qobuz UNMATCH still falls to /api/youtube
+  (bug #7, transcribed bug-compatible). Remaining P5 wiring items recorded:
+  render FixModal with key={row.index}, run postUnmatch+applyUnmatched with
+  the vanilla toasts, and the quality-profile select in the organize footer.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

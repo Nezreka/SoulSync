@@ -32,8 +32,10 @@
  *   reads the script-scoped listenbrainzPlaylistStates/youtubePlaylistStates
  *   registries (wishlist-tools.js 22-58) that a React page can never populate
  *   — every call would toast "Track data not found". The Fix/rematch/unmatch
- *   buttons therefore surface INTENTS (onFixTrack/onUnmatchTrack) and the
- *   React-native fix modal implements them in P4b.
+ *   buttons therefore surface INTENTS (onFixTrack/onUnmatchTrack); the page
+ *   wiring renders the React-native FixModal (-ui/fix-modal.tsx) for
+ *   onFixTrack and runs postUnmatch + applyUnmatched (with the vanilla's
+ *   'Match removed' / failure toasts) for onUnmatchTrack.
  */
 
 import { useState } from 'react';
@@ -54,6 +56,7 @@ import {
   seededProgress,
 } from '../-sync.modal-core';
 import { syncPercent } from '../-sync.state';
+import { OrganizeToggle } from './organize-toggle';
 
 declare global {
   interface Window {
@@ -491,6 +494,15 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
 
         <div className="modal-footer">
           <div className="modal-footer-left">
+            {/* The organize toggle is spotify_public-only, above the actions
+                (discoveryModalOrganizeFooterHtml, 9552-9566). The resolve ref
+                is the BARE url_hash: the vanilla builds spotify_public_<hash>
+                and then normalizePlaylistOrganizeRef strips the prefix before
+                the wire request (shared-helpers.js 1113-1115) — the stored
+                source_playlist_id is the bare hash. */}
+            {config.id === 'spotify_public' && (
+              <OrganizeToggle playlistRef={state.sourceId} source="spotify_public" />
+            )}
             <div className="modal-footer-actions">
               <FooterActions {...props} />
             </div>
