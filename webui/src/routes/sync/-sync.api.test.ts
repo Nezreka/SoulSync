@@ -18,7 +18,11 @@ import {
   fetchDeezerArlStatus,
   fetchDeezerLinkPlaylist,
   fetchSourceDiscoveryStatus,
+  clearMirroredDiscovery,
+  deleteMirroredPlaylist,
+  fetchMirroredPlaylists,
   fetchSourcePlaylists,
+  patchMirroredCustomName,
   fetchSourcePlaylistsStates,
   fetchSourceState,
   fetchSourceSyncStatus,
@@ -271,5 +275,52 @@ describe('JSON bodies carry Content-Type', () => {
     await startSourceSync(SYNC_SOURCES.tidal, '9');
     expect(calls[0].body).toBeUndefined();
     expect(calls[0].headers).toBeUndefined();
+  });
+});
+
+describe('mirrored playlist endpoints', () => {
+  it('the list unwraps an array and throws the backend error otherwise (500-524)', async () => {
+    stubFetch([{ id: 1, name: 'M' }]);
+    await expect(fetchMirroredPlaylists()).resolves.toEqual([{ id: 1, name: 'M' }]);
+    expect(calls[0]).toMatchObject({ url: '/api/mirrored-playlists', method: 'GET' });
+    // the vanilla does `if (playlists.error) throw` on the parsed body (508)
+    stubFetch({ error: 'nope' });
+    await expect(fetchMirroredPlaylists()).rejects.toThrow('nope');
+  });
+
+  it('clear-discovery POSTs to the per-playlist path (1175)', async () => {
+    stubFetch({ success: true, cleared: 12 });
+    await expect(clearMirroredDiscovery(7)).resolves.toEqual({ success: true, cleared: 12 });
+    expect(calls[0]).toMatchObject({
+      url: '/api/mirrored-playlists/7/clear-discovery',
+      method: 'POST',
+    });
+  });
+
+  it('delete uses DELETE on the bare resource (2023)', async () => {
+    stubFetch({ success: true });
+    await deleteMirroredPlaylist(7);
+    expect(calls[0]).toMatchObject({ url: '/api/mirrored-playlists/7', method: 'DELETE' });
+  });
+
+  it('rename PATCHes custom_name with a JSON header, and throws on !ok (auto-sync.js 2389)', async () => {
+    stubFetch({});
+    await patchMirroredCustomName(7, 'My Alias');
+    expect(calls[0]).toMatchObject({
+      url: '/api/mirrored-playlists/7/custom-name',
+      method: 'PATCH',
+      body: { custom_name: 'My Alias' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    // a blank name clears the alias — it must still be sent
+    stubFetch({});
+    await patchMirroredCustomName(7, '');
+    expect(calls[0].body).toEqual({ custom_name: '' });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'taken' }), { status: 409 })),
+    );
+    await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('taken');
   });
 });

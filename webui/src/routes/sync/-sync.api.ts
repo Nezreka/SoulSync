@@ -324,6 +324,49 @@ export async function fetchSourcePlaylistsStates(
   return readJson(await fetch(config.api.playlistsStates));
 }
 
+/* ── Mirrored playlists (stats-automations.js) ────────────────────────────── */
+
+/** GET /api/mirrored-playlists (loadMirroredPlaylists, 500-524). */
+export async function fetchMirroredPlaylists(): Promise<Record<string, unknown>[]> {
+  const data = await readJson<unknown>(await fetch('/api/mirrored-playlists'));
+  if (!Array.isArray(data)) {
+    const err = (data as { error?: string } | null)?.error;
+    throw new Error(err || 'Failed to load mirrored playlists');
+  }
+  return data as Record<string, unknown>[];
+}
+
+/** POST .../clear-discovery (clearMirroredDiscovery, 1175). */
+export async function clearMirroredDiscovery(
+  playlistId: number | string,
+): Promise<{ success?: boolean; cleared?: number; error?: string }> {
+  return readJson(
+    await fetch(`/api/mirrored-playlists/${playlistId}/clear-discovery`, { method: 'POST' }),
+  );
+}
+
+/** DELETE /api/mirrored-playlists/<id> (deleteMirroredPlaylist, 2023). */
+export async function deleteMirroredPlaylist(
+  playlistId: number | string,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' }));
+}
+
+/** PATCH .../custom-name (editMirroredCustomName, auto-sync.js 2389). */
+export async function patchMirroredCustomName(
+  playlistId: number | string,
+  customName: string,
+): Promise<{ error?: string }> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/custom-name`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ custom_name: customName }),
+  });
+  const data = await readJson<{ error?: string }>(response);
+  if (!response.ok || data.error) throw new Error(data.error || 'Failed to update name');
+  return data;
+}
+
 /** DELETE /api/youtube/delete/<hash> (removeYouTubePlaylistFromBackend, 1541). */
 export async function deleteYouTubePlaylist(urlHash: string): Promise<Response> {
   return fetch(`/api/youtube/delete/${urlHash}`, { method: 'DELETE' });
