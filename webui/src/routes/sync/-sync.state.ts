@@ -350,6 +350,10 @@ export function fromBackendState(
     ),
     downloadProcessId: pick<string>('download_process_id', 'downloadProcessId'),
     syncPlaylistId: pick<string>('sync_playlist_id', 'syncPlaylistId'),
+    // The states rows carry the live sync counters (endpoints.py 239) and the
+    // card's sync line is painted from them (updateTidalCardSyncProgress
+    // 1163 keeps them on the state for exactly this restore).
+    lastSyncProgress: pick<SyncProgressSnapshot>('sync_progress', 'syncProgress'),
     wingIt: pick<boolean>('wing_it', 'wingIt'),
   };
 }

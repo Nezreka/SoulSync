@@ -17,12 +17,9 @@
  * construction.
  */
 
-import type { ReactNode } from 'react';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { SourceVerticalConfig } from '../-sync.sources';
-import type { SourcePlaylistState } from '../-sync.state';
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
 
@@ -40,7 +37,6 @@ import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
 import {
   asString,
-  checkNoteCounts,
   deezerAlreadyLoaded,
   deezerInputResult,
   deezerMirrorTracks,
@@ -49,7 +45,6 @@ import {
   itunesLinkMirrorTracks,
   itunesLinkTypeBadge,
   itunesLinkUrlError,
-  slashTextProgressLine,
   spotifyPublicAlreadyLoaded,
   spotifyPublicCardIcon,
   spotifyPublicMirrorTracks,
@@ -63,6 +58,7 @@ import {
 } from '../-sync.url-tabs';
 import { URL_HISTORY_SOURCES } from '../-sync.urls';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
+import { cardProgressLine } from './card-progress';
 import { SourceCard } from './source-card';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
 
@@ -106,23 +102,6 @@ function UrlInputSection({
       <button type="button" id={buttonId} disabled={busyLabel !== null && busy} onClick={onSubmit}>
         {busyLabel !== null && busy ? busyLabel : buttonLabel}
       </button>
-    </div>
-  );
-}
-
-/** The check-note progress spans (updateDeezerCardProgress and twins). */
-function checkNoteProgressLine(state: SourcePlaylistState): ReactNode {
-  if (state.phase === 'fresh') return null;
-  const counts = checkNoteCounts({
-    spotify_total: state.spotifyTotal,
-    spotify_matches: state.spotifyMatches,
-  });
-  if (!counts) return '';
-  return (
-    <div className="playlist-card-sync-status">
-      <span className="sync-stat matched-tracks">✓ {counts.matches}</span>
-      <span className="sync-separator">/</span>
-      <span className="sync-stat total-tracks">♪ {counts.total}</span>
     </div>
   );
 }
@@ -199,12 +178,18 @@ export async function hydrateStatesForLoaded(
     const states = (data as { states?: Record<string, unknown>[] }).states ?? [];
     for (const row of states) {
       if (isCurrent && !isCurrent()) return;
-      const playlistId = asString(row.playlist_id);
-      if (!playlistId) continue;
-      const playlist = findPlaylist(playlistId);
-      if (!playlist) continue;
-      vertical.hydrate(playlistId, { ...row, playlist });
-      resumeIfInFlight(vertical, playlistId, asString(row.phase));
+      // Per-row isolation, like every applyXPlaylistState clone (867 +
+      // 946-948): one malformed row must not drop the rest.
+      try {
+        const playlistId = asString(row.playlist_id);
+        if (!playlistId) continue;
+        const playlist = findPlaylist(playlistId);
+        if (!playlist) continue;
+        vertical.hydrate(playlistId, { ...row, playlist });
+        resumeIfInFlight(vertical, playlistId, asString(row.phase));
+      } catch {
+        // Skip this row.
+      }
     }
   } catch {
     // Best-effort, like the vanilla's swallowed console.error path.
@@ -309,7 +294,7 @@ function LinkTabShell({
                 countText={`${trackCount} tracks`}
                 phase={state.phase}
                 typeBadge={typeBadge?.(p)}
-                progressLine={checkNoteProgressLine(state)}
+                progressLine={cardProgressLine(state, config)}
                 onClick={() => onOpen(id, p)}
               />
             );
@@ -782,13 +767,10 @@ export function YouTubeTab({
                   countText={`${tracks.length} tracks`}
                   phase={state.phase}
                   buttonText={ytActionButtonText(state.phase)}
+                  // YouTube hides the element outside the running phases
+                  // (8988-9036) — inside them the shared line applies.
                   progressLine={
-                    ytProgressVisible(state.phase)
-                      ? slashTextProgressLine({
-                          spotify_total: state.spotifyTotal,
-                          spotify_matches: state.spotifyMatches,
-                        })
-                      : null
+                    ytProgressVisible(state.phase) ? cardProgressLine(state, config) : null
                   }
                   onClick={() => onOpen(urlHash, p)}
                 />

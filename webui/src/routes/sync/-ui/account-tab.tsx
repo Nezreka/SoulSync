@@ -13,7 +13,17 @@
  * DiscoveryModal in every phase (the vanilla's downloading branches reopened
  * the vanilla engine modal via the script-scoped registry); the states-list
  * engine-modal rehydration rides the same registry and is not reproduced;
- * the 'state not found' toasts are unreachable by construction.
+ * the 'state not found' toasts are unreachable by construction; the progress
+ * line paints for any non-fresh phase (the vanilla's hydration painted it
+ * only for 'discovered', then the live writers took over); spotifyTotal comes
+ * from the backend state row rather than the vanilla's playlist track_count
+ * (applyTidalPlaylistState 926-929), which stops a not-yet-loaded account row
+ * from rendering a negative ✗ count.
+ *
+ * The saved states are hydrated BEFORE the background track loop, not after
+ * it (the vanilla's 61-62): the loop is sequential over every playlist and
+ * takes minutes on a real account, and a states response that lands after the
+ * user has already started a discovery would roll their card back.
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -26,8 +36,9 @@ import { fetchAccountPlaylist, fetchSourcePlaylists, postMirrorPlaylist } from '
 import { buildMirrorPayload } from '../-sync.import';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
-import { asString, deezerMirrorTracks, slashTextProgressLine } from '../-sync.url-tabs';
+import { asString, deezerMirrorTracks } from '../-sync.url-tabs';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
+import { cardProgressLine } from './card-progress';
 import { SourceCard } from './source-card';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
@@ -80,9 +91,13 @@ function AccountVerticalTab({
 
   const setPlaylistTracks = useCallback((id: string, tracks: unknown[]) => {
     setPlaylists((prev) =>
-      (prev ?? []).map((p) =>
-        String(p.id) === String(id) ? { ...p, tracks, track_count: tracks.length } : p,
-      ),
+      // A track fetch that outlives a Refresh must NOT resurrect the cleared
+      // list — that would flash 'No <source> playlists found.' mid-load.
+      prev === null
+        ? prev
+        : prev.map((p) =>
+            String(p.id) === String(id) ? { ...p, tracks, track_count: tracks.length } : p,
+          ),
     );
   }, []);
 
@@ -99,6 +114,16 @@ function AccountVerticalTab({
       rows.forEach((p) => {
         if (!vertical.states[String(p.id)]) vertical.seed(String(p.id), p);
       });
+
+      // Saved discovery states first (see the header note on ordering),
+      // resuming any row the backend reports mid-flight.
+      await hydrateStatesForLoaded(
+        config,
+        vertical,
+        (pid) => rows.find((p) => String(p.id) === pid),
+        () => generation === loadGeneration.current,
+      );
+      if (generation !== loadGeneration.current) return;
 
       // Background per-playlist track fetch + auto-mirror (27-59) — cards are
       // already rendered; this must not block them. Sequential, like the
@@ -147,16 +172,6 @@ function AccountVerticalTab({
           // Per-playlist track fetch is best-effort (56-58).
         }
       }
-
-      // Saved discovery states, after the list is up (61-62), resuming
-      // in-flight rows. The generation guard rides along so a Refresh fired
-      // during this call can't be hydrated over by the abandoned load.
-      await hydrateStatesForLoaded(
-        config,
-        vertical,
-        (pid) => (playlistsRef.current ?? rows).find((p) => String(p.id) === pid),
-        () => generation === loadGeneration.current,
-      );
     } catch (error) {
       if (generation !== loadGeneration.current) return;
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -190,7 +205,7 @@ function AccountVerticalTab({
         await openSettled(sourceId, playlist);
         return;
       }
-      if (chrome.base === 'tidal') {
+      if (config.ux.openModalImmediately) {
         // #867: open IMMEDIATELY — the discovery poll fills rows in; cached
         // tracks seed instantly, missing tracks default to [] (162-166).
         const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
@@ -221,7 +236,7 @@ function AccountVerticalTab({
       vertical.seed(sourceId, { ...playlist, tracks });
       onOpen(sourceId);
     },
-    [chrome.base, vertical, onOpen, openSettled, setPlaylistTracks],
+    [config, chrome.base, vertical, onOpen, openSettled, setPlaylistTracks],
   );
 
   return (
@@ -260,16 +275,7 @@ function AccountVerticalTab({
                 name={asString(p.name)}
                 countText={`${(p.track_count as number | undefined) ?? 0} tracks`}
                 phase={state.phase}
-                progressLine={
-                  state.phase === 'fresh'
-                    ? null
-                    : state.spotifyTotal > 0
-                      ? slashTextProgressLine({
-                          spotify_total: state.spotifyTotal,
-                          spotify_matches: state.spotifyMatches,
-                        })
-                      : ''
-                }
+                progressLine={cardProgressLine(state, config)}
                 onClick={() => void openCard(p)}
               />
             );

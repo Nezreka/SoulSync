@@ -1526,6 +1526,44 @@ all mapped in the ecosystem section).
   Spotify-style tab (details modal + sequential sync engine +
   playlistTrackCache) and rides the Spotify wave.
 
+- P5c CORRECTED + P5d landed (an Opus re-review of P5c found what the first
+  pass missed — the re-review is now the standard for every wave):
+  * **The cards had no SYNC progress line at all.** The vanilla paints this
+    element from TWO writers: updateXCardProgress (the discovery line) and
+    updateXCardSyncProgress (tidal 1159-1197, qobuz 2315-2348), whose
+    percentage is (matched+failed)/total, not matched/total, and which only
+    paints when total_tracks > 0 — otherwise the discovery line stays. The
+    port rendered discovery numbers during and after a sync, wave-wide (P5b
+    and P5c both). Now ONE renderer, -ui/card-progress.tsx, drives every
+    vertical, and it reads the discovery format from the config table's
+    ux.cardProgressFormat — which until now had no production consumer at
+    all. fromBackendState also never mapped the rows' sync_progress
+    (endpoints.py 239) onto lastSyncProgress, so the line could not have lit
+    up from hydration even once it existed; it does now.
+  * The tidal-vs-qobuz fresh-click drift now reads config.ux.
+    openModalImmediately instead of a base-name string — the second dead
+    config field, and the second source of truth, both gone.
+  * Saved states hydrate BEFORE the background track loop, not after it: the
+    loop is sequential over every playlist and runs for minutes on a real
+    account, and a states response landing after the user started a
+    discovery rolled their card back (hydrate replaces the whole state).
+  * A track fetch outliving a Refresh no longer resurrects the cleared list
+    into [] (which flashed 'No <source> playlists found.' mid-load), and the
+    states loop regained the vanilla's PER-ROW try/catch (867, 946-948) so
+    one malformed row can't drop the rest.
+  * Three P5c tests were proven vacuous by mutation and rewritten: the Qobuz
+    projection was deletable with the suite still green, the card-count
+    assertion passed off the fixture, and the in-loop staleness check was
+    never reached. The #867 test now proves the payoff (cached tracks seed
+    instantly) instead of a tautology.
+  * P5d: the import-file tab (-ui/import-file-tab.tsx). All parsing is the P1
+    pure core; the component owns the file read, the DOM and the submit.
+    onImported is REQUIRED so a mount site cannot silently drop the vanilla's
+    post-import tab switch. Declared divergence: the name pre-fill runs once
+    per read (the vanilla re-ran it on every reparse, refilling a field the
+    user had cleared); its 'only if empty' guard is moot here because the
+    input does not exist before the first read and clear() empties it.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

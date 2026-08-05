@@ -53,6 +53,9 @@ function TidalHarness({ onOpen }: { onOpen?: (id: string) => void }) {
       <TidalTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
       <span data-testid="open-id">{openId ?? 'none'}</span>
       <span data-testid="phase">{vertical.states.t1?.phase ?? 'unseeded'}</span>
+      <span data-testid="seeded">
+        {JSON.stringify(vertical.states[openId ?? 't1']?.playlist?.tracks ?? null)}
+      </span>
     </div>
   );
 }
@@ -213,21 +216,87 @@ describe('TidalTab', () => {
     stubFetch();
     responder = (url) => {
       if (url === '/api/tidal/playlists') {
-        return [{ id: 't1', name: 'Instant', track_count: 5 }];
+        return [{ id: 't1', name: 'Instant', track_count: 1 }];
       }
       if (url === '/api/tidal/playlists/states') return { states: [] };
-      // The background loop's per-playlist fetch may still run — empty tracks.
-      return { tracks: [] };
+      // The background loop caches these before the click.
+      return { tracks: [{ id: 'c1', name: 'Cached' }] };
     };
     render(<TidalHarness />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
     await waitFor(() => expect(screen.getByText('Instant')).toBeInTheDocument());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t1')).toBe(true));
     const before = calls.length;
     fireEvent.click(screen.getByText('Instant'));
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
-    // No overlay fetch on click — only whatever the background loop already did.
+    // No fetch on click at all — the modal opens on what is already cached.
     expect(calls.length).toBe(before);
-    expect(screen.getByTestId('phase')).toHaveTextContent('fresh');
+    // #867's payoff: the cached rows seed instantly (162-166).
+    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
+      { id: 'c1', name: 'Cached' },
+    ]);
+  });
+
+  it('a fresh tidal card with NO cached tracks still opens, seeded with [] (162-165)', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Bare', track_count: 9 }];
+      if (url === '/api/tidal/playlists/states') return { states: [] };
+      return { tracks: [] };
+    };
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('Bare')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Bare'));
+    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
+    expect(screen.getByTestId('seeded')).toHaveTextContent('[]');
+  });
+
+  it('the SYNC progress line replaces the discovery one, with (matched+failed)/total (1159-1197)', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/tidal/playlists')
+        return [{ id: 't1', name: 'Syncing One', track_count: 10 }];
+      if (url === '/api/tidal/playlists/states') {
+        return {
+          states: [
+            {
+              playlist_id: 't1',
+              phase: 'syncing',
+              spotify_matches: 4,
+              spotify_total: 10,
+              sync_progress: { total_tracks: 10, matched_tracks: 6, failed_tracks: 2 },
+            },
+          ],
+        };
+      }
+      return { tracks: [] };
+    };
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    // 6 matched + 2 failed of 10 = 80%, NOT the discovery 4/10 = 40%.
+    await waitFor(() => expect(screen.getByText('(80%)')).toBeInTheDocument());
+    expect(screen.getByText('♪ 10')).toBeInTheDocument();
+    expect(screen.getByText('✓ 6')).toBeInTheDocument();
+    expect(screen.getByText('✗ 2')).toBeInTheDocument();
+    expect(screen.queryByText('♪ 10 / ✓ 4 / ✗ 6 / 40%')).not.toBeInTheDocument();
+  });
+
+  it('a non-fresh card with nothing to report renders the bar visible and empty', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Quiet', track_count: 0 }];
+      if (url === '/api/tidal/playlists/states') {
+        return { states: [{ playlist_id: 't1', phase: 'discovered', spotify_total: 0 }] };
+      }
+      return { tracks: [] };
+    };
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('Discovery Complete')).toBeInTheDocument());
+    const bar = document.querySelector('#tidal-card-t1 .playlist-card-progress')!;
+    expect(bar.className).not.toContain('hidden');
+    expect(bar.textContent).toBe('');
   });
 });
 
@@ -238,6 +307,9 @@ function QobuzHarness({ onOpen }: { onOpen?: (id: string) => void }) {
     <div>
       <QobuzTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
       <span data-testid="open-id">{openId ?? 'none'}</span>
+      <span data-testid="seeded">
+        {JSON.stringify(vertical.states[openId ?? 'q1']?.playlist?.tracks ?? null)}
+      </span>
     </div>
   );
 }
@@ -252,7 +324,7 @@ describe('QobuzTab', () => {
     let clickFetches = 0;
     responder = (url) => {
       if (url === '/api/qobuz/playlists') {
-        return { playlists: [{ id: 'q1', name: 'Qz List', track_count: 1 }] };
+        return { playlists: [{ id: 'q1', name: 'Qz List', track_count: 0 }] };
       }
       if (url === '/api/qobuz/playlist/q1') {
         clickFetches += 1;
@@ -261,7 +333,16 @@ describe('QobuzTab', () => {
           ? { tracks: [] }
           : {
               tracks: [
-                { id: 'qt', name: 'QS', artists: ['QA'], album: 'QAl', duration_ms: 7, extra: 'x' },
+                {
+                  id: 'qt',
+                  name: 'QS',
+                  artists: ['QA'],
+                  album: 'QAl',
+                  duration_ms: 7,
+                  track_number: 3,
+                  extra: 'dropped-by-the-projection',
+                },
+                { id: 'qt2', name: 'QS2' },
               ],
             };
       }
@@ -279,7 +360,13 @@ describe('QobuzTab', () => {
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('q1'));
     expect(overlay).toHaveBeenCalledWith('Loading Qz List...');
     expect(hideOverlay).toHaveBeenCalled();
-    expect(screen.getByText('1 tracks')).toBeInTheDocument();
+    // The card count came from the click's fetch, not the fixture (1662-1663).
+    expect(screen.getByText('2 tracks')).toBeInTheDocument();
+    // The projection kept exactly the vanilla's six fields (1657-1661).
+    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
+      { id: 'qt', name: 'QS', artists: ['QA'], album: 'QAl', duration_ms: 7, track_number: 3 },
+      { id: 'qt2', name: 'QS2', artists: [], album: '', duration_ms: 0, track_number: 0 },
+    ]);
   });
 
   it("no tracks → 'Could not load tracks for this playlist', no open (1672-1676)", async () => {
@@ -334,7 +421,7 @@ describe('shared helpers', () => {
     expect(resumeSync).toHaveBeenCalledExactlyOnceWith('b');
   });
 
-  it('hydrateStatesForLoaded honours the staleness guard', async () => {
+  it('hydrateStatesForLoaded honours the staleness guard before the loop', async () => {
     stubFetch();
     responder = () => ({ states: [{ playlist_id: 'known', phase: 'discovering' }] });
     const hydrate = vi.fn();
@@ -342,9 +429,63 @@ describe('shared helpers', () => {
     const vertical = { hydrate, resumeDiscovery, resumeSync: vi.fn() } as unknown as Parameters<
       typeof hydrateStatesForLoaded
     >[1];
-    await hydrateStatesForLoaded(SYNC_SOURCES.tidal, vertical, () => ({ id: 'known' }), () => false);
+    await hydrateStatesForLoaded(
+      SYNC_SOURCES.tidal,
+      vertical,
+      () => ({ id: 'known' }),
+      () => false,
+    );
     expect(hydrate).not.toHaveBeenCalled();
     expect(resumeDiscovery).not.toHaveBeenCalled();
+  });
+
+  it('...and again INSIDE the loop, so a mid-hydration refresh stops it', async () => {
+    stubFetch();
+    responder = () => ({
+      states: [
+        { playlist_id: 'a', phase: 'discovered' },
+        { playlist_id: 'b', phase: 'discovered' },
+      ],
+    });
+    const hydrate = vi.fn();
+    const vertical = {
+      hydrate,
+      resumeDiscovery: vi.fn(),
+      resumeSync: vi.fn(),
+    } as unknown as Parameters<typeof hydrateStatesForLoaded>[1];
+    // Current for the pre-loop check and row a, stale from row b on.
+    let checks = 0;
+    await hydrateStatesForLoaded(
+      SYNC_SOURCES.tidal,
+      vertical,
+      (pid) => ({ id: pid }),
+      () => checks++ < 2,
+    );
+    expect(hydrate).toHaveBeenCalledExactlyOnceWith(
+      'a',
+      expect.objectContaining({ playlist_id: 'a', playlist: { id: 'a' } }),
+    );
+  });
+
+  it('one malformed state row does not drop the rest (867, 946-948)', async () => {
+    stubFetch();
+    responder = () => ({
+      states: [
+        { playlist_id: 'boom', phase: 'discovered' },
+        { playlist_id: 'fine', phase: 'discovered' },
+      ],
+    });
+    const hydrate = vi.fn((id: string) => {
+      if (id === 'boom') throw new Error('bad row');
+    });
+    const vertical = {
+      hydrate,
+      resumeDiscovery: vi.fn(),
+      resumeSync: vi.fn(),
+    } as unknown as Parameters<typeof hydrateStatesForLoaded>[1];
+    await hydrateStatesForLoaded(SYNC_SOURCES.tidal, vertical, (pid) => ({ id: pid }));
+    expect(hydrate).toHaveBeenCalledTimes(2);
+    expect(hydrate).toHaveBeenLastCalledWith('fine', expect.anything());
   });
 
   it('hydrateStatesForLoaded skips rows whose playlist is not loaded (3273-3275)', async () => {
