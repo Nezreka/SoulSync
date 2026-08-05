@@ -4,13 +4,13 @@
  * plumbing in sync-services.js). Which source it drives comes entirely from
  * the config; the drift catalog lives there, not here.
  *
- * Transport normalization (declared in -sync.sources.ts): discovery frames
- * arrive via the ss:discovery-progress CustomEvent (core.js re-broadcasts
- * every socket frame there, core.js:878) plus an HTTP backstop poll at the
- * source's vanilla cadence. The vanilla's three per-source poll policies
- * collapse into event + backstop — the guaranteed path is the poll, the event
- * makes it live. Sync progress is HTTP-poll only, the discover-port precedent
- * (its socket frames are not re-broadcast for modules).
+ * Transport: the HTTP poll at the source's vanilla cadence is THE guaranteed
+ * path — nothing on this page emits discovery:subscribe, so the server's
+ * room-scoped discovery:progress frames only reach the ss:discovery-progress
+ * CustomEvent (core.js:878) when some OTHER surface subscribed the id (e.g.
+ * the explorer's mirrored discoveries). The listener is kept for exactly that
+ * case, filtered by frame id AND platform. Sync progress is HTTP-poll only,
+ * the discover-port precedent.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -106,15 +106,25 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
       const id =
         typeof frame.id === 'string' || typeof frame.id === 'number' ? String(frame.id) : '';
       // Frame ids are the identifiers the verticals subscribe with — the
-      // source's own id (623 tidal, 4725 beatport, 11026 LB...). Anything not
-      // seeded here belongs to another source or page.
+      // source's own id (623 tidal, 4725 beatport, 11026 LB...). Rooms are not
+      // platform-namespaced and qobuz/deezer numeric ids can collide, so the
+      // frame's platform must match too (web_server.py 41887; mirrored
+      // discoveries run on the youtube platform).
       if (!(id in statesRef.current)) return;
+      const platform = frame.platform;
+      if (typeof platform === 'string') {
+        const matches =
+          platform === config.id || (config.id === 'mirrored' && platform === 'youtube');
+        if (!matches) return;
+      }
       if (frame.error) {
         stopDiscoveryPoll(id);
         return;
       }
       patch(id, (s) => applyDiscovery(s, config, frame as DiscoveryPayload));
-      if (frame.complete || frame.phase === 'discovered') stopDiscoveryPoll(id);
+      if (frame.complete || frame.phase === 'discovered' || frame.phase === 'error') {
+        stopDiscoveryPoll(id);
+      }
     };
     window.addEventListener(SYNC_DISCOVERY_EVENT, onFrame);
     return () => window.removeEventListener(SYNC_DISCOVERY_EVENT, onFrame);
@@ -133,7 +143,12 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
             return;
           }
           patch(sourceId, (s) => applyDiscovery(s, config, status));
-          if (status.complete || status.phase === 'discovered') stopDiscoveryPoll(sourceId);
+          // Backends park failures on phase 'error' with no error field and
+          // complete still false (core/discovery/endpoints.py) — the vanilla
+          // HTTP polls spin forever on it; stop here.
+          if (status.complete || status.phase === 'discovered' || status.phase === 'error') {
+            stopDiscoveryPoll(sourceId);
+          }
         } catch {
           stopDiscoveryPoll(sourceId);
         }
@@ -145,7 +160,7 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
   const startSyncPoll = useCallback(
     (sourceId: string) => {
       stopSyncPoll(sourceId);
-      syncPollers.current[sourceId] = setInterval(async () => {
+      const tick = async () => {
         try {
           const status = await fetchSourceSyncStatus(config, sourceId);
           if (status.error) {
@@ -164,7 +179,10 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
         } catch {
           stopSyncPoll(sourceId);
         }
-      }, config.sync.pollMs);
+      };
+      // The vanilla runs the poll body immediately on start/resume (1105).
+      void tick();
+      syncPollers.current[sourceId] = setInterval(tick, config.sync.pollMs);
     },
     [config, patch, stopSyncPoll],
   );
@@ -214,10 +232,14 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
 
   const startSync = useCallback(
     async (sourceId: string) => {
-      const response = await startSourceSync(config, sourceId);
-      if (response.error) return;
-      patch(sourceId, (s) => applySyncStarted(s, response));
-      startSyncPoll(sourceId);
+      try {
+        const response = await startSourceSync(config, sourceId);
+        if (response.error) return;
+        patch(sourceId, (s) => applySyncStarted(s, response));
+        startSyncPoll(sourceId);
+      } catch {
+        // The vanilla toasts and stays put on a failed start (1013-1016).
+      }
     },
     [config, patch, startSyncPoll],
   );
@@ -226,12 +248,16 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
 
   const cancelSync = useCallback(
     async (sourceId: string) => {
-      stopSyncPoll(sourceId);
+      // The vanilla returns WITHOUT reverting when the cancel fails
+      // (cancelTidalSync 1129-1132 and twins) — the sync is still running and
+      // the poller keeps tracking it.
       try {
-        await cancelSourceSync(config, sourceId);
+        const response = await cancelSourceSync(config, sourceId);
+        if (response.error) return;
       } catch {
-        // The vanilla reverts locally even when the cancel POST fails (1112ff).
+        return;
       }
+      stopSyncPoll(sourceId);
       patch(sourceId, (s) => ({ ...s, phase: 'discovered' }));
     },
     [config, patch, stopSyncPoll],
@@ -286,6 +312,10 @@ export async function fetchAndHydrateState(
   sourceId: string,
   hydrate: (sourceId: string, backend: Record<string, unknown>) => void,
 ): Promise<void> {
-  const backend = await fetchSourceState(config, sourceId);
-  if (backend && Object.keys(backend).length) hydrate(sourceId, backend);
+  try {
+    const backend = await fetchSourceState(config, sourceId);
+    if (backend && Object.keys(backend).length) hydrate(sourceId, backend);
+  } catch {
+    // Hydration is best-effort; the card just stays on its current state.
+  }
 }

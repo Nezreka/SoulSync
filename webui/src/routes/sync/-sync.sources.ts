@@ -379,7 +379,10 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       playlistsStates: '/api/mirrored-playlists/discovery-states',
       reset: (id) => `/api/youtube/reset/${id}`,
     },
-    ids: { fakeHashPrefix: 'mirrored_', vpidPrefix: 'youtube_', stateFlag: '' },
+    // The registry key IS the source id ('mirrored_<n>' — the literal prefix
+    // is PART of the id, never prepended; frame ids and API paths carry the
+    // same full string, stats-automations.js 2045/2084).
+    ids: { fakeHashPrefix: '', vpidPrefix: 'youtube_', stateFlag: '' },
     discovery: {
       pollMs: 1000,
       pollPolicy: 'always',
@@ -405,6 +408,9 @@ export const SOURCE_IDS: readonly SyncSourceId[] = Object.keys(SYNC_SOURCES) as 
 export function sourceForFakeHash(fakeHash: string): SourceVerticalConfig | null {
   // Longest prefix first so 'spotifypublic_' style additions can never be
   // shadowed by a shorter prefix.
+  // mirrored keys carry their marker INSIDE the id (fakeHashPrefix is ''),
+  // so resolve them explicitly before the constructed-prefix loop.
+  if (fakeHash.startsWith('mirrored_')) return SYNC_SOURCES.mirrored;
   const prefixed = SOURCE_IDS.map((id) => SYNC_SOURCES[id]).filter(
     (c) => c.ids.fakeHashPrefix !== '',
   );

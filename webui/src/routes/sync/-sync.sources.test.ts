@@ -73,7 +73,9 @@ describe('id spaces', () => {
     expect(SYNC_SOURCES.beatport.ids.fakeHashPrefix).toBe('');
     expect(SYNC_SOURCES.listenbrainz.ids.fakeHashPrefix).toBe('');
     expect(SYNC_SOURCES.youtube.ids.fakeHashPrefix).toBe('');
-    expect(SYNC_SOURCES.mirrored.ids.fakeHashPrefix).toBe('mirrored_');
+    // mirrored: the 'mirrored_' marker is PART of the source id, not a
+    // constructed prefix — fakeHash === sourceId === 'mirrored_<n>' (F1).
+    expect(SYNC_SOURCES.mirrored.ids.fakeHashPrefix).toBe('');
   });
 
   it('state flags name the shared-modal dispatch booleans', () => {

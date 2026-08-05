@@ -126,7 +126,9 @@ export function applySyncStarted(
  * REVERT to discovered (the Tidal-shaped machinery, 976-1157: results are
  * still good, only the sync failed). In-flight payloads land in
  * lastSyncProgress, which the card re-render restores (1159).
- * The HTTP poll captures beatport's converted id on completion (5481ff).
+ * The converted-id ||-keep is defensive: no current status endpoint returns
+ * converted_spotify_playlist_id (the vanilla's 5476 assigns undefined), but a
+ * payload that does carry one wins over the stored value.
  */
 export function applySyncStatus(
   state: SourcePlaylistState,

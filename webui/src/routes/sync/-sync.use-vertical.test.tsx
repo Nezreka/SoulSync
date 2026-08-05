@@ -84,6 +84,14 @@ describe('discovery via frames', () => {
     act(() => frame({ id: 'mirrored_5', progress: 10 }));
     expect(result.current.states['mirrored_5']).toBeUndefined();
 
+    // A colliding id from ANOTHER platform is ignored (rooms are not
+    // platform-namespaced; web_server stamps the frame's platform).
+    act(() => frame({ id: '77', platform: 'deezer', progress: 99 }));
+    expect(result.current.states['77'].discoveryProgress).toBe(50);
+    // The matching platform is accepted.
+    act(() => frame({ id: '77', platform: 'tidal', progress: 75 }));
+    expect(result.current.states['77'].discoveryProgress).toBe(75);
+
     // Completion frame → phase discovered and the backstop poller dies.
     act(() => frame({ id: '77', complete: true, phase: 'discovered' }));
     expect(result.current.states['77'].phase).toBe('discovered');
@@ -180,6 +188,17 @@ describe('sync lifecycle', () => {
     });
     expect(calls[0]).toMatchObject({ url: '/api/youtube/sync/cancel/mbid-1', method: 'POST' });
     expect(result.current.states['mbid-1'].phase).toBe('discovered');
+  });
+
+  it('a FAILED cancel leaves the phase alone (cancelTidalSync 1129-1132)', async () => {
+    responder = () => ({ error: 'engine says no' });
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.tidal));
+    act(() => result.current.seed('77'));
+    act(() => result.current.hydrate('77', { phase: 'syncing' }));
+    await act(async () => {
+      await result.current.cancelSync('77');
+    });
+    expect(result.current.states['77'].phase).toBe('syncing');
   });
 });
 

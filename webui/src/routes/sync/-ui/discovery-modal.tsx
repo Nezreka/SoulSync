@@ -21,7 +21,11 @@
  *   call the engine directly with its own argument shapes: wingItDownload
  *   (tracks, name, sourceWord, null, true) after closing this modal — the
  *   vanilla removes the modal first (downloads.js 92-96) — and
- *   _wingItSyncFromModal(hash, tracks, name, isLB), which keeps it open.
+ *   _wingItSyncFromModal(hash, tracks, name, isLB), which keeps it open. The
+ *   engine's follow-up DOM writes (updateYouTubeModalButtons) target the
+ *   VANILLA container id, which this modal deliberately does NOT use — so
+ *   they no-op instead of innerHTML-clobbering React-owned children; wing-it
+ *   sync progress feedback arrives when the page wiring polls it (P5).
  * - Downloads: onDownloadMissing hands off to the vanilla download engine via
  *   the parent (openDownloadMissingModalForYouTube).
  * - Fix Track Match: NOT adopted. The review proved the wishlist-tools flow
@@ -122,24 +126,26 @@ export function pendingSourceRows(
   return tracks.map((raw, index) => {
     const t = raw as {
       name?: string;
-      artists?: (string | { name?: string })[] | string;
+      artists?: string[] | string;
       track_name?: string;
       artist_name?: string;
     };
     if (config.id === 'listenbrainz') {
       return {
         index,
-        track: t.track_name || t.name || 'Unknown',
-        artist: t.artist_name || 'Unknown',
+        track: t.track_name || 'Unknown Track',
+        artist: t.artist_name || 'Unknown Artist',
       };
     }
-    const artists = Array.isArray(t.artists)
-      ? t.artists
-          .map((a) => (typeof a === 'object' && a !== null ? (a.name ?? '') : a))
-          .filter(Boolean)
-          .join(', ')
-      : t.artists;
-    return { index, track: t.name || t.track_name || 'Unknown', artist: artists || 'Unknown' };
+    return {
+      index,
+      track: t.name || 'Unknown Track',
+      artist: t.artists
+        ? Array.isArray(t.artists)
+          ? t.artists.join(', ')
+          : t.artists
+        : 'Unknown Artist',
+    };
   });
 }
 
@@ -335,11 +341,12 @@ function FooterActions(props: DiscoveryModalProps) {
     );
   }
 
+  // NOTE: the vanilla's "ℹ️ No Spotify matches found." prepend (9700-9702) is
+  // unreachable dead code — the wing-it wrap defeats its startsWith guard —
+  // so with no matches and no converted id the footer shows only the
+  // always-present actions, exactly what the vanilla actually renders.
   return (
     <>
-      {!hasMatches && (
-        <div className="modal-info">ℹ️ No {metadataSourceLabel()} matches found.</div>
-      )}
       {hasMatches && !standalone && (
         <button type="button" className="modal-btn modal-btn-primary" onClick={onStartSync}>
           🔄 Sync This Playlist
@@ -386,13 +393,15 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
   const metadataLabel = metadataSourceLabel();
   const seeded = seededProgress(state);
   const tracks = playlistTracks(state);
-  // The seed line uses the playlist's own track count (9518).
-  const total = tracks.length;
+  // Seed with the playlist's own count (9518); once payloads flow, their
+  // authoritative spotify_total wins (the live painter, 10113) — results can
+  // outnumber a rate-limited partial track fetch.
+  const total = state.spotifyTotal || tracks.length;
   const showLine = state.rows.length > 0;
   const pending = state.rows.length === 0 ? pendingSourceRows(config, tracks) : [];
 
   return (
-    <div className="modal-overlay" id={`youtube-discovery-modal-${fakeHash}`}>
+    <div className="modal-overlay" id={`sync-discovery-modal-${fakeHash}`}>
       <div className="youtube-discovery-modal">
         <div className="modal-header">
           <h2>{modalTitle(config.id, fakeHash)}</h2>
@@ -439,7 +448,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
               </thead>
               <tbody>
                 {state.rows.map((row) => (
-                  <tr key={row.index} id={`discovery-row-${fakeHash}-${row.index}`}>
+                  <tr key={row.index} id={`sync-discovery-row-${fakeHash}-${row.index}`}>
                     <td className="yt-track">{row.yt_track}</td>
                     <td className="yt-artist">
                       {/* #863: an unknown/blank source artist falls back to the matched one. */}
@@ -462,10 +471,13 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                   </tr>
                 ))}
                 {pending.map((row) => (
-                  <tr key={`pending-${row.index}`} id={`discovery-row-${fakeHash}-${row.index}`}>
+                  <tr
+                    key={`pending-${row.index}`}
+                    id={`sync-discovery-row-${fakeHash}-${row.index}`}
+                  >
                     <td className="yt-track">{row.track}</td>
                     <td className="yt-artist">{row.artist}</td>
-                    <td className="discovery-status pending">🔍 Pending...</td>
+                    <td className="discovery-status">🔍 Pending...</td>
                     <td className="spotify-track">-</td>
                     <td className="spotify-artist">-</td>
                     <td className="spotify-album">-</td>

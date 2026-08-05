@@ -122,9 +122,9 @@ describe('phase footers', () => {
   });
 
   it('matches are COUNTER-only, and a converted id keeps Download available (9604-9605)', () => {
-    window.getActiveMetadataSource = () => 'deezer';
-    window.getMetadataSourceLabel = () => 'Deezer';
-    // Found rows but counter 0 → info line, no sync; converted id → Download stays.
+    // Found rows but counter 0 → no sync button; converted id → Download stays.
+    // (No info line: the vanilla's "No matches" prepend is unreachable dead
+    // code — its startsWith guard is defeated by the wing-it wrap.)
     render(
       <DiscoveryModal
         config={SYNC_SOURCES.tidal}
@@ -138,9 +138,9 @@ describe('phase footers', () => {
         {...noopHandlers}
       />,
     );
-    expect(screen.getByText('ℹ️ No Deezer matches found.')).toBeInTheDocument();
     expect(screen.queryByText('🔄 Sync This Playlist')).not.toBeInTheDocument();
     expect(screen.getByText('🔍 Download Missing Tracks')).toBeInTheDocument();
+    expect(screen.queryByText(/No .* matches found/)).not.toBeInTheDocument();
   });
 
   it('standalone hides sync everywhere and gives spotify_public the folder download', () => {
@@ -277,7 +277,7 @@ describe('the table', () => {
     expect(screen.getByTitle('Change this match')).toBeInTheDocument();
     fireEvent.click(screen.getByText('🔧 Fix'));
     expect(onFixTrack).toHaveBeenCalledWith(expect.objectContaining({ index: 1 }));
-    expect(document.getElementById('discovery-row-tidal_77-0')).not.toBe(null);
+    expect(document.getElementById('sync-discovery-row-tidal_77-0')).not.toBe(null);
   });
 
   it('a modal with no results pre-renders every playlist track as Pending (10001)', () => {
@@ -288,7 +288,7 @@ describe('the table', () => {
           playlist: {
             name: 'My List',
             tracks: [
-              { name: 'T1', artists: [{ name: 'A1' }] },
+              { name: 'T1', artists: ['A1'] },
               { name: 'T2', artists: ['A2', 'A3'] },
             ],
           },
@@ -302,12 +302,19 @@ describe('the table', () => {
     expect(screen.getByText('A2, A3')).toBeInTheDocument();
   });
 
-  it('pendingSourceRows speaks the LB flat dialect', () => {
+  it('pendingSourceRows speaks the vanilla dialects exactly (10007-10020)', () => {
     expect(
       pendingSourceRows(SYNC_SOURCES.listenbrainz, [{ track_name: 'L', artist_name: 'M' }]),
     ).toEqual([{ index: 0, track: 'L', artist: 'M' }]);
     expect(pendingSourceRows(SYNC_SOURCES.tidal, [{}])).toEqual([
-      { index: 0, track: 'Unknown', artist: 'Unknown' },
+      { index: 0, track: 'Unknown Track', artist: 'Unknown Artist' },
+    ]);
+    // A non-array artists value passes through; empty array joins to ''.
+    expect(pendingSourceRows(SYNC_SOURCES.tidal, [{ name: 'S', artists: 'Solo' }])).toEqual([
+      { index: 0, track: 'S', artist: 'Solo' },
+    ]);
+    expect(pendingSourceRows(SYNC_SOURCES.tidal, [{ name: 'E', artists: [] }])).toEqual([
+      { index: 0, track: 'E', artist: '' },
     ]);
   });
 });

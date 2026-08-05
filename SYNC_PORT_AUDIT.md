@@ -1399,6 +1399,29 @@ all mapped in the ecosystem section).
   P4b TODO: React-native fix modal (search + MBID lookup + apply/unmatch
   endpoints), spotify_public organize toggle in the footer.
 
+- PERFECTION PASS (third independent review, whole branch): ten findings,
+  all fixed + tested; production build verified for the first time (passes;
+  routeTree untouched). The fixes: mirrored is a ''-prefix source (the
+  'mirrored_' marker is PART of the id — fakeHash===sourceId, no doubling);
+  cancelSync only reverts on a SUCCESSFUL cancel (the vanilla returns
+  without reverting on error, 1129-1132); discovery frames are filtered by
+  PLATFORM as well as id (rooms are not platform-namespaced; mirrored frames
+  arrive as platform 'youtube') and the transport doc now states honestly
+  that the poll is the only guaranteed path; the React modal uses its OWN
+  container/row-id namespace (sync-discovery-*) so live vanilla writers
+  (updateYouTubeModalButtons from wing-it sync) no-op instead of
+  innerHTML-clobbering React DOM; the progress line uses the payload's
+  authoritative spotify_total; pendingSourceRows matches
+  generateInitialTableRows exactly ('Unknown Track'/'Unknown Artist', plain
+  join); the "No matches" info line is REMOVED (the vanilla's prepend is
+  unreachable dead code — wing-it wrap defeats its startsWith guard);
+  discovery polling stops on phase 'error' (backends park failures there
+  with complete=false — the vanilla HTTP polls spin forever, ours doesn't);
+  startSync/fetchAndHydrateState catch network failures; sync polls run an
+  immediate first tick on start/resume (vanilla 1105); the beatport
+  converted-id doc corrected (no status endpoint returns it — the ||-keep is
+  defensive).
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
