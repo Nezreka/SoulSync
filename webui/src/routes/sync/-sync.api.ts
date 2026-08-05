@@ -288,10 +288,31 @@ export async function fetchYouTubePlaylists(): Promise<Record<string, unknown>[]
 
 /* ── Source playlist lists ────────────────────────────────────────────────── */
 
-/** GET /api/tidal/playlists | /api/qobuz/playlists (vertical heads). */
+/**
+ * GET /api/tidal/playlists | /api/qobuz/playlists (vertical heads). Throws
+ * the backend error on !ok (the vanilla's sync-services.js 14-17 throw,
+ * which lands in the tab's ❌ placeholder + toast).
+ */
 export async function fetchSourcePlaylists(base: 'tidal' | 'qobuz'): Promise<unknown[]> {
-  const data = await readJson<unknown>(await fetch(`/api/${base}/playlists`));
+  const response = await fetch(`/api/${base}/playlists`);
+  if (!response.ok) {
+    const error = await readJson<{ error?: string }>(response);
+    throw new Error(
+      error.error || `Failed to fetch ${base === 'tidal' ? 'Tidal' : 'Qobuz'} playlists`,
+    );
+  }
+  const data = await readJson<unknown>(response);
   return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
+}
+
+/** GET /api/tidal/playlist/<id> | /api/qobuz/playlist/<id> — the on-demand
+ * track fetch the account verticals run per playlist (sync-services.js 39,
+ * 1550, 1653). */
+export async function fetchAccountPlaylist(
+  base: 'tidal' | 'qobuz',
+  id: string,
+): Promise<Record<string, unknown>> {
+  return readJson(await fetch(`/api/${base}/playlist/${id}`));
 }
 
 /** GET the bulk state hydration for a vertical, when it has one. */

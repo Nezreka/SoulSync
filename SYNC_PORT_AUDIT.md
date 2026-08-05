@@ -1503,6 +1503,29 @@ all mapped in the ecosystem section).
   (script-scoped registry); progress line derives from state each render;
   YT already-loaded check is array-backed, not a DOM data-url scan.
 
+- P5c landed (built → line-by-line reviewed → findings fixed, per the loop):
+  the Tidal + Qobuz account verticals in -ui/account-tab.tsx — one
+  AccountVerticalTab parameterized by the pair's only real drift. Refresh
+  loads the account list (fetchSourcePlaylists now THROWS the backend error
+  on !ok, the vanilla's 14-17/1526-1529 throw → ❌ placeholder + toast),
+  cards render instantly from metadata, then a sequential background loop
+  fetches each playlist's tracks (new fetchAccountPlaylist), updates the card
+  count and auto-mirrors with {owner, image_url, description} — the mirror
+  mapper is byte-identical to Deezer's, so deezerMirrorTracks is reused.
+  Saved states hydrate afterwards with the P5b resume-on-in-flight fix.
+  The fresh-click drift: TIDAL opens the modal immediately with tracks ?? []
+  (#867 — the backend discovery fetch is the source of truth, 152-166);
+  QOBUZ fetches the track list behind the loading overlay, projects it
+  (1657-1661), and refuses to open with 'Could not load tracks for this
+  playlist'. Review findings fixed: hydrateStatesForLoaded takes an optional
+  staleness guard so an abandoned Refresh can't hydrate/resume over a newer
+  one (belt-and-braces — the Refresh button is disabled for the whole load,
+  which the tests now pin), plus coverage for the tracks-came-with-the-list
+  mirror branch, the settled discovered-empty refetch, and the guard itself.
+  DEFERRED: deezer-arl is NOT an account vertical of this shape — it's a
+  Spotify-style tab (details modal + sequential sync engine +
+  playlistTrackCache) and rides the Spotify wave.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

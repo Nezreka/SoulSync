@@ -179,20 +179,26 @@ export function useYouTubeCardOpen(
   );
 }
 
-/** Hydrate every backend state row whose playlist is loaded in this tab
+/** Hydrate every backend state row whose playlist is loaded in a tab
  * (loadDeezerPlaylistStatesFromBackend 3195 and clones — rows for playlists
  * that are not loaded are skipped, exactly like applyXPlaylistState). Rows
  * hydrated mid-flight resume their pollers, the vanilla's
  * startXDiscoveryPolling/startXSyncPolling tail (3320-3326 and clones). */
-async function hydrateStatesForLoaded(
+export async function hydrateStatesForLoaded(
   config: SourceVerticalConfig,
   vertical: SourceVertical,
   findPlaylist: (playlistId: string) => UrlTabPlaylist | undefined,
+  /** Optional staleness check — a tab that reloads mid-flight passes its
+   * generation guard so an abandoned load can't hydrate or resume over the
+   * new one (the vanilla had no such guard anywhere). */
+  isCurrent?: () => boolean,
 ): Promise<void> {
   try {
     const data = await fetchSourcePlaylistsStates(config);
+    if (isCurrent && !isCurrent()) return;
     const states = (data as { states?: Record<string, unknown>[] }).states ?? [];
     for (const row of states) {
+      if (isCurrent && !isCurrent()) return;
       const playlistId = asString(row.playlist_id);
       if (!playlistId) continue;
       const playlist = findPlaylist(playlistId);
@@ -206,7 +212,7 @@ async function hydrateStatesForLoaded(
 }
 
 /** Restart the transport for a row restored in a running phase. */
-function resumeIfInFlight(vertical: SourceVertical, sourceId: string, phase: string): void {
+export function resumeIfInFlight(vertical: SourceVertical, sourceId: string, phase: string): void {
   if (phase === 'discovering') vertical.resumeDiscovery(sourceId);
   else if (phase === 'syncing') vertical.resumeSync(sourceId);
 }
