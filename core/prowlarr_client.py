@@ -100,8 +100,6 @@ class ProwlarrSearchResult:
 class ProwlarrClient:
     """Thin sync-backed async wrapper around the Prowlarr v1 API."""
 
-    DEFAULT_TIMEOUT = 15
-
     def __init__(self) -> None:
         self._load_config()
 
@@ -243,7 +241,7 @@ class ProwlarrClient:
                 url,
                 headers={'X-Api-Key': self._api_key, 'Accept': 'application/json'},
                 params=params,
-                timeout=self.DEFAULT_TIMEOUT,
+                timeout=getattr(self._config, 'get_source_search_timeout', lambda: None)() or 60,
             )
             if not resp.ok:
                 logger.warning("Prowlarr %s returned HTTP %s", path, resp.status_code)
