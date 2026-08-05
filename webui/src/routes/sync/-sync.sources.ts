@@ -338,7 +338,9 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
     discovery: {
       pollMs: 1000,
       pollPolicy: 'always',
-      wingItInSocket: true,
+      // NEITHER LB transform maps wing-it (verified: the only case-insensitive
+      // 'wing' in the whole LB region is the word "Showing" in a log line).
+      wingItInSocket: false,
       wingItInPoll: false,
       startBody: 'playlist',
     },

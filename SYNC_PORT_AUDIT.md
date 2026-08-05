@@ -1324,6 +1324,23 @@ all mapped in the ecosystem section).
   built): wing-it handled on every transport, discovery via
   ss:discovery-progress + per-source HTTP backstop.
 
+- DRIFT CATALOG CORRECTION (P3a re-read): ListenBrainz has NO wing-it
+  handling in EITHER transform (the only case-insensitive 'wing' in its
+  region is the word "Showing" in a log line) — the audit's earlier guess
+  that LB followed the Tidal socket pattern was wrong; config fixed. Also
+  found: LB's spotify_artist shows only the FIRST artist (11049) where every
+  other mapper joins the list; and the actualMatches counters disagree with
+  the socket mappers about wing-it rows (491 counts a wing-it row with
+  spotify_data as a match; 635 excludes it).
+- P3a landed: `-sync.transform.ts` — ONE mapper replacing the fourteen
+  socket/poll result transforms, per-source only for the genuine payload
+  dialects (tidal_track/qobuz_track/deezer_track/spotify_public_track/
+  itunes_link_track objects, beatport_track title+artist strings, LB
+  lb_*||track_name flats + authoritative indexes + duration, YT/mirrored
+  passthrough). THREE knowing unifications documented in the module header:
+  wing-it on every source+transport, the error arm everywhere, joined
+  Spotify artists (LB's first-only dropped).
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

@@ -99,12 +99,11 @@ describe('transports', () => {
     expect(SYNC_SOURCES.tidal.sync.pollMs).toBe(1000);
   });
 
-  it('wing-it handling (live bug #4): socket transforms only, and never yt/beatport/mirrored', () => {
+  it('wing-it handling (live bug #4): socket transforms only, and never yt/beatport/LB/mirrored', () => {
     const socketWingIt = SOURCE_IDS.filter((id) => SYNC_SOURCES[id].discovery.wingItInSocket);
     expect(socketWingIt.sort()).toEqual([
       'deezer',
       'itunes_link',
-      'listenbrainz',
       'qobuz',
       'spotify_public',
       'tidal',
