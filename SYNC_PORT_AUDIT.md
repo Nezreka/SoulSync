@@ -1472,6 +1472,37 @@ all mapped in the ecosystem section).
   unreachable). patchState added to useSourceVertical (exposes the stable
   patch; missing-id falls to freshSourceState where reducers no-op safely).
 
+- P5b landed (built → line-by-line reviewed → 6 findings fixed, per the loop):
+  the four URL-import tabs — -sync.url-tabs.ts (validation toasts verbatim
+  incl. the 'a iTunes' typo, spotify checks case-SENSITIVE vs itunes
+  lowercased, the four mirror-track projections field-by-field with youtube's
+  unconditional mirror + always-'' album, badges/icons/colors, YouTube's OWN
+  7-case button map — fresh 'Start Discovery', discovered+sync_complete
+  'View Details', download_complete 'View Results' — and its
+  progress-only-while-running visibility, slash-text + check-note progress
+  formats, url-history localStorage glue), -ui/url-history-bar.tsx (Recent
+  pills, truncate 28+'...', × remove), -ui/url-import-tab.tsx (LinkTabShell
+  + DeezerLinkTab + the PublicLinkTab clone pair + YouTubeTab with the temp
+  'Parsing…' card flow and the sync-spotify 695 backend restore; ENTER key
+  on all inputs; useUrlCardOpen with the discovered-empty-results refetch;
+  useYouTubeCardOpen preserving YT's fresh-click-starts-discovery drift).
+  fetchDeezerLinkPlaylist now throws the backend error on !ok (the vanilla's
+  2746 throw); fetchYouTubePlaylists added. SourceCard grew typeBadge /
+  iconClassName / optional owner / ReactNode progressLine (additive).
+  Review findings fixed: states-list rows hydrated in discovering/syncing now
+  RESUME their pollers (the vanilla's startXPolling tail, 3320-3326 — the
+  port would have frozen mid-flight cards), the YouTube mount restore resumes
+  the same way (replacing checkForActiveProcesses → rehydrate), url-variant
+  re-paste of a restored YT playlist can't append a duplicate url_hash card
+  (vanilla leaked an orphan card here), the silent-seed divergence declared
+  (the 'state not found' toasts are unreachable by construction), the
+  restored-card button-map inconsistency documented, and coverage added for
+  post-load dedupe + pill guard + url_hash dedupe + the refetch + resume.
+  Declared divergences (P5a pattern): card clicks open the React
+  DiscoveryModal in every phase; engine-modal page-load rehydration dropped
+  (script-scoped registry); progress line derives from state each render;
+  YT already-loaded check is array-backed, not a DOM data-url scan.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

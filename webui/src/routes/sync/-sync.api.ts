@@ -261,9 +261,29 @@ export async function parseITunesLinkUrl(
   );
 }
 
-/** GET /api/deezer/playlist/<id> (the Deezer-link parse head, 2706). */
+/**
+ * GET /api/deezer/playlist/<id> (the Deezer-link parse head, 2706). Throws
+ * the backend's error message on !ok — the vanilla's 2746-2749 throw, which
+ * lands in the tab's catch toast.
+ */
 export async function fetchDeezerLinkPlaylist(id: string): Promise<Record<string, unknown>> {
-  return readJson(await fetch(`/api/deezer/playlist/${id}`));
+  const response = await fetch(`/api/deezer/playlist/${id}`);
+  if (!response.ok) {
+    const error = await readJson<{ error?: string }>(response);
+    throw new Error(error.error || 'Failed to fetch Deezer playlist');
+  }
+  return readJson(response);
+}
+
+/** GET /api/youtube/playlists (loadYouTubePlaylistsFromBackend, sync-spotify.js 695). */
+export async function fetchYouTubePlaylists(): Promise<Record<string, unknown>[]> {
+  const response = await fetch('/api/youtube/playlists');
+  if (!response.ok) {
+    const error = await readJson<{ error?: string }>(response);
+    throw new Error(error.error || 'Failed to fetch YouTube playlists');
+  }
+  const data = await readJson<{ playlists?: Record<string, unknown>[] }>(response);
+  return data.playlists ?? [];
 }
 
 /* ── Source playlist lists ────────────────────────────────────────────────── */
