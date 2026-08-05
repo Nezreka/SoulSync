@@ -1376,6 +1376,29 @@ all mapped in the ecosystem section).
   config's drift endpoint, seed/hydrate for tab loads. Tested with fake
   timers + dispatched CustomEvents + captured fetch.
 
+- P4a landed: the shared discovery modal (-sync.modal-core.ts,
+  -sync.use-standalone.ts, -ui/discovery-modal.tsx). Independent review ran
+  BEFORE commit; its big finding changed the architecture: **the
+  wishlist-tools Fix Track Match flow CANNOT be adopted** — openDiscoveryFix
+  Modal/unmatchDiscoveryTrack read the script-scoped listenbrainzPlaylist
+  States/youtubePlaylistStates registries (wishlist-tools.js 22-58) that a
+  React page can never populate, so every call would toast "Track data not
+  found". The modal therefore surfaces onFixTrack/onUnmatchTrack INTENTS and
+  the fix modal gets ported React-native in P4b (it is page-scoped anyway).
+  All other review findings fixed pre-commit: vanilla cell classes + the
+  modal-footer-actions wrapper restored (the repaint/CSS contract), the
+  spotify_public organize toggle noted as a P4b item, the wing-it DROPDOWN
+  (Download closes the modal; Sync to Server via _wingItSyncFromModal keeps
+  it open — both engine fns take explicit tracks, no registry dependency),
+  Retry-Failed counts every non-found row (9684), Download stays available
+  via convertedSpotifyPlaylistId with counter-only hasMatches (9603-9605),
+  the ⚠️ no-results branch (9628), the styled ♪/✓/✗ syncing status row,
+  initial 🔍 Pending rows (10001), the vanilla button copy (Sync This
+  Playlist / ❌ Cancel Sync / ℹ️ No X matches found.), inline unmatch/mbid
+  styling, soulsync-standalone-action class.
+  P4b TODO: React-native fix modal (search + MBID lookup + apply/unmatch
+  endpoints), spotify_public organize toggle in the footer.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
