@@ -11,6 +11,7 @@
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { MirrorPayload } from './-sync.import';
 import type { MirroredPipelineState } from './-sync.pipeline';
+import type { DiscoveryPoolData, PoolSearchTrack, WingItPoolData } from './-sync.pools';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { RawDiscoveryResult } from './-sync.transform';
 
@@ -21,6 +22,7 @@ import {
   SOURCE_REF_FAILED,
   pipelineResponseError,
 } from './-sync.pipeline';
+import { POOL_FIX_SEARCH_LIMIT } from './-sync.pools';
 
 /* ── Shared response shapes (fields the vanilla actually read) ────────────── */
 
@@ -375,6 +377,98 @@ export async function patchMirroredCustomName(
   const data = await readJson<{ error?: string }>(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Failed to update name');
   return data;
+}
+
+/* ── The two pools (stats-automations.js 1206-2022) ───────────────────────── */
+
+/** `?playlist_id=N` only when a playlist is actually selected (1223, 1377). */
+function poolUrl(base: string, playlistId: number | string | null): string {
+  return playlistId ? `${base}?playlist_id=${playlistId}` : base;
+}
+
+/** GET /api/discovery-pool (1207, 1222, 1619). */
+export async function fetchDiscoveryPool(
+  playlistId: number | string | null = null,
+): Promise<DiscoveryPoolData> {
+  return readJson(await fetch(poolUrl('/api/discovery-pool', playlistId)));
+}
+
+/** GET /api/wing-it-pool (1376, 1551). */
+export async function fetchWingItPool(
+  playlistId: number | string | null = null,
+): Promise<WingItPoolData> {
+  return readJson(await fetch(poolUrl('/api/wing-it-pool', playlistId)));
+}
+
+/**
+ * GET /api/spotify/search_tracks (1931). Params are omitted when blank — the
+ * vanilla only sets the ones the user filled in.
+ */
+export async function searchPoolFixTracks(
+  track: string,
+  artist: string,
+): Promise<{ ok: boolean; status: number; statusText: string; data: PoolSearchResponse }> {
+  const params = new URLSearchParams();
+  if (track) params.set('track', track);
+  if (artist) params.set('artist', artist);
+  params.set('limit', String(POOL_FIX_SEARCH_LIMIT));
+  const response = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
+  // The vanilla swallows a bad JSON body into {} so the !ok arm still reports
+  // the status rather than a parse error (1932).
+  const data = await response.json().catch(() => ({}));
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    data: data as PoolSearchResponse,
+  };
+}
+
+export interface PoolSearchResponse {
+  error?: string;
+  tracks?: PoolSearchTrack[];
+}
+
+/** POST /api/discovery-pool/fix — a MIRRORED TRACK id (1994). */
+export async function postPoolFix(
+  trackId: number,
+  spotifyTrack: PoolSearchTrack,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(
+    await fetch('/api/discovery-pool/fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track_id: trackId, spotify_track: spotifyTrack }),
+    }),
+  );
+}
+
+/** POST /api/discovery-pool/rematch — a CACHE id, and the original pair (1979). */
+export async function postPoolRematch(
+  cacheId: number,
+  originalTitle: string,
+  originalArtist: string,
+  spotifyTrack: PoolSearchTrack,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(
+    await fetch('/api/discovery-pool/rematch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cache_id: cacheId,
+        original_title: originalTitle,
+        original_artist: originalArtist,
+        spotify_track: spotifyTrack,
+      }),
+    }),
+  );
+}
+
+/** DELETE /api/discovery-pool/cache/<id> (1815). */
+export async function deletePoolCacheEntry(
+  entryId: number,
+): Promise<{ success?: boolean; error?: string }> {
+  return readJson(await fetch(`/api/discovery-pool/cache/${entryId}`, { method: 'DELETE' }));
 }
 
 /* ── Auto-Sync pipeline + source ref (auto-sync.js 2358-2525) ─────────────── */

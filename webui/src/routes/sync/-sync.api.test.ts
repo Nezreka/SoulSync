@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelSourceSync,
   deleteBeatportChart,
+  deletePoolCacheEntry,
   deleteYouTubePlaylist,
   detectLbSeries,
   fetchAccountSyncStatus,
@@ -17,6 +18,7 @@ import {
   fetchDeezerArlPlaylists,
   fetchDeezerArlStatus,
   fetchDeezerLinkPlaylist,
+  fetchDiscoveryPool,
   fetchExportConnectedSources,
   fetchMirroredPipelineStatus,
   fetchPlaylistExportStatus,
@@ -31,14 +33,18 @@ import {
   fetchSourceState,
   fetchSourceSyncStatus,
   fetchSpotifyPlaylists,
+  fetchWingItPool,
   generatePlaylistM3u,
   parseITunesLinkUrl,
   parseSpotifyPublicUrl,
   parseYouTubeUrl,
   postMirrorPlaylist,
+  postPoolFix,
+  postPoolRematch,
   postWishlistCleanup,
   postWishlistClear,
   runMirroredPipeline,
+  searchPoolFixTracks,
   startPlaylistExport,
   startSourceDiscovery,
   startSourceSync,
@@ -343,6 +349,84 @@ describe('mirrored playlist endpoints', () => {
       vi.fn(async () => new Response(JSON.stringify({}), { status: 500 })),
     );
     await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('Failed to update name');
+  });
+});
+
+describe('the two pool endpoints (1207-1815)', () => {
+  it('both pools take ?playlist_id ONLY when one is selected', async () => {
+    stubFetch({ stats: {} });
+    await fetchDiscoveryPool();
+    await fetchDiscoveryPool(null);
+    await fetchDiscoveryPool('');
+    await fetchDiscoveryPool(7);
+    await fetchWingItPool();
+    await fetchWingItPool(7);
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/discovery-pool',
+      '/api/discovery-pool',
+      '/api/discovery-pool',
+      '/api/discovery-pool?playlist_id=7',
+      '/api/wing-it-pool',
+      '/api/wing-it-pool?playlist_id=7',
+    ]);
+  });
+
+  it('the fix search omits blank params and always asks for 20', async () => {
+    stubFetch({ tracks: [] });
+    await searchPoolFixTracks('Blue Monday', '');
+    expect(calls[0].url).toBe('/api/spotify/search_tracks?track=Blue+Monday&limit=20');
+    stubFetch({ tracks: [] });
+    await searchPoolFixTracks('', 'New Order');
+    expect(calls[0].url).toBe('/api/spotify/search_tracks?artist=New+Order&limit=20');
+  });
+
+  it('the fix search reports the response shape instead of throwing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not json', { status: 500, statusText: 'Server Error' })),
+    );
+    // A body that will not parse becomes {} so the !ok arm can still report
+    // the status rather than a parse error.
+    await expect(searchPoolFixTracks('x', '')).resolves.toEqual({
+      ok: false,
+      status: 500,
+      statusText: 'Server Error',
+      data: {},
+    });
+  });
+
+  it('fix carries a TRACK id, rematch a CACHE id and the original pair', async () => {
+    const track = { name: 'Blue Monday', artists: ['New Order'] };
+    stubFetch({ success: true });
+    await postPoolFix(7, track);
+    expect(calls[0]).toMatchObject({
+      url: '/api/discovery-pool/fix',
+      method: 'POST',
+      body: { track_id: 7, spotify_track: track },
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    stubFetch({ success: true });
+    await postPoolRematch(9, 'Blue Monday', 'New Order', track);
+    expect(calls[0]).toMatchObject({
+      url: '/api/discovery-pool/rematch',
+      method: 'POST',
+      body: {
+        cache_id: 9,
+        original_title: 'Blue Monday',
+        original_artist: 'New Order',
+        spotify_track: track,
+      },
+    });
+  });
+
+  it('removing a cache entry DELETEs it by id', async () => {
+    stubFetch({ success: true });
+    await expect(deletePoolCacheEntry(9)).resolves.toEqual({ success: true });
+    expect(calls[0]).toMatchObject({
+      url: '/api/discovery-pool/cache/9',
+      method: 'DELETE',
+    });
   });
 });
 

@@ -374,25 +374,17 @@ describe('MirroredTab — the three actions', () => {
 });
 
 describe('MirroredTab — deferred controls and click dispatch', () => {
-  it('the pool buttons need a handler; the three card actions never do', async () => {
+  it('every control renders unconditionally — the tab takes no handler props', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
-    const { unmount } = render(<Harness />);
+    render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    expect(screen.queryByText('Discovery Pool')).not.toBeInTheDocument();
-    expect(screen.queryByText('Wing It Pool')).not.toBeInTheDocument();
-    // Export, Auto-Sync and 🔗 own their controllers since P5g, so they take
-    // no handler and are never conditional.
+    // All five own their controllers since P5f/P5g, so none is conditional.
+    expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
+    expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
     expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
     expect(screen.getByText('Auto-Sync')).toBeInTheDocument();
     expect(screen.getByTitle('Edit original playlist link')).toBeInTheDocument();
-    unmount();
-
-    stubFetch();
-    render(<Harness onOpenDiscoveryPool={() => undefined} onOpenWingItPool={() => undefined} />);
-    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
-    expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
   });
 
   it('a card click opens the shared modal under the mirrored_<id> hash', async () => {
