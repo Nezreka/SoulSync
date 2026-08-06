@@ -2002,6 +2002,93 @@ fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
 (GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
 Cache HIT spreads the cached tracks onto the list row rather than refetching.
 
+### SERVER MANAGER TAB — P0 READ COMPLETE (pages-extra.js, all 1,240 lines)
+
+The original P0 read this file as "verbatim 1-595, skim-verified tail". The tail
+is now read verbatim too, so the whole tab is covered. 28 top-level functions,
+no other page touches this file.
+
+**Shape.** Two views inside one tab, swapped by display:
+`#server-playlist-container` (the card list) and `#server-editor` (the compare
+editor). serverEditorBack (698) just flips them back.
+
+**The card list (loadServerPlaylists, 12-156).** Six skeleton cards while
+loading; three PARALLEL fetches (/api/server/playlists, /api/mirrored-playlists,
+/api/sync/history/names); splits SYNCED (name ∈ mirrored ∪ history, matched
+case-insensitively and trimmed) from 'Other'; per-server SVG icons
+(plex/jellyfin/navidrome); cards hue-rotated by index (`i*37+200 % 360`).
+
+**Opening one (openServerPlaylistEditor, 158).** Mirrored lookup BY NAME: one
+match → compare view; none → server-only view with a banner; several →
+disambiguation modal (_showServerDisambig, 185) whose Escape handler is parked
+on `window._disambigEsc` and removed on close.
+
+**The compare editor (_openServerCompareView, 247-354).** GET
+/api/server/playlist/<id>/tracks?name[&mirrored_playlist_id]. State lives in the
+script-scoped `_serverEditorState` {tracks, playlistId, playlistName,
+serverType, orderStatus, serverOrder, mirroredPlaylist, searchArtist,
+_searchResults}. Columns render in SOURCE order; `order_status` flags
+same-tracks-different-order and lights a '⚠ out of order' badge opening
+_showServerOrder (387) — a read-only view of the ACTUAL server order with two
+align actions (_alignPlaylist, 451: 'Mirror source' drops extras, 'Keep extras'
+appends them; POST .../align with matched_ids in source order; missing tracks
+are deliberately NOT added).
+
+**Filters + re-render.** `.discog-filter` pills (all/matched/missing/extra)
+call _serverEditorFilter (705) → _applyServerEditorFilter (715), which shows or
+hides `.server-track-item` rows by `dataset.status`. #1005: a re-render must
+RE-APPLY the active filter — _rerenderCompare (732) does stats + columns +
+filter and RESTORES both columns' scrollTop, because an in-place patch must not
+throw the user to the top of a 2,000-track list.
+
+**Search / Replace (746-980) — the richest part.**
+- serverSearchReplace(trackIndex, mode) builds `#server-search-overlay`, seeds
+  the input with the SOURCE track name only (a title alone searches better than
+  an "artist title" blob), stashes the artist on `_serverEditorState.searchArtist`
+  as a relevance hint, and closes on backdrop click OR Escape — the Escape
+  listener is torn down by a MutationObserver watching for the overlay's removal.
+- _serverSearchExecute (818): GET /api/library/search-tracks?q&limit=20
+  [&artist=hint]; results keep `_searchResults` so a pick can patch in place;
+  the format badge maps M4A→AAC and only shows for a known extension list.
+- _serverSelectTrack (886): 'replace' POSTs .../replace-track; 'add' POSTs
+  .../add-track with a computed `position` (count of server tracks BEFORE this
+  index) plus source_track_id/title/artist/source, which the backend stores as a
+  durable manual match (#787). `new_playlist_id` is honoured because PLEX
+  DELETES AND RECREATES the playlist. Then it PATCHES the pair in place rather
+  than reloading (#1005), and — the subtle bit — if the picked track already sat
+  in the list as an 'extra' row, that row is SPLICED OUT, because the backend
+  links rather than duplicates.
+- _serverRemoveTrack (982): confirm dialog, POST .../remove-track; a matched
+  pair loses its server side and becomes 'missing', an extra row is spliced.
+
+**M3U export (642).** Server tracks only, POST /api/generate-playlist-m3u with
+save_to_disk+force, then a browser blob download; the filename strips
+`/\?%*:|"<>`; the toast reports `found/total in library` when the server could
+not resolve every path.
+
+**Sync detail modal (openSyncDetailModal, 1058-1213).** Its own
+`.discog-modal-overlay#sync-detail-overlay`, opened from a synced card. Rows
+carry status ✅/❌, a confidence badge banded 80/50, and a download column whose
+icons are ✅/❌/🔇/🚫. The wishlist arm is the interesting one: a
+`download_status === 'wishlist'` row renders a CLICKABLE '→ Wishlist' button
+(_readdSyncWishlist, 1029 → POST /api/sync/history/<id>/track/<i>/wishlist)
+UNLESS its source_track_id starts with `wing_it_`, in which case it renders the
+plain non-clickable 'Unmatched' label — those stubs never had real metadata and
+were never wishlisted. Old entries with no track_results fall back to
+tracks_json behind a 'Per-track match data not available' notice.
+
+**Port notes.** No engine coupling at all — this region never touches
+downloads.js, spotifyPlaylists or the discovery machinery, so nothing here needs
+a bridge. `_serverEditorState` is script-scoped but ONLY this file reads it, so
+it becomes React state cleanly. Escaping is already correct throughout (`_esc`),
+and the two hand-rolled listener teardowns (the disambig Escape handler and the
+search overlay's MutationObserver) simply become effects.
+
+**Build slices, in order:** (A) card list + disambiguation; (B) compare editor —
+columns, stats, filter pills, scroll linking; (C) search/replace + remove +
+the in-place patch rules; (D) order view + align; (E) sync detail modal + M3U
+export.
+
 ### THE SEEDING BLOCKER — RESOLVED (Boulder chose the bridge)
 
 Found while building the two account tabs, by reading rather than assuming.
