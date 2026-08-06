@@ -2647,3 +2647,69 @@ restored under a sha256 check.
 **This is the flip wave's real worklist.** Each of the 46 needs a decision —
 re-home the definition, publish it from React, or delete the caller with it —
 and none of them can now be missed silently.
+
+### THE OTHER DIRECTION — 119 edges, and what they mean (different risk)
+
+The 46-edge inventory covers SURVIVOR -> PORT calls: things that break when the
+port deletes a definition. Reading Beatport's very first function exposed the
+missing half — `loadBeatportHeroTracks` calls `getBeatportContentSignal()`,
+which lives in **core.js**, not beatport-ui.js.
+
+Swept that direction too: **119 PORT -> SURVIVOR edges.**
+
+**These are not breakage risk.** The callee survives; the caller is the thing
+being deleted. They are the CAPABILITY LIST — everything React must obtain (via
+a window seam) or reimplement when it takes the page over. Useful as a checklist,
+not as a guard, which is why they are recorded here and not asserted in a test.
+
+**beatport-ui.js needs exactly six things** — a short list for a 3,900-line file:
+`getBeatportContentSignal` (core.js), `showLoadingOverlay` / `hideLoadingOverlay`
+/ `showToast` (downloads.js), `openDownloadMissingModalForArtistAlbum` and
+`registerBeatportDownload` (shared-helpers.js).
+
+**CAVEAT, stated rather than glossed:** this resolution is naive about duplicate
+globals. `formatDuration` is defined in BOTH sync-services.js and
+wishlist-tools.js, so "sync-spotify calls formatDuration<-wishlist-tools.js" may
+be wrong about which copy wins — script load order decides that, not the
+analysis. Treat any name in the duplicate set as unresolved until read.
+
+### BEATPORT VERBATIM READ — SLIDER 1 (rebuild/hero, lines 1-322)
+
+Read line by line. This is the CLONE BASELINE: the other four sliders (releases
+662, hype picks 1002, charts 1298, DJ) share this shape, so they will be
+diff-read against it rather than re-read from scratch.
+
+**The shape.** Module state object {currentSlide, totalSlides, autoPlayInterval,
+autoPlayDelay: 5000}; init -> fetch -> populate -> wire nav + indicators +
+autoplay + hover-pause; a cleanup that clears the interval.
+
+**Details that would be wrong if assumed:**
+- **Re-entrancy guard (24-28).** `slider.dataset.initialized === 'true'` skips
+  the whole re-init and JUST RESTARTS AUTOPLAY. Re-entering the tab must not
+  re-bind listeners, and must not re-fetch.
+- **The API-failure path keeps the STATIC markup (163-168).** On failure it
+  calls setupBeatportSliderFunctionality() against the placeholder slides
+  already in index.html — it does not render an error. So the markup carries
+  real placeholder slides, and the port must decide to reproduce or drop them.
+- **totalSlides starts at 4** and is overwritten by tracks.length (81). The 4 is
+  the count of the static placeholders, which is why the failure path works.
+- **Wrap-around both ways (239-243)**, and every slide gets exactly one of
+  active/prev/next (252-262) — the CSS transition depends on prev vs next, so
+  this is not just an 'active' toggle.
+- **Nav and indicator clicks call preventDefault + stopPropagation** (197-198),
+  because the slide itself is click-to-open; without it, paging would open the
+  release.
+- `resetAutoPlay` is an alias for `startAutoPlay`, which clears first (277-283).
+- **AbortError is swallowed silently (58)** — a page-leave mid-fetch is not an
+  error, which is what getBeatportContentSignal exists for.
+
+**Declared divergence (an improvement, stated):** the slide HTML interpolates
+`track.title`, `track.artist`, `track.url` and `track.image_url` into innerHTML
+UNESCAPED (86-103), where the rest of this file uses `_esc`. The data is
+third-party (Beatport). React escapes by default, so the port closes this
+without trying — recorded so the difference is deliberate and not mistaken for
+a transcription error later.
+
+**Read status: 322 of ~3,600 in-scope lines.** Remaining: sliders 2-5
+(diff-read), the top-10 lists, the click handlers + download-modal bridge, and
+the genre browser (~1,400 lines, the largest single region).
