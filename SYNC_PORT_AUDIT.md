@@ -1839,6 +1839,96 @@ vanilla rename/source-ref tails REOPEN the detail modal, while P5g's React
 ports of those two actions do not — so a React rename would leave an adopted
 detail modal stale on screen.
 
+## THE FULL FUNCTION ENUMERATION (Boulder-prompted: "im sure there is much more
+## still that hasn't been ported")
+
+The reconciliation above checked the port against this dossier's DECISIONS. It
+never checked it against this dossier's FUNCTIONS. This pass does that, and it
+enumerates the vanilla files rather than the prose above — the prose is a
+summary, the files are ground truth.
+
+Surface: 371 top-level functions across the six core sync files (sync-spotify
+37, sync-services 197, sync-listenbrainz 10, sync-lastfm 2,
+sync-soulsync-discovery 4, auto-sync 121), plus the 53-function
+stats-automations sync region and the pages-extra server region.
+
+Method: split the inventory mechanically into the per-source ARCHETYPE (a name
+shape shared by ≥4 verticals — `start<S>SyncPolling`, `update<S>CardPhase` and
+16 more, 120 functions) which the config table + useSourceVertical cover by
+construction, and the 114 NON-archetype one-offs, which were classified
+individually. Then two sweeps for the failure mode the phase reviews cannot
+see — code that exists but nothing calls: every optional callback prop declared
+in the -ui components, and every export in routes/sync, checked for a
+production caller.
+
+### THREE NEW GAPS, all inside phases marked COMPLETE
+
+1. **`_mirrorListenBrainzAfterDiscovery` (sync-services.js 10928-11020) is
+   entirely unported — P5a.** Both LB discovery-completion paths call it (11075
+   socket, 11170 poll). It mirrors the MATCHED tracks (spotify_data.id required)
+   into the Mirrored tab with extra_data {discovered, provider, confidence,
+   matched_data}, routes a 'Last.fm Radio:' title prefix to source 'lastfm', and
+   collapses rotating series via GET /api/listenbrainz/series-detect so per-week
+   duplicates (Weekly Jams etc.) UPSERT onto one row. Without it, ListenBrainz
+   and Last.fm Radio discoveries never reach the Mirrored tab at all — and
+   listenbrainz mirrors are schedulable in Auto-Sync (autoSyncCanSchedulePlaylist
+   excludes only file/beatport/lastfm, 205-216), so the schedule board loses them
+   too. Half-built and never wired: `detectLbSeries` sits in -sync.api.ts:226
+   with no caller, which is what made the omission invisible.
+
+2. **🔄 Rediscover can never render — P5b (youtube) and P5e (mirrored).**
+   discovery-modal.tsx:391 gates the button on `config.api.reset &&
+   onRediscover`; NOTHING supplies onRediscover. The vanilla renders it in
+   THREE phase arms (9690-9695 discovered, 9855-9859 sync_complete, 9916-9920
+   the dead download_complete twin) for beatport (resetBeatportChart, 10837) and
+   for everything not in the exclusion list at 9693 — which is youtube AND
+   mirrored (resetYouTubePlaylist, 10785). The config table already has the
+   right endpoints for all three; only the wiring is absent. Identical class to
+   the known Retry Failed gap, and the sweep proves the pair is exhaustive:
+   of 4 optional callback props declared in the -ui layer, exactly these 2 have
+   no non-test supplier.
+
+3. **The source-ref success toast never fires — P5g.** The vanilla's
+   editMirroredSourceRef toasts `Updated source for <name>` (auto-sync.js 2432).
+   `sourceRefUpdatedToast` was built (-sync.pipeline.ts:202) and never called;
+   source-ref-modal.tsx fires only the error toast. Small, but the same
+   built-then-not-wired shape as 1 and 2.
+
+### VERIFIED NOT GAPS (recorded so nobody re-checks them)
+
+- `startListenBrainzListingSyncPolling` (11373) and the whole LB listing dual-UI
+  drive `discover-lb-playlist-<mbid>-sync-*` ids, which belong to the DISCOVER
+  page — already React, contract declared at globals.d.ts:126. Not sync-page
+  content, despite living in sync-services.js.
+- `removeYouTubePlaylistFromBackend` (sync-spotify.js 1541) is **dead in the
+  vanilla**: no caller in any static/*.js, in index.html, or in React. The port
+  carries the endpoint (deleteYouTubePlaylist) and needs no UI for it.
+- Covered as claimed: removeYouTubeCard, updateYouTubeCardData, timeAgo,
+  deleteMirroredPlaylist, the URL-history helpers, the three parse* entries, the
+  four phase maps, both formatDuration copies, the shared discovery-modal core
+  (9302-10460), and all 120 archetype clones.
+- The six config fields with no production consumer (heroLabel,
+  listingPercentFormula, pollPolicy, stateFlag, wingItInSocket, wingItInPoll)
+  are deliberate RECORDS of vanilla drift, each carrying a doc comment naming
+  the vanilla lines; the port's unifications are declared. Not dead config —
+  do not "clean up".
+
+### SHELL-WAVE WIRING OBLIGATIONS (unwired because their phase has not run)
+
+These exports have no caller only because the page shell does not exist yet.
+Listing them so the shell phase cannot silently drop them the way onRediscover
+was dropped: the 13 tab components (TidalTab, QobuzTab, DeezerLinkTab,
+SpotifyPublicTab, ITunesLinkTab, YouTubeTab, ListenBrainzSyncTab, LastfmSyncTab,
+SoulsyncDiscoveryTab, ImportFileTab, MirroredTab, SourceModals), `useStandalone`
+(the modal's required `standalone` prop — the _isSoulsyncStandalone gate),
+`useUrlCardOpen`/`useYouTubeCardOpen`/`useLbCardOpen` (each tab takes `onOpen`
+as a prop; these hooks build it), and the auto-sync pure core (32 exports, due
+with the board phase).
+
+Remaining unenumerated: the Beatport browse subsystem (~35 fns) and
+beatport-ui.js still ride their own phase's P0 read; auto-sync's render half and
+the pages-extra server region likewise.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
