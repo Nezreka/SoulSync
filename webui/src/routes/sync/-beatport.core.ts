@@ -88,6 +88,21 @@ export interface BeatportSliderConfig {
   padsLastSlide: boolean;
   /** What a failed load renders. */
   onFailure: 'keep-static-markup' | 'error-block' | 'nothing';
+  /**
+   * WHEN the vanilla marks the slider loaded, which decides whether a return to
+   * the tab re-fetches.
+   *
+   * The hero marks itself initialised BEFORE the fetch (31-34), so a failed
+   * load is never retried for the rest of the session — the section simply
+   * stays on its static placeholders. The other four mark themselves only
+   * INSIDE `.then(success => …)` (369, 1056, 1355) or on their state flag
+   * (700), so a failure retries next time and a success does not.
+   *
+   * This is load-bearing for the port: Beatport scraping is slow and
+   * rate-limited, and a React section that re-fetched on every tab visit would
+   * hammer it in a way the vanilla never does.
+   */
+  marksLoadedBeforeFetch: boolean;
 }
 
 /** Every class name a slider owns, derived from its slug in one place. */
@@ -122,6 +137,7 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     hasGrid: false,
     padsLastSlide: false,
     onFailure: 'keep-static-markup',
+    marksLoadedBeforeFetch: true,
   },
   releases: {
     slug: 'releases',
@@ -130,6 +146,7 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     hasGrid: true,
     padsLastSlide: true,
     onFailure: 'error-block',
+    marksLoadedBeforeFetch: false,
   },
   hypePicks: {
     slug: 'hype-picks',
@@ -138,6 +155,7 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     hasGrid: true,
     padsLastSlide: true,
     onFailure: 'error-block',
+    marksLoadedBeforeFetch: false,
   },
   charts: {
     slug: 'charts',
@@ -146,6 +164,7 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     hasGrid: true,
     padsLastSlide: false,
     onFailure: 'nothing',
+    marksLoadedBeforeFetch: false,
   },
   dj: {
     slug: 'dj',
@@ -154,6 +173,7 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     hasGrid: true,
     padsLastSlide: false,
     onFailure: 'nothing',
+    marksLoadedBeforeFetch: false,
   },
 };
 

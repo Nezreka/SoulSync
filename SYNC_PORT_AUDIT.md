@@ -3149,3 +3149,44 @@ markup applies them to all five, so the port emits them all — markup parity, n
 stylesheet parity.
 
 Full suite 283 files / 6173 tests. Build clean.
+
+### BEATPORT P4 — the shared section load lifecycle (-beatport.use-section.ts)
+
+15 mutants, 15 killed. Full suite 284 files / 6187. Build clean.
+
+**A behaviour the read caught and the config now carries: WHEN a slider is
+marked loaded, which decides whether returning to the tab re-fetches.**
+
+The hero marks itself before it even fetches (31-34), so a failed hero load is
+never retried for the rest of the session — the section just keeps its static
+placeholders. The other four mark themselves only on success, so a FAILURE
+retries next visit and a SUCCESS does not. `marksLoadedBeforeFetch` in the
+config table, with both arms tested.
+
+**Why a module-level cache, and why it is not laziness.** The vanilla holds its
+loaded state in the DOM, which survives tab switches because the sync page's
+markup is hidden rather than removed. A React section that unmounts would
+re-fetch every visit — and these endpoints SCRAPE BEATPORT, slowly and
+rate-limited. Re-fetching per visit is not a neutral refactor; it is a
+behaviour change with a cost on someone else's server.
+
+**One genuinely equivalent mutant, resolved by deleting the branch.** Marking a
+section loaded on success was guarded by `if (!marksLoadedBeforeFetch)`, which a
+pre-marked section makes a no-op anyway (Set membership). Rather than annotate
+an equivalence, the guard is gone and the add is unconditional.
+
+**Two survivors that were one real untested scenario:** a load that settles
+LATE, after `reload()` has already aborted it and started another. Both abort
+guards exist for exactly that, and nothing exercised it.
+
+Closing it took three attempts, and the failures are the lesson:
+1. The first test used a synchronous `act()`. A promise rejection lands in a
+   microtask, so the assertion ran before the `catch` did. `await act(async …)`.
+2. The second still let the stale-SUCCESS mutant live, because the test
+   rejected the stale promise and then tried to RESOLVE THE SAME ONE. A promise
+   settles once, so the resolve was a no-op and that path was never entered.
+   Stale-success now has its own test with its own promise.
+
+Both were tests that passed while measuring nothing — the same failure mode as
+the cleanTrackText rule-three gap earlier in this port. Mutation testing is the
+only thing that has caught any of them.
