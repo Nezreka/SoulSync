@@ -2002,6 +2002,16 @@ fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
 (GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
 Cache HIT spreads the cached tracks onto the list row rather than refetching.
 
+### KNOWN FLAKE, NOT MINE, NOT FIXED
+
+`src/routes/search/-route.test.tsx` > "closes on an outside click and reopens on
+the next search" failed once in a full-suite run and passed both in isolation
+(18/18) and on the very next full run. My change in that round was one added
+assertion inside a SYNC test file, which cannot reach the search dropdown except
+through ordering or timing. Recorded rather than dismissed: if it resurfaces,
+the suspects are an outside-click listener that outlives its test, or a timing
+assumption in the dropdown state machine. Not in scope for the sync port.
+
 ### SERVER MANAGER TAB — P0 READ COMPLETE (pages-extra.js, all 1,240 lines)
 
 The original P0 read this file as "verbatim 1-595, skim-verified tail". The tail
