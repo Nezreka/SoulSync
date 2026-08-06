@@ -1839,6 +1839,58 @@ vanilla rename/source-ref tails REOPEN the detail modal, while P5g's React
 ports of those two actions do not — so a React rename would leave an adopted
 detail modal stale on screen.
 
+### THE ENUMERATION'S THREE GAPS — ALL CLOSED, AND TWO OF MY FINDINGS WERE WRONG
+
+Every gap the enumeration named is now fixed. Recording what the fixing proved,
+including where the enumeration itself was inaccurate — two of its three
+findings were partly wrong, and only reading the vanilla again showed it.
+
+1. **The LB mirror — real, and the biggest of the three.** Ported as
+   buildLbMirrorTracks + resolveLbMirrorTarget + mirrorLbAfterDiscovery, run
+   DIFFERENTIALLY against the real vanilla body over 9 mirror cases and 4 skip
+   cases. useListenBrainzVertical exists so it cannot be dropped again: there is
+   no way to construct that vertical without the mirror.
+
+2. **Rediscover — real.** resetDiscovery on the vertical hook, supplied by
+   SourceModals itself. Two genuine drifts went into the config: youtube and
+   mirrored send a BARE reset POST while beatport must send
+   {phase:'fresh', reset:true} (10851), and the failure toast says 'playlist'
+   at 10833 but 'chart' at 10902.
+
+3. **"The source-ref success toast never fires" — WRONG.** It fires, from an
+   inline literal; sourceRefUpdatedToast was simply an unused duplicate of that
+   string. What WAS missing sat next to it: the vanilla closes and REOPENS the
+   detail modal after a successful source-ref edit (2434-2438). That is now
+   ported, with the origin remembered at the two open sites rather than probed
+   for at commit time.
+
+4. **"The discovery-complete toast is unported for ALL NINE verticals" —
+   WRONG ON SCOPE.** Only youtube, mirrored (which rides youtube's poller) and
+   listenbrainz toast at all; the other six complete with a console.log. Porting
+   it to nine would have invented user-visible behaviour in six verticals. The
+   config table now carries the exact per-source text, null included.
+
+5. **Minor: the card's source-icon map has FIVE keys, not six** (spotify,
+   tidal, youtube, beatport, file — 571). The detail modal's has seven. The
+   enumeration said six. They still must not share a table.
+
+Two fidelity bugs the per-phase line-by-line review caught in my own work, both
+invisible to green tests:
+- The completion announcement read state BEFORE the patch that triggered it
+  committed, so the #815 retry message reported the pre-completion match count.
+  The vanilla writes its counters then toasts (9224 then 9233).
+- Edit Source seeded the editor from the LIST row where the vanilla uses the
+  DETAIL payload (1084-1085) — a stale list would pre-fill the wrong value.
+
+STANDING SWEEPS (both currently empty for routes/sync; run at the end of every
+wave and again before the flip):
+- Declared-but-never-supplied callback props. NOTE the sweep must count
+  object-literal supply (`onX: ...`) as well as JSX (`onX={...}`) or it reports
+  hook options as false positives.
+- Config fields and exports with no production consumer.
+These catch the failure mode green tests structurally cannot: code that exists
+and nothing calls.
+
 ### CORRECTION to the P5e-fix read, finding 1 — and an OPEN DECISION
 
 The P5e-fix read concluded "openMirroredPlaylistModal must be ADOPTED, not
