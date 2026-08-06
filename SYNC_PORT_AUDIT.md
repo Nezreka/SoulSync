@@ -1925,6 +1925,83 @@ unilateral fork call cost the P5h wave. Independent of it, and safe to do
 first: the Rediscover/Retry-Failed wiring and the prepare-discovery fix live in
 the DISCOVERY modal, which is already React.
 
+### SPOTIFY TAB P0 READ — PART 1 (READ, no code). Option A is now concrete.
+
+Read line by line: sync-spotify.js 1598-1721 (load/render/card/view-progress/
+card-UI) and 1794-1893 (selection + details-modal open). NOT yet read:
+showPlaylistDetailsModal's body (1893-1958) and the whole Deezer-ARL region
+(sync-services.js 2437-2705). Do those before any code.
+
+**THE OPTION A CONTRACT — the card markup React must reproduce exactly**
+(renderSpotifyPlaylists, 1645-1664). The vanilla engine finds these nodes by
+selector and paints them, so every id and class is load-bearing:
+
+    div.playlist-card[data-playlist-id=<id>]      ← click toggles selection
+      div.playlist-card-main
+        div.playlist-card-content
+          div.playlist-card-name                  ← escapeHtml(p.name)
+          div.playlist-card-info
+            span                                  ← `${p.track_count} tracks`
+            (the separator is a literal " • " with a TRAILING SPACE, 1651)
+            span.playlist-card-status.<statusClass>  ← p.sync_status
+          div.sync-progress-indicator#progress-<id> ← THE ENGINE PAINTS HERE
+        div.playlist-card-actions
+          button#action-btn-<id>                  ← 'Sync / Download'
+          button#progress-btn-<id>.view-progress-btn.hidden ← 'View Progress'
+
+**Status class (1640-1642) — three SEQUENTIAL ifs, not else-if; last write
+wins.** Default 'status-never-synced'; startsWith('Synced') →
+'status-synced'; === 'Needs Sync' OR startsWith('Last Sync') →
+'status-needs-sync'. Note 'Synced' and 'Last Sync' are disjoint prefixes, so
+the sequence is observably equivalent to a ladder — but transcribe the order,
+not an interpretation of it.
+
+**What the ENGINE owns and React must never re-render over:**
+- `#progress-<id>` innerHTML — updateCardToSyncing (downloads.js 4139)
+- `.playlist-card-status` text AND class — updateCardToDefault (4202)
+- `#action-btn-<id>` / `#progress-btn-<id>` text, disabled, inline
+  backgroundColor+color, and the card's `download-complete` class —
+  updatePlaylistCardUI (1679-1721), whose three arms are: running
+  ('📥 Downloading...', disabled, progress btn shown), complete
+  ('✅ Ready for Review' + '📋 View Results' at #28a745 on white, card gains
+  download-complete), else reset (inline styles CLEARED, not just changed).
+
+The vanilla already wipes and rehydrates this exact way — renderSpotifyPlaylists
+rebuilds innerHTML wholesale and checkForActiveProcesses re-applies (1618-1621)
+— which is precisely why React re-rendering the skeleton is safe, and why
+Option A is faithful rather than a compromise.
+
+**loadSpotifyPlaylists (1598-1630):** placeholder '🔄 Loading playlists...';
+refresh button disabled + '🔄 Loading...' then restored to '🔄 Refresh' in a
+FINALLY (so an error still re-enables it); !ok throws error.error ||
+'Failed to fetch playlists'; error paints '❌ Error: <msg>' into the container
+AND toasts 'Error loading playlists: <msg>'; empty list renders
+'No Spotify playlists found.'; cache invalidated through the optional-global
+protocol (invalidatePlaylistTrackCache else playlistTrackCache = {}); then
+checkForActiveProcesses() — the rehydration entry.
+
+**Selection (1794-1830) — the shell-wave problem, now precise:**
+- togglePlaylistSelection returns early when `event.target.tagName === 'BUTTON'`
+  so the two action buttons never toggle the card.
+- It writes the SCRIPT-SCOPED `selectedPlaylists` (core.js 34) — unreachable
+  from React.
+- updateSyncActionsUI defers entirely to sequentialSyncManager.updateUI() while
+  a sync is running, and otherwise writes `#selection-info`
+  ('Select playlists to sync' / `N playlist[s] selected`, pluralised at count>1)
+  and toggles `#start-sync-btn.disabled` — both in `.sync-sidebar`, OUTSIDE
+  every tab.
+So selection spans tab + shell + engine, exactly as the reverted P5h found.
+
+**handleViewProgressClick (1668-1677):** reads activeDownloadProcesses and
+re-shows the existing modalElement (display:flex). Pure engine adoption — there
+is nothing to port.
+
+**openPlaylistDetailsModal (1832-1876):** the optional-globals cache protocol
+again — playlistTrackCacheIsStale / invalidatePlaylistTrackCache /
+fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
+(GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
+Cache HIT spreads the cached tracks onto the list row rather than refetching.
+
 ## THE FULL FUNCTION ENUMERATION (Boulder-prompted: "im sure there is much more
 ## still that hasn't been ported")
 
