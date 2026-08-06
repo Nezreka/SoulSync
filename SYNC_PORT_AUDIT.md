@@ -2856,3 +2856,48 @@ the family. Worth keeping deliberately.
 Read status: **1,603 of ~3,600 in-scope lines (45%).** The whole slider family
 is done. Remaining: top-10 lists, the click handlers + download-modal bridge,
 and the genre browser.
+
+### BEATPORT READ — THE TOP-10 LISTS (1605-1853)
+
+Three lists: Beatport Top 10 and Hype Top 10 (tracks, from one endpoint), and
+Top 10 Releases (separate endpoint).
+
+**`cleanTrackText` (1638-1649) is the one piece of genuinely portable pure logic
+in this file**, and it must be transcribed exactly rather than approximated. Four
+substitutions in order:
+
+    /([a-z$!@#%&*])([A-Z])/g   -> '$1 $2'    space between lower/symbol and upper
+    /([a-zA-Z]),([a-zA-Z])/g   -> '$1, $2'   space after a comma
+    /([a-zA-Z])(Mix|Remix|Extended|Version)\b/g -> '$1 $2'
+    /\s+/g -> ' ', then trim
+
+It exists because the scraped Beatport strings arrive concatenated. Note the
+first rule is blunt: any internal capital gets split, so 'McCartney' becomes
+'Mc Cartney' and 'MoBlack' becomes 'Mo Black'. That is the vanilla's accepted
+cost, not a bug to fix mid-port — but it IS why the port must not "improve" it.
+Also note it returns its argument UNCHANGED when falsy, so `cleanTrackText(0)`
+is 0, not ''.
+
+**Applied inconsistently.** The two TRACK lists clean title/artist/label. The
+RELEASES list does not clean anything (1807-1809). Same file, same shape of data.
+
+**Two details in the releases list that are easy to miss:**
+- **Beatport CDN upscaling (1824):** the card background rewrites the artwork
+  path `/image_size/95x95/` -> `/image_size/500x500/`. The thumbnail stays 95px;
+  only the blurred background is upscaled. A plain string replace, so a URL
+  without that exact segment passes through untouched.
+- The background is applied as an INLINE style with a baked gradient
+  (`linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.8)), url(...)`), not a CSS
+  class or custom property — unlike every slider, which uses a custom property.
+
+**A fourth click-resolution style.** These cards index straight back into the
+source array (`releases[index]`, 1834). Across the file that now makes four:
+closure over the item, lookup by URL, re-reading the rendered DOM, and index
+alignment.
+
+**Both list renderers bail silently on an empty array** (1656, 1700, 1789), so a
+successful-but-empty response leaves whatever was in the container. Only an
+explicit failure renders the error block — and showTop10ListsError writes the
+SAME block into BOTH track containers.
+
+Read status: 1,853 of ~3,600 in-scope lines (51%).
