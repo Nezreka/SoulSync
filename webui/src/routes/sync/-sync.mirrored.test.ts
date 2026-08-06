@@ -12,6 +12,7 @@ import type { MirroredPlaylistRow } from './-sync.mirrored';
 import { extractFunction } from '../../test/vanilla-extract';
 import {
   MIRRORED_DETAIL_SOURCE_ICONS,
+  MIRRORED_DETAIL_SOURCE_LABELS,
   MIRRORED_SOURCE_ICONS,
   mirroredDetailSourceIcon,
   mirroredDetailSourceLabel,
@@ -306,6 +307,21 @@ describe('the detail modal tables are NOT the card tables', () => {
       expect(key in MIRRORED_SOURCE_ICONS).toBe(false);
       expect(key in MIRRORED_DETAIL_SOURCE_ICONS).toBe(true);
     }
+  });
+
+  it('labels the same seven keys, with Spotify twice (1087)', () => {
+    expect(MIRRORED_DETAIL_SOURCE_LABELS).toEqual({
+      spotify: 'Spotify',
+      spotify_public: 'Spotify',
+      tidal: 'Tidal',
+      youtube: 'YouTube',
+      beatport: 'Beatport',
+      deezer: 'Deezer',
+      qobuz: 'Qobuz',
+    });
+    expect(Object.keys(MIRRORED_DETAIL_SOURCE_LABELS)).toEqual(
+      Object.keys(MIRRORED_DETAIL_SOURCE_ICONS),
+    );
   });
 
   it('falls back to the clipboard icon but to the RAW source name (1088-1089)', () => {

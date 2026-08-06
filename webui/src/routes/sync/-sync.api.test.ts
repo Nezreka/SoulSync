@@ -23,7 +23,11 @@ import {
   fetchSourceDiscoveryStatus,
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
+  fetchMirroredPlaylist,
   fetchMirroredPlaylists,
+  postRetryFailedDiscovery,
+  prepareMirroredDiscovery,
+  resetSourceDiscovery,
   fetchSourcePlaylists,
   patchMirroredCustomName,
   patchMirroredSourceRef,
@@ -492,5 +496,62 @@ describe('playlist export endpoints (#903, 715-760)', () => {
     stubFetch({ job: { phase: 'done' } });
     await expect(fetchPlaylistExportStatus('j1')).resolves.toEqual({ job: { phase: 'done' } });
     expect(calls[0]).toMatchObject({ url: '/api/playlists/export/status/j1', method: 'GET' });
+  });
+});
+
+describe('the mirrored discovery endpoints (2062, 2159, 1069)', () => {
+  it('pins the three mirrored paths and their methods', async () => {
+    stubFetch();
+    await fetchMirroredPlaylist(3);
+    await prepareMirroredDiscovery(3);
+    await postRetryFailedDiscovery('3');
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'GET /api/mirrored-playlists/3',
+      'POST /api/mirrored-playlists/3/prepare-discovery',
+      'POST /api/mirrored-playlists/3/retry-failed-discovery',
+    ]);
+    // None of the three carries a body.
+    expect(calls.every((c) => c.body === undefined)).toBe(true);
+  });
+});
+
+describe('resetSourceDiscovery (10793 / 10851)', () => {
+  it('sends youtube a bare POST and beatport the {phase, reset} body', async () => {
+    stubFetch();
+    await resetSourceDiscovery(SYNC_SOURCES.youtube, 'h1');
+    await resetSourceDiscovery(SYNC_SOURCES.beatport, 'chart1');
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'POST /api/youtube/reset/h1',
+      'POST /api/beatport/charts/update-phase/chart1',
+    ]);
+    expect(calls[0].body).toBeUndefined();
+    expect(calls[1].body).toEqual({ phase: 'fresh', reset: true });
+  });
+
+  it('does nothing for a source with no reset endpoint (9800)', async () => {
+    stubFetch();
+    await resetSourceDiscovery(SYNC_SOURCES.tidal, '42');
+    expect(calls).toEqual([]);
+  });
+
+  it('throws the backend error, else the source-shaped fallback', async () => {
+    const failWith = (body: unknown) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(body), { status: 500 })),
+      );
+
+    failWith({ error: 'backend said no' });
+    await expect(resetSourceDiscovery(SYNC_SOURCES.youtube, 'h1')).rejects.toThrow(
+      'backend said no',
+    );
+
+    failWith({});
+    await expect(resetSourceDiscovery(SYNC_SOURCES.youtube, 'h1')).rejects.toThrow(
+      'Failed to reset playlist',
+    );
+    await expect(resetSourceDiscovery(SYNC_SOURCES.beatport, 'c1')).rejects.toThrow(
+      'Failed to reset Beatport chart',
+    );
   });
 });

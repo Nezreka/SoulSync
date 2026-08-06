@@ -23,6 +23,7 @@ import {
   fetchSsdRecords,
   lbCardProgressLine,
   mirrorLbAfterDiscovery,
+  resolveLbMirrorTarget,
   postLbCacheRefresh,
   postSsdRefresh,
   soulsyncSyntheticId,
@@ -622,5 +623,45 @@ describe('mirrorLbAfterDiscovery (differential vs _mirrorListenBrainzAfterDiscov
     // but FOLLOWS spotify_data.source when it carries one.
     expect(JSON.parse(String(tracks[1].extra_data)).provider).toBe('spotify');
     expect(JSON.parse(String(tracks[3].extra_data)).provider).toBe('deezer');
+  });
+});
+
+describe('resolveLbMirrorTarget (10975-11004) — direct', () => {
+  it('routes a Last.fm Radio PREFIX to lastfm, and only the prefix', () => {
+    expect(resolveLbMirrorTarget('m', 'Last.fm Radio: Boards of Canada', undefined).source).toBe(
+      'lastfm',
+    );
+    // Contains the word but is not the prefix — stays listenbrainz.
+    expect(resolveLbMirrorTarget('m', 'Radio Ga Ga Mix', undefined).source).toBe('listenbrainz');
+  });
+
+  it('defaults the name when the title is empty (10975)', () => {
+    expect(resolveLbMirrorTarget('m', '', undefined).name).toBe('ListenBrainz Playlist');
+  });
+
+  it('ignores series fields unless matched is true', () => {
+    const unmatched = resolveLbMirrorTarget('m', 'Weekly Jams', undefined, {
+      matched: false,
+      series_id: 'ignored',
+      canonical_name: 'Ignored',
+    });
+    expect(unmatched.sourcePlaylistId).toBe('m');
+    expect(unmatched.name).toBe('Weekly Jams');
+  });
+
+  it('takes only the series fields it was actually sent', () => {
+    const partial = resolveLbMirrorTarget('m', 'Weekly Jams for user', undefined, {
+      matched: true,
+      canonical_name: 'Weekly Jams',
+    });
+    expect(partial.name).toBe('Weekly Jams');
+    expect(partial.sourcePlaylistId).toBe('m');
+    expect(partial.source).toBe('listenbrainz');
+  });
+
+  it('owner: the creator wins, else a fallback chosen from the RESOLVED source', () => {
+    expect(resolveLbMirrorTarget('m', 'Weekly Jams', 'troi').owner).toBe('troi');
+    expect(resolveLbMirrorTarget('m', 'Weekly Jams', undefined).owner).toBe('ListenBrainz');
+    expect(resolveLbMirrorTarget('m', 'Last.fm Radio: x', undefined).owner).toBe('Last.fm');
   });
 });
