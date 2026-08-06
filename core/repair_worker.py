@@ -367,11 +367,20 @@ class RepairWorker:
         if interval_hours is not None:
             self._config_manager.set(f'repair.jobs.{job_id}.interval_hours', interval_hours)
         if settings is not None:
+            if not isinstance(settings, dict):
+                settings = {}
             current = self._config_manager.get(f'repair.jobs.{job_id}.settings', {})
             if isinstance(current, dict):
                 current.update(settings)
             else:
                 current = settings
+            if job_id == 'genre_enrichment':
+                defaults = self._jobs.get(job_id).default_settings if self._jobs.get(job_id) else {
+                    'max_genres': 5, 'include_artists': True, 'include_albums': True, 'allow_live_calls': False}
+                value = current.get('max_genres')
+                current['max_genres'] = value if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 20 else defaults['max_genres']
+                for key in ('include_artists', 'include_albums', 'allow_live_calls'):
+                    if not isinstance(current.get(key), bool): current[key] = defaults[key]
             self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
 
     def get_all_job_info(self) -> List[dict]:
@@ -1073,6 +1082,7 @@ class RepairWorker:
             'corrupt_audio': self._fix_corrupt_audio,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
+            'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
         }
 
@@ -1116,6 +1126,34 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _fix_genre_enrichment(self, entity_type, entity_id, file_path, details):
+        """Merge scanned additions with current genres without deleting anything."""
+        additions = details.get('added_genres')
+        table = {'artist': 'artists', 'album': 'albums'}.get(entity_type)
+        if not isinstance(additions, list) or table is None:
+            return {'success': False, 'error': 'Invalid genre enrichment finding'}
+        conn = None
+        try:
+            conn = self.db._get_connection(); cur = conn.cursor()
+            cur.execute(f"SELECT genres FROM {table} WHERE id = ?", (entity_id,))
+            row = cur.fetchone()
+            if not row:
+                conn.close(); return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
+            from core.metadata.genre_enrichment import parse_values
+            from core.genre_filter import _normalize_for_match
+            current = parse_values(row[0]); seen = {_normalize_for_match(g) for g in current}
+            for genre in additions:
+                if genre and _normalize_for_match(genre) not in seen:
+                    current.append(genre); seen.add(_normalize_for_match(genre))
+            cur.execute(f"UPDATE {table} SET genres = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), entity_id))
+            conn.commit(); conn.close()
+            return {'success': True, 'action': 'genres_applied'}
+        except Exception as e:
+            logger.error("Genre enrichment fix failed for %s %s: %s", entity_type, entity_id, e)
+            try: conn.close()
+            except Exception: pass
+            return {'success': False, 'error': str(e)}
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
         """Split a comma-joined artist tag into properly separated artists (jadux).

@@ -3075,6 +3075,7 @@ async function loadRepairFindings() {
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
             quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip',
             genre_cleanup: 'Genres',
+            genre_enrichment: 'Genre Enrichment',
             comma_artist_split: 'Comma Artist'
         };
 
@@ -3099,6 +3100,7 @@ async function loadRepairFindings() {
             library_retag: 'Apply Tags',
             short_preview_track: 'Re-download',
             genre_cleanup: 'Clean Genres',
+            genre_enrichment: 'Apply Genres',
             comma_artist_split: 'Split Artists',
         };
 
@@ -3108,6 +3110,7 @@ async function loadRepairFindings() {
             const actionLabels = {
                 removed_db_entry: 'Entry Removed', added_to_wishlist: 'Wishlisted', deleted_file: 'File Deleted',
                 genres_cleaned: 'Genres Cleaned',
+                genres_applied: 'Genres Applied',
                 artists_split: 'Artists Split',
                 already_gone: 'Already Gone', fixed_track_number: 'Track # Fixed',
                 applied_cover_art: 'Art Applied', applied_metadata: 'Metadata Applied',
@@ -3298,6 +3301,21 @@ function _renderFindingDetail(f) {
     const media = _renderFindingMedia(d);
 
     switch (f.finding_type) {
+        case 'genre_enrichment': {
+            const proposed = Array.isArray(d.proposed_genres) ? d.proposed_genres : [];
+            const added = Array.isArray(d.added_genres) ? d.added_genres : [];
+            const ambiguous = Array.isArray(d.ambiguous_genres) ? d.ambiguous_genres : [];
+            rows.push(['Current genres', (d.original_genres || []).join(', ') || '— none']);
+            rows.push(['Proposed genres', proposed.join(', ') || '— none']);
+            rows.push(['Added', added.join(', ') || '— none']);
+            rows.push(['Omitted at cap', (d.omitted_due_to_cap || []).join(', ') || '— none']);
+            rows.push(['Rejected', (d.rejected_genres || []).join(', ') || '— none']);
+            if (ambiguous.length) rows.push(['Ambiguous', ambiguous.map(x => `${x.raw_genre || x.raw}: ${(x.candidates || []).join(', ')} (${Math.round((x.score || 0) * 100)}%)`).join('; ')]);
+            if (d.sources) rows.push(['Sources', Object.entries(d.sources).map(([g, s]) => `${g}: ${s.join(', ')}`).join('; ')]);
+            if (d.cache_stats) rows.push(['Cache / external calls', `metadata ${d.cache_stats.metadata_cache_hits || 0}, live ${d.cache_stats.live_calls || 0}`]);
+            return media + _gridRows(rows);
+        }
+
         case 'genre_cleanup': {
             // #1057 — show exactly what stays and what goes; the fix applies
             // kept_genres verbatim, so this IS the contract.
@@ -4525,4 +4543,3 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
-
