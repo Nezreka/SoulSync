@@ -1683,6 +1683,34 @@ all mapped in the ecosystem section).
     Verified defensive in both worlds — the footer early-returns on
     !hasResults — so this is expression fidelity, not a user-visible change.
 
+- P5e-ii landed (built → line-by-line reviewed → findings fixed → THEN
+  committed; P5e-i had gone in unreviewed, which is how its own overclaim
+  slipped through). The review found three real breaks in the component:
+  * **discovery-state hydration could never match a row.** The shared
+    hydrateStatesForLoaded resolves identity from row.playlist_id, but the
+    mirrored endpoint sends playlist_id as a BARE INT and the real key as
+    url_hash (web_server.py 38508-38509) — so 'mirrored_3' vs '3' never
+    matched, nothing hydrated, and no in-flight discovery resumed after a
+    refresh. Worse, my own test fixture used playlist_id:'mirrored_3', a
+    shape the server never emits, which is exactly what hid it. The helper
+    now takes a row-key extractor; mirrored passes url_hash; the fixture is
+    the real server shape.
+  * **clear left a 'cancelled' state the vanilla deletes.** 1184-1187 writes
+    the cancel signal GUARDED by the entry existing and then DELETES it.
+    patchState alone skipped the guard (it materialises a state) and left the
+    entry behind, so the next card click read it as non-fresh, skipped the
+    seed, and opened the shared modal with no playlist at all. Added
+    dropState to the hook — patchState cannot express a delete.
+  * the quality-profile select and the render-time pipeline poller resume
+    were dropped SILENTLY; both are now declared deferrals (profiles need an
+    api the port has nowhere yet; the poller belongs with P5g's pipeline
+    button), and the rename failure toast regained its 'Error: ' prefix.
+  Mutation-checked after fixing: the two survivors were invisible because the
+  clear test ran on a card that had never been clicked, so no state existed —
+  a seeded-then-clear test kills them. The vanilla's existence guard is
+  genuinely unobservable in React (dropState follows unconditionally) and is
+  annotated as such so nobody hunts for a test that cannot exist.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across

@@ -171,6 +171,13 @@ export async function hydrateStatesForLoaded(
    * generation guard so an abandoned load can't hydrate or resume over the
    * new one (the vanilla had no such guard anywhere). */
   isCurrent?: () => boolean,
+  /**
+   * Which field of a states row identifies the playlist. Defaults to
+   * playlist_id, which every vertical uses EXCEPT mirrored: its endpoint
+   * sends playlist_id as a bare int (web_server.py 38509) while its state
+   * key is the url_hash 'mirrored_<n>' (stats-automations.js 986).
+   */
+  rowKey: (row: Record<string, unknown>) => string = (row) => asString(row.playlist_id),
 ): Promise<void> {
   try {
     const data = await fetchSourcePlaylistsStates(config);
@@ -181,7 +188,7 @@ export async function hydrateStatesForLoaded(
       // Per-row isolation, like every applyXPlaylistState clone (867 +
       // 946-948): one malformed row must not drop the rest.
       try {
-        const playlistId = asString(row.playlist_id);
+        const playlistId = rowKey(row);
         if (!playlistId) continue;
         const playlist = findPlaylist(playlistId);
         if (!playlist) continue;

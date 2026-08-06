@@ -49,6 +49,13 @@ export interface SourceVertical {
   /** Apply a pure reducer to one playlist's state (fix/unmatch flows). */
   patchState: (sourceId: string, fn: (state: SourcePlaylistState) => SourcePlaylistState) => void;
   /**
+   * Drop a playlist's state entirely — the `delete youtubePlaylistStates[hash]`
+   * the vanilla runs after clearing discovery (stats-automations.js 1187).
+   * patchState cannot express this: it materialises a fresh state when the
+   * key is absent.
+   */
+  dropState: (sourceId: string) => void;
+  /**
    * Start discovery: optimistic 'discovering' (the #867/YT pattern — the card
    * flips before the backend acks), revert to fresh on error, then event +
    * backstop poll until complete.
@@ -191,6 +198,15 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
 
   /* ── Actions ────────────────────────────────────────────────────────────── */
 
+  const dropState = useCallback((sourceId: string) => {
+    setStates((current) => {
+      if (!(sourceId in current)) return current;
+      const next = { ...current };
+      delete next[sourceId];
+      return next;
+    });
+  }, []);
+
   const seed = useCallback(
     (sourceId: string, playlist?: Record<string, unknown>) => {
       patch(sourceId, (s) => (playlist ? { ...s, playlist } : s));
@@ -296,6 +312,7 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
     seed,
     hydrate,
     patchState: patch,
+    dropState,
     startDiscovery,
     resumeDiscovery,
     startSync,
