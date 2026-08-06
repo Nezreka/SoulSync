@@ -272,6 +272,35 @@ export function buildChartTracks(
 export const BEATPORT_COMPILATION_ARTIST = { id: 'beatport_various', name: 'Various Artists' };
 
 /**
+ * The seventh argument to openDownloadMissingModalForArtistAlbum
+ * (shared-helpers.js 1763: `contextType = 'artist_album'`).
+ *
+ * Charts pass 'playlist' EXPLICITLY (2059). Releases pass only six arguments
+ * (1900-1907), so they take the default. Easy to miss precisely because the
+ * release call looks complete — the difference is an argument that is not
+ * there. Both pass `false` for showLoadingOverlay, because Beatport is already
+ * showing its own.
+ */
+export function beatportDownloadContext(kind: 'chart' | 'release'): 'playlist' | 'artist_album' {
+  return kind === 'chart' ? 'playlist' : 'artist_album';
+}
+
+/**
+ * Which image the release's download bubble gets (1910).
+ *
+ * The album art the metadata endpoint returned wins; the card's own thumbnail
+ * is the fallback; then the empty string. Charts do not go through this — they
+ * hand registerBeatportDownload the chart image directly.
+ */
+export function releaseBubbleImage(
+  album: { images?: { url: string }[] } | null | undefined,
+  releaseImageUrl: string | null | undefined,
+): string {
+  const fromAlbum = album?.images && album.images.length > 0 ? album.images[0].url : '';
+  return fromAlbum || releaseImageUrl || '';
+}
+
+/**
  * 1891-1894. A release's tracks arrive with artists as objects OR strings
  * depending on the scrape; the download modal wants strings either way.
  */

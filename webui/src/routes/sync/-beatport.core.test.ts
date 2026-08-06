@@ -11,6 +11,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BEATPORT_COMPILATION_ARTIST,
+  beatportDownloadContext,
+  releaseBubbleImage,
   BEATPORT_SLIDERS,
   EXCLUDED_GENRE_NAMES,
   beatportCardBackground,
@@ -338,5 +340,30 @@ describe('normaliseReleaseTrackArtists (1891-1894)', () => {
   it('keeps every other field on the track', () => {
     const out = normaliseReleaseTrackArtists([{ id: 7, name: 'x', artists: ['A'] }]);
     expect(out[0]).toMatchObject({ id: 7, name: 'x' });
+  });
+});
+
+describe('the download-modal context type (1900-1907 vs 2052-2060)', () => {
+  it('sends charts as a playlist and releases as an artist_album', () => {
+    // The release call passes only six arguments, so it takes the callee's
+    // default (shared-helpers.js 1763). The difference between the two call
+    // sites is an argument that ISN'T THERE, which is why it is easy to miss.
+    expect(beatportDownloadContext('chart')).toBe('playlist');
+    expect(beatportDownloadContext('release')).toBe('artist_album');
+  });
+});
+
+describe('releaseBubbleImage (1910)', () => {
+  it("prefers the metadata endpoint's album art", () => {
+    expect(releaseBubbleImage({ images: [{ url: 'http://album.jpg' }] }, 'http://card.jpg')).toBe(
+      'http://album.jpg',
+    );
+  });
+
+  it("falls back to the card's own thumbnail, then to nothing", () => {
+    expect(releaseBubbleImage({ images: [] }, 'http://card.jpg')).toBe('http://card.jpg');
+    expect(releaseBubbleImage(null, 'http://card.jpg')).toBe('http://card.jpg');
+    expect(releaseBubbleImage(undefined, undefined)).toBe('');
+    expect(releaseBubbleImage({ images: [] }, '')).toBe('');
   });
 });

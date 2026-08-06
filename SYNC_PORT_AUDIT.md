@@ -2995,3 +2995,38 @@ needs an input the earlier stages leave alone. Mutation testing is what surfaced
 it; the tests looked thorough and were not.
 
 Next: the API layer, then the shared slider component driven by the config table.
+
+### BEATPORT P1 REVIEW — two contract details the first pass missed
+
+Re-read the committed core against the vanilla. The transcriptions were right;
+two things around the download hand-off were not recorded at all.
+
+**1. Charts and releases open the download modal in DIFFERENT MODES.**
+`openDownloadMissingModalForArtistAlbum` is declared
+`(…, showLoadingOverlayParam = true, contextType = 'artist_album')`
+(shared-helpers.js 1763). Charts pass `'playlist'` explicitly as a seventh
+argument (2059); releases pass only SIX (1900-1907) and so take the default.
+
+The difference is an argument that ISN'T THERE, which is exactly why it slipped
+past — the release call reads as complete. Now `beatportDownloadContext()`, with
+both arms asserted. Both call sites pass `false` for the loading overlay, since
+Beatport shows its own.
+
+**2. The release bubble's image has a two-step fallback (1910).** The album art
+from `/api/beatport/release-metadata` wins, then the clicked card's own
+thumbnail, then ''. Charts skip this entirely — they hand the chart image
+straight to registerBeatportDownload. Now `releaseBubbleImage()`.
+
+**Still open, deliberately, for the UI slice:** the vanilla generates
+`virtualPlaylistId` as `beatport_chart_${Date.now()}_${random}` /
+`beatport_release_…` at the call site. Impure, so it stays out of the core and
+belongs to the wire layer — recorded here so it is not forgotten, since the
+download bubble is keyed off it.
+
+**Also still open:** hype-pick cards re-read their own rendered text, so a
+release with no title sends the literal 'Unknown Title' / 'Unknown Artist' /
+'Hype Pick' into the download. React holds the real object, so the port
+naturally sends the true values. That is a BEHAVIOUR CHANGE and needs a
+decision at the UI slice, not a silent improvement.
+
+44 tests. Full suite 281 files / 6129 tests.
