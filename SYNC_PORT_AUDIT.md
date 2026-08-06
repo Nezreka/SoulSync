@@ -3088,3 +3088,37 @@ behaviour change rather than a fix. `VANILLA_ABORTED_ENDPOINTS` is the same list
 as data, pinned by a test that drives all seven loaders and compares.
 
 Full suite 282 files / 6153 tests.
+
+### BEATPORT P3 — the one slider component (-ui/beatport-slider.tsx)
+
+22 mutants, 22 killed. Full suite 283 files / 6172. Build clean.
+
+Five vanilla sliders become one component, and it is only safe because every
+difference the read found is a PROP: autoplay delay, cards per slide, whether
+the slide wraps a grid, whether the last slide is padded, and the CSS slug.
+
+**The slug is checked against the stylesheet, not trusted.** Class names are
+derived (`beatport-<slug>-slide` and friends), and a wrong slug is SILENT — a
+missing class renders an unstyled slider, never an error. So the test reads
+static/style.css and asserts every derived name exists, for all five sliders,
+and additionally that the hero has NO grid class. That also pins the quirk that
+the hero's slug is 'rebuild', not 'hero': the markup predates the name.
+
+**What React removes, and why none of it is a divergence.** The
+`dataset.initialized` / `isInitialized` guards and the `cloneNode` nav
+de-duplication both existed to stop duplicate listeners on re-rendered DOM;
+effects handle that. The autoplay-frozen-on-return bug those guards caused was
+fixed in the VANILLA first (44f60b3fc), so the two sides agree today rather than
+the port quietly being better.
+
+**One declared divergence, and it took a timer-count assertion to pin.** With a
+single slide the port schedules no interval; the vanilla schedules one and lets
+every tick wrap 0 → 0. The rendered output is identical, so the mutation
+survived a render-based test. `vi.getTimerCount()` is the only thing that can
+see it — now asserted at 0 for one slide and 0 while hovered.
+
+**The other survivor was a plain test gap:** the stopPropagation test clicked
+'next' and an indicator but never 'prev', so the prev button's guard was
+unverified. All three controls now.
+
+Next: the five section components that feed this slider, then the genre browser.

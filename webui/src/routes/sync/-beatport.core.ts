@@ -66,14 +66,39 @@ export function beatportCardBackground(url: string): string {
 /* ── Slides ───────────────────────────────────────────────────────────────── */
 
 export interface BeatportSliderConfig {
+  /**
+   * The CSS infix. Every class this slider owns is `beatport-<slug>-<part>`,
+   * verified against style.css by a test rather than trusted — a wrong slug
+   * loses the styling silently, since a missing class is not an error.
+   *
+   * Note the hero slider's slug is 'rebuild', not 'hero': the markup predates
+   * the name, and renaming it would orphan the stylesheet.
+   */
+  slug: string;
   /** ms between auto-advances. Five sliders, five values — none shared. */
   autoPlayDelay: number;
   /** Items per slide. 1 = one item fills the slide. */
   cardsPerSlide: number;
+  /**
+   * Whether the slide wraps its cards in a `beatport-<slug>-grid`. The hero is
+   * the only one that does not — its single item fills the slide itself.
+   */
+  hasGrid: boolean;
   /** Whether the last slide is padded out with placeholder cards. */
   padsLastSlide: boolean;
   /** What a failed load renders. */
   onFailure: 'keep-static-markup' | 'error-block' | 'nothing';
+}
+
+/** Every class name a slider owns, derived from its slug in one place. */
+export function beatportSliderClasses(slug: string) {
+  return {
+    container: `beatport-${slug}-slider-container`,
+    track: `beatport-${slug}-slider-track`,
+    slide: `beatport-${slug}-slide`,
+    indicator: `beatport-${slug}-indicator`,
+    grid: `beatport-${slug}-grid`,
+  };
 }
 
 /**
@@ -87,25 +112,45 @@ export interface BeatportSliderConfig {
  */
 export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = {
   hero: {
+    slug: 'rebuild',
     autoPlayDelay: 5000,
     cardsPerSlide: 1,
+    hasGrid: false,
     padsLastSlide: false,
     onFailure: 'keep-static-markup',
   },
   releases: {
+    slug: 'releases',
     autoPlayDelay: 8000,
     cardsPerSlide: 10,
+    hasGrid: true,
     padsLastSlide: true,
     onFailure: 'error-block',
   },
   hypePicks: {
+    slug: 'hype-picks',
     autoPlayDelay: 4000,
     cardsPerSlide: 10,
+    hasGrid: true,
     padsLastSlide: true,
     onFailure: 'error-block',
   },
-  charts: { autoPlayDelay: 10000, cardsPerSlide: 10, padsLastSlide: false, onFailure: 'nothing' },
-  dj: { autoPlayDelay: 12000, cardsPerSlide: 3, padsLastSlide: false, onFailure: 'nothing' },
+  charts: {
+    slug: 'charts',
+    autoPlayDelay: 10000,
+    cardsPerSlide: 10,
+    hasGrid: true,
+    padsLastSlide: false,
+    onFailure: 'nothing',
+  },
+  dj: {
+    slug: 'dj',
+    autoPlayDelay: 12000,
+    cardsPerSlide: 3,
+    hasGrid: true,
+    padsLastSlide: false,
+    onFailure: 'nothing',
+  },
 };
 
 /** ceil(items / perSlide) — the hero slider is 1:1, so this covers it too. */
