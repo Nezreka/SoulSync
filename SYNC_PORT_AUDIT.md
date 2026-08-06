@@ -3030,3 +3030,41 @@ naturally sends the true values. That is a BEHAVIOUR CHANGE and needs a
 decision at the UI slice, not a silent improvement.
 
 44 tests. Full suite 281 files / 6129 tests.
+
+### BEATPORT P2 — the wire layer (-beatport.api.ts)
+
+All 19 endpoints, typed. 23 mutants, 23 killed. Full suite 282 files / 6151.
+
+**Abort is not uniform in the vanilla, and the split is meaningful.** The SEVEN
+homepage content loads pass core.js's getBeatportContentSignal so leaving the
+page cancels them; the other twelve pass nothing. Reproduced exactly, including
+`signal ? { signal } : undefined` — an absent signal means a bare `fetch(url)`,
+not `fetch(url, { signal: undefined })`, and there is a test for that.
+
+**THE ONE DELIBERATE DIVERGENCE — the enrichment poll.** beatport-ui.js
+1955-1980 polls inside `while (true)` with no attempt cap, no abort (it is the
+only fetch in that file to ignore the page-leave signal) and a `catch` INSIDE
+the loop that swallows a throwing poll and continues. A progress endpoint that
+keeps failing therefore spins every 800ms for the life of the tab, and
+navigating away does not stop it.
+
+The port adds three exits: an AbortSignal, a consecutive-failure cap, and an
+overall attempt ceiling (~30 min at the vanilla's 800ms). All three return the
+ORIGINAL tracks — which is exactly what the vanilla does on every failure that
+does not hang — so the only behaviour that changes is the hang. Every exit is
+tested, including that a single blip resets the failure run rather than ending
+the poll.
+
+**A test of mine was wrong, and the code was right.** I asserted the progress
+callback fires once per non-final poll. It fires on the FINAL poll too: 1963-1969
+paints the overlay BEFORE testing `done`, so the last update carries undefined
+counts. The vanilla briefly shows '(undefined/undefined)'. Transcribed, and the
+test now says so — whatever renders this must tolerate the blank.
+
+**A mutation survivor that was NOT equivalent.** Deleting the abort check BEFORE
+the sleep left the one after it, so the poll still exited — but only after
+waiting out a full 800ms tick. The test aborted before calling and never looked
+at the sleep. Now asserts `sleep` is not called at all when already aborted,
+plus a second case aborting DURING the interval.
+
+Next: the shared slider component, driven by the config table.
