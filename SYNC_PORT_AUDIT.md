@@ -1839,6 +1839,40 @@ vanilla rename/source-ref tails REOPEN the detail modal, while P5g's React
 ports of those two actions do not — so a React rename would leave an adopted
 detail modal stale on screen.
 
+### CORRECTION to the P5e-fix read, finding 1 — and an OPEN DECISION
+
+The P5e-fix read concluded "openMirroredPlaylistModal must be ADOPTED, not
+ported… No fork — the evidence is one-sided." That read examined the modal's
+CALLERS. It never read the modal's own BUTTONS. Having now read them
+(stats-automations.js 1139-1153), the evidence is not one-sided:
+
+    Delete Mirror  → deleteMirroredPlaylist      (the port has its own)
+    Edit Source    → editMirroredSourceRef       (P5g ported it)
+    Auto-Sync      → runMirroredPlaylistPipeline (P5g ported it)
+    Discover       → discoverMirroredPlaylist    (UNPORTED — the prepare gap)
+    Close          → closeMirroredModal
+
+So adopting the detail modal means every action inside it runs the VANILLA
+implementation — including opening the VANILLA discovery modal — while the
+React tab carries its own React versions of three of the five. Two live
+implementations of the same actions, which is the P5g interop problem again,
+one level deeper.
+
+It is already half-live: the React SoulSync-Discovery tab calls
+window.openMirroredPlaylistModal today (soulsync-discovery-tab.tsx 124).
+
+Why this is NOT the pools' situation: the pools are depended on by the TOOLS
+page, an already-completed port that must keep working. This modal's five
+callers are auto-sync.js ×3 (a LATER PHASE OF THIS PORT), shared-helpers.js,
+and a tab that is already React. Almost the whole dependent set is inside this
+port's own remaining scope, which argues the other way — port it, and keep the
+vanilla alive only until the auto-sync board phase retires its callers.
+
+DECISION NOT TAKEN. Recording it rather than choosing, because the last
+unilateral fork call cost the P5h wave. Independent of it, and safe to do
+first: the Rediscover/Retry-Failed wiring and the prepare-discovery fix live in
+the DISCOVERY modal, which is already React.
+
 ## THE FULL FUNCTION ENUMERATION (Boulder-prompted: "im sure there is much more
 ## still that hasn't been ported")
 
