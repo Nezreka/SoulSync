@@ -16,9 +16,15 @@
  *   React cannot reach (the P5a/P5b pattern).
  * - The phase line is ONE derived renderer; the vanilla's three writers
  *   disagree (documented in -sync.mirrored.ts).
- * - Export (📤), Auto-Sync, the 🔗 source-ref edit and the two pool modals all
- *   own their controllers outright; this tab supplies no handler props at all
- *   beyond the shared discovery-modal opener.
+ * - Export (📤), Auto-Sync and the 🔗 source-ref edit own their controllers
+ *   outright; this tab supplies no handler props beyond the discovery-modal
+ *   opener.
+ * - The two POOL modals are ADOPTED, not reimplemented. They are app-level
+ *   overlays: the Tools page opens the Discovery Pool through the same
+ *   window.openDiscoveryPoolModal seam (routes/tools/-ui/launcher-cards.tsx),
+ *   and globals.d.ts records them as modals that stay vanilla. The header
+ *   buttons call the globals; the flip must NOT delete them from
+ *   stats-automations.js.
  * - The 🔗 editor is a modal, NOT window.prompt (auto-sync.js 2414) — the same
  *   repo rule the rename follows.
  * - DEFERRED, not dropped: the per-card quality-profile select (600-602) and
@@ -57,11 +63,9 @@ import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
 import { useMirroredPipeline } from '../-sync.use-pipeline';
-import { DiscoveryPoolModal } from './discovery-pool-modal';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { SourceRefModal } from './source-ref-modal';
 import { hydrateStatesForLoaded } from './url-import-tab';
-import { WingItPoolModal } from './wingit-pool-modal';
 
 export interface MirroredTabProps {
   vertical: SourceVertical;
@@ -81,8 +85,6 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
   const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
   /** The row whose 🔗 source-ref editor is open (auto-sync.js 2410). */
   const [editingRef, setEditingRef] = useState<MirroredPlaylistRow | null>(null);
-  /** Which pool modal is open, if any (the two header buttons, 1217/1373). */
-  const [pool, setPool] = useState<'discovery' | 'wingit' | null>(null);
   const exportJobs = useExportJobs();
   /** loadMirroredPlaylists (500-524). */
   const load = useCallback(async () => {
@@ -301,7 +303,7 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
           type="button"
           className="pool-trigger-btn"
           title="View matched and failed discovery tracks"
-          onClick={() => setPool('discovery')}
+          onClick={() => window.openDiscoveryPoolModal?.()}
         >
           Discovery Pool
         </button>
@@ -309,7 +311,7 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
           type="button"
           className="pool-trigger-btn"
           title="Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them"
-          onClick={() => setPool('wingit')}
+          onClick={() => window.openWingItPoolModal?.()}
         >
           Wing It Pool
         </button>
@@ -501,8 +503,6 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
           }}
         />
       )}
-      {pool === 'discovery' && <DiscoveryPoolModal onClose={() => setPool(null)} />}
-      {pool === 'wingit' && <WingItPoolModal onClose={() => setPool(null)} />}
       {editingRef && (
         <SourceRefModal
           row={editingRef}

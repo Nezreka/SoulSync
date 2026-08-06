@@ -379,7 +379,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    // All five own their controllers since P5f/P5g, so none is conditional.
+    // None is conditional: the three card actions own their controllers, and
+    // the two pool buttons OPEN the adopted vanilla overlays.
     expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
     expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
     expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
@@ -599,5 +600,42 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     expect(calls.some((c) => c.url.endsWith('/source-ref'))).toBe(false);
     // ...and the editor stays open so the value can be fixed.
     expect(document.querySelector('.mirrored-source-ref-input')).not.toBeNull();
+  });
+});
+
+describe('MirroredTab — the pools are ADOPTED, not reimplemented', () => {
+  // globals.d.ts records these as modals that stay vanilla and are opened.
+  // The Tools page opens the Discovery Pool through the same seam
+  // (routes/tools/-ui/launcher-cards.tsx), so a React reimplementation here
+  // would strand that caller the moment the flip deleted the global.
+  it('the header buttons call the vanilla globals and render no React overlay', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    const openDiscovery = vi.fn();
+    const openWingIt = vi.fn();
+    (window as { openDiscoveryPoolModal?: unknown }).openDiscoveryPoolModal = openDiscovery;
+    (window as { openWingItPoolModal?: unknown }).openWingItPoolModal = openWingIt;
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Discovery Pool'));
+    expect(openDiscovery).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByText('Wing It Pool'));
+    expect(openWingIt).toHaveBeenCalledTimes(1);
+
+    // No React pool overlay is mounted — the vanilla owns that DOM.
+    expect(document.querySelector('#discovery-pool-overlay')).toBeNull();
+    expect(document.querySelector('#wing-it-pool-overlay')).toBeNull();
+    delete (window as { openDiscoveryPoolModal?: unknown }).openDiscoveryPoolModal;
+    delete (window as { openWingItPoolModal?: unknown }).openWingItPoolModal;
+  });
+
+  it('a missing global is survivable — the optional call just no-ops', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    expect(() => fireEvent.click(screen.getByText('Discovery Pool'))).not.toThrow();
+    expect(() => fireEvent.click(screen.getByText('Wing It Pool'))).not.toThrow();
   });
 });

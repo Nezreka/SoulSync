@@ -506,7 +506,10 @@ declare global {
      * - openToolHelpModal reads TOOL_HELP_CONTENT and drives #tool-help-modal,
      *   which sits outside the tools region in index.html
      * - openDiscoveryPoolModal is in stats-automations.js and is also opened
-     *   from the sync page's per-playlist menu
+     *   from the sync page's per-playlist menu. Its Wing It twin
+     *   (openWingItPoolModal) is sync-page-only but lives in the same file and
+     *   shares the whole fix/rematch flow, so it is adopted the same way — the
+     *   React sync tab OPENS both; the flip must not delete either.
      * - openManualLibraryMatchTool is a self-contained file also opened from
      *   the sync-history markup, so it cannot move with this page
      * - openConfigExportModal is a self-contained IIFE covering BOTH sides
@@ -518,6 +521,7 @@ declare global {
      */
     openToolHelpModal?: (toolId: string) => void;
     openDiscoveryPoolModal?: (playlistId?: string | null) => void;
+    openWingItPoolModal?: (playlistId?: string | null) => void;
     openManualLibraryMatchTool?: (prefill?: string) => void;
     openConfigExportModal?: () => void;
     openMetadataCacheModal?: () => void;
