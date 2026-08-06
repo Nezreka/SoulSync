@@ -104,20 +104,37 @@ export function BeatportSlider<T>({
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      <button
-        type="button"
-        id={prevButtonId}
-        className={`beatport-${config.slug}-nav-btn beatport-${config.slug}-prev-btn`}
-        onClick={(event) => {
-          // 197-198: the slide itself is click-to-open, so paging must not
-          // reach it.
-          event.preventDefault();
-          event.stopPropagation();
-          goTo(currentSlide - 1);
-        }}
-      >
-        ‹
-      </button>
+      {/* index.html 2832-2837: the two buttons sit inside a slider-nav
+          wrapper, which is what positions them. Rendering them bare loses the
+          layout silently — CSS has no way to complain about a missing box. */}
+      <div className={classes.nav}>
+        <button
+          type="button"
+          id={prevButtonId}
+          className={`${classes.navButton} beatport-${config.slug}-prev-btn`}
+          onClick={(event) => {
+            // 197-198: the slide itself is click-to-open, so paging must not
+            // reach it.
+            event.preventDefault();
+            event.stopPropagation();
+            goTo(currentSlide - 1);
+          }}
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          id={nextButtonId}
+          className={`${classes.navButton} beatport-${config.slug}-next-btn`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            goTo(currentSlide + 1);
+          }}
+        >
+          ›
+        </button>
+      </div>
 
       <div className={classes.track} id={trackId}>
         {slides.map((slideItems, slideIndex) => {
@@ -144,20 +161,7 @@ export function BeatportSlider<T>({
         })}
       </div>
 
-      <button
-        type="button"
-        id={nextButtonId}
-        className={`beatport-${config.slug}-nav-btn beatport-${config.slug}-next-btn`}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          goTo(currentSlide + 1);
-        }}
-      >
-        ›
-      </button>
-
-      <div className={`beatport-${config.slug}-slider-indicators`} id={indicatorsId}>
+      <div className={classes.indicators} id={indicatorsId}>
         {slides.map((_, slideIndex) => (
           <button
             type="button"

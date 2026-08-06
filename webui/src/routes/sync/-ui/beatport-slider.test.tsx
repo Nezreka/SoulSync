@@ -230,13 +230,36 @@ describe('BeatportSlider', () => {
     expect(onSlideClick).not.toHaveBeenCalled();
   });
 
+  it('wraps the nav buttons in the slider-nav box the markup has', () => {
+    renderSlider('releases');
+    const nav = document.querySelector('.beatport-releases-slider-nav');
+    expect(nav).not.toBeNull();
+    // Both buttons INSIDE it — index.html 2832-2837. Bare buttons lose their
+    // positioning with no error anywhere.
+    expect(nav?.querySelectorAll('button')).toHaveLength(2);
+    expect(nav?.querySelector('.beatport-releases-prev-btn')).not.toBeNull();
+    expect(nav?.querySelector('.beatport-releases-next-btn')).not.toBeNull();
+    expect(document.querySelectorAll('.beatport-releases-nav-btn')).toHaveLength(2);
+  });
+
   it('every derived class name exists in the vanilla stylesheet', () => {
     // The whole point of deriving from a slug is that a typo is silent: a
     // missing class renders an unstyled slider, not an error. So check.
     const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
     for (const [name, config] of Object.entries(BEATPORT_SLIDERS)) {
       const classes = beatportSliderClasses(config.slug);
-      const required = [classes.container, classes.track, classes.slide, classes.indicator];
+      // EVERY class the component emits, not a hand-picked subset — the first
+      // version of this test checked five and the component emitted seven, so
+      // the missing slider-nav wrapper sailed through.
+      const required = [
+        classes.container,
+        classes.track,
+        classes.slide,
+        classes.indicator,
+        classes.indicators,
+        classes.nav,
+        classes.navButton,
+      ];
       if (config.hasGrid) required.push(classes.grid);
       for (const className of required) {
         expect(

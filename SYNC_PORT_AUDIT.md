@@ -3122,3 +3122,30 @@ see it — now asserted at 0 for one slide and 0 while hovered.
 unverified. All three controls now.
 
 Next: the five section components that feed this slider, then the genre browser.
+
+### BEATPORT P3 REVIEW — a missing wrapper the CSS test could not see
+
+**The bug: the nav buttons were rendered bare.** index.html 2832-2837 wraps both
+in `<div class="beatport-<slug>-slider-nav">`, which is what positions them; the
+class exists for all five sliders. The component emitted the buttons as direct
+children of the container, so they would have landed wherever the flow put them.
+
+**Why the existing test missed it, which is the part worth keeping.** The CSS
+test checked a HAND-PICKED list of five class names against style.css. The
+component emitted seven. A test that verifies a subset it was told about cannot
+notice a class it was never told about — the same shape of error as the
+`head -40` truncation earlier in this port: a check whose scope is narrower than
+the thing it is supposed to cover, reporting success.
+
+Fixed at the source rather than by adding one more name: every class the
+component emits is now derived in ONE place (`beatportSliderClasses`), and the
+test iterates that object rather than a list beside it. Adding an eighth class
+to the component now automatically demands it exist in the stylesheet.
+
+Also verified while here, rather than assumed: the ‹ › glyphs and the
+`nav-btn` / `prev-btn` / `next-btn` class pairs match the markup exactly. The
+`prev-btn`/`next-btn` classes are STYLED for only two of the five, but the
+markup applies them to all five, so the port emits them all — markup parity, not
+stylesheet parity.
+
+Full suite 283 files / 6173 tests. Build clean.

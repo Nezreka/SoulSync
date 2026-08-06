@@ -97,7 +97,11 @@ export function beatportSliderClasses(slug: string) {
     track: `beatport-${slug}-slider-track`,
     slide: `beatport-${slug}-slide`,
     indicator: `beatport-${slug}-indicator`,
+    indicators: `beatport-${slug}-slider-indicators`,
     grid: `beatport-${slug}-grid`,
+    /** index.html wraps the two buttons in this; it is what positions them. */
+    nav: `beatport-${slug}-slider-nav`,
+    navButton: `beatport-${slug}-nav-btn`,
   };
 }
 
