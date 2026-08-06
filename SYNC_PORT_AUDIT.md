@@ -3219,3 +3219,37 @@ every render, re-run an effect that calls setStatus, and loop forever. Now
 depends on the two primitive fields it actually reads.
 
 Full suite 284 files / 6189 tests.
+
+### BEATPORT P5 — the section wrapper (-ui/beatport-section.tsx)
+
+13 mutants, 11 killed, 2 DECLARED EQUIVALENT with the reasoning below. Full
+suite 284 files / 6199. Build clean.
+
+Joins the loader to the slider and renders the section's own failure arm. The
+three arms are the point: the vanilla's five sections disagree about what a
+failed load looks like, and the difference only shows when Beatport is down.
+- releases / hype picks: an error block, with per-section copy
+- charts / DJ: NOTHING — those loaders have no error renderer at all
+- hero: nothing either, but for a different reason — its placeholder slides are
+  already in the page markup and setupBeatportSliderWithPlaceholders just wires
+  them up
+
+**I justified a change with a scenario that cannot happen, and the mutation
+pass caught it.** I switched the render guard from `status !== 'ready'` to
+`items.length === 0` and wrote a comment claiming it keeps items on screen
+during a reload. A mutant reverting the guard survived — because
+BeatportSection does not expose reload, so that path is unreachable through the
+component. The test I had written to defend the change reached around the
+component and drove the HOOK directly, which is why it passed while proving
+nothing about the section.
+
+Corrected rather than papered over: the misplaced test is deleted (the hook
+already has a real one), and the comment now says plainly that all three
+variants — content guard, status guard, and no guard at all, since
+BeatportSlider already returns null for an empty list — are equivalent in every
+reachable state.
+
+**The lesson, which is the same one as the earlier gaps:** a test that reaches
+past the unit it names can pass without touching it. Mutation testing is what
+distinguishes "my justification is right" from "my justification is untested",
+and here it was the latter.

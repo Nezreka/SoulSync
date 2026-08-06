@@ -117,6 +117,10 @@ export function beatportSliderClasses(slug: string) {
     /** index.html wraps the two buttons in this; it is what positions them. */
     nav: `beatport-${slug}-slider-nav`,
     navButton: `beatport-${slug}-nav-btn`,
+    /** The error block (638-650, 983-994). Present for all five in the CSS,
+     *  even the three that never render one. */
+    loading: `beatport-${slug}-loading`,
+    loadingContent: `beatport-${slug}-loading-content`,
   };
 }
 
