@@ -2963,3 +2963,35 @@ slider twice to stop its autoplay and restart it on the way back — but touches
 none of the other four.
 
 Read status: **COMPLETE.** Next: the React port itself.
+
+### BEATPORT P1 — the pure core (-beatport.core.ts)
+
+32 mutants, 32 killed. Full suite 281 files / 6126 tests. Build clean.
+
+Transcribed, with the read's findings encoded as tests rather than left in prose:
+cleanTrackText's four ordered rules, parseBeatportDuration, the CDN 95x95→500x500
+upscale and its baked gradient, the five-slider config table, slide paging and
+wrap-around, the nine-name genre filter, and the whole chart→download-modal
+bridge (compilation album, mix-name suffix, comma-split artists, per-track
+release metadata).
+
+**A mutation survivor that was a genuine test defect, not an equivalence.**
+Dropping cleanTrackText's THIRD rule entirely — the Mix/Remix/Extended/Version
+spacer — did not fail a single test. Nor did removing its `\b`.
+
+The reason is worth recording: every case I had written ('SongExtended',
+'SongRemix', …) is already split by rule ONE, which fires on the lower→upper
+transition. Rule three only does work where rule one CANNOT fire — after an
+uppercase letter. So the tests were exercising rule three's output while
+actually measuring rule one.
+
+Closed with all-caps fixtures, where only rule three is in play:
+'SUMMERMix' → 'SUMMER Mix', and 'SUMMERMixed' → unchanged, which is what the
+word boundary is for. Both mutants now die.
+
+**The general lesson:** in a pipeline of ordered rewrites, a test that passes
+through the whole pipeline does not prove any particular stage runs. Each stage
+needs an input the earlier stages leave alone. Mutation testing is what surfaced
+it; the tests looked thorough and were not.
+
+Next: the API layer, then the shared slider component driven by the config table.
