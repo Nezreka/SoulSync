@@ -2002,6 +2002,62 @@ fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
 (GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
 Cache HIT spreads the cached tracks onto the list row rather than refetching.
 
+### THE SEEDING BLOCKER — a DECISION Boulder must make before this wave ships
+
+Found while building the two account tabs, by reading rather than assuming.
+
+**The fact.** `openDownloadMissingModal` looks the playlist up in
+`spotifyPlaylists` and HARD-FAILS when it is absent:
+
+    const playlist = spotifyPlaylists.find(p => p.id === playlistId);   // 2235
+    if (!playlist) { showToast('Could not find playlist data.', 'error'); return; }
+
+`spotifyPlaylists` is `let spotifyPlaylists = []` at **core.js:33** — a
+top-level binding in a classic script, so no module can reach it. Today it is
+filled by the vanilla `loadSpotifyPlaylists` (1612), by the ARL shim at 2471 /
+2646, and by the rehydration shim at 642-657.
+
+**Why it blocks BOTH tabs, not just ARL.** Once React owns
+`#spotify-playlist-container`, the vanilla loader no longer runs, so the array
+stays empty and EVERY Spotify download fails with that toast. The ARL shim is
+the same problem one level down. This is the identical class of trap as
+`selectedPlaylists` (core.js:34) — and it is why the P0 read's
+"Option A is faithful" conclusion is right about PAINTING and silent about
+SEEDING. The two are different problems and I had merged them.
+
+**There is an exact precedent.** `window.startDiscoverVirtualSync`
+(core.js:75-81) was added during the DISCOVER port to solve this same thing,
+and its docblock generalises the reasoning:
+
+    `spotifyPlaylists` are top-level `let`s in this script's lexical scope, so
+    a module cannot seed them itself — the same reason the function below
+    exists.
+
+It seeds `playlistTrackCache` AND pushes the row — but then calls
+`startPlaylistSync`, so it cannot be reused for a download.
+
+**The options.**
+(a) Add a narrow seeding bridge to core.js beside the existing one. It is the
+    established pattern, it is additive, and it touches no behaviour — but it
+    edits an engine file this port has deliberately left alone.
+(b) Route both tabs' downloads through `openDownloadMissingModalForTidal`
+    instead, which takes tracks EXPLICITLY and reads no registry (1312). Costs
+    real behaviour: the account modal's staleness protocol, its Export-as-M3U
+    button, and its different toast copy all belong to the 2193 entry.
+(c) Keep the vanilla loaders alive alongside React so they keep filling the
+    array. They also write the container React owns — direct conflict.
+
+**Recommendation: (a).** It is the precedent's own case, the smallest change,
+and the only one that keeps the account download flow byte-identical. But it
+edits core.js, so it is Boulder's call — the last engine-file decision I made
+alone cost the P5h wave.
+
+**State meanwhile:** both tabs are built, tested and committed. They load,
+render, browse and open their details modals correctly. The Download Missing
+button is the ONE thing that does not work, left visibly broken rather than
+faked or hidden, and documented at the call site. The route is still `legacy`,
+so nothing user-facing is affected either way.
+
 ### SPOTIFY + DEEZER-ARL P0 READ — PART 2 (READ COMPLETE, no code)
 
 Read line by line: sync-spotify.js 1878-1971 (the details modal + close +

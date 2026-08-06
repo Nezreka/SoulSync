@@ -211,6 +211,27 @@ declare global {
      * back. Returns true when a modal was shown.
      */
     /**
+     * THE app-wide download flow for an ACCOUNT playlist — sync-spotify.js
+     * 2193. Twelve call sites across both worlds; the Spotify and Deezer-ARL
+     * tabs hand off to it rather than reimplementing any of it.
+     *
+     * It reads the playlist out of the script-scoped `spotifyPlaylists` array,
+     * which is why an ARL playlist must be shimmed into that array first
+     * (sync-services.js 2646-2654) — see arlShimRow in -sync.accounts.ts.
+     */
+    openDownloadMissingModal?: (playlistId: string) => Promise<void> | void;
+    /**
+     * The account sync engine's two card writers (downloads.js 4139 / 3969).
+     * The Deezer-ARL tab calls BOTH on load for any playlist the backend
+     * reports mid-sync (sync-services.js 2473-2474), which is how a sync
+     * started before the page loaded keeps painting.
+     *
+     * They write `#progress-<id>` and the card's status/action nodes directly,
+     * so the React card must render those ids and then leave them alone.
+     */
+    updateCardToSyncing?: (playlistId: string, percent: number, progress?: unknown) => void;
+    startSyncPolling?: (playlistId: string) => void;
+    /**
      * The generic engine entry (misnamed ForTidal) that tidal/qobuz/deezer/
      * spotify-public/itunes use — sync-services.js 1312. Unlike the YouTube
      * one it takes options and hydrates the organize preference (1494).

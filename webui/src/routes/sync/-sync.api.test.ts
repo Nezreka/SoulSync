@@ -23,7 +23,9 @@ import {
   fetchSourceDiscoveryStatus,
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
+  fetchDeezerArlPlaylistTracks,
   fetchMirroredPlaylist,
+  fetchSpotifyPlaylistTracks,
   fetchMirroredPlaylists,
   postRetryFailedDiscovery,
   prepareMirroredDiscovery,
@@ -553,5 +555,22 @@ describe('resetSourceDiscovery (10793 / 10851)', () => {
     await expect(resetSourceDiscovery(SYNC_SOURCES.beatport, 'c1')).rejects.toThrow(
       'Failed to reset Beatport chart',
     );
+  });
+});
+
+describe("the account tabs' track endpoints (1861, 2557)", () => {
+  it('spotify takes its own id; ARL takes the RAW deezer id, not the prefixed one', async () => {
+    stubFetch();
+    await fetchSpotifyPlaylistTracks('p1');
+    await fetchDeezerArlPlaylistTracks('7');
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
+      'GET /api/spotify/playlist/p1',
+      'GET /api/deezer/arl-playlist/7',
+    ]);
+  });
+
+  it('passes the backend error through for the caller to throw on', async () => {
+    stubFetch({ error: 'playlist not found' });
+    expect((await fetchSpotifyPlaylistTracks('p1')).error).toBe('playlist not found');
   });
 });

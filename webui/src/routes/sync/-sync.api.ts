@@ -165,6 +165,45 @@ export async function fetchDeezerArlPlaylists(): Promise<unknown[]> {
   return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
 }
 
+/** A playlist's tracks, as both account tabs' details modals read them. */
+export interface AccountPlaylistTracks {
+  error?: string;
+  name?: string;
+  owner?: string;
+  description?: string;
+  image_url?: string;
+  track_count?: number;
+  tracks?: {
+    id?: string;
+    name?: string;
+    artists?: unknown;
+    duration_ms?: number;
+  }[];
+}
+
+/**
+ * GET /api/spotify/playlist/<id> (openPlaylistDetailsModal's inline fallback,
+ * sync-spotify.js 1861). The vanilla prefers the optional global
+ * fetchAndCacheSpotifyPlaylistTracks when wishlist-tools has defined it; the
+ * port owns its own cache, so it always takes this path.
+ */
+export async function fetchSpotifyPlaylistTracks(
+  playlistId: string,
+): Promise<AccountPlaylistTracks> {
+  return readJson(await fetch(`/api/spotify/playlist/${playlistId}`));
+}
+
+/**
+ * GET /api/deezer/arl-playlist/<id> (2557). NOTE the path takes the RAW deezer
+ * id, not the `deezer_arl_` prefixed one — the prefix is a client-side id space
+ * only (2540, 2557).
+ */
+export async function fetchDeezerArlPlaylistTracks(
+  playlistId: string,
+): Promise<AccountPlaylistTracks> {
+  return readJson(await fetch(`/api/deezer/arl-playlist/${playlistId}`));
+}
+
 /** GET /api/sync/status/<id> — the ACCOUNT sync engine's status, not a vertical's. */
 export async function fetchAccountSyncStatus(
   playlistId: string,
