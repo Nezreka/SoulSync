@@ -3253,3 +3253,31 @@ reachable state.
 past the unit it names can pass without touching it. Mutation testing is what
 distinguishes "my justification is right" from "my justification is untested",
 and here it was the latter.
+
+### BEATPORT P5 REVIEW — two structural notes, both checked not assumed
+
+**1. The error block sits somewhere different, and that is safe — verified.**
+The vanilla writes the error INTO the slider track (`sliderTrack.innerHTML =
+…`), leaving the nav buttons and the indicator container in place, because both
+are static siblings in index.html. The port renders the error INSTEAD of the
+whole slider, so neither appears.
+
+Checked rather than assumed: `.beatport-releases-loading` is a standalone class
+selector with its own min-height, background, radius and dashed border, and
+there is no descendant selector anywhere in the family. It styles itself
+wherever it sits.
+
+The visible difference is that the vanilla keeps dead arrows on screen during an
+error — they respond, wrap to slide 0 and find nothing. The port shows the error
+box alone. Declared as an improvement rather than smuggled in.
+
+**2. A FLIP-WAVE CONSEQUENCE that needs recording now.** The port's slider
+renders the track, the nav wrapper, both buttons and the indicator container
+ITSELF. All five of those currently exist as static markup in index.html
+(2395-2600+ for the Beatport tab). At flip time that block must be DELETED, not
+merely hidden, or every slider will render two sets of arrows and two indicator
+rows — a duplicate-id situation as well, since the port reuses the vanilla ids.
+
+This is the same class as the duplicate-id trap the discover port hit
+(f6369f914, "the duplicate-id guard was right"). Recorded against the flip
+rather than left to be discovered.
