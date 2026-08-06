@@ -2818,3 +2818,41 @@ different designs, not two.
   handle set rather than nulling it.
 
 Read status: 1,005 of ~3,600 in-scope lines.
+
+### BEATPORT READ — SLIDERS 4 + 5, AND THE COMPLETE FIVE-SLIDER TABLE
+
+All five sliders now read line by line (1-1603). Slider 5 (DJ) really IS a clone
+of slider 4 (charts) — the only true clone pair in the family — differing only
+in delay, cards-per-slide, class prefix, CSS custom property and which click
+handler it calls.
+
+| | hero | releases | hype picks | charts | DJ |
+|---|---|---|---|---|---|
+| autoplay ms | 5000 | 8000 | 4000 | 10000 | 12000 |
+| cards / slide | 1 | 10 | 10 | 10 | 3 |
+| re-entry guard | dataset | dataset | **state flag** | dataset | dataset |
+| sets dataset | before load | after load | **never** | after load | after load |
+| sets state flag | **no** | yes | yes | yes | yes |
+| API failure | keeps static markup | error block | error block | **nothing** | **nothing** |
+| pads last slide | n/a | text cards | icon cards | **no** | **no** |
+| click → data | closure | URL match | **DOM re-read** | URL match | URL match |
+| nav de-dup | none | cloneNode | cloneNode | cloneNode | cloneNode |
+| indicator click | stops propagation | plain | plain | plain | plain |
+| DOM insert | insertAdjacentHTML | innerHTML += | insertAdjacentHTML | innerHTML += | innerHTML += |
+
+**Five sliders, five configurations.** Not one of the twelve rows is uniform.
+Every function in sliders 2-5 is commented "copied from" its predecessor and
+every one has drifted since. A shared React `<BeatportSlider>` is clearly the
+right shape, but its props must carry ALL of the above — writing one component
+and assuming the differences are cosmetic would silently change five behaviours.
+
+**Charts and DJ fail silently.** Unlike releases and hype picks, a failed load
+calls no error renderer at all: loadBeatportFeaturedCharts / loadBeatportDJCharts
+just return false, the init `.then(success => ...)` skips everything, and the
+slider keeps whatever markup was already in the DOM. `dataset.initialized` is
+never set, so a later re-entry retries the fetch — the only self-healing arm in
+the family. Worth keeping deliberately.
+
+Read status: **1,603 of ~3,600 in-scope lines (45%).** The whole slider family
+is done. Remaining: top-10 lists, the click handlers + download-modal bridge,
+and the genre browser.
