@@ -5,14 +5,22 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MirroredPlaylistRow } from './-sync.mirrored';
 
 import { extractFunction } from '../../test/vanilla-extract';
 import {
+  MIRRORED_DETAIL_SOURCE_ICONS,
   MIRRORED_SOURCE_ICONS,
+  mirroredDetailSourceIcon,
+  mirroredDetailSourceLabel,
+  mirroredDiscoveryTracks,
   mirroredHash,
+  mirroredHeroArt,
+  mirroredRowDuration,
+  mirroredTotalRuntime,
+  retryFailedMirroredDiscovery,
   mirroredPhaseLine,
   mirroredRatio,
   mirroredSourceIcon,
@@ -274,5 +282,226 @@ describe('mirroredHash', () => {
   it('carries the marker INSIDE the id — it is never a prepended prefix', () => {
     expect(mirroredHash(3)).toBe('mirrored_3');
     expect(STATS).toContain('`mirrored_${p.id}`');
+  });
+});
+
+/* ── The DETAIL modal's helpers (openMirroredPlaylistModal, 1086-1100) ─────── */
+
+describe('the detail modal tables are NOT the card tables', () => {
+  it('carries the seven keys the detail modal has, and not the card key', () => {
+    expect(MIRRORED_DETAIL_SOURCE_ICONS).toEqual({
+      spotify: '🎵',
+      spotify_public: '🎵',
+      tidal: '🌊',
+      youtube: '▶',
+      beatport: '🎛',
+      deezer: '🎧',
+      qobuz: '♫',
+    });
+    // The card knows `file`; the detail modal does not (571 vs 1086).
+    expect('file' in MIRRORED_DETAIL_SOURCE_ICONS).toBe(false);
+    expect('file' in MIRRORED_SOURCE_ICONS).toBe(true);
+    // And the reverse: three keys only the detail modal has.
+    for (const key of ['spotify_public', 'deezer', 'qobuz']) {
+      expect(key in MIRRORED_SOURCE_ICONS).toBe(false);
+      expect(key in MIRRORED_DETAIL_SOURCE_ICONS).toBe(true);
+    }
+  });
+
+  it('falls back to the clipboard icon but to the RAW source name (1088-1089)', () => {
+    expect(mirroredDetailSourceIcon('navidrome')).toBe('📋');
+    expect(mirroredDetailSourceLabel('navidrome')).toBe('navidrome');
+    expect(mirroredDetailSourceLabel('spotify_public')).toBe('Spotify');
+  });
+});
+
+describe('mirroredHeroArt (1092)', () => {
+  it('prefers the playlist cover', () => {
+    expect(mirroredHeroArt('http://cover', [{ image_url: 'http://track' }])).toBe('http://cover');
+  });
+
+  it('falls to the FIRST track carrying art, skipping those without', () => {
+    // Two arted tracks, so first-vs-last is actually distinguishable.
+    expect(
+      mirroredHeroArt('', [{}, { image_url: 'http://second' }, { image_url: 'http://fourth' }]),
+    ).toBe('http://second');
+  });
+
+  it('is empty when nothing has art — the gradient-fallback signal', () => {
+    expect(mirroredHeroArt(null, [{}, {}])).toBe('');
+    expect(mirroredHeroArt(undefined, [])).toBe('');
+  });
+});
+
+describe('mirroredTotalRuntime (1095-1097)', () => {
+  it('reads minutes below the hour', () => {
+    expect(mirroredTotalRuntime([{ duration_ms: 219000 }, { duration_ms: 326000 }]).label).toBe(
+      '9 min',
+    );
+  });
+
+  it('splits hours and minutes at and above 60', () => {
+    expect(mirroredTotalRuntime([{ duration_ms: 3600000 }]).label).toBe('1 hr 0 min');
+    expect(mirroredTotalRuntime([{ duration_ms: 5400000 }]).label).toBe('1 hr 30 min');
+  });
+
+  it('rounds to whole minutes BEFORE splitting, not after', () => {
+    // 89.6 min → rounds to 90 → "1 hr 30 min", never "1 hr 29 min".
+    expect(mirroredTotalRuntime([{ duration_ms: 5376000 }]).label).toBe('1 hr 30 min');
+  });
+
+  it('treats missing durations as zero and reports totalMs for the gate (1133)', () => {
+    const none = mirroredTotalRuntime([{}, {}]);
+    expect(none.totalMs).toBe(0);
+    expect(none.label).toBe('0 min');
+    expect(mirroredTotalRuntime([{ duration_ms: 219000 }]).totalMs).toBe(219000);
+  });
+});
+
+describe('mirroredRowDuration (1100) — the inline duplicate, not formatDuration', () => {
+  it('renders m:ss with a padded seconds field', () => {
+    expect(mirroredRowDuration(219000)).toBe('3:39');
+    expect(mirroredRowDuration(61500)).toBe('1:01');
+  });
+
+  it('renders EMPTY for a missing or zero duration, where formatDuration says 0:00', () => {
+    expect(mirroredRowDuration(0)).toBe('');
+    expect(mirroredRowDuration(null)).toBe('');
+    expect(mirroredRowDuration(undefined)).toBe('');
+  });
+
+  it('does not roll over into hours', () => {
+    expect(mirroredRowDuration(3600000)).toBe('60:00');
+  });
+});
+
+describe('mirroredDiscoveryTracks (2073-2079)', () => {
+  it('projects the mirror rows into the discovery modal shape', () => {
+    expect(
+      mirroredDiscoveryTracks([
+        {
+          id: 9,
+          source_track_id: 'sp1',
+          track_name: 'Alright',
+          artist_name: 'Kendrick Lamar',
+          album_name: 'TPAB',
+          duration_ms: 219000,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: 'sp1',
+        name: 'Alright',
+        artists: ['Kendrick Lamar'],
+        album: 'TPAB',
+        duration_ms: 219000,
+      },
+    ]);
+  });
+
+  it('falls back to mirrored_<row id> when no provider id was ever stored', () => {
+    const [track] = mirroredDiscoveryTracks([{ id: 42, track_name: 'x', artist_name: 'y' }]);
+    expect(track.id).toBe('mirrored_42');
+    // The empty-string defaults, not undefined (2077-2078).
+    expect(track.album).toBe('');
+    expect(track.duration_ms).toBe(0);
+  });
+
+  it('wraps the flat artist in a ONE-element array, never a split list', () => {
+    const [track] = mirroredDiscoveryTracks([
+      { id: 1, track_name: 't', artist_name: 'Simon & Garfunkel' },
+    ]);
+    expect(track.artists).toEqual(['Simon & Garfunkel']);
+  });
+});
+
+describe('retryFailedMirroredDiscovery (2155-2194)', () => {
+  function stub(response: unknown): { calls: string[]; toasts: [string, string][] } {
+    const calls: string[] = [];
+    const toasts: [string, string][] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? 'GET'} ${url}`);
+        return new Response(JSON.stringify(response));
+      }),
+    );
+    window.showToast = ((message: string, type: string) => {
+      toasts.push([message, type]);
+    }) as typeof window.showToast;
+    return { calls, toasts };
+  }
+
+  function fakeVertical(state: Record<string, unknown>) {
+    const resumed: string[] = [];
+    let current = state;
+    return {
+      resumed,
+      get state() {
+        return current;
+      },
+      patchState: (_id: string, fn: (s: never) => never) => {
+        current = fn(current as never);
+      },
+      resumeDiscovery: (id: string) => resumed.push(id),
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('strips the mirrored_ prefix to reach the playlist endpoint (2157)', async () => {
+    const { calls } = stub({ retry_count: 3 });
+    const vertical = fakeVertical({ spotifyMatches: 7 });
+    await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
+    expect(calls).toEqual(['POST /api/mirrored-playlists/3/retry-failed-discovery']);
+  });
+
+  it('stamps the #815 baseline and resumes polling (2171-2188)', async () => {
+    const { toasts } = stub({ retry_count: 5 });
+    const vertical = fakeVertical({ spotifyMatches: 7 });
+    await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
+    expect(vertical.state).toMatchObject({
+      phase: 'discovering',
+      discoveryProgress: 0,
+      retryDiscovery: { matchesBefore: 7, retryCount: 5 },
+    });
+    expect(vertical.resumed).toEqual(['mirrored_3']);
+    expect(toasts).toEqual([['Retrying 5 failed tracks...', 'info']]);
+  });
+
+  it('says so and changes NOTHING when nothing failed (2165-2168)', async () => {
+    const { toasts } = stub({ retry_count: 0 });
+    const vertical = fakeVertical({ spotifyMatches: 7 });
+    await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
+    expect(toasts).toEqual([['All tracks already found!', 'success']]);
+    // No baseline, no phase change, no poller — the early return (2167).
+    expect(vertical.state).toEqual({ spotifyMatches: 7 });
+    expect(vertical.resumed).toEqual([]);
+  });
+
+  it('reports a backend error and leaves the state alone (2161-2164)', async () => {
+    const { toasts } = stub({ error: 'no such playlist' });
+    const vertical = fakeVertical({ spotifyMatches: 7 });
+    await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
+    expect(toasts).toEqual([['Error: no such playlist', 'error']]);
+    expect(vertical.state).toEqual({ spotifyMatches: 7 });
+  });
+
+  it('uses its OWN wording when the request itself throws (2192)', async () => {
+    const toasts: [string, string][] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    );
+    window.showToast = ((message: string, type: string) => {
+      toasts.push([message, type]);
+    }) as typeof window.showToast;
+    const vertical = fakeVertical({ spotifyMatches: 7 });
+    await retryFailedMirroredDiscovery('mirrored_3', vertical as never);
+    expect(toasts).toEqual([['Error retrying discovery: network down', 'error']]);
   });
 });

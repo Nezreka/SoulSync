@@ -10,6 +10,12 @@
  * - Rename uses a real input row, NOT window.prompt (auto-sync.js 2381). The
  *   repo forbids the native dialogs; Escape/Cancel is the `null` return the
  *   vanilla checked for, and a blank value still clears the alias.
+ * - The TRACKS detail modal is PORTED (mirrored-detail-modal.tsx), not adopted
+ *   like the pools. Its Discover button calls openYouTubeDiscoveryModal, which
+ *   the flip deletes, so adoption would break its primary action; three of its
+ *   other buttons already have React implementations here. The vanilla
+ *   openMirroredPlaylistModal STAYS for auto-sync.js's three callers and
+ *   shared-helpers.js, and retires with the auto-sync board phase.
  * - Card clicks open the React DiscoveryModal for every non-fresh phase; the
  *   vanilla's downloading/download_complete arms reopened the vanilla ENGINE
  *   modal through the script-scoped activeDownloadProcesses registry, which
@@ -36,6 +42,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { ExportMode } from '../-sync.export';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
 import type { MirroredPipelineState } from '../-sync.pipeline';
@@ -44,7 +51,10 @@ import type { SourceVertical } from '../-sync.use-vertical';
 import {
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
+  fetchMirroredPlaylist,
   fetchMirroredPlaylists,
+  fetchSourceDiscoveryStatus,
+  prepareMirroredDiscovery,
   patchMirroredCustomName,
 } from '../-sync.api';
 import { patchMirroredSourceRef } from '../-sync.api';
@@ -55,6 +65,7 @@ import {
   mirroredPhaseLine,
   mirroredRatio,
   mirroredSourceIcon,
+  mirroredDiscoveryTracks,
   pipelinePhaseFor,
   timeAgo,
 } from '../-sync.mirrored';
@@ -64,6 +75,7 @@ import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
 import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { ExportModal, ExportStatusSpan } from './export-modal';
+import { MirroredDetailModal } from './mirrored-detail-modal';
 import { SourceRefModal } from './source-ref-modal';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
@@ -85,6 +97,11 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
   const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
   /** The row whose 🔗 source-ref editor is open (auto-sync.js 2410). */
   const [editingRef, setEditingRef] = useState<MirroredPlaylistRow | null>(null);
+  /** The playlist whose TRACKS detail modal is open (1066-1165). */
+  const [detail, setDetail] = useState<{
+    playlistId: number;
+    data: MirroredPlaylistDetail;
+  } | null>(null);
   const exportJobs = useExportJobs();
   /** loadMirroredPlaylists (500-524). */
   const load = useCallback(async () => {
@@ -274,6 +291,93 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
     [load],
   );
 
+  /** openMirroredPlaylistModal's fetch half (1067-1073). */
+  const openDetail = useCallback(async (playlistId: number) => {
+    window.showLoadingOverlay?.('Loading mirrored playlist...');
+    try {
+      const data = await fetchMirroredPlaylist(playlistId);
+      if (data.error) throw new Error(data.error);
+      window.hideLoadingOverlay?.();
+      setDetail({ playlistId, data });
+    } catch (err) {
+      window.hideLoadingOverlay?.();
+      window.showToast?.(`Error: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
+    }
+  }, []);
+
+  /**
+   * discoverMirroredPlaylist (2043-2149).
+   *
+   * The prepare-discovery POST at 2062 is the load-bearing step this port was
+   * missing entirely: it REGISTERS the mirror with the backend so the discovery
+   * pipeline can find it. Without it the discovery start had nothing to run on.
+   */
+  const runDiscovery = useCallback(
+    async (playlistId: number) => {
+      setDetail(null); // closeMirroredModal (2044)
+      const hash = mirroredHash(playlistId);
+
+      // Already discovering or discovered → just reopen, resuming a stalled
+      // poller (2048-2057). React has no open-modal DOM to probe, so the state
+      // itself is the whole test.
+      const existing = vertical.states[hash];
+      if (existing && existing.phase !== 'fresh') {
+        onOpen(hash);
+        if (existing.phase === 'discovering') vertical.resumeDiscovery(hash);
+        return;
+      }
+
+      window.showLoadingOverlay?.('Preparing discovery...');
+      try {
+        const prep = await prepareMirroredDiscovery(playlistId);
+        if (prep.error) throw new Error(prep.error);
+
+        const data = await fetchMirroredPlaylist(playlistId);
+        if (data.error) throw new Error(data.error);
+        window.hideLoadingOverlay?.();
+
+        const tracks = mirroredDiscoveryTracks(data.tracks ?? []);
+        const playlist = { name: data.name, tracks, track_count: tracks.length };
+
+        if (prep.from_cache) {
+          // The backend already holds results: hydrate from the status endpoint
+          // rather than re-running discovery (2082-2116).
+          const status = await fetchSourceDiscoveryStatus(config, hash);
+          if (status.error) throw new Error(String(status.error));
+          vertical.hydrate(hash, {
+            playlist,
+            phase: status.phase || 'discovered',
+            results: status.results || [],
+            // `|| 100`, not `?? 100` — a 0 reads as complete here (2097).
+            discovery_progress: (status.progress as number) || 100,
+            spotify_matches: status.spotify_matches || 0,
+            spotify_total: tracks.length,
+          });
+          const cached = prep.cached_matches || 0;
+          const total = prep.total_tracks || tracks.length;
+          window.showToast?.(`Loaded ${cached}/${total} cached discovery results`, 'success');
+        } else {
+          vertical.hydrate(hash, {
+            playlist,
+            phase: 'fresh',
+            results: [],
+            discovery_progress: 0,
+            spotify_matches: 0,
+            spotify_total: tracks.length,
+          });
+        }
+        onOpen(hash);
+      } catch (err) {
+        window.hideLoadingOverlay?.();
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [config, vertical, onOpen],
+  );
+
   /** handleMirroredCardClick (610-643). */
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
@@ -283,13 +387,10 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
         onOpen(hash);
         return;
       }
-      // Nothing running: the vanilla opens the TRACKS detail modal instead
-      // (641). That modal is its own wave; until it exists the card seeds and
-      // opens the shared modal rather than doing nothing.
-      vertical.seed(hash, row as unknown as Record<string, unknown>);
-      onOpen(hash);
+      // Nothing running → the TRACKS detail modal (641).
+      void openDetail(row.id);
     },
-    [vertical, onOpen],
+    [vertical, onOpen, openDetail],
   );
 
   // One clock read per render — the vanilla calls timeAgo per card at 527.
@@ -501,6 +602,30 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
             setExporting(null);
             exportJobs.paint(id, exportNotConnectedStatus(mode));
           }}
+        />
+      )}
+      {detail && (
+        <MirroredDetailModal
+          playlistId={detail.playlistId}
+          data={detail.data}
+          now={now}
+          onClose={() => setDetail(null)}
+          onDelete={() => {
+            const row = rows?.find((r) => r.id === detail.playlistId);
+            if (row) void onDelete(row);
+          }}
+          onEditSource={() => {
+            const row = rows?.find((r) => r.id === detail.playlistId);
+            if (row) {
+              setDetail(null);
+              setEditingRef(row);
+            }
+          }}
+          onRunPipeline={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '');
+          }}
+          onDiscover={() => void runDiscovery(detail.playlistId)}
         />
       )}
       {editingRef && (

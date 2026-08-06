@@ -233,9 +233,22 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = toast as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
 
-    // Click first so a state exists — without one, neither the guard nor the
-    // delete is observable.
+    // A state has to exist first, or neither the guard nor the delete is
+    // observable. The real path there is card → detail modal → Discover,
+    // which registers the mirror and hydrates (2043-2144).
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [{ ...ROW, discovered_count: 4 }]
+        : url === '/api/mirrored-playlists/3'
+          ? { name: 'Road Trip', source: 'spotify', tracks: [] }
+          : url.includes('prepare-discovery')
+            ? {}
+            : url.includes('clear-discovery')
+              ? { success: true, cleared: 4 }
+              : { states: [] };
     fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Discover'));
     await waitFor(() => expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip'));
 
     fireEvent.click(screen.getByTitle('Clear discovery data'));
@@ -388,16 +401,69 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     expect(screen.getByTitle('Edit original playlist link')).toBeInTheDocument();
   });
 
-  it('a card click opens the shared modal under the mirrored_<id> hash', async () => {
+  it('a FRESH card click opens the tracks detail modal (641), not the discovery one', async () => {
     stubFetch();
-    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? {
+              name: 'Road Trip',
+              source: 'spotify',
+              owner: 'boulder',
+              tracks: [
+                {
+                  position: 1,
+                  track_name: 'Alright',
+                  artist_name: 'Kendrick',
+                  duration_ms: 219000,
+                },
+              ],
+            }
+          : { states: [] };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    // The detail modal's own chrome, not the discovery modal's.
+    expect(screen.getByText('Mirrored Playlist')).toBeInTheDocument();
+    expect(screen.getByText('1 tracks')).toBeInTheDocument();
+    expect(screen.getByText('Alright')).toBeInTheDocument();
+    // The discovery modal stays shut until Discover is pressed.
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+  });
+
+  it('Discover registers the mirror BEFORE starting (prepare-discovery, 2062)', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? {
+              name: 'Road Trip',
+              source: 'spotify',
+              tracks: [
+                { id: 9, track_name: 'Alright', artist_name: 'Kendrick', duration_ms: 219000 },
+              ],
+            }
+          : url.includes('prepare-discovery')
+            ? {}
+            : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Discover')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Discover'));
+
     await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3'));
-    // the fresh branch must SEED the row, or the shared modal opens with no
-    // playlist at all (discovery-modal 123/127 fall back to [] / 'Playlist')
+    const prep = calls.find((c) => c.url.includes('prepare-discovery'));
+    expect(prep, 'the port used to skip this entirely').toBeDefined();
+    expect(prep?.method).toBe('POST');
+    // Registered first, then the state seeded — the modal opens with the
+    // playlist, not empty.
     expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip');
+    // The detail modal closed on the way through (2044).
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
   });
 
   it('Update list refetches (the refresh button keeps its vanilla id)', async () => {

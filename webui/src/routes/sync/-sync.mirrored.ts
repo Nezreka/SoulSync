@@ -12,6 +12,10 @@
  * ONLY when no live per-hash state exists (534-542).
  */
 
+import type { SourceVertical } from './-sync.use-vertical';
+
+import { postRetryFailedDiscovery } from './-sync.api';
+
 /** The row as /api/mirrored-playlists returns it. */
 export interface MirroredPlaylistRow {
   id: number;
@@ -47,6 +51,157 @@ export const MIRRORED_SOURCE_ICONS: Readonly<Record<string, string>> = {
 
 export function mirroredSourceIcon(source: string | null | undefined): string {
   return MIRRORED_SOURCE_ICONS[source ?? ''] ?? '📋';
+}
+
+/* ── The DETAIL modal's own tables (openMirroredPlaylistModal, 1086-1089) ──── */
+
+/**
+ * The detail modal's icon table is NOT the card's. They overlap but neither is
+ * a superset: the card (571) knows `file` and not spotify_public/deezer/qobuz;
+ * the detail modal knows those three and not `file`. Sharing one table would
+ * silently change what either surface shows, so they stay separate — checked
+ * key by key against both lines.
+ */
+export const MIRRORED_DETAIL_SOURCE_ICONS: Readonly<Record<string, string>> = {
+  spotify: '🎵',
+  spotify_public: '🎵',
+  tidal: '🌊',
+  youtube: '▶',
+  beatport: '🎛',
+  deezer: '🎧',
+  qobuz: '♫',
+};
+
+/** Same seven keys; an unlisted source falls back to its RAW name (1089). */
+export const MIRRORED_DETAIL_SOURCE_LABELS: Readonly<Record<string, string>> = {
+  spotify: 'Spotify',
+  spotify_public: 'Spotify',
+  tidal: 'Tidal',
+  youtube: 'YouTube',
+  beatport: 'Beatport',
+  deezer: 'Deezer',
+  qobuz: 'Qobuz',
+};
+
+export function mirroredDetailSourceIcon(source: string): string {
+  return MIRRORED_DETAIL_SOURCE_ICONS[source] ?? '📋';
+}
+
+export function mirroredDetailSourceLabel(source: string): string {
+  return MIRRORED_DETAIL_SOURCE_LABELS[source] ?? source;
+}
+
+export interface MirroredTrack {
+  position?: number;
+  track_name?: string;
+  artist_name?: string;
+  album_name?: string;
+  duration_ms?: number;
+  image_url?: string;
+}
+
+/** Hero artwork: playlist cover → the first track that has art → none (1092). */
+export function mirroredHeroArt(
+  imageUrl: string | null | undefined,
+  tracks: readonly MirroredTrack[],
+): string {
+  return imageUrl || tracks.find((t) => t.image_url)?.image_url || '';
+}
+
+/**
+ * The meta line's runtime (1095-1097). Rounded to whole MINUTES first, so the
+ * hour/minute split derives from the rounded value, not the raw ms. `totalMs`
+ * comes back because the vanilla gates the whole segment on it being truthy
+ * (1133), not on the label.
+ */
+export function mirroredTotalRuntime(tracks: readonly MirroredTrack[]): {
+  totalMs: number;
+  label: string;
+} {
+  const totalMs = tracks.reduce((sum, t) => sum + (t.duration_ms || 0), 0);
+  const totalMin = Math.round(totalMs / 60000);
+  const label =
+    totalMin >= 60 ? `${Math.floor(totalMin / 60)} hr ${totalMin % 60} min` : `${totalMin} min`;
+  return { totalMs, label };
+}
+
+/**
+ * The track row's duration (1100) — an INLINE duplicate, not formatDuration: a
+ * missing or zero duration renders EMPTY here where formatDuration renders
+ * '0:00'. Transcribed rather than reused so the cell stays blank.
+ */
+export function mirroredRowDuration(durationMs: number | null | undefined): string {
+  if (!durationMs) return '';
+  const minutes = Math.floor(durationMs / 60000);
+  const seconds = String(Math.floor((durationMs % 60000) / 1000)).padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
+/**
+ * The track shape the discovery modal expects, built from the mirror's own
+ * rows (discoverMirroredPlaylist, 2073-2079).
+ *
+ * The id ladder matters: a mirror row that never carried a provider id falls
+ * back to `mirrored_<row id>`, which is what the backend then matches on.
+ * `artists` is a single-element array of the flat artist_name, not a list.
+ */
+export function mirroredDiscoveryTracks(
+  tracks: readonly { id?: number; source_track_id?: string; [key: string]: unknown }[],
+): {
+  id: string;
+  name: unknown;
+  artists: unknown[];
+  album: unknown;
+  duration_ms: number;
+}[] {
+  return tracks.map((t) => ({
+    id: t.source_track_id || `mirrored_${t.id}`,
+    name: t.track_name,
+    artists: [t.artist_name],
+    album: t.album_name || '',
+    duration_ms: (t.duration_ms as number) || 0,
+  }));
+}
+
+/**
+ * retryFailedMirroredDiscovery (2155-2194) — the discovery modal's
+ * "Retry Failed (N)" button.
+ *
+ * It lives here, and SourceModals calls it directly, so no mount site can
+ * forget to supply it: the button is gated on the callback existing, which is
+ * exactly how it silently never rendered before.
+ */
+export async function retryFailedMirroredDiscovery(
+  hash: string,
+  vertical: Pick<SourceVertical, 'patchState' | 'resumeDiscovery'>,
+): Promise<void> {
+  const playlistId = hash.replace('mirrored_', '');
+  try {
+    const data = await postRetryFailedDiscovery(playlistId);
+    if (data.error) {
+      window.showToast?.(`Error: ${data.error}`, 'error');
+      return;
+    }
+    if (data.retry_count === 0) {
+      window.showToast?.('All tracks already found!', 'success');
+      return;
+    }
+    const retryCount = data.retry_count ?? 0;
+    vertical.patchState(hash, (s) => ({
+      ...s,
+      phase: 'discovering',
+      discoveryProgress: 0,
+      // #815: the baseline the completion toast reports against (2178-2181).
+      retryDiscovery: { matchesBefore: s.spotifyMatches || 0, retryCount },
+    }));
+    vertical.resumeDiscovery(hash);
+    window.showToast?.(`Retrying ${retryCount} failed tracks...`, 'info');
+  } catch (err) {
+    window.showToast?.(
+      `Error retrying discovery: ${err instanceof Error ? err.message : 'unknown error'}`,
+      'error',
+    );
+  }
 }
 
 /**

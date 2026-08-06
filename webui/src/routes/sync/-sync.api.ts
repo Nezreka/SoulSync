@@ -357,6 +357,64 @@ export async function clearMirroredDiscovery(
   );
 }
 
+/** One mirrored playlist with its tracks (openMirroredPlaylistModal, 1069). */
+export interface MirroredPlaylistDetail {
+  error?: string;
+  name?: string;
+  source?: string;
+  source_playlist_id?: string;
+  source_ref?: string;
+  description?: string;
+  owner?: string;
+  image_url?: string;
+  updated_at?: string;
+  mirrored_at?: string;
+  tracks?: {
+    id?: number;
+    position?: number;
+    track_name?: string;
+    artist_name?: string;
+    album_name?: string;
+    duration_ms?: number;
+    image_url?: string;
+    source_track_id?: string;
+  }[];
+}
+
+/** GET /api/mirrored-playlists/<id> (1069). */
+export async function fetchMirroredPlaylist(
+  playlistId: number | string,
+): Promise<MirroredPlaylistDetail> {
+  return readJson(await fetch(`/api/mirrored-playlists/${playlistId}`));
+}
+
+/**
+ * POST /api/mirrored-playlists/<id>/prepare-discovery (2062).
+ *
+ * Registers the mirrored playlist with the backend so the discovery pipeline
+ * can find it. The vanilla POSTs this BEFORE every fresh mirrored discovery;
+ * skipping it is why the port's mirrored discovery could not work.
+ */
+export async function prepareMirroredDiscovery(playlistId: number | string): Promise<{
+  error?: string;
+  from_cache?: boolean;
+  cached_matches?: number;
+  total_tracks?: number;
+}> {
+  return readJson(
+    await fetch(`/api/mirrored-playlists/${playlistId}/prepare-discovery`, { method: 'POST' }),
+  );
+}
+
+/** POST /api/mirrored-playlists/<id>/retry-failed-discovery (2159). */
+export async function postRetryFailedDiscovery(
+  playlistId: number | string,
+): Promise<{ error?: string; retry_count?: number }> {
+  return readJson(
+    await fetch(`/api/mirrored-playlists/${playlistId}/retry-failed-discovery`, { method: 'POST' }),
+  );
+}
+
 /** DELETE /api/mirrored-playlists/<id> (deleteMirroredPlaylist, 2023). */
 export async function deleteMirroredPlaylist(
   playlistId: number | string,

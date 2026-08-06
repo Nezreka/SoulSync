@@ -22,6 +22,7 @@ import type { DiscoveryRow } from '../-sync.transform';
 import type { SourceVertical } from '../-sync.use-vertical';
 
 import { postUnmatch } from '../-sync.fix';
+import { retryFailedMirroredDiscovery } from '../-sync.mirrored';
 import { buildDownloadTracks } from '../-sync.modal-core';
 import { applyFixedMatch, applyUnmatched } from '../-sync.state';
 import { DiscoveryModal } from './discovery-modal';
@@ -175,6 +176,11 @@ export function SourceModals({
         onStartSync={() => void vertical.startSync(openId)}
         onCancelSync={() => void vertical.cancelSync(openId)}
         onDownloadMissing={(options) => void onDownloadMissing(options)}
+        onRetryFailed={
+          config.id === 'mirrored'
+            ? () => void retryFailedMirroredDiscovery(openId, vertical)
+            : undefined
+        }
         onFixTrack={(row) => setFixRow(row)}
         onUnmatchTrack={(row) => void onUnmatchTrack(row)}
       >
