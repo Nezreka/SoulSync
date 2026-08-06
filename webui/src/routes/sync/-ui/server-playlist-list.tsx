@@ -1,0 +1,441 @@
+/**
+ * The Server Manager tab's playlist list (loadServerPlaylists, pages-extra.js
+ * 12-156) and its disambiguation modal (_showServerDisambig, 185-245).
+ *
+ * Slice A of the server tab. The compare EDITOR is slice B and does not exist
+ * yet, so opening a card raises the choice it resolves and hands the caller the
+ * ids — the tab's own state machine, not a mount-site prop, will own the swap.
+ *
+ * Every class here is transcribed from the vanilla and already exists in
+ * style.css; the skeleton, the two section headers and the card body are
+ * structural, so they are asserted as literals in the test.
+ */
+
+import type { CSSProperties, ReactElement } from 'react';
+
+import { useCallback, useEffect, useState } from 'react';
+
+import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
+
+import { timeAgo } from '../-sync.mirrored';
+import {
+  fetchMirroredMatches,
+  fetchMirroredPlaylistById,
+  fetchServerPlaylistData,
+  serverCardHue,
+  serverTabTitle,
+  splitServerPlaylists,
+} from '../-sync.server';
+
+/** The three server icons, verbatim from 86-90. */
+const SERVER_ICONS: Readonly<Record<string, ReactElement>> = {
+  plex: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+      <path d="M11.643 0H4.68l7.679 12L4.68 24h6.963L19.32 12z" />
+    </svg>
+  ),
+  jellyfin: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+      <path d="M12 2C8.5 2 6 5.1 6 9c0 2.4 1.2 5.5 3.3 8.7.7 1 1.5 2 2.2 2.9.2.3.4.3.5.4.1 0 .3-.1.5-.4.7-.9 1.5-1.9 2.2-2.9C16.8 14.5 18 11.4 18 9c0-3.9-2.5-7-6-7z" />
+    </svg>
+  ),
+  navidrome: (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+    </svg>
+  ),
+};
+
+/** 91: an unrecognised server type falls back to the Plex mark. */
+function serverIcon(serverType: string | undefined): ReactElement {
+  return SERVER_ICONS[serverType ?? ''] ?? SERVER_ICONS.plex;
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="server-pl-grid">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div
+          key={i}
+          className="server-pl-card server-pl-skeleton"
+          style={{ animationDelay: `${i * 0.06}s` }}
+        >
+          <div className="server-pl-card-top">
+            <div className="skeleton-box" style={{ width: 44, height: 44, borderRadius: 12 }} />
+            <div className="skeleton-box" style={{ width: 28, height: 28, borderRadius: 8 }} />
+          </div>
+          <div className="server-pl-card-body">
+            {/* The vanilla randomises this width per card (30); a fixed width
+                keeps the render deterministic and the shimmer identical. */}
+            <div
+              className="skeleton-box"
+              style={{ width: '75%', height: 14, borderRadius: 4, marginBottom: 8 }}
+            />
+            <div className="skeleton-box" style={{ width: '40%', height: 11, borderRadius: 4 }} />
+          </div>
+          <div
+            className="server-pl-card-footer"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 12 }}
+          >
+            <div className="skeleton-box" style={{ width: 60, height: 10, borderRadius: 3 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PlaylistCard({
+  playlist,
+  index,
+  isSynced,
+  icon,
+  onOpen,
+}: {
+  playlist: ServerPlaylist;
+  index: number;
+  isSynced: boolean;
+  icon: ReactElement;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      className={isSynced ? 'server-pl-card' : 'server-pl-card server-pl-unsynced'}
+      style={
+        {
+          animationDelay: `${index * 0.04}s`,
+          '--card-hue': serverCardHue(index),
+        } as CSSProperties
+      }
+      onClick={onOpen}
+    >
+      <div className="server-pl-card-glow" />
+      <div className="server-pl-card-top">
+        <div className="server-pl-card-icon-wrap">
+          <div className="server-pl-card-bars">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+        <div className="server-pl-card-badge">{icon}</div>
+      </div>
+      <div className="server-pl-card-body">
+        <div className="server-pl-card-name">{playlist.name}</div>
+        <div className="server-pl-card-meta">
+          <span className="server-pl-track-count">{playlist.track_count}</span> tracks
+          {isSynced ? <span className="server-pl-synced-badge">Synced</span> : null}
+        </div>
+      </div>
+      <div className="server-pl-card-footer">
+        <span className="server-pl-card-action">{isSynced ? 'Open Editor' : 'View Tracks'}</span>
+        <span className="server-pl-card-arrow">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  className,
+  icon,
+  title,
+  playlists,
+  startIndex,
+  isSynced,
+  serverType,
+  onOpen,
+}: {
+  className: string;
+  icon: string;
+  title: string;
+  playlists: ServerPlaylist[];
+  startIndex: number;
+  isSynced: boolean;
+  serverType: string | undefined;
+  onOpen: (playlist: ServerPlaylist) => void;
+}) {
+  return (
+    <div className={className}>
+      <div className="server-pl-section-header">
+        <span className="server-pl-section-icon">{icon}</span>
+        <span className="server-pl-section-title">{title}</span>
+        <span className="server-pl-section-count">{playlists.length}</span>
+      </div>
+      <div className="server-pl-grid">
+        {playlists.map((pl, i) => (
+          <PlaylistCard
+            key={pl.id}
+            playlist={pl}
+            // 145: the Other grid continues the synced grid's numbering, so the
+            // hue and the stagger never restart.
+            index={startIndex + i}
+            isSynced={isSynced}
+            icon={serverIcon(serverType)}
+            onOpen={() => onOpen(pl)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export interface ServerPlaylistListProps {
+  /**
+   * Resolved by the name lookup: exactly one mirrored match, none (server-only)
+   * or several (after the user has picked one). Slice B renders the compare
+   * view from this.
+   */
+  onOpenCompare: (playlist: ServerPlaylist, mirrored: MirroredMatch | null) => void;
+}
+
+export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
+  const [state, setState] = useState<{
+    synced: ServerPlaylist[];
+    unsynced: ServerPlaylist[];
+    serverType?: string;
+  } | null>(null);
+  const [placeholder, setPlaceholder] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  /** The several-matches case (183): pick one before the compare view opens. */
+  const [disambig, setDisambig] = useState<{
+    playlist: ServerPlaylist;
+    candidates: MirroredMatch[];
+  } | null>(null);
+
+  const load = useCallback(async () => {
+    setState(null);
+    setPlaceholder(null);
+    setRefreshing(true);
+    try {
+      const { data, mirroredNames, historyNames } = await fetchServerPlaylistData();
+      if (!data.success || !data.playlists) {
+        setPlaceholder(data.error || 'Could not load server playlists');
+        return;
+      }
+      const { synced, unsynced } = splitServerPlaylists(
+        data.playlists,
+        mirroredNames,
+        historyNames,
+      );
+      if (synced.length === 0 && unsynced.length === 0) {
+        setPlaceholder('No playlists found on your media server.');
+        return;
+      }
+      setState({ synced, unsynced, serverType: data.server_type });
+    } catch (error) {
+      setPlaceholder(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /** selectDisambigPlaylist (234-243) — re-fetch, then open. */
+  const pickMirrored = useCallback(
+    async (playlist: ServerPlaylist, mirroredId: number) => {
+      try {
+        onOpenCompare(playlist, await fetchMirroredPlaylistById(mirroredId));
+      } catch (error) {
+        window.showToast?.(
+          `Failed to load mirrored playlist: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [onOpenCompare],
+  );
+
+  /** openServerPlaylistEditor's three-way branch (172-183). */
+  const openPlaylist = useCallback(
+    async (playlist: ServerPlaylist) => {
+      const matches = await fetchMirroredMatches(playlist.name);
+      if (matches.length === 1) onOpenCompare(playlist, matches[0]);
+      else if (matches.length === 0) onOpenCompare(playlist, null);
+      else setDisambig({ playlist, candidates: matches });
+    },
+    [onOpenCompare],
+  );
+
+  return (
+    <div>
+      <div className="playlist-header">
+        <h3 id="server-tab-title">{serverTabTitle(state?.serverType)}</h3>
+        <button
+          type="button"
+          className="refresh-button"
+          id="server-refresh-btn"
+          disabled={refreshing}
+          onClick={() => void load()}
+        >
+          {refreshing ? '🔄 Loading...' : '🔄 Refresh'}
+        </button>
+      </div>
+      <div id="server-playlist-container">
+        {refreshing && !state ? (
+          <SkeletonGrid />
+        ) : placeholder ? (
+          <div className="playlist-placeholder">{placeholder}</div>
+        ) : state ? (
+          <>
+            {state.synced.length > 0 && (
+              <Section
+                className="server-pl-section"
+                icon="🔗"
+                title="Synced Playlists"
+                playlists={state.synced}
+                startIndex={0}
+                isSynced
+                serverType={state.serverType}
+                onOpen={(pl) => void openPlaylist(pl)}
+              />
+            )}
+            {state.unsynced.length > 0 && (
+              <Section
+                className="server-pl-section server-pl-section-unsynced"
+                icon="🎵"
+                title="Other Server Playlists"
+                playlists={state.unsynced}
+                startIndex={state.synced.length}
+                isSynced={false}
+                serverType={state.serverType}
+                onOpen={(pl) => void openPlaylist(pl)}
+              />
+            )}
+          </>
+        ) : null}
+      </div>
+      {disambig && (
+        <ServerDisambigModal
+          playlistName={disambig.playlist.name}
+          candidates={disambig.candidates}
+          now={Date.now()}
+          onClose={() => setDisambig(null)}
+          onPick={(candidate) => {
+            const playlist = disambig.playlist;
+            setDisambig(null);
+            // 234-243: the picked row is only a LIST entry — the compare view
+            // gets the full mirrored playlist, re-fetched by id.
+            void pickMirrored(playlist, candidate.id);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Disambiguation (_showServerDisambig 185-223) ─────────────────────────── */
+
+/**
+ * 193 — this tab's OWN icon table, and it is not the mirrored tab's. Spotify is
+ * a green circle here and a musical note there; deezer is purple here; `file`
+ * exists here and qobuz does not. Do not share a table between them.
+ */
+const DISAMBIG_SOURCE_ICONS: Readonly<Record<string, string>> = {
+  spotify: '🟢',
+  tidal: '🌊',
+  youtube: '▶️',
+  beatport: '🎛️',
+  deezer: '🟣',
+  file: '📄',
+};
+
+export function ServerDisambigModal({
+  playlistName,
+  candidates,
+  now,
+  onClose,
+  onPick,
+}: {
+  playlistName: string;
+  candidates: MirroredMatch[];
+  /** One clock read, as the vanilla calls timeAgo once per card build. */
+  now: number;
+  onClose: () => void;
+  onPick: (candidate: MirroredMatch) => void;
+}) {
+  // 221-222 parks the handler on window._disambigEsc and removes it in
+  // closeServerDisambig; an effect is the same teardown without the global.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      id="server-disambig-overlay"
+      className="server-disambig-overlay visible"
+      // 220 — backdrop only.
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="server-disambig-modal" id="server-disambig-modal">
+        <div id="server-disambig-subtitle">
+          &ldquo;{playlistName}&rdquo; was found on {candidates.length} sources. Which one do you
+          want to compare against?
+        </div>
+        <div className="server-disambig-list" id="server-disambig-list">
+          {candidates.map((candidate, i) => (
+            <div
+              key={candidate.id}
+              className="server-disambig-card"
+              style={{ animationDelay: `${i * 0.06}s` }}
+              onClick={() => onPick(candidate)}
+            >
+              <div className="server-disambig-icon">
+                {DISAMBIG_SOURCE_ICONS[candidate.source ?? ''] ?? '📋'}
+              </div>
+              <div className="server-disambig-info">
+                <div className="server-disambig-name">{candidate.name}</div>
+                <div className="server-disambig-details">
+                  <span className="source-badge">{candidate.source}</span>
+                  <span>{candidate.track_count || 0} tracks</span>
+                  {candidate.owner ? <span>by {candidate.owner}</span> : null}
+                  {/* 197: mirrored_at FIRST here. The mirrored tab's card reads
+                      the same two fields in the OPPOSITE order (527). */}
+                  <span>
+                    Mirrored {timeAgo(candidate.mirrored_at || candidate.updated_at, now)}
+                  </span>
+                </div>
+              </div>
+              <div className="server-disambig-arrow">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
