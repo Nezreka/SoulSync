@@ -89,6 +89,27 @@ window.discoverDownloadProcess = function (virtualPlaylistId) {
     return activeDownloadProcesses[virtualPlaylistId] || null;
 };
 
+/**
+ * Bridge for the React SYNC page's account tabs (Spotify + Deezer ARL): put a
+ * playlist row into `spotifyPlaylists` so `openDownloadMissingModal` can find
+ * it. Same lexical-scope story as startDiscoverVirtualSync above — and the same
+ * shape, minus the sync kickoff, because this one only seeds.
+ *
+ * Without it openDownloadMissingModal bails at its `if (!playlist)` guard with
+ * 'Could not find playlist data.' (sync-spotify.js 2235-2240). The vanilla page
+ * never needed a bridge: loadSpotifyPlaylists assigns the whole array (1612)
+ * and the ARL flow pushes its own shim rows (sync-services.js 2471, 2646-2654).
+ * Once React owns those tabs, neither of those runs.
+ *
+ * Idempotent by id, exactly like the push it replaces.
+ */
+window.registerSyncAccountPlaylist = function (row) {
+    if (!row || !row.id) return;
+    if (!spotifyPlaylists.find(p => p.id === row.id)) {
+        spotifyPlaylists.push(row);
+    }
+};
+
 
 /**
  * Bridge for the React discover page: the ListenBrainz/Last.fm playlist

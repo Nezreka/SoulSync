@@ -34,9 +34,11 @@ const ARL_ROW = { id: 7, name: 'Deep Cuts', track_count: 12, sync_status: 'Synce
 
 beforeEach(() => {
   stubFetch();
-  window.showToast = vi.fn() as typeof window.showToast;
-  window.showLoadingOverlay = vi.fn() as typeof window.showLoadingOverlay;
-  window.hideLoadingOverlay = vi.fn() as typeof window.hideLoadingOverlay;
+  // vi.stubGlobal, NOT `window.x =` — a direct assignment survives
+  // unstubAllGlobals and leaks into every later test file in this worker.
+  vi.stubGlobal('showToast', vi.fn());
+  vi.stubGlobal('showLoadingOverlay', vi.fn());
+  vi.stubGlobal('hideLoadingOverlay', vi.fn());
 });
 
 afterEach(() => {
@@ -234,6 +236,61 @@ describe('AccountDetailsModal', () => {
   });
 });
 
+describe('seeding — the engine must be able to FIND the playlist (2235-2240)', () => {
+  it('Spotify seeds every loaded row, the way 1612 assigns the whole array', async () => {
+    const seeded: unknown[] = [];
+    vi.stubGlobal('registerSyncAccountPlaylist', (row: unknown) => {
+      seeded.push(row);
+    });
+    // The second row's id is a NUMBER — the engine matches with === against
+    // the string the card rendered (2235), so seeding must coerce.
+    responder = () => [SPOTIFY_ROW, { id: 99, name: 'Second', track_count: 3 }];
+    render(<SpotifyTab />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    expect(seeded).toHaveLength(2);
+    expect(seeded[0]).toMatchObject({ id: 'p1', name: 'Road Trip' });
+    expect(seeded[1]).toMatchObject({ id: '99', name: 'Second' });
+    expect(typeof (seeded[1] as { id: unknown }).id).toBe('string');
+  });
+
+  it('ARL seeds at hand-off, with the shim shape and the FETCHED count (2646)', async () => {
+    const seeded: unknown[] = [];
+    vi.stubGlobal('registerSyncAccountPlaylist', (row: unknown) => {
+      seeded.push(row);
+    });
+    const openDownloadMissingModal = vi.fn();
+    vi.stubGlobal('openDownloadMissingModal', openDownloadMissingModal);
+    responder = (url) =>
+      url === '/api/deezer/arl-playlists'
+        ? [ARL_ROW]
+        : url === '/api/deezer/arl-playlist/7'
+          ? { name: 'Deep Cuts', tracks: [{ id: 'a' }, { id: 'b' }] }
+          : {};
+    render(<DeezerArlTab />);
+    await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());
+    // Nothing is seeded just by loading — the vanilla shims at modal time.
+    expect(seeded).toHaveLength(0);
+
+    fireEvent.click(document.querySelector('#action-btn-deezer_arl_7') as Element);
+    await waitFor(() =>
+      expect(document.querySelector('#deezer-arl-playlist-details-modal')).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText('📥 Download Missing Tracks'));
+
+    expect(seeded).toEqual([
+      {
+        id: 'deezer_arl_7',
+        name: 'Deep Cuts',
+        track_count: 2,
+        image_url: '',
+        owner: '',
+      },
+    ]);
+    // Seeded BEFORE the engine is asked to open it.
+    expect(openDownloadMissingModal).toHaveBeenCalledWith('deezer_arl_7');
+  });
+});
+
 describe('the header count is per-tab drift (1901 vs 2592)', () => {
   const zeroCount = { id: 9, track_count: 0 };
   const withTracks = { tracks: [{ id: 'a' }, { id: 'b' }] };
@@ -330,8 +387,8 @@ describe('DeezerArlTab', () => {
   it('rehydrates an in-flight sync through the engine (2462-2479)', async () => {
     const updateCardToSyncing = vi.fn();
     const startSyncPolling = vi.fn();
-    window.updateCardToSyncing = updateCardToSyncing as typeof window.updateCardToSyncing;
-    window.startSyncPolling = startSyncPolling as typeof window.startSyncPolling;
+    vi.stubGlobal('updateCardToSyncing', updateCardToSyncing);
+    vi.stubGlobal('startSyncPolling', startSyncPolling);
     responder = (url) =>
       url === '/api/deezer/arl-playlists'
         ? [ARL_ROW]
@@ -345,8 +402,8 @@ describe('DeezerArlTab', () => {
 
   it('a syncing row with no progress payload starts at 0, not at 100 (2473)', async () => {
     const updateCardToSyncing = vi.fn();
-    window.updateCardToSyncing = updateCardToSyncing as typeof window.updateCardToSyncing;
-    window.startSyncPolling = vi.fn() as typeof window.startSyncPolling;
+    vi.stubGlobal('updateCardToSyncing', updateCardToSyncing);
+    vi.stubGlobal('startSyncPolling', vi.fn());
     responder = (url) => (url === '/api/deezer/arl-playlists' ? [ARL_ROW] : { status: 'syncing' });
     render(<DeezerArlTab />);
     await waitFor(() => expect(updateCardToSyncing).toHaveBeenCalled());
@@ -355,7 +412,7 @@ describe('DeezerArlTab', () => {
 
   it('a playlist with no active sync is left alone, not treated as an error', async () => {
     const startSyncPolling = vi.fn();
-    window.startSyncPolling = startSyncPolling as typeof window.startSyncPolling;
+    vi.stubGlobal('startSyncPolling', startSyncPolling);
     responder = (url) => (url === '/api/deezer/arl-playlists' ? [ARL_ROW] : { status: 'idle' });
     render(<DeezerArlTab />);
     await waitFor(() => expect(screen.getByText('Deep Cuts')).toBeInTheDocument());

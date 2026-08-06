@@ -221,6 +221,20 @@ declare global {
      */
     openDownloadMissingModal?: (playlistId: string) => Promise<void> | void;
     /**
+     * core.js — seed `spotifyPlaylists` so openDownloadMissingModal can find a
+     * playlist React rendered. That array is a top-level `let` (core.js:33), so
+     * a module cannot push to it; this is the same bridge shape as
+     * startDiscoverVirtualSync, which the discover port added for this exact
+     * trap. Idempotent by id.
+     */
+    registerSyncAccountPlaylist?: (row: {
+      id: string;
+      name?: string;
+      track_count?: number;
+      image_url?: string;
+      owner?: string;
+    }) => void;
+    /**
      * The account sync engine's two card writers (downloads.js 4139 / 3969).
      * The Deezer-ARL tab calls BOTH on load for any playlist the backend
      * reports mid-sync (sync-services.js 2473-2474), which is how a sync

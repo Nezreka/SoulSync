@@ -12,26 +12,18 @@
  * one is re-shown through the process registry; progress, status and the two
  * action buttons are painted by the engine into the ids the card renders.
  *
- * ============================ SEEDING BLOCKER ============================
- * openDownloadMissingModal reads the playlist out of `spotifyPlaylists` and
- * HARD-FAILS when it is absent — 'Could not find playlist data.', sync-spotify
- * .js 2236. That array is a top-level `let` at core.js:33, so React cannot fill
- * it, and the vanilla loader that normally does (1612) will not be running once
- * this tab owns the container. BOTH tabs are affected, not just ARL's shim.
+ * SEEDING: openDownloadMissingModal looks the playlist up in
+ * `spotifyPlaylists` and bails with 'Could not find playlist data.' when it is
+ * absent (2235-2240). That array is a top-level `let` at core.js:33 which no
+ * module can push to, and the vanilla loader that fills it (1612) stops running
+ * once these tabs own their containers. Both tabs therefore seed through
+ * window.registerSyncAccountPlaylist — the bridge added beside
+ * startDiscoverVirtualSync, which the discover port added for this same trap.
  *
- * There is an exact PRECEDENT for the fix: window.startDiscoverVirtualSync
- * (core.js:75) was added for the discover port to solve this same problem, and
- * its docblock generalises it — "`spotifyPlaylists` are top-level `let`s in
- * this script's lexical scope, so a module cannot seed them itself". It seeds
- * playlistTrackCache AND pushes the row, but it then STARTS A SYNC, so it
- * cannot be reused for a download.
- *
- * Options are written up in SYNC_PORT_AUDIT.md. The decision is Boulder's
- * because it touches core.js, which this port has deliberately left alone.
- * Until then these tabs render and browse correctly and the download button is
- * the one thing that does not work — deliberately left visible rather than
- * hidden or faked. The route is still `legacy`, so nothing user-facing.
- * =========================================================================
+ * Spotify seeds the whole loaded list, because the vanilla ASSIGNS the array
+ * wholesale at 1612. ARL seeds per playlist at hand-off, reproducing the shim
+ * the vanilla builds at 2646-2654 — including its track count, which comes from
+ * the FETCHED tracks and not the row.
  *
  * SELECTION is deliberately a PROP, not local state. It spans tab + shell +
  * engine — `selectedPlaylists` is script-scoped in core.js:34 and
@@ -46,6 +38,7 @@ import type { AccountPlaylistRow } from '../-sync.accounts';
 import type { AccountPlaylistTracks } from '../-sync.api';
 
 import {
+  arlShimRow,
   deezerArlId,
   deezerArlStatusClass,
   deezerArlStatusLabel,
@@ -88,6 +81,10 @@ export function SpotifyTab({ selectedIds, onToggleSelect }: AccountTabProps) {
     try {
       const list = (await fetchSpotifyPlaylists()) as AccountPlaylistRow[];
       setRows(list);
+      // 1612 assigns the whole array; the engine reads it on every download.
+      for (const row of list) {
+        window.registerSyncAccountPlaylist?.({ ...row, id: String(row.id) });
+      }
       if (list.length === 0) setPlaceholder('No Spotify playlists found.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -296,11 +293,12 @@ export function DeezerArlTab() {
           onClose={() => setOpen(null)}
           // 2637-2639: ARL closes before handing off.
           closeBeforeDownload
-          // BLOCKED — see the SEEDING BLOCKER note at the top of this file.
-          // The vanilla shims the ARL row into spotifyPlaylists here
-          // (2646-2654); React cannot, so openDownloadMissingModal will answer
-          // 'Could not find playlist data.' until the seam exists.
-          onDownloadMissing={() => void window.openDownloadMissingModal?.(deezerArlId(open.row.id))}
+          onDownloadMissing={() => {
+            // The shim at 2646-2654, seeded through the bridge: prefixed id,
+            // and the count taken from the FETCHED tracks.
+            window.registerSyncAccountPlaylist?.(arlShimRow(open.row, 'modal', open.detail.tracks));
+            void window.openDownloadMissingModal?.(deezerArlId(open.row.id));
+          }}
         />
       )}
     </div>

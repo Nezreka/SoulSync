@@ -2002,7 +2002,7 @@ fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
 (GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
 Cache HIT spreads the cached tracks onto the list row rather than refetching.
 
-### THE SEEDING BLOCKER — a DECISION Boulder must make before this wave ships
+### THE SEEDING BLOCKER — RESOLVED (Boulder chose the bridge)
 
 Found while building the two account tabs, by reading rather than assuming.
 
@@ -2047,16 +2047,16 @@ It seeds `playlistTrackCache` AND pushes the row — but then calls
 (c) Keep the vanilla loaders alive alongside React so they keep filling the
     array. They also write the container React owns — direct conflict.
 
-**Recommendation: (a).** It is the precedent's own case, the smallest change,
-and the only one that keeps the account download flow byte-identical. But it
-edits core.js, so it is Boulder's call — the last engine-file decision I made
-alone cost the P5h wave.
+**RESOLVED: (a).** `window.registerSyncAccountPlaylist` now sits in core.js
+directly beneath startDiscoverVirtualSync, in the same shape minus the sync
+kickoff. Six lines, idempotent by id, no behaviour changed for any vanilla
+caller. Spotify seeds the whole loaded list (the vanilla ASSIGNS the array at
+1612); ARL seeds one shim row at hand-off with the FETCHED track count, which
+is what 2646-2654 builds.
 
-**State meanwhile:** both tabs are built, tested and committed. They load,
-render, browse and open their details modals correctly. The Download Missing
-button is the ONE thing that does not work, left visibly broken rather than
-faked or hidden, and documented at the call site. The route is still `legacy`,
-so nothing user-facing is affected either way.
+This is the SECOND core.js bridge of this kind. See the bridge tally below —
+the count is the real signal about the engine's future, and it belongs in the
+post-music-side plan rather than in any page phase.
 
 ### SPOTIFY + DEEZER-ARL P0 READ — PART 2 (READ COMPLETE, no code)
 
