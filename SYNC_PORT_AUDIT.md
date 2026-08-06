@@ -2901,3 +2901,65 @@ explicit failure renders the error block — and showTop10ListsError writes the
 SAME block into BOTH track containers.
 
 Read status: 1,853 of ~3,600 in-scope lines (51%).
+
+### BEATPORT READ COMPLETE — 3,626 in-scope lines
+
+The whole of beatport-ui.js is now read line by line, minus the Settings tenant
+at the tail. Regions: 5 sliders (1-1603), 3 top-10 lists (1605-1853), the click
+handlers + download bridge (1855-2228), the genre browser (2230-3626).
+
+**FIXED: the genre page's Top 100 button downloaded the WRONG genre.**
+`showGenrePageView` builds `.genre-page-content` once and reuses it for every
+genre thereafter (2704). The Top 100 listener was attached inside that
+build-once block, closing over the FIRST genre's slug/id/name, and was never
+rebound — while the element's dataset WAS refreshed on every open (2766-2768).
+So: open Tech House, go back, open Techno, press Beatport Top 100 → it scraped
+and queued **Tech House's** Top 100. Wrong tracks actually downloaded, silently,
+with the right genre's name on screen. Now reads the dataset.
+
+The two genre Top 10 handlers were never affected: they re-read the genre from
+`.genre-page-title` textContent at click time (3295, 3308).
+
+**The download bridge (the region that matters most).**
+- Releases open as an ALBUM via `/api/beatport/release-metadata` ->
+  `openDownloadMissingModalForArtistAlbum` with the real artist.
+- Charts open as a COMPILATION ('Various Artists'), each track searched
+  independently. Title gets `mix_name` appended unless it is 'original mix'
+  (case-insensitive); the artist string is split on commas into a real array so
+  the folder structure comes out right; durations parse 'm:ss' or bare seconds.
+- `_enrichTracksWithProgress` batches, then **polls every 800ms in an
+  unbounded `while (true)`** with no timeout, no abort signal and no failure cap
+  — a poll that keeps throwing loops forever, and leaving the page does not stop
+  it (it is the one fetch here that ignores getBeatportContentSignal). Its
+  docblock claims WebSocket progress; the code polls. Its `chartName` parameter
+  is unused.
+- The double-click latch `_beatportModalOpening` is applied FIVE different ways:
+  set-and-clear-on-every-exit (release clicks), set + a blind 2s `setTimeout`
+  (Top 100, Hype 100, genre Top 100, genre charts), cleared unconditionally by
+  `openBeatportChartAsDownloadModal`, and **not used at all** by the featured-
+  chart and DJ-chart card clicks. A scrape slower than 2s reopens the gate mid
+  flight.
+- **Genre release downloads never register the progress bubble.**
+  `handleBeatportReleaseCardClick` calls `registerBeatportDownload` (1911);
+  its genre twin `handleGenreReleaseCardClick` is otherwise identical and does
+  not. Left as-is — recorded for the port to decide, since it is a UX gap rather
+  than a wrong result.
+
+**Five ways of answering "what did the user click".** Closure over the item
+(hero), lookup by URL (releases/charts/DJ), re-reading rendered text (hype
+picks), index alignment (top-10 releases), and full DOM scraping
+(`getGenrePageTrackData`, 3348). The last two re-read defaulted strings, so
+'Unknown Title' can travel into a download as real metadata.
+
+**Genre browser specifics.** Module-level cache survives modal closes and is
+never invalidated (`lastLoaded` is recorded but unused). Image loading uses two
+cooperative workers polling a shared queue, paused by flipping
+`imageLoadingActive` on close. Nine genre names are hard-filtered by an
+inline list. Two identical card renderers exist (fresh vs cached). Retry
+buttons use inline `onclick` global calls. The search filter sets
+`display:'block'`, overwriting whatever the CSS chose. `genreHeroSliderState` is
+the file's only WINDOW-scoped state. The genre view reaches into the main hero
+slider twice to stop its autoplay and restart it on the way back — but touches
+none of the other four.
+
+Read status: **COMPLETE.** Next: the React port itself.

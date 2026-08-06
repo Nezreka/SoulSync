@@ -2747,11 +2747,21 @@ function showGenrePageView(genreSlug, genreId, genreName) {
             backButton.addEventListener('click', showGenreListView);
         }
 
-        // Add genre top 100 button listener
+        // Add genre top 100 button listener.
+        // Read the genre off the dataset, NOT off this call's arguments: this
+        // whole block runs only the first time the genre page is built, and the
+        // element is then reused for every later genre. Closing over the
+        // arguments pinned the button to whichever genre was opened first, so
+        // opening a second genre and pressing Top 100 scraped and downloaded the
+        // FIRST genre's chart. The dataset below is refreshed on every open.
         const genreTop100Button = genrePageContent.querySelector('#genre-top100-btn');
         if (genreTop100Button) {
             genreTop100Button.addEventListener('click', () => {
-                handleGenreTop100Click(genreSlug, genreId, genreName);
+                handleGenreTop100Click(
+                    genrePageContent.dataset.genreSlug,
+                    genrePageContent.dataset.genreId,
+                    genrePageContent.dataset.genreName
+                );
             });
         }
     }
