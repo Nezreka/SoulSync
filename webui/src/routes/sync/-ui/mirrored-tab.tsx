@@ -16,9 +16,9 @@
  *   React cannot reach (the P5a/P5b pattern).
  * - The phase line is ONE derived renderer; the vanilla's three writers
  *   disagree (documented in -sync.mirrored.ts).
- * - Auto-Sync (📤 export and the pipeline button) and the two pool modals are
- *   separate waves; their buttons render only when the page shell supplies a
- *   handler, so this tab never ships a dead control.
+ * - The pipeline button and the two pool modals are separate waves; their
+ *   buttons render only when the page shell supplies a handler, so this tab
+ *   never ships a dead control. Export (📤) landed in P5g and is always on.
  * - DEFERRED, not dropped: the per-card quality-profile select (600-602) and
  *   its hydrate (645-650). It needs the profiles api + the hydration protocol
  *   that no React sync surface has yet — the discovery-modal footer's copy of
@@ -32,6 +32,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import type { ExportMode } from '../-sync.export';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
 import type { SourceVertical } from '../-sync.use-vertical';
 
@@ -42,6 +43,7 @@ import {
   patchMirroredCustomName,
 } from '../-sync.api';
 import { getMirroredSourceRef } from '../-sync.autosync';
+import { exportNotConnectedStatus } from '../-sync.export';
 import {
   mirroredHash,
   mirroredPhaseLine,
@@ -52,6 +54,8 @@ import {
 } from '../-sync.mirrored';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
+import { useExportJobs } from '../-sync.use-export';
+import { ExportModal, ExportStatusSpan } from './export-modal';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
 export interface MirroredTabProps {
@@ -60,8 +64,6 @@ export interface MirroredTabProps {
   onOpen: (sourceId: string) => void;
   /** The metadata source the ratio line names (currentMusicSourceName). */
   sourceName?: string;
-  /** P5g — the export job. Omitted until that wave lands. */
-  onExport?: (row: MirroredPlaylistRow) => void;
   /** P5g — runMirroredPlaylistPipeline. */
   onAutoSync?: (row: MirroredPlaylistRow) => void;
   /** P5g — editMirroredSourceRef (it owns its own modal). */
@@ -75,7 +77,6 @@ export function MirroredTab({
   vertical,
   onOpen,
   sourceName = 'Spotify',
-  onExport,
   onAutoSync,
   onEditSourceRef,
   onOpenDiscoveryPool,
@@ -86,6 +87,9 @@ export function MirroredTab({
   const [placeholder, setPlaceholder] = useState('Loading mirrored playlists...');
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  /** The row whose export picker is open (exportMirroredPlaylist, 663). */
+  const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
+  const exportJobs = useExportJobs();
   /** loadMirroredPlaylists (500-524). */
   const load = useCallback(async () => {
     setPlaceholder('Loading mirrored playlists...');
@@ -348,6 +352,9 @@ export function MirroredTab({
                       </span>
                     )}
                     {line && <span style={{ color: line.color }}>{line.text}</span>}
+                    {exportJobs.statuses[row.id] && (
+                      <ExportStatusSpan status={exportJobs.statuses[row.id]} />
+                    )}
                   </div>
                 </div>
                 {discovered > 0 && (
@@ -401,19 +408,17 @@ export function MirroredTab({
                     🔗
                   </button>
                 )}
-                {onExport && (
-                  <button
-                    type="button"
-                    className="mirrored-card-export"
-                    title="Export to ListenBrainz / JSPF"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onExport(row);
-                    }}
-                  >
-                    📤
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="mirrored-card-export"
+                  title="Export to ListenBrainz / JSPF"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExporting(row);
+                  }}
+                >
+                  📤
+                </button>
                 <button
                   type="button"
                   className="mirrored-card-delete"
@@ -430,6 +435,23 @@ export function MirroredTab({
           })
         )}
       </div>
+      {exporting && (
+        <ExportModal
+          // The picker's subtitle uses the card's shown name (607).
+          name={exporting.display_name || exporting.name || ''}
+          onClose={() => setExporting(null)}
+          onChoose={(mode: ExportMode, backfill: boolean) => {
+            const id = exporting.id;
+            setExporting(null);
+            void exportJobs.start(id, mode, backfill);
+          }}
+          onGated={(mode: ExportMode) => {
+            const id = exporting.id;
+            setExporting(null);
+            exportJobs.paint(id, exportNotConnectedStatus(mode));
+          }}
+        />
+      )}
     </div>
   );
 }

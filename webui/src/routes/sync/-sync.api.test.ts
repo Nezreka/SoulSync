@@ -17,6 +17,8 @@ import {
   fetchDeezerArlPlaylists,
   fetchDeezerArlStatus,
   fetchDeezerLinkPlaylist,
+  fetchExportConnectedSources,
+  fetchPlaylistExportStatus,
   fetchSourceDiscoveryStatus,
   clearMirroredDiscovery,
   deleteMirroredPlaylist,
@@ -34,6 +36,7 @@ import {
   postMirrorPlaylist,
   postWishlistCleanup,
   postWishlistClear,
+  startPlaylistExport,
   startSourceDiscovery,
   startSourceSync,
   updateSourcePhase,
@@ -337,5 +340,68 @@ describe('mirrored playlist endpoints', () => {
       vi.fn(async () => new Response(JSON.stringify({}), { status: 500 })),
     );
     await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('Failed to update name');
+  });
+});
+
+describe('playlist export endpoints (#903, 715-760)', () => {
+  it('the connection probe returns the connected list, and null when it fails', async () => {
+    stubFetch({ connected: ['spotify', 'deezer'] });
+    await expect(fetchExportConnectedSources()).resolves.toEqual(['spotify', 'deezer']);
+    expect(calls[0]).toMatchObject({ url: '/api/discover/your-albums/sources', method: 'GET' });
+    // A body with no `connected` key is an empty list, NOT a failed probe.
+    stubFetch({});
+    await expect(fetchExportConnectedSources()).resolves.toEqual([]);
+    // A thrown fetch is the vanilla's `.catch(() => {})` — null gates nothing.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    );
+    await expect(fetchExportConnectedSources()).resolves.toBeNull();
+  });
+
+  it('spotify/deezer POST the service endpoint with {backfill}', async () => {
+    stubFetch({ success: true, job_id: 'j1' });
+    await expect(startPlaylistExport(7, 'spotify', true)).resolves.toEqual({
+      success: true,
+      job_id: 'j1',
+    });
+    expect(calls[0]).toMatchObject({
+      url: '/api/playlists/7/export/service/spotify',
+      method: 'POST',
+      body: { backfill: true },
+      headers: { 'Content-Type': 'application/json' },
+    });
+    stubFetch({});
+    await startPlaylistExport(7, 'deezer', false);
+    expect(wire(calls[0])).toEqual({
+      url: '/api/playlists/7/export/service/deezer',
+      method: 'POST',
+      body: { backfill: false },
+    });
+  });
+
+  it('push/download POST the ListenBrainz endpoint with {mode} — backfill never rides along', async () => {
+    stubFetch({});
+    await startPlaylistExport(7, 'push', true);
+    expect(wire(calls[0])).toEqual({
+      url: '/api/playlists/7/export/listenbrainz',
+      method: 'POST',
+      body: { mode: 'push' },
+    });
+    stubFetch({});
+    await startPlaylistExport(7, 'download', false);
+    expect(wire(calls[0])).toEqual({
+      url: '/api/playlists/7/export/listenbrainz',
+      method: 'POST',
+      body: { mode: 'download' },
+    });
+  });
+
+  it('the status poll GETs the job by id', async () => {
+    stubFetch({ job: { phase: 'done' } });
+    await expect(fetchPlaylistExportStatus('j1')).resolves.toEqual({ job: { phase: 'done' } });
+    expect(calls[0]).toMatchObject({ url: '/api/playlists/export/status/j1', method: 'GET' });
   });
 });

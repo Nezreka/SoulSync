@@ -374,7 +374,7 @@ describe('MirroredTab — the three actions', () => {
 });
 
 describe('MirroredTab — deferred controls and click dispatch', () => {
-  it('the pool + export + Auto-Sync buttons render ONLY with a handler', async () => {
+  it('the pool + Auto-Sync buttons render ONLY with a handler; export always does', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     const { unmount } = render(<Harness />);
@@ -382,7 +382,9 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     expect(screen.queryByText('Discovery Pool')).not.toBeInTheDocument();
     expect(screen.queryByText('Wing It Pool')).not.toBeInTheDocument();
     expect(screen.queryByText('Auto-Sync')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Export to ListenBrainz / JSPF')).not.toBeInTheDocument();
+    // Export owns its own modal + controller since P5g, so it takes no handler
+    // and is never conditional.
+    expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
     unmount();
 
     stubFetch();
@@ -391,14 +393,12 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
         onOpenDiscoveryPool={() => undefined}
         onOpenWingItPool={() => undefined}
         onAutoSync={() => undefined}
-        onExport={() => undefined}
       />,
     );
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
     expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
     expect(screen.getByText('Auto-Sync')).toBeInTheDocument();
-    expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
   });
 
   it('a card click opens the shared modal under the mirrored_<id> hash', async () => {
@@ -424,5 +424,69 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     await waitFor(() =>
       expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before + 1),
     );
+  });
+});
+
+describe('MirroredTab — export (#903)', () => {
+  const withExport = (over: Record<string, unknown> = {}): typeof responder => {
+    return (url) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url === '/api/discover/your-albums/sources') return { connected: ['spotify'] };
+      if (url.includes('/export/status/')) return over.status ?? { job: { phase: 'pushing' } };
+      if (url.includes('/export/')) return over.start ?? { success: true, job_id: 'j9' };
+      return { states: [] };
+    };
+  };
+
+  it('📤 opens the picker; a choice starts the job and paints INTO the card meta', async () => {
+    stubFetch();
+    responder = withExport();
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
+    // The picker names the card's shown name (607).
+    expect(screen.getByText('Road Trip → ListenBrainz')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Sync to ListenBrainz'));
+    expect(screen.queryByText('Export playlist')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.querySelector('.export-status-span')?.textContent).toBe(
+        'Pushing to ListenBrainz…',
+      ),
+    );
+    // _setExportStatus injects into the card's own .card-meta row (809-813).
+    expect(
+      document.querySelector('#mirrored-card-3 .card-meta .export-status-span'),
+    ).not.toBeNull();
+    expect(calls.some((c) => c.url === '/api/playlists/3/export/listenbrainz')).toBe(true);
+  });
+
+  it('a gated service choice nudges to Settings instead of exporting', async () => {
+    stubFetch();
+    responder = withExport();
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-mode="deezer"]')).toHaveAttribute('data-disconnected'),
+    );
+    fireEvent.click(document.querySelector('[data-mode="deezer"]')!);
+    await waitFor(() =>
+      expect(document.querySelector('.export-status-span')?.textContent).toBe(
+        'Connect Deezer in Settings → Connections to export here',
+      ),
+    );
+    expect(calls.some((c) => c.url.includes('/export/'))).toBe(false);
+  });
+
+  it('the 📤 click never opens the card behind it', async () => {
+    stubFetch();
+    responder = withExport();
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
+    await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
 });

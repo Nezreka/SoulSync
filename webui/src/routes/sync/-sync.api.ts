@@ -8,9 +8,12 @@
  * the backend predates the port and is not being re-contracted here.
  */
 
+import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { MirrorPayload } from './-sync.import';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { RawDiscoveryResult } from './-sync.transform';
+
+import { isServiceExport } from './-sync.export';
 
 /* ── Shared response shapes (fields the vanilla actually read) ────────────── */
 
@@ -365,6 +368,52 @@ export async function patchMirroredCustomName(
   const data = await readJson<{ error?: string }>(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Failed to update name');
   return data;
+}
+
+/* ── Playlist export (#903, stats-automations.js 662-819) ─────────────────── */
+
+/**
+ * GET /api/discover/your-albums/sources — the export modal's connection probe
+ * (715). The vanilla swallows every failure with `.catch(() => {})`, gating
+ * nothing; null is that outcome.
+ */
+export async function fetchExportConnectedSources(): Promise<string[] | null> {
+  try {
+    const data = await readJson<{ connected?: string[] }>(
+      await fetch('/api/discover/your-albums/sources'),
+    );
+    return data?.connected || [];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST the export job. Spotify/Deezer take .../export/service/<mode> with a
+ * {backfill} body; ListenBrainz and .jspf take .../export/listenbrainz with a
+ * {mode} body (736-741).
+ */
+export async function startPlaylistExport(
+  playlistId: number | string,
+  mode: ExportMode,
+  backfill: boolean,
+): Promise<ExportStartResponse> {
+  const isService = isServiceExport(mode);
+  const url = isService
+    ? `/api/playlists/${playlistId}/export/service/${mode}`
+    : `/api/playlists/${playlistId}/export/listenbrainz`;
+  return readJson(
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(isService ? { backfill: !!backfill } : { mode }),
+    }),
+  );
+}
+
+/** GET /api/playlists/export/status/<jobId> (759). */
+export async function fetchPlaylistExportStatus(jobId: string): Promise<{ job?: ExportJob }> {
+  return readJson(await fetch(`/api/playlists/export/status/${jobId}`));
 }
 
 /** DELETE /api/youtube/delete/<hash> (removeYouTubePlaylistFromBackend, 1541). */
