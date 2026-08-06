@@ -1790,6 +1790,55 @@ reconcile against it — the named functions, the cross-page contracts section,
 and globals.d.ts — before writing any code. Every miss above was already
 written down.
 
+### P5e-fix P0 READ — the mirrored pieces P5e left behind (READ, no code yet)
+
+Read line by line: stats-automations.js 1066-1197 (openMirroredPlaylistModal,
+closeMirroredModal, clearMirroredDiscovery), 2043-2149
+(discoverMirroredPlaylist), 2155-2194 (retryFailedMirroredDiscovery);
+sync-services.js 9189-9205 (_discoveryCompleteToast); and ALL FIVE external
+call sites. Six findings, every one verified by grep, not inferred:
+
+1. **openMirroredPlaylistModal must be ADOPTED, not ported.** Five callers,
+   three of them in auto-sync.js whose board is a later phase: the schedule
+   board's Details button (1180), and the close-and-REOPEN tails of
+   editMirroredCustomName (2403) and editMirroredSourceRef (2437); plus
+   shared-helpers.js 1756 (the mirrorPlaylist flow) and
+   sync-soulsync-discovery.js 266 ("Same flow the Mirrored tab uses"). It
+   stays a global; the React tab opens it. No fork — the evidence is one-sided.
+2. **`/api/mirrored-playlists/<id>/prepare-discovery` is UNPORTED** (grep:
+   the only occurrence in the repo is stats-automations.js 2062). It REGISTERS
+   the mirrored playlist with the backend so the YouTube discovery pipeline can
+   find it, and the vanilla POSTs it before every fresh mirrored discovery.
+   P5e's card click seeds React state and opens the modal, whose Start
+   Discovery goes straight to the youtube discovery-start endpoint with no
+   registration. This is a probable functional break in P5e, not a gap.
+3. **The React modal's Retry Failed button can never render.** discovery-modal
+   .tsx 386 gates it on `config.id === 'mirrored' && failedCount > 0 &&
+   onRetryFailed`, and NOTHING in the port supplies onRetryFailed —
+   source-modals.tsx does not pass it. Silently dropped, not deferred.
+4. **The discovery-complete toast is unported for ALL NINE verticals** — a P3c
+   gap, wider than this phase. The vanilla calls _discoveryCompleteToast from
+   both completion paths (9233 socket, 9281 poll); useSourceVertical has no
+   showToast at all. It also carries #815: when retryFailedMirroredDiscovery
+   stamped `_retryDiscovery {matchesBefore, retryCount}`, the toast reports
+   `Retry complete: N of M newly found` (+ `, K still not found`), type success
+   when N>0 else info, and DELETES the baseline; otherwise plain
+   'Discovery complete!'.
+5. **clearMirroredDiscovery's stale-modal removal was omitted** (1188-1189:
+   `document.getElementById('youtube-discovery-modal-' + hash)` removed after
+   the delete). Probably a correct no-op given the React modal's own
+   sync-discovery-* namespace (perfection-pass finding), but P5e neither
+   ported nor declared it.
+6. **The detail modal's source maps differ from the card's.** 1086-1087 carries
+   SEVEN entries (spotify, spotify_public, tidal, youtube, beatport, deezer,
+   qobuz) with a 📋 fallback and a parallel label map; the card's map at 571 has
+   six and includes `file`. Do not share one table between them.
+
+Also noted for the auto-sync board phase: findings 1's callers 2 and 3 mean the
+vanilla rename/source-ref tails REOPEN the detail modal, while P5g's React
+ports of those two actions do not — so a React rename would leave an adopted
+detail modal stale on screen.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
