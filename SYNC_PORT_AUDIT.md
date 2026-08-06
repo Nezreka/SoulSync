@@ -2545,3 +2545,47 @@ block the shell wave and the shell wave does not block it.
 **Still to do: the verbatim read.** This entry establishes scope and boundary
 only. The line-by-line read of the 3,913 lines + the 29 sync-services functions
 has NOT been done, and no Beatport code should be written until it has.
+
+### CORRECTION — the Beatport boundary entry above is WRONG, and how it happened
+
+The entry above claims *"beatport-ui.js is entirely the sync page's Beatport
+tab"* with "four checks, all negative". That claim is false and the commit that
+carried it (521cd50ac) should be read with this correction attached.
+
+**The fact.** beatport-ui.js lines 3627-3912 (~285 lines, 8 functions) are not
+Beatport at all. They are the SETTINGS page's media-server configuration:
+
+    loadPlexMusicLibraries / selectPlexLibrary
+    loadJellyfinUsers / selectJellyfinUser
+    loadJellyfinMusicLibraries / selectJellyfinLibrary
+    loadNavidromeMusicFolders / selectNavidromeMusicFolder
+
+Called from settings.js (three call sites each) and from inline `onchange`
+handlers in the SETTINGS markup (index.html 4392-4492). Nothing on the sync page
+touches them.
+
+**How the wrong conclusion was reached.** The container-id check was run through
+`head -40`, and the conclusion "every container it looks up is beatport-* or
+genre-*" was drawn from that truncated list. There are 48 distinct ids, and all
+NINE settings ids (plex-music-library, jellyfin-user, navidrome-music-folder and
+the three selector containers among them) sat past the cut. The evidence was
+truncated and the conclusion was not.
+
+**The lesson, which generalises past this file:** a `head`/`tail` on the evidence
+makes a NEGATIVE claim ("nothing outside X") unsound, because the counter-example
+is exactly what gets cut. Enumerate in full, or count first and compare the
+count. The other three checks (no page machinery, no window globals, no external
+callers) were sound and remain true.
+
+**Corrected boundary.** beatport-ui.js is TWO tenants in one file:
+- 1-3626 — the sync page's Beatport tab. Self-contained, no seams, severs
+  cleanly. Everything the entry above says about interop holds for this part.
+- 3627-3912 — the Settings page's media-server pickers. NOT sync content, must
+  be re-homed before the file is deleted, and must not be ported into the sync
+  route.
+
+**Now enforced.** `vanilla-seams.test.ts` gained a second block, FOREIGN_TENANTS,
+asserting all eight settings functions still exist in beatport-ui.js. Unlike the
+window seams these fail LOUDLY when deleted (an unqualified call to a missing
+function is a ReferenceError) — but loud-on-interaction still catches nobody,
+since no one exercises a Settings dropdown while porting the Beatport tab.
