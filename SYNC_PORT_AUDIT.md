@@ -2476,3 +2476,30 @@ suite 278 files / 6071 tests.
 `onExportM3u` deleted, for slices C and D's reason. **The server tab is now
 COMPLETE** — all five slices built, and ServerCompareEditor has no leftover
 callback props.
+
+### THE FLIP-TIME CARVE-OUTS ARE NOW ENFORCED, NOT JUST WRITTEN DOWN
+
+The slice-E note above ("do not delete openSyncDetailModal") was only a
+document, and a document does not fail a build. `src/test/vanilla-seams.test.ts`
+now asserts that all TEN vanilla definitions React reaches through `window`
+still exist in their files.
+
+**Why these specifically.** Every one of these call sites is optional-chained —
+`window.openSyncDetailModal?.(id)` — which is correct at runtime, since a
+missing global must not throw. The consequence is that deleting the definition
+produces no error, no toast and no failing test: the button just stops working,
+usually on a DIFFERENT page from the one whose region was deleted. Silence is
+the whole danger.
+
+Covered: openSyncDetailModal / _syncDetailFilter / _readdSyncWishlist
+(pages-extra.js), openAutoSyncScheduleModal (auto-sync.js),
+checkForActiveProcesses + openDownloadMissingModal (sync-spotify.js),
+updateCardToSyncing + startSyncPolling (downloads.js), and both core.js bridges
+this migration added.
+
+**The guard was proven, not assumed.** Renaming openSyncDetailModal in
+pages-extra.js was simulated: the guard failed with the intended message while
+the other nine stayed green, and the file was restored under a sha256 check.
+
+A failure here means the seam MOVED, which is fine — re-home it or publish it
+from React and update the row. It must never be made green by deleting the row.
