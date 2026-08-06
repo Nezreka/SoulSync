@@ -4,13 +4,17 @@
  * (file:line cited per describe), wire calls against a captured fetch.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SsdTrack } from './-sync.lb-tabs';
 
+import { extractFunction } from '../../test/vanilla-extract';
 import {
   LB_EMPTY_MESSAGES,
   LB_SUB_TABS,
+  buildLbMirrorTracks,
   buildSsdMirrorPayload,
   buildSsdMirrorTracks,
   fetchLastfmRadios,
@@ -18,6 +22,7 @@ import {
   fetchLbPlaylistTracks,
   fetchSsdRecords,
   lbCardProgressLine,
+  mirrorLbAfterDiscovery,
   postLbCacheRefresh,
   postSsdRefresh,
   soulsyncSyntheticId,
@@ -341,5 +346,281 @@ describe('SoulSync Discovery (sync-soulsync-discovery.js)', () => {
       'POST /api/personalized/playlist/hidden_gems/refresh',
       'POST /api/personalized/playlist/time_machine/1990s/refresh',
     ]);
+  });
+});
+
+/* ── The post-discovery LB mirror (differential vs 10928-11020) ───────────── */
+
+describe('mirrorLbAfterDiscovery (differential vs _mirrorListenBrainzAfterDiscovery)', () => {
+  const SYNC_SERVICES = readFileSync(resolve(process.cwd(), 'static/sync-services.js'), 'utf8');
+  type MirrorVanilla = { _mirrorListenBrainzAfterDiscovery: (mbid: string) => Promise<void> };
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const mirrorVanilla = new Function(
+    `${extractFunction('_mirrorListenBrainzAfterDiscovery', SYNC_SERVICES)}
+     return { _mirrorListenBrainzAfterDiscovery };`,
+  )() as MirrorVanilla;
+
+  interface MirrorCall {
+    source: string;
+    sourcePlaylistId: string;
+    name: string;
+    tracks: unknown[];
+    meta: Record<string, unknown>;
+  }
+
+  /** Run the vanilla with its globals faked, and report what it mirrored. */
+  async function runVanilla(
+    mbid: string,
+    state: Record<string, unknown> | undefined,
+    series: unknown,
+  ): Promise<MirrorCall | null> {
+    let call: MirrorCall | null = null;
+    const g = globalThis as Record<string, unknown>;
+    g.listenbrainzPlaylistStates = state ? { [mbid]: state } : {};
+    g.mirrorPlaylist = (
+      source: string,
+      sourcePlaylistId: string,
+      name: string,
+      tracks: unknown[],
+      meta: Record<string, unknown>,
+    ) => {
+      call = { source, sourcePlaylistId, name, tracks, meta };
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(series), { status: 200 })),
+    );
+    await mirrorVanilla._mirrorListenBrainzAfterDiscovery(mbid);
+    return call;
+  }
+
+  /** Run the port and report the payload it POSTed to /api/mirror-playlist. */
+  async function runPort(
+    mbid: string,
+    state: Record<string, unknown> | undefined,
+    series: unknown,
+  ): Promise<MirrorCall | null> {
+    let body: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).startsWith('/api/mirror-playlist')) {
+          body = JSON.parse(init?.body as string) as Record<string, unknown>;
+          return new Response('{}', { status: 200 });
+        }
+        return new Response(JSON.stringify(series), { status: 200 });
+      }),
+    );
+    await mirrorLbAfterDiscovery(
+      mbid,
+      state
+        ? {
+            playlist: state.playlist as Record<string, unknown>,
+            rawResults: state.discovery_results as unknown[],
+          }
+        : undefined,
+    );
+    // Let the fire-and-forget POST settle.
+    await new Promise((r) => setTimeout(r, 0));
+    if (!body) return null;
+    const b = body as Record<string, unknown>;
+    return {
+      source: b.source as string,
+      sourcePlaylistId: b.source_playlist_id as string,
+      name: b.name as string,
+      tracks: b.tracks as unknown[],
+      meta: {
+        owner: b.owner,
+        description: b.description,
+        image_url: b.image_url,
+      },
+    };
+  }
+
+  const RESULTS = [
+    // Object artists + object album with images — the fully-populated row.
+    {
+      confidence: 0.91,
+      spotify_data: {
+        id: 't1',
+        name: 'Alright',
+        artists: [{ name: 'Kendrick Lamar' }, { name: 'Pharrell' }],
+        album: { name: 'To Pimp a Butterfly', images: [{ url: 'http://img/1' }] },
+        duration_ms: 219000,
+        source: 'spotify',
+      },
+    },
+    // String artists array + string album + top-level image_url fallback.
+    {
+      spotify_data: {
+        id: 't2',
+        name: 'Redbone',
+        artists: ['Childish Gambino'],
+        album: 'Awaken, My Love!',
+        image_url: 'http://img/2',
+        duration_ms: 326000,
+      },
+    },
+    // Bare-string artists, no album, no image at all.
+    { spotify_data: { id: 't3', name: 'Nights', artists: 'Frank Ocean' } },
+    // A NON-spotify provider — extra_data.provider follows spotify_data.source
+    // (10957), it is not hardcoded.
+    {
+      confidence: 0.4,
+      spotify_data: { id: 't4', name: 'Teardrop', artists: ['Massive Attack'], source: 'deezer' },
+    },
+    // Unmatched rows: no spotify_data, and spotify_data without an id.
+    { spotify_track: 'unmatched' },
+    { spotify_data: { name: 'no id here' } },
+  ];
+
+  const PLAYLIST = {
+    name: 'Weekly Jams for user',
+    tracks: [],
+    description: '5 tracks from Weekly Jams for user',
+    source: 'listenbrainz',
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const CASES: { label: string; state: Record<string, unknown>; series: unknown }[] = [
+    {
+      label: 'a plain LB playlist, no series match',
+      state: { playlist: PLAYLIST, discovery_results: RESULTS },
+      series: { matched: false },
+    },
+    {
+      label: 'a matched rotating series (id + name + source all rewritten)',
+      state: { playlist: PLAYLIST, discovery_results: RESULTS },
+      series: {
+        matched: true,
+        source: 'listenbrainz',
+        series_id: 'lb_weekly_jams_boulder',
+        canonical_name: 'Weekly Jams',
+      },
+    },
+    {
+      label: 'a Last.fm Radio title routes to source lastfm',
+      state: {
+        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
+        discovery_results: RESULTS,
+      },
+      series: { matched: false },
+    },
+    {
+      label: 'a Last.fm Radio whose series match rewrites the source back',
+      state: {
+        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
+        discovery_results: RESULTS,
+      },
+      series: { matched: true, series_id: 'lb_x' },
+    },
+    {
+      label: 'a title merely CONTAINING Radio is not a Last.fm radio (10976)',
+      state: {
+        playlist: { ...PLAYLIST, name: 'Radio Ga Ga Mix' },
+        discovery_results: RESULTS,
+      },
+      series: { matched: false },
+    },
+    {
+      label: 'series fields are ignored unless matched is true (10990)',
+      state: { playlist: PLAYLIST, discovery_results: RESULTS },
+      series: {
+        matched: false,
+        series_id: 'lb_ignored',
+        canonical_name: 'Ignored',
+        source: 'lastfm',
+      },
+    },
+    {
+      label: 'a matched series rewrites a Last.fm radio back to listenbrainz (10991)',
+      state: {
+        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
+        discovery_results: RESULTS,
+      },
+      series: {
+        matched: true,
+        source: 'listenbrainz',
+        series_id: 'lb_series',
+        canonical_name: 'Rolled Up',
+      },
+    },
+    {
+      label: 'a creator on the playlist wins over the owner fallback',
+      state: {
+        playlist: { ...PLAYLIST, creator: 'troi', image_url: 'http://cover' },
+        discovery_results: RESULTS,
+      },
+      series: { matched: false },
+    },
+    {
+      label: 'a partial series match keeps the fields it did not send',
+      state: { playlist: PLAYLIST, discovery_results: RESULTS },
+      series: { matched: true, canonical_name: 'Weekly Jams' },
+    },
+  ];
+
+  it.each(CASES)('mirrors identically: $label', async ({ state, series }) => {
+    const theirs = await runVanilla('mbid-1', state, series);
+    const ours = await runPort('mbid-1', state, series);
+    expect(theirs).not.toBeNull();
+    expect(ours).toEqual(theirs);
+  });
+
+  const SKIPS: { label: string; state: Record<string, unknown> | undefined }[] = [
+    { label: 'no state at all (10931)', state: undefined },
+    { label: 'a state with no playlist (10931)', state: { discovery_results: RESULTS } },
+    { label: 'no results (10935)', state: { playlist: PLAYLIST, discovery_results: [] } },
+    {
+      label: 'results but none matched (10964)',
+      state: { playlist: PLAYLIST, discovery_results: [{ spotify_track: 'x' }] },
+    },
+  ];
+
+  it.each(SKIPS)('mirrors nothing when there is $label', async ({ state }) => {
+    expect(await runVanilla('mbid-1', state, { matched: false })).toBeNull();
+    expect(await runPort('mbid-1', state, { matched: false })).toBeNull();
+  });
+
+  it('still mirrors when the series lookup fails outright (11000-11002)', async () => {
+    let body: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).startsWith('/api/mirror-playlist')) {
+          body = JSON.parse(init?.body as string) as Record<string, unknown>;
+          return new Response('{}', { status: 200 });
+        }
+        throw new Error('series endpoint down');
+      }),
+    );
+    await mirrorLbAfterDiscovery('mbid-1', {
+      playlist: PLAYLIST,
+      rawResults: RESULTS,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(body).not.toBeNull();
+    // Falls through to the per-playlist mbid rather than dropping the mirror.
+    expect((body as unknown as Record<string, unknown>).source_playlist_id).toBe('mbid-1');
+  });
+
+  it('sends only the matched rows, with extra_data as a JSON string (10955)', () => {
+    const tracks = buildLbMirrorTracks(RESULTS);
+    expect(tracks).toHaveLength(4);
+    expect(JSON.parse(String(tracks[0].extra_data))).toEqual({
+      discovered: true,
+      provider: 'spotify',
+      confidence: 0.91,
+      matched_data: RESULTS[0].spotify_data,
+    });
+    // The confidence default is 1.0 when the row carries none (10958).
+    expect(JSON.parse(String(tracks[1].extra_data)).confidence).toBe(1.0);
+    // provider defaults to 'spotify' when spotify_data.source is absent (10957)
+    // but FOLLOWS spotify_data.source when it carries one.
+    expect(JSON.parse(String(tracks[1].extra_data)).provider).toBe('spotify');
+    expect(JSON.parse(String(tracks[3].extra_data)).provider).toBe('deezer');
   });
 });

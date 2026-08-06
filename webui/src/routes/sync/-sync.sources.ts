@@ -149,6 +149,16 @@ export interface SourceVerticalConfig {
      * The YouTube modal alone adds the M3U export + quality-profile chrome.
      */
     downloadEntry: 'tidal' | 'youtube';
+    /**
+     * The toast a finished discovery raises, or null for none. Real drift, not
+     * an oversight: youtube + mirrored share _discoveryCompleteToast's
+     * 'Discovery complete!' (9204), listenbrainz words its own differently
+     * (11076, 11171), and the other six raise NOTHING — they complete with a
+     * console.log only (759 tidal, 3180 deezer, 7106 spotify_public, 8132
+     * itunes_link, and the qobuz/beatport twins). Resolved through
+     * discoveryCompleteToast, which also applies the #815 retry override.
+     */
+    discoveryCompleteToast: string | null;
   };
 }
 
@@ -185,6 +195,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -212,6 +223,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'qobuz',
       downloadEntry: 'tidal',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -239,6 +251,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -269,6 +282,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
+      discoveryCompleteToast: 'Discovery complete!',
     },
   },
 
@@ -303,6 +317,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -335,6 +350,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -366,6 +382,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'check-note-spans',
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
+      discoveryCompleteToast: null,
     },
   },
 
@@ -408,6 +425,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
+      discoveryCompleteToast: 'ListenBrainz discovery complete!',
     },
   },
 
@@ -443,6 +461,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       cardProgressFormat: 'slash-text',
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
+      discoveryCompleteToast: 'Discovery complete!',
     },
   },
 };

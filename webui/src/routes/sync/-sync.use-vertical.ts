@@ -11,6 +11,16 @@
  * the explorer's mirrored discoveries). The listener is kept for exactly that
  * case, filtered by frame id AND platform. Sync progress is HTTP-poll only,
  * the discover-port precedent.
+ *
+ * Completion announcement: the vanilla fires its toast strictly on the payload's
+ * `complete` flag (9226 socket, 9268 poll) except ListenBrainz, which also
+ * accepts phase 'discovered' (11062). This hook announces on EITHER, for every
+ * source, and never on phase 'error' — a knowing unification that follows the
+ * one already made for the stop condition: the vanilla's stricter test leaves
+ * its HTTP poll spinning forever on a phase-only completion, which this port
+ * deliberately stops, and stopping successfully without announcing would be
+ * incoherent. It also announces at most ONCE per run, where the vanilla's
+ * socket and always-on poll can both reach the block and toast twice.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,6 +37,7 @@ import {
   startSourceSync,
   updateSourcePhase,
 } from './-sync.api';
+import { discoveryCompleteToast } from './-sync.core';
 import {
   applyDiscovery,
   applySyncStarted,
@@ -77,13 +88,39 @@ export interface SourceVertical {
   closeModalReset: (sourceId: string) => Promise<void>;
 }
 
-export function useSourceVertical(config: SourceVerticalConfig): SourceVertical {
+export interface SourceVerticalOptions {
+  /**
+   * Extra work when a discovery finishes, after the toast. The ONE production
+   * user is ListenBrainz, which auto-mirrors its matched tracks at exactly this
+   * point (_mirrorListenBrainzAfterDiscovery, called at 11075 socket / 11170
+   * poll) — that is what puts LB and Last.fm Radio playlists in the Mirrored
+   * tab and therefore on the Auto-Sync board.
+   */
+  onDiscoveryComplete?: (sourceId: string) => void;
+}
+
+export function useSourceVertical(
+  config: SourceVerticalConfig,
+  options: SourceVerticalOptions = {},
+): SourceVertical {
   const [states, setStates] = useState<Record<string, SourcePlaylistState>>({});
   const statesRef = useRef(states);
   statesRef.current = states;
 
   const discoveryPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const syncPollers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  /**
+   * Ids whose completion has already been announced. The vanilla can announce
+   * twice — its socket callback and its always-on HTTP poll both run the
+   * completion block (9233 and 9281) — but a doubled toast is a defect, not a
+   * behaviour to transcribe, so the port announces once per discovery run. The
+   * entry is cleared when a new discovery starts.
+   */
+  const announced = useRef<Set<string>>(new Set());
+  /** Ids whose announcement is waiting for the patch that triggered it. */
+  const pendingAnnounce = useRef<Set<string>>(new Set());
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const patch = useCallback(
     (sourceId: string, fn: (s: SourcePlaylistState) => SourcePlaylistState) => {
@@ -94,6 +131,40 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
     },
     [config],
   );
+
+  /**
+   * Queue the completion side effects. They must not run here: the caller has
+   * just patched the payload in, and the vanilla writes those counters BEFORE
+   * it toasts (9224 then 9233) — reading statesRef now would report the
+   * PRE-completion match count, which is exactly wrong for the #815 retry
+   * message. The effect below runs them once the patch has committed.
+   */
+  const announceComplete = useCallback((sourceId: string) => {
+    if (announced.current.has(sourceId)) return;
+    announced.current.add(sourceId);
+    pendingAnnounce.current.add(sourceId);
+  }, []);
+
+  useEffect(() => {
+    if (pendingAnnounce.current.size === 0) return;
+    const ids = [...pendingAnnounce.current];
+    pendingAnnounce.current.clear();
+    for (const sourceId of ids) {
+      const state = states[sourceId];
+      const toast = discoveryCompleteToast(
+        config.ux.discoveryCompleteToast,
+        state?.spotifyMatches ?? 0,
+        state?.retryDiscovery,
+      );
+      if (state?.retryDiscovery) {
+        // Consumed — the vanilla deletes the baseline at 9198 so the next
+        // plain discovery reports plainly.
+        patch(sourceId, ({ retryDiscovery: _consumed, ...rest }) => rest);
+      }
+      if (toast) window.showToast?.(toast.message, toast.type);
+      optionsRef.current.onDiscoveryComplete?.(sourceId);
+    }
+  }, [config, patch, states]);
 
   const stopDiscoveryPoll = useCallback((sourceId: string) => {
     const poller = discoveryPollers.current[sourceId];
@@ -133,17 +204,20 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
       patch(id, (s) => applyDiscovery(s, config, frame as DiscoveryPayload));
       if (frame.complete || frame.phase === 'discovered' || frame.phase === 'error') {
         stopDiscoveryPoll(id);
+        if (frame.phase !== 'error') announceComplete(id);
       }
     };
     window.addEventListener(SYNC_DISCOVERY_EVENT, onFrame);
     return () => window.removeEventListener(SYNC_DISCOVERY_EVENT, onFrame);
-  }, [config, patch, stopDiscoveryPoll]);
+  }, [announceComplete, config, patch, stopDiscoveryPoll]);
 
   /* ── The HTTP backstop ──────────────────────────────────────────────────── */
 
   const startDiscoveryPoll = useCallback(
     (sourceId: string) => {
       stopDiscoveryPoll(sourceId);
+      // A new observation window: this run gets its own completion announcement.
+      announced.current.delete(sourceId);
       discoveryPollers.current[sourceId] = setInterval(async () => {
         try {
           const status = await fetchSourceDiscoveryStatus(config, sourceId);
@@ -157,13 +231,14 @@ export function useSourceVertical(config: SourceVerticalConfig): SourceVertical 
           // HTTP polls spin forever on it; stop here.
           if (status.complete || status.phase === 'discovered' || status.phase === 'error') {
             stopDiscoveryPoll(sourceId);
+            if (status.phase !== 'error') announceComplete(sourceId);
           }
         } catch {
           stopDiscoveryPoll(sourceId);
         }
       }, config.discovery.pollMs);
     },
-    [config, patch, stopDiscoveryPoll],
+    [announceComplete, config, patch, stopDiscoveryPoll],
   );
 
   const startSyncPoll = useCallback(

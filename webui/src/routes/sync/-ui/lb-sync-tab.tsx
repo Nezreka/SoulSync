@@ -24,11 +24,13 @@ import {
   fetchLbCategories,
   fetchLbPlaylistTracks,
   lbCardProgressLine,
+  mirrorLbAfterDiscovery,
   postLbCacheRefresh,
   unwrapJspfPlaylist,
 } from '../-sync.lb-tabs';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
+import { useSourceVertical } from '../-sync.use-vertical';
 import { SourceCard } from './source-card';
 
 /** The shared card list both MB-style tabs render. */
@@ -72,6 +74,29 @@ export function LbCardList({
 }
 
 /**
+ * THE way to build the ListenBrainz vertical — used by both this tab and the
+ * Last.fm Radio tab, which share one vertical exactly as the vanilla shares
+ * listenbrainzPlaylistStates between them.
+ *
+ * It exists so the post-discovery mirror cannot be forgotten. That mirror
+ * (_mirrorListenBrainzAfterDiscovery, 10928, called from both completion paths
+ * at 11075/11170) is what puts LB and Last.fm Radio playlists into the Mirrored
+ * tab, and LB rows onto the Auto-Sync board; a plain useSourceVertical call for
+ * this source would silently drop the feature, which is exactly how it went
+ * missing in the first place.
+ */
+export function useListenBrainzVertical(): SourceVertical {
+  const verticalRef = useRef<SourceVertical | null>(null);
+  const vertical = useSourceVertical(SYNC_SOURCES.listenbrainz, {
+    onDiscoveryComplete: (mbid) => {
+      void mirrorLbAfterDiscovery(mbid, verticalRef.current?.states[mbid]);
+    },
+  });
+  verticalRef.current = vertical;
+  return vertical;
+}
+
+/**
  * The on-demand track fetch + seed + open (handleListenBrainzSyncCardClick
  * 159-218), with the module-level tracks cache the vanilla kept in
  * listenbrainzTracksCache.
@@ -96,7 +121,16 @@ export function useLbCardOpen(
         }
         if (!tracks || tracks.length === 0) throw new Error('Playlist has no tracks');
         window.hideLoadingOverlay?.();
-        vertical.seed(card.mbid, { name: card.title, tracks });
+        // The vanilla's LB state.playlist, field for field (core.js 238-252):
+        // name + tracks + a DERIVED description and the source tag. The
+        // description is not decoration — the post-discovery mirror sends it
+        // as the mirrored row's description (11012).
+        vertical.seed(card.mbid, {
+          name: card.title,
+          tracks,
+          description: `${tracks.length} tracks from ${card.title}`,
+          source: 'listenbrainz',
+        });
         setOpenId(card.mbid);
       } catch (error) {
         window.hideLoadingOverlay?.();

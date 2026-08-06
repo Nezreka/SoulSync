@@ -13,6 +13,7 @@
  */
 
 import type { SyncStartResponse, SourceSyncStatusResponse } from './-sync.api';
+import type { RetryDiscoveryBaseline } from './-sync.core';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { DiscoveryRow, RawDiscoveryResult } from './-sync.transform';
 
@@ -48,6 +49,13 @@ export interface SourcePlaylistState {
   syncPlaylistId?: string;
   lastSyncProgress?: SyncProgressSnapshot;
   wingIt?: boolean;
+  /**
+   * The #815 Retry-Failed baseline. The vanilla stamps `_retryDiscovery` on
+   * this same state object (retryFailedMirroredDiscovery, stats-automations.js
+   * 2183-2186) and _discoveryCompleteToast consumes and DELETES it (9198), so
+   * the next plain discovery reports plainly. Mirrored-only in practice.
+   */
+  retryDiscovery?: RetryDiscoveryBaseline;
   /**
    * The Auto-Sync pipeline overlay, mirrored-only (auto-sync.js 2451-2460).
    * Snake-cased because these ARE the vanilla's key names on the same state

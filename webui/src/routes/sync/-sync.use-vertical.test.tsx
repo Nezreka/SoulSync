@@ -251,3 +251,113 @@ describe('hydration', () => {
     expect(result.current.states['9'].rows).toHaveLength(1);
   });
 });
+
+describe('discovery completion announcement', () => {
+  function toastSpy(): ReturnType<typeof vi.fn> {
+    const spy = vi.fn();
+    vi.stubGlobal('showToast', spy);
+    (window as unknown as Record<string, unknown>).showToast = spy;
+    return spy;
+  }
+
+  it('raises the source toast once, no matter how many completions arrive', () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.seed('h1'));
+    act(() => result.current.resumeDiscovery('h1'));
+
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true, spotify_matches: 4 }));
+    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    // The vanilla's socket AND always-on poll can both reach the block (9233,
+    // 9281); the port announces once per run.
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true, spotify_matches: 4 }));
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces again after a NEW discovery run starts', () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.seed('h1'));
+    act(() => result.current.resumeDiscovery('h1'));
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
+    act(() => result.current.resumeDiscovery('h1'));
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('stays silent for the six verticals the vanilla never toasts', () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.tidal));
+    act(() => result.current.seed('42'));
+    act(() => frame({ id: '42', platform: 'tidal', complete: true }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when discovery parks on phase error', () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.seed('h1'));
+    act(() => frame({ id: 'h1', platform: 'youtube', phase: 'error' }));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when the BACKSTOP POLL sees phase error, not only frames', async () => {
+    const spy = toastSpy();
+    responder = () => ({ phase: 'error' });
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.seed('h1'));
+    act(() => result.current.resumeDiscovery('h1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.youtube.discovery.pollMs);
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('reports the #815 retry result and consumes the baseline', () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.mirrored));
+    act(() => result.current.seed('mirrored_3'));
+    act(() =>
+      result.current.patchState('mirrored_3', (s) => ({
+        ...s,
+        retryDiscovery: { matchesBefore: 7, retryCount: 5 },
+      })),
+    );
+    act(() => frame({ id: 'mirrored_3', platform: 'youtube', complete: true, spotify_matches: 9 }));
+    expect(spy).toHaveBeenCalledWith(
+      'Retry complete: 2 of 5 newly found, 3 still not found',
+      'success',
+    );
+    expect(result.current.states.mirrored_3.retryDiscovery).toBeUndefined();
+
+    // The baseline is gone, so the NEXT run reports plainly (9198).
+    act(() => result.current.resumeDiscovery('mirrored_3'));
+    act(() => frame({ id: 'mirrored_3', platform: 'youtube', complete: true }));
+    expect(spy).toHaveBeenLastCalledWith('Discovery complete!', 'success');
+  });
+
+  it('fires the source hook — how the LB mirror is reached (11075/11170)', () => {
+    toastSpy();
+    const onDiscoveryComplete = vi.fn();
+    const { result } = renderHook(() =>
+      useSourceVertical(SYNC_SOURCES.listenbrainz, { onDiscoveryComplete }),
+    );
+    act(() => result.current.seed('mbid'));
+    // LB's completion also accepts phase 'discovered' (11062).
+    act(() => frame({ id: 'mbid', platform: 'listenbrainz', phase: 'discovered' }));
+    expect(onDiscoveryComplete).toHaveBeenCalledWith('mbid');
+    expect(onDiscoveryComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces from the HTTP backstop too, not only the frame path', async () => {
+    const spy = toastSpy();
+    responder = () => ({ complete: true, spotify_matches: 2 });
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.seed('h1'));
+    act(() => result.current.resumeDiscovery('h1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.youtube.discovery.pollMs);
+    });
+    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+  });
+});

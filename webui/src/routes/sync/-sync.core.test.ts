@@ -25,6 +25,7 @@ import {
   M3U_AUTOSAVE_SKIP_PREFIXES,
   M3U_EXPORT_ALBUM_PREFIXES,
   actionButtonText,
+  discoveryCompleteToast,
   discoveryRowAction,
   downloadTaskStatusText,
   finalDownloadProgress,
@@ -448,5 +449,92 @@ describe('formatDuration (differential vs the load-order WINNER)', () => {
     expect(formatDuration(null)).toBe('0:00');
     expect(formatDuration(61500)).toBe('1:01');
     expect(formatDuration(3600000)).toBe('60:00'); // no hour rollover, by design
+  });
+});
+
+/* ── discoveryCompleteToast (differential vs _discoveryCompleteToast, 9192) ── */
+
+describe('discoveryCompleteToast (differential vs sync-services.js 9192-9205)', () => {
+  type ToastVanilla = { _discoveryCompleteToast: (hash: string) => void };
+  const toastVanilla = lift<ToastVanilla>(['_discoveryCompleteToast'], SYNC_SERVICES);
+
+  /**
+   * Run the vanilla against a state and report what it toasted. The function
+   * reads the script-scoped youtubePlaylistStates and calls the global
+   * showToast, so both are installed on globalThis for the call.
+   */
+  function vanillaToast(state: Record<string, unknown>): {
+    message: string;
+    type: string;
+  } | null {
+    let captured: { message: string; type: string } | null = null;
+    const g = globalThis as Record<string, unknown>;
+    g.youtubePlaylistStates = { h: state };
+    g.showToast = (message: string, type: string) => {
+      captured = { message, type };
+    };
+    toastVanilla._discoveryCompleteToast('h');
+    return captured;
+  }
+
+  /**
+   * Only youtube + mirrored reach _discoveryCompleteToast, so the differential
+   * runs against their default message. Its retry arm is what actually varies.
+   */
+  const CASES: { matches: number; retry?: { matchesBefore: number; retryCount: number } }[] = [
+    { matches: 0 },
+    { matches: 12 },
+    // Every retried track found.
+    { matches: 10, retry: { matchesBefore: 7, retryCount: 3 } },
+    // Some still missing → the ", K still not found" tail.
+    { matches: 9, retry: { matchesBefore: 7, retryCount: 5 } },
+    // None found → type flips to 'info'.
+    { matches: 7, retry: { matchesBefore: 7, retryCount: 4 } },
+    // Matches went DOWN — both sides clamp found at 0 (Math.max, 9196).
+    { matches: 3, retry: { matchesBefore: 7, retryCount: 4 } },
+    // stillFailed clamps too: more found than were retried.
+    { matches: 20, retry: { matchesBefore: 7, retryCount: 2 } },
+    // Zero-count retry: the baseline exists but counted nothing.
+    { matches: 5, retry: { matchesBefore: 5, retryCount: 0 } },
+  ];
+
+  it('agrees with the vanilla on every message and severity', () => {
+    for (const c of CASES) {
+      const state: Record<string, unknown> = { spotify_matches: c.matches };
+      if (c.retry) state._retryDiscovery = { ...c.retry };
+      const theirs = vanillaToast(state);
+      const ours = discoveryCompleteToast('Discovery complete!', c.matches, c.retry);
+      expect(ours, JSON.stringify(c)).toEqual(theirs);
+    }
+  });
+
+  it('consumes the baseline exactly as the vanilla deletes it', () => {
+    const state: Record<string, unknown> = {
+      spotify_matches: 9,
+      _retryDiscovery: { matchesBefore: 7, retryCount: 5 },
+    };
+    vanillaToast(state);
+    // 9198 — so a following plain discovery reports plainly.
+    expect(state._retryDiscovery).toBeUndefined();
+  });
+
+  it('returns null for the six verticals that raise no toast', () => {
+    expect(discoveryCompleteToast(null, 12)).toBeNull();
+  });
+
+  it('lets a retry override survive a null default (mirrored-only in practice)', () => {
+    // The vanilla checks the baseline BEFORE any default (9195), so the arm
+    // order is preserved even though no silent source ever stamps one.
+    expect(discoveryCompleteToast(null, 9, { matchesBefore: 7, retryCount: 5 })).toEqual({
+      message: 'Retry complete: 2 of 5 newly found, 3 still not found',
+      type: 'success',
+    });
+  });
+
+  it('pins ListenBrainz wording as a literal (11076, 11171)', () => {
+    expect(discoveryCompleteToast('ListenBrainz discovery complete!', 3)).toEqual({
+      message: 'ListenBrainz discovery complete!',
+      type: 'success',
+    });
   });
 });

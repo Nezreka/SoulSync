@@ -238,3 +238,26 @@ describe('the endpoint table is anchored to the live vanilla', () => {
     expect(SYNC_SOURCES.itunes_link.ids.vpidPrefix).toBe('itunes_link_');
   });
 });
+
+describe('discovery-completion toasts (the per-source drift, 9204/11076)', () => {
+  it('pins which sources toast, and with what words', () => {
+    const byId = Object.fromEntries(
+      Object.values(SYNC_SOURCES).map((c) => [c.id, c.ux.discoveryCompleteToast]),
+    );
+    expect(byId).toEqual({
+      // _discoveryCompleteToast, shared by youtube and the mirrored rows that
+      // ride its poller (9204).
+      youtube: 'Discovery complete!',
+      mirrored: 'Discovery complete!',
+      // ListenBrainz words its own (11076, 11171).
+      listenbrainz: 'ListenBrainz discovery complete!',
+      // The other six complete with a console.log and NO toast.
+      tidal: null,
+      qobuz: null,
+      deezer: null,
+      beatport: null,
+      spotify_public: null,
+      itunes_link: null,
+    });
+  });
+});

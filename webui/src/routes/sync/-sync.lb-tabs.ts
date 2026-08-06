@@ -7,6 +7,8 @@
 
 import type { MirrorPayload } from './-sync.import';
 
+import { detectLbSeries, postMirrorPlaylist } from './-sync.api';
+
 /* ── JSPF unwrap (sync-listenbrainz.js 89-105 / sync-lastfm.js 65-73) ─────── */
 
 export interface LbCardData {
@@ -320,6 +322,149 @@ export function buildSsdMirrorPayload(
     owner: 'SoulSync',
     image_url: '',
   };
+}
+
+/* ── The post-discovery LB mirror (_mirrorListenBrainzAfterDiscovery, 10928) ─ */
+
+/**
+ * Project the MATCHED discovery results into the mirror contract (10937-10962).
+ *
+ * Only rows carrying spotify_data.id survive — the vanilla filters at 10938 and
+ * abandons the whole mirror when nothing does (10964-10967), which the caller
+ * reproduces by checking for an empty array. The artist/album/image ladders are
+ * transcribed exactly: artists may be an array of objects, an array of strings
+ * or a bare string; album may be an object or a string; the image comes from
+ * album.images[0].url, else sp.image_url, else null.
+ */
+export function buildLbMirrorTracks(results: unknown[]): MirrorPayload['tracks'] {
+  return results
+    .filter((r) => {
+      const row = r as { spotify_data?: { id?: string } } | null;
+      return Boolean(row && row.spotify_data && row.spotify_data.id);
+    })
+    .map((r) => {
+      const row = r as { spotify_data: Record<string, unknown>; confidence?: number };
+      const sp = row.spotify_data;
+      const artists = sp.artists;
+      const artistName = Array.isArray(artists)
+        ? typeof artists[0] === 'object' && artists[0] !== null
+          ? ((artists[0] as { name?: string }).name ?? '')
+          : ((artists[0] as string | undefined) ?? '')
+        : ((artists as string | undefined) ?? '');
+      const album = sp.album as { name?: string; images?: { url?: string }[] } | string | undefined;
+      const albumName =
+        album && typeof album === 'object' ? (album.name ?? '') : (album as string) || '';
+      const albumImage =
+        album && typeof album === 'object' && album.images && album.images[0]
+          ? (album.images[0].url ?? null)
+          : ((sp.image_url as string | undefined) ?? null);
+      return {
+        track_name: (sp.name as string) || '',
+        artist_name: artistName || '',
+        album_name: albumName || '',
+        duration_ms: (sp.duration_ms as number) || 0,
+        image_url: albumImage,
+        source_track_id: (sp.id as string) || '',
+        extra_data: JSON.stringify({
+          discovered: true,
+          provider: (sp.source as string) || 'spotify',
+          confidence: row.confidence || 1.0,
+          matched_data: sp,
+        }),
+      };
+    });
+}
+
+/** What detectLbSeries returns, as the vanilla reads it (10990-10993). */
+export interface LbSeriesMatch {
+  matched?: boolean;
+  source?: string;
+  series_id?: string;
+  canonical_name?: string;
+}
+
+export interface LbMirrorTarget {
+  source: string;
+  sourcePlaylistId: string;
+  name: string;
+  owner: string;
+}
+
+/**
+ * Where an LB mirror lands (10975-11004, 11011).
+ *
+ * Two rules, both load-bearing:
+ * - A 'Last.fm Radio:' title prefix routes the mirror to source 'lastfm' so the
+ *   Auto-Sync board groups it under Last.fm Radio and the cascade-delete hook
+ *   targets the right source. This is also why those rows are unschedulable —
+ *   autoSyncCanSchedulePlaylist excludes 'lastfm' (auto-sync.js 205-216).
+ * - A matched rotating series collapses onto a synthetic id + canonical name so
+ *   the next week/year UPSERTs onto ONE row instead of accumulating.
+ *
+ * The owner fallback is chosen from the RESOLVED source, so a Last.fm radio
+ * whose series lookup rewrote the source follows it (11004).
+ */
+export function resolveLbMirrorTarget(
+  playlistMbid: string,
+  rawTitle: string,
+  creator: string | undefined,
+  series?: LbSeriesMatch | null,
+): LbMirrorTarget {
+  const title = rawTitle || 'ListenBrainz Playlist';
+  let source = title.startsWith('Last.fm Radio:') ? 'lastfm' : 'listenbrainz';
+  let sourcePlaylistId = playlistMbid;
+  let name = title;
+  if (series && series.matched) {
+    source = series.source || source;
+    sourcePlaylistId = series.series_id || sourcePlaylistId;
+    name = series.canonical_name || name;
+  }
+  const ownerFallback = source === 'lastfm' ? 'Last.fm' : 'ListenBrainz';
+  return { source, sourcePlaylistId, name, owner: creator || ownerFallback };
+}
+
+/**
+ * The whole post-discovery mirror (10929-11019), fire-and-forget like the
+ * vanilla's mirrorPlaylist.
+ *
+ * Three guards precede the work, all the vanilla's: no state/playlist (10931),
+ * no results (10935), and no MATCHED results (10964) — the last one abandons
+ * rather than mirroring an empty playlist. The series lookup is best-effort;
+ * a failure falls through to the per-playlist mbid (11000-11002).
+ */
+export async function mirrorLbAfterDiscovery(
+  playlistMbid: string,
+  state: { playlist?: Record<string, unknown>; rawResults?: readonly unknown[] } | undefined | null,
+): Promise<void> {
+  if (!state || !state.playlist) return;
+  const results = state.rawResults ?? [];
+  if (!results.length) return;
+  const tracks = buildLbMirrorTracks([...results]);
+  if (!tracks.length) return;
+
+  const playlist = state.playlist;
+  const rawTitle = (playlist.name as string) || 'ListenBrainz Playlist';
+  let series: LbSeriesMatch | null = null;
+  try {
+    series = await detectLbSeries(rawTitle);
+  } catch {
+    // Non-fatal — fall through to the per-playlist mirror id.
+  }
+  const target = resolveLbMirrorTarget(
+    playlistMbid,
+    rawTitle,
+    playlist.creator as string | undefined,
+    series,
+  );
+  void postMirrorPlaylist({
+    source: target.source,
+    source_playlist_id: target.sourcePlaylistId,
+    name: target.name,
+    tracks,
+    owner: target.owner,
+    description: (playlist.description as string) || '',
+    image_url: (playlist.image_url as string) || '',
+  });
 }
 
 /** POST the kind's generator (144-152). */

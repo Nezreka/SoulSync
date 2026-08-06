@@ -225,7 +225,9 @@ export async function postWishlistClear(): Promise<{ success?: boolean; error?: 
 /** GET /api/listenbrainz/series-detect (rotating-series collapse, 11009). */
 export async function detectLbSeries(
   title: string,
-): Promise<{ matched?: boolean; series_id?: string; canonical_name?: string }> {
+): Promise<{ matched?: boolean; source?: string; series_id?: string; canonical_name?: string }> {
+  // `source` is read at 10991 and was missing from this type — the vanilla lets
+  // a series match rewrite the mirror's source, not just its id and name.
   return readJson(
     await fetch(`/api/listenbrainz/series-detect?title=${encodeURIComponent(title)}`),
   );

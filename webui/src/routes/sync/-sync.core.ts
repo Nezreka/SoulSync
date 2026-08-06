@@ -302,6 +302,56 @@ export function m3uExportContextType(playlistId: string): 'album' | 'playlist' {
   return M3U_EXPORT_ALBUM_PREFIXES.some((p) => playlistId.startsWith(p)) ? 'album' : 'playlist';
 }
 
+/* ── The discovery-complete toast (_discoveryCompleteToast, 9192-9205) ─────── */
+
+/** The #815 retry baseline retryFailedMirroredDiscovery stamps (2183-2186). */
+export interface RetryDiscoveryBaseline {
+  matchesBefore: number;
+  retryCount: number;
+}
+
+export interface ToastSpec {
+  message: string;
+  type: 'success' | 'info';
+}
+
+/**
+ * Which toast a finished discovery raises — null for the six verticals that
+ * raise none.
+ *
+ * The vanilla is NOT uniform here and the port must not make it so: only
+ * youtube and mirrored call _discoveryCompleteToast (9233 socket, 9281 poll,
+ * and mirrored rides that same poller — stats-automations.js 637/1037/2054/
+ * 2188), and listenbrainz raises its own differently-worded toast inline
+ * (11076, 11171). Tidal, Qobuz, Deezer, Spotify-public, iTunes-link and
+ * Beatport complete with a console.log and no toast at all (759, 3180, 7106,
+ * 8132 and twins). `defaultMessage` therefore comes from the config table.
+ *
+ * `retry` is the #815 override, mirrored-only in practice: it reports how many
+ * of the retried tracks were newly found against the baseline instead of the
+ * generic line. The caller must drop the baseline afterwards — the vanilla
+ * deletes it at 9198 so the NEXT plain discovery reads as plain.
+ */
+export function discoveryCompleteToast(
+  defaultMessage: string | null,
+  spotifyMatches: number,
+  retry?: RetryDiscoveryBaseline | null,
+): ToastSpec | null {
+  if (retry) {
+    const found = Math.max(0, (spotifyMatches || 0) - (retry.matchesBefore || 0));
+    // `found`'s clamp IS observable — it prints. `stillFailed`'s is not: the
+    // value is only ever tested `> 0` below, so every negative behaves exactly
+    // as 0 does. Transcribed from 9197 because the vanilla clamps, but no test
+    // can distinguish it; a mutation survivor here is equivalent, not a gap.
+    const stillFailed = Math.max(0, (retry.retryCount || 0) - found);
+    let message = `Retry complete: ${found} of ${retry.retryCount} newly found`;
+    if (stillFailed > 0) message += `, ${stillFailed} still not found`;
+    return { message, type: found > 0 ? 'success' : 'info' };
+  }
+  if (defaultMessage === null) return null;
+  return { message: defaultMessage, type: 'success' };
+}
+
 /* ── formatDuration (sync-services.js 10036; sync-spotify.js 1967 is a twin) ── */
 
 export function formatDuration(durationMs: number | null | undefined): string {
