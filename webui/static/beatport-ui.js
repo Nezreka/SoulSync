@@ -345,9 +345,14 @@ function initializeBeatportReleasesSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Leaving the page runs
+    // cleanupBeatportReleasesSlider, which clears the autoplay interval — so
+    // coming back has to restart it, or the slider stays frozen for the rest of
+    // the session while its arrows and dots keep working. The hero slider above
+    // has always done this (see initializeBeatportRebuildSlider).
     if (slider.dataset.initialized === 'true') {
         console.log('Releases slider already initialized');
+        startBeatportReleasesSliderAutoPlay();
         return;
     }
 
@@ -1024,9 +1029,12 @@ function initializeBeatportChartsSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Re-entry must restart the autoplay that
+    // cleanupBeatportChartsSlider cleared on the way out — see the note in
+    // initializeBeatportReleasesSlider.
     if (slider.dataset.initialized === 'true') {
         console.log('Charts slider already initialized');
+        startBeatportChartsSliderAutoPlay();
         return;
     }
 
@@ -1320,9 +1328,12 @@ function initializeBeatportDJSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Re-entry must restart the autoplay that
+    // cleanupBeatportDJSlider cleared on the way out — see the note in
+    // initializeBeatportReleasesSlider.
     if (slider.dataset.initialized === 'true') {
         console.log('DJ slider already initialized');
+        startBeatportDJSliderAutoPlay();
         return;
     }
 

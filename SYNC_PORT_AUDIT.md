@@ -2755,3 +2755,35 @@ appended with `innerHTML +=` inside the loop; handlers are attached afterwards,
 so nothing is lost, but every append re-parses the whole track.
 
 Read status: 661 of ~3,600 in-scope lines.
+
+### FIXED IN THE VANILLA: three of five Beatport sliders froze after a page-leave
+
+Found by the read, fixed with Boulder's approval rather than ported.
+
+**The bug.** Leaving the sync page runs core.js 507-511, which calls each
+slider's cleanup, and each cleanup clears its autoplay interval. Coming back
+re-runs the initialisers, which see their already-initialised guard and return —
+without restarting the interval they no longer have. The slider then never
+auto-advances again for the rest of the session. Arrows and dots still work, so
+it reads as intentional.
+
+**Which ones.** Checked all five individually rather than assuming the pattern:
+- hero (14) — CORRECT, its guard already called startAutoPlay
+- new releases (339) — BUG, fixed
+- hype picks (683) — CORRECT, and it guards on a state flag rather than
+  `dataset.initialized`, which is a second inconsistency in the family
+- featured charts (1018) — BUG, fixed
+- DJ charts (1314) — BUG, fixed
+
+Three lines added, each calling the slider's own existing startAutoPlay, which
+already clears any live interval before setting a new one — so a double call is
+safe and no other path changes.
+
+Harmless on the failure path too: with totalSlides 0 the autoplay tick wraps to
+0 and finds no slides to touch.
+
+**beatport-ui.js added to the vanilla-syntax parse gate.** That test covers the
+classic scripts this migration edits, and this file is now one of them; nothing
+else parse-checks it, since no bundler or typechecker sees it.
+
+Full suite 280 files / 6085 tests.
