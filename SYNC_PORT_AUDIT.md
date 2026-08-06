@@ -2787,3 +2787,34 @@ classic scripts this migration edits, and this file is now one of them; nothing
 else parse-checks it, since no bundler or typechecker sees it.
 
 Full suite 280 files / 6085 tests.
+
+### BEATPORT READ — SLIDER 3 (hype picks, 667-1005)
+
+Read line by line. Diverges from BOTH earlier sliders, so the family is three
+different designs, not two.
+
+- **autoplay 4000** (hero 5000, releases 8000). Three sliders, three delays.
+- **Re-entry guards on a STATE FLAG (`isInitialized`), not `dataset.initialized`**,
+  and restarts autoplay — correct, but by a different mechanism than either
+  neighbour. It never sets `dataset.initialized` at all. NOTE: the flag lives in
+  module state, so it survives DOM replacement; if the markup were ever rebuilt
+  underneath it, init would wrongly no-op. Not reachable today.
+- **Click data is read back OUT OF THE DOM** (961-972): textContent of the
+  rendered title/artist/label plus `img.src`. That is a third approach — hero
+  closes over the source object, releases looks it up by URL, hype picks
+  re-parses its own markup.
+  - **Consequence worth stating:** createBeatportHypePickCard defaults an
+    untitled release to the literal 'Unknown Title' / 'Unknown Artist' /
+    'Hype Pick' (814-816), and the click handler reads those strings back as
+    DATA. So a release missing a title sends "Unknown Title" into the download
+    flow as its title. Reproducing that in React would take deliberate effort —
+    holding the real object is the natural shape — so it becomes a decision, not
+    a transcription.
+  - `img.src` is the RESOLVED absolute URL, not the original attribute.
+- **Placeholder cards are an icon only** (🔥), where the releases slider's
+  placeholders carry 'More Releases / Coming Soon / Beatport' text.
+- Shares with releases: cloneNode nav de-duplication, plain indicator clicks,
+  an error block on failure. Shares with hero: hover-pause leaves the interval
+  handle set rather than nulling it.
+
+Read status: 1,005 of ~3,600 in-scope lines.
