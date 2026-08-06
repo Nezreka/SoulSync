@@ -86,6 +86,15 @@ describe('the release card', () => {
     expect(document.querySelector('.beatport-release-title')?.textContent).toBe('');
   });
 
+  it('keeps data-url PRESENT but empty when the release has no url', () => {
+    // JSX drops an attribute whose value is undefined, where the vanilla's
+    // template writes the literal 'undefined'. Neither is wanted: the attribute
+    // stays present, as in the vanilla, without the bogus text. All three card
+    // families now agree.
+    render(<BeatportReleaseCard release={{ title: 'x' }} />);
+    expect(document.querySelector('.beatport-release-card')?.getAttribute('data-url')).toBe('');
+  });
+
   it('fires its click handler', () => {
     const onClick = vi.fn();
     render(<BeatportReleaseCard release={RELEASE} onClick={onClick} />);

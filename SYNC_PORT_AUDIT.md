@@ -3342,3 +3342,31 @@ The hero's slide attributes are emitted UNCONDITIONALLY, matching the vanilla:
 an artless track still gets `data-image=""`, so `[data-image]::before` still
 matches and paints nothing. Emitting them conditionally would be a different
 behaviour, not a tidier one.
+
+### BEATPORT P6 REVIEW — attribute PRESENCE, a JSX-vs-template difference
+
+Reviewing the cards raised a difference that is invisible in the code and
+visible in the DOM: **template interpolation and JSX disagree about missing
+values.**
+
+`data-url="${release.url}"` with no url writes the literal string
+`data-url="undefined"`. The JSX equivalent `data-url={release.url}` DROPS the
+attribute entirely. So a straight transcription silently changes whether the
+attribute is present — and the vanilla's own card wiring queries
+`.beatport-release-card[data-url]` (490), which matches the first and not the
+second.
+
+Checked before deciding, rather than assuming: the ONLY two attribute selectors
+in the entire Beatport stylesheet are
+`.beatport-tab-button[data-beatport-tab="browse"]` (16934) and
+`.beatport-rebuild-slide[data-image]` (17056). No card styling depends on
+`data-url`, and the port attaches click handlers directly rather than by
+selector, so nothing breaks either way.
+
+Normalised anyway, and declared: every missing value becomes `''`, so the
+attribute stays PRESENT as in the vanilla, without the bogus 'undefined' text.
+The hype-pick and chart cards already did this (`|| ''`); the release card was
+the odd one out, which is the sort of inconsistency that only shows up when
+someone later writes a selector against it.
+
+Full suite 285 files / 6220 tests.

@@ -5,6 +5,19 @@
  * own CSS custom property, its own defaults for missing fields, and its own
  * rule about whether the background style is emitted at all. Every difference
  * below is in the vanilla.
+ *
+ * ONE DECLARED NORMALISATION, applied consistently. Template interpolation
+ * writes the literal string 'undefined' for a missing value, so the vanilla can
+ * emit `data-url="undefined"` and `url('undefined')`. JSX instead DROPS an
+ * attribute whose value is undefined, which would change whether the attribute
+ * is present at all. Neither is desirable, so every missing value here becomes
+ * an empty string: the attribute stays present, as in the vanilla, without the
+ * bogus text.
+ *
+ * Checked before relying on it: the only two attribute selectors in the whole
+ * Beatport stylesheet are `.beatport-tab-button[data-beatport-tab="browse"]`
+ * and `.beatport-rebuild-slide[data-image]` (17056), so no card styling depends
+ * on `data-url` at all — but the cards now agree with each other either way.
  */
 
 import type { CSSProperties } from 'react';
@@ -83,7 +96,7 @@ export function BeatportReleaseCard({
   return (
     <div
       className="beatport-release-card"
-      data-url={release.url}
+      data-url={release.url ?? ''}
       style={{ '--card-bg-image': `url('${release.image_url ?? ''}')` } as CSSProperties}
       onClick={onClick}
     >
