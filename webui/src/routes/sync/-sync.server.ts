@@ -581,6 +581,76 @@ export async function removeServerTrack(
   return (await response.json()) as ServerMutationResponse;
 }
 
+/* ── The order view + align (385-482) ─────────────────────────────────────── */
+
+/** A row of `server_order` — the server's ACTUAL sequence (295, 394-406). */
+export interface ServerOrderTrack {
+  title?: string;
+  artist?: string;
+  thumb?: string;
+}
+
+/**
+ * 412: the three servers whose clients implement a reorder primitive. The
+ * backend gates on the SAME three (web_server.py 22014) — checked, not assumed;
+ * its docstring still says "Navidrome only for now" and is simply stale.
+ */
+export const ALIGNABLE_SERVERS: readonly string[] = ['navidrome', 'plex', 'jellyfin'];
+
+export function canAlignServer(serverType: string | null | undefined): boolean {
+  return ALIGNABLE_SERVERS.includes(serverType ?? '');
+}
+
+/**
+ * 390-391: the heading's label. The vanilla defaults the TYPE to 'server' and
+ * then capitalises, where compareServerLabel defaults the LABEL to 'Server';
+ * both land on 'Server', so this reuses that one rather than carrying a second
+ * copy of the same output.
+ */
+export function orderModalTitle(serverType: string | null | undefined): string {
+  return `${compareServerLabel(serverType)} playlist order`;
+}
+
+/**
+ * The ids the align POST carries (454-456).
+ *
+ * MATCHED rows only, in SOURCE order — which is the whole point: the backend
+ * rewrites the playlist into exactly this sequence. Missing rows have no server
+ * track to name and extras are governed by keep_extras instead, so neither
+ * belongs here. `id != null` keeps an id of 0 or '', which `id &&` would drop.
+ */
+export function alignMatchedIds(tracks: readonly CompareTrack[]): string[] {
+  return tracks
+    .filter((t) => t.match_status === 'matched' && t.server_track && t.server_track.id != null)
+    .map((t) => String(t.server_track?.id));
+}
+
+export interface AlignResponse {
+  success?: boolean;
+  error?: string;
+  track_count?: number;
+  kept_extras?: boolean;
+}
+
+/** 462-470. */
+export async function alignServerPlaylist(
+  playlistId: string,
+  playlistName: string,
+  matchedIds: readonly string[],
+  keepExtras: boolean,
+): Promise<AlignResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/align`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playlist_name: playlistName || '',
+      matched_ids: matchedIds,
+      keep_extras: !!keepExtras,
+    }),
+  });
+  return (await response.json()) as AlignResponse;
+}
+
 /** 988: the confirm copy, verbatim, with the server track's own title. */
 export function removeConfirmOptions(track: CompareTrack | undefined): {
   title: string;

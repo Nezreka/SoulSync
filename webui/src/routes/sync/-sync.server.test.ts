@@ -7,9 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CompareTrack } from './-sync.server';
 
 import {
+  ALIGNABLE_SERVERS,
   COMPARE_SERVER_ICONS,
   COMPARE_SOURCE_ICONS,
   addServerTrack,
+  alignMatchedIds,
+  alignServerPlaylist,
+  canAlignServer,
+  orderModalTitle,
   addTrackPosition,
   applyPickedTrack,
   applyRemovedTrack,
@@ -715,5 +720,127 @@ describe('the three write calls + the search call', () => {
       track_id: 's1',
       playlist_name: 'Road Trip',
     });
+  });
+});
+
+/* ── Slice D: the order view + align (385-482) ─────────────────────────────── */
+
+describe('canAlignServer (412)', () => {
+  it('covers exactly the three servers the backend accepts', () => {
+    // web_server.py 22014 gates on the same three — checked, not assumed.
+    expect([...ALIGNABLE_SERVERS].sort()).toEqual(['jellyfin', 'navidrome', 'plex']);
+    expect(canAlignServer('plex')).toBe(true);
+    expect(canAlignServer('jellyfin')).toBe(true);
+    expect(canAlignServer('navidrome')).toBe(true);
+  });
+
+  it('refuses anything else, including nothing at all', () => {
+    expect(canAlignServer('subsonic')).toBe(false);
+    expect(canAlignServer('')).toBe(false);
+    expect(canAlignServer(undefined)).toBe(false);
+    // Case matters: the server type arrives lower-cased.
+    expect(canAlignServer('Plex')).toBe(false);
+  });
+});
+
+describe('orderModalTitle (390-391, 436)', () => {
+  it('capitalises the server and falls back to Server', () => {
+    expect(orderModalTitle('plex')).toBe('Plex playlist order');
+    expect(orderModalTitle('navidrome')).toBe('Navidrome playlist order');
+    expect(orderModalTitle(undefined)).toBe('Server playlist order');
+    expect(orderModalTitle('')).toBe('Server playlist order');
+  });
+});
+
+describe('alignMatchedIds (454-456)', () => {
+  it('takes MATCHED rows only, in source order, as strings', () => {
+    const tracks: CompareTrack[] = [
+      { match_status: 'matched', server_track: { id: 'a' } },
+      { match_status: 'missing', server_track: null },
+      { match_status: 'extra', source_track: null, server_track: { id: 'b' } },
+      { match_status: 'matched', server_track: { id: 'c' } },
+    ];
+    // The extra is governed by keep_extras, not by this list.
+    expect(alignMatchedIds(tracks)).toEqual(['a', 'c']);
+  });
+
+  it('drops a matched row with no server track or no id', () => {
+    const tracks: CompareTrack[] = [
+      { match_status: 'matched', server_track: null },
+      { match_status: 'matched', server_track: {} },
+      { match_status: 'matched', server_track: { id: 'a' } },
+    ];
+    expect(alignMatchedIds(tracks)).toEqual(['a']);
+  });
+
+  it("keeps an id of '' or 0 — the guard is != null, not truthiness (455)", () => {
+    const tracks = [
+      { match_status: 'matched', server_track: { id: '' } },
+      { match_status: 'matched', server_track: { id: 0 } },
+    ] as unknown as CompareTrack[];
+    expect(alignMatchedIds(tracks)).toEqual(['', '0']);
+  });
+
+  it('is empty for a playlist with nothing matched', () => {
+    expect(alignMatchedIds([{ match_status: 'missing' }])).toEqual([]);
+  });
+});
+
+describe('alignServerPlaylist (462-470)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('posts the ids, the name and the extras choice', async () => {
+    const seen: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push({ url, init });
+        return new Response(JSON.stringify({ success: true, track_count: 3 }));
+      }),
+    );
+    await alignServerPlaylist('7', 'Road Trip', ['a', 'b'], true);
+    expect(seen[0].url).toBe('/api/server/playlist/7/align');
+    expect(seen[0].init?.method).toBe('POST');
+    expect(JSON.parse(seen[0].init?.body as string)).toEqual({
+      playlist_name: 'Road Trip',
+      matched_ids: ['a', 'b'],
+      keep_extras: true,
+    });
+  });
+
+  it('coerces a missing name to an empty string rather than dropping the key (466)', async () => {
+    // The guard looks redundant against the type, but the name comes from an
+    // untyped payload: JSON.stringify OMITS an undefined value entirely, so
+    // without it the backend would see no playlist_name at all rather than the
+    // empty one it answers 400 to.
+    const seen: { init?: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        seen.push({ init });
+        return new Response(JSON.stringify({ success: false }));
+      }),
+    );
+    await alignServerPlaylist('7', undefined as unknown as string, ['a'], false);
+    const body = JSON.parse(seen[0].init?.body as string) as Record<string, unknown>;
+    expect('playlist_name' in body).toBe(true);
+    expect(body.playlist_name).toBe('');
+  });
+
+  it('sends an empty string for a nameless playlist, which the backend rejects (466)', async () => {
+    const seen: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push({ url, init });
+        return new Response(JSON.stringify({ success: false }));
+      }),
+    );
+    await alignServerPlaylist('7', '', ['a'], false);
+    const body = JSON.parse(seen[0].init?.body as string);
+    expect(body.playlist_name).toBe('');
+    expect(body.keep_extras).toBe(false);
   });
 });

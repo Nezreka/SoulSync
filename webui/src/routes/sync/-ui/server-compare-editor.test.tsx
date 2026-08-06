@@ -31,6 +31,19 @@ const TRACKS = [
   },
 ];
 
+/** The out-of-order variant, which is what unlocks the order modal. */
+const ORDERED_PAYLOAD = {
+  success: true,
+  server_type: 'plex',
+  server_track_count: 2,
+  order_status: { out_of_order: true },
+  server_order: [
+    { title: 'Bonus', artist: 'Someone' },
+    { title: 'Alright', artist: 'Kendrick' },
+  ],
+  tracks: TRACKS,
+};
+
 let payload: unknown = {};
 let searchPayload: unknown = {};
 let writePayload: unknown = {};
@@ -234,28 +247,14 @@ describe('ServerCompareEditor', () => {
     await waitFor(() => expect(screen.getByText('Matched')).toBeInTheDocument());
     expect(document.querySelector('.server-order-badge')).toBeNull();
 
-    const onShowOrder = vi.fn();
-    payload = {
-      success: true,
-      server_type: 'plex',
-      server_track_count: 2,
-      order_status: { out_of_order: true },
-      tracks: TRACKS,
-    };
-    render(
-      <ServerCompareEditor
-        playlist={PLAYLIST}
-        mirrored={MIRRORED}
-        onBack={vi.fn()}
-        onShowOrder={onShowOrder}
-      />,
-    );
+    payload = ORDERED_PAYLOAD;
+    render(<ServerCompareEditor playlist={PLAYLIST} mirrored={MIRRORED} onBack={vi.fn()} />);
     await waitFor(() => expect(document.querySelector('.server-order-badge')).not.toBeNull());
     const badge = document.querySelector('.server-order-badge') as HTMLElement;
     expect(badge.textContent).toBe('⚠ out of order');
     expect(badge.title).toContain('different order on Plex');
     fireEvent.click(badge);
-    expect(onShowOrder).toHaveBeenCalled();
+    await waitFor(() => expect(document.querySelector('#server-order-modal')).not.toBeNull());
   });
 
   it('shows the no-source banner only without a mirrored playlist (304-306)', async () => {
@@ -528,6 +527,102 @@ describe('ServerCompareEditor', () => {
     for (const call of calls.filter((c) => c.url.includes('/remove-track'))) {
       expect(call.url).toBe('/api/server/playlist/7/remove-track');
     }
+  });
+
+  /* ── Slice D: the order view + align ────────────────────────────────────── */
+
+  async function openOrderModal() {
+    payload = ORDERED_PAYLOAD;
+    renderEditor();
+    await waitFor(() => expect(document.querySelector('.server-order-badge')).not.toBeNull());
+    fireEvent.click(document.querySelector('.server-order-badge') as Element);
+    await waitFor(() => expect(document.querySelector('#server-order-modal')).not.toBeNull());
+  }
+
+  it('the order modal lists the SERVER order, not the source order (394-406)', async () => {
+    await openOrderModal();
+    const rows = document.querySelectorAll('.server-order-row');
+    expect(rows).toHaveLength(2);
+    // The compare columns show Alright first; the server really has Bonus first,
+    // and seeing that difference is the entire purpose of this view.
+    expect(rows[0].querySelector('.server-order-title')?.textContent).toBe('Bonus');
+    expect(rows[1].querySelector('.server-order-title')?.textContent).toBe('Alright');
+    expect(rows[0].querySelector('.server-order-num')?.textContent).toBe('1');
+  });
+
+  it('Mirror source sends the matched ids in SOURCE order, dropping extras (417, 454-468)', async () => {
+    await openOrderModal();
+    fireEvent.click(screen.getByText('Mirror source'));
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/align'))).toBe(true));
+
+    const align = calls.find((c) => c.url.includes('/align'));
+    expect(align?.url).toBe('/api/server/playlist/7/align');
+    expect(align?.body).toEqual({
+      playlist_name: 'Road Trip',
+      // Only the matched row — the missing row has no server track to name and
+      // the extra is governed by keep_extras instead.
+      matched_ids: ['s1'],
+      keep_extras: false,
+    });
+  });
+
+  it('Keep extras sends the same ids with the flag flipped (421)', async () => {
+    await openOrderModal();
+    fireEvent.click(screen.getByText('Keep extras'));
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/align'))).toBe(true));
+    const align = calls.find((c) => c.url.includes('/align'));
+    expect(align?.body).toEqual({
+      playlist_name: 'Road Trip',
+      matched_ids: ['s1'],
+      keep_extras: true,
+    });
+  });
+
+  it('a successful align closes the modal and RELOADS the comparison (472-475)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: true, track_count: 12 };
+    await openOrderModal();
+    const comparesBefore = calls.filter((c) => c.url.includes('/tracks?name=')).length;
+
+    fireEvent.click(screen.getByText('Mirror source'));
+    await waitFor(() => expect(document.querySelector('#server-order-modal')).toBeNull());
+    expect(toast).toHaveBeenCalledWith('Playlist order aligned (12 tracks)', 'success');
+    // A reorder invalidates order_status and the whole server column, so unlike
+    // the row writes this one really does re-fetch.
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/tracks?name=')).length).toBe(comparesBefore + 1),
+    );
+  });
+
+  it('a failed align keeps the modal open so the user can retry (476-478)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: false, error: 'Playlist changed on the server' };
+    await openOrderModal();
+    fireEvent.click(screen.getByText('Mirror source'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('Playlist changed on the server', 'error'),
+    );
+    expect(document.querySelector('#server-order-modal')).not.toBeNull();
+  });
+
+  it('warns rather than posting when there is nothing to align (457-459)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    payload = {
+      ...ORDERED_PAYLOAD,
+      // No matched row at all — an order-only rewrite has nothing to act on.
+      tracks: [TRACKS[1], TRACKS[2]],
+    };
+    renderEditor();
+    await waitFor(() => expect(document.querySelector('.server-order-badge')).not.toBeNull());
+    fireEvent.click(document.querySelector('.server-order-badge') as Element);
+    await waitFor(() => expect(screen.getByText('Mirror source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Mirror source'));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Nothing to align', 'warning'));
+    expect(calls.some((c) => c.url.includes('/align'))).toBe(false);
   });
 
   it('a declined confirm writes nothing (988)', async () => {

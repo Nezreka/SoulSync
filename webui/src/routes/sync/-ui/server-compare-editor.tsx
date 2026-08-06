@@ -24,6 +24,7 @@ import type {
   CompareTrack,
   LibrarySearchTrack,
   MirroredMatch,
+  ServerOrderTrack,
   ServerPlaylist,
   ServerSearchMode,
 } from '../-sync.server';
@@ -31,6 +32,8 @@ import type {
 import {
   addServerTrack,
   addTrackPosition,
+  alignMatchedIds,
+  alignServerPlaylist,
   applyPickedTrack,
   applyRemovedTrack,
   compareConfidenceBadge,
@@ -49,6 +52,7 @@ import {
   removeServerTrack,
   replaceServerTrack,
 } from '../-sync.server';
+import { ServerOrderModal } from './server-order-modal';
 import { ServerSearchOverlay } from './server-search-overlay';
 
 const FILTERS = ['all', 'matched', 'missing', 'extra'] as const;
@@ -257,8 +261,6 @@ export interface ServerCompareEditorProps {
   playlist: ServerPlaylist;
   mirrored: MirroredMatch | null;
   onBack: () => void;
-  /** Slice D — the '⚠ out of order' badge. */
-  onShowOrder?: () => void;
   /** Slice E — exportServerPlaylistM3U. */
   onExportM3u?: () => void;
 }
@@ -267,7 +269,6 @@ export function ServerCompareEditor({
   playlist,
   mirrored,
   onBack,
-  onShowOrder,
   onExportM3u,
 }: ServerCompareEditorProps) {
   const [data, setData] = useState<CompareResponse | null>(null);
@@ -292,6 +293,7 @@ export function ServerCompareEditor({
   const [filter, setFilter] = useState<CompareFilter>('all');
   const [highlighted, setHighlighted] = useState<number | null>(null);
   const [search, setSearch] = useState<{ index: number; mode: ServerSearchMode } | null>(null);
+  const [showOrder, setShowOrder] = useState(false);
 
   const sourceScroll = useRef<HTMLDivElement>(null);
   const serverScroll = useRef<HTMLDivElement>(null);
@@ -465,6 +467,51 @@ export function ServerCompareEditor({
     [playlist.name, tracks],
   );
 
+  /**
+   * _alignPlaylist (448-482). Order-only: the matched server ids are sent in
+   * SOURCE order and the backend rewrites the playlist into exactly that
+   * sequence, keeping or dropping the extras. Missing tracks are never added —
+   * that is a normal sync's job.
+   */
+  const alignPlaylist = useCallback(
+    async (keepExtras: boolean) => {
+      // 453: no playlist, nothing to align.
+      if (!playlistIdRef.current) return;
+      const matchedIds = alignMatchedIds(tracks);
+      if (matchedIds.length === 0) {
+        // 458: 'warning', not 'error' — nothing went wrong, there is just
+        // nothing an order-only rewrite could act on.
+        window.showToast?.('Nothing to align', 'warning');
+        return;
+      }
+      try {
+        const response = await alignServerPlaylist(
+          playlistIdRef.current,
+          playlist.name,
+          matchedIds,
+          keepExtras,
+        );
+        if (!response.success) {
+          // 477: the modal STAYS open on failure, so the user can retry.
+          window.showToast?.(response.error || 'Align failed', 'error');
+          return;
+        }
+        window.showToast?.(`Playlist order aligned (${response.track_count} tracks)`, 'success');
+        setShowOrder(false);
+        // 475 _serverEditorRefresh: a reorder invalidates order_status and the
+        // server column's numbering, so this one really does reload — unlike
+        // the row writes, there is nothing to patch in place.
+        void loadCompare();
+      } catch (error) {
+        window.showToast?.(
+          `Align failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [loadCompare, playlist.name, tracks],
+  );
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -577,7 +624,7 @@ export function ServerCompareEditor({
                   type="button"
                   className="server-order-badge"
                   title={`These tracks match the source, but the playlist is in a different order on ${serverLabel}. Click to view the actual server order.`}
-                  onClick={onShowOrder}
+                  onClick={() => setShowOrder(true)}
                 >
                   ⚠ out of order
                 </button>
@@ -620,6 +667,15 @@ export function ServerCompareEditor({
       </div>
 
       <div id="server-editor-footer">{compareFooterText(stats)}</div>
+
+      {showOrder && (
+        <ServerOrderModal
+          order={(data?.server_order ?? []) as ServerOrderTrack[]}
+          serverType={data?.server_type}
+          onClose={() => setShowOrder(false)}
+          onAlign={(keepExtras) => void alignPlaylist(keepExtras)}
+        />
+      )}
 
       {/* 761-762: each open builds a fresh overlay, so the key remounts it
           rather than re-seeding a live one. */}

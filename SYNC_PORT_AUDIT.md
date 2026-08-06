@@ -2389,3 +2389,44 @@ is honoured on both writes because Plex deletes and recreates. The link case at
 
 **Remaining server slices:** (D) order view + align; (E) sync detail modal + M3U
 export.
+
+### SERVER TAB SLICE D — order view + align (pages-extra.js 385-482)
+
+Built: `-ui/server-order-modal.tsx` plus the align core in `-sync.server.ts`,
+wired into the compare editor. 21 mutants, 21 killed. Full suite 278 files /
+6053 tests.
+
+**`onShowOrder` deleted, for slice C's reason.** _showServerOrder reads
+serverOrder/serverType and _alignPlaylist reads playlistId/playlistName/tracks
+and then calls _serverEditorRefresh — all editor state. The editor owns both.
+
+**Verified rather than assumed:** the frontend gates align on
+navidrome/plex/jellyfin (412) and the backend gates on the SAME three
+(web_server.py 22014). Its docstring still says "Navidrome only for now" and is
+simply stale — there is no button offered for a server that would reject it.
+
+**Why this one really does reload.** Every other write in this tab patches in
+place (#1005). Align does not: a reorder invalidates order_status, the server
+column's numbering and the server_order list itself, so there is nothing to
+patch — the vanilla calls _serverEditorRefresh (475) and so does this.
+
+**Transcription details.** The align payload carries the MATCHED ids only, in
+SOURCE order — missing rows have no server track to name and extras are governed
+by keep_extras instead. The id guard is `!= null`, so an id of 0 or '' survives
+where `id &&` would drop it. 'Nothing to align' is a WARNING, not an error —
+nothing failed, there is simply nothing an order-only rewrite could act on. A
+failed align leaves the modal OPEN so the user can retry. The artwork falls back
+to a ♫ placeholder both when absent and when it fails to load.
+
+**Two mutation-pass notes, both process rather than product.**
+- One survivor was a MALFORMED MUTANT, not a gap: it inserted a dead
+  `if (false) void loadCompare()` while leaving the real call intact, so it
+  mutated nothing. Re-anchored onto the real call; killed. A mutant that cannot
+  change behaviour is not evidence of coverage.
+- `playlist_name: playlistName || ''` looked like an equivalent mutant because
+  the type says the name is a string. It is not: the name comes from untyped
+  wire data, and JSON.stringify OMITS an undefined value rather than sending it,
+  so the guard is the difference between the backend seeing `''` (400, as
+  designed) and seeing no key at all. Tested through a cast.
+
+**Remaining server slice:** (E) sync detail modal + M3U export.
