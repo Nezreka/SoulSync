@@ -16,24 +16,24 @@
  *   React cannot reach (the P5a/P5b pattern).
  * - The phase line is ONE derived renderer; the vanilla's three writers
  *   disagree (documented in -sync.mirrored.ts).
- * - The pipeline button and the two pool modals are separate waves; their
- *   buttons render only when the page shell supplies a handler, so this tab
- *   never ships a dead control. Export (📤) landed in P5g and is always on.
+ * - The two pool modals are a separate wave; their buttons render only when
+ *   the page shell supplies a handler, so this tab never ships a dead control.
+ *   Export (📤), Auto-Sync and the 🔗 source-ref edit landed in P5g and own
+ *   their controllers outright.
+ * - The 🔗 editor is a modal, NOT window.prompt (auto-sync.js 2414) — the same
+ *   repo rule the rename follows.
  * - DEFERRED, not dropped: the per-card quality-profile select (600-602) and
  *   its hydrate (645-650). It needs the profiles api + the hydration protocol
  *   that no React sync surface has yet — the discovery-modal footer's copy of
  *   the same control is deferred for the same reason (organize-toggle.tsx).
  *   row.quality_profile_id is carried on the row type ready for it.
- * - DEFERRED to P5g with the pipeline button: the render-time poller resume
- *   at 653-655, which picks up a pipeline started by a schedule or another
- *   client. Until then a running pipeline paints from the row and only
- *   advances on 'Update list'.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 
 import type { ExportMode } from '../-sync.export';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
+import type { MirroredPipelineState } from '../-sync.pipeline';
 import type { SourceVertical } from '../-sync.use-vertical';
 
 import {
@@ -42,6 +42,7 @@ import {
   fetchMirroredPlaylists,
   patchMirroredCustomName,
 } from '../-sync.api';
+import { patchMirroredSourceRef } from '../-sync.api';
 import { getMirroredSourceRef } from '../-sync.autosync';
 import { exportNotConnectedStatus } from '../-sync.export';
 import {
@@ -52,10 +53,13 @@ import {
   pipelinePhaseFor,
   timeAgo,
 } from '../-sync.mirrored';
+import { SOURCE_REF_FAILED, applyPipelineState } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { ExportModal, ExportStatusSpan } from './export-modal';
+import { SourceRefModal } from './source-ref-modal';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
 export interface MirroredTabProps {
@@ -64,10 +68,6 @@ export interface MirroredTabProps {
   onOpen: (sourceId: string) => void;
   /** The metadata source the ratio line names (currentMusicSourceName). */
   sourceName?: string;
-  /** P5g — runMirroredPlaylistPipeline. */
-  onAutoSync?: (row: MirroredPlaylistRow) => void;
-  /** P5g — editMirroredSourceRef (it owns its own modal). */
-  onEditSourceRef?: (row: MirroredPlaylistRow, currentRef: string) => void;
   /** P5f — the two pool modals in the tab header. */
   onOpenDiscoveryPool?: () => void;
   onOpenWingItPool?: () => void;
@@ -77,8 +77,6 @@ export function MirroredTab({
   vertical,
   onOpen,
   sourceName = 'Spotify',
-  onAutoSync,
-  onEditSourceRef,
   onOpenDiscoveryPool,
   onOpenWingItPool,
 }: MirroredTabProps) {
@@ -89,6 +87,8 @@ export function MirroredTab({
   const [renameValue, setRenameValue] = useState('');
   /** The row whose export picker is open (exportMirroredPlaylist, 663). */
   const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
+  /** The row whose 🔗 source-ref editor is open (auto-sync.js 2410). */
+  const [editingRef, setEditingRef] = useState<MirroredPlaylistRow | null>(null);
   const exportJobs = useExportJobs();
   /** loadMirroredPlaylists (500-524). */
   const load = useCallback(async () => {
@@ -122,6 +122,42 @@ export function MirroredTab({
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * applyMirroredPipelineState (auto-sync.js 2443-2464). patchState both
+   * materialises an absent entry and merges, which is what the vanilla's
+   * `{ ...(youtubePlaylistStates[hash] || {}), ... }` assignment does.
+   */
+  const onPipelineState = useCallback(
+    (playlistId: number, state: MirroredPipelineState) => {
+      vertical.patchState(mirroredHash(playlistId), (s) => ({
+        ...s,
+        ...applyPipelineState(s.phase, state),
+      }));
+    },
+    [vertical],
+  );
+
+  // Memoised so the controller's callbacks stay stable and the resume effect
+  // below does not re-run on every render.
+  const reload = useCallback(() => {
+    void load();
+  }, [load]);
+
+  const pipeline = useMirroredPipeline({ onState: onPipelineState, reload });
+
+  /**
+   * The render-time poller resume (stats-automations.js 653-655): a row the
+   * backend says is running picks its poll back up, so a pipeline started by a
+   * schedule or another client keeps advancing here. In the vanilla this sits
+   * inside renderMirroredCard; an effect is the React equivalent, and the
+   * hook's own registry makes it idempotent across re-renders.
+   */
+  useEffect(() => {
+    for (const row of rows ?? []) {
+      if (row.pipeline_state?.status === 'running') pipeline.resume(row.id, row.name ?? '');
+    }
+  }, [rows, pipeline]);
 
   /** clearMirroredDiscovery (1175-1205). */
   const onClear = useCallback(
@@ -220,6 +256,28 @@ export function MirroredTab({
     [renameValue, load],
   );
 
+  /** editMirroredSourceRef's PATCH half (auto-sync.js 2422-2440). */
+  const commitSourceRef = useCallback(
+    async (row: MirroredPlaylistRow, sourceRef: string) => {
+      const name = row.name ?? '';
+      setEditingRef(null);
+      try {
+        await patchMirroredSourceRef(row.id, sourceRef);
+        window.showToast?.(`Updated source for ${name}`, 'success');
+        // The vanilla also reopens the tracks-detail modal when it was open
+        // (2434-2438); that modal is its own wave, so there is nothing to
+        // reopen here.
+        await load();
+      } catch (err) {
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : SOURCE_REF_FAILED}`,
+          'error',
+        );
+      }
+    },
+    [load],
+  );
+
   /** handleMirroredCardClick (610-643). */
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
@@ -295,6 +353,11 @@ export function MirroredTab({
                     discoveryProgress: state.discoveryProgress,
                     spotifyMatches: state.spotifyMatches,
                     spotifyTotal: state.spotifyTotal,
+                    // A live Auto-Sync run writes these onto the same state
+                    // (applyPipelineState), so the pipeline arms read them
+                    // from there rather than the stale row.
+                    pipeline_progress: state.pipeline_progress,
+                    pipeline_phase: state.pipeline_phase,
                   }
                 : {
                     pipeline_progress: row.pipeline_state?.progress,
@@ -370,19 +433,17 @@ export function MirroredTab({
                     ↺
                   </button>
                 )}
-                {onAutoSync && (
-                  <button
-                    type="button"
-                    className="mirrored-card-pipeline"
-                    title="Refresh, discover, sync, and queue missing tracks"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onAutoSync(row);
-                    }}
-                  >
-                    Auto-Sync
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="mirrored-card-pipeline"
+                  title="Refresh, discover, sync, and queue missing tracks"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void pipeline.run(row.id, row.name ?? '');
+                  }}
+                >
+                  Auto-Sync
+                </button>
                 <button
                   type="button"
                   className="mirrored-card-rename"
@@ -395,19 +456,17 @@ export function MirroredTab({
                 >
                   ✏️
                 </button>
-                {onEditSourceRef && (
-                  <button
-                    type="button"
-                    className="mirrored-card-link"
-                    title="Edit original playlist link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEditSourceRef(row, getMirroredSourceRef(row));
-                    }}
-                  >
-                    🔗
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="mirrored-card-link"
+                  title="Edit original playlist link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingRef(row);
+                  }}
+                >
+                  🔗
+                </button>
                 <button
                   type="button"
                   className="mirrored-card-export"
@@ -450,6 +509,14 @@ export function MirroredTab({
             setExporting(null);
             exportJobs.paint(id, exportNotConnectedStatus(mode));
           }}
+        />
+      )}
+      {editingRef && (
+        <SourceRefModal
+          row={editingRef}
+          currentRef={getMirroredSourceRef(editingRef)}
+          onClose={() => setEditingRef(null)}
+          onSubmit={(sourceRef) => void commitSourceRef(editingRef, sourceRef)}
         />
       )}
     </div>

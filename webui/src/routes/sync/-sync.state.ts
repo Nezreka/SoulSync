@@ -48,6 +48,17 @@ export interface SourcePlaylistState {
   syncPlaylistId?: string;
   lastSyncProgress?: SyncProgressSnapshot;
   wingIt?: boolean;
+  /**
+   * The Auto-Sync pipeline overlay, mirrored-only (auto-sync.js 2451-2460).
+   * Snake-cased because these ARE the vanilla's key names on the same state
+   * object, and the mirrored phase line reads them back by those names.
+   */
+  pipeline_status?: string;
+  pipeline_progress?: number;
+  pipeline_phase?: string;
+  pipeline_error?: string;
+  pipeline_log?: string[];
+  pipeline_result?: unknown;
 }
 
 export function freshSourceState(

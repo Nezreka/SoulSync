@@ -18,6 +18,7 @@ import {
   fetchDeezerArlStatus,
   fetchDeezerLinkPlaylist,
   fetchExportConnectedSources,
+  fetchMirroredPipelineStatus,
   fetchPlaylistExportStatus,
   fetchSourceDiscoveryStatus,
   clearMirroredDiscovery,
@@ -25,6 +26,7 @@ import {
   fetchMirroredPlaylists,
   fetchSourcePlaylists,
   patchMirroredCustomName,
+  patchMirroredSourceRef,
   fetchSourcePlaylistsStates,
   fetchSourceState,
   fetchSourceSyncStatus,
@@ -36,6 +38,7 @@ import {
   postMirrorPlaylist,
   postWishlistCleanup,
   postWishlistClear,
+  runMirroredPipeline,
   startPlaylistExport,
   startSourceDiscovery,
   startSourceSync,
@@ -340,6 +343,92 @@ describe('mirrored playlist endpoints', () => {
       vi.fn(async () => new Response(JSON.stringify({}), { status: 500 })),
     );
     await expect(patchMirroredCustomName(7, 'X')).rejects.toThrow('Failed to update name');
+  });
+});
+
+describe('Auto-Sync pipeline endpoints (auto-sync.js 2467-2497)', () => {
+  it('run POSTs an empty JSON body and returns the state', async () => {
+    stubFetch({ state: { status: 'running', progress: 0 } });
+    await expect(runMirroredPipeline(7)).resolves.toEqual({
+      state: { status: 'running', progress: 0 },
+    });
+    expect(calls[0]).toMatchObject({
+      url: '/api/mirrored-playlists/7/pipeline/run',
+      method: 'POST',
+      body: {},
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('status GETs, and the whole body IS the state', async () => {
+    stubFetch({ status: 'finished', progress: 100 });
+    await expect(fetchMirroredPipelineStatus(7)).resolves.toEqual({
+      status: 'finished',
+      progress: 100,
+    });
+    expect(calls[0]).toMatchObject({
+      url: '/api/mirrored-playlists/7/pipeline/status',
+      method: 'GET',
+    });
+  });
+
+  it('an EMPTY body is accepted — the vanilla reads text before parsing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('')),
+    );
+    await expect(fetchMirroredPipelineStatus(7)).resolves.toEqual({});
+  });
+
+  it('a 404 with an unparseable body blames a stale server', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<!doctype html>', { status: 404 })),
+    );
+    await expect(runMirroredPipeline(7)).rejects.toThrow(
+      'Auto-Sync endpoint not found. Restart the SoulSync server so the new backend routes load.',
+    );
+  });
+
+  it('each endpoint carries its own fallback message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
+    await expect(runMirroredPipeline(7)).rejects.toThrow('Failed to start Auto-Sync');
+    await expect(fetchMirroredPipelineStatus(7)).rejects.toThrow('Failed to read Auto-Sync status');
+  });
+
+  it('a 200 body carrying an error still throws it', async () => {
+    stubFetch({ error: 'no source ref' });
+    await expect(runMirroredPipeline(7)).rejects.toThrow('no source ref');
+  });
+});
+
+describe('the source-ref PATCH (auto-sync.js 2423-2432)', () => {
+  it('sends the trimmed ref with a JSON header', async () => {
+    stubFetch({});
+    await patchMirroredSourceRef(7, 'https://open.spotify.com/playlist/x');
+    expect(calls[0]).toMatchObject({
+      url: '/api/mirrored-playlists/7/source-ref',
+      method: 'PATCH',
+      body: { source_ref: 'https://open.spotify.com/playlist/x' },
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('throws on either guard arm, with the backend message when there is one', async () => {
+    // 200 + an error body — only the data.error arm catches this.
+    stubFetch({ error: 'not a playlist url' });
+    await expect(patchMirroredSourceRef(7, 'x')).rejects.toThrow('not a playlist url');
+    // non-ok with NO error body — only the !response.ok arm, message falls back.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
+    await expect(patchMirroredSourceRef(7, 'x')).rejects.toThrow(
+      'Failed to update source reference',
+    );
   });
 });
 

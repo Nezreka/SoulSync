@@ -374,31 +374,25 @@ describe('MirroredTab — the three actions', () => {
 });
 
 describe('MirroredTab — deferred controls and click dispatch', () => {
-  it('the pool + Auto-Sync buttons render ONLY with a handler; export always does', async () => {
+  it('the pool buttons need a handler; the three card actions never do', async () => {
     stubFetch();
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     const { unmount } = render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     expect(screen.queryByText('Discovery Pool')).not.toBeInTheDocument();
     expect(screen.queryByText('Wing It Pool')).not.toBeInTheDocument();
-    expect(screen.queryByText('Auto-Sync')).not.toBeInTheDocument();
-    // Export owns its own modal + controller since P5g, so it takes no handler
-    // and is never conditional.
+    // Export, Auto-Sync and 🔗 own their controllers since P5g, so they take
+    // no handler and are never conditional.
     expect(screen.getByTitle('Export to ListenBrainz / JSPF')).toBeInTheDocument();
+    expect(screen.getByText('Auto-Sync')).toBeInTheDocument();
+    expect(screen.getByTitle('Edit original playlist link')).toBeInTheDocument();
     unmount();
 
     stubFetch();
-    render(
-      <Harness
-        onOpenDiscoveryPool={() => undefined}
-        onOpenWingItPool={() => undefined}
-        onAutoSync={() => undefined}
-      />,
-    );
+    render(<Harness onOpenDiscoveryPool={() => undefined} onOpenWingItPool={() => undefined} />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     expect(screen.getByText('Discovery Pool')).toBeInTheDocument();
     expect(screen.getByText('Wing It Pool')).toBeInTheDocument();
-    expect(screen.getByText('Auto-Sync')).toBeInTheDocument();
   });
 
   it('a card click opens the shared modal under the mirrored_<id> hash', async () => {
@@ -488,5 +482,130 @@ describe('MirroredTab — export (#903)', () => {
     fireEvent.click(screen.getByTitle('Export to ListenBrainz / JSPF'));
     await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+  });
+});
+
+describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
+  it('Auto-Sync runs the pipeline and paints its phase onto the card', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url.endsWith('/pipeline/run')) {
+        return { state: { status: 'running', progress: 0, phase: 'Refreshing' } };
+      }
+      if (url.endsWith('/pipeline/status'))
+        return { status: 'running', progress: 45, phase: 'Syncing' };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Auto-Sync'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/pipeline/run')).toBe(true),
+    );
+    expect(window.showToast).toHaveBeenCalledWith('Auto-Sync started for Road Trip', 'success');
+    // applyPipelineState wrote pipeline_running onto the SHARED state, so the
+    // mirrored phase line renders it from there rather than the stale row.
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('pipeline_running'));
+    await waitFor(() => expect(screen.getByText('Syncing 45%')).toBeInTheDocument());
+  });
+
+  it('the Auto-Sync click never opens the card behind it', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Auto-Sync'));
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+  });
+
+  it('a row the backend says is RUNNING resumes its poll on render (653-655)', async () => {
+    stubFetch();
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') {
+        return [{ ...ROW, pipeline_state: { status: 'running', progress: 20 } }];
+      }
+      if (url.endsWith('/pipeline/status')) return { status: 'running', progress: 20 };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/pipeline/status')).toBe(true),
+    );
+    // Idempotent: re-renders must not stack a second poller.
+    const polls = calls.filter((c) => c.url.endsWith('/pipeline/status')).length;
+    fireEvent.mouseOver(screen.getByText('Road Trip'));
+    expect(calls.filter((c) => c.url.endsWith('/pipeline/status')).length).toBe(polls);
+  });
+
+  it('an idle row does NOT start a poller', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [{ ...ROW, pipeline_state: { status: 'idle' } }]
+        : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    expect(calls.some((c) => c.url.endsWith('/pipeline/status'))).toBe(false);
+  });
+
+  it('🔗 opens the editor pre-filled from getMirroredSourceRef and PATCHes', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    // ROW has no source_ref and no URL description, so the id is the default.
+    const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
+    expect(input.value).toBe('tp1');
+    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+
+    fireEvent.change(input, { target: { value: 'tp2' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/source-ref')).toBe(true),
+    );
+    const patch = calls.find((c) => c.url === '/api/mirrored-playlists/3/source-ref')!;
+    expect(patch.method).toBe('PATCH');
+    expect(patch.body).toEqual({ source_ref: 'tp2' });
+    expect(window.showToast).toHaveBeenCalledWith('Updated source for Road Trip', 'success');
+  });
+
+  it('a rejected source ref surfaces the backend message', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url.endsWith('/source-ref')) return { error: 'not a playlist url' };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'nope' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Error: not a playlist url', 'error'),
+    );
+  });
+
+  it('an empty source ref is rejected without a PATCH', async () => {
+    stubFetch();
+    window.showToast = vi.fn() as typeof window.showToast;
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.click(screen.getByText('Save'));
+    expect(window.showToast).toHaveBeenCalledWith('Source link or ID is required', 'error');
+    expect(calls.some((c) => c.url.endsWith('/source-ref'))).toBe(false);
+    // ...and the editor stays open so the value can be fixed.
+    expect(document.querySelector('.mirrored-source-ref-input')).not.toBeNull();
   });
 });

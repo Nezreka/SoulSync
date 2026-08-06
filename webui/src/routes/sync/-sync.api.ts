@@ -10,10 +10,17 @@
 
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { MirrorPayload } from './-sync.import';
+import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { RawDiscoveryResult } from './-sync.transform';
 
 import { isServiceExport } from './-sync.export';
+import {
+  PIPELINE_RUN_FAILED,
+  PIPELINE_STATUS_FAILED,
+  SOURCE_REF_FAILED,
+  pipelineResponseError,
+} from './-sync.pipeline';
 
 /* ── Shared response shapes (fields the vanilla actually read) ────────────── */
 
@@ -368,6 +375,62 @@ export async function patchMirroredCustomName(
   const data = await readJson<{ error?: string }>(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Failed to update name');
   return data;
+}
+
+/* ── Auto-Sync pipeline + source ref (auto-sync.js 2358-2525) ─────────────── */
+
+/**
+ * The pipeline endpoints' shared reader (parseMirroredPipelineResponse, 2358).
+ * The body is read as TEXT first so an empty one can pass and an unparseable
+ * one can be blamed on a stale server; the branch logic is pure and pinned
+ * differentially in -sync.pipeline.test.ts.
+ */
+async function readPipelineResponse(
+  response: Response,
+  fallback: string,
+): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  const error = pipelineResponseError(response.ok, response.status, text, fallback);
+  if (error) throw new Error(error);
+  return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+}
+
+/** POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472). */
+export async function runMirroredPipeline(
+  playlistId: number | string,
+): Promise<{ state?: MirroredPipelineState }> {
+  return readPipelineResponse(
+    await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }),
+    PIPELINE_RUN_FAILED,
+  );
+}
+
+/** GET .../pipeline/status — the whole body IS the state (2495-2497). */
+export async function fetchMirroredPipelineStatus(
+  playlistId: number | string,
+): Promise<MirroredPipelineState> {
+  return readPipelineResponse(
+    await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/status`),
+    PIPELINE_STATUS_FAILED,
+  );
+}
+
+/** PATCH .../source-ref (editMirroredSourceRef, 2423-2432). */
+export async function patchMirroredSourceRef(
+  playlistId: number | string,
+  sourceRef: string,
+): Promise<void> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/source-ref`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_ref: sourceRef }),
+  });
+  const data = await readJson<{ error?: string }>(response);
+  if (!response.ok || data.error) throw new Error(data.error || SOURCE_REF_FAILED);
 }
 
 /* ── Playlist export (#903, stats-automations.js 662-819) ─────────────────── */
