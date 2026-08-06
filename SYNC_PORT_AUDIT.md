@@ -3310,3 +3310,35 @@ before deciding where the React version can put it. `[data-image]`,
 `.beatport-<slug>-slider-nav` and the slug-derived class names have all now been
 verified against style.css rather than by eye — and two of the three were wrong
 before checking.
+
+### BEATPORT P6 — the five card shapes (-ui/beatport-cards.tsx)
+
+Full suite 285 files / 6219. Build clean. All 32 class names checked against
+style.css rather than by eye.
+
+They look interchangeable and are not. The differences, each transcribed and
+each asserted:
+
+- **The background custom property is emitted differently.** The RELEASE card
+  sets `--card-bg-image` unconditionally, so an artless release gets `url('')`
+  (439). Hype picks and both chart cards OMIT the style entirely in that case
+  (805, 1121, 1420). Same-looking cards, opposite rules.
+- **Only hype picks default their text**, and its label default is 'Hype Pick',
+  not 'Unknown Label'. The release card defaults nothing. This is not cosmetic:
+  the vanilla's hype-pick click handler reads the rendered text back out as the
+  track's metadata, so those literals can reach the download engine.
+- **The two placeholders differ in kind.** Releases pad with a captioned card
+  ('More Releases / Coming Soon / Beatport'); hype picks pad with a bare 🔥 and
+  no info block at all.
+- **Chart and DJ cards use DIFFERENT custom properties** — `--chart-bg-image`
+  vs `--dj-bg-image` — so the shared component's variant decides the property,
+  not just the class prefix. Asserted both ways round: setting one must leave
+  the other empty.
+- **`data-url` is emitted as `''` rather than omitted** on the chart cards,
+  because the vanilla's click wiring tests against `''` and a missing attribute
+  reads as null.
+
+The hero's slide attributes are emitted UNCONDITIONALLY, matching the vanilla:
+an artless track still gets `data-image=""`, so `[data-image]::before` still
+matches and paints nothing. Emitting them conditionally would be a different
+behaviour, not a tidier one.
