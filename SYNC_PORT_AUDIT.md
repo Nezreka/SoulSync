@@ -2002,6 +2002,87 @@ fetchAndCacheSpotifyPlaylistTracks each typeof-guarded with an inline fallback
 (GET /api/spotify/playlist/<id>, writing playlistTrackCache[id] = data.tracks).
 Cache HIT spreads the cached tracks onto the list row rather than refetching.
 
+### SPOTIFY + DEEZER-ARL P0 READ — PART 2 (READ COMPLETE, no code)
+
+Read line by line: sync-spotify.js 1878-1971 (the details modal + close +
+the formatDuration twin) and sync-services.js 2437-2699 (the WHOLE Deezer-ARL
+region). With part 1 above, both tabs are now fully read.
+
+**showPlaylistDetailsModal (1878-1958)** — a SINGLETON `#playlist-details-modal`
+.modal-overlay appended to body; closing only sets display:none, it is never
+removed, so the next open overwrites innerHTML. Structure:
+
+    div.modal-container.playlist-modal
+      div.playlist-modal-header
+        div.playlist-header-content
+          h2                                   ← escaped name
+          div.playlist-quick-info
+            span.playlist-track-count          ← `${track_count} tracks`
+            span.playlist-owner                ← `by ${owner}`
+          div.playlist-modal-sync-status#modal-sync-status-<id> [display:none]
+            ♪ #modal-total-<id> / ✓ #modal-matched-<id>
+            / ✗ #modal-failed-<id> (#modal-percentage-<id>%)
+        span.playlist-modal-close              ← &times;
+      div.playlist-modal-body
+        div.playlist-description               ← ONLY when description is truthy
+        .playlist-tracks-container > .playlist-tracks-list
+          .playlist-track-item × N: span.playlist-track-number (index+1),
+            .playlist-track-info > .playlist-track-name + .playlist-track-artists
+            (formatArtists), .playlist-track-duration (formatDuration)
+      div.playlist-modal-footer
+        .playlist-modal-footer-left  ← playlistOrganizeToggleHtml(id,'spotify')
+        .playlist-modal-footer-right ← Close + playlistModalDownloadSyncFooterHtml
+
+The four-stat sync row is hidden markup the SYNC engine unhides and fills — the
+same adopt-the-region rule as the card.
+
+Every footer hook is a typeof-guarded OPTIONAL global with an inline fallback:
+playlistOrganizeToggleHtml, playlistModalDownloadSyncFooterHtml (fallback =
+one tertiary '📥 Download Missing Tracks' button calling openDownloadMissingModal),
+and loadPlaylistOrganizePreferenceIntoModal fired after display:flex.
+hasCompletedProcess = activeDownloadProcesses[id].status === 'complete';
+isSyncing = !!activeSyncPollers[id].
+
+**DEEZER-ARL — the complete drift list vs Spotify.** It clones the Spotify
+archetype, so only the differences matter:
+
+1. **Its cards are NOT selectable.** No `onclick=togglePlaylistSelection` at
+   2503, where Spotify has one at 1646. Confirmed rather than assumed.
+2. Extra class `.deezer-arl-playlist-card` alongside `.playlist-card`.
+3. Every id is prefixed `deezer_arl_<id>`, but the two button onclicks are
+   handed the RAW id (2514-2515) and the handlers re-prefix (2527, 2540, 2668).
+4. **Only TWO status states** — 'status-never-synced' and, for
+   startsWith('Synced'), 'status-synced'. No 'Needs Sync' arm. It also GUARDS
+   `p.sync_status &&` and falls back to the literal 'Never Synced' (2500, 2509);
+   Spotify has NO guard, so an absent sync_status would throw at 1641.
+5. **It rehydrates syncs itself** (2462-2479): after checkForActiveProcesses it
+   loops EVERY playlist sequentially, GETs /api/sync/status/deezer_arl_<id>,
+   and on status 'syncing' pushes a shim row into spotifyPlaylists then calls
+   updateCardToSyncing + startSyncPolling. N awaited requests per tab load.
+6. **THE SHIM, twice, with different track counts.** The load-time shim (2471)
+   takes `p.track_count || 0`; the modal-time shim (2646-2654) takes
+   `playlist.tracks.length`. Both exist so openDownloadMissingModal — which
+   only knows spotifyPlaylists — can serve an ARL playlist.
+7. Its details modal is a SECOND singleton (`#deezer-arl-playlist-details-modal`),
+   byte-identical to Spotify's except: footer source 'deezer',
+   `closeBeforeDownload: true`, and the fallback button closes the modal BEFORE
+   opening the download modal (2639).
+8. openDeezerArlPlaylistDetailsModal coerces with String() on both sides of the
+   find (2537), builds a playlistMeta whose track_count is
+   `track_count ?? tracks?.length` for the staleness check, keys the cache by
+   the PREFIXED id, and calls fetchAndCacheDeezerArlPlaylistTracks(arlId,
+   playlistId) — the only optional-global taking BOTH ids.
+9. updateDeezerArlPlaylistCardUI (2667-2699) is a literal clone of
+   updatePlaylistCardUI, prefix aside — same three arms, same '#28a745', same
+   inline-style clearing.
+
+**PORT SHAPE for this wave (Option A, confirmed against the read):** React
+renders both card lists and both details modals with these exact ids and
+classes. It does NOT own the sync-progress indicator, the status span, the two
+action buttons, or the four-stat modal row — those stay the engine's, reached
+by selector. The download hand-off stays openDownloadMissingModal. Selection is
+Spotify-only and belongs to the SHELL wave, not this one.
+
 ## THE FULL FUNCTION ENUMERATION (Boulder-prompted: "im sure there is much more
 ## still that hasn't been ported")
 
