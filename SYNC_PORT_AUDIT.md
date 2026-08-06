@@ -1711,6 +1711,85 @@ all mapped in the ecosystem section).
   genuinely unobservable in React (dropState follows unconditionally) and is
   annotated as such so nobody hunts for a test that cannot exist.
 
+- P5f landed, then FAILED RECONCILIATION — see the correction entry below. The
+  two pool modals (-sync.pools.ts + -ui/pool-modal.tsx, pool-fix-modal.tsx,
+  discovery-pool-modal.tsx, wingit-pool-modal.tsx). Built to the usual
+  standard — `_wingItMatchedName` and `_buildPoolMatchedMosaic` both run
+  DIFFERENTIALLY against the real vanilla bodies (the mosaic compared element
+  for element in jsdom, including the four-cover threshold, doubled tiles,
+  three-image row offset and staggered speeds); 39 mutants, 36 killed, the
+  three survivors proven equivalent. The UI mutation pass caught three REAL
+  test gaps: the matched list's filter was never exercised, and NEITHER row →
+  fix-modal hand-off was driven end to end, so an off-by-one in which row's id
+  gets passed was invisible — which matters because "Re-match" means two
+  different things (a Wing It row carries a TRACK id to /discovery-pool/fix, a
+  Discovery matched row a CACHE id to /discovery-pool/rematch). Also recorded:
+  the vanilla computes `matchedArtists` at 1706 and never renders it.
+  **The work is sound and the target was wrong** — see below.
+
+- P5g landed (export #903 + the Auto-Sync pipeline button + the 🔗 source-ref
+  edit + P5e's deferred render-time poller resume). `applyMirroredPipelineState`
+  and `parseMirroredPipelineResponse` both proved liftable, so the pipeline core
+  is differential over 36 state×prior-state combinations and 9 response cases.
+  38 mutants across the two halves, all killed. Findings worth keeping:
+  * a test I wrote was WRONG and the differential said so — a
+    `{status:'error', error:'...'}` status can never reach the tick's error
+    arm, because parseMirroredPipelineResponse rejects ANY body carrying an
+    `error` key first (2372). The poller's catch reports "Pipeline status
+    error: ..." and stops WITHOUT reloading. That arm only fires for `skipped`
+    or a message-less `error`, so its `|| 'Pipeline stopped for ...'` fallback
+    is the line users actually see.
+  * an EMPTY response body is not an error (it parses to {} and passes both
+    guards); a non-empty non-JSON body is, and a 404 gets its own
+    "restart the server" message rather than a parse complaint.
+  * the 🔗 editor is a modal, not window.prompt (the repo rule).
+  **Sequencing problem found later** — see below.
+
+## RECONCILIATION AGAINST THIS DOSSIER (Boulder-prompted) — and a reversal
+
+The trigger: P5h was built on a decision that contradicted headline outcome #1.
+Asked whether the guide had been consulted, it had not been — for P5e, P5f, P5g
+or P5h. This dossier was treated as background instead of as the worklist. What
+that cost, all verified rather than assumed:
+
+1. **P5h REVERTED (3 commits).** Headline outcome #1 says the download engine
+   "stays vanilla behind existing window.* seams". P5h added two dispatches to
+   downloads.js instead, on the strength of a fork presented to Boulder as
+   open — he had actually argued for the adopt option, which was the recorded
+   plan. Reverted to 968cc25dd; downloads.js is byte-clean.
+2. **P5f violates a contract this port wrote ITSELF.** This dossier calls the
+   pool modals "app-level overlays (adoptable)", and
+   src/platform/shell/globals.d.ts (written during the TOOLS phase) is
+   explicit: "modals that stay VANILLA and are opened, not reimplemented —
+   openDiscoveryPoolModal is in stats-automations.js and is also opened from
+   the sync page". routes/tools/-ui/launcher-cards.tsx calls
+   window.openDiscoveryPoolModal(). P5f reimplemented both pools as sync-route
+   components; at the flip the Tools button would break, and
+   loadDiscoveryPoolStats (called from wishlist-tools.js 7090, painting the
+   Tools counters) with it.
+3. **P5e left three named functions unported and unrecorded**:
+   openMirroredPlaylistModal (1066 — FIVE external callers: auto-sync.js ×3,
+   shared-helpers.js, sync-soulsync-discovery.js), discoverMirroredPlaylist
+   (2043), retryFailedMirroredDiscovery (2155, the #815 toast pair). All three
+   are named in this dossier's stats-automations section.
+4. **P5g ported three functions that live in auto-sync.js**
+   (runMirroredPlaylistPipeline, editMirroredSourceRef,
+   editMirroredCustomName) — a file whose schedule board is its own later
+   phase. After the flip the board would still call the vanilla pipeline,
+   giving two implementations, two pollers, and neither aware of the other.
+5. **Selection is not self-contained** and P5h had claimed it ported.
+   `selectedPlaylists` is script-scoped in core.js:34; startSequentialSync
+   (downloads.js 4060) reads it directly AND derives order from
+   querySelectorAll('.playlist-card'); updateSyncActionsUI writes
+   #selection-info / #start-sync-btn in the .sync-sidebar, outside every tab.
+6. **This log stopped at P5e-ii.** P5f and P5g were never written up until now —
+   the record went quiet exactly where the work started drifting.
+
+STANDING RULE ADDED: open this dossier at the START of each phase and
+reconcile against it — the named functions, the cross-page contracts section,
+and globals.d.ts — before writing any code. Every miss above was already
+written down.
+
 ## open questions for the port design (collect, don't decide yet)
 
 - Download modal: port-first-as-shared-component vs adopt? (12 call sites across
