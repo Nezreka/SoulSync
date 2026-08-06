@@ -19,6 +19,12 @@ import { describe, expect, it } from 'vitest';
  * A deliberate failure here is fine — it means the seam MOVED. Re-home it (or
  * publish it from React) and update the row, rather than deleting the row to
  * make the suite green.
+ *
+ * Scope: this file covers REACT -> vanilla only. The vanilla -> vanilla edges
+ * (a surviving script calling into a file the port deletes) are far more
+ * numerous — 46 of them — and are covered by vanilla-crossfile.test.ts, which
+ * COMPUTES them rather than listing them by hand. An earlier hand-written list
+ * here caught 8 of those 46 and asserted nothing about the rest.
  */
 const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[] = [
   {
@@ -84,55 +90,6 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
       '`spotifyPlaylists` is a top-level let no module can reach',
   },
 ];
-
-/**
- * The same hazard one step over: definitions that another VANILLA page depends
- * on, sitting in a file this migration is going to delete from.
- *
- * These fail loudly rather than silently (an unqualified call to a deleted
- * function is a ReferenceError), but loud-on-interaction is still a break that
- * no test catches — nobody clicks a Settings dropdown while porting the sync
- * page's Beatport tab.
- */
-const FOREIGN_TENANTS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[] = [
-  ...['loadPlexMusicLibraries', 'selectPlexLibrary'].map((symbol) => ({
-    file: 'static/beatport-ui.js',
-    symbol,
-    pattern: new RegExp(`function ${symbol}\\b`),
-    usedBy: "the SETTINGS page's Plex library picker (settings.js + inline onchange)",
-  })),
-  ...[
-    'loadJellyfinUsers',
-    'selectJellyfinUser',
-    'loadJellyfinMusicLibraries',
-    'selectJellyfinLibrary',
-  ].map((symbol) => ({
-    file: 'static/beatport-ui.js',
-    symbol,
-    pattern: new RegExp(`function ${symbol}\\b`),
-    usedBy: "the SETTINGS page's Jellyfin user/library pickers",
-  })),
-  ...['loadNavidromeMusicFolders', 'selectNavidromeMusicFolder'].map((symbol) => ({
-    file: 'static/beatport-ui.js',
-    symbol,
-    pattern: new RegExp(`function ${symbol}\\b`),
-    usedBy: "the SETTINGS page's Navidrome folder picker",
-  })),
-];
-
-describe('foreign tenants in files this migration deletes from', () => {
-  for (const { file, symbol, pattern, usedBy } of FOREIGN_TENANTS) {
-    it(`${symbol} (${file}) — ${usedBy}`, () => {
-      const source = readFileSync(resolve(process.cwd(), file), 'utf8');
-      expect(
-        pattern.test(source),
-        `${symbol} is gone from ${file}, but it belongs to ${usedBy} — NOT to the ` +
-          'page this file is named after. Deleting the file wholesale at sever time ' +
-          'breaks that other page. Re-home it first.',
-      ).toBe(true);
-    });
-  }
-});
 
 describe('vanilla seams React calls through window still exist', () => {
   for (const { file, symbol, pattern, usedBy } of SEAMS) {

@@ -2589,3 +2589,61 @@ asserting all eight settings functions still exist in beatport-ui.js. Unlike the
 window seams these fail LOUDLY when deleted (an unqualified call to a missing
 function is a ReferenceError) — but loud-on-interaction still catches nobody,
 since no one exercises a Settings dropdown while porting the Beatport tab.
+
+### THE CROSS-FILE EDGE INVENTORY — 46 calls that snap at sever time
+
+Verifying the correction above raised the obvious next question: if
+beatport-ui.js had a foreign tenant nobody had noticed, what about the other six
+files this port deletes from? Swept it properly. The answer is 46.
+
+**Method.** 481 top-level functions are defined across the seven port files
+(sync-services, sync-spotify, sync-listenbrainz, sync-lastfm,
+sync-soulsync-discovery, auto-sync, beatport-ui). Cross-referenced against every
+call in the 36 static/*.js files that SURVIVE the port. 46 of those 481 are
+called from a surviving file. Each is an edge that breaks when its definition
+goes — an unqualified global call, so it throws at the caller's next
+interaction, on a page nobody is exercising while porting the sync page.
+
+**The shape of it.**
+- **downloads.js → sync-services/sync-spotify (17 edges).** The engine calling
+  back into the page: the per-source card-phase updaters
+  (updateTidalCardPhase, updateYouTubeCardPhase, updateBeatportCardPhase,
+  updateDeezerCardPhase, updateSpotifyPublicCardPhase), updatePlaylistCardUI,
+  the two sync pollers, the modal helpers, cleanupWishlist/clearWishlist. This
+  is the Option A adopted-region contract seen from the other side — the port
+  has always known the engine paints these, but the CALL EDGES were never
+  enumerated.
+- **shared-helpers.js → sync-spotify (6).** The download-modal helpers.
+- **wishlist-tools.js → sync-services (4).** Three card-progress updaters plus
+  generateDiscoveryActionButton.
+- **stats-automations.js → auto-sync (5) + sync-services (3).** The P5g mirrored
+  interop the audit already flagged, now with exact names:
+  editMirroredCustomName, editMirroredSourceRef, getMirroredSourceRef,
+  runMirroredPlaylistPipeline, pollMirroredPipelineStatus.
+- **core.js → beatport-ui (5).** THE SECOND FLAW IN THE BOUNDARY ENTRY: core.js
+  calls all five Beatport slider cleanups on page-leave (core.js 507-511). The
+  earlier check grepped for a `beatportUI` NAMESPACE, which does not exist —
+  wrong probe entirely for a classic script whose functions are bare globals.
+- **settings.js → beatport-ui (4).** The tenant already covered.
+- **init.js → sync-services/sync-spotify (2).** initializeSyncPage, loadSyncData.
+- **api-monitor.js + core.js + init.js → rehydrateModal (5 callers).**
+- **formatDuration** — called from four surviving files. Already known as the
+  duplicate-global trap; now confirmed to have four external consumers.
+
+**So beatport-ui.js has THREE tenants, not one:** the Beatport tab, the Settings
+pickers, and a teardown contract with core.js.
+
+**Enforced, and computed rather than listed.** `vanilla-crossfile.test.ts`
+recomputes the whole inventory from the files on every run and compares it to a
+recorded snapshot. Hand-listing is what produced the last two errors; a computed
+list cannot miss an edge it was never told about. The FOREIGN_TENANTS block in
+vanilla-seams.test.ts is deleted — it caught 8 of these 46 and asserted nothing
+about the rest. vanilla-seams.test.ts now covers REACT -> vanilla only.
+
+**Proven, not assumed:** simulated deleting a Settings function AND a core.js
+teardown hook from beatport-ui.js; the guard failed on both, and the file was
+restored under a sha256 check.
+
+**This is the flip wave's real worklist.** Each of the 46 needs a decision —
+re-home the definition, publish it from React, or delete the caller with it —
+and none of them can now be missed silently.
