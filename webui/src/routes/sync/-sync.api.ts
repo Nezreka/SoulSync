@@ -539,6 +539,36 @@ export async function fetchPlaylistExportStatus(jobId: string): Promise<{ job?: 
   return readJson(await fetch(`/api/playlists/export/status/${jobId}`));
 }
 
+/**
+ * The hard reset (resetYouTubePlaylist 10793, resetBeatportChart 10851).
+ *
+ * Both vanilla bodies read the error off a NON-ok response and throw its
+ * `error` field, falling back to their own message — so a 500 with a body is
+ * reported by the backend's words, and one without gets the generic line.
+ */
+export async function resetSourceDiscovery(
+  config: SourceVerticalConfig,
+  id: string,
+): Promise<void> {
+  const url = config.api.reset?.(id);
+  if (!url) return;
+  const init: RequestInit = { method: 'POST' };
+  if (config.api.resetBody === 'fresh-reset') {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify({ phase: 'fresh', reset: true });
+  }
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(
+      body.error ||
+        (config.api.resetBody === 'fresh-reset'
+          ? 'Failed to reset Beatport chart'
+          : 'Failed to reset playlist'),
+    );
+  }
+}
+
 /** DELETE /api/youtube/delete/<hash> (removeYouTubePlaylistFromBackend, 1541). */
 export async function deleteYouTubePlaylist(urlHash: string): Promise<Response> {
   return fetch(`/api/youtube/delete/${urlHash}`, { method: 'DELETE' });

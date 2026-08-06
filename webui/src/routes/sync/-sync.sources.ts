@@ -66,6 +66,12 @@ export interface SourceVerticalConfig {
     playlistsStates: string | null;
     /** Hard reset; null = source has no reset (documented at 9800). */
     reset: ((id: string) => string) | null;
+    /**
+     * What the reset POST carries. youtube + mirrored send a BARE POST
+     * (resetYouTubePlaylist, 10793-10795); beatport rides update-phase and must
+     * send {phase:'fresh', reset:true} (resetBeatportChart, 10851-10858).
+     */
+    resetBody: 'none' | 'fresh-reset';
   };
   ids: {
     /**
@@ -159,6 +165,12 @@ export interface SourceVerticalConfig {
      * discoveryCompleteToast, which also applies the #815 retry override.
      */
     discoveryCompleteToast: string | null;
+    /**
+     * The noun in the reset FAILURE toast: 'Error resetting playlist: ...'
+     * (10833) vs 'Error resetting chart: ...' (10902). The SUCCESS line is
+     * identical for both, so only this word is parameterized.
+     */
+    resetErrorNoun: 'playlist' | 'chart';
   };
 }
 
@@ -180,6 +192,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/tidal/state/${id}`,
       playlistsStates: '/api/tidal/playlists/states',
       reset: null,
+      resetBody: 'none',
     },
     ids: { fakeHashPrefix: 'tidal_', vpidPrefix: 'tidal_', stateFlag: 'is_tidal_playlist' },
     discovery: {
@@ -196,6 +209,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -208,6 +222,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/qobuz/state/${id}`,
       playlistsStates: '/api/qobuz/playlists/states',
       reset: null,
+      resetBody: 'none',
     },
     ids: { fakeHashPrefix: 'qobuz_', vpidPrefix: 'qobuz_', stateFlag: 'is_qobuz_playlist' },
     discovery: {
@@ -224,6 +239,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'qobuz',
       downloadEntry: 'tidal',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -236,6 +252,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/deezer/state/${id}`,
       playlistsStates: '/api/deezer/playlists/states',
       reset: null,
+      resetBody: 'none',
     },
     ids: { fakeHashPrefix: 'deezer_', vpidPrefix: 'deezer_', stateFlag: 'is_deezer_playlist' },
     discovery: {
@@ -252,6 +269,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -264,6 +282,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/youtube/state/${id}`,
       playlistsStates: null, // hydrated via /api/youtube/playlists + per-hash state
       reset: (id) => `/api/youtube/reset/${id}`,
+      resetBody: 'none',
     },
     // The bare url_hash IS the youtubePlaylistStates key; only the download
     // vpid carries the youtube_ prefix (10761). YouTube is the shared modal's
@@ -283,6 +302,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
       discoveryCompleteToast: 'Discovery complete!',
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -300,6 +320,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/beatport/charts/status/${id}`,
       playlistsStates: '/api/beatport/charts',
       // Reset rides update-phase with {phase:'fresh', reset:true} (10837).
+      resetBody: 'fresh-reset',
       reset: (id) => `/api/beatport/charts/update-phase/${id}`,
     },
     // The chart hash IS the youtubePlaylistStates key — no prefix (845-1052).
@@ -318,6 +339,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'chart',
     },
   },
 
@@ -330,6 +352,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/spotify-public/state/${id}`,
       playlistsStates: '/api/spotify-public/playlists/states',
       reset: null,
+      resetBody: 'none',
     },
     // The live inconsistent pair: modal hash vs download vpid.
     ids: {
@@ -351,6 +374,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -363,6 +387,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/itunes-link/state/${id}`,
       playlistsStates: '/api/itunes-link/playlists/states',
       reset: null,
+      resetBody: 'none',
     },
     ids: {
       fakeHashPrefix: 'ituneslink_',
@@ -383,6 +408,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'tidal',
       discoveryCompleteToast: null,
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -402,6 +428,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/listenbrainz/state/${id}`,
       playlistsStates: '/api/listenbrainz/playlists',
       reset: null,
+      resetBody: 'none',
     },
     // The mbid IS the key, in the SEPARATE listenbrainzPlaylistStates registry
     // (looked up FIRST by the shared modal, 9302).
@@ -426,6 +453,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
       discoveryCompleteToast: 'ListenBrainz discovery complete!',
+      resetErrorNoun: 'playlist',
     },
   },
 
@@ -443,6 +471,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       state: (id) => `/api/youtube/state/${id}`,
       playlistsStates: '/api/mirrored-playlists/discovery-states',
       reset: (id) => `/api/youtube/reset/${id}`,
+      resetBody: 'none',
     },
     // The registry key IS the source id ('mirrored_<n>' — the literal prefix
     // is PART of the id, never prepended; frame ids and API paths carry the
@@ -462,6 +491,7 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       foundVariant: 'lenient',
       downloadEntry: 'youtube',
       discoveryCompleteToast: 'Discovery complete!',
+      resetErrorNoun: 'playlist',
     },
   },
 };

@@ -176,6 +176,16 @@ export function SourceModals({
         onStartSync={() => void vertical.startSync(openId)}
         onCancelSync={() => void vertical.cancelSync(openId)}
         onDownloadMissing={(options) => void onDownloadMissing(options)}
+        onRediscover={
+          config.api.reset
+            ? () => {
+                // The vanilla closes the modal after resetting (10826/10895).
+                // hideWithoutReset, not close: closeModalReset would POST the
+                // phase back to 'discovered' over the reset we just made.
+                void vertical.resetDiscovery(openId).then(hideWithoutReset);
+              }
+            : undefined
+        }
         onRetryFailed={
           config.id === 'mirrored'
             ? () => void retryFailedMirroredDiscovery(openId, vertical)

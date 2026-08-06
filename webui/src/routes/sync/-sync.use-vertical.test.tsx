@@ -361,3 +361,138 @@ describe('discovery completion announcement', () => {
     expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
   });
 });
+
+describe('resetDiscovery — the 🔄 Rediscover hard reset (10785 / 10837)', () => {
+  function toastSpy(): ReturnType<typeof vi.fn> {
+    const spy = vi.fn();
+    (window as unknown as Record<string, unknown>).showToast = spy;
+    return spy;
+  }
+
+  const HYDRATED = {
+    playlist: { name: 'Road Trip', tracks: [{}, {}] },
+    phase: 'sync_complete',
+    results: [{ status: 'found', spotify_data: { id: 'x' } }],
+    discovery_progress: 100,
+    spotify_matches: 2,
+    converted_spotify_playlist_id: 'vp1',
+  };
+
+  it('POSTs the reset, zeroes every field and names the playlist in the toast', async () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.hydrate('h1', HYDRATED));
+    await act(async () => {
+      await result.current.resetDiscovery('h1');
+    });
+
+    expect(calls.find((c) => c.url === '/api/youtube/reset/h1')?.method).toBe('POST');
+    const state = result.current.states.h1;
+    expect(state.phase).toBe('fresh');
+    expect(state.rawResults).toEqual([]);
+    expect(state.rows).toEqual([]);
+    expect(state.discoveryProgress).toBe(0);
+    expect(state.spotifyMatches).toBe(0);
+    expect(state.convertedSpotifyPlaylistId).toBeUndefined();
+    expect(state.syncPlaylistId).toBeUndefined();
+    expect(state.lastSyncProgress).toBeUndefined();
+    expect(spy).toHaveBeenCalledWith('Reset "Road Trip" to fresh state', 'success');
+  });
+
+  it('sends beatport its {phase, reset} body, where youtube sends none (10851)', async () => {
+    toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.beatport));
+    act(() => result.current.hydrate('chart1', HYDRATED));
+    await act(async () => {
+      await result.current.resetDiscovery('chart1');
+    });
+    const call = calls.find((c) => c.url.includes('/api/beatport/charts/update-phase/'));
+    expect(call?.body).toEqual({ phase: 'fresh', reset: true });
+    // youtube's is a bare POST — no body at all.
+    const { result: yt } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => yt.current.hydrate('h1', HYDRATED));
+    await act(async () => {
+      await yt.current.resetDiscovery('h1');
+    });
+    expect(calls.find((c) => c.url === '/api/youtube/reset/h1')?.body).toBeUndefined();
+  });
+
+  it('does nothing at all without a state (10787)', async () => {
+    toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    await act(async () => {
+      await result.current.resetDiscovery('missing');
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('keeps the state on a failed reset, with the source-specific noun', async () => {
+    const spy = toastSpy();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(JSON.stringify({ error: 'backend said no' }), { status: 500 }),
+      ),
+    );
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.beatport));
+    act(() => result.current.hydrate('chart1', HYDRATED));
+    await act(async () => {
+      await result.current.resetDiscovery('chart1');
+    });
+    // 10902 says 'chart' where 10833 says 'playlist'.
+    expect(spy).toHaveBeenCalledWith('Error resetting chart: backend said no', 'error');
+    expect(result.current.states.chart1.phase).toBe('sync_complete');
+  });
+
+  it('falls back to the vanilla message when the failure carries no error field', async () => {
+    const spy = toastSpy();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}', { status: 500 })),
+    );
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.hydrate('h1', HYDRATED));
+    await act(async () => {
+      await result.current.resetDiscovery('h1');
+    });
+    expect(spy).toHaveBeenCalledWith('Error resetting playlist: Failed to reset playlist', 'error');
+  });
+
+  it('stops an in-flight discovery poll — the reset must not race it (10803)', async () => {
+    toastSpy();
+    responder = () => ({ progress: 10 });
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.hydrate('h1', HYDRATED));
+    act(() => result.current.resumeDiscovery('h1'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.youtube.discovery.pollMs);
+    });
+    const polled = calls.filter((c) => c.url.includes('/discovery/status/')).length;
+    expect(polled).toBeGreaterThan(0);
+
+    await act(async () => {
+      await result.current.resetDiscovery('h1');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_SOURCES.youtube.discovery.pollMs * 3);
+    });
+    // Not one more status call, and the reset state survives.
+    expect(calls.filter((c) => c.url.includes('/discovery/status/')).length).toBe(polled);
+    expect(result.current.states.h1.phase).toBe('fresh');
+  });
+
+  it('lets the NEXT discovery announce again', async () => {
+    const spy = toastSpy();
+    const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.youtube));
+    act(() => result.current.hydrate('h1', HYDRATED));
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
+    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+    spy.mockClear();
+
+    await act(async () => {
+      await result.current.resetDiscovery('h1');
+    });
+    act(() => frame({ id: 'h1', platform: 'youtube', complete: true }));
+    expect(spy).toHaveBeenCalledWith('Discovery complete!', 'success');
+  });
+});

@@ -34,6 +34,7 @@ import {
   fetchSourceState,
   fetchSourceSyncStatus,
   startSourceDiscovery,
+  resetSourceDiscovery,
   startSourceSync,
   updateSourcePhase,
 } from './-sync.api';
@@ -86,6 +87,12 @@ export interface SourceVertical {
    * matching closeYouTubeDiscoveryModal's gate (10237).
    */
   closeModalReset: (sourceId: string) => Promise<void>;
+  /**
+   * The 🔄 Rediscover hard reset (resetYouTubePlaylist 10785 /
+   * resetBeatportChart 10837): POST, stop polling, zero the discovery + sync
+   * fields, toast, and tell the caller to close the modal.
+   */
+  resetDiscovery: (sourceId: string) => Promise<void>;
 }
 
 export interface SourceVerticalOptions {
@@ -371,6 +378,41 @@ export function useSourceVertical(
     [config, patch],
   );
 
+  const resetDiscovery = useCallback(
+    async (sourceId: string) => {
+      const state = statesRef.current[sourceId];
+      // 10787 / 10841 — no state, nothing to reset.
+      if (!state) return;
+      const name = (state.playlist?.name as string) ?? '';
+      try {
+        await resetSourceDiscovery(config, sourceId);
+        stopDiscoveryPoll(sourceId);
+        stopSyncPoll(sourceId);
+        // The field-by-field zeroing at 10809-10815 / 10872-10881. Beatport
+        // writes both key styles; this store keeps one, so one assignment
+        // covers both.
+        patch(sourceId, (s) => ({
+          ...s,
+          phase: 'fresh',
+          rawResults: [],
+          rows: [],
+          discoveryProgress: 0,
+          spotifyMatches: 0,
+          syncPlaylistId: undefined,
+          lastSyncProgress: undefined,
+          convertedSpotifyPlaylistId: undefined,
+        }));
+        // A fresh run must be announceable again.
+        announced.current.delete(sourceId);
+        window.showToast?.(`Reset "${name}" to fresh state`, 'success');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'unknown error';
+        window.showToast?.(`Error resetting ${config.ux.resetErrorNoun}: ${message}`, 'error');
+      }
+    },
+    [config, patch, stopDiscoveryPoll, stopSyncPoll],
+  );
+
   /* ── Lifecycle ──────────────────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -394,6 +436,7 @@ export function useSourceVertical(
     resumeSync,
     cancelSync,
     closeModalReset,
+    resetDiscovery,
   };
 }
 
