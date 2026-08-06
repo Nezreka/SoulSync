@@ -6,6 +6,8 @@
  * not exist produces an unstyled slider rather than an error.
  */
 
+import type React from 'react';
+
 import { act, fireEvent, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -240,6 +242,47 @@ describe('BeatportSlider', () => {
     expect(nav?.querySelector('.beatport-releases-prev-btn')).not.toBeNull();
     expect(nav?.querySelector('.beatport-releases-next-btn')).not.toBeNull();
     expect(document.querySelectorAll('.beatport-releases-nav-btn')).toHaveLength(2);
+  });
+
+  it('merges per-slide attributes onto the SLIDE, which the hero background needs', () => {
+    render(
+      <BeatportSlider
+        config={BEATPORT_SLIDERS.hero}
+        items={['track-a', 'track-b']}
+        renderItem={(item) => <span key={item}>{item}</span>}
+        slideAttributes={(item) => ({
+          'data-url': `http://${item}`,
+          'data-image': `http://${item}.jpg`,
+          style: { '--slide-bg-image': `url('http://${item}.jpg')` } as React.CSSProperties,
+        })}
+      />,
+    );
+    const slide = document.querySelectorAll('.beatport-rebuild-slide')[0] as HTMLElement;
+    // style.css 17056: `.beatport-rebuild-slide[data-image]::before` is an
+    // ATTRIBUTE SELECTOR on the slide reading a custom property that must
+    // inherit from it. On a child, the selector never matches and the artwork
+    // silently does not appear.
+    expect(slide.getAttribute('data-image')).toBe('http://track-a.jpg');
+    expect(slide.getAttribute('data-url')).toBe('http://track-a');
+    expect(slide.style.getPropertyValue('--slide-bg-image')).toBe("url('http://track-a.jpg')");
+    // …and the slider's own class and data-slide survive the merge.
+    expect(slide.className).toContain('beatport-rebuild-slide');
+    expect(slide.getAttribute('data-slide')).toBe('0');
+  });
+
+  it('does not apply per-slide attributes to a multi-card slide', () => {
+    const slideAttributes = vi.fn(() => ({ 'data-url': 'x' }));
+    render(
+      <BeatportSlider
+        config={BEATPORT_SLIDERS.releases}
+        items={ITEMS}
+        renderItem={(item) => <span key={item}>{item}</span>}
+        slideAttributes={slideAttributes}
+      />,
+    );
+    // Ten cards to a slide: there is no single item the slide could describe,
+    // and the vanilla puts those attributes on the cards instead.
+    expect(slideAttributes).not.toHaveBeenCalled();
   });
 
   it('every derived class name exists in the vanilla stylesheet', () => {

@@ -3281,3 +3281,32 @@ rows — a duplicate-id situation as well, since the port reuses the vanilla ids
 This is the same class as the duplicate-id trap the discover port hit
 (f6369f914, "the duplicate-id guard was right"). Recorded against the flip
 rather than left to be discovered.
+
+### A BREAK THE REVIEW CAUGHT BEFORE THE HERO CARD WAS EVEN WRITTEN
+
+Starting the hero slide renderer, I checked what actually paints its artwork
+instead of assuming the markup could go anywhere. style.css 17056:
+
+    .beatport-rebuild-slide[data-image]::before { background-image: var(--slide-bg-image); … }
+
+That is an ATTRIBUTE SELECTOR on the slide element, reading a custom property
+that has to inherit from it. The vanilla puts both on the slide (86-91).
+
+**The port could not have.** BeatportSlider owns the slide element and the card
+renderer returns its children, so `data-image` and `--slide-bg-image` would have
+landed on an inner div. The selector would never match, and the hero would
+render with no artwork at all — no error, no warning, just a flat panel where
+the album art should be. Exactly the failure mode the slug check was built for,
+one level deeper.
+
+Fixed with a `slideAttributes` prop that merges onto the slide itself, applied
+only for one-card-per-slide layouts (the hero's shape; grid sliders put their
+attributes on the cards). Tested for the merge, for the slider's own class and
+data-slide surviving it, and for it NOT being consulted on a ten-card slide.
+
+**The general rule this is the third instance of:** when the vanilla puts an
+attribute on an element, check whether a SELECTOR depends on it being there
+before deciding where the React version can put it. `[data-image]`,
+`.beatport-<slug>-slider-nav` and the slug-derived class names have all now been
+verified against style.css rather than by eye — and two of the three were wrong
+before checking.

@@ -16,7 +16,7 @@
  *     the vanilla first (commit 44f60b3fc), so the two sides agree today.
  */
 
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -29,6 +29,15 @@ import {
   wrapSlideIndex,
 } from '../-beatport.core';
 
+/**
+ * Standard div attributes plus arbitrary `data-*`, which HTMLAttributes does
+ * not model but JSX accepts — and which is the entire point here, since the
+ * hero's background hangs off `[data-image]`.
+ */
+export type BeatportSlideAttributes = HTMLAttributes<HTMLDivElement> & {
+  [key: `data-${string}`]: string;
+};
+
 export interface BeatportSliderProps<T> {
   config: BeatportSliderConfig;
   items: readonly T[];
@@ -39,6 +48,16 @@ export interface BeatportSliderProps<T> {
    * caller's, not the component's.
    */
   renderPlaceholder?: (index: number) => ReactNode;
+  /**
+   * Attributes and style to merge onto the SLIDE element itself.
+   *
+   * The hero needs this and nothing else does. Its background is painted by
+   * `.beatport-rebuild-slide[data-image]::before` using `var(--slide-bg-image)`
+   * (style.css 17056-17069) — an attribute selector on the slide, reading a
+   * custom property that must inherit from it. Putting either on a child means
+   * the selector never matches and the artwork silently does not appear.
+   */
+  slideAttributes?: (item: T, index: number) => BeatportSlideAttributes | undefined;
   /** The id the vanilla put on the track element, kept for the CSS contract. */
   trackId?: string;
   prevButtonId?: string;
@@ -51,6 +70,7 @@ export function BeatportSlider<T>({
   items,
   renderItem,
   renderPlaceholder,
+  slideAttributes,
   trackId,
   prevButtonId,
   nextButtonId,
@@ -149,9 +169,16 @@ export function BeatportSlider<T>({
             padding > 0
               ? [...body, ...Array.from({ length: padding }, (_, i) => renderPlaceholder?.(i))]
               : body;
+          // One item per slide is the only shape where a per-slide attribute
+          // is meaningful, which is exactly the hero's shape.
+          const extra =
+            config.cardsPerSlide === 1 && slideItems[0] !== undefined
+              ? slideAttributes?.(slideItems[0], slideIndex)
+              : undefined;
           return (
             <div
               key={slideIndex}
+              {...extra}
               className={`${classes.slide} ${slidePosition(slideIndex, currentSlide)}`}
               data-slide={slideIndex}
             >
