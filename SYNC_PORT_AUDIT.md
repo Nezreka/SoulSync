@@ -2713,3 +2713,45 @@ a transcription error later.
 **Read status: 322 of ~3,600 in-scope lines.** Remaining: sliders 2-5
 (diff-read), the top-10 lists, the click handlers + download-modal bridge, and
 the genre browser (~1,400 lines, the largest single region).
+
+### BEATPORT READ — SLIDER 2 (new releases, 323-661)
+
+Read line by line and diffed against slider 1. **They are not clones.** The
+comments say "copied from hero slider" on nearly every function, and nearly
+every one has since drifted. Assuming shared behaviour would have been wrong
+about all of the following:
+
+| | slider 1 (hero) | slider 2 (releases) |
+|---|---|---|
+| autoplay delay | 5000 | **8000** |
+| slide contents | one track | **grid of 10 cards** |
+| slide count | tracks.length | **ceil(len/10)** |
+| init order | mark initialised, THEN fetch | **fetch, wire up ONLY on success** |
+| re-entry | restarts autoplay | **returns, restarts nothing** |
+| API failure | silently keeps static markup | **renders an error block** |
+| nav buttons | addEventListener | **cloneNode to strip old listeners** |
+| indicator click | preventDefault + stopPropagation | **neither** |
+| click → data | by INDEX | **by URL match (first wins)** |
+
+**A real vanilla bug, recorded not fixed.** cleanupBeatportReleasesSlider clears
+the interval on page-leave (655-659), and initializeBeatportReleasesSlider
+returns early on re-entry because `dataset.initialized` is still 'true'
+(349-352) — without restarting autoplay. So the releases slider auto-advances
+once per app session: leave the sync page and come back and it is frozen, while
+the hero slider revives because its guard explicitly restarts (26). Nav buttons
+and indicators still work, so it looks alive.
+
+The port should NOT silently inherit this. It is not a transcription question —
+React's effect lifecycle would naturally restart it, so reproducing the freeze
+takes deliberate code. FLAGGED FOR BOULDER as a probable bug to fix rather than
+port.
+
+**Other details worth keeping.** The final slide is padded to 10 with static
+'More Releases / Coming Soon / Beatport' placeholder cards, which are excluded
+from click handling by `:not(.beatport-release-placeholder)`. The click handler
+resolves its release by matching `url` against the source array rather than by
+position, so two releases sharing a URL would both open the first. Slides are
+appended with `innerHTML +=` inside the loop; handlers are attached afterwards,
+so nothing is lost, but every append re-parses the whole track.
+
+Read status: 661 of ~3,600 in-scope lines.
