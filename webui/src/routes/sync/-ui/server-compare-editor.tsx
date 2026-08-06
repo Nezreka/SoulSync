@@ -36,6 +36,7 @@ import {
   alignServerPlaylist,
   applyPickedTrack,
   applyRemovedTrack,
+  downloadM3u,
   compareConfidenceBadge,
   compareFilterLabel,
   compareFooterText,
@@ -46,11 +47,15 @@ import {
   compareSourceIcon,
   compareSourceLabel,
   compareStats,
+  exportServerM3u,
   fetchComparePlaylist,
   formatDurationMs,
+  m3uExportNote,
+  m3uFileName,
   removeConfirmOptions,
   removeServerTrack,
   replaceServerTrack,
+  serverM3uTracks,
 } from '../-sync.server';
 import { ServerOrderModal } from './server-order-modal';
 import { ServerSearchOverlay } from './server-search-overlay';
@@ -261,16 +266,9 @@ export interface ServerCompareEditorProps {
   playlist: ServerPlaylist;
   mirrored: MirroredMatch | null;
   onBack: () => void;
-  /** Slice E — exportServerPlaylistM3U. */
-  onExportM3u?: () => void;
 }
 
-export function ServerCompareEditor({
-  playlist,
-  mirrored,
-  onBack,
-  onExportM3u,
-}: ServerCompareEditorProps) {
+export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompareEditorProps) {
   const [data, setData] = useState<CompareResponse | null>(null);
   /**
    * The tracks are state of their own, apart from `data`, because that is the
@@ -294,6 +292,7 @@ export function ServerCompareEditor({
   const [highlighted, setHighlighted] = useState<number | null>(null);
   const [search, setSearch] = useState<{ index: number; mode: ServerSearchMode } | null>(null);
   const [showOrder, setShowOrder] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const sourceScroll = useRef<HTMLDivElement>(null);
   const serverScroll = useRef<HTMLDivElement>(null);
@@ -512,6 +511,37 @@ export function ServerCompareEditor({
     [loadCompare, playlist.name, tracks],
   );
 
+  /** exportServerPlaylistM3U (632-696). */
+  const exportM3u = useCallback(async () => {
+    const m3uTracks = serverM3uTracks(tracks);
+    // 652-655: the guard runs BEFORE the button is touched, so an empty
+    // playlist never shows the exporting state at all.
+    if (m3uTracks.length === 0) {
+      window.showToast?.('No server tracks to export', 'warning');
+      return;
+    }
+    setExporting(true);
+    try {
+      const data = await exportServerM3u(playlist.name, m3uTracks);
+      downloadM3u(data.m3u_content || '', m3uFileName(playlist.name));
+      const found = data.stats?.found != null ? data.stats.found : m3uTracks.length;
+      // 690: the toast names the playlist WITHOUT the 'Playlist' fallback the
+      // body and the filename both use — a nameless playlist really does read
+      // 'Exported M3U: (3 tracks)'. Transcribed, not tidied.
+      window.showToast?.(
+        `Exported M3U: ${playlist.name}${m3uExportNote(found, m3uTracks.length)}`,
+        'success',
+      );
+    } catch (error) {
+      window.showToast?.(
+        `M3U export failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [playlist.name, tracks]);
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -531,8 +561,16 @@ export function ServerCompareEditor({
         </button>
         <div id="server-editor-name">{playlist.name}</div>
         <div id="server-editor-meta">{meta}</div>
-        <button type="button" id="server-editor-export-btn" onClick={onExportM3u}>
-          📋 Export M3U
+        {/* 657/694: the label IS the button state. The vanilla restores
+            whatever text it captured, falling back to this same string — a
+            fallback that can only ever produce the string it already had. */}
+        <button
+          type="button"
+          id="server-editor-export-btn"
+          disabled={exporting}
+          onClick={() => void exportM3u()}
+        >
+          {exporting ? '⏳ Exporting…' : '📋 Export M3U'}
         </button>
       </div>
 

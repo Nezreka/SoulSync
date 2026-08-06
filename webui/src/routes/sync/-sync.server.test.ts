@@ -14,7 +14,12 @@ import {
   alignMatchedIds,
   alignServerPlaylist,
   canAlignServer,
+  downloadM3u,
+  exportServerM3u,
+  m3uExportNote,
+  m3uFileName,
   orderModalTitle,
+  serverM3uTracks,
   addTrackPosition,
   applyPickedTrack,
   applyRemovedTrack,
@@ -842,5 +847,153 @@ describe('alignServerPlaylist (462-470)', () => {
     const body = JSON.parse(seen[0].init?.body as string);
     expect(body.playlist_name).toBe('');
     expect(body.keep_extras).toBe(false);
+  });
+});
+
+/* ── Slice E: M3U export (632-696) ─────────────────────────────────────────── */
+
+describe('serverM3uTracks (645-651)', () => {
+  it('exports what is physically ON the server — matched and extra, never missing', () => {
+    const tracks: CompareTrack[] = [
+      {
+        match_status: 'matched',
+        source_track: { name: 'Source Name' },
+        server_track: { id: 'a', title: 'Alright', artist: 'Kendrick', duration: 219000 },
+      },
+      { match_status: 'missing', source_track: { name: 'Nights' }, server_track: null },
+      {
+        match_status: 'extra',
+        source_track: null,
+        server_track: { id: 'b', title: 'Bonus', artist: 'Someone', duration: 100 },
+      },
+    ];
+    // The names come from the SERVER side, not the source side — this file
+    // describes the server's playlist.
+    expect(serverM3uTracks(tracks)).toEqual([
+      { name: 'Alright', artist: 'Kendrick', duration_ms: 219000 },
+      { name: 'Bonus', artist: 'Someone', duration_ms: 100 },
+    ]);
+  });
+
+  it('defaults a missing artist and duration but leaves the name alone', () => {
+    const tracks: CompareTrack[] = [{ match_status: 'matched', server_track: { id: 'a' } }];
+    expect(serverM3uTracks(tracks)).toEqual([{ name: undefined, artist: '', duration_ms: 0 }]);
+  });
+
+  it('is empty for a playlist with nothing on the server', () => {
+    expect(serverM3uTracks([{ match_status: 'missing', server_track: null }])).toEqual([]);
+  });
+});
+
+describe('m3uFileName (676)', () => {
+  it('flattens every character a filesystem refuses', () => {
+    expect(m3uFileName('a/b\\c?d%e*f:g|h"i<j>k')).toBe('a-b-c-d-e-f-g-h-i-j-k.m3u');
+  });
+
+  it('leaves an ordinary name alone and falls back when there is none', () => {
+    expect(m3uFileName('Road Trip')).toBe('Road Trip.m3u');
+    expect(m3uFileName('')).toBe('Playlist.m3u');
+    expect(m3uFileName(undefined)).toBe('Playlist.m3u');
+  });
+});
+
+describe('m3uExportNote (689)', () => {
+  it('calls out the shortfall only when the library could not resolve every track', () => {
+    expect(m3uExportNote(8, 10)).toBe(' (8/10 in library)');
+    expect(m3uExportNote(10, 10)).toBe(' (10 tracks)');
+    // More found than sent cannot happen, but it reads as the plain form.
+    expect(m3uExportNote(11, 10)).toBe(' (11 tracks)');
+  });
+});
+
+describe('exportServerM3u (659-673)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubM3u(body: unknown, ok = true) {
+    const seen: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        seen.push({ url, init });
+        return new Response(JSON.stringify(body), { status: ok ? 200 : 500 });
+      }),
+    );
+    return seen;
+  }
+
+  it('posts the tracks with save_to_disk and force set', async () => {
+    const seen = stubM3u({ success: true, m3u_content: '#EXTM3U' });
+    const tracks = [{ name: 'Alright', artist: 'Kendrick', duration_ms: 219000 }];
+    await exportServerM3u('Road Trip', tracks);
+    expect(seen[0].url).toBe('/api/generate-playlist-m3u');
+    expect(JSON.parse(seen[0].init?.body as string)).toEqual({
+      playlist_name: 'Road Trip',
+      tracks,
+      context_type: 'playlist',
+      // force bypasses the auto-save gate; this export is on demand.
+      save_to_disk: true,
+      force: true,
+    });
+  });
+
+  it("names a nameless playlist 'Playlist' in the body (663)", async () => {
+    const seen = stubM3u({ success: true });
+    await exportServerM3u('', []);
+    expect(JSON.parse(seen[0].init?.body as string).playlist_name).toBe('Playlist');
+  });
+
+  it('throws the error the backend named, and a default when it named none', async () => {
+    stubM3u({ success: false, error: 'no writer configured' });
+    await expect(exportServerM3u('Road Trip', [])).rejects.toThrow('no writer configured');
+    stubM3u({ success: false });
+    await expect(exportServerM3u('Road Trip', [])).rejects.toThrow('Export failed');
+  });
+
+  it('throws on a non-ok response even when the body claims success', async () => {
+    stubM3u({ success: true, m3u_content: '#EXTM3U' }, false);
+    await expect(exportServerM3u('Road Trip', [])).rejects.toThrow('Export failed');
+  });
+
+  it('treats a response that OMITS success as a success (671)', async () => {
+    // The check is `success === false`, not falsiness.
+    stubM3u({ m3u_content: '#EXTM3U' });
+    await expect(exportServerM3u('Road Trip', [])).resolves.toMatchObject({
+      m3u_content: '#EXTM3U',
+    });
+  });
+});
+
+describe('downloadM3u (677-685)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('clicks a real anchor, then cleans up after itself', () => {
+    const createObjectURL = vi.fn(() => 'blob:m3u');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const clicked: HTMLAnchorElement[] = [];
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        // Captured mid-flight: the anchor must still be IN the document when
+        // it is clicked, or the download never starts in some browsers.
+        expect(document.body.contains(this)).toBe(true);
+        clicked.push(this);
+      });
+
+    downloadM3u('#EXTM3U', 'Road Trip.m3u');
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(clicked[0].download).toBe('Road Trip.m3u');
+    expect(clicked[0].href).toContain('blob:m3u');
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect((createObjectURL.mock.calls[0] as unknown[])[0]).toBeInstanceOf(Blob);
+    // …and neither the node nor the object URL is left behind.
+    expect(document.body.contains(clicked[0])).toBe(false);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:m3u');
+    click.mockRestore();
   });
 });

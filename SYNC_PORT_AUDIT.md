@@ -2430,3 +2430,49 @@ to a ♫ placeholder both when absent and when it fails to load.
   designed) and seeing no key at all. Tested through a cast.
 
 **Remaining server slice:** (E) sync detail modal + M3U export.
+
+### SERVER TAB SLICE E — M3U export, and a SCOPE CORRECTION
+
+**The audit had slice E wrong, and the read caught it.** It listed slice E as
+"sync detail modal + M3U export". The sync detail modal is NOT sync-page content
+and must not be ported here.
+
+**openSyncDetailModal is the DASHBOARD's seam.** Searched the whole repo: its
+only caller is `-ui/syncs-card.tsx:109`, `window.openSyncDetailModal?.(view.id)`,
+and it is a declared P7 dashboard seam at globals.d.ts:610-630 with a docblock
+saying so. Nothing on the sync page reaches it — a synced server card calls
+`openServerPlaylistEditor` (99), not this. The P0's phrase "opened from a synced
+card" meant the DASHBOARD's Recent Syncs card, and I had read it as the server
+tab's.
+
+Porting it into the sync route would have been inventing a caller: no sync-page
+code would call it, and the dashboard would still need the window seam.
+
+**FLIP-TIME CARVE-OUT — do not delete this region.** When the sync flip deletes
+pages-extra.js's server region, `openSyncDetailModal` (1058-1213),
+`_syncDetailFilter` (1214-1232) and `_readdSyncWishlist` (1029-1056) MUST SURVIVE
+along with the CSS they use. Deleting them breaks the dashboard's Recent Syncs
+card SILENTLY — the call is optional-chained, so a click would simply do nothing.
+Whether React eventually owns that modal and publishes the seam is a DASHBOARD
+follow-up, not a sync-page phase.
+
+**What slice E actually is: M3U export (632-696).** 23 mutants, 23 killed. Full
+suite 278 files / 6071 tests.
+
+- The file describes what is physically ON the server: matched + extra. A
+  missing row has no server track and no path to write.
+- `force:true` bypasses the auto-save `m3u_export.enabled` gate (manual export);
+  `save_to_disk:true` also writes it server-side for media servers.
+- The success check is `data.success === false`, so a response OMITTING success
+  is treated as a success. Transcribed, not tidied.
+- `found` uses `!= null`, so a server that resolved NONE of the tracks reads
+  '(0/2 in library)' rather than a cheerful '(2 tracks)'.
+- The toast names the playlist WITHOUT the 'Playlist' fallback the body and the
+  filename both use — a nameless playlist really does read 'Exported M3U: '.
+- NOT routed through routes/library's downloadExport: that one names the file
+  its own way, picks its own mime, toasts on its own and revokes the object URL
+  a second later. Different function, separate transcription.
+
+`onExportM3u` deleted, for slices C and D's reason. **The server tab is now
+COMPLETE** — all five slices built, and ServerCompareEditor has no leftover
+callback props.

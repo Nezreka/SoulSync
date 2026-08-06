@@ -625,6 +625,133 @@ describe('ServerCompareEditor', () => {
     expect(calls.some((c) => c.url.includes('/align'))).toBe(false);
   });
 
+  /* ── Slice E: M3U export ────────────────────────────────────────────────── */
+
+  it('Export M3U sends the server tracks and downloads the file (642-690)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    writePayload = { success: true, m3u_content: '#EXTM3U', stats: { found: 2 } };
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes('m3u'))).toBe(true));
+    const body = calls.find((c) => c.url === '/api/generate-playlist-m3u')?.body as {
+      tracks: unknown[];
+    };
+    // Matched + extra are on the server; the missing row is not.
+    expect(body.tracks).toEqual([
+      { name: 'Alright', artist: 'Kendrick', duration_ms: 219000 },
+      { name: 'Bonus', artist: 'Someone', duration_ms: 0 },
+    ]);
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('Exported M3U: Road Trip (2 tracks)', 'success'),
+    );
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
+
+  it('reports the shortfall when the library could not resolve every track (688-689)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    writePayload = { success: true, m3u_content: '#EXTM3U', stats: { found: 1 } };
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('Exported M3U: Road Trip (1/2 in library)', 'success'),
+    );
+    click.mockRestore();
+  });
+
+  it('reports a found count of ZERO rather than falling back to the total (688)', async () => {
+    // The guard is `!= null`, not truthiness: a server that resolved NONE of
+    // the tracks must read '0/2 in library', not a cheerful '2 tracks'.
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    writePayload = { success: true, m3u_content: '', stats: { found: 0 } };
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('Exported M3U: Road Trip (0/2 in library)', 'success'),
+    );
+    click.mockRestore();
+  });
+
+  it('shows the exporting state on the button while the write runs (657, 694)', async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          await held;
+          return new Response(JSON.stringify({ success: true, m3u_content: '' }));
+        }
+        return new Response(JSON.stringify(payload));
+      }),
+    );
+    vi.stubGlobal('URL', { ...URL, createObjectURL: () => 'blob:x', revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+
+    await waitFor(() => expect(screen.getByText('⏳ Exporting…')).toBeInTheDocument());
+    expect((screen.getByText('⏳ Exporting…') as HTMLButtonElement).disabled).toBe(true);
+
+    release();
+    await waitFor(() => expect(screen.getByText('📋 Export M3U')).toBeInTheDocument());
+    expect((screen.getByText('📋 Export M3U') as HTMLButtonElement).disabled).toBe(false);
+    click.mockRestore();
+  });
+
+  it('warns without exporting when nothing is on the server (652-655)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    payload = { success: true, tracks: [TRACKS[1]] };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('No server tracks to export', 'warning'),
+    );
+    expect(calls.some((c) => c.url.includes('m3u'))).toBe(false);
+    // The guard runs before the button is touched, so it never shows the
+    // exporting state.
+    expect(screen.getByText('📋 Export M3U')).toBeInTheDocument();
+  });
+
+  it('restores the button after a failed export (691-695)', async () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: false, error: 'no writer configured' };
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText('📋 Export M3U'));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('M3U export failed: no writer configured', 'error'),
+    );
+    const button = screen.getByText('📋 Export M3U') as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
   it('a declined confirm writes nothing (988)', async () => {
     vi.stubGlobal(
       'showConfirmDialog',

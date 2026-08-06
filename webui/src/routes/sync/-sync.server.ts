@@ -581,6 +581,101 @@ export async function removeServerTrack(
   return (await response.json()) as ServerMutationResponse;
 }
 
+/* ── M3U export (632-696) ─────────────────────────────────────────────────── */
+
+export interface M3uTrack {
+  name?: string;
+  artist: string;
+  duration_ms: number;
+}
+
+/**
+ * The tracks the export sends (645-651): the ones physically ON the server,
+ * which is matched + extra. A missing row has no server track and no file to
+ * point at, so it is not in the file.
+ */
+export function serverM3uTracks(tracks: readonly CompareTrack[]): M3uTrack[] {
+  return tracks
+    .filter((t) => t.server_track)
+    .map((t) => ({
+      name: t.server_track?.title,
+      artist: t.server_track?.artist || '',
+      duration_ms: t.server_track?.duration || 0,
+    }));
+}
+
+/** 676: the characters a filesystem will not take, flattened to a dash. */
+export function m3uFileName(playlistName: string | null | undefined): string {
+  return `${(playlistName || 'Playlist').replace(/[/\\?%*:|"<>]/g, '-')}.m3u`;
+}
+
+/**
+ * 688-689. `found` counts the server tracks the backend could resolve to a real
+ * library file path; anything SoulSync does not own is skipped, because there is
+ * no path to write for it. The note only calls that out when some were lost.
+ */
+export function m3uExportNote(found: number, total: number): string {
+  return found < total ? ` (${found}/${total} in library)` : ` (${found} tracks)`;
+}
+
+export interface M3uResponse {
+  success?: boolean;
+  error?: string;
+  m3u_content?: string;
+  stats?: { found?: number } | null;
+}
+
+/**
+ * 659-673. force:true bypasses the auto-save `m3u_export.enabled` gate — this
+ * is a manual, on-demand export — and save_to_disk:true also writes it
+ * server-side so a media server can read it.
+ *
+ * Throws on failure, which is how the vanilla routes both arms into one catch.
+ * Note the check is `success === false`, so a response that omits `success`
+ * entirely is treated as a SUCCESS.
+ */
+export async function exportServerM3u(
+  playlistName: string | null | undefined,
+  tracks: readonly M3uTrack[],
+): Promise<M3uResponse> {
+  const response = await fetch('/api/generate-playlist-m3u', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playlist_name: playlistName || 'Playlist',
+      tracks,
+      context_type: 'playlist',
+      save_to_disk: true,
+      force: true,
+    }),
+  });
+  const data = (await response.json()) as M3uResponse;
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || 'Export failed');
+  }
+  return data;
+}
+
+/**
+ * The browser-side download (677-685).
+ *
+ * Deliberately NOT routed through routes/library's downloadExport: that one
+ * names the file its own way, picks its own mime, toasts on its own and revokes
+ * the object URL a second later. This is a transcription of a different
+ * function, so it stays a separate one.
+ */
+export function downloadM3u(content: string, fileName: string): void {
+  const blob = new Blob([content || ''], { type: 'audio/x-mpegurl;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /* ── The order view + align (385-482) ─────────────────────────────────────── */
 
 /** A row of `server_order` — the server's ACTUAL sequence (295, 394-406). */
