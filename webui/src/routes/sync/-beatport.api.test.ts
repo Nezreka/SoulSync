@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  VANILLA_ABORTED_ENDPOINTS,
   enrichBeatportTracks,
   extractBeatportChart,
   fetchBeatportDJCharts,
@@ -81,6 +82,36 @@ describe('the seven homepage loads', () => {
     const calls = stub({ success: true });
     await fetchBeatportHeroTracks();
     expect(calls[0].init).toBeUndefined();
+  });
+});
+
+describe('VANILLA_ABORTED_ENDPOINTS', () => {
+  it('is exactly the seven the vanilla cancels, and they are the seven above', async () => {
+    const calls = stub({ success: true });
+    const controller = new AbortController();
+    await fetchBeatportHeroTracks(controller.signal);
+    await fetchBeatportNewReleases(controller.signal);
+    await fetchBeatportHypePicks(controller.signal);
+    await fetchBeatportFeaturedCharts(controller.signal);
+    await fetchBeatportDJCharts(controller.signal);
+    await fetchBeatportTop10Lists(controller.signal);
+    await fetchBeatportTop10Releases(controller.signal);
+    // The list is the checkable form of the file header: if a homepage loader
+    // is ever added or renamed, this pins the two together.
+    expect(calls.map((c) => c.url)).toEqual([...VANILLA_ABORTED_ENDPOINTS]);
+  });
+
+  it('excludes everything that leads to a download', () => {
+    // Cancelling a scrape because the user changed tab would be a behaviour
+    // change, not a fix — so these must stay off the list.
+    for (const url of [
+      '/api/beatport/top-100?enrich=false',
+      '/api/beatport/chart/extract',
+      '/api/beatport/release-metadata',
+      '/api/beatport/enrich-tracks',
+    ]) {
+      expect(VANILLA_ABORTED_ENDPOINTS).not.toContain(url);
+    }
   });
 });
 

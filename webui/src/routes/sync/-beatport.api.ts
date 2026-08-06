@@ -2,10 +2,22 @@
  * The Beatport tab's wire layer — all 19 endpoints beatport-ui.js calls.
  *
  * ABORT IS NOT UNIFORM IN THE VANILLA, and the split is deliberate rather than
- * accidental: the seven HOMEPAGE content loads pass core.js's
- * getBeatportContentSignal so that leaving the page cancels them mid-flight,
- * and nothing else does. Every function below therefore takes an optional
- * signal, and the doc on each says whether the vanilla actually supplies one.
+ * accidental. Exactly these SEVEN pass core.js's getBeatportContentSignal, so
+ * leaving the page cancels them mid-flight:
+ *
+ *     hero-tracks, new-releases, hype-picks, featured-charts, dj-charts,
+ *     homepage/top-10-lists, homepage/top-10-releases-cards
+ *
+ * The other twelve — the two Top 100s, chart extraction, release metadata, both
+ * enrichment calls, and all five genre endpoints — pass nothing. That is not an
+ * oversight to correct while porting: those twelve are the ones that lead to a
+ * DOWNLOAD, and cancelling a scrape halfway because the user changed tab is a
+ * behaviour change, not a fix.
+ *
+ * Every function here takes an optional signal so React can still tear down
+ * cleanly, but the UI layer should supply one only for the seven above unless a
+ * divergence is being made on purpose. `VANILLA_ABORTED_ENDPOINTS` below is the
+ * checkable form of that list.
  */
 
 import type { BeatportScrapedTrack } from './-beatport.core';
@@ -68,6 +80,20 @@ export interface BeatportReleaseMetadata extends BeatportEnvelope {
   album?: { name: string; images?: { url: string }[] };
   artist?: { id?: string; name?: string };
 }
+
+/**
+ * The seven the vanilla cancels on page-leave, as data rather than prose, so
+ * the UI slice can be checked against it instead of remembering.
+ */
+export const VANILLA_ABORTED_ENDPOINTS: readonly string[] = [
+  '/api/beatport/hero-tracks',
+  '/api/beatport/new-releases',
+  '/api/beatport/hype-picks',
+  '/api/beatport/featured-charts',
+  '/api/beatport/dj-charts',
+  '/api/beatport/homepage/top-10-lists',
+  '/api/beatport/homepage/top-10-releases-cards',
+];
 
 /* ── The seven abortable homepage loads ───────────────────────────────────── */
 

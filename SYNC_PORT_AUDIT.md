@@ -3068,3 +3068,23 @@ at the sleep. Now asserts `sleep` is not called at all when already aborted,
 plus a second case aborting DURING the interval.
 
 Next: the shared slider component, driven by the config table.
+
+### BEATPORT P2 REVIEW
+
+Cross-checked every endpoint string in -beatport.api.ts against every one in
+beatport-ui.js, mechanically rather than by eye: 17 exact matches, and the two
+remaining (the Beatport and Hype Top 100s) are produced by the one variant
+function whose output both tests assert as literals. Nothing missing, nothing
+invented.
+
+**The gap the review found was in the DOCS, not the code.** The header said "the
+seven homepage loads" abort without naming them, which leaves the UI slice to
+guess — and guessing wrong here is invisible, because passing a signal where the
+vanilla passes none silently cancels a scrape mid-download.
+
+Now named, with the reasoning stated: the twelve that DON'T abort are exactly
+the ones that lead to a download, so cancelling them on a tab change would be a
+behaviour change rather than a fix. `VANILLA_ABORTED_ENDPOINTS` is the same list
+as data, pinned by a test that drives all seven loaders and compares.
+
+Full suite 282 files / 6153 tests.
