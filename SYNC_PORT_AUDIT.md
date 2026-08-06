@@ -2336,3 +2336,56 @@ the pages-extra server region likewise.
 - Beatport browse subsystem interplay with beatport-ui.js (3,913 lines, NOT in
   the sync family — what's the boundary?)
 - sync-history-overlay + matching-modal live OUTSIDE the page block — shared?
+
+### SERVER TAB SLICE C — search / replace / remove (pages-extra.js 746-1020)
+
+Built: the library-search overlay (`-ui/server-search-overlay.tsx`), the three
+write calls and their patch rules (`-sync.server.ts`), wired into the compare
+editor. 40 mutants, 40 killed. Full suite 277 files / 6027 tests.
+
+**CORRECTION to slice B — three props deleted.** Slice B declared `onSwap`,
+`onFindAndAdd` and `onRemove` as optional props on the guess that a parent would
+own them. The read says otherwise: all three mutate `_serverEditorState.tracks`
+and re-render this view and nothing else. The editor owns them now and the props
+are gone. Keeping them would have been exactly the declared-but-never-supplied
+defect the standing sweep exists to catch — the guess was the error, not the
+deletion.
+
+**A slice-B verification miss, found and fixed.** The pair-click test looked
+green while its behaviour never ran: jsdom has no `scrollIntoView`, so the
+handler threw, and React rethrows out of an event handler ASYNCHRONOUSLY — the
+assertions had already passed. Vitest reported it only as an unhandled error
+beneath the green counts. `scrollIntoView` is now defined per test and deleted
+afterwards, and the scroll-the-other-column call is asserted. **Standing lesson:
+an "Errors: N" line under a passing suite is a failure, not noise.**
+
+**The pick is resolved AFTER the write, not at click time (946).** My first cut
+passed the clicked row straight through, which can never miss — and that would
+have silently deleted the vanilla's full-reload fallback at 968-971. The vanilla
+looks the id up in `_searchResults` once the write returns, so a second search
+landing while the write is in flight really does miss. The seam therefore passes
+a RESOLVER, not a value, and the race is tested directly.
+
+**Declared divergences.**
+- The vanilla builds the overlay with a sixth results body (magnifier +
+  'Searching...', 789-792) that no user ever sees — `_serverSearchExecute`
+  overwrites it synchronously in the same task, before paint. Modelling it as a
+  React state would add a one-frame flicker the vanilla does not have, so the
+  first phase is computed to be whatever the immediate search sets.
+- `popover.dataset.trackIndex/mode` (807-808) are plumbing for rebuilding each
+  row's onclick string. Both are closure state here, so the attributes carry no
+  information and are not emitted.
+- The patch helpers return new arrays where the vanilla mutates in place. Same
+  resulting list; React re-renders off identity.
+- `_rerenderCompare`'s scroll save/restore and filter re-application (732-742)
+  need no code: it rebuilds columns with innerHTML, React reconciles them.
+
+**Transcription details worth keeping.** The seed query is the TITLE ALONE and
+the artist rides separately as a ranking hint (752, 756-758) — the backend ranks
+with it and does not filter. The add-track `position` counts SERVER tracks before
+the row, not rows. The confirm names the SERVER track's title. `new_playlist_id`
+is honoured on both writes because Plex deletes and recreates. The link case at
+960-966 splices the extra row the backend linked rather than duplicated.
+
+**Remaining server slices:** (D) order view + align; (E) sync detail modal + M3U
+export.

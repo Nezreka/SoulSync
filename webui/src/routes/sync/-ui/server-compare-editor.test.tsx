@@ -32,15 +32,42 @@ const TRACKS = [
 ];
 
 let payload: unknown = {};
+let searchPayload: unknown = {};
+let writePayload: unknown = {};
+let calls: { url: string; body: unknown }[] = [];
 
+/**
+ * One stub for four endpoints. Routing by URL matters here: slice C's overlay
+ * hits /api/library/search-tracks while the editor behind it is still holding
+ * the compare payload, and the two shapes are nothing alike.
+ */
 function stubFetch(): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(payload))),
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+      if (url.includes('/api/library/search-tracks')) {
+        return new Response(JSON.stringify(searchPayload));
+      }
+      if (init?.method === 'POST') return new Response(JSON.stringify(writePayload));
+      return new Response(JSON.stringify(payload));
+    }),
   );
 }
 
+/**
+ * jsdom implements no scrollIntoView, and the pair-click handler calls it. Left
+ * undefined it throws inside a React event handler, which React rethrows
+ * asynchronously — the assertions still pass while the behaviour under test
+ * never runs. Defined here so the call can be asserted, and deleted afterwards
+ * so it cannot leak into another test file.
+ */
+const scrollIntoView = vi.fn();
+
 beforeEach(() => {
+  scrollIntoView.mockClear();
+  (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollIntoView;
+  calls = [];
   payload = {
     success: true,
     server_type: 'plex',
@@ -48,11 +75,28 @@ beforeEach(() => {
     source_track_count: 2,
     tracks: TRACKS,
   };
+  searchPayload = {
+    success: true,
+    tracks: [
+      {
+        id: 42,
+        title: 'Alright (Remaster)',
+        artist_name: 'Kendrick Lamar',
+        album_title: 'TPAB',
+        file_path: '/music/a.flac',
+        bitrate: 1411,
+        duration: 220000,
+        album_thumb_url: 'http://art/1.jpg',
+      },
+    ],
+  };
+  writePayload = { success: true, message: 'Track added' };
   stubFetch();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
 function renderEditor(props = {}) {
@@ -95,39 +139,34 @@ describe('ServerCompareEditor', () => {
   });
 
   it('an extra has a static source slot; a missing has a clickable server slot', async () => {
-    const onFindAndAdd = vi.fn();
-    renderEditor({ onFindAndAdd });
+    renderEditor();
     await waitFor(() => expect(screen.getByText('No source track')).toBeInTheDocument());
 
     // 521-528: the extra's source side has no handler at all.
     expect(document.querySelector('.extra-gap')).not.toBeNull();
     fireEvent.click(document.querySelector('.extra-gap') as Element);
-    expect(onFindAndAdd).not.toHaveBeenCalled();
+    expect(document.querySelector('#server-search-overlay')).toBeNull();
 
     // 567-577: the missing row's whole slot IS the button.
     expect(screen.getByText('Find & add')).toBeInTheDocument();
     expect(screen.getByText('Frank Ocean — Nights')).toBeInTheDocument();
     fireEvent.click(document.querySelector('.empty-slot-wrap') as Element);
-    expect(onFindAndAdd).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(screen.getByText('Add Track to Server')).toBeInTheDocument());
   });
 
   it('offers Swap on a matched row only, and Remove on both (555-560)', async () => {
-    const onSwap = vi.fn();
-    const onRemove = vi.fn();
-    renderEditor({ onSwap, onRemove });
+    renderEditor();
     await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
 
     expect(document.querySelectorAll('.server-track-swap-btn')).toHaveLength(1);
     expect(document.querySelectorAll('.server-track-remove-btn')).toHaveLength(2);
 
     fireEvent.click(document.querySelector('.server-track-swap-btn') as Element);
-    expect(onSwap).toHaveBeenCalledWith(0);
-    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
-    expect(onRemove).toHaveBeenCalledWith(0, 's1');
+    await waitFor(() => expect(screen.getByText('Swap Track')).toBeInTheDocument());
   });
 
   it('an action button never selects the row behind it (555, 558)', async () => {
-    renderEditor({ onSwap: vi.fn() });
+    renderEditor();
     await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
     fireEvent.click(document.querySelector('.server-track-swap-btn') as Element);
     expect(document.querySelector('.server-track-item.highlighted')).toBeNull();
@@ -148,6 +187,11 @@ describe('ServerCompareEditor', () => {
     expect(highlighted).toHaveLength(2);
     expect(highlighted[0].getAttribute('data-pair-id')).toBe('pair-0');
     expect(highlighted[1].getAttribute('data-pair-id')).toBe('pair-0');
+    // 624-627: and the OTHER column is scrolled to the twin, centred.
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    expect(scrollIntoView.mock.instances[0]).toBe(
+      document.querySelector('#server-col-server-scroll [data-pair-id="pair-0"]'),
+    );
   });
 
   it('the filter HIDES rows on both sides — it never drops them (715-721)', async () => {
@@ -233,6 +277,269 @@ describe('ServerCompareEditor', () => {
     await waitFor(() =>
       expect(document.querySelector('#server-editor-meta')?.textContent).toBe('Playlist vanished'),
     );
+  });
+
+  /* ── Slice C: the three writes ──────────────────────────────────────────── */
+
+  async function openFindAndAdd() {
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('.empty-slot-wrap') as Element);
+    await waitFor(() => expect(screen.getByText('Alright (Remaster)')).toBeInTheDocument());
+  }
+
+  it('Find & Add posts the server-side position and the durable-match fields (908-931)', async () => {
+    await openFindAndAdd();
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/add-track'))).toBe(true));
+    const add = calls.find((c) => c.url.includes('/add-track'));
+    expect(add?.url).toBe('/api/server/playlist/7/add-track');
+    expect(add?.body).toEqual({
+      track_id: '42',
+      playlist_name: 'Road Trip',
+      // Row 1 is the missing one; exactly ONE row before it has a server
+      // track, so the server-side position is 1 — not the row index.
+      position: 1,
+      source_track_id: '',
+      source_title: 'Nights',
+      source_artist: 'Frank Ocean',
+      // The source track carries no provider, so the mirrored playlist's wins.
+      source: 'tidal',
+    });
+  });
+
+  it('patches the pair in place instead of re-fetching the playlist (#1005, 941-967)', async () => {
+    await openFindAndAdd();
+    const comparesBefore = calls.filter((c) => c.url.includes('/tracks?name=')).length;
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+
+    await waitFor(() => expect(document.querySelector('#server-search-overlay')).toBeNull());
+    // The formerly-missing row now carries the picked track, at 100%.
+    const serverRows = document.querySelectorAll('#server-col-server-scroll .server-track-item');
+    expect(serverRows[1].getAttribute('data-status')).toBe('matched');
+    expect(serverRows[1].textContent).toContain('Alright (Remaster)');
+    expect(serverRows[1].textContent).toContain('100%');
+    // …and no second compare fetch was made.
+    expect(calls.filter((c) => c.url.includes('/tracks?name=')).length).toBe(comparesBefore);
+  });
+
+  it('drops the extra row the backend linked rather than duplicated (960-966)', async () => {
+    payload = {
+      success: true,
+      tracks: [
+        TRACKS[1],
+        { match_status: 'extra', source_track: null, server_track: { id: '42', title: 'Bonus' } },
+      ],
+    };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+    expect(document.querySelectorAll('#server-col-server-scroll .server-track-item')).toHaveLength(
+      2,
+    );
+
+    fireEvent.click(document.querySelector('.empty-slot-wrap') as Element);
+    await waitFor(() => expect(screen.getByText('Alright (Remaster)')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+
+    // The picked track already sat in the list as an extra; leaving it would
+    // show the same track twice until the next full load.
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('#server-col-server-scroll .server-track-item'),
+      ).toHaveLength(1),
+    );
+    expect(screen.queryByText('Bonus')).not.toBeInTheDocument();
+  });
+
+  it('follows the playlist id when Plex recreates it (939)', async () => {
+    writePayload = { success: true, message: 'Track added', new_playlist_id: '99' };
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => true),
+    );
+    await openFindAndAdd();
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+    await waitFor(() => expect(document.querySelector('#server-search-overlay')).toBeNull());
+
+    // The NEXT write must go to the recreated playlist, not the dead one.
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/remove-track'))).toBe(true));
+    expect(calls.find((c) => c.url.includes('/remove-track'))?.url).toBe(
+      '/api/server/playlist/99/remove-track',
+    );
+  });
+
+  it('Swap posts the OLD server track id alongside the new one (896-904)', async () => {
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelector('.server-track-swap-btn') as Element);
+    await waitFor(() => expect(screen.getByText('Alright (Remaster)')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/replace-track'))).toBe(true));
+    expect(calls.find((c) => c.url.includes('/replace-track'))?.body).toEqual({
+      old_track_id: 's1',
+      new_track_id: '42',
+      playlist_name: 'Road Trip',
+    });
+  });
+
+  it('a rejected write keeps the overlay open and restores the button (972-975)', async () => {
+    writePayload = { success: false, error: 'Plex said no' };
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    await openFindAndAdd();
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Plex said no', 'error'));
+    expect(document.querySelector('#server-search-overlay')).not.toBeNull();
+    expect(
+      (document.querySelector('.server-search-select-btn') as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it('falls back to a full reload when the pick cannot be identified (946, 968-971)', async () => {
+    // The pick is looked up AFTER the write returns, so a second search landing
+    // while the write is in flight replaces the list it is looked up in. That
+    // race is the only way the vanilla's fallback is ever reached.
+    let releaseWrite = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+        if (url.includes('/api/library/search-tracks')) {
+          return new Response(JSON.stringify(searchPayload));
+        }
+        if (init?.method === 'POST') {
+          await held;
+          return new Response(JSON.stringify(writePayload));
+        }
+        return new Response(JSON.stringify(payload));
+      }),
+    );
+
+    await openFindAndAdd();
+    const comparesBefore = calls.filter((c) => c.url.includes('/tracks?name=')).length;
+    fireEvent.click(document.querySelector('.server-search-result') as Element);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/add-track'))).toBe(true));
+
+    // A second search lands while the write is still open, and it holds a
+    // different track entirely.
+    searchPayload = { success: true, tracks: [{ id: 7, title: 'Something Else' }] };
+    fireEvent.keyDown(document.querySelector('#server-search-input') as Element, {
+      key: 'Enter',
+    });
+    await waitFor(() => expect(screen.getByText('Something Else')).toBeInTheDocument());
+
+    releaseWrite();
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/tracks?name=')).length).toBe(comparesBefore + 1),
+    );
+  });
+
+  it('Remove confirms with the track title, then turns a matched row missing (988-1012)', async () => {
+    const confirm = vi.fn(async () => true);
+    const toast = vi.fn();
+    vi.stubGlobal('showConfirmDialog', confirm);
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: true, message: 'Track removed' };
+
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
+
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalledWith({
+      title: 'Remove Track',
+      message: 'Remove "Alright" from this playlist?',
+      confirmText: 'Remove',
+      destructive: true,
+    });
+
+    // 1006-1009: the row KEEPS its source side and becomes missing, so the two
+    // columns stay paired — three rows on each side, still.
+    await waitFor(() =>
+      expect(
+        document
+          .querySelectorAll('#server-col-server-scroll .server-track-item')[0]
+          .getAttribute('data-status'),
+      ).toBe('missing'),
+    );
+    const serverRows = document.querySelectorAll('#server-col-server-scroll .server-track-item');
+    expect(serverRows).toHaveLength(3);
+    expect(document.querySelectorAll('#server-col-source-scroll .server-track-item')).toHaveLength(
+      3,
+    );
+    expect(screen.getAllByText('Find & add')).toHaveLength(2);
+    expect(toast).toHaveBeenCalledWith('Track removed', 'success');
+  });
+
+  it('Remove drops an extra row entirely (1010-1011)', async () => {
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => true),
+    );
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Bonus')).toBeInTheDocument());
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[1]);
+    await waitFor(() => expect(screen.queryByText('Bonus')).not.toBeInTheDocument());
+    expect(document.querySelectorAll('#server-col-server-scroll .server-track-item')).toHaveLength(
+      2,
+    );
+  });
+
+  it('an id-less server row is not removable — no confirm, no write (983)', async () => {
+    const confirm = vi.fn(async () => true);
+    vi.stubGlobal('showConfirmDialog', confirm);
+    payload = {
+      success: true,
+      tracks: [{ match_status: 'extra', source_track: null, server_track: { title: 'No id' } }],
+    };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('No id')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('.server-track-remove-btn') as Element);
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(confirm).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.url.includes('/remove-track'))).toBe(false);
+  });
+
+  it('keeps the current playlist id when a remove names no new one (1003)', async () => {
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => true),
+    );
+    // Neither Jellyfin nor Navidrome recreates the playlist, so the response
+    // carries no new_playlist_id and ours must survive the write.
+    writePayload = { success: true, message: 'Track removed' };
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/remove-track'))).toBe(true));
+    // The extra row is still removable, and still on playlist 7.
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url.includes('/remove-track'))).toHaveLength(2),
+    );
+    for (const call of calls.filter((c) => c.url.includes('/remove-track'))) {
+      expect(call.url).toBe('/api/server/playlist/7/remove-track');
+    }
+  });
+
+  it('a declined confirm writes nothing (988)', async () => {
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => false),
+    );
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelectorAll('.server-track-remove-btn')[0]);
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls.some((c) => c.url.includes('/remove-track'))).toBe(false);
   });
 
   it('starts on the loading copy in both columns (262-265)', () => {

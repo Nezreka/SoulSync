@@ -174,6 +174,12 @@ export interface CompareTrack {
     artist?: string;
     image_url?: string;
     duration_ms?: number;
+    /**
+     * Both are read ONLY by the Find & Add body (924, 929) — nothing renders
+     * them. They carry the durable manual match (#787) back to the backend.
+     */
+    source_track_id?: string;
+    source?: string;
   } | null;
   server_track?: {
     id?: string;
@@ -181,7 +187,14 @@ export interface CompareTrack {
     artist?: string;
     thumb?: string;
     duration?: number;
+    /**
+     * Written by the in-place patch (953) and never rendered by this tab. Kept
+     * because the patched object is the same shape a later full load returns.
+     */
+    album?: string;
   } | null;
+  /** Set by the in-place patch only (959); no renderer reads it. */
+  override?: boolean;
 }
 
 export interface CompareResponse {
@@ -314,4 +327,271 @@ export async function fetchComparePlaylist(
   let url = `/api/server/playlist/${playlistId}/tracks?name=${encodeURIComponent(playlistName)}`;
   if (mirroredId) url += `&mirrored_playlist_id=${mirroredId}`;
   return (await (await fetch(url)).json()) as CompareResponse;
+}
+
+/* ── Search / Replace / Remove (746-1020) ─────────────────────────────────── */
+
+export type ServerSearchMode = 'replace' | 'add';
+
+/** A /api/library/search-tracks row (web_server.py 22459-22470). */
+export interface LibrarySearchTrack {
+  /** A database row id — a NUMBER over the wire, which is why every comparison
+   *  and every request body coerces it with String() (863, 947). */
+  id: string | number;
+  title?: string;
+  artist_name?: string;
+  album_title?: string;
+  album_thumb_url?: string;
+  file_path?: string;
+  bitrate?: number;
+  duration?: number;
+}
+
+export interface LibrarySearchResponse {
+  success?: boolean;
+  error?: string;
+  tracks?: LibrarySearchTrack[];
+}
+
+/** The three write endpoints all answer in this shape (web_server.py 22099/22290/22383). */
+export interface ServerMutationResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  /** Plex DELETES AND RECREATES the playlist, so the id can change under us (939). */
+  new_playlist_id?: string;
+}
+
+/** 771: the same overlay serves both entry points, titled by mode. */
+export function searchModalTitle(mode: ServerSearchMode): string {
+  return mode === 'replace' ? 'Swap Track' : 'Add Track to Server';
+}
+
+export interface SearchSeed {
+  query: string;
+  contextArtist: string;
+  contextName: string;
+}
+
+/**
+ * What the overlay opens with (750-759).
+ *
+ * The query is the track NAME ALONE — deliberately, per the comment at 752: an
+ * "artist title" blob searches worse than a title. The artist is kept
+ * separately and sent as a relevance HINT (the backend ranks with it, it does
+ * not filter — web_server.py 22424-22426), which is what stops "bad guy" by
+ * Billie Eilish being buried under same-title tracks by other artists.
+ *
+ * The source side wins on every field, with the server side as the fallback;
+ * note the query falls back on an EMPTY src.name, not merely a missing one.
+ */
+export function searchSeed(track: CompareTrack): SearchSeed {
+  const src = track.source_track ?? {};
+  const svr = track.server_track ?? {};
+  return {
+    query: src.name ? src.name.trim() : (svr.title || '').trim(),
+    contextArtist: src.artist || svr.artist || '',
+    contextName: src.name || svr.title || '',
+  };
+}
+
+/** 859: only these seven extensions get a badge, and M4A is shown as AAC. */
+const SEARCH_FORMATS = ['FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'AAC', 'WAV'];
+
+export function searchFormatBadge(filePath: string | null | undefined): string {
+  const ext = (filePath || '').split('.').pop()?.toUpperCase() ?? '';
+  if (!SEARCH_FORMATS.includes(ext)) return '';
+  return ext === 'M4A' ? 'AAC' : ext;
+}
+
+/** 861. */
+export function searchBitrateText(bitrate: number | null | undefined): string {
+  return bitrate ? `${bitrate}k` : '';
+}
+
+/** 855 — pluralised, and 1 result really does read '1 result'. */
+export function searchResultsHeaderText(count: number): string {
+  return `${count} result${count !== 1 ? 's' : ''}`;
+}
+
+/**
+ * Where a Find & Add lands on the server (908-911).
+ *
+ * The compare columns are in SOURCE order and missing rows occupy a slot on the
+ * left with nothing on the right, so the server-side index is NOT the row
+ * index: it is the count of rows before this one that actually have a server
+ * track.
+ */
+export function addTrackPosition(tracks: readonly CompareTrack[], trackIndex: number): number {
+  let position = 0;
+  for (let k = 0; k < trackIndex; k++) {
+    if (tracks[k]?.server_track) position++;
+  }
+  return position;
+}
+
+/**
+ * The in-place patch after a successful swap/add (946-967).
+ *
+ * #1005: one Find & Add used to re-fetch and re-match the whole playlist,
+ * throwing a 2,000-track compare back to 'Loading comparison...'. The write
+ * already succeeded and the picked library track IS the server track (same id
+ * space), so the pair is patched instead. Order status and the header counts
+ * deliberately go stale until the next full open.
+ *
+ * The link case at the end is the subtle one: the picked track may ALREADY sit
+ * in the list as an 'extra' row, because the backend links rather than
+ * duplicating. That row is dropped, or the track shows twice.
+ *
+ * Declared divergence: the vanilla mutates the row objects and the array in
+ * place; this returns new ones because React re-renders off identity. The
+ * resulting list is the same either way.
+ */
+export function applyPickedTrack(
+  tracks: readonly CompareTrack[],
+  trackIndex: number,
+  newTrackId: string,
+  picked: LibrarySearchTrack,
+): CompareTrack[] {
+  const track = tracks[trackIndex];
+  if (!track) return tracks.slice();
+  const next = tracks.slice();
+  next[trackIndex] = {
+    ...track,
+    server_track: {
+      id: String(newTrackId),
+      title: picked.title || '',
+      artist: picked.artist_name || '',
+      album: picked.album_title || '',
+      duration: picked.duration || 0,
+      thumb: picked.album_thumb_url || '',
+    },
+    match_status: 'matched',
+    confidence: 1.0,
+    override: true,
+  };
+  const dupIndex = next.findIndex(
+    (row, index) =>
+      index !== trackIndex &&
+      !row.source_track &&
+      row.server_track &&
+      String(row.server_track.id) === String(newTrackId),
+  );
+  if (dupIndex >= 0) next.splice(dupIndex, 1);
+  return next;
+}
+
+/**
+ * The in-place patch after a successful remove (1006-1012).
+ *
+ * A matched pair keeps its source side and becomes 'missing' — the row stays,
+ * so the two columns stay paired. An extra row has no source side to keep, so
+ * it goes entirely.
+ */
+export function applyRemovedTrack(
+  tracks: readonly CompareTrack[],
+  trackIndex: number,
+): CompareTrack[] {
+  const track = tracks[trackIndex];
+  // The vanilla's splice() on an out-of-range index removes nothing, so an
+  // unchanged list is the same outcome.
+  if (!track) return tracks.slice();
+  const next = tracks.slice();
+  if (track.source_track) {
+    next[trackIndex] = { ...track, server_track: null, match_status: 'missing', confidence: 0.0 };
+  } else {
+    next.splice(trackIndex, 1);
+  }
+  return next;
+}
+
+/** 837-838: limit is fixed at 20; the artist hint is omitted when empty. */
+export async function searchLibraryTracks(
+  query: string,
+  artistHint: string,
+): Promise<LibrarySearchResponse> {
+  const url =
+    `/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=20` +
+    (artistHint ? `&artist=${encodeURIComponent(artistHint)}` : '');
+  return (await (await fetch(url)).json()) as LibrarySearchResponse;
+}
+
+/** 896-904. */
+export async function replaceServerTrack(
+  playlistId: string,
+  playlistName: string,
+  oldTrackId: string | undefined,
+  newTrackId: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/replace-track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      old_track_id: oldTrackId,
+      new_track_id: newTrackId,
+      playlist_name: playlistName,
+    }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
+/**
+ * 917-931. The four source_* fields are what make the pick DURABLE: the
+ * backend stores them as a manual match override (#787) so later syncs pair the
+ * two automatically. `source` falls back to the mirrored playlist's provider
+ * because a source track only carries its own when the compare came from a
+ * mirrored playlist.
+ */
+export async function addServerTrack(
+  playlistId: string,
+  playlistName: string,
+  newTrackId: string,
+  position: number,
+  sourceTrack: NonNullable<CompareTrack['source_track']> | null | undefined,
+  mirroredSource: string | null | undefined,
+): Promise<ServerMutationResponse> {
+  const src = sourceTrack ?? {};
+  const response = await fetch(`/api/server/playlist/${playlistId}/add-track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      track_id: newTrackId,
+      playlist_name: playlistName,
+      position,
+      source_track_id: src.source_track_id || '',
+      source_title: src.name || '',
+      source_artist: src.artist || '',
+      source: src.source || mirroredSource || '',
+    }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
+/** 991-998. */
+export async function removeServerTrack(
+  playlistId: string,
+  playlistName: string,
+  trackId: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/remove-track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ track_id: trackId, playlist_name: playlistName }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
+/** 988: the confirm copy, verbatim, with the server track's own title. */
+export function removeConfirmOptions(track: CompareTrack | undefined): {
+  title: string;
+  message: string;
+  confirmText: string;
+  destructive: boolean;
+} {
+  return {
+    title: 'Remove Track',
+    message: `Remove "${track?.server_track?.title || 'this track'}" from this playlist?`,
+    confirmText: 'Remove',
+    destructive: true,
+  };
 }

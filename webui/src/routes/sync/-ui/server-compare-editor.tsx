@@ -1,23 +1,38 @@
 /**
  * The server tab's compare editor — _openServerCompareView (pages-extra.js
  * 247-354), _updateCompareStats (356-383), _renderCompareColumns (490-583),
- * _setupScrollLinking (585-610) and _compareTrackClick (612-628).
+ * _setupScrollLinking (585-610), _compareTrackClick (612-628) and, with slice C,
+ * _serverSelectTrack (886-980) and _serverRemoveTrack (982-1020).
  *
- * Slice B. The two columns render in SOURCE order and are paired by index, so
- * row i on the left and row i on the right are the same pair — that is what
+ * The two columns render in SOURCE order and are paired by index, so row i on
+ * the left and row i on the right are the same pair — that is what
  * `data-pair-id` encodes, and what the click highlight and the linked scrolling
  * both rely on.
  *
- * Slices C-E are not here yet: the swap / find-and-add / remove buttons and the
- * '⚠ out of order' badge raise their intent through props, so the row markup is
- * already final and only the handlers arrive later.
+ * CORRECTION to slice B: swap / find-and-add / remove were declared there as
+ * OPTIONAL PROPS, on the guess that a parent would own them. The read says
+ * otherwise — all three mutate `_serverEditorState.tracks` and re-render this
+ * view and nothing else, so this component owns them and the three props are
+ * gone. Leaving them would have been exactly the declared-but-never-supplied
+ * defect the standing sweep looks for.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { CompareResponse, CompareTrack, MirroredMatch, ServerPlaylist } from '../-sync.server';
+import type {
+  CompareResponse,
+  CompareTrack,
+  LibrarySearchTrack,
+  MirroredMatch,
+  ServerPlaylist,
+  ServerSearchMode,
+} from '../-sync.server';
 
 import {
+  addServerTrack,
+  addTrackPosition,
+  applyPickedTrack,
+  applyRemovedTrack,
   compareConfidenceBadge,
   compareFilterLabel,
   compareFooterText,
@@ -30,7 +45,11 @@ import {
   compareStats,
   fetchComparePlaylist,
   formatDurationMs,
+  removeConfirmOptions,
+  removeServerTrack,
+  replaceServerTrack,
 } from '../-sync.server';
+import { ServerSearchOverlay } from './server-search-overlay';
 
 const FILTERS = ['all', 'matched', 'missing', 'extra'] as const;
 type CompareFilter = (typeof FILTERS)[number];
@@ -240,10 +259,6 @@ export interface ServerCompareEditorProps {
   onBack: () => void;
   /** Slice D — the '⚠ out of order' badge. */
   onShowOrder?: () => void;
-  /** Slice C — serverSearchReplace(index, 'replace' | 'add') and remove. */
-  onSwap?: (index: number) => void;
-  onFindAndAdd?: (index: number) => void;
-  onRemove?: (index: number, serverTrackId: string) => void;
   /** Slice E — exportServerPlaylistM3U. */
   onExportM3u?: () => void;
 }
@@ -253,43 +268,75 @@ export function ServerCompareEditor({
   mirrored,
   onBack,
   onShowOrder,
-  onSwap,
-  onFindAndAdd,
-  onRemove,
   onExportM3u,
 }: ServerCompareEditorProps) {
   const [data, setData] = useState<CompareResponse | null>(null);
+  /**
+   * The tracks are state of their own, apart from `data`, because that is the
+   * split the vanilla has: the in-place patches rewrite
+   * `_serverEditorState.tracks` and _rerenderCompare repaints the stats and the
+   * columns from it — while the header line, the column counts and the
+   * out-of-order badge keep whatever the FETCH said and go stale until the next
+   * full open (732-742 touches none of them).
+   *
+   * _rerenderCompare's other two jobs need no code here. It saves and restores
+   * both columns' scrollTop because it rebuilds them with innerHTML; React
+   * reconciles the same elements, so the scroll position was never lost. And it
+   * re-applies the active filter (#1005: a reload once left the columns showing
+   * everything while the 'Missing' pill stayed lit) because its rows are built
+   * fresh and visible; here the filter is state that every render already
+   * honours, so the two cannot disagree.
+   */
+  const [tracks, setTracks] = useState<CompareTrack[]>([]);
   const [meta, setMeta] = useState('Loading comparison...');
   const [filter, setFilter] = useState<CompareFilter>('all');
   const [highlighted, setHighlighted] = useState<number | null>(null);
+  const [search, setSearch] = useState<{ index: number; mode: ServerSearchMode } | null>(null);
 
   const sourceScroll = useRef<HTMLDivElement>(null);
   const serverScroll = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  /**
+   * Plex deletes and recreates a playlist on every write, so the id it answers
+   * with replaces ours (939, 1003). It is a ref, not state: no render reads it,
+   * and making it state would re-run the loader below and undo the very
+   * in-place patch the write just made.
+   */
+  const playlistIdRef = useRef(playlist.id);
+  const runId = useRef(0);
+
+  const loadCompare = useCallback(async () => {
+    const id = ++runId.current;
     setData(null);
+    setTracks([]);
     setMeta('Loading comparison...');
-    void (async () => {
-      try {
-        const response = await fetchComparePlaylist(playlist.id, playlist.name, mirrored?.id);
-        if (cancelled) return;
-        if (!response.success) {
-          setMeta(response.error || 'Failed to load');
-          return;
-        }
-        setData(response);
-        setMeta(compareMetaText(response));
-      } catch (error) {
-        if (!cancelled) {
-          setMeta(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
-        }
+    try {
+      const response = await fetchComparePlaylist(
+        playlistIdRef.current,
+        playlist.name,
+        mirrored?.id,
+      );
+      if (runId.current !== id) return;
+      if (!response.success) {
+        setMeta(response.error || 'Failed to load');
+        return;
       }
-    })();
+      setData(response);
+      setTracks(response.tracks ?? []);
+      setMeta(compareMetaText(response));
+    } catch (error) {
+      if (runId.current !== id) return;
+      setMeta(`Error: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }, [playlist.name, mirrored?.id]);
+
+  useEffect(() => {
+    playlistIdRef.current = playlist.id;
+    void loadCompare();
     return () => {
-      cancelled = true;
+      runId.current++;
     };
-  }, [playlist.id, playlist.name, mirrored?.id]);
+  }, [playlist.id, loadCompare]);
 
   /**
    * Linked scrolling (597-606) — PROPORTIONAL, not absolute, because the two
@@ -318,7 +365,106 @@ export function ServerCompareEditor({
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, []);
 
-  const tracks = data?.tracks ?? [];
+  /* ── The three writes (886-1020) ────────────────────────────────────────── */
+
+  // 747-748: both entry points bail on an index with no track behind it.
+  const openSearch = useCallback(
+    (index: number, mode: ServerSearchMode) => {
+      if (!tracks[index]) return;
+      setSearch({ index, mode });
+    },
+    [tracks],
+  );
+
+  /**
+   * _serverSelectTrack (886-980). Returns false to leave the overlay open with
+   * its Select button restored, which is what the vanilla does at 974/978.
+   */
+  const selectSearchResult = useCallback(
+    async (
+      newTrackId: string,
+      resolvePicked: () => LibrarySearchTrack | undefined,
+    ): Promise<boolean> => {
+      if (!search) return false;
+      const { index, mode } = search;
+      const track = tracks[index];
+      if (!track) return false;
+      try {
+        const response =
+          mode === 'replace'
+            ? await replaceServerTrack(
+                playlistIdRef.current,
+                playlist.name,
+                track.server_track?.id,
+                newTrackId,
+              )
+            : await addServerTrack(
+                playlistIdRef.current,
+                playlist.name,
+                newTrackId,
+                addTrackPosition(tracks, index),
+                track.source_track,
+                mirrored?.source,
+              );
+        if (!response.success) {
+          window.showToast?.(response.error || 'Failed to update track', 'error');
+          return false;
+        }
+        window.showToast?.(response.message || 'Track updated', 'success');
+        setSearch(null);
+        if (response.new_playlist_id) playlistIdRef.current = response.new_playlist_id;
+        // 946: resolved only NOW, after the write — see the seam's doc comment.
+        const picked = resolvePicked();
+        if (picked) {
+          setTracks((current) => applyPickedTrack(current, index, newTrackId, picked));
+        } else {
+          // 968-971: the pick could not be identified locally, so there is
+          // nothing to patch with — fall back to the full reload the patch
+          // exists to avoid.
+          void loadCompare();
+        }
+        return true;
+      } catch (error) {
+        window.showToast?.(
+          `Error: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+        return false;
+      }
+    },
+    [loadCompare, mirrored?.source, playlist.name, search, tracks],
+  );
+
+  /** _serverRemoveTrack (982-1020). */
+  const removeTrack = useCallback(
+    async (index: number, serverTrackId: string) => {
+      // 983: an id-less row is not removable, and the confirm never opens.
+      if (!serverTrackId) return;
+      const confirmed = await window.showConfirmDialog?.(removeConfirmOptions(tracks[index]));
+      if (!confirmed) return;
+      try {
+        const response = await removeServerTrack(
+          playlistIdRef.current,
+          playlist.name,
+          serverTrackId,
+        );
+        if (!response.success) {
+          window.showToast?.(response.error || 'Failed to remove track', 'error');
+          return;
+        }
+        window.showToast?.(response.message || 'Track removed', 'success');
+        playlistIdRef.current = response.new_playlist_id || playlistIdRef.current;
+        setTracks((current) => applyRemovedTrack(current, index));
+      } catch (error) {
+        window.showToast?.(
+          `Error: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [playlist.name, tracks],
+  );
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -452,9 +598,9 @@ export function ServerCompareEditor({
                   hidden={isHidden(track)}
                   highlighted={highlighted === index}
                   onSelect={() => selectPair(index, 'server')}
-                  onSwap={(i) => onSwap?.(i)}
-                  onRemove={(i, id) => onRemove?.(i, id)}
-                  onFindAndAdd={(i) => onFindAndAdd?.(i)}
+                  onSwap={(i) => openSearch(i, 'replace')}
+                  onRemove={(i, id) => void removeTrack(i, id)}
+                  onFindAndAdd={(i) => openSearch(i, 'add')}
                 />
               ))
             ) : (
@@ -474,6 +620,18 @@ export function ServerCompareEditor({
       </div>
 
       <div id="server-editor-footer">{compareFooterText(stats)}</div>
+
+      {/* 761-762: each open builds a fresh overlay, so the key remounts it
+          rather than re-seeding a live one. */}
+      {search && tracks[search.index] && (
+        <ServerSearchOverlay
+          key={`${search.index}-${search.mode}`}
+          track={tracks[search.index]}
+          mode={search.mode}
+          onClose={() => setSearch(null)}
+          onSelect={selectSearchResult}
+        />
+      )}
     </div>
   );
 }
