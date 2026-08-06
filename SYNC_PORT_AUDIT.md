@@ -2503,3 +2503,45 @@ the other nine stayed green, and the file was restored under a sha256 check.
 
 A failure here means the seam MOVED, which is fine — re-home it or publish it
 from React and update the row. It must never be made green by deleting the row.
+
+## BEATPORT WAVE — P0 SCOPING (the boundary question is ANSWERED)
+
+The dossier has carried this open question since the original P0: *"Beatport
+browse subsystem interplay with beatport-ui.js (3,913 lines, NOT in the sync
+family — what's the boundary?)"*. Settled by evidence, not by assumption.
+
+**Surface.** beatport-ui.js is 3,913 lines / 113 top-level functions, plus 29
+Beatport functions in sync-services.js (442 mentions), plus the markup block at
+index.html 2278-2600+. This is the LARGEST remaining wave — bigger than any
+server-tab slice, and comparable to the Artist Map + Artist Web viz read.
+
+**The boundary: beatport-ui.js is entirely the sync page's Beatport tab.**
+Four checks, all negative for cross-page reach:
+
+1. Every container it looks up by id is `beatport-*` or `genre-*`, and all of
+   them live inside `#beatport-tab-content`, which is inside the sync page's own
+   tab set (index.html 2395, `data-tab="beatport"`).
+2. It references no page machinery at all — no setPage, no currentPage, no
+   pageId, and no dashboard/library/watchlist container.
+3. It publishes NO `window.*` globals, so nothing can call into it.
+4. Nothing outside it names it — grep for callers across static/*.js and
+   index.html returns nothing.
+
+The ONE element it touches outside its own markup is
+`#loading-overlay .loading-message` — the shared shell overlay, which every page
+uses. That is a shell touch, not a cross-page contract.
+
+**What that means for the port.** No seams to preserve and no bridges to add:
+unlike the account tabs (which needed the core.js seeding bridge) and unlike
+openSyncDetailModal (which the dashboard calls), this subsystem is self-contained.
+It is wired purely by listeners it binds to its own markup, so once React owns
+`#beatport-tab-content` those listeners have nothing to bind to and the file
+severs cleanly and completely.
+
+**Consequence for sequencing.** Because it is self-contained, it carries the
+LOWEST interop risk of anything left — but the HIGHEST volume. It does not
+block the shell wave and the shell wave does not block it.
+
+**Still to do: the verbatim read.** This entry establishes scope and boundary
+only. The line-by-line read of the 3,913 lines + the 29 sync-services functions
+has NOT been done, and no Beatport code should be written until it has.
