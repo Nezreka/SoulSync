@@ -84,6 +84,38 @@ describe('useBeatportSection', () => {
     const second = renderSection('releases', load);
     await waitFor(() => expect(second.result.current.status).toBe('ready'));
     expect(load).toHaveBeenCalledTimes(1);
+    // …and it comes back WITH ITS ITEMS. Caching only the flag would give a
+    // 'ready' section holding nothing — an empty slider. The vanilla avoids
+    // this by hiding the rendered DOM rather than removing it.
+    expect(second.result.current.items).toEqual(['a']);
+  });
+
+  it('hydrates from the cache on the FIRST render, with no empty frame', async () => {
+    const load = vi.fn(async () => ['a', 'b']);
+    const first = renderSection('releases', load);
+    await waitFor(() => expect(first.result.current.status).toBe('ready'));
+    first.unmount();
+
+    // Not after an effect — on the very first render, or the slider would
+    // flash empty on every tab visit.
+    const second = renderSection('releases', load);
+    expect(second.result.current.status).toBe('ready');
+    expect(second.result.current.items).toEqual(['a', 'b']);
+  });
+
+  it('a hero that failed comes back ready but EMPTY, keeping its placeholders', async () => {
+    const load = vi.fn(async () => {
+      throw new Error('down');
+    });
+    const first = renderSection('hero', load);
+    await waitFor(() => expect(first.result.current.status).toBe('failed'));
+    first.unmount();
+
+    const second = renderSection('hero', load);
+    // It claimed the slot with an empty list before fetching, which is right:
+    // nothing to show, and the static markup stands in.
+    expect(second.result.current.items).toEqual([]);
+    expect(load).toHaveBeenCalledTimes(1);
   });
 
   it('DOES re-fetch after a failure, for the four that mark on success only', async () => {

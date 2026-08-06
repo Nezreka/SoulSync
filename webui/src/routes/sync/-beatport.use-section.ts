@@ -24,7 +24,7 @@ import type { BeatportSliderConfig } from './-beatport.core';
  * Only successful loads are recorded, except for the hero, which the vanilla
  * marks before it even fetches (see marksLoadedBeforeFetch).
  */
-const loadedSections = new Set<string>();
+const loadedSections = new Map<string, unknown[]>();
 
 /** Test seam. Nothing in production clears this — a reload is the reset. */
 export function resetBeatportSectionCache(): void {
@@ -61,13 +61,26 @@ export function useBeatportSection<T>({
   load,
   defaultErrorMessage = 'Failed to load',
 }: UseBeatportSectionOptions<T>): BeatportSectionState<T> {
-  const [status, setStatus] = useState<BeatportSectionStatus>('idle');
-  const [items, setItems] = useState<T[]>([]);
+  // Hydrated from the cache on the FIRST render, not in an effect: a section
+  // that was loaded earlier this session must come back with its ITEMS, not
+  // just with the flag saying it once had some. The vanilla gets this free by
+  // hiding the rendered DOM rather than removing it.
+  const cached = loadedSections.get(sectionKey) as T[] | undefined;
+  const [status, setStatus] = useState<BeatportSectionStatus>(cached ? 'ready' : 'idle');
+  const [items, setItems] = useState<T[]>(cached ?? []);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   const loadRef = useRef(load);
   loadRef.current = load;
+
+  /**
+   * Destructured on purpose. Depending on `config` itself would make an inline
+   * `config={{…}}` re-run the effect every render — and since the effect calls
+   * setStatus, that is an infinite loop rather than a slow one. The two fields
+   * are primitives, so identity cannot bite.
+   */
+  const { marksLoadedBeforeFetch, onFailure } = config;
 
   const reload = useCallback(() => {
     loadedSections.delete(sectionKey);
@@ -77,14 +90,18 @@ export function useBeatportSection<T>({
   useEffect(() => {
     // Already loaded this session: the vanilla's guard, honoured so a tab
     // switch does not re-scrape Beatport.
-    if (loadedSections.has(sectionKey)) {
-      setStatus((current) => (current === 'idle' ? 'ready' : current));
+    const alreadyLoaded = loadedSections.get(sectionKey);
+    if (alreadyLoaded) {
+      setItems(alreadyLoaded as T[]);
+      setStatus('ready');
       return;
     }
 
     // 31-34: the hero claims the slot before it fetches, so a failure is never
     // retried for the rest of the session.
-    if (config.marksLoadedBeforeFetch) loadedSections.add(sectionKey);
+    // The hero claims the slot with an EMPTY list, which is exactly right: it
+    // has nothing to show and will keep its static placeholders.
+    if (marksLoadedBeforeFetch) loadedSections.set(sectionKey, []);
 
     const controller = new AbortController();
     setStatus('loading');
@@ -97,28 +114,26 @@ export function useBeatportSection<T>({
         if (result && result.length > 0) {
           setItems(result);
           setStatus('ready');
-          // Unconditional: a pre-marked section is already present, and Set
-          // membership makes the second add a no-op.
-          loadedSections.add(sectionKey);
+          loadedSections.set(sectionKey, result);
           return;
         }
         // An empty list is a FAILURE here, matching every vanilla loader:
         // `data.success && data.tracks && data.tracks.length > 0`.
         setStatus('failed');
-        if (config.onFailure === 'error-block') setErrorMessage(defaultErrorMessage);
+        if (onFailure === 'error-block') setErrorMessage(defaultErrorMessage);
       } catch (error) {
         // 58 and its four twins: leaving the page mid-fetch is not an error.
         if (controller.signal.aborted) return;
         if (error instanceof Error && error.name === 'AbortError') return;
         setStatus('failed');
-        if (config.onFailure === 'error-block') {
+        if (onFailure === 'error-block') {
           setErrorMessage(error instanceof Error ? error.message : defaultErrorMessage);
         }
       }
     })();
 
     return () => controller.abort();
-  }, [sectionKey, config, defaultErrorMessage, reloadToken]);
+  }, [sectionKey, marksLoadedBeforeFetch, onFailure, defaultErrorMessage, reloadToken]);
 
   return { status, items, errorMessage, reload };
 }

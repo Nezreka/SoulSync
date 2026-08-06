@@ -3190,3 +3190,32 @@ Closing it took three attempts, and the failures are the lesson:
 Both were tests that passed while measuring nothing — the same failure mode as
 the cleanTrackText rule-three gap earlier in this port. Mutation testing is the
 only thing that has caught any of them.
+
+### BEATPORT P4 REVIEW — the cache remembered the flag, not the data
+
+**A real bug, and the tests said it was fine.** The session cache recorded THAT
+a section had loaded, never WHAT it loaded. So the second mount — every return
+to the tab — produced `status: 'ready'` with an empty item list. An empty
+slider, permanently, for the rest of the session.
+
+The vanilla does not have this because its "cache" IS the rendered DOM: the sync
+page is hidden rather than removed, so the cards are simply still there. Storing
+only the flag reproduced the guard and threw away the thing the guard protects.
+
+The test that should have caught it asserted `status === 'ready'` and
+`load` called once, and never looked at `items` — which is the entire point of
+not re-fetching. Now stores the items, hydrates them on the FIRST render rather
+than in an effect (an effect would flash an empty slider every visit), and
+asserts the items on return.
+
+The hero is a deliberate exception: it caches an EMPTY list, because it claims
+its slot before fetching and has nothing to show — its static placeholders are
+the intended fallback. Tested separately.
+
+**Second finding, a latent footgun rather than a live bug.** The effect depended
+on the `config` OBJECT. Production passes the stable BEATPORT_SLIDERS entries,
+so nothing misbehaves — but an inline `config={{…}}` would give a new identity
+every render, re-run an effect that calls setStatus, and loop forever. Now
+depends on the two primitive fields it actually reads.
+
+Full suite 284 files / 6189 tests.
