@@ -69,7 +69,7 @@ import {
   pipelinePhaseFor,
   timeAgo,
 } from '../-sync.mirrored';
-import { SOURCE_REF_FAILED, applyPipelineState } from '../-sync.pipeline';
+import { SOURCE_REF_FAILED, applyPipelineState, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
@@ -97,6 +97,17 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
   const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
   /** The row whose 🔗 source-ref editor is open (auto-sync.js 2410). */
   const [editingRef, setEditingRef] = useState<MirroredPlaylistRow | null>(null);
+  /**
+   * Whether the open source-ref editor was launched FROM the detail modal.
+   * The vanilla decides this by probing for #mirrored-track-modal at commit
+   * time (2434); React closes the modal to show the editor, so the origin is
+   * remembered instead of detected.
+   *
+   * Set at BOTH open sites and nowhere else — that is what makes it correct
+   * without any cleanup on cancel: whichever entry point opened the editor has
+   * already stated where it came from.
+   */
+  const [refEditFromDetail, setRefEditFromDetail] = useState(false);
   /** The playlist whose TRACKS detail modal is open (1066-1165). */
   const [detail, setDetail] = useState<{
     playlistId: number;
@@ -270,27 +281,6 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
   );
 
   /** editMirroredSourceRef's PATCH half (auto-sync.js 2422-2440). */
-  const commitSourceRef = useCallback(
-    async (row: MirroredPlaylistRow, sourceRef: string) => {
-      const name = row.name ?? '';
-      setEditingRef(null);
-      try {
-        await patchMirroredSourceRef(row.id, sourceRef);
-        window.showToast?.(`Updated source for ${name}`, 'success');
-        // The vanilla also reopens the tracks-detail modal when it was open
-        // (2434-2438); that modal is its own wave, so there is nothing to
-        // reopen here.
-        await load();
-      } catch (err) {
-        window.showToast?.(
-          `Error: ${err instanceof Error ? err.message : SOURCE_REF_FAILED}`,
-          'error',
-        );
-      }
-    },
-    [load],
-  );
-
   /** openMirroredPlaylistModal's fetch half (1067-1073). */
   const openDetail = useCallback(async (playlistId: number) => {
     window.showLoadingOverlay?.('Loading mirrored playlist...');
@@ -304,6 +294,28 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
       window.showToast?.(`Error: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
     }
   }, []);
+
+  const commitSourceRef = useCallback(
+    async (row: MirroredPlaylistRow, sourceRef: string, fromDetail: boolean) => {
+      const name = row.name ?? '';
+      setEditingRef(null);
+      try {
+        await patchMirroredSourceRef(row.id, sourceRef);
+        window.showToast?.(sourceRefUpdatedToast(name), 'success');
+        await load();
+        // 2434-2438: an open detail modal is closed and REOPENED so it shows
+        // the new source. Only when the edit came from there — the card's 🔗
+        // leaves nothing open, and the vanilla's probe would find nothing.
+        if (fromDetail) await openDetail(row.id);
+      } catch (err) {
+        window.showToast?.(
+          `Error: ${err instanceof Error ? err.message : SOURCE_REF_FAILED}`,
+          'error',
+        );
+      }
+    },
+    [load, openDetail],
+  );
 
   /**
    * discoverMirroredPlaylist (2043-2149).
@@ -555,6 +567,7 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
                   title="Edit original playlist link"
                   onClick={(e) => {
                     e.stopPropagation();
+                    setRefEditFromDetail(false);
                     setEditingRef(row);
                   }}
                 >
@@ -615,11 +628,21 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
             if (row) void onDelete(row);
           }}
           onEditSource={() => {
-            const row = rows?.find((r) => r.id === detail.playlistId);
-            if (row) {
-              setDetail(null);
-              setEditingRef(row);
-            }
+            // The vanilla's Edit Source passes the DETAIL payload's fields,
+            // not the list row's: data.name, `data.source || 'unknown'`, and
+            // getMirroredSourceRef(DATA) (1084-1085, 1150). The list can be
+            // staler than the modal you are looking at, so the editor is
+            // seeded from what the modal actually shows.
+            setDetail(null);
+            setRefEditFromDetail(true);
+            setEditingRef({
+              id: detail.playlistId,
+              name: detail.data.name,
+              source: detail.data.source || 'unknown',
+              source_ref: detail.data.source_ref,
+              description: detail.data.description,
+              source_playlist_id: detail.data.source_playlist_id,
+            });
           }}
           onRunPipeline={() => {
             setDetail(null);
@@ -633,7 +656,7 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
           row={editingRef}
           currentRef={getMirroredSourceRef(editingRef)}
           onClose={() => setEditingRef(null)}
-          onSubmit={(sourceRef) => void commitSourceRef(editingRef, sourceRef)}
+          onSubmit={(sourceRef) => void commitSourceRef(editingRef, sourceRef, refEditFromDetail)}
         />
       )}
     </div>

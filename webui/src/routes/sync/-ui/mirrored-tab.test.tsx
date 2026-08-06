@@ -705,3 +705,193 @@ describe('MirroredTab — the pools are ADOPTED, not reimplemented', () => {
     expect(() => fireEvent.click(screen.getByText('Wing It Pool'))).not.toThrow();
   });
 });
+
+describe('MirroredTab — the source-ref reopen tail (2434-2438)', () => {
+  const DETAIL = {
+    name: 'Road Trip',
+    source: 'spotify',
+    source_ref: 'https://open.spotify.com/playlist/old',
+    tracks: [],
+  };
+
+  it('reopens the detail modal when the edit came FROM it', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? DETAIL
+          : { success: true };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Edit Source'));
+    // The editor replaces the detail modal while it is open (React cannot
+    // stack them the way the vanilla's prompt sat on top).
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+
+    const input = document.querySelector('#mirrored-source-ref-modal input');
+    fireEvent.change(input as Element, {
+      target: { value: 'https://open.spotify.com/playlist/new' },
+    });
+    fireEvent.click(screen.getByText('Save'));
+
+    // Back to the detail modal, refetched so it shows the new source.
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+    const patched = calls.filter((c) => c.url === '/api/mirrored-playlists/3/source-ref');
+    expect(patched).toHaveLength(1);
+    expect(patched[0].method).toBe('PATCH');
+  });
+
+  it('does NOT reopen it when the edit came from the card 🔗', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? DETAIL
+          : { success: true };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+    const input = document.querySelector('#mirrored-source-ref-modal input');
+    fireEvent.change(input as Element, {
+      target: { value: 'https://open.spotify.com/playlist/new' },
+    });
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/source-ref')).toBe(true),
+    );
+    // The vanilla's probe finds no open modal here, so nothing opens.
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
+  it('cancelling from the detail modal leaves nothing open', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists' ? [ROW] : url === '/api/mirrored-playlists/3' ? DETAIL : {};
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Edit Source'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(document.querySelector('#mirrored-source-ref-modal')).toBeNull());
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+});
+
+describe('MirroredTab — the reopen origin cannot leak between entry points', () => {
+  const DETAIL = { name: 'Road Trip', source: 'spotify', tracks: [] };
+
+  function serve(url: string): unknown {
+    if (url === '/api/mirrored-playlists') return [ROW];
+    if (url === '/api/mirrored-playlists/3') return DETAIL;
+    return { success: true };
+  }
+
+  function save(value: string): void {
+    const input = document.querySelector('#mirrored-source-ref-modal input');
+    fireEvent.change(input as Element, { target: { value } });
+    fireEvent.click(screen.getByText('Save'));
+  }
+
+  it('a CANCELLED detail edit does not make the next card edit reopen it', async () => {
+    stubFetch();
+    responder = serve;
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    // Open from the detail modal, then back out.
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Edit Source'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByText('Cancel'));
+    await waitFor(() => expect(document.querySelector('#mirrored-source-ref-modal')).toBeNull());
+
+    // Now edit from the CARD and commit.
+    fireEvent.click(screen.getByTitle('Edit original playlist link'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+    save('https://open.spotify.com/playlist/new');
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/source-ref')).toBe(true),
+    );
+    // The card edit has no modal behind it, so nothing may open.
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
+  it('seeds the editor from the DETAIL payload, not the list row (1084-1085)', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? // The list is stale: an older name and no source_ref at all.
+          [{ ...ROW, name: 'Stale Name', source: 'spotify', source_ref: undefined }]
+        : url === '/api/mirrored-playlists/3'
+          ? {
+              name: 'Road Trip',
+              source: 'spotify',
+              source_ref: 'https://open.spotify.com/playlist/fresh',
+              tracks: [],
+            }
+          : { success: true };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Stale Name')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Stale Name'));
+    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Edit Source'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+
+    // The prompt names what the MODAL showed, and the field is pre-filled from
+    // the modal's source_ref — neither is available on the stale list row.
+    const input = document.querySelector('#mirrored-source-ref-modal input') as HTMLInputElement;
+    expect(input.value).toBe('https://open.spotify.com/playlist/fresh');
+    expect(document.querySelector('#mirrored-source-ref-modal')?.textContent).toContain(
+      'Road Trip',
+    );
+  });
+
+  it('refreshes the LIST before reopening the detail (2432-2437 order)', async () => {
+    stubFetch();
+    responder = serve;
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Edit Source'));
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
+    );
+
+    const before = calls.length;
+    save('https://open.spotify.com/playlist/new');
+    await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
+
+    const after = calls.slice(before).map((c) => c.url);
+    const listAt = after.indexOf('/api/mirrored-playlists');
+    const detailAt = after.lastIndexOf('/api/mirrored-playlists/3');
+    expect(listAt).toBeGreaterThanOrEqual(0);
+    // loadMirroredPlaylists() runs first, so the card behind the modal is
+    // already current when the modal comes back.
+    expect(listAt).toBeLessThan(detailAt);
+  });
+});
