@@ -4490,6 +4490,67 @@ Full suite 6682 tests. Build clean. Lint clean.
 save/unschedule/run actions, the bulk menu (whose `window.prompt` must become a
 SoulSync modal), the 3s status poller and the two shared-helpers seams.
 
+### AUTO-SYNC SLICE E-i — the modal shell, tabs and bulk popover
+
+`openAutoSyncScheduleModal` / `renderAutoSyncScheduleModal` / `setAutoSyncTab`
+(571-740) and `openAutoSyncBulkMenu` / `promptAutoSyncBulkCustom` (1256-1313).
+The actions, the poller and the two shared-helpers seams are E-ii.
+
+**THE WINDOW.PROMPT IS GONE.** `promptAutoSyncBulkCustom` (1305) collected the
+custom interval with `window.prompt`, which this repo forbids outright. It is
+now an inline field inside the bulk popover — the only user-visible change in
+this slice, and a required one. The VALIDATION is unchanged and lives in
+`autoSyncParseCustomInterval`, wording included; a test asserts `window.prompt`
+is never called. Two new CSS classes were written for the field, since there is
+nothing to transcribe.
+
+**Scroll preservation dissolves, and it looks like a dropped feature.** The
+vanilla reads `.scrollTop` off the active lane board before every re-render and
+writes it back after (657-661, 736-739) — because innerHTML destroys and
+rebuilds every node, so dropping a playlist used to snap the board to the top.
+React keeps the nodes, so the scroll never moves and there is nothing to
+restore. Written down because "the port lost the scroll fix" is exactly what
+this looks like from a diff.
+
+**All four panels stay MOUNTED, as the vanilla's `.active` toggle does
+(727-730).** Unmounting the inactive tabs would be the obvious React shape and
+would silently discard each board's sidebar filter and expanded kind-groups on
+every tab switch. There is a test that types a filter, switches away and back,
+and asserts it survived.
+
+**A transcribed inconsistency, with the reasoning recorded.** `enabledCount`
+(660-661) filters on `s.enabled` as plain TRUTHINESS, where every other read of
+that field in the file treats it as tri-state (`!== false && !== 0`). A
+schedule whose `enabled` the backend omitted therefore counts as scheduled but
+NOT as active, while its card renders as enabled. Transcribed rather than
+harmonised: it is a header statistic, and "fixing" it would make the port show
+a different number than the vanilla for the same data. Both behaviours have
+tests naming the asymmetry.
+
+**Two overlapping types collapsed into one.** Slice B introduced
+`AutoSyncHistoryRow` as a placeholder for the health dot; slice D-ii introduced
+`AutoSyncHistoryEntry` as the real shape. Two names for one thing is the drift
+this port exists to remove, so the placeholder is gone and every consumer names
+the real type. `AutoSyncScheduleState.runHistory` was `unknown[]` from slice A
+for the same reason — nothing consumed it yet — and is now typed too.
+
+**Mutation pass: 38 mutants, 38 killed** after one round. Two anchors had
+drifted through formatting and were RE-ANCHORED; the one real survivor was the
+history-tab error badge, where the test checked the badge existed but not that
+it was the ONLY one.
+
+**The export gate caught four more.** Ten consecutive slices.
+
+**A pre-existing flake, noted not chased:** `-sync.use-export.test.tsx > drops
+the status after its autoHideMs` failed once under full-suite parallel load and
+passes 3/3 in isolation. It is a timer test from P5g, untouched by this wave.
+
+Full suite 6717 tests. Build clean. Lint clean.
+
+**Next:** slice E-ii — the save/unschedule/run/organize actions, the bulk
+scheduling loop (carrying the invariant fix), the 3s status poller with its
+mid-drag skip, and the two `typeof`-guarded shared-helpers seams.
+
 ### LIVE BUG FIX — bulk scheduling left weekly schedules running
 
 The P0 addendum's live bug #1, fixed in the vanilla rather than only in the

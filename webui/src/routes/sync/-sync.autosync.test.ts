@@ -19,7 +19,11 @@ import { describe, expect, it } from 'vitest';
 
 import { extractFunction } from '../../test/vanilla-extract';
 import {
+  AUTO_SYNC_TABS,
   autoSyncBuildLanes,
+  autoSyncNormalizeTab,
+  autoSyncParseCustomInterval,
+  autoSyncSummary,
   autoSyncAutomationCardFields,
   autoSyncFormatTrigger,
   autoSyncHumanizeType,
@@ -1454,5 +1458,79 @@ describe('the run-history pure core (1574-1882)', () => {
     expect(autoSyncValueLabel(['a', true])).toBe('a, Yes');
     expect(autoSyncValueLabel({ a: 1 })).toBe('{"a":1}');
     expect(autoSyncValueLabel(0)).toBe('0');
+  });
+});
+
+describe('the modal shell pure core (571-740, 1303-1313)', () => {
+  it('names the four tabs, in the order the header renders them', () => {
+    expect(AUTO_SYNC_TABS).toEqual(['schedule', 'weekly', 'automations', 'history']);
+  });
+
+  it('falls back to the hourly board for an unknown tab (733)', () => {
+    expect(autoSyncNormalizeTab('weekly')).toBe('weekly');
+    expect(autoSyncNormalizeTab('history')).toBe('history');
+    expect(autoSyncNormalizeTab('nonsense')).toBe('schedule');
+    expect(autoSyncNormalizeTab(undefined)).toBe('schedule');
+  });
+
+  it('summarises an empty board as four zeroes', () => {
+    expect(
+      autoSyncSummary({
+        playlists: [],
+        playlistSchedules: {},
+        weeklySchedules: {},
+        automationPipelines: [],
+        runHistory: [],
+      }),
+    ).toEqual({
+      scheduledCount: 0,
+      enabledCount: 0,
+      pipelineCount: 0,
+      totalTracks: 0,
+      historyErrorCount: 0,
+    });
+  });
+
+  it('sums both schedule maps and parses a string track count', () => {
+    const s = autoSyncSummary({
+      playlists: [{ id: 1, track_count: 10 }, { id: 2, track_count: '5' }, { id: 3 }],
+      playlistSchedules: { '1': { hours: 24, enabled: true } as never },
+      weeklySchedules: { '2': { enabled: false } as never },
+      automationPipelines: [{ id: 7 }],
+      runHistory: [{ status: 'error' }, { status: 'skipped' }, { status: 'completed' }],
+    });
+    expect(s).toEqual({
+      scheduledCount: 2,
+      enabledCount: 1,
+      pipelineCount: 1,
+      totalTracks: 15,
+      historyErrorCount: 2,
+    });
+  });
+
+  it('reads enabled as TRUTHINESS, which no other consumer does (660)', () => {
+    // Documented divergence inside the vanilla itself: a schedule whose
+    // `enabled` is missing counts as scheduled but not as active, where the
+    // cards would call it enabled. Transcribed so the number matches.
+    const s = autoSyncSummary({
+      playlists: [],
+      playlistSchedules: { '1': { hours: 24 } as never },
+      weeklySchedules: {},
+      automationPipelines: [],
+      runHistory: [],
+    });
+    expect(s.scheduledCount).toBe(1);
+    expect(s.enabledCount).toBe(0);
+  });
+
+  it('validates a custom interval the way the prompt used to', () => {
+    expect(autoSyncParseCustomInterval('6')).toEqual({ hours: 6 });
+    // parseInt semantics are kept: a trailing unit is ignored, not rejected.
+    expect(autoSyncParseCustomInterval('36h')).toEqual({ hours: 36 });
+    for (const bad of ['0', '-1', 'abc', '']) {
+      expect(autoSyncParseCustomInterval(bad)).toEqual({
+        error: 'Interval must be a whole number of hours, 1 or greater',
+      });
+    }
   });
 });

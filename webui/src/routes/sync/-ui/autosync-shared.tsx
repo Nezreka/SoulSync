@@ -26,7 +26,7 @@ import {
   autoSyncGroupSidebarRows,
   autoSyncSourceLabel,
   autoSyncPlaylistHealth,
-  type AutoSyncHistoryRow,
+  type AutoSyncHistoryEntry,
   type MirroredRow,
 } from '../-sync.autosync';
 
@@ -131,7 +131,7 @@ export function AutoSyncScheduledCard({
   playlist: MirroredRow;
   enabled: boolean;
   timing: React.ReactNode;
-  history: AutoSyncHistoryRow[];
+  history: AutoSyncHistoryEntry[];
   actions: AutoSyncCardActions;
   extraClass?: string;
   unscheduleTitle: string;

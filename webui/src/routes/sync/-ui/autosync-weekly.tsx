@@ -43,7 +43,7 @@ import {
   autoSyncNextRunLabel,
   autoSyncWeeklyLabel,
   detectBrowserTimezone,
-  type AutoSyncHistoryRow,
+  type AutoSyncHistoryEntry,
   type AutoSyncHourlyEntry,
   type AutoSyncWeeklyEntry,
   type MirroredRow,
@@ -245,7 +245,7 @@ export interface AutoSyncWeeklyBoardProps {
   weeklySchedules: Record<string, AutoSyncWeeklyEntry>;
   /** Read only to mark rows scheduled on the OTHER board (879-887). */
   playlistSchedules: Record<string, AutoSyncHourlyEntry>;
-  runHistory: AutoSyncHistoryRow[];
+  runHistory: AutoSyncHistoryEntry[];
   now: number;
   actions: AutoSyncWeeklyBoardActions;
 }

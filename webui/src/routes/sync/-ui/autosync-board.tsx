@@ -21,7 +21,7 @@ import {
   autoSyncLaneCadence,
   autoSyncMatchesFilter,
   autoSyncNextRunLabel,
-  type AutoSyncHistoryRow,
+  type AutoSyncHistoryEntry,
   type AutoSyncHourlyEntry,
   type MirroredRow,
 } from '../-sync.autosync';
@@ -42,7 +42,7 @@ export interface AutoSyncBoardActions extends AutoSyncCardActions {
 export interface AutoSyncBoardProps {
   playlists: MirroredRow[];
   playlistSchedules: Record<string, AutoSyncHourlyEntry>;
-  runHistory: AutoSyncHistoryRow[];
+  runHistory: AutoSyncHistoryEntry[];
   /** Injected so the 'next in 3h' labels are assertable without faking time. */
   now: number;
   actions: AutoSyncBoardActions;

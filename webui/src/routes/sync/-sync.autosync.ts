@@ -514,7 +514,13 @@ export interface AutoSyncScheduleState {
   weeklySchedules: Record<string, AutoSyncWeeklyEntry>;
   /** Pipeline automations this board does NOT own — the read-only panel. */
   automationPipelines: AutomationRow[];
-  runHistory: unknown[];
+  /**
+   * Typed as `unknown[]` when slice A wrote this, because nothing consumed it
+   * yet. Slice D-ii gave the rows a shape and both the health dot and the
+   * history panel read them, so it is narrowed. Rows still arrive unvalidated
+   * from the API — every consumer treats a malformed one as such.
+   */
+  runHistory: AutoSyncHistoryEntry[];
   runHistoryTotal: number;
 }
 
@@ -651,7 +657,8 @@ export function buildAutoSyncScheduleState(
     playlistSchedules,
     weeklySchedules,
     automationPipelines,
-    runHistory: historyData.history || [],
+    // Rows arrive unvalidated; every consumer treats a malformed one as such.
+    runHistory: (historyData.history || []) as AutoSyncHistoryEntry[],
     runHistoryTotal: historyData.total || 0,
   };
 }
@@ -777,12 +784,6 @@ export interface AutoSyncHealth {
   tooltip: string;
 }
 
-export interface AutoSyncHistoryRow {
-  playlist_id?: number | string;
-  status?: string;
-  [key: string]: unknown;
-}
-
 /**
  * 1978-1996. The health dot on a scheduled card, from the last three runs of
  * that playlist in the loaded history. Three errors in a row is failing (red);
@@ -797,7 +798,7 @@ export interface AutoSyncHistoryRow {
  * recent three runs and needs no defensive sort.
  */
 export function autoSyncPlaylistHealth(
-  history: AutoSyncHistoryRow[] | null | undefined,
+  history: AutoSyncHistoryEntry[] | null | undefined,
   playlistId: number | string,
 ): AutoSyncHealth {
   const id = parseInt(String(playlistId), 10);
@@ -1328,4 +1329,79 @@ export function autoSyncHistoryResultPills(
   )
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([label, v]) => ({ label, value: String(v) }));
+}
+
+/* ── The modal shell (571-740, 1256-1312) ───────────────────────────────── */
+
+export type AutoSyncTab = 'schedule' | 'weekly' | 'automations' | 'history';
+
+export const AUTO_SYNC_TABS: readonly AutoSyncTab[] = [
+  'schedule',
+  'weekly',
+  'automations',
+  'history',
+];
+
+/** 733-735. An unknown tab falls back to the hourly board. */
+export function autoSyncNormalizeTab(tab: string | undefined): AutoSyncTab {
+  return (AUTO_SYNC_TABS as readonly string[]).includes(tab as string)
+    ? (tab as AutoSyncTab)
+    : 'schedule';
+}
+
+export interface AutoSyncSummary {
+  scheduledCount: number;
+  enabledCount: number;
+  pipelineCount: number;
+  totalTracks: number;
+  /** 700-703. Drives the red badge on the Run History tab. */
+  historyErrorCount: number;
+}
+
+/**
+ * 658-664 and 700-703.
+ *
+ * Two things worth knowing. `scheduledCount` sums BOTH schedule maps, so a
+ * playlist can only appear once — the one-schedule-per-playlist invariant the
+ * save paths enforce is what makes that true. And `enabledCount` filters on
+ * `s.enabled` as plain TRUTHINESS here (660-661), where every other read of
+ * the same field treats it as tri-state (`!== false && !== 0`). That means a
+ * schedule whose `enabled` the backend omitted counts as scheduled but NOT as
+ * active. Transcribed as-is: it is a header statistic, and "fixing" it would
+ * make the port's number differ from the vanilla's for the same data.
+ */
+export function autoSyncSummary(state: {
+  playlists: MirroredRow[];
+  playlistSchedules: Record<string, AutoSyncHourlyEntry>;
+  weeklySchedules: Record<string, AutoSyncWeeklyEntry>;
+  automationPipelines: AutomationRow[];
+  runHistory: AutoSyncHistoryEntry[];
+}): AutoSyncSummary {
+  const hourly = Object.values(state.playlistSchedules || {});
+  const weekly = Object.values(state.weeklySchedules || {});
+  return {
+    scheduledCount: hourly.length + weekly.length,
+    enabledCount: hourly.filter((s) => s.enabled).length + weekly.filter((s) => s.enabled).length,
+    pipelineCount: (state.automationPipelines || []).length,
+    totalTracks: (state.playlists || []).reduce(
+      (sum, p) => sum + (parseInt(String(p.track_count), 10) || 0),
+      0,
+    ),
+    historyErrorCount: (state.runHistory || []).filter((h) =>
+      autoSyncHistoryMatchesFilter(h, 'error'),
+    ).length,
+  };
+}
+
+/**
+ * 1303-1313. The custom-interval value, validated. The vanilla collects it
+ * with `window.prompt`, which this repo forbids; the port asks in a SoulSync
+ * modal instead, so the parsing and the asking are separated here.
+ */
+export function autoSyncParseCustomInterval(raw: string): { hours: number } | { error: string } {
+  const hours = parseInt(raw, 10);
+  if (!Number.isFinite(hours) || hours < 1) {
+    return { error: 'Interval must be a whole number of hours, 1 or greater' };
+  }
+  return { hours };
 }
