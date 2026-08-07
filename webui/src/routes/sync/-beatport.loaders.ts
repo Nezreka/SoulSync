@@ -27,6 +27,7 @@ import {
   type BeatportTop10Track,
   fetchBeatportDJCharts,
   fetchBeatportGenreHero,
+  fetchBeatportGenreTop10Lists,
   fetchBeatportFeaturedCharts,
   fetchBeatportHeroTracks,
   fetchBeatportHypePicks,
@@ -198,6 +199,36 @@ export function genreHeroClickRelease(release: BeatportRelease) {
  */
 export function genreHeroAlbumLine(release: BeatportRelease, genreName: string): string {
   return release.label || `${genreName} Hero Release`;
+}
+
+/* ── The genre top-10 lists (3123-3162) ───────────────────────────────────── */
+
+export interface GenreTop10Lists {
+  beatport: BeatportTop10Track[];
+  hype: BeatportTop10Track[];
+  /**
+   * 3179/3219: when the backend says there is no hype section, the hype list is
+   * OMITTED ENTIRELY and the container collapses to one centred column. The
+   * main page has no such switch — it always renders both.
+   */
+  hasHypeSection: boolean;
+}
+
+export async function loadGenreTop10Lists(
+  genreSlug: string,
+  genreId: string | number,
+  signal?: AbortSignal,
+): Promise<GenreTop10Lists> {
+  const data = await fetchBeatportGenreTop10Lists(genreSlug, genreId, signal);
+  // 3137: `data.success` alone, like the main page's — no length check.
+  if (!data.success) throw new Error(data.error || 'Failed to load Top 10 lists');
+  const hype = data.hype_top10 ?? [];
+  return {
+    beatport: data.beatport_top10 ?? [],
+    hype,
+    // 3219 requires BOTH the flag and a non-empty list before it renders.
+    hasHypeSection: Boolean(data.has_hype_section) && hype.length > 0,
+  };
 }
 
 /* ── The hero's click payload (128-138) ───────────────────────────────────── */

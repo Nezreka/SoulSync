@@ -389,13 +389,20 @@ export async function fetchBeatportGenreHero(
   };
 }
 
-/** 3133. */
+/**
+ * 3133. Carries `has_hype_section`, which the homepage twin does not: the genre
+ * page hides the hype column outright when it is false (3219).
+ */
 export function fetchBeatportGenreTop10Lists(
   slug: string,
   id: string | number,
   signal?: AbortSignal,
 ): Promise<
-  BeatportEnvelope & { beatport_top10?: BeatportTop10Track[]; hype_top10?: BeatportTop10Track[] }
+  BeatportEnvelope & {
+    beatport_top10?: BeatportTop10Track[];
+    hype_top10?: BeatportTop10Track[];
+    has_hype_section?: boolean;
+  }
 > {
   return getJson(`/api/beatport/genre/${slug}/${id}/top-10-lists`, signal);
 }

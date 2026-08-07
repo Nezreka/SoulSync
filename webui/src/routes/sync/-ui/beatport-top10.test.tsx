@@ -17,7 +17,7 @@ import type { BeatportDownloadEnv } from '../-beatport.downloads';
 
 import { resetBeatportModalLatch } from '../-beatport.downloads';
 import { resetBeatportSectionCache } from '../-beatport.use-section';
-import { BeatportTop10Lists, BeatportTop10Releases } from './beatport-top10';
+import { BeatportTop10Lists, BeatportTop10Releases, TrackTop10List } from './beatport-top10';
 
 function makeEnv(): BeatportDownloadEnv {
   return {
@@ -380,6 +380,38 @@ describe('the top-10 releases list', () => {
       expect(screen.getByText('💿 Loading Top 10 Releases...')).toBeInTheDocument(),
     );
     expect(document.querySelector('.beatport-releases-top10-error')).toBeNull();
+  });
+});
+
+describe('TrackTop10List on its own', () => {
+  it('takes an id, a subtitle and a chart name from its caller', () => {
+    // The genre page reuses this component with all three overridden; the
+    // homepage supplies none of them and gets the defaults.
+    render(
+      <TrackTop10List
+        variant="beatport"
+        tracks={[{ title: 'T', artist: 'A', label: 'L' }]}
+        env={makeEnv()}
+        listId="genre-beatport-top10-list"
+        subtitle="Most popular tech house tracks"
+        chartName="Tech House Beatport Top 10"
+      />,
+    );
+    expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull();
+    expect(document.getElementById('beatport-top10-list')).toBeNull();
+    expect(document.querySelector('.beatport-top10-list-subtitle')?.textContent).toBe(
+      'Most popular tech house tracks',
+    );
+    // The card markup is unchanged by the overrides.
+    expect(document.querySelector('.beatport-top10-card-title')?.textContent).toBe('T');
+  });
+
+  it('falls back to the homepage id and copy when given none', () => {
+    render(<TrackTop10List variant="hype" tracks={[]} env={makeEnv()} />);
+    expect(document.getElementById('beatport-hype10-list')).not.toBeNull();
+    expect(document.querySelector('.beatport-hype10-list-subtitle')?.textContent).toBe(
+      "Editor's trending picks",
+    );
   });
 });
 

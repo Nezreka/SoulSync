@@ -3887,3 +3887,58 @@ in the component and covered by a test that asserts the page stays put.
 
 This is the sort of thing only a cross-loader comparison finds: each of the
 three reads perfectly sensibly in isolation.
+
+### BEATPORT P10c-ii — the genre top-10 lists + the genre Top 100 button
+
+Covers 3123-3296 (the lists), 3301-3353 (their chart clicks), 3358-3401 (the
+DOM scrape) and 3406-3439 (the Top 100 button).
+
+**Most of this was already ported.** handleGenreChartClick (3327-3353) is
+byte-for-byte handleRebuildChartClick from sync-services.js — same latch, same
+`Fetching track metadata... (0/n)` overlay, same enrich, same compilation modal
+— so P9's openBeatportTop10List covers it unchanged, and getGenrePageTrackData
+dissolves with the DOM scrape it exists to perform. The two lists themselves are
+the homepage's, so TrackTop10List became reusable rather than restated: the
+genre page overrides exactly three things — element id, subtitle, chart name.
+
+**What is genuinely different, and tested:**
+- **`has_hype_section`.** The homepage always renders both columns; the genre
+  page removes the hype column OUTRIGHT when the backend says there is none
+  (3219, and the explicit "No else block" comment at 3259), and collapses the
+  grid to one centred track with an inline style (3179). The port requires BOTH
+  the flag and a non-empty list, as 3219 does.
+- the copy lower-cases the genre in three places (3176, 3184, 3225) while the
+  section heading keeps its casing (3175);
+- the chart names carry the genre: '<Genre> Beatport Top 10', '<Genre> Hype
+  Top 10', '<Genre> Top 100';
+- unlike the hero, this loader SWALLOWS its failure — the two sections fail
+  independently, which is now asserted directly.
+
+**FOUND: four classes the genre page emits have no CSS at all.** Checked by
+plain substring, not just the anchored pattern:
+`genre-top10-lists-container`, `genre-top10-loading-container`,
+`genre-top10-error` and `error-detail` appear NOWHERE in style.css. So the
+genre page's top-10 wrapper, its loading block and its error block are unstyled
+today; the lists look right only because their CONTENT uses the
+`beatport-top10-*` classes, which do exist.
+
+`error-detail` is the near-miss: the HERO's error block uses
+`genre-error-details` (plural, styled at 33560) while the top-10 one uses
+`error-detail`. Almost certainly a typo that lost the styling. Both are
+transcribed as-is and named in the artefact test — inventing CSS here would
+redesign a page nobody asked me to touch.
+
+**Mutation pass: 36 mutants, 36 killed** after one round. Three of the four
+first-round survivors were real gaps (an empty beatport list is NOT a failure;
+the Top 100 latch was untested; the enrichment stub echoed its input again) and
+one was a stale anchor — the Top 100 button's markup had changed when I wired
+its onClick.
+
+**The full suite caught THREE exports with no test naming them** —
+openBeatportGenreTop100, loadGenreTop10Lists and TrackTop10List, all exercised
+through the page and none named. Given direct tests. That gate has now caught
+something in P9, P10c-i and P10c-ii; a scoped run cannot see it.
+
+Full suite 6418 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the genre top-10 releases (3444-3646) — the last region.

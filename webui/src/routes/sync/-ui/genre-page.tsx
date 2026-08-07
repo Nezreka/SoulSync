@@ -41,17 +41,20 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { BeatportGenre, BeatportRelease } from '../-beatport.api';
 import type { BeatportDownloadEnv } from '../-beatport.downloads';
+import type { GenreTop10Lists as GenreTop10Data } from '../-beatport.loaders';
 
 import { BEATPORT_SLIDERS } from '../-beatport.core';
-import { openBeatportRelease } from '../-beatport.downloads';
+import { openBeatportGenreTop100, openBeatportRelease } from '../-beatport.downloads';
 import {
   genreHeroAlbumLine,
   genreHeroClickRelease,
   isBeatportReleaseClickable,
   loadGenreHero,
+  loadGenreTop10Lists,
 } from '../-beatport.loaders';
 import { heroSlideAttributes } from './beatport-cards';
 import { BeatportSlider } from './beatport-slider';
+import { TrackTop10List } from './beatport-top10';
 
 export interface GenrePageProps {
   genre: BeatportGenre;
@@ -84,10 +87,122 @@ export function GenrePage({ genre, onBack, env }: GenrePageProps) {
 
             The handler itself arrives with the genre Top 100 slice.
           */}
-          <button type="button" className="beatport-nav-button" id="genre-top100-btn">
+          <button
+            type="button"
+            className="beatport-nav-button"
+            id="genre-top100-btn"
+            onClick={() => {
+              void openBeatportGenreTop100(genre.slug, genre.id, genre.name, env);
+            }}
+          >
             <span className="beatport-nav-icon top100-icon" />
             <span className="beatport-nav-text">Beatport Top 100</span>
           </button>
+        </div>
+      </div>
+
+      <GenreTop10Lists genre={genre} env={env} />
+    </div>
+  );
+}
+
+/* ── The genre top-10 lists (3123-3296) ───────────────────────────────────── */
+
+/**
+ * The same two lists as the homepage — same classes, same cards, same
+ * container-level click — differing only in element id, subtitle and the name
+ * the download is filed under. So this reuses TrackTop10List rather than
+ * restating the card markup, and overrides exactly those three things.
+ *
+ * The genre names in the copy are LOWER-CASED (3176, 3184, 3225) while the
+ * section heading keeps the original casing (3175).
+ */
+function GenreTop10Lists({ genre, env }: { genre: BeatportGenre; env: BeatportDownloadEnv }) {
+  const [data, setData] = useState<GenreTop10Data | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setData(null);
+    setErrorMessage('');
+    void (async () => {
+      try {
+        const loaded = await loadGenreTop10Lists(genre.slug, genre.id, controller.signal);
+        if (controller.signal.aborted) return;
+        setData(loaded);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.name === 'AbortError') return;
+        // 3151-3160. Unlike the hero, this one SWALLOWS — it renders its block
+        // and leaves the user on the page.
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+      }
+    })();
+    return () => controller.abort();
+  }, [genre.slug, genre.id]);
+
+  if (errorMessage) {
+    return (
+      <div className="genre-top10-lists-container" id="genre-top10-lists-container">
+        <div className="genre-top10-error">
+          <h3>❌ Error Loading Top 10 Lists</h3>
+          <p>Could not load Top 10 tracks for {genre.name}</p>
+          <p className="error-detail">{errorMessage}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="genre-top10-lists-container" id="genre-top10-lists-container">
+        <div className="genre-top10-loading-container">
+          <div className="genre-loading-spinner" />
+          <p className="genre-loading-text">🎵 Loading Top 10 lists...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const lower = genre.name.toLowerCase();
+  return (
+    <div className="genre-top10-lists-container" id="genre-top10-lists-container">
+      <div className="beatport-top10-section">
+        <div className="beatport-top10-header">
+          <h2 className="beatport-top10-title">🏆 {genre.name} Top 10 Lists</h2>
+          <p className="beatport-top10-subtitle">Current trending {lower} tracks</p>
+        </div>
+
+        <div
+          className="beatport-top10-container"
+          // 3179: with no hype column the grid collapses to one centred track.
+          // Inline, because the vanilla has no class for it.
+          style={
+            data.hasHypeSection
+              ? undefined
+              : { gridTemplateColumns: '1fr', justifyItems: 'center', maxWidth: '700px' }
+          }
+        >
+          <TrackTop10List
+            variant="beatport"
+            tracks={data.beatport}
+            env={env}
+            listId="genre-beatport-top10-list"
+            subtitle={`Most popular ${lower} tracks`}
+            chartName={`${genre.name} Beatport Top 10`}
+          />
+          {/* 3219, and the comment at 3259: NO else branch — the hype column is
+              removed outright rather than shown empty. */}
+          {data.hasHypeSection ? (
+            <TrackTop10List
+              variant="hype"
+              tracks={data.hype}
+              env={env}
+              listId="genre-beatport-hype10-list"
+              subtitle={`Editor's trending ${lower} picks`}
+              chartName={`${genre.name} Hype Top 10`}
+            />
+          ) : null}
         </div>
       </div>
     </div>

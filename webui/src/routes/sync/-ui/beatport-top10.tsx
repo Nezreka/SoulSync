@@ -104,29 +104,43 @@ function TrackCard({
   );
 }
 
-function TrackList({
-  variant,
-  tracks,
-  env,
-}: {
+export interface TrackTop10ListProps {
   variant: TrackListVariant;
   tracks: BeatportTop10Track[];
   env: BeatportDownloadEnv;
-}) {
+  /**
+   * The genre page reuses these lists verbatim — same classes, same cards, same
+   * container-level click — and changes only the element id, the subtitle and
+   * the name the download is filed under (3181-3226). So the overrides are
+   * exactly those three, and everything else stays shared.
+   */
+  listId?: string;
+  subtitle?: string;
+  chartName?: string;
+}
+
+export function TrackTop10List({
+  variant,
+  tracks,
+  env,
+  listId,
+  subtitle,
+  chartName,
+}: TrackTop10ListProps) {
   const copy = TRACK_LIST_VARIANTS[variant];
   return (
     <div
       className={`beatport-${copy.slug}-list`}
-      id={`beatport-${copy.slug}-list`}
+      id={listId ?? `beatport-${copy.slug}-list`}
       // sync-services.js 3948-3963: the CONTAINER is the button. Clicking the
       // header queues all ten tracks, which is unobvious but is the behaviour.
       onClick={() => {
-        void openBeatportTop10List(tracks, copy.chartName, env);
+        void openBeatportTop10List(tracks, chartName ?? copy.chartName, env);
       }}
     >
       <div className={`beatport-${copy.slug}-list-header`}>
         <h3 className={`beatport-${copy.slug}-list-title`}>{copy.title}</h3>
-        <p className={`beatport-${copy.slug}-list-subtitle`}>{copy.subtitle}</p>
+        <p className={`beatport-${copy.slug}-list-subtitle`}>{subtitle ?? copy.subtitle}</p>
       </div>
       {tracks.length > 0 ? (
         <div className={`beatport-${copy.slug}-tracks`}>
@@ -176,8 +190,8 @@ export function BeatportTop10Lists({ env }: { env: BeatportDownloadEnv }) {
 
   return (
     <div className="beatport-top10-container">
-      <TrackList variant="beatport" tracks={data?.beatport ?? []} env={env} />
-      <TrackList variant="hype" tracks={data?.hype ?? []} env={env} />
+      <TrackTop10List variant="beatport" tracks={data?.beatport ?? []} env={env} />
+      <TrackTop10List variant="hype" tracks={data?.hype ?? []} env={env} />
     </div>
   );
 }

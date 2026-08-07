@@ -25,6 +25,7 @@ import {
   type BeatportChart,
   enrichBeatportTracks,
   extractBeatportChart,
+  fetchBeatportGenreTracks,
   fetchBeatportReleaseMetadata,
   fetchBeatportTop100,
 } from './-beatport.api';
@@ -379,6 +380,50 @@ export async function openBeatportTop10List(
     env.showLoadingOverlay(`Fetching track metadata... (0/${tracks.length})`);
 
     const enriched = await enrichWithOverlayProgress(tracks, env);
+
+    env.hideLoadingOverlay();
+    openBeatportChartAsDownloadModal(enriched, chartName, null, env);
+  } catch (error) {
+    env.hideLoadingOverlay();
+    env.showToast(
+      `Error loading ${chartName}: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
+  }
+}
+
+/* ── The genre Top 100 button (3406-3439) ─────────────────────────────────── */
+
+/**
+ * The same shape as the two homepage Top 100 buttons — latch, blind 2s release,
+ * scrape unenriched, enrich with progress, open as a compilation with no image
+ * — over the genre tracks endpoint, and filed as '<Genre> Top 100'.
+ *
+ * Like them, and unlike every other flow, it shows no 'Loading …' toast.
+ */
+export async function openBeatportGenreTop100(
+  genreSlug: string,
+  genreId: string | number,
+  genreName: string,
+  env: BeatportDownloadEnv,
+): Promise<void> {
+  if (modalOpening) return;
+  modalOpening = true;
+  env.schedule(() => {
+    modalOpening = false;
+  }, 2000);
+
+  const chartName = `${genreName} Top 100`;
+
+  try {
+    env.showLoadingOverlay(`Scraping ${chartName}...`);
+
+    const data = await fetchBeatportGenreTracks(genreSlug, genreId);
+    if (!data.success || !data.tracks || data.tracks.length === 0) {
+      throw new Error(`No tracks found in ${chartName}`);
+    }
+
+    const enriched = await enrichWithOverlayProgress(data.tracks, env);
 
     env.hideLoadingOverlay();
     openBeatportChartAsDownloadModal(enriched, chartName, null, env);

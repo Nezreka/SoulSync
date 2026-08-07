@@ -254,7 +254,255 @@ describe('the genre hero slider', () => {
   });
 });
 
+const LISTS_URL = '/api/beatport/genre/tech-house/11/top-10-lists';
+const TRACKS_URL = '/api/beatport/genre/tech-house/11/tracks';
+
+const LISTS = {
+  success: true,
+  has_hype_section: true,
+  beatport_top10: [{ title: 'DeepHouseAnthem', artist: 'A', label: 'L', url: 'http://b' }],
+  hype_top10: [{ title: 'H', artist: 'B', label: 'L2' }],
+};
+
+describe('the genre top-10 lists', () => {
+  it('renders both lists under GENRE ids, with genre-flavoured copy', async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+
+    expect(document.getElementById('genre-beatport-hype10-list')).not.toBeNull();
+    // The ids must NOT collide with the homepage lists, which share every class.
+    expect(document.getElementById('beatport-top10-list')).toBeNull();
+    // 3175 keeps the casing; 3176/3184/3225 lower-case it.
+    expect(screen.getByText('🏆 Tech House Top 10 Lists')).toBeInTheDocument();
+    expect(screen.getByText('Current trending tech house tracks')).toBeInTheDocument();
+    expect(screen.getByText('Most popular tech house tracks')).toBeInTheDocument();
+    expect(screen.getByText("Editor's trending tech house picks")).toBeInTheDocument();
+  });
+
+  it('cleans the card text, as the homepage lists do', async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-top10-card-title')?.textContent).toBe(
+        'Deep House Anthem',
+      ),
+    );
+  });
+
+  it('files the download under the GENRE-prefixed chart name', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: LISTS,
+      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'x' }] },
+    });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+
+    fireEvent.click(document.getElementById('genre-beatport-top10-list') as Element);
+    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
+    expect((env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe(
+      'Tech House Beatport Top 10',
+    );
+  });
+
+  it('files the hype list under its own name', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: LISTS,
+      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'x' }] },
+    });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-hype10-list')).not.toBeNull(),
+    );
+
+    fireEvent.click(document.getElementById('genre-beatport-hype10-list') as Element);
+    await waitFor(() => expect(env.registerDownload).toHaveBeenCalled());
+    expect(env.registerDownload).toHaveBeenCalledWith(
+      'Tech House Hype Top 10',
+      '',
+      expect.any(String),
+    );
+  });
+
+  it('REMOVES the hype column outright when there is no hype section', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: { ...LISTS, has_hype_section: false },
+    });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+
+    // 3259's comment is explicit: no else branch, the column is gone rather
+    // than empty — and the grid collapses to one centred track (3179).
+    expect(document.getElementById('genre-beatport-hype10-list')).toBeNull();
+    const container = document.querySelector('.beatport-top10-container') as HTMLElement;
+    expect(container.style.gridTemplateColumns).toBe('1fr');
+    expect(container.style.maxWidth).toBe('700px');
+  });
+
+  it('also removes it when the flag is set but the list is empty', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: { ...LISTS, has_hype_section: true, hype_top10: [] },
+    });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+    // 3219 requires BOTH.
+    expect(document.getElementById('genre-beatport-hype10-list')).toBeNull();
+  });
+
+  it('leaves the grid alone when there IS a hype section', async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-hype10-list')).not.toBeNull(),
+    );
+    expect(
+      (document.querySelector('.beatport-top10-container') as HTMLElement).getAttribute('style'),
+    ).toBeNull();
+  });
+
+  it('renders an EMPTY beatport list rather than treating it as a failure', async () => {
+    // 3137 tests `data.success` alone — no length check, exactly like the
+    // homepage twin. An empty list is a list, not an error.
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: { success: true, has_hype_section: false, beatport_top10: [], hype_top10: [] },
+    });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+    expect(screen.queryByText('❌ Error Loading Top 10 Lists')).not.toBeInTheDocument();
+    expect(document.querySelector('.beatport-top10-card')).toBeNull();
+  });
+
+  it('SWALLOWS its failure and stays on the page, unlike the hero', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: { success: false, error: 'lists are down' },
+    });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(screen.getByText('❌ Error Loading Top 10 Lists')).toBeInTheDocument(),
+    );
+    expect(screen.getByText('Could not load Top 10 tracks for Tech House')).toBeInTheDocument();
+    expect(screen.getByText('lists are down')).toBeInTheDocument();
+    // The hero still rendered — the two sections fail independently.
+    expect(screen.getByText('Nights')).toBeInTheDocument();
+  });
+});
+
+describe('the genre Top 100 button', () => {
+  it('scrapes the genre tracks endpoint and files it as "<Genre> Top 100"', async () => {
+    const calls = stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: LISTS,
+      [TRACKS_URL]: { success: true, tracks: [{ title: 'T' }] },
+      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'T+' }] },
+    });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+
+    fireEvent.click(document.getElementById('genre-top100-btn') as Element);
+    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
+    expect(calls.some((c) => c.url.startsWith(TRACKS_URL))).toBe(true);
+    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args[1]).toBe('Tech House Top 100');
+    expect(args[6]).toBe('playlist');
+    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Scraping Tech House Top 100...');
+    // The ENRICHED tracks, not the scraped ones — the stub deliberately
+    // returns a different payload so the two cannot be confused.
+    expect((args[2] as { name: string }[])[0].name).toBe('T+');
+  });
+
+  it('is latched — a second press while the first is in flight is swallowed', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let scrapes = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.startsWith(TRACKS_URL)) {
+          scrapes++;
+          await gate;
+          return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
+            status: 200,
+          });
+        }
+        if (url.startsWith(HERO_URL)) {
+          return new Response(JSON.stringify({ success: true, releases: [RELEASE] }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
+          status: 200,
+        });
+      }),
+    );
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+
+    const button = document.getElementById('genre-top100-btn') as Element;
+    fireEvent.click(button);
+    await waitFor(() => expect(scrapes).toBe(1));
+    fireEvent.click(button);
+    expect(scrapes).toBe(1);
+    release();
+    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalledTimes(1));
+  });
+
+  it('reports an empty chart with the genre in the message', async () => {
+    stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: LISTS,
+      [TRACKS_URL]: { success: true, tracks: [] },
+    });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+
+    fireEvent.click(document.getElementById('genre-top100-btn') as Element);
+    await waitFor(() =>
+      expect(env.showToast).toHaveBeenCalledWith(
+        'Error loading Tech House Top 100: No tracks found in Tech House Top 100',
+        'error',
+      ),
+    );
+  });
+});
+
 describe('the genre page class names', () => {
+  /**
+   * DELIBERATELY NOT IN THE LIST BELOW, because they are not in style.css
+   * either — checked by plain substring, not just the anchored pattern:
+   *
+   *   genre-top10-lists-container, genre-top10-loading-container,
+   *   genre-top10-error, error-detail
+   *
+   * The vanilla emits all four and none has a rule, so the genre page's top-10
+   * wrapper, its loading block and its error block are unstyled today. The
+   * inner lists look right only because their CONTENT uses the
+   * `beatport-top10-*` classes, which do exist.
+   *
+   * `error-detail` is the near-miss worth noting: the hero's error block uses
+   * `genre-error-details` (plural, and styled at 33560) while the top-10 one
+   * uses `error-detail`. The port transcribes both as-is — inventing CSS here
+   * would change the appearance of a page nobody asked me to redesign.
+   */
   it('all exist in the vanilla stylesheet', () => {
     const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
     const required = [

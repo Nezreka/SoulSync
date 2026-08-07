@@ -16,6 +16,7 @@ import {
   openBeatportChartCard,
   openBeatportRelease,
   openBeatportTop100,
+  openBeatportGenreTop100,
   openBeatportTop10List,
   resetBeatportModalLatch,
 } from './-beatport.downloads';
@@ -485,6 +486,41 @@ describe('the two Top 100 buttons', () => {
       'Error loading Hype Top 100: No tracks found in Hype Top 100',
       'error',
     );
+  });
+});
+
+describe('the genre Top 100 flow', () => {
+  it('hits the genre tracks endpoint and files it under the genre', async () => {
+    const calls = stubFetch(() => ({ success: true, tracks: [{ title: 'T' }] }));
+    const { env, scheduled } = makeEnv();
+    await openBeatportGenreTop100('tech-house', 11, 'Tech House', env);
+
+    expect(calls[0].url).toBe('/api/beatport/genre/tech-house/11/tracks?enrich=false');
+    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Scraping Tech House Top 100...');
+    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args[1]).toBe('Tech House Top 100');
+    expect(args[6]).toBe('playlist');
+    // No image, and the same blind 2s latch as its two homepage twins.
+    expect(env.registerDownload).toHaveBeenCalledWith('Tech House Top 100', '', expect.any(String));
+    expect(scheduled).toEqual([{ callback: expect.any(Function), ms: 2000 }]);
+  });
+
+  it('shows no loading toast, like the other Top 100 buttons', async () => {
+    stubFetch(() => ({ success: true, tracks: [{ title: 'T' }] }));
+    const { env } = makeEnv();
+    await openBeatportGenreTop100('g', 1, 'G', env);
+    expect(env.showToast).not.toHaveBeenCalled();
+  });
+
+  it('reports an empty chart with the genre in both halves of the message', async () => {
+    stubFetch(() => ({ success: true, tracks: [] }));
+    const { env } = makeEnv();
+    await openBeatportGenreTop100('g', 1, 'Techno', env);
+    expect(env.showToast).toHaveBeenCalledWith(
+      'Error loading Techno Top 100: No tracks found in Techno Top 100',
+      'error',
+    );
+    expect(env.hideLoadingOverlay).toHaveBeenCalled();
   });
 });
 

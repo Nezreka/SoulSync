@@ -13,6 +13,7 @@ import {
   genreHeroClickRelease,
   heroClickRelease,
   loadGenreHero,
+  loadGenreTop10Lists,
   loadBeatportTop10Lists,
   loadBeatportTop10Releases,
   isBeatportReleaseClickable,
@@ -162,6 +163,42 @@ describe('the genre hero loader', () => {
   it('reads `message`, and ignores the `error` every other loader uses', async () => {
     stubJson({ success: false, message: 'genre is empty', error: 'IGNORED' });
     await expect(loadGenreHero('tech-house', 11, SIGNAL)).rejects.toThrow('genre is empty');
+  });
+});
+
+describe('the genre top-10 lists loader', () => {
+  it('splits the two lists and reports whether the hype column exists', async () => {
+    stubJson({
+      success: true,
+      has_hype_section: true,
+      beatport_top10: [{ title: 'a' }],
+      hype_top10: [{ title: 'b' }],
+    });
+    await expect(loadGenreTop10Lists('tech-house', 11, SIGNAL)).resolves.toEqual({
+      beatport: [{ title: 'a' }],
+      hype: [{ title: 'b' }],
+      hasHypeSection: true,
+    });
+  });
+
+  it('needs BOTH the flag and a non-empty list to claim a hype section', async () => {
+    // 3219 tests both, so either alone leaves the column out.
+    stubJson({ success: true, has_hype_section: true, hype_top10: [] });
+    await expect(loadGenreTop10Lists('g', 1, SIGNAL)).resolves.toMatchObject({
+      hasHypeSection: false,
+    });
+    stubJson({ success: true, has_hype_section: false, hype_top10: [{ title: 'b' }] });
+    await expect(loadGenreTop10Lists('g', 1, SIGNAL)).resolves.toMatchObject({
+      hasHypeSection: false,
+    });
+  });
+
+  it("forwards the backend's message, and does not mind an empty beatport list", async () => {
+    stubJson({ success: false, error: 'lists are down' });
+    await expect(loadGenreTop10Lists('g', 1, SIGNAL)).rejects.toThrow('lists are down');
+    // 3137 checks `success` alone — an empty list is a list.
+    stubJson({ success: true });
+    await expect(loadGenreTop10Lists('g', 1, SIGNAL)).resolves.toMatchObject({ beatport: [] });
   });
 });
 
