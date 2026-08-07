@@ -3602,3 +3602,56 @@ Full suite 290 files / 6329 tests. Build clean. Lint clean.
 
 **Beatport remaining:** the genre browser (2230-3626, ~1,400 lines) — the last
 piece.
+
+### BEATPORT P10a — the genre browser's data layer (-beatport.genres.ts)
+
+The genre list is cheap; the genre IMAGES are one scraped request each for ~40
+genres, so the vanilla does something more careful than it first looks
+(2526-2625), and all four parts survive the port:
+
+1. render the list immediately with emoji placeholders,
+2. fill images in the background with TWO cooperative workers on a shared
+   queue, 100ms apart,
+3. cache each resolved url so reopening the modal only queues what is missing,
+4. PAUSE on modal close — not cancel — and resume from the same point.
+
+**The one change:** the vanilla caches by mutating `genre.imageUrl` in place,
+which React cannot observe. The urls live in a Map keyed by SLUG AND ID — the
+pair, because the vanilla's card selector matches on both attributes at once
+(2511-2513), so a slug alone would let two genres share an image.
+
+**Transcribed, not corrected:** images load only when there are MORE THAN five
+genres (2433, a strict `>`), so a list of exactly five keeps its emoji. The real
+list is ~40, so this only bites when the scrape has mostly failed — and not
+firing five more requests at a struggling backend is defensible.
+
+Also recorded: `/api/beatport/genres` is the only Beatport fetch that checks
+`response.ok`, and it puts the status line into the message the user reads. And
+two of the vanilla cache's five fields are dead — `lastLoaded` is written and
+never read, `imageWorkers` is declared and never assigned — so neither is
+ported.
+
+**Mutation pass: 24 mutants, 22 killed, 2 DECLARED EQUIVALENT WITH PROOF.**
+
+Four of the six first-round survivors were real gaps, and all four were tests
+that passed for the wrong reason — the recurring failure mode, caught again:
+- 'clears imagesLoaded' asserted false against a cache that was ALREADY false
+  from the reset. Now sets it true first.
+- 'success but no url' could not tell the two clauses apart, because the stub
+  omitted the url whenever it reported failure. Now tests both directions.
+- 'empty queue is complete' passed on the PREVIOUS call's flag. Now runs the
+  empty case first.
+- 'does not search the slug' used a fixture with no slug in it.
+
+The remaining two are the pause flag's `while`-head test and its post-await
+`break`. The vanilla has both (2588, 2597-2600) and they are redundant:
+control reaches the break and then the loop head, which re-tests the same flag,
+and the flag is set true immediately before the workers start, so the loop
+cannot be entered with it false. Deleting EITHER changes nothing. That was not
+left as an assertion — deleting BOTH was run, and is killed. Kept in the code so
+a reader diffing against the vanilla finds the same shape.
+
+Full suite 291 files / 6352 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the genre browser MODAL (2243-2340, 2643-2681) and the
+genre detail page (2683-3646).
