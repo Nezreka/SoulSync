@@ -28,6 +28,7 @@ import {
   fetchBeatportDJCharts,
   fetchBeatportGenreHero,
   fetchBeatportGenreTop10Lists,
+  fetchBeatportGenreTop10Releases,
   fetchBeatportFeaturedCharts,
   fetchBeatportHeroTracks,
   fetchBeatportHypePicks,
@@ -229,6 +230,23 @@ export async function loadGenreTop10Lists(
     // 3219 requires BOTH the flag and a non-empty list before it renders.
     hasHypeSection: Boolean(data.has_hype_section) && hype.length > 0,
   };
+}
+
+/* ── The genre top-10 releases (3444-3468) ────────────────────────────────── */
+
+/**
+ * 3458 checks `data.success` alone, like its homepage twin — so an empty list
+ * is not a failure, and createGenreTop10ReleasesHTML then bails at 3475 and
+ * leaves the loading placeholder in place.
+ */
+export async function loadGenreTop10Releases(
+  genreSlug: string,
+  genreId: string | number,
+  signal?: AbortSignal,
+): Promise<BeatportRelease[]> {
+  const data = await fetchBeatportGenreTop10Releases(genreSlug, genreId, signal);
+  if (!data.success) throw new Error(data.error || 'Failed to load Top 10 releases');
+  return data.releases ?? [];
 }
 
 /* ── The hero's click payload (128-138) ───────────────────────────────────── */

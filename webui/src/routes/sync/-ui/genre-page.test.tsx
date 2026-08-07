@@ -235,8 +235,12 @@ describe('the genre hero slider', () => {
   });
 
   it('re-loads when a DIFFERENT genre is shown', async () => {
+    // Scoped to the two HERO urls: a `/api/beatport/genre/` wildcard would also
+    // feed the top-10 releases list, which would then render a second element
+    // with the same title and make getByText ambiguous.
     const calls = stubApi({
-      '/api/beatport/genre/': { success: true, releases: [RELEASE] },
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      '/api/beatport/genre/techno/6/hero': { success: true, releases: [RELEASE] },
     });
     const view = render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
     await waitFor(() => expect(screen.getByText('Nights')).toBeInTheDocument());
@@ -482,6 +486,131 @@ describe('the genre Top 100 button', () => {
         'error',
       ),
     );
+  });
+});
+
+const REL_URL = '/api/beatport/genre/tech-house/11/top-10-releases';
+const TOP_RELEASE = {
+  title: 'Blonde',
+  artist: 'Frank Ocean',
+  label: 'Blonded',
+  url: 'http://r',
+  image_url: 'https://cdn/image_size/95x95/a.jpg',
+};
+
+describe('the genre top-10 releases', () => {
+  function withReleases(extra: Record<string, unknown> = {}) {
+    return stubApi({
+      [HERO_URL]: { success: true, releases: [RELEASE] },
+      [LISTS_URL]: LISTS,
+      [REL_URL]: { success: true, releases: [TOP_RELEASE] },
+      ...extra,
+    });
+  }
+
+  it('renders the cards under a genre-named header and its own id', async () => {
+    withReleases();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-releases-top10-list')).not.toBeNull(),
+    );
+    expect(screen.getByText('💿 Top 10 Tech House Releases')).toBeInTheDocument();
+    expect(screen.getByText('Most popular albums and EPs for Tech House')).toBeInTheDocument();
+    // Must not collide with the homepage list, which shares every class.
+    expect(document.getElementById('beatport-releases-top10-list')).toBeNull();
+  });
+
+  it('reuses the homepage card, upscaled background and all', async () => {
+    withReleases();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-releases-top10-card')).not.toBeNull(),
+    );
+    const card = document.querySelector('.beatport-releases-top10-card') as HTMLElement;
+    expect(card.style.backgroundImage).toContain('image_size/500x500/a.jpg');
+    expect(card.querySelector('img')?.getAttribute('src')).toBe(
+      'https://cdn/image_size/95x95/a.jpg',
+    );
+    // Not cleaned, exactly as on the homepage.
+    expect(document.querySelector('.beatport-releases-top10-card-title')?.textContent).toBe(
+      'Blonde',
+    );
+  });
+
+  it('REGISTERS the download bubble — the one line the vanilla dropped', async () => {
+    withReleases({
+      '/api/beatport/release-metadata': {
+        success: true,
+        tracks: [{ name: 'A', artists: ['X'] }],
+        album: { name: 'Blonde', images: [{ url: 'http://album.jpg' }] },
+        artist: { name: 'Frank Ocean' },
+      },
+    });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-releases-top10-card')).not.toBeNull(),
+    );
+
+    fireEvent.click(document.querySelector('.beatport-releases-top10-card') as Element);
+    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
+    // handleGenreReleaseCardClick is a byte-for-byte copy of the homepage
+    // handler with registerBeatportDownload missing, so a genre release
+    // downloads today with no progress bubble at all. Restored — see the note
+    // on GenreTop10Releases.
+    expect(env.registerDownload).toHaveBeenCalledWith(
+      'Blonde',
+      'http://album.jpg',
+      expect.any(String),
+    );
+  });
+
+  it('binds every card, so an url-less release still gets its toast', async () => {
+    withReleases({ [REL_URL]: { success: true, releases: [{ title: 'x' }] } });
+    const env = makeEnv();
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-releases-top10-card')).not.toBeNull(),
+    );
+    fireEvent.click(document.querySelector('.beatport-releases-top10-card') as Element);
+    await waitFor(() =>
+      expect(env.showToast).toHaveBeenCalledWith('No release URL available', 'error'),
+    );
+  });
+
+  it('keeps its placeholder for an empty list, as the vanilla does', async () => {
+    withReleases({ [REL_URL]: { success: true, releases: [] } });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    // Wait for a SIBLING section to finish first. The placeholder is also the
+    // pre-load state, so asserting it directly passes on the first tick —
+    // before the response has even arrived — and proves nothing.
+    await waitFor(() =>
+      expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull(),
+    );
+
+    // 3475 bails rather than rendering an error OR an empty section.
+    expect(screen.getByText('💿 Loading Top 10 releases...')).toBeInTheDocument();
+    expect(document.querySelector('.beatport-releases-top10-error')).toBeNull();
+    expect(screen.queryByText('💿 Top 10 Tech House Releases')).not.toBeInTheDocument();
+  });
+
+  it('DROPS the genre name from the error header, unlike the success one', async () => {
+    withReleases({ [REL_URL]: { success: false, error: 'releases are down' } });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() => expect(screen.getByText('❌ Error Loading Releases')).toBeInTheDocument());
+    // 3628 says '💿 Top 10 Releases' with no genre, and the subtitle changes.
+    expect(screen.getByText('💿 Top 10 Releases')).toBeInTheDocument();
+    expect(screen.getByText('Error loading releases')).toBeInTheDocument();
+    expect(screen.getByText('releases are down')).toBeInTheDocument();
+    expect(screen.queryByText('💿 Top 10 Tech House Releases')).not.toBeInTheDocument();
+  });
+
+  it('fails independently of the hero and the lists', async () => {
+    withReleases({ [REL_URL]: { success: false, error: 'down' } });
+    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);
+    await waitFor(() => expect(screen.getByText('❌ Error Loading Releases')).toBeInTheDocument());
+    expect(screen.getByText('Nights')).toBeInTheDocument();
+    expect(document.getElementById('genre-beatport-top10-list')).not.toBeNull();
   });
 });
 

@@ -14,6 +14,7 @@ import {
   heroClickRelease,
   loadGenreHero,
   loadGenreTop10Lists,
+  loadGenreTop10Releases,
   loadBeatportTop10Lists,
   loadBeatportTop10Releases,
   isBeatportReleaseClickable,
@@ -199,6 +200,26 @@ describe('the genre top-10 lists loader', () => {
     // 3137 checks `success` alone — an empty list is a list.
     stubJson({ success: true });
     await expect(loadGenreTop10Lists('g', 1, SIGNAL)).resolves.toMatchObject({ beatport: [] });
+  });
+});
+
+describe('the genre top-10 releases loader', () => {
+  it('returns the releases, and an empty list is NOT a failure', async () => {
+    stubJson({ success: true, releases: [{ title: 'a' }] });
+    await expect(loadGenreTop10Releases('g', 1, SIGNAL)).resolves.toEqual([{ title: 'a' }]);
+    // 3458 checks `success` alone; the renderer then bails at 3475 and leaves
+    // the placeholder, which is not the same as an error.
+    stubJson({ success: true });
+    await expect(loadGenreTop10Releases('g', 1, SIGNAL)).resolves.toEqual([]);
+  });
+
+  it("forwards the backend's message, with its own fallback", async () => {
+    stubJson({ success: false, error: 'releases are down' });
+    await expect(loadGenreTop10Releases('g', 1, SIGNAL)).rejects.toThrow('releases are down');
+    stubJson({ success: false });
+    await expect(loadGenreTop10Releases('g', 1, SIGNAL)).rejects.toThrow(
+      'Failed to load Top 10 releases',
+    );
   });
 });
 

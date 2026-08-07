@@ -212,7 +212,7 @@ function Top10ListsError({ message }: { message: string }) {
  * 1796-1830. Note what is NOT here: no cleanTrackText anywhere, where the two
  * track lists clean all three text fields.
  */
-function ReleaseCard({
+export function ReleaseTop10Card({
   release,
   index,
   onClick,
@@ -286,7 +286,7 @@ export function BeatportTop10Releases({ env }: { env: BeatportDownloadEnv }) {
       {releases.length > 0 ? (
         <div className="beatport-releases-top10-tracks">
           {releases.map((release, index) => (
-            <ReleaseCard
+            <ReleaseTop10Card
               key={index}
               release={release}
               index={index}

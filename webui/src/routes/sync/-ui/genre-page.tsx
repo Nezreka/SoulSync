@@ -51,10 +51,11 @@ import {
   isBeatportReleaseClickable,
   loadGenreHero,
   loadGenreTop10Lists,
+  loadGenreTop10Releases,
 } from '../-beatport.loaders';
 import { heroSlideAttributes } from './beatport-cards';
 import { BeatportSlider } from './beatport-slider';
-import { TrackTop10List } from './beatport-top10';
+import { ReleaseTop10Card, TrackTop10List } from './beatport-top10';
 
 export interface GenrePageProps {
   genre: BeatportGenre;
@@ -102,6 +103,7 @@ export function GenrePage({ genre, onBack, env }: GenrePageProps) {
       </div>
 
       <GenreTop10Lists genre={genre} env={env} />
+      <GenreTop10Releases genre={genre} env={env} />
     </div>
   );
 }
@@ -321,5 +323,117 @@ function GenreHeroSlide({ release, genreName }: { release: BeatportRelease; genr
         </div>
       </div>
     </>
+  );
+}
+
+/* ── The genre top-10 releases (3444-3641) ────────────────────────────────── */
+
+/**
+ * The homepage's release list with a genre-flavoured header and its own id.
+ * The cards are identical, so ReleaseTop10Card is reused rather than restated.
+ *
+ * ONE DECLARED FIX, and it is the item the P0 read flagged and left open.
+ * handleGenreReleaseCardClick (3558-3617) is a byte-for-byte copy of
+ * handleBeatportReleaseCardClick with ONE line missing: it never calls
+ * registerBeatportDownload, so a release started from a genre page downloads
+ * with no progress bubble — no indication anything is happening, though the
+ * files do arrive.
+ *
+ * Read as a decision rather than a transcription question, and decided: the
+ * function's own comment says "exact parity with main page" (3556), the copy is
+ * otherwise identical line for line, and the effect of restoring the call is
+ * purely additive — a bubble appears where today there is silence. So this
+ * calls the SAME openBeatportRelease as every other release card.
+ *
+ * Reversing it, if Boulder disagrees, is one argument: a variant that skips the
+ * registerDownload call.
+ */
+function GenreTop10Releases({ genre, env }: { genre: BeatportGenre; env: BeatportDownloadEnv }) {
+  const [releases, setReleases] = useState<BeatportRelease[] | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setReleases(null);
+    setErrorMessage('');
+    void (async () => {
+      try {
+        const loaded = await loadGenreTop10Releases(genre.slug, genre.id, controller.signal);
+        if (controller.signal.aborted) return;
+        setReleases(loaded);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.name === 'AbortError') return;
+        // 3464 swallows, like the top-10 lists and unlike the hero.
+        setErrorMessage(error instanceof Error ? error.message : String(error));
+      }
+    })();
+    return () => controller.abort();
+  }, [genre.slug, genre.id]);
+
+  if (errorMessage) {
+    return (
+      <div className="genre-top10-releases-container" id="genre-top10-releases-container">
+        <div className="beatport-releases-top10-section">
+          <div className="beatport-releases-top10-header">
+            {/* 3628: the error header drops the genre name that the success
+                header carries, and the subtitle changes too. */}
+            <h2 className="beatport-releases-top10-title">💿 Top 10 Releases</h2>
+            <p className="beatport-releases-top10-subtitle">Error loading releases</p>
+          </div>
+          <div className="beatport-releases-top10-container">
+            <div className="beatport-releases-top10-error">
+              <h3>❌ Error Loading Releases</h3>
+              <p>{errorMessage}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3475 bails on an empty list, leaving the placeholder — so loading and
+  // loaded-but-empty look the same, exactly as they do today.
+  if (!releases || releases.length === 0) {
+    return (
+      <div className="genre-top10-releases-container" id="genre-top10-releases-container">
+        <div className="genre-top10-releases-loading-container">
+          <div className="genre-loading-spinner" />
+          <p className="genre-loading-text">💿 Loading Top 10 releases...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="genre-top10-releases-container" id="genre-top10-releases-container">
+      <div className="beatport-releases-top10-section">
+        <div className="beatport-releases-top10-header">
+          <h2 className="beatport-releases-top10-title">💿 Top 10 {genre.name} Releases</h2>
+          <p className="beatport-releases-top10-subtitle">
+            Most popular albums and EPs for {genre.name}
+          </p>
+        </div>
+        <div className="beatport-releases-top10-container">
+          <div className="beatport-releases-top10-list" id="genre-beatport-releases-top10-list">
+            <div className="beatport-releases-top10-tracks">
+              {releases.map((release, index) => (
+                <ReleaseTop10Card
+                  key={index}
+                  release={release}
+                  index={index}
+                  // 3549-3551 binds every card with no url test, like the
+                  // homepage list — so an url-less release reaches the handler
+                  // and gets its toast.
+                  onClick={() => {
+                    void openBeatportRelease(release, env);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

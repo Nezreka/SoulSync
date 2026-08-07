@@ -3942,3 +3942,64 @@ something in P9, P10c-i and P10c-ii; a scoped run cannot see it.
 Full suite 6418 tests. Build clean. Lint clean.
 
 **Beatport remaining:** the genre top-10 releases (3444-3646) — the last region.
+
+### BEATPORT P10c-iii — the genre top-10 releases. THE FILE IS DONE.
+
+Covers 3444-3641, the last region of beatport-ui.js.
+
+The cards are the homepage's, so ReleaseTop10Card became exported and reused
+rather than restated — the genre page changes only the list id and the header.
+
+**Details worth keeping, each tested:**
+- the success header names the genre ('💿 Top 10 <Genre> Releases', 3481) and
+  the ERROR header does NOT ('💿 Top 10 Releases', 3628) — with a different
+  subtitle too;
+- an empty list renders NOTHING and leaves the placeholder (3475), so
+  loading and loaded-but-empty look identical, exactly as they do today;
+- every card is bound with no url test (3549), so an url-less release reaches
+  the handler and gets its toast;
+- this loader SWALLOWS, like the top-10 lists and unlike the hero.
+
+**ONE DECLARED FIX — the item the P0 read flagged and left open.**
+handleGenreReleaseCardClick (3558-3617) is a byte-for-byte copy of
+handleBeatportReleaseCardClick with ONE line missing: it never calls
+registerBeatportDownload. So a release started from a genre page downloads with
+no progress bubble — nothing on screen says anything is happening, though the
+files do arrive.
+
+Decided rather than left open: the function's own comment says "exact parity
+with main page" (3556), the copy is otherwise identical line for line, and
+restoring the call is purely additive. The port uses the SAME
+openBeatportRelease as every other release card. Reversing it is one argument if
+Boulder disagrees.
+
+**Mutation pass: 43 mutants, 43 killed.** Three first-round survivors: a bad
+mutant of mine (a no-op field spread), a stale anchor after formatting, and a
+REAL test defect — 'keeps its placeholder for an empty list' asserted the
+placeholder while it was still the pre-load state, so it passed on the first
+tick before the response arrived. It now waits for a sibling section to settle
+first.
+
+**The export gate caught two more** (loadGenreTop10Releases, ReleaseTop10Card) —
+four consecutive slices now.
+
+Full suite 6428 tests. Build clean. Lint clean.
+
+## BEATPORT IS COMPLETE — all 113 functions accounted for
+
+| region | lines | status |
+|---|---|---|
+| five sliders | 14-1603 | ported / dissolved |
+| three top-10 lists | 1608-1855 | ported |
+| download bridge | 1858-2228 | ported |
+| genre browser modal | 2243-2681 | ported |
+| genre detail page | 2683-3646 | ported |
+| Settings tenant | 3650+ | out of scope (documented boundary) |
+
+Three live vanilla bugs were found by reading and fixed in the vanilla itself
+(three frozen sliders, the genre Top 100 downloading the wrong genre); a fourth
+(the missing genre download bubble) is fixed in the port and declared above.
+
+**Sync-port remaining after Beatport:** the auto-sync schedule board, the 15-tab
+page shell + sidebar, then the flip, the vanilla severs and the full
+original-vs-port review.

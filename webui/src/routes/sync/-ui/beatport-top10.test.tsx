@@ -17,7 +17,12 @@ import type { BeatportDownloadEnv } from '../-beatport.downloads';
 
 import { resetBeatportModalLatch } from '../-beatport.downloads';
 import { resetBeatportSectionCache } from '../-beatport.use-section';
-import { BeatportTop10Lists, BeatportTop10Releases, TrackTop10List } from './beatport-top10';
+import {
+  BeatportTop10Lists,
+  BeatportTop10Releases,
+  ReleaseTop10Card,
+  TrackTop10List,
+} from './beatport-top10';
 
 function makeEnv(): BeatportDownloadEnv {
   return {
@@ -380,6 +385,26 @@ describe('the top-10 releases list', () => {
       expect(screen.getByText('💿 Loading Top 10 Releases...')).toBeInTheDocument(),
     );
     expect(document.querySelector('.beatport-releases-top10-error')).toBeNull();
+  });
+});
+
+describe('ReleaseTop10Card on its own', () => {
+  it('is the same card the genre page reuses — rank, art and click', () => {
+    const onClick = vi.fn();
+    render(
+      <ReleaseTop10Card
+        release={{ title: 'Blonde', artist: 'A', label: 'L', image_url: 'http://a.jpg' }}
+        index={3}
+        onClick={onClick}
+      />,
+    );
+    // The position is the fallback; index 3 means the fourth card.
+    expect(document.querySelector('.beatport-releases-top10-card-rank')?.textContent).toBe('4');
+    expect(document.querySelector('.beatport-releases-top10-card-title')?.textContent).toBe(
+      'Blonde',
+    );
+    fireEvent.click(document.querySelector('.beatport-releases-top10-card') as Element);
+    expect(onClick).toHaveBeenCalled();
   });
 });
 
