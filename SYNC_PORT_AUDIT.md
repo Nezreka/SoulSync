@@ -4701,3 +4701,70 @@ what they are agreeing to. Five mutants — reading the hourly map alone,
 deleting only the first schedule found, dropping the weekly map from the
 accessor, keeping the absent one (which would DELETE undefined), and reverting
 the confirm copy — all killed.
+
+
+## SHELL WAVE — P0 READ (IN PROGRESS)
+
+The 15-tab page shell and sidebar: the last structural piece before the flip.
+**This read is NOT finished** — recorded here so the established facts survive,
+with what remains explicitly listed. No building starts until it is complete.
+
+### Established so far
+
+**Extent.** The markup is index.html 2226-3318 (1,093 lines), closing cleanly
+at the `#sync-page` div. The controller is `initializeSyncPage` in
+sync-services.js 3694-4036 (343 lines) — the tab click handler plus whatever
+follows it; sync-services.js is 11,482 lines total, so the shell is a small
+region of a very large file and the boundary matters.
+
+**Fifteen tabs, and every one resolves.** `server`, `spotify`,
+`spotify-public`, `itunes-link`, `tidal`, `qobuz`, `deezer`, `deezer-link`,
+`youtube`, `beatport`, `listenbrainz-sync`, `lastfm-sync`,
+`soulsync-discovery-sync`, `import-file`, `mirrored`. The handler does an
+UNGUARDED `document.getElementById(`${tabId}-tab-content`).classList.add(...)`
+(3714), so a tab whose pane is missing would throw mid-handler and leave the
+buttons in a half-updated state — active class moved, no content shown. I
+checked all 15 against the panes: 15 tabs, 15 panes, no orphans either way.
+Not a bug. (My first pass said `server` had no pane; the regex required
+`class="sync-tab-content"` exactly and that one pane carries
+`"sync-tab-content active"` because it is the default. Verified before
+reporting, which is the point.)
+
+**`listenbrainz-sync` is named to avoid a collision.** The comment at 3760-3763
+says so outright: the id is not `listenbrainz` because
+`${tabId}-tab-content` would then collide with the DISCOVER page's own
+`#listenbrainz-tab-content`. Two pages, one id namespace. Worth carrying into
+the port's naming even though React scopes its own DOM.
+
+**Dead code in the sidebar branch (3707-3712).** `const isMobile =
+window.innerWidth <= 1300;` is computed and never read. The comment right
+below it explains why — the sidebar is now always hidden and shown only while
+a sync is active — so the mobile check is vestigial from an earlier layout.
+Do not port it.
+
+**Four header buttons**, all inline onclick into vanilla globals: Auto-Sync
+(`openAutoSyncScheduleModal` — the modal this wave just ported, so this is the
+entry point E-i left open), Library Match (`openManualLibraryMatchTool`), Sync
+History (`openSyncHistoryModal`), Download Origins
+(`openDownloadOriginsModal('playlist')`). Three of the four are surfaces this
+port has NOT touched; each needs a decision — port, or keep vanilla behind a
+seam with a vanilla-seams.test.ts row.
+
+**Per-tab lazy loading, with a one-shot flag each.** `deezerArlPlaylistsLoaded`,
+`mirroredPlaylistsLoaded`, `window._serverPlaylistsLoaded`,
+`window._listenbrainzSyncTabLoaded`, `window._lastfmSyncTabLoaded`,
+`window._soulsyncDiscoverySyncTabLoaded`, plus Beatport's
+`ensureBeatportContentLoaded` / `cleanupBeatportContent` pair — the only tab
+with a teardown on leaving. Note the flags are a mix of script-scoped `let`s
+and `window` properties; which is which decides whether each survives the flip.
+
+### Still to read before this P0 is done
+
+1. sync-services.js 3800-4036 — the rest of `initializeSyncPage`.
+2. The sidebar markup (index.html 3301-3318) and whatever drives it: the
+   comment says "shown only when sync is active", so something outside this
+   handler sets it.
+3. The right-panel / server-playlists column, and `loadServerPlaylists`.
+4. The four header-button targets, enough to decide port-vs-seam on each.
+5. The live-bug pass — headline outcome #3 of this guide's own standard, and
+   the one I skipped on the auto-sync P0 and had to be told about.
