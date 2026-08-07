@@ -1371,6 +1371,7 @@ async function saveAutoSyncPlaylistScheduleSilent(playlistId, hours) {
     // exists for the playlist.
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) throw new Error('playlist not found');
+    await dropOpposingAutoSyncSchedule(playlistId, 'hourly');
     const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
     const payload = {
         name: `Auto-Sync: ${playlist.name}`,
@@ -2048,6 +2049,27 @@ function autoSyncDragEnd() {
     _autoSyncIsDragging = false;
 }
 
+// Enforce one-schedule-per-playlist. The engine can technically run an hourly
+// and a weekly automation for the same playlist side by side, but the UI
+// assumes one schedule per playlist and the playlist would then refresh on
+// BOTH cadences. Every save path drops the opposing schedule first.
+//
+// This lives in one place deliberately: it used to be copy-pasted into the two
+// interactive save paths, and the third — the bulk path — never got a copy, so
+// bulk-scheduling a source silently left weekly schedules running alongside the
+// new hourly ones. Delete-then-create is safe; the worst case leaves the
+// playlist unscheduled, which is recoverable from this modal.
+async function dropOpposingAutoSyncSchedule(playlistId, keep) {
+    const opposing = keep === 'hourly'
+        ? _autoSyncScheduleState.weeklySchedules?.[playlistId]
+        : _autoSyncScheduleState.playlistSchedules?.[playlistId];
+    if (!opposing) return;
+    try {
+        await fetch(`/api/automations/${opposing.automation_id}`, { method: 'DELETE' });
+    } catch (_) { /* best-effort cleanup */ }
+}
+
+
 async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
     const playlist = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
     if (!playlist) return;
@@ -2056,15 +2078,7 @@ async function saveAutoSyncPlaylistSchedule(playlistId, hours) {
         return;
     }
 
-    // Enforce one-schedule-per-playlist: if a weekly schedule exists,
-    // drop it before installing the hourly one. Mirrors the same
-    // mutual-exclusion the weekly save path enforces in reverse.
-    const existingWeekly = _autoSyncScheduleState.weeklySchedules?.[playlistId];
-    if (existingWeekly) {
-        try {
-            await fetch(`/api/automations/${existingWeekly.automation_id}`, { method: 'DELETE' });
-        } catch (_) { /* best-effort cleanup */ }
-    }
+    await dropOpposingAutoSyncSchedule(playlistId, 'hourly');
 
     const existing = _autoSyncScheduleState.playlistSchedules[playlistId];
     const payload = {
@@ -2248,19 +2262,7 @@ async function saveAutoSyncWeeklySchedule(playlistId, { time, days, tz }) {
         return;
     }
 
-    // Enforce one-schedule-per-playlist: if the playlist currently has
-    // an hourly schedule, drop it before installing the weekly one. The
-    // engine can technically run both side-by-side as two separate
-    // automations, but the UI assumes one schedule per playlist and
-    // showing two cards under the same playlist row would surprise
-    // users. Delete-then-create is safe — the worst case (POST fails)
-    // leaves the playlist unscheduled, which is recoverable from the UI.
-    const existingHourly = _autoSyncScheduleState.playlistSchedules?.[playlistId];
-    if (existingHourly) {
-        try {
-            await fetch(`/api/automations/${existingHourly.automation_id}`, { method: 'DELETE' });
-        } catch (_) { /* best-effort cleanup */ }
-    }
+    await dropOpposingAutoSyncSchedule(playlistId, 'weekly');
 
     const existingWeekly = _autoSyncScheduleState.weeklySchedules?.[playlistId];
     const payload = {

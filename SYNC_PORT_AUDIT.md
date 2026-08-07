@@ -4420,3 +4420,41 @@ Full suite 6613 tests. Build clean. Lint clean.
 
 **Next:** slice D-ii, the run-history panel (1200-1253, 1394-1882) — filter
 tabs, load-more, and the 27-function entry renderer.
+
+### LIVE BUG FIX — bulk scheduling left weekly schedules running
+
+The P0 addendum's live bug #1, fixed in the vanilla rather than only in the
+port, because it is live for users today and the flip is several slices away.
+
+**The defect.** Auto-Sync can install two kinds of automation for one playlist,
+an hourly `schedule` and a `weekly_time`, and the engine runs BOTH. The two
+interactive save paths each delete the opposing one first, with comments saying
+so. `saveAutoSyncPlaylistScheduleSilent` (1368-1392) — the path the Bulk menu
+drives — never did. Bulk-scheduling a source containing a weekly-scheduled
+playlist left both automations live, so that playlist refreshed on two cadences
+at once.
+
+**Root cause, and why the fix is not a third copy.** The invariant was enforced
+by copy-paste at each call site, and the third site simply never got a copy.
+That is the bug class, not the instance. The enforcement is now one helper,
+`dropOpposingAutoSyncSchedule(playlistId, keep)`, called by all three paths.
+
+**The regression guard is source-level, and mutation-verified.** auto-sync.js
+is a browser script with no module boundary, so `vanilla-autosync-invariants.test.ts`
+asserts over its source the way vanilla-crossfile.test.ts already does: every
+save path calls the helper, calls it BEFORE writing the automation (a delete
+issued after the POST could race the create), the helper reads the OPPOSITE
+map, and the enforcement exists in exactly one place. Three mutants were run
+against it — re-introducing the original bug, inverting the helper's two maps,
+and moving the drop after the write — and all three were killed. Delete this
+test file with auto-sync.js at the flip.
+
+**STILL OPEN — live bug #2, deliberately not fixed here.**
+`bulkUnscheduleAutoSyncSource` (1339) filters on `playlistSchedules` alone, so
+"Unschedule all" cannot see weekly schedules: it undercounts in its own confirm
+dialog, says "No scheduled X playlists to unschedule" when weekly ones exist,
+and leaves them running. Same root cause — the bulk paths predate weekly
+schedules and never learned about them. It is left open because fixing it
+changes what a differently-named button DOES (should "Unschedule all" remove
+weekly schedules too?), which is a product call rather than a defect repair.
+My recommendation is yes.
