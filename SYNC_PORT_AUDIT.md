@@ -4758,13 +4758,69 @@ seam with a vanilla-seams.test.ts row.
 with a teardown on leaving. Note the flags are a mix of script-scoped `let`s
 and `window` properties; which is which decides whether each survives the flip.
 
+### LIVE BUG — the Start Sync button cancels itself on every second visit
+
+Traced end to end. This is the page's PRIMARY action and it silently does
+nothing for half the users who reach it.
+
+**The chain.**
+
+1. `initializeSyncPage()` is called TWICE from init.js — once at boot (2885)
+   and once from `loadPageData`'s `case 'sync'` (3290).
+2. `loadPageData` runs on every navigation. `activatePage` (init.js 575) only
+   short-circuits when you are ALREADY on the page and it is visible, so
+   leaving /sync and coming back re-runs the whole initializer.
+3. Of the 25 `addEventListener` calls in that initializer, only FOUR are
+   guarded by a matching `removeEventListener` first — the Spotify, Tidal,
+   Deezer-ARL and Qobuz refresh buttons (3814-3838). The other 21 accumulate a
+   fresh listener on every visit.
+4. One of the 21 is `startSyncBtn.addEventListener('click', startSequentialSync)`
+   (3971).
+5. `startSequentialSync` (downloads.js 4060) is a TOGGLE: if the manager is
+   already running it CANCELS and returns (4067-4070).
+6. `SequentialSyncManager.start()` sets `this.isRunning = true` SYNCHRONOUSLY
+   (core.js 1246), before any async work.
+
+**So:** visit /sync, navigate away, come back → the button has 2 listeners →
+one click runs `startSequentialSync` twice in a row → the first call starts the
+sync and synchronously sets `isRunning`, the second sees it and cancels. The
+sync starts and dies within the same click. Visit an ODD number of times and it
+works; an EVEN number and the button appears dead.
+
+**The same accumulation hits everything else unguarded**, with milder effects:
+the YouTube / Spotify-Link / iTunes-Link / Deezer-Link parse buttons fire N
+duplicate parses, the Mirrored and Beatport-clear buttons fire N times, the
+Beatport Top-100 buttons open N modals (the `modalOpening` latch the Beatport
+wave ported would swallow the extras — it was written for a different reason
+and happens to cover this), and the 15 TAB BUTTONS themselves re-run the whole
+tab handler N times per click.
+
+**Why the port fixes it structurally.** React binds via JSX props on mounted
+elements; there is no accumulate-on-init path to get wrong. The bug cannot be
+carried across unless someone reintroduces manual `addEventListener` in an
+effect without a cleanup — which is what the effect-cleanup discipline is for.
+
+**Whether to fix the vanilla too is Boulder's call.** The one-line version is
+to give the 21 the same `removeEventListener`-first treatment the other four
+already have; the arrow-function handlers need their references hoisted first,
+so it is not purely mechanical. It is live today and the flip is a wave away.
+
+### The sidebar — read, and smaller than it looks
+
+`.sync-sidebar` (index.html 3301-3315) is just two sections: Sync Actions
+(`#selection-info` + the `#start-sync-btn` above) and Sync Progress (a bar,
+a text line and a readonly `#sync-log-area` textarea). It is hidden by default
+and revealed by `showSyncSidebar()` (downloads.js 4041-4048), which the sync
+start calls — and which itself refuses below 1300px. The tab handler re-hides
+it on every tab switch (3707-3712), where the `isMobile` const is computed and
+never used.
+
 ### Still to read before this P0 is done
 
-1. sync-services.js 3800-4036 — the rest of `initializeSyncPage`.
-2. The sidebar markup (index.html 3301-3318) and whatever drives it: the
-   comment says "shown only when sync is active", so something outside this
-   handler sets it.
-3. The right-panel / server-playlists column, and `loadServerPlaylists`.
-4. The four header-button targets, enough to decide port-vs-seam on each.
-5. The live-bug pass — headline outcome #3 of this guide's own standard, and
-   the one I skipped on the auto-sync P0 and had to be told about.
+1. The right-panel / server-playlists column, and `loadServerPlaylists`.
+2. The four header-button targets (`openManualLibraryMatchTool`,
+   `openSyncHistoryModal`, `openDownloadOriginsModal`), enough to decide
+   port-vs-seam on each. `openAutoSyncScheduleModal` is settled — this wave
+   ported it, and the shell supplies its entry point.
+3. `_initImportFileTab` and the Beatport nested-tab wiring, both called from
+   the initializer and both already ported — confirm nothing else remains.
