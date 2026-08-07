@@ -49,8 +49,13 @@ export interface MirroredRow {
   _personalized?: boolean;
   /** The board's organize-by-playlist preference (1921). */
   organize_by_playlist?: boolean;
-  /** Live pipeline status, used to disable 'Run now' (1954). */
-  pipeline_state?: { status?: string } | null;
+  /**
+   * Live pipeline status — used to disable 'Run now' (1954) and to drive the
+   * whole monitor panel (1104-1114). Declared as the full PipelineState (see
+   * below) rather than just its status, because the monitor reads phase,
+   * progress, timestamps and logs off the same object.
+   */
+  pipeline_state?: PipelineState | null;
 }
 
 export interface PersonalizedKind {
@@ -811,4 +816,244 @@ export function autoSyncPlaylistHealth(
     return { level: 'warning', tooltip: `${errored.length} of last ${recent.length} runs failed` };
   }
   return { level: 'ok', tooltip: '' };
+}
+
+/* ── The live pipeline monitor (1104-1129) ──────────────────────────────── */
+
+export interface PipelineState {
+  status?: string;
+  phase?: string;
+  progress?: number | string;
+  started_at?: number;
+  finished_at?: number;
+  log?: { message?: string }[];
+}
+
+export interface AutoSyncPipelineItem {
+  playlist: MirroredRow;
+  state: PipelineState;
+}
+
+/**
+ * 1104-1114. Every playlist with a non-idle pipeline state, running ones
+ * first, then most-recently-touched. `finished_at || started_at || 0` is kept
+ * verbatim: a running row has no finish time, so it sorts on its start.
+ */
+export function getAutoSyncPipelinePlaylists(playlists: MirroredRow[]): AutoSyncPipelineItem[] {
+  return playlists
+    .map((p) => ({ playlist: p, state: (p.pipeline_state || null) as PipelineState | null }))
+    .filter(
+      (item): item is AutoSyncPipelineItem =>
+        !!item.state && !!item.state.status && item.state.status !== 'idle',
+    )
+    .sort((a, b) => {
+      const aRunning = a.state.status === 'running' ? 1 : 0;
+      const bRunning = b.state.status === 'running' ? 1 : 0;
+      if (aRunning !== bRunning) return bRunning - aRunning;
+      return (
+        (b.state.finished_at || b.state.started_at || 0) -
+        (a.state.finished_at || a.state.started_at || 0)
+      );
+    });
+}
+
+/** 1116-1122. */
+export function autoSyncPipelineStatusLabel(status: string | undefined): string {
+  if (status === 'running') return 'Running';
+  if (status === 'finished') return 'Completed';
+  if (status === 'skipped') return 'Skipped';
+  if (status === 'error') return 'Needs attention';
+  return 'Idle';
+}
+
+/** 1124-1129. Note that 'skipped' shares the error class but not the label. */
+export function autoSyncPipelineStatusClass(status: string | undefined): string {
+  if (status === 'running') return 'running';
+  if (status === 'finished') return 'finished';
+  if (status === 'error' || status === 'skipped') return 'error';
+  return 'idle';
+}
+
+export interface AutoSyncMonitorSummary {
+  visible: AutoSyncPipelineItem[];
+  runningCount: number;
+  title: string;
+  detail: string;
+}
+
+/**
+ * 1131-1145. ALL running rows, then at most 2 finished ones, then the whole
+ * lot capped at 4. The two caps compose: with five pipelines running you see
+ * four running rows and no recent ones, which is the intent — live work
+ * outranks history.
+ */
+export function autoSyncMonitorSummary(playlists: MirroredRow[]): AutoSyncMonitorSummary {
+  const items = getAutoSyncPipelinePlaylists(playlists);
+  const running = items.filter((i) => i.state.status === 'running');
+  const recent = items.filter((i) => i.state.status !== 'running').slice(0, 2);
+  return {
+    visible: [...running, ...recent].slice(0, 4),
+    runningCount: running.length,
+    title: running.length
+      ? `${running.length} pipeline${running.length === 1 ? '' : 's'} running`
+      : 'No pipelines running',
+    detail: running.length
+      ? 'Live status refreshes while this modal is open.'
+      : 'Use Run now on a scheduled playlist when you want the pipeline immediately.',
+  };
+}
+
+/** 1163-1164. Clamped to 0-100 because the backend has been known to overshoot. */
+export function autoSyncPipelineProgress(progress: unknown): number {
+  return Math.max(0, Math.min(100, parseInt(String(progress), 10) || 0));
+}
+
+/** 1165. The LAST log line, not the first — the monitor shows the newest. */
+export function autoSyncPipelineLatestLog(state: PipelineState | null | undefined): string {
+  const log = state?.log;
+  return Array.isArray(log) && log.length ? log[log.length - 1]?.message || '' : '';
+}
+
+/* ── The read-only Automations panel (1185-1198, 1883-1918) ─────────────── */
+
+/**
+ * stats-automations.js 4144-4152. 'deep_scan_library' → 'Deep Scan Library'.
+ * The video/music prefix is stripped first.
+ */
+export function autoSyncHumanizeType(type: string | null | undefined): string {
+  return (
+    String(type || '')
+      .replace(/^(video|music)_/, '')
+      .split('_')
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ') || 'Unknown'
+  );
+}
+
+const TRIGGER_LABELS: Record<string, string> = {
+  app_started: 'App Started',
+  track_downloaded: 'Track Downloaded',
+  batch_complete: 'Batch Complete',
+  watchlist_new_release: 'New Release Found',
+  playlist_synced: 'Playlist Synced',
+  playlist_changed: 'Playlist Changed',
+  discovery_completed: 'Discovery Complete',
+  wishlist_processing_completed: 'Wishlist Processed',
+  watchlist_scan_completed: 'Watchlist Scan Done',
+  database_update_completed: 'Database Updated',
+  download_failed: 'Download Failed',
+  download_quarantined: 'File Quarantined',
+  wishlist_item_added: 'Wishlist Item Added',
+  watchlist_artist_added: 'Artist Watched',
+  watchlist_artist_removed: 'Artist Unwatched',
+  import_completed: 'Import Complete',
+  mirrored_playlist_created: 'Playlist Mirrored',
+  quality_scan_completed: 'Quality Scan Done',
+  duplicate_scan_completed: 'Duplicate Scan Done',
+  library_scan_completed: 'Library Scan Done',
+  signal_received: 'Signal Received',
+};
+
+/**
+ * stats-automations.js 4154-4186, reached from auto-sync.js 1890 as an
+ * UNGUARDED cross-file global. That call is safe today only because
+ * index.html 8398-8399 loads stats-automations.js immediately before
+ * auto-sync.js — a load-order dependency, not a contract.
+ *
+ * This port does not inherit that dependency. It reimplements the formatter
+ * and delegates to the global ONLY for the one branch it cannot reproduce:
+ * `_findBlockDef(type)?.label`, which reads block definitions
+ * stats-automations.js fetches at runtime. So an exotic trigger type still
+ * gets its configured label while that file is loaded, and degrades to the
+ * humanized identifier rather than throwing if it ever is not.
+ */
+export function autoSyncFormatTrigger(
+  type: string | undefined,
+  config: Record<string, unknown> | undefined,
+  formatViaGlobal: ((type: string, config: unknown) => string) | undefined = typeof window !==
+  'undefined'
+    ? window._autoFormatTrigger
+    : undefined,
+): string {
+  if (type === 'schedule' && config) {
+    return `Every ${config.interval || 1} ${config.unit || 'hours'}`;
+  }
+  if (type === 'daily_time' && config) return `Daily at ${config.time || '00:00'}`;
+  if (type === 'weekly_time' && config) {
+    const days = ((config.days as string[]) || [])
+      .map((d) => d.charAt(0).toUpperCase() + d.slice(1))
+      .join(', ');
+    return `${days || 'Every day'} at ${config.time || '00:00'}`;
+  }
+  if (type === 'signal_received' && config) {
+    return `Signal: ${config.signal_name || 'unknown'}`;
+  }
+
+  let label = TRIGGER_LABELS[type as string];
+  if (!label && formatViaGlobal) {
+    // Only worth asking when the type is unmapped — a mapped label always
+    // wins, exactly as the comment at 4179 says.
+    const viaGlobal = formatViaGlobal(type as string, config);
+    if (viaGlobal) return viaGlobal;
+  }
+  label = label || autoSyncHumanizeType(type);
+
+  const conditions = config?.conditions as { field?: string; operator?: string; value?: unknown }[];
+  if (conditions?.length) {
+    const first = conditions[0];
+    label += ` (${first.field} ${first.operator} "${String(first.value)}"${
+      conditions.length > 1 ? ` +${conditions.length - 1} more` : ''
+    })`;
+  }
+  return label;
+}
+
+export interface AutoSyncAutomationCard {
+  name: string;
+  trigger: string;
+  target: string;
+  sourceLabel: string;
+  next: string;
+  enabled: boolean;
+}
+
+/**
+ * 1883-1893. The read-only card's fields. `cfg.all` is checked against BOTH
+ * `true` and the string `'true'` because the Automations page stores it either
+ * way depending on which editor wrote it.
+ */
+export function autoSyncAutomationCardFields(
+  auto: AutomationRow,
+  playlists: MirroredRow[],
+  now: number,
+): AutoSyncAutomationCard {
+  const cfg = (auto.action_config || {}) as Record<string, unknown>;
+  const playlistId = autoSyncPlaylistIdFromAutomation(auto);
+  const playlist = playlistId
+    ? playlists.find((p) => parseInt(String(p.id), 10) === playlistId)
+    : null;
+  const isAll = cfg.all === true || cfg.all === 'true';
+  return {
+    name: auto.name || 'Playlist Pipeline',
+    trigger: autoSyncFormatTrigger(
+      auto.trigger_type,
+      (auto.trigger_config || {}) as Record<string, unknown>,
+    ),
+    target: isAll
+      ? 'All refreshable mirrored playlists'
+      : playlist
+        ? playlist.name || ''
+        : playlistId
+          ? `Playlist #${playlistId}`
+          : 'Custom pipeline target',
+    sourceLabel: playlist
+      ? autoSyncSourceLabel(playlist.source)
+      : isAll
+        ? 'All sources'
+        : 'Pipeline',
+    // 1892: 'not scheduled', NOT the empty string the card helper returns.
+    next: auto.next_run ? autoSyncNextRunLabel(auto.next_run, now) : 'not scheduled',
+    enabled: auto.enabled !== false && auto.enabled !== 0,
+  };
 }

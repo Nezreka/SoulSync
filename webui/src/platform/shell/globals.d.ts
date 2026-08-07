@@ -307,6 +307,12 @@ declare global {
      * guard the vanilla uses (auto-sync.js 1927-1929), so an absent global
      * simply yields no select. `compact` is the third argument.
      */
+    /**
+     * stats-automations.js 4154-4186 — the trigger-label formatter. The port
+     * reimplements it; this is consulted only for the block-definition branch
+     * it cannot reproduce. See autoSyncFormatTrigger.
+     */
+    _autoFormatTrigger?: (type: string, config: unknown) => string;
     playlistQualityProfileSelectHtml?: (
       playlistId: string | number | undefined,
       source: string | undefined,

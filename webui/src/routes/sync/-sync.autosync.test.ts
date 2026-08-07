@@ -20,12 +20,22 @@ import { describe, expect, it } from 'vitest';
 import { extractFunction } from '../../test/vanilla-extract';
 import {
   autoSyncBuildLanes,
+  autoSyncAutomationCardFields,
+  autoSyncFormatTrigger,
+  autoSyncHumanizeType,
+  autoSyncMonitorSummary,
+  autoSyncPipelineLatestLog,
+  autoSyncPipelineProgress,
+  autoSyncPipelineStatusClass,
+  autoSyncPipelineStatusLabel,
+  type PipelineState,
   autoSyncGroupBySource,
   autoSyncMatchesFilter,
   autoSyncNextRunLabel,
   autoSyncParseUTC,
   autoSyncPlaylistHealth,
   buildAutoSyncScheduleState,
+  getAutoSyncPipelinePlaylists,
   AUTO_SYNC_BUCKETS,
   AUTO_SYNC_WEEKDAYS,
   AUTO_SYNC_WEEKDAY_LABELS,
@@ -1049,5 +1059,183 @@ describe('the scheduled-card helpers (1978-2011)', () => {
         'warning',
       );
     });
+  });
+});
+
+describe('getAutoSyncPipelinePlaylists (1104-1114)', () => {
+  const p = (id: number, state: PipelineState | null) => ({
+    id,
+    name: `P${id}`,
+    pipeline_state: state,
+  });
+
+  it('orders RUNNING first regardless of timestamps', () => {
+    // Worth asserting here rather than only through the monitor panel: the
+    // panel re-partitions running-first itself, so deleting this rule is
+    // invisible from there. Any other consumer would silently lose it.
+    const out = getAutoSyncPipelinePlaylists([
+      p(1, { status: 'finished', finished_at: 9000 }),
+      p(2, { status: 'running', started_at: 1 }),
+    ]);
+    expect(out.map((i) => i.playlist.id)).toEqual([2, 1]);
+  });
+
+  it('breaks ties on finished_at, falling back to started_at', () => {
+    const out = getAutoSyncPipelinePlaylists([
+      p(1, { status: 'error', started_at: 100 }),
+      p(2, { status: 'finished', finished_at: 300 }),
+      p(3, { status: 'skipped', started_at: 200 }),
+    ]);
+    expect(out.map((i) => i.playlist.id)).toEqual([2, 3, 1]);
+  });
+
+  it('drops idle and state-less rows', () => {
+    const out = getAutoSyncPipelinePlaylists([
+      p(1, { status: 'idle' }),
+      p(2, null),
+      p(3, {}),
+      p(4, { status: 'running' }),
+    ]);
+    expect(out.map((i) => i.playlist.id)).toEqual([4]);
+  });
+});
+
+describe('autoSyncFormatTrigger defaults (stats-automations.js 4155)', () => {
+  it('defaults a schedule trigger to every 1 hours', () => {
+    expect(autoSyncFormatTrigger('schedule', {}, undefined)).toBe('Every 1 hours');
+  });
+
+  it('keeps a supplied interval and unit', () => {
+    expect(autoSyncFormatTrigger('schedule', { interval: 30, unit: 'minutes' }, undefined)).toBe(
+      'Every 30 minutes',
+    );
+  });
+
+  it('defaults a daily or weekly time to midnight', () => {
+    expect(autoSyncFormatTrigger('daily_time', {}, undefined)).toBe('Daily at 00:00');
+    expect(autoSyncFormatTrigger('weekly_time', { days: ['mon'] }, undefined)).toBe('Mon at 00:00');
+  });
+
+  it('names an unknown signal', () => {
+    expect(autoSyncFormatTrigger('signal_received', {}, undefined)).toBe('Signal: unknown');
+  });
+
+  it('needs a config to take the typed branches at all', () => {
+    // Every typed branch is guarded on `config` being truthy, so a missing
+    // config falls through to the label map / humanizer.
+    expect(autoSyncFormatTrigger('schedule', undefined, undefined)).toBe('Schedule');
+  });
+});
+
+describe('the monitor pure core (1116-1129, 1163-1165)', () => {
+  it('maps every pipeline status to its label', () => {
+    expect(autoSyncPipelineStatusLabel('running')).toBe('Running');
+    expect(autoSyncPipelineStatusLabel('finished')).toBe('Completed');
+    expect(autoSyncPipelineStatusLabel('skipped')).toBe('Skipped');
+    expect(autoSyncPipelineStatusLabel('error')).toBe('Needs attention');
+    expect(autoSyncPipelineStatusLabel('anything else')).toBe('Idle');
+    expect(autoSyncPipelineStatusLabel(undefined)).toBe('Idle');
+  });
+
+  it('maps status to class, with skipped SHARING the error class', () => {
+    // The label distinguishes them; the styling does not. Both are true at
+    // once and neither is a typo.
+    expect(autoSyncPipelineStatusClass('skipped')).toBe('error');
+    expect(autoSyncPipelineStatusClass('error')).toBe('error');
+    expect(autoSyncPipelineStatusClass('running')).toBe('running');
+    expect(autoSyncPipelineStatusClass('finished')).toBe('finished');
+    expect(autoSyncPipelineStatusClass(undefined)).toBe('idle');
+  });
+
+  it('clamps progress into 0-100 and treats junk as zero', () => {
+    expect(autoSyncPipelineProgress(42)).toBe(42);
+    expect(autoSyncPipelineProgress('42')).toBe(42);
+    expect(autoSyncPipelineProgress(500)).toBe(100);
+    expect(autoSyncPipelineProgress(-1)).toBe(0);
+    expect(autoSyncPipelineProgress('nonsense')).toBe(0);
+    expect(autoSyncPipelineProgress(undefined)).toBe(0);
+  });
+
+  it('reads the NEWEST log line, and survives every empty shape', () => {
+    expect(autoSyncPipelineLatestLog({ log: [{ message: 'a' }, { message: 'b' }] })).toBe('b');
+    expect(autoSyncPipelineLatestLog({ log: [] })).toBe('');
+    expect(autoSyncPipelineLatestLog({})).toBe('');
+    expect(autoSyncPipelineLatestLog(null)).toBe('');
+    expect(autoSyncPipelineLatestLog({ log: [{}] })).toBe('');
+  });
+
+  it('summarises the visible set, the count and both copy lines', () => {
+    const idle = autoSyncMonitorSummary([]);
+    expect(idle).toEqual({
+      visible: [],
+      runningCount: 0,
+      title: 'No pipelines running',
+      detail: 'Use Run now on a scheduled playlist when you want the pipeline immediately.',
+    });
+
+    const busy = autoSyncMonitorSummary([
+      { id: 1, pipeline_state: { status: 'running' } },
+      { id: 2, pipeline_state: { status: 'finished', finished_at: 5 } },
+    ]);
+    expect(busy.runningCount).toBe(1);
+    expect(busy.title).toBe('1 pipeline running');
+    expect(busy.detail).toBe('Live status refreshes while this modal is open.');
+    expect(busy.visible.map((v) => v.playlist.id)).toEqual([1, 2]);
+  });
+});
+
+describe('autoSyncHumanizeType (stats-automations.js 4144-4152)', () => {
+  it('turns snake_case into words', () => {
+    expect(autoSyncHumanizeType('deep_scan_library')).toBe('Deep Scan Library');
+  });
+
+  it('strips a leading video_ or music_ prefix, but only leading', () => {
+    expect(autoSyncHumanizeType('video_deep_scan')).toBe('Deep Scan');
+    expect(autoSyncHumanizeType('music_import')).toBe('Import');
+    expect(autoSyncHumanizeType('scan_video_library')).toBe('Scan Video Library');
+  });
+
+  it("never lets an empty type through as ''", () => {
+    expect(autoSyncHumanizeType('')).toBe('Unknown');
+    expect(autoSyncHumanizeType(null)).toBe('Unknown');
+    expect(autoSyncHumanizeType('__')).toBe('Unknown');
+  });
+});
+
+describe('autoSyncAutomationCardFields (1883-1893)', () => {
+  const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const base = {
+    id: 1,
+    name: 'Nightly',
+    action_type: 'playlist_pipeline',
+    trigger_type: 'schedule',
+    trigger_config: { interval: 6, unit: 'hours' },
+    action_config: { playlist_id: 5 },
+  };
+
+  it('resolves the playlist name and its source label', () => {
+    expect(
+      autoSyncAutomationCardFields(base, [{ id: 5, name: 'Late Night', source: 'tidal' }], NOW),
+    ).toEqual({
+      name: 'Nightly',
+      trigger: 'Every 6 hours',
+      target: 'Late Night',
+      sourceLabel: 'Tidal',
+      next: 'not scheduled',
+      enabled: true,
+    });
+  });
+
+  it('describes an all-playlists pipeline without a playlist lookup', () => {
+    const f = autoSyncAutomationCardFields({ ...base, action_config: { all: 'true' } }, [], NOW);
+    expect(f.target).toBe('All refreshable mirrored playlists');
+    expect(f.sourceLabel).toBe('All sources');
+  });
+
+  it('falls back through id, then to a generic target', () => {
+    expect(autoSyncAutomationCardFields(base, [], NOW).target).toBe('Playlist #5');
+    expect(autoSyncAutomationCardFields({ ...base, action_config: {} }, [], NOW).target).toBe(
+      'Custom pipeline target',
+    );
   });
 });

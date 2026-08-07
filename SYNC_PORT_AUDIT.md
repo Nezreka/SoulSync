@@ -4358,3 +4358,65 @@ classes resolve.
 Full suite 6558 tests. Build clean. Lint clean.
 
 **Next:** slice D, the monitor / automations / history panels.
+
+### AUTO-SYNC SLICE D-i — the live monitor + the read-only Automations panel
+
+`getAutoSyncPipelinePlaylists` / the two status maps / `renderAutoSyncPipelineMonitor`
+/ `autoSyncPipelineMonitorCardHtml` (1104-1183), and
+`renderAutoSyncAutomationPanel` / `autoSyncAutomationCardHtml` (1185-1198,
+1883-1918). Slice D was split: the history panel is 490 lines across 27
+functions and becomes D-ii.
+
+**Two caps that compose, and the composition is the point.** The monitor takes
+ALL running rows, then at most 2 finished ones, then caps the whole list at 4
+(1133-1135). With five pipelines running you see four running rows and no
+recent ones — live work crowds out history. Both caps have their own test,
+plus one for the interaction, because a single test of either would pass
+against the wrong composition order.
+
+**A redundancy worth keeping, found by mutation.** `getAutoSyncPipelinePlaylists`
+sorts running-first (1108-1110), and the monitor then re-partitions
+running-first anyway when it builds `[...running, ...recent]`. Deleting the
+sort's rule is therefore INVISIBLE from the panel — the mutant survived. It is
+now pinned by a direct test of the selector, because the rule is part of that
+function's contract and any other consumer would silently lose it.
+
+**A load-order dependency the port does not inherit.** auto-sync.js calls
+`_autoFormatTrigger` (stats-automations.js 4154) UNGUARDED at 1890, while
+listing `_autoParseUTC` from the same file as a cross-file global in its own
+header comment. That call is safe today only because index.html 8398-8399
+loads stats-automations.js immediately before auto-sync.js. The port
+reimplements the formatter and consults the global for exactly one branch —
+`_findBlockDef(type)?.label`, which reads block definitions that file fetches
+at runtime — and only when the type is unmapped, since a mapped label always
+wins (4179). So an exotic trigger keeps its configured label while that file is
+loaded, and degrades to the humanized identifier instead of throwing if it
+ever is not.
+
+**My fixture was wrong before the port was, again.** The automation fixture
+omitted `action_type: 'playlist_pipeline'`, which
+`autoSyncPlaylistIdFromAutomation` requires before it will resolve an id at
+all. The test failed loudly; the coupling now has a test of its own.
+
+**A type that was too narrow.** `MirroredRow.pipeline_state` was declared as
+`{ status?: string }` back in slice B, which was all the card needed. The
+monitor reads phase, progress, timestamps and logs off the same object, so it
+is now the full `PipelineState`. Caught by the type-checker on the test
+fixtures, not by a runtime failure.
+
+**Mutation pass: 42 mutants, 42 killed** after one round of three survivors —
+the redundant sort above, and both `schedule`-trigger defaults (every fixture
+supplied an interval and a unit, so `|| 1` and `|| 'hours'` were never
+exercised).
+
+**The export gate caught eight things** — seven core helpers reachable only
+through the components, and `AutoSyncAutomationCard`, exported but used only by
+its own panel. The seven got direct tests; the component was un-exported.
+Eight consecutive slices.
+
+**Artefact check:** all 31 classes resolve.
+
+Full suite 6613 tests. Build clean. Lint clean.
+
+**Next:** slice D-ii, the run-history panel (1200-1253, 1394-1882) — filter
+tabs, load-more, and the 27-function entry renderer.
