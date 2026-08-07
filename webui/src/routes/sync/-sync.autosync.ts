@@ -784,13 +784,12 @@ export interface AutoSyncHistoryRow {
  * any error at all is a warning. 'skipped' counts as an error, which is
  * deliberate — a skipped run means the pipeline did not do its job.
  *
- * ORDERING CAVEAT, carried over unchanged: `slice(0, 3)` calls the FIRST three
- * rows "the last 3 runs", which is only true if the history endpoint returns
- * newest-first. I could not find the ORDER BY for the pipeline-history table
- * during the P0 read (the `ORDER BY started_at DESC` nearby belongs to
- * `sync_history`), so this is flagged in SYNC_PORT_AUDIT.md as unverified
- * rather than silently "fixed" — reversing it here would change behaviour on a
- * guess.
+ * ORDERING, now verified: `slice(0, 3)` calls the FIRST three rows "the last 3
+ * runs", which is only correct if the endpoint returns newest-first. It does —
+ * music_database.py 17820 orders the pipeline-history query `ORDER BY id DESC`
+ * (the `ORDER BY started_at DESC` I first found during the P0 read belongs to
+ * `sync_history`, a different table). So the window is genuinely the most
+ * recent three runs and needs no defensive sort.
  */
 export function autoSyncPlaylistHealth(
   history: AutoSyncHistoryRow[] | null | undefined,

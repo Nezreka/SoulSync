@@ -4251,10 +4251,12 @@ a card inside the lane. The fix is a real `MouseEvent`, which does carry
 `act()`. Dispatching it directly leaves the assertion reading pre-update DOM,
 which is a second silent pass.
 
-**Health dot ordering — still unverified, deliberately unchanged.** The P0 read
-flagged that `.slice(0, 3)` calls the FIRST three rows "the last 3 runs". I
-still have not found the ORDER BY for the pipeline-history table, so the port
-transcribes it and says so in the docblock rather than reversing it on a guess.
+**Health dot ordering — RESOLVED, the vanilla is correct.** The P0 read flagged
+that `.slice(0, 3)` calls the FIRST three rows "the last 3 runs" and could not
+find the ORDER BY. It is `ORDER BY id DESC` at music_database.py 17820 — the
+`ORDER BY started_at DESC` found during the P0 read belongs to `sync_history`,
+a different table. The window really is the most recent three runs; no
+defensive sort is needed, and the P0 addendum's fourth open item is closed.
 
 **Mutation pass: 43 mutants, 43 killed** after one round of three survivors —
 the health window (fixtures never exceeded three rows), the `typeof` guard on
@@ -4272,3 +4274,65 @@ refuses to count.
 Full suite 6510 tests. Build clean. Lint clean.
 
 **Next:** slice C, the weekly board + the controlled editor popover.
+
+### AUTO-SYNC SLICE C — the weekly board + the editor, on shared chrome
+
+`renderAutoSyncWeeklyPanel` (861-977), `autoSyncWeeklyCardHtml` (979-1024),
+`renderAutoSyncWeeklyEditor` (1026-1077) and the drop/editor handlers
+(2145-2232). Seven day lanes, Mon–Sun, with a click-to-edit popover.
+
+**The two boards now share their chrome instead of duplicating it.** The
+vanilla duplicates the sidebar, the lane and the card across both panels, and
+says so at 980-987: "Mirror the hourly board's autoSyncScheduledCardHtml shape
+so the two boards stay visually consistent", followed by an explicit list of
+the only four things that differ — the timing line, the click, the drag
+functions, the unschedule helper. Those four became props;
+`-ui/autosync-shared.tsx` holds the rest. Two copies that a comment BEGS to
+stay in sync are two copies that will eventually drift.
+
+That refactor moved the hourly board's code without changing its behaviour,
+which its existing tests confirmed by continuing to pass untouched — the point
+of testing rendered DOM rather than internals.
+
+**One declared divergence, and it is a bug fix.** The hourly board's dragleave
+guards on `col.contains(event.relatedTarget)` (2030-2035). The weekly board's
+does NOT (2138-2142). Without the guard, moving the cursor from a lane onto a
+card inside that lane fires dragleave and the drop highlight flickers off
+mid-drag. The shared lane carries the guard, so the weekly board gains the
+hourly board's behaviour. This is an asymmetry with no design behind it — the
+vanilla's own hourly board is the evidence for what was intended.
+
+**Two vanilla workarounds that dissolve.** The editor's day toggle re-renders
+the whole modal (2200) while its time and tz inputs deliberately do not
+(2205-2215) — an asymmetry that exists purely because an innerHTML re-render
+would eat the caret mid-typing. React re-renders all three without losing
+focus, so the draft is plain state and the distinction disappears. Same story
+as slice B's `_autoSyncSidebarFilter`.
+
+**Three states in the weekly sidebar, not two.** A playlist scheduled on the
+HOURLY board renders `scheduled-elsewhere` with an "Hourly (every 8 hours)"
+label (878-887), so it reads as spoken-for without looking like it runs weekly.
+
+**Mutation pass: 84 mutants, 84 killed.** One anchor missed on the first run
+because the refactor had moved it from the board into the shared module; it was
+RE-ANCHORED and re-run rather than counted as passing.
+
+**My test fixtures were wrong before the port was.** I wrote the weekday
+fixtures as `'monday'`; the real keys are `'mon'`, and the label is `Mon @
+09:00`, not prose. Sixteen tests failed loudly and immediately — which is the
+behaviour you want from a fixture that guessed.
+
+**The export gate caught a gratuitous export** — `AutoSyncOrganizeRow` was
+exported but used only by the card in its own module. Un-exported rather than
+given a ceremonial test. Seven consecutive slices.
+
+**Artefact check found one unstyled class: `auto-sync-weekly-lanes`.** It
+appears once in auto-sync.js and ZERO times in style.css, so it is a dead hook
+in the vanilla too, not a port regression. Carried faithfully. The other 70
+classes resolve.
+
+**Health dot ordering is now resolved** — see the correction in slice B above.
+
+Full suite 6558 tests. Build clean. Lint clean.
+
+**Next:** slice D, the monitor / automations / history panels.

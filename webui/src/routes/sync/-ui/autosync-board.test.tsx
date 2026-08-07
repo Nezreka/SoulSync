@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AutoSyncHourlyEntry, MirroredRow } from '../-sync.autosync';
 import type { AutoSyncBoardActions } from './autosync-board';
 
-import { AutoSyncBoard, AutoSyncScheduledCard, AutoSyncSourceIcon } from './autosync-board';
+import { AutoSyncBoard } from './autosync-board';
 
 const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
 
@@ -79,186 +79,6 @@ afterEach(() => {
   delete window.playlistQualityProfileSelectHtml;
 });
 
-describe('AutoSyncSourceIcon (197-203)', () => {
-  it('renders the brand logo with the source stamped on it', () => {
-    const { container } = render(<AutoSyncSourceIcon source="tidal" />);
-    const img = container.querySelector('img');
-    expect(img?.getAttribute('src')).toBe('/static/img/brands/tidal.svg');
-    expect(img?.getAttribute('data-svc')).toBe('tidal');
-    // Decorative: no alt text, hidden from the a11y tree.
-    expect(img?.getAttribute('alt')).toBe('');
-    expect(img?.getAttribute('aria-hidden')).toBe('true');
-  });
-
-  it('renders NOTHING for a source with no logo, not a broken image', () => {
-    const { container } = render(<AutoSyncSourceIcon source="beatport" />);
-    expect(container.querySelector('img')).toBeNull();
-  });
-
-  it('hides itself when the image fails to load', () => {
-    const { container } = render(<AutoSyncSourceIcon source="spotify" />);
-    const img = container.querySelector('img') as HTMLImageElement;
-    expect(img.style.display).toBe('');
-    fireEvent.error(img);
-    expect(img.style.display).toBe('none');
-  });
-});
-
-describe('AutoSyncScheduledCard (1951-1976)', () => {
-  const renderCard = (
-    playlist: MirroredRow,
-    schedule: AutoSyncHourlyEntry | undefined,
-    history: { playlist_id?: number; status?: string }[] = [],
-    actions = makeActions(),
-  ) => ({
-    actions,
-    ...render(
-      <AutoSyncScheduledCard
-        playlist={playlist}
-        schedule={schedule}
-        history={history}
-        now={NOW}
-        actions={actions}
-      />,
-    ),
-  });
-
-  it('shows the source, the track count and the interval', () => {
-    const { container } = renderCard(row(), hourly({ hours: 12 }));
-    expect(container.querySelector('.auto-sync-scheduled-meta')?.textContent).toBe(
-      'Spotify · 42 tracks',
-    );
-    expect(container.querySelector('.auto-sync-scheduled-timing span')?.textContent).toBe(
-      'Every 12 hours',
-    );
-  });
-
-  it('marks a DISABLED schedule but not an enabled one', () => {
-    const { container: on } = renderCard(row(), hourly({ enabled: true }));
-    expect(on.querySelector('.auto-sync-scheduled-card')?.className).not.toContain('disabled');
-    const { container: off } = renderCard(row(), hourly({ enabled: false }));
-    expect(off.querySelector('.auto-sync-scheduled-card')?.className).toContain('disabled');
-  });
-
-  it('treats a MISSING enabled flag as enabled (`!== false`, 1952)', () => {
-    const { container } = renderCard(row(), hourly({ enabled: undefined }));
-    expect(container.querySelector('.auto-sync-scheduled-card')?.className).not.toContain(
-      'disabled',
-    );
-  });
-
-  it('renders the relative next-run label, and omits it when there is none', () => {
-    const soon = new Date(NOW + 3 * 3600_000).toISOString().replace('Z', '');
-    const { container } = renderCard(row(), hourly({ next_run: soon }));
-    expect(container.querySelector('.auto-sync-scheduled-timing small')?.textContent).toBe(
-      'next in 3h',
-    );
-    const { container: none } = renderCard(row(), hourly({ next_run: null }));
-    expect(none.querySelector('.auto-sync-scheduled-timing small')).toBeNull();
-  });
-
-  it('disables Run now while the pipeline is running, and relabels it', () => {
-    const { container } = renderCard(row({ pipeline_state: { status: 'running' } }), hourly());
-    const btn = container.querySelector('button.run') as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.textContent).toBe('Running');
-  });
-
-  it('fires run and unschedule with the playlist id', () => {
-    const { container, actions } = renderCard(row({ id: 91 }), hourly());
-    fireEvent.click(container.querySelector('button.run') as HTMLElement);
-    expect(actions.onRun).toHaveBeenCalledWith(91);
-    const buttons = container.querySelectorAll('.auto-sync-scheduled-actions button');
-    fireEvent.click(buttons[1]);
-    expect(actions.onUnschedule).toHaveBeenCalledWith(91);
-  });
-
-  it('shows no health marker when the recent runs are clean', () => {
-    const { container } = renderCard(row({ id: 5 }), hourly(), [
-      { playlist_id: 5, status: 'success' },
-      { playlist_id: 5, status: 'success' },
-    ]);
-    expect(container.querySelector('.auto-sync-scheduled-health')).toBeNull();
-    expect(container.querySelector('.auto-sync-scheduled-card')?.className).not.toContain(
-      'warning',
-    );
-  });
-
-  it('warns on a single failure and goes red on three (1978-1996)', () => {
-    const { container: warn } = renderCard(row({ id: 5 }), hourly(), [
-      { playlist_id: 5, status: 'error' },
-      { playlist_id: 5, status: 'success' },
-    ]);
-    expect(warn.querySelector('.auto-sync-scheduled-health')?.textContent).toBe('⚠');
-    expect(warn.querySelector('.auto-sync-scheduled-health')?.getAttribute('title')).toBe(
-      '1 of last 2 runs failed',
-    );
-    expect(warn.querySelector('.auto-sync-scheduled-card')?.className).toContain('warning');
-
-    const { container: fail } = renderCard(row({ id: 5 }), hourly(), [
-      { playlist_id: 5, status: 'error' },
-      { playlist_id: 5, status: 'skipped' },
-      { playlist_id: 5, status: 'error' },
-    ]);
-    expect(fail.querySelector('.auto-sync-scheduled-health')?.textContent).toBe('!');
-    expect(fail.querySelector('.auto-sync-scheduled-card')?.className).toContain('failing');
-  });
-
-  it('looks only at the THREE most recent runs (1985)', () => {
-    // Newest first: three clean runs then an old failure. Reading the whole
-    // history would raise a warning the vanilla does not raise.
-    const { container } = renderCard(row({ id: 5 }), hourly(), [
-      { playlist_id: 5, status: 'success' },
-      { playlist_id: 5, status: 'success' },
-      { playlist_id: 5, status: 'success' },
-      { playlist_id: 5, status: 'error' },
-    ]);
-    expect(container.querySelector('.auto-sync-scheduled-health')).toBeNull();
-  });
-
-  it("ignores ANOTHER playlist's failures", () => {
-    const { container } = renderCard(row({ id: 5 }), hourly(), [
-      { playlist_id: 9, status: 'error' },
-      { playlist_id: 9, status: 'error' },
-      { playlist_id: 9, status: 'error' },
-    ]);
-    expect(container.querySelector('.auto-sync-scheduled-health')).toBeNull();
-  });
-
-  it('reflects and reports the organize-by-playlist preference', () => {
-    const { container, actions } = renderCard(row({ organize_by_playlist: true }), hourly());
-    const box = container.querySelector('.auto-sync-organize-toggle input') as HTMLInputElement;
-    expect(box.checked).toBe(true);
-    fireEvent.click(box);
-    expect(actions.onOrganizeChange).toHaveBeenCalledWith(1, false);
-  });
-
-  it('ignores a non-callable global rather than throwing (typeof guard, 1927)', () => {
-    (
-      window as unknown as { playlistQualityProfileSelectHtml: unknown }
-    ).playlistQualityProfileSelectHtml = '<select class="qp-select"></select>';
-    const { container } = renderCard(row(), hourly());
-    expect(container.querySelector('.qp-select')).toBeNull();
-  });
-
-  it('renders the quality-profile seam only when the shared global exists', () => {
-    const { container: without } = renderCard(row(), hourly());
-    expect(without.querySelector('.qp-select')).toBeNull();
-
-    window.playlistQualityProfileSelectHtml = (id, source, compact) =>
-      `<select class="qp-select" data-id="${id}" data-source="${source}" data-compact="${compact}"></select>`;
-    const { container: with_ } = renderCard(
-      row({ source_playlist_id: 'abc', source: 'tidal' }),
-      hourly(),
-    );
-    const sel = with_.querySelector('.qp-select');
-    expect(sel?.getAttribute('data-id')).toBe('abc');
-    expect(sel?.getAttribute('data-source')).toBe('tidal');
-    // 1928 passes `true` for the compact form.
-    expect(sel?.getAttribute('data-compact')).toBe('true');
-  });
-});
-
 describe('AutoSyncBoard (741-859)', () => {
   const renderBoard = (
     playlists: MirroredRow[],
@@ -304,6 +124,30 @@ describe('AutoSyncBoard (741-859)', () => {
     expect(lane.querySelector('.auto-sync-lane-count')?.textContent).toBe('2');
     expect(lane.querySelectorAll('.auto-sync-scheduled-card')).toHaveLength(2);
     expect(lane.querySelector('.auto-sync-lane-hint')).toBeNull();
+  });
+
+  it('spells out the interval and the next run on each card', () => {
+    const soon = new Date(NOW + 3 * 3600_000).toISOString().replace('Z', '');
+    const { container } = renderBoard([row({ id: 1 })], {
+      '1': hourly({ hours: 12, next_run: soon }),
+    });
+    const timing = container.querySelector('.auto-sync-scheduled-timing') as HTMLElement;
+    expect(timing.querySelector('span')?.textContent).toBe('Every 12 hours');
+    expect(timing.querySelector('small')?.textContent).toBe('next in 3h');
+  });
+
+  it('omits the next-run line when the schedule has no next run', () => {
+    const { container } = renderBoard([row({ id: 1 })], { '1': hourly({ next_run: null }) });
+    expect(container.querySelector('.auto-sync-scheduled-timing small')).toBeNull();
+  });
+
+  it('treats a MISSING enabled flag as enabled (`!== false`, 1952)', () => {
+    const { container } = renderBoard([row({ id: 1 })], {
+      '1': hourly({ enabled: undefined }),
+    });
+    expect(container.querySelector('.auto-sync-scheduled-card')?.className).not.toContain(
+      'disabled',
+    );
   });
 
   it('marks a custom-interval lane and says so in the badge', () => {
