@@ -42,7 +42,8 @@ export interface MirroredRow {
   source_playlist_id?: string | number;
   description?: string;
   name?: string;
-  track_count?: number;
+  /** String or number on the wire, which is why every read parseInts it. */
+  track_count?: number | string;
   kind?: string;
   variant?: string;
   kind_label?: string;
@@ -1404,4 +1405,40 @@ export function autoSyncParseCustomInterval(raw: string): { hours: number } | { 
     return { error: 'Interval must be a whole number of hours, 1 or greater' };
   }
   return { hours };
+}
+
+/* ── The save payloads (2069-2082, 2266-2277) ───────────────────────────── */
+
+/**
+ * The automation body both save paths POST or PUT. The two differ ONLY in
+ * `trigger_type` and `trigger_config`; everything else — the `Auto-Sync:` name
+ * prefix, the empty `then_actions`, the group and the ownership stamp — is
+ * identical, and all three of those are what
+ * `autoSyncIsScheduleOwned` later reads back to decide the board owns the row.
+ */
+export function autoSyncSchedulePayload(
+  playlist: MirroredRow,
+  playlistId: number | string,
+  trigger: { trigger_type: string; trigger_config: unknown },
+): Record<string, unknown> {
+  return {
+    name: `Auto-Sync: ${playlist.name}`,
+    trigger_type: trigger.trigger_type,
+    trigger_config: trigger.trigger_config,
+    ...autoSyncActionForPlaylist(playlist, playlistId),
+    then_actions: [],
+    group_name: 'Playlist Auto-Sync',
+    owned_by: 'auto_sync',
+  };
+}
+
+/** 2098 / 2283. The success toast each save path shows. */
+export function autoSyncSavedToast(
+  playlistName: string,
+  kind: 'hourly' | 'weekly',
+  detail: string,
+): string {
+  return kind === 'hourly'
+    ? `${playlistName} scheduled every ${detail}`
+    : `${playlistName} scheduled ${detail.toLowerCase()}`;
 }

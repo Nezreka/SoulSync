@@ -4551,6 +4551,63 @@ Full suite 6717 tests. Build clean. Lint clean.
 scheduling loop (carrying the invariant fix), the 3s status poller with its
 mid-drag skip, and the two `typeof`-guarded shared-helpers seams.
 
+### AUTO-SYNC SLICE E-ii — the controller: actions, bulk, poller
+
+`-sync.use-autosync.ts` — the load/refresh (602-650), the save / unschedule /
+run / organize actions (2051-2134, 2237-2336, 1933-1949), both bulk paths
+(1315-1392) and the status poller (2338-2360). This closes the Auto-Sync wave.
+
+**THE TESTS FOUND A REAL DEFECT, and it was mine.** `now` is a prop, so a
+caller writing `now={() => Date.now()}` inline hands the hook a NEW function
+every render. It was in `refresh`'s dependency list, so `refresh` changed
+identity on every render, so the load effect re-fired, which set state, which
+re-rendered — an unbounded loop refetching FIVE endpoints per turn. In the
+suite it showed up as every test after the first describe timing out at 5s;
+in production it would have hammered the API for as long as the modal was
+open. `now` now lives in a ref and is out of the dependency list.
+
+That is the second time in this wave that a test failure was worth more than
+the test: the history panel's null-row crash was the first.
+
+**The invariant cannot regress in this codebase.** All three save paths —
+hourly, weekly and the bulk loop — go through one `dropOpposing`. The vanilla
+enforced it by copy-paste and one of the three copies was missing (live bug #1,
+fixed separately in 37bec3bab). Here there is only one copy to forget.
+Likewise `bulkUnschedule` reads both schedule maps through one accessor, so
+live bug #2 has no counterpart either. Both have mutants.
+
+**`_autoSyncIsDragging` survives as a REF.** The poller reads it to skip a tick
+mid-drag (2347) — a re-render during a drag would yank the card out from under
+the cursor — and it must never itself cause a render, which is what a ref is
+for. Three tests: it polls at 3s while work runs, it skips while dragging, and
+it resumes when the drag ends.
+
+**The poller stops on all three exits**, each with its own test: nothing
+running, the modal closed, and unmount. The closed case needed the REACHABLE
+scenario to be testable at all — open, load, then close with work still
+running, so the hook keeps its loaded state and only `open` has changed. A test
+that merely mounted with `open: false` proves nothing, because the state is
+empty and the poller would not have started regardless.
+
+**Mutation pass: 43 mutants, 43 killed** after two rounds. Six anchors had
+moved through formatting and were RE-ANCHORED. One of my own mutants was
+BROKEN — it inserted a `void` statement instead of removing the guard it
+claimed to remove, so it could never have failed; rewritten rather than
+counted. Four real gaps: the personalized enrichment throwing (the fixture only
+returned unusable data, never threw), a stale error never clearing, the
+personalized run falling through to the vanilla engine as well, and both
+poller stop conditions.
+
+**The export gate caught six more.** Eleven consecutive slices.
+
+Full suite 6761 tests. Build clean. Lint clean.
+
+**Still open for the shell wave:** the two `typeof`-guarded shared-helpers
+seams (`playlistQualityProfileSelectHtml` is rendered by the card;
+`hydratePlaylistQualityProfileSelects` is NOT yet called after mount) need
+vanilla-seams.test.ts rows before the flip, and the modal needs an entry point
+from the mirrored tab's Auto-Sync button.
+
 ### LIVE BUG FIX — bulk scheduling left weekly schedules running
 
 The P0 addendum's live bug #1, fixed in the vanilla rather than only in the

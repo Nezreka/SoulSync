@@ -313,6 +313,15 @@ declare global {
      * it cannot reproduce. See autoSyncFormatTrigger.
      */
     _autoFormatTrigger?: (type: string, config: unknown) => string;
+    /**
+     * downloads.js — runs a mirrored playlist through the pipeline engine.
+     * The engine stays vanilla for this port, so Auto-Sync's 'Run now' calls
+     * across to it (auto-sync.js 2336).
+     */
+    runMirroredPlaylistPipeline?: (
+      playlistId: number,
+      playlistName: string,
+    ) => Promise<void> | void;
     playlistQualityProfileSelectHtml?: (
       playlistId: string | number | undefined,
       source: string | undefined,

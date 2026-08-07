@@ -23,6 +23,8 @@ import {
   autoSyncBuildLanes,
   autoSyncNormalizeTab,
   autoSyncParseCustomInterval,
+  autoSyncSavedToast,
+  autoSyncSchedulePayload,
   autoSyncSummary,
   autoSyncAutomationCardFields,
   autoSyncFormatTrigger,
@@ -1532,5 +1534,62 @@ describe('the modal shell pure core (571-740, 1303-1313)', () => {
         error: 'Interval must be a whole number of hours, 1 or greater',
       });
     }
+  });
+});
+
+describe('the save payload (2069-2082, 2266-2277)', () => {
+  const playlist = { id: 5, name: 'Late Night', source: 'spotify', source_playlist_id: 'abc' };
+
+  it('carries the three fields ownership is later read back from', () => {
+    const payload = autoSyncSchedulePayload(playlist, 5, {
+      trigger_type: 'schedule',
+      trigger_config: { interval: 24, unit: 'hours' },
+    });
+    // autoSyncIsScheduleOwned reads owned_by, then falls back to the group and
+    // the name prefix for pre-column rows — so all three matter.
+    expect(payload.owned_by).toBe('auto_sync');
+    expect(payload.group_name).toBe('Playlist Auto-Sync');
+    expect(payload.name).toBe('Auto-Sync: Late Night');
+    expect(payload.then_actions).toEqual([]);
+    expect(payload.trigger_type).toBe('schedule');
+    expect(payload.trigger_config).toEqual({ interval: 24, unit: 'hours' });
+  });
+
+  it('is identical apart from the trigger for the weekly path', () => {
+    const hourly = autoSyncSchedulePayload(playlist, 5, {
+      trigger_type: 'schedule',
+      trigger_config: { interval: 24, unit: 'hours' },
+    });
+    const weekly = autoSyncSchedulePayload(playlist, 5, {
+      trigger_type: 'weekly_time',
+      trigger_config: { time: '09:00', days: ['mon'], tz: 'UTC' },
+    });
+    const strip = (p: Record<string, unknown>) => {
+      const { trigger_type, trigger_config, ...rest } = p;
+      void trigger_type;
+      void trigger_config;
+      return rest;
+    };
+    expect(strip(weekly)).toEqual(strip(hourly));
+  });
+
+  it('carries the action the row resolves to', () => {
+    const payload = autoSyncSchedulePayload(playlist, 5, {
+      trigger_type: 'schedule',
+      trigger_config: {},
+    });
+    expect(payload.action_type).toBe('playlist_pipeline');
+  });
+});
+
+describe('autoSyncSavedToast (2098, 2283)', () => {
+  it('reads as an interval for hourly and as a phrase for weekly', () => {
+    expect(autoSyncSavedToast('Late Night', 'hourly', '12h')).toBe(
+      'Late Night scheduled every 12h',
+    );
+    // The weekly label arrives already capitalised, and is lowercased here.
+    expect(autoSyncSavedToast('Late Night', 'weekly', 'Mon, Fri @ 09:00')).toBe(
+      'Late Night scheduled mon, fri @ 09:00',
+    );
   });
 });
