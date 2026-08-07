@@ -1057,3 +1057,275 @@ export function autoSyncAutomationCardFields(
     enabled: auto.enabled !== false && auto.enabled !== 0,
   };
 }
+
+/* ── The run-history panel (1200-1253, 1394-1882) ───────────────────────── */
+
+export interface AutoSyncHistorySnapshot {
+  name?: string;
+  source?: string;
+  playlist_id?: number | string;
+  track_count?: number | string;
+  discovered_count?: number | string;
+  wishlisted_count?: number | string;
+  in_library_count?: number | string;
+  [key: string]: unknown;
+}
+
+export interface AutoSyncHistoryEntry {
+  id?: number | string;
+  playlist_id?: number | string;
+  playlist_name?: string;
+  status?: string;
+  source?: string;
+  trigger_source?: string;
+  started_at?: string;
+  finished_at?: string;
+  duration_seconds?: number | string;
+  before_json?: AutoSyncHistorySnapshot | string;
+  after_json?: AutoSyncHistorySnapshot | string;
+  result_json?: Record<string, unknown> | string;
+  log_lines?: (
+    | string
+    | { message?: string; log_line?: string; type?: string; log_type?: string }
+  )[];
+}
+
+/** 1632-1642. A snapshot arrives as an object OR a JSON string OR junk. */
+export function autoSyncParseHistoryObject(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export interface AutoSyncNormalizedEntry extends AutoSyncHistoryEntry {
+  id: number | string;
+  before_json: AutoSyncHistorySnapshot;
+  after_json: AutoSyncHistorySnapshot;
+  result_json: Record<string, unknown>;
+}
+
+/** 1595-1615. A row that is not an object at all still renders as something. */
+export function autoSyncNormalizeHistoryEntry(
+  entry: AutoSyncHistoryEntry | null | undefined,
+  index: number,
+): AutoSyncNormalizedEntry {
+  if (!entry || typeof entry !== 'object') {
+    return {
+      id: `unknown-${index}`,
+      status: 'completed',
+      playlist_name: 'Playlist pipeline run',
+      trigger_source: 'pipeline',
+      // The vanilla also sets `summary` here, which nothing reads.
+      before_json: {},
+      after_json: {},
+      result_json: {},
+    };
+  }
+  return {
+    ...entry,
+    id: entry.id ?? `history-${index}`,
+    before_json: autoSyncParseHistoryObject(entry.before_json),
+    after_json: autoSyncParseHistoryObject(entry.after_json),
+    result_json: autoSyncParseHistoryObject(entry.result_json),
+  };
+}
+
+/** 1666-1671. 'finished' and 'completed' are the same thing to a reader. */
+export function autoSyncHistoryStatusLabel(status: string | undefined): string {
+  if (status === 'completed' || status === 'finished') return 'Completed';
+  if (status === 'error') return 'Error';
+  if (status === 'skipped') return 'Skipped';
+  return status || 'Run';
+}
+
+/** 1673-1677. Only two dots exist, so an unknown status reads as fine. */
+export function autoSyncHistoryStatusClass(status: string | undefined): string {
+  if (status === 'error' || status === 'skipped') return 'disabled';
+  return 'enabled';
+}
+
+/** 1679-1685. */
+export function autoSyncDurationLabel(seconds: number | string | undefined): string {
+  const total = Math.max(0, Math.round(parseFloat(String(seconds)) || 0));
+  if (total < 60) return `${total}s`;
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
+}
+
+/** 1687-1691. */
+export function autoSyncDelta(after: unknown, before: unknown): number {
+  return (parseInt(String(after), 10) || 0) - (parseInt(String(before), 10) || 0);
+}
+
+/** 1574-1579. '42 tracks' or '42 tracks (+3)'. */
+export function autoSyncDeltaLabel(after: unknown, delta: number, unit: string): string {
+  const a = parseInt(String(after), 10) || 0;
+  if (!delta) return `${a} ${unit}`;
+  return `${a} ${unit} (${delta > 0 ? '+' : ''}${delta})`;
+}
+
+/** 1668-1670 / 1770-1772. pos/neg/zero drives the colour. */
+export function autoSyncDeltaClass(delta: number): string {
+  return delta > 0 ? 'pos' : delta < 0 ? 'neg' : 'zero';
+}
+
+/** stats-automations.js 4265-4270, reached as a cross-file global. */
+export function autoSyncTimeAgo(ts: string | undefined, now: number): string {
+  if (!ts) return 'Never';
+  const d = (now - autoSyncParseUTC(ts)) / 1000;
+  if (d < 60) return 'just now';
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+}
+
+/** 1861-1866. An unparseable value is shown RAW rather than swallowed. */
+export function autoSyncFormatDateTime(value: string | undefined): string {
+  if (!value) return '';
+  const ts = autoSyncParseUTC(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleString();
+}
+
+/** 1876-1882. */
+export function autoSyncValueLabel(value: unknown): string {
+  if (value === undefined || value === null || value === '') return 'Not recorded';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (Array.isArray(value)) {
+    return value.length ? value.map(autoSyncValueLabel).join(', ') : 'None';
+  }
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+export type AutoSyncHistoryFilter = 'all' | 'error' | 'completed';
+
+/** 1246-1249. Anything else falls back to 'all' rather than showing nothing. */
+export function autoSyncNormalizeHistoryFilter(key: string | undefined): AutoSyncHistoryFilter {
+  return key === 'error' || key === 'completed' ? key : 'all';
+}
+
+/**
+ * 1399-1405 and 1211-1214 — the SAME predicate, used for both.
+ *
+ * DECLARED HARDENING: `entry?.status`, where the vanilla writes `h.status`.
+ * The vanilla goes to real trouble to tolerate a malformed row — the
+ * normalizer has a whole branch for "not an object at all" (1596-1607) and
+ * each card build is wrapped in try/catch (1428-1432) — but its filter and
+ * tab-count paths dereference `.status` BEFORE either of those runs, and the
+ * tab counts run on every render regardless of the active filter (1211-1213).
+ * So a null row throws out of renderAutoSyncHistoryPanel and blanks the entire
+ * history panel, which is precisely the outcome the other two guards exist to
+ * prevent. One optional chain restores the intent.
+ */
+export function autoSyncHistoryMatchesFilter(
+  entry: AutoSyncHistoryEntry | null | undefined,
+  filter: AutoSyncHistoryFilter,
+): boolean {
+  if (filter === 'error') return entry?.status === 'error' || entry?.status === 'skipped';
+  if (filter === 'completed') {
+    return entry?.status === 'completed' || entry?.status === 'finished';
+  }
+  return true;
+}
+
+export interface AutoSyncHistoryTab {
+  key: AutoSyncHistoryFilter;
+  label: string;
+  count: number;
+  hasErrors: boolean;
+}
+
+/**
+ * 1210-1215. Counts come from the WHOLE loaded window, not the filtered view —
+ * otherwise switching to Errors would report "Errors 3, Completed 0".
+ */
+export function autoSyncHistoryTabs(history: AutoSyncHistoryEntry[]): AutoSyncHistoryTab[] {
+  const errors = history.filter((h) => autoSyncHistoryMatchesFilter(h, 'error')).length;
+  return [
+    { key: 'all', label: 'All', count: history.length, hasErrors: false },
+    // 1217: only the Errors tab gets the attention class, and only when > 0.
+    { key: 'error', label: 'Errors', count: errors, hasErrors: errors > 0 },
+    {
+      key: 'completed',
+      label: 'Completed',
+      count: history.filter((h) => autoSyncHistoryMatchesFilter(h, 'completed')).length,
+      hasErrors: false,
+    },
+  ];
+}
+
+/** 1251-1254. Capped at 500 so a runaway click cannot ask for everything. */
+export function autoSyncNextHistoryLimit(limit: number): number {
+  return Math.min(500, limit + 50);
+}
+
+export interface AutoSyncHistoryLogLine {
+  text: string;
+  type: string;
+}
+
+/**
+ * 1786-1794. The last 20 lines. A line is a string, or an object under any of
+ * two message keys and two type keys, or — failing all that — its own JSON.
+ */
+export function autoSyncHistoryLogLines(
+  logLines: AutoSyncHistoryEntry['log_lines'],
+): AutoSyncHistoryLogLine[] {
+  if (!Array.isArray(logLines) || !logLines.length) return [];
+  return logLines.slice(-20).map((line) => ({
+    text: typeof line === 'string' ? line : line.message || line.log_line || JSON.stringify(line),
+    type: typeof line === 'object' ? line.type || line.log_type || 'info' : 'info',
+  }));
+}
+
+export interface AutoSyncHistoryStat {
+  label: string;
+  before: number;
+  after: number;
+  delta: number;
+}
+
+/** 1722-1727. The four before/after cards, in fixed order. */
+export function autoSyncHistoryStats(
+  before: AutoSyncHistorySnapshot,
+  after: AutoSyncHistorySnapshot,
+): AutoSyncHistoryStat[] {
+  const stat = (label: string, key: keyof AutoSyncHistorySnapshot): AutoSyncHistoryStat => ({
+    label,
+    before: parseInt(String(before[key]), 10) || 0,
+    after: parseInt(String(after[key]), 10) || 0,
+    delta: autoSyncDelta(after[key], before[key]),
+  });
+  return [
+    stat('Tracks', 'track_count'),
+    stat('Discovered', 'discovered_count'),
+    stat('Wishlisted', 'wishlisted_count'),
+    stat('In library', 'in_library_count'),
+  ];
+}
+
+/**
+ * 1740-1747. `tracks_discovered` is deliberately NOT here: it is a status
+ * STRING ('completed'), not a count, and rendering it produced a nonsense
+ * "Discovered: completed" pill. The vanilla's comment at 1737-1740 says so.
+ */
+export function autoSyncHistoryResultPills(
+  result: Record<string, unknown>,
+): { label: string; value: string }[] {
+  return (
+    [
+      ['Refreshed', result.playlists_refreshed],
+      ['Synced', result.tracks_synced],
+      ['Skipped', result.sync_skipped],
+      ['Wishlisted', result.wishlist_queued],
+    ] as [string, unknown][]
+  )
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([label, v]) => ({ label, value: String(v) }));
+}

@@ -24,6 +24,24 @@ import {
   autoSyncFormatTrigger,
   autoSyncHumanizeType,
   autoSyncMonitorSummary,
+  autoSyncDelta,
+  autoSyncDeltaClass,
+  autoSyncDeltaLabel,
+  autoSyncDurationLabel,
+  autoSyncFormatDateTime,
+  autoSyncHistoryLogLines,
+  autoSyncHistoryMatchesFilter,
+  autoSyncHistoryResultPills,
+  autoSyncHistoryStats,
+  autoSyncHistoryStatusClass,
+  autoSyncHistoryStatusLabel,
+  autoSyncHistoryTabs,
+  autoSyncNextHistoryLimit,
+  autoSyncNormalizeHistoryEntry,
+  autoSyncParseHistoryObject,
+  autoSyncTimeAgo,
+  autoSyncValueLabel,
+  autoSyncNormalizeHistoryFilter,
   autoSyncPipelineLatestLog,
   autoSyncPipelineProgress,
   autoSyncPipelineStatusClass,
@@ -1237,5 +1255,204 @@ describe('autoSyncAutomationCardFields (1883-1893)', () => {
     expect(autoSyncAutomationCardFields({ ...base, action_config: {} }, [], NOW).target).toBe(
       'Custom pipeline target',
     );
+  });
+});
+
+describe('autoSyncNextHistoryLimit (1251-1254)', () => {
+  it('steps by 50', () => {
+    expect(autoSyncNextHistoryLimit(50)).toBe(100);
+    expect(autoSyncNextHistoryLimit(100)).toBe(150);
+  });
+
+  it('stops at 500 however many times it is clicked', () => {
+    expect(autoSyncNextHistoryLimit(480)).toBe(500);
+    expect(autoSyncNextHistoryLimit(500)).toBe(500);
+    expect(autoSyncNextHistoryLimit(9000)).toBe(500);
+  });
+});
+
+describe('autoSyncNormalizeHistoryFilter (1246-1249)', () => {
+  it('keeps the two real filters and rejects anything else', () => {
+    expect(autoSyncNormalizeHistoryFilter('error')).toBe('error');
+    expect(autoSyncNormalizeHistoryFilter('completed')).toBe('completed');
+    expect(autoSyncNormalizeHistoryFilter('all')).toBe('all');
+    expect(autoSyncNormalizeHistoryFilter('nonsense')).toBe('all');
+    expect(autoSyncNormalizeHistoryFilter(undefined)).toBe('all');
+  });
+});
+
+describe('the run-history pure core (1574-1882)', () => {
+  const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
+
+  it('parses a snapshot from an object, a JSON string, or junk', () => {
+    expect(autoSyncParseHistoryObject({ a: 1 })).toEqual({ a: 1 });
+    expect(autoSyncParseHistoryObject('{"a":1}')).toEqual({ a: 1 });
+    expect(autoSyncParseHistoryObject('not json')).toEqual({});
+    expect(autoSyncParseHistoryObject('[1,2]')).toEqual([1, 2]);
+    // A JSON scalar parses fine but is not an object, so it is discarded.
+    expect(autoSyncParseHistoryObject('42')).toEqual({});
+    expect(autoSyncParseHistoryObject(null)).toEqual({});
+    expect(autoSyncParseHistoryObject(7)).toEqual({});
+  });
+
+  it('normalizes a row, parsing its three payloads and defaulting its id', () => {
+    const out = autoSyncNormalizeHistoryEntry(
+      { playlist_name: 'x', before_json: '{"track_count":1}' },
+      3,
+    );
+    expect(out.id).toBe('history-3');
+    expect(out.before_json).toEqual({ track_count: 1 });
+    expect(out.after_json).toEqual({});
+    expect(out.playlist_name).toBe('x');
+    // A real id is kept, including 0 — `??` not `||`.
+    expect(autoSyncNormalizeHistoryEntry({ id: 0 }, 1).id).toBe(0);
+  });
+
+  it('substitutes a whole placeholder row for a non-object', () => {
+    for (const junk of [null, undefined, 'string', 42]) {
+      const out = autoSyncNormalizeHistoryEntry(junk as never, 2);
+      expect(out.id).toBe('unknown-2');
+      expect(out.playlist_name).toBe('Playlist pipeline run');
+      expect(out.status).toBe('completed');
+      expect(out.trigger_source).toBe('pipeline');
+    }
+  });
+
+  it('labels and colours a run status', () => {
+    expect(autoSyncHistoryStatusLabel('completed')).toBe('Completed');
+    expect(autoSyncHistoryStatusLabel('finished')).toBe('Completed');
+    expect(autoSyncHistoryStatusLabel('error')).toBe('Error');
+    expect(autoSyncHistoryStatusLabel('skipped')).toBe('Skipped');
+    // An unknown status is echoed, not replaced.
+    expect(autoSyncHistoryStatusLabel('quarantined')).toBe('quarantined');
+    expect(autoSyncHistoryStatusLabel(undefined)).toBe('Run');
+
+    expect(autoSyncHistoryStatusClass('error')).toBe('disabled');
+    expect(autoSyncHistoryStatusClass('skipped')).toBe('disabled');
+    expect(autoSyncHistoryStatusClass('completed')).toBe('enabled');
+    expect(autoSyncHistoryStatusClass('anything')).toBe('enabled');
+  });
+
+  it('formats a duration, switching to m/s at a minute', () => {
+    expect(autoSyncDurationLabel(0)).toBe('0s');
+    expect(autoSyncDurationLabel(59)).toBe('59s');
+    expect(autoSyncDurationLabel(60)).toBe('1m 0s');
+    expect(autoSyncDurationLabel(75.4)).toBe('1m 15s');
+    expect(autoSyncDurationLabel(-5)).toBe('0s');
+    expect(autoSyncDurationLabel('nonsense')).toBe('0s');
+  });
+
+  it('computes and labels a delta', () => {
+    expect(autoSyncDelta(12, 10)).toBe(2);
+    expect(autoSyncDelta(10, 12)).toBe(-2);
+    expect(autoSyncDelta(undefined, undefined)).toBe(0);
+    expect(autoSyncDelta('12', '10')).toBe(2);
+
+    expect(autoSyncDeltaLabel(12, 2, 'tracks')).toBe('12 tracks (+2)');
+    expect(autoSyncDeltaLabel(10, -2, 'tracks')).toBe('10 tracks (-2)');
+    expect(autoSyncDeltaLabel(10, 0, 'tracks')).toBe('10 tracks');
+
+    expect(autoSyncDeltaClass(1)).toBe('pos');
+    expect(autoSyncDeltaClass(-1)).toBe('neg');
+    expect(autoSyncDeltaClass(0)).toBe('zero');
+  });
+
+  it('renders a relative age, and a date only when parseable', () => {
+    expect(autoSyncTimeAgo(undefined, NOW)).toBe('Never');
+    expect(autoSyncTimeAgo(new Date(NOW - 30_000).toISOString(), NOW)).toBe('just now');
+    expect(autoSyncTimeAgo(new Date(NOW - 5 * 60_000).toISOString(), NOW)).toBe('5m ago');
+    expect(autoSyncTimeAgo(new Date(NOW - 5 * 3600_000).toISOString(), NOW)).toBe('5h ago');
+    expect(autoSyncTimeAgo(new Date(NOW - 5 * 86400_000).toISOString(), NOW)).toBe('5d ago');
+
+    expect(autoSyncFormatDateTime(undefined)).toBe('');
+    // Unparseable input is echoed RAW rather than swallowed (1864).
+    expect(autoSyncFormatDateTime('whenever')).toBe('whenever');
+    expect(autoSyncFormatDateTime('2026-01-01T12:00:00')).toContain('2026');
+  });
+
+  it('builds the three filter tabs from the whole window', () => {
+    const tabs = autoSyncHistoryTabs([
+      { status: 'completed' },
+      { status: 'finished' },
+      { status: 'error' },
+    ]);
+    expect(tabs.map((t) => [t.key, t.count, t.hasErrors])).toEqual([
+      ['all', 3, false],
+      ['error', 1, true],
+      ['completed', 2, false],
+    ]);
+    expect(autoSyncHistoryTabs([])[1].hasErrors).toBe(false);
+  });
+
+  it('matches the filter predicate the tabs and the list share', () => {
+    expect(autoSyncHistoryMatchesFilter({ status: 'skipped' }, 'error')).toBe(true);
+    expect(autoSyncHistoryMatchesFilter({ status: 'finished' }, 'completed')).toBe(true);
+    expect(autoSyncHistoryMatchesFilter({ status: 'error' }, 'completed')).toBe(false);
+    expect(autoSyncHistoryMatchesFilter({ status: 'anything' }, 'all')).toBe(true);
+    expect(autoSyncHistoryMatchesFilter(null, 'error')).toBe(false);
+    expect(autoSyncHistoryMatchesFilter(null, 'all')).toBe(true);
+  });
+
+  it('takes the newest 20 log lines, in every shape they arrive in', () => {
+    expect(autoSyncHistoryLogLines(undefined)).toEqual([]);
+    expect(autoSyncHistoryLogLines([])).toEqual([]);
+    expect(
+      autoSyncHistoryLogLines([
+        'plain',
+        { message: 'msg', type: 'warn' },
+        { log_line: 'legacy', log_type: 'error' },
+        { nothing: true } as never,
+      ]),
+    ).toEqual([
+      { text: 'plain', type: 'info' },
+      { text: 'msg', type: 'warn' },
+      { text: 'legacy', type: 'error' },
+      // No message key at all → the object serialises itself.
+      { text: '{"nothing":true}', type: 'info' },
+    ]);
+
+    const many = Array.from({ length: 25 }, (_, i) => `l${i}`);
+    const kept = autoSyncHistoryLogLines(many);
+    expect(kept).toHaveLength(20);
+    expect(kept[0].text).toBe('l5');
+  });
+
+  it('builds the four stat cards in a fixed order', () => {
+    const stats = autoSyncHistoryStats(
+      { track_count: 10, discovered_count: 1 },
+      { track_count: 12, discovered_count: 1 },
+    );
+    expect(stats.map((s) => s.label)).toEqual(['Tracks', 'Discovered', 'Wishlisted', 'In library']);
+    expect(stats[0]).toEqual({ label: 'Tracks', before: 10, after: 12, delta: 2 });
+    // A stat absent from both snapshots is zeroed, not dropped.
+    expect(stats[3]).toEqual({ label: 'In library', before: 0, after: 0, delta: 0 });
+  });
+
+  it('keeps only result pills that carry a value, and never the status string', () => {
+    expect(
+      autoSyncHistoryResultPills({
+        playlists_refreshed: 1,
+        tracks_synced: 0,
+        sync_skipped: null,
+        wishlist_queued: '',
+        tracks_discovered: 'completed',
+      }),
+    ).toEqual([
+      { label: 'Refreshed', value: '1' },
+      // Zero is a real count and stays.
+      { label: 'Synced', value: '0' },
+    ]);
+    expect(autoSyncHistoryResultPills({})).toEqual([]);
+  });
+
+  it('labels a value for display, recursing into arrays', () => {
+    expect(autoSyncValueLabel(undefined)).toBe('Not recorded');
+    expect(autoSyncValueLabel('')).toBe('Not recorded');
+    expect(autoSyncValueLabel(true)).toBe('Yes');
+    expect(autoSyncValueLabel(false)).toBe('No');
+    expect(autoSyncValueLabel([])).toBe('None');
+    expect(autoSyncValueLabel(['a', true])).toBe('a, Yes');
+    expect(autoSyncValueLabel({ a: 1 })).toBe('{"a":1}');
+    expect(autoSyncValueLabel(0)).toBe('0');
   });
 });

@@ -4421,6 +4421,75 @@ Full suite 6613 tests. Build clean. Lint clean.
 **Next:** slice D-ii, the run-history panel (1200-1253, 1394-1882) — filter
 tabs, load-more, and the 27-function entry renderer.
 
+### AUTO-SYNC SLICE D-ii — the run-history panel
+
+`renderAutoSyncHistoryPanel` (1200-1243), `populateAutoSyncHistoryList`
+(1394-1436), `createAutoSyncHistoryEntryElement` (1478-1572) and the helpers
+under them.
+
+**TEN OF THE REGION'S 27 FUNCTIONS ARE DEAD and were not ported.** Seven have
+no call site at all — `autoSyncHistoryStatHtml` (1693),
+`autoSyncHistoryPreviewPill` (1705), `autoSyncHistoryResultPill` (1716),
+`autoSyncHistorySnapshotHtml` (1805), `autoSyncHistoryObjectHtml` (1824),
+`autoSyncHistoryLogsHtml` (1845), `autoSyncHistoryFallbackSummary` (1644) —
+and three are reachable only from those: `autoSyncHistoryPreviewText`,
+`autoSyncHistoryFactHtml`, `autoSyncHumanizeKey`. They are earlier drafts of
+the detail panel that the current one replaced; `autoSyncHistoryLogsHtml` is a
+12-line twin of the 20-line `autoSyncHistoryLogsCompactHtml` that actually
+runs. Verified by locating EVERY reference to each name, not by grep count
+alone — three of the ten have two references and are still dead, because the
+second reference is inside another dead function. Roughly 180 lines of vanilla
+with no React counterpart.
+
+**The two-phase render dissolves; the per-row error isolation does NOT.** The
+vanilla emits a `data-renderer="pending"` placeholder, walks the DOM to build
+cards with createElement, then binds click/keydown in a third pass — all
+because live listeners cannot go in an innerHTML string. React renders once, so
+the placeholder, the `data-renderer` markers, the binding pass and
+`createAutoSyncHistoryListFallback` have no counterpart. But the vanilla ALSO
+wraps each card build in try/catch and substitutes an error card (1428-1432),
+and in React a throwing child unmounts its parent — so that one needed a real
+error boundary, with a test that renders a genuinely throwing row and asserts
+its two neighbours survive.
+
+**A latent vanilla crash, found because the port reproduced it faithfully.**
+The vanilla works hard to tolerate a malformed row: the normalizer has a whole
+branch for "not an object at all" (1596-1607) and every card build is wrapped
+in try/catch. But its filter and tab-count paths dereference `.status` BEFORE
+either runs, and the tab counts execute on every render regardless of the
+active filter (1211-1213) — so a null row throws out of
+`renderAutoSyncHistoryPanel` and blanks the WHOLE history panel, which is
+exactly what the other two guards exist to prevent. Declared hardening: one
+optional chain. A mutant that removes it is part of the suite.
+
+**One provably-equivalent mutant, annotated rather than left unkillable.** The
+`stopPropagation` on "Run pipeline again" (1754) is inert in BOTH codebases —
+the detail panel is a sibling of the clickable row, not a child, so the click
+never had a row handler to bubble into. Kept for faithfulness, annotated in the
+source, and removed from the mutation suite with the reasoning.
+
+**Mutation pass: 47 mutants, 47 killed** after two rounds. First-round
+survivors were real gaps: load-more and the running total compare against
+DIFFERENT counts (window vs visible) and no fixture distinguished them; the
+paging helper had no test at all; and `timeAgo`'s minutes branch was never
+exercised because every fixture was over an hour old.
+
+**The export gate caught sixteen things** — fifteen core helpers reachable only
+through the component, and `AutoSyncHistoryEntryCard`, exported but used only
+inside its own module. Nine consecutive slices.
+
+**Artefact check: six classes are unstyled, and all six are unstyled in the
+VANILLA too** — `auto-sync-history-time`, `auto-sync-history-title-block`,
+`auto-sync-history-title-row`, `stat-before`, `stat-after` and `zero` each
+appear exactly once in auto-sync.js and zero times in style.css. Carried
+faithfully, same as `auto-sync-weekly-lanes` in slice C. The other 53 resolve.
+
+Full suite 6682 tests. Build clean. Lint clean.
+
+**Next:** slice E — wiring: the modal shell and its five tabs, the schedule
+save/unschedule/run actions, the bulk menu (whose `window.prompt` must become a
+SoulSync modal), the 3s status poller and the two shared-helpers seams.
+
 ### LIVE BUG FIX — bulk scheduling left weekly schedules running
 
 The P0 addendum's live bug #1, fixed in the vanilla rather than only in the
