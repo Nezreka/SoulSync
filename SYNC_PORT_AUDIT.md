@@ -4815,12 +4815,56 @@ start calls — and which itself refuses below 1300px. The tab handler re-hides
 it on every tab switch (3707-3712), where the `isMobile` const is computed and
 never used.
 
-### Still to read before this P0 is done
+### P0 COMPLETE — what the shell actually has to do
 
-1. The right-panel / server-playlists column, and `loadServerPlaylists`.
-2. The four header-button targets (`openManualLibraryMatchTool`,
-   `openSyncHistoryModal`, `openDownloadOriginsModal`), enough to decide
-   port-vs-seam on each. `openAutoSyncScheduleModal` is settled — this wave
-   ported it, and the shell supplies its entry point.
-3. `_initImportFileTab` and the Beatport nested-tab wiring, both called from
-   the initializer and both already ported — confirm nothing else remains.
+**The server tab is already fully ported.** Its markup (3230-3298) is the
+richest of the fifteen — playlist list, disambiguation overlay, and a two-column
+compare editor with four filters, an M3U export and a footer — and all of it
+exists in React already: `server-playlist-list.tsx`, `server-compare-editor.tsx`,
+`server-order-modal.tsx`, `server-search-overlay.tsx` and the `-sync.server.ts`
+pure core. `serverEditorBack` and `_serverEditorFilter` do not appear by name
+because React expresses them as an `onBack` prop and a `FILTERS` const; both are
+there. The shell only has to MOUNT them.
+
+**The three remaining header buttons are SEAMS, and safe ones.** Each target
+lives in its own file that the flip does not touch —
+`openManualLibraryMatchTool` in manual-library-match.js, `openSyncHistoryModal`
+in wishlist-tools.js, `openDownloadOriginsModal` in origin-history.js. So the
+React header calls them through `window.x?.()` and each gets a
+vanilla-seams.test.ts row. The fourth, `openAutoSyncScheduleModal`, is settled:
+this wave ported it, and the shell supplies the entry point E-i left open.
+
+**Four initializer calls become DEAD at the flip, not seams.** `_initImportFileTab`
+(stats-automations.js), `ensureBeatportContentLoaded` (sync-spotify.js),
+`cleanupBeatportContent` (core.js) and `updateBeatportClearButtonState`
+(sync-services.js) all exist to wire markup the port replaces — the React
+import-file tab owns its own file read and submit, and the Beatport sections
+self-load through `useBeatportOnce`. They go on the deletion worklist; each
+needs a reachability check first, because three of the four live in files that
+SURVIVE and may have other callers.
+
+**The selection model, decided.** `startSequentialSync` (downloads.js 4079-4087)
+reads membership from the `selectedPlaylists` Set and ORDER from
+`document.querySelectorAll('.playlist-card')`. Two options were open since P0:
+have the React cards keep `.playlist-card` + `data-playlist-id` so the DOM query
+still works, or give the function an ordered-ids parameter. **Take the
+parameter.** The DOM-order read is the engine reaching into the view to
+reconstruct something the view already knows; keeping it would make a React
+render order a load-bearing contract of the download engine, discoverable only
+by breaking it. The parameter is additive and the existing call site can pass
+the same DOM-derived array until the shell flips.
+
+### Build slices, in order
+
+**S1 — the shell chrome.** Header (title, subtitle, four buttons incl. the
+Auto-Sync entry point), the 15-tab strip, and the tab panel switch. Pure core
+for the tab list and normalization; component; tests; the three seam rows.
+
+**S2 — the sidebar.** Two sections, the selection info line, Start Sync, the
+progress bar/text/log. Shown only while a sync runs and only above 1300px.
+
+**S3 — mount the fifteen.** Wire every ported tab into its panel, plus the
+per-tab lazy-load equivalents (React does this with mount, not one-shot flags).
+
+**S4 — the route flip, severs and deletions**, with the reachability checks
+above and the `startSequentialSync` parameter.
