@@ -4936,7 +4936,17 @@ row inline (`style="display:flex;gap:8px;align-items:center;"` at 2236); the
 port emits `.sync-header-actions` and the CSS is a 1:1 transcription of those
 three declarations.
 
-**Mutation pass: 35 mutants, 35 killed** after one round, the single survivor
+**The post-slice review caught a missing page id.** The root rendered
+`<div className="page-shell">` with no id. The vanilla nests page-shell inside
+`<div class="page" id="sync-page">`, and every flipped route collapses those
+two while KEEPING the id — dashboard-page.tsx 38 is `page-shell
+dashboard-container` with `id="dashboard-page"`. `#sync-page` appears in no CSS
+rule and no JS lookup today, so nothing would have broken loudly; it is the
+handle the legacy chrome resolves a page by, and dropping it silently would
+have diverged from every other route for no reason. Added, with a test and a
+mutant.
+
+**Mutation pass: 36 mutants, 36 killed** after one round, the single survivor
 being the unreachable normalizer above.
 
 Full suite 6803 tests. Build clean. Lint clean. All 35 emitted classes resolve.

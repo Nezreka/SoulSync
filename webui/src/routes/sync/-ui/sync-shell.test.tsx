@@ -86,6 +86,17 @@ describe('the header (2229-2243)', () => {
   });
 });
 
+describe('the page root', () => {
+  it('carries page-shell and the page id, as every flipped route does', () => {
+    const { container } = renderShell();
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toBe('page-shell');
+    // The vanilla nests page-shell inside `<div class="page" id="sync-page">`;
+    // the React roots collapse the two and keep the id.
+    expect(root.id).toBe('sync-page');
+  });
+});
+
 describe('the tab strip (2249-2295)', () => {
   it('renders all fifteen tabs, in order, with their labels', () => {
     const { container } = renderShell();

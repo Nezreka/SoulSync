@@ -73,7 +73,12 @@ export function SyncShell({ panels, onAutoSync, sidebar }: SyncShellProps) {
   };
 
   return (
-    <div className="page-shell">
+    // `page-shell` plus the page id, matching the convention every flipped
+    // route follows (dashboard-page.tsx 38). The vanilla nests page-shell
+    // inside `<div class="page" id="sync-page">`; the React roots collapse the
+    // two and keep the id, which is how the legacy chrome still resolves a
+    // page by `${pageId}-page`.
+    <div className="page-shell" id="sync-page">
       <div className="sync-header">
         <div className="sync-header-row">
           <div>
