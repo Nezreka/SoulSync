@@ -47,6 +47,10 @@ export interface MirroredRow {
   variant?: string;
   kind_label?: string;
   _personalized?: boolean;
+  /** The board's organize-by-playlist preference (1921). */
+  organize_by_playlist?: boolean;
+  /** Live pipeline status, used to disable 'Run now' (1954). */
+  pipeline_state?: { status?: string } | null;
 }
 
 export interface PersonalizedKind {
@@ -535,6 +539,14 @@ function autoSyncEnabledFlag(auto: AutomationRow): boolean {
  *    `automationPipelines`; the personalized_pipeline pass DROPS them** (518 vs
  *    526-528). A personalized automation that cannot be bucketed simply
  *    disappears from the board rather than appearing in the read-only panel.
+ *
+ * TWO TYPING COERCIONS, declared rather than smuggled. The vanilla stores
+ * `auto.id` and `auto.name` raw; this stores `?? ''` so the entry type is not
+ * optional. Both fields always arrive populated from /api/automations, and an
+ * undefined id would produce a broken DELETE url either way — but it is a
+ * difference, so it is written down. Keys are `String(playlistId)` for the same
+ * reason: JS object keys are strings regardless, so this only makes explicit
+ * what the vanilla's numeric index already did.
  */
 export function buildAutoSyncScheduleState(
   playlists: MirroredRow[],
@@ -637,4 +649,167 @@ export function buildAutoSyncScheduleState(
     runHistory: historyData.history || [],
     runHistoryTotal: historyData.total || 0,
   };
+}
+
+/* ── The hourly board's lane model (auto-sync.js 741-823) ─────────────────── */
+
+/**
+ * 742-746. The sidebar filter matches the playlist NAME or its SOURCE LABEL —
+ * so typing "tidal" finds every Tidal playlist even though no name contains it.
+ * Empty filter matches everything.
+ */
+export function autoSyncMatchesFilter(
+  playlist: MirroredRow,
+  filter: string,
+  sourceLabel: (source: string) => string = autoSyncSourceLabel,
+): boolean {
+  const needle = (filter || '').trim().toLowerCase();
+  if (!needle) return true;
+  const name = (playlist?.name || '').toLowerCase();
+  const label = sourceLabel(playlist?.source || '').toLowerCase();
+  return name.includes(needle) || label.includes(needle);
+}
+
+/**
+ * 747-753. Group the schedulable rows by source, ordering the groups by their
+ * DISPLAY LABEL rather than the raw key.
+ *
+ * Worth knowing before anyone simplifies this: with TODAY'S twelve labels the
+ * two orderings happen to coincide, because every label is essentially its key
+ * capitalised. Sorting by the key would therefore pass every test that used
+ * real sources — which is why the labeller is injectable and the test below
+ * supplies one that genuinely reorders. The moment a label stops matching its
+ * key (an 'amazon_music' → 'Prime Music', say) the difference becomes visible
+ * to users, and this stays correct.
+ */
+export function autoSyncGroupBySource(
+  playlists: MirroredRow[],
+  sourceLabel: (source: string) => string = autoSyncSourceLabel,
+): {
+  source: string;
+  rows: MirroredRow[];
+}[] {
+  const grouped = new Map<string, MirroredRow[]>();
+  (playlists || []).forEach((p) => {
+    const key = p?.source || 'other';
+    const rows = grouped.get(key);
+    if (rows) rows.push(p);
+    else grouped.set(key, [p]);
+  });
+  return [...grouped.keys()]
+    .sort((a, b) => sourceLabel(a).localeCompare(sourceLabel(b)))
+    .map((source) => ({ source, rows: grouped.get(source) as MirroredRow[] }));
+}
+
+export interface AutoSyncLane {
+  hours: number;
+  /** True when this interval is not one of the ten standard buckets. */
+  isCustom: boolean;
+  playlists: MirroredRow[];
+}
+
+/**
+ * 795-823. The lanes to render, and the reason this is not just
+ * AUTO_SYNC_BUCKETS.
+ *
+ * A schedule can carry ANY hour count — the Automations page and the board's
+ * own custom-interval prompt both allow it. Those hours are merged into the
+ * bucket list so a 6h or 36h schedule renders in its own lane instead of
+ * vanishing from the board entirely. Filtered to finite positives so a
+ * corrupt row cannot inject a NaN or negative lane, de-duplicated, and sorted
+ * ascending so a custom lane lands between its neighbours rather than at the
+ * end.
+ */
+export function autoSyncBuildLanes(
+  schedulable: MirroredRow[],
+  playlistSchedules: Record<string, { hours?: number } | undefined>,
+): AutoSyncLane[] {
+  const customHours = Object.values(playlistSchedules || {})
+    .map((s) => parseInt(String(s?.hours), 10))
+    .filter((h) => Number.isFinite(h) && h > 0 && !AUTO_SYNC_BUCKETS.includes(h));
+
+  const allHours = [...new Set([...AUTO_SYNC_BUCKETS, ...customHours])].sort((a, b) => a - b);
+
+  return allHours.map((hours) => ({
+    hours,
+    isCustom: !AUTO_SYNC_BUCKETS.includes(hours),
+    playlists: (schedulable || []).filter(
+      (p) => playlistSchedules?.[String(p?.id)]?.hours === hours,
+    ),
+  }));
+}
+
+/**
+ * stats-automations.js 4260-4264, reached from auto-sync.js 1863/2002 as a
+ * cross-file global. A bare timestamp is UTC, so it gets a 'Z' appended; one
+ * that already carries an offset is parsed as-is.
+ */
+export function autoSyncParseUTC(ts: string): number {
+  if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts).getTime();
+  return new Date(`${ts}Z`).getTime();
+}
+
+/**
+ * 1999-2011. 'next in 12m' / '3h' / '2d', or 'due now' once the moment has
+ * passed. `now` is a parameter rather than a `Date.now()` call so the label is
+ * testable without faking the clock.
+ */
+export function autoSyncNextRunLabel(nextRun: string | null | undefined, now: number): string {
+  if (!nextRun) return '';
+  const ts = autoSyncParseUTC(nextRun);
+  if (!Number.isFinite(ts)) return '';
+  const diff = ts - now;
+  if (diff <= 0) return 'due now';
+  const mins = Math.ceil(diff / 60000);
+  if (mins < 60) return `next in ${mins}m`;
+  const hours = Math.ceil(mins / 60);
+  if (hours < 24) return `next in ${hours}h`;
+  return `next in ${Math.ceil(hours / 24)}d`;
+}
+
+export interface AutoSyncHealth {
+  level: 'ok' | 'warning' | 'failing';
+  tooltip: string;
+}
+
+export interface AutoSyncHistoryRow {
+  playlist_id?: number | string;
+  status?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * 1978-1996. The health dot on a scheduled card, from the last three runs of
+ * that playlist in the loaded history. Three errors in a row is failing (red);
+ * any error at all is a warning. 'skipped' counts as an error, which is
+ * deliberate — a skipped run means the pipeline did not do its job.
+ *
+ * ORDERING CAVEAT, carried over unchanged: `slice(0, 3)` calls the FIRST three
+ * rows "the last 3 runs", which is only true if the history endpoint returns
+ * newest-first. I could not find the ORDER BY for the pipeline-history table
+ * during the P0 read (the `ORDER BY started_at DESC` nearby belongs to
+ * `sync_history`), so this is flagged in SYNC_PORT_AUDIT.md as unverified
+ * rather than silently "fixed" — reversing it here would change behaviour on a
+ * guess.
+ */
+export function autoSyncPlaylistHealth(
+  history: AutoSyncHistoryRow[] | null | undefined,
+  playlistId: number | string,
+): AutoSyncHealth {
+  const id = parseInt(String(playlistId), 10);
+  const recent = (history || [])
+    .filter((h) => parseInt(String(h?.playlist_id), 10) === id)
+    .slice(0, 3);
+  if (!recent.length) return { level: 'ok', tooltip: '' };
+  const errored = recent.filter((h) => h?.status === 'error' || h?.status === 'skipped');
+  if (errored.length >= 3) {
+    return {
+      level: 'failing',
+      tooltip: `Last ${recent.length} runs failed — check Run History tab`,
+    };
+  }
+  if (errored.length) {
+    return { level: 'warning', tooltip: `${errored.length} of last ${recent.length} runs failed` };
+  }
+  return { level: 'ok', tooltip: '' };
 }

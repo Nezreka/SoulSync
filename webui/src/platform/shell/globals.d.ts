@@ -301,6 +301,26 @@ declare global {
     ) => void;
     removeDiscoverDownload?: (playlistId: string) => void;
     updateDiscoverDownloadBar?: () => void;
+    /**
+     * shared-helpers.js — the per-playlist quality-profile <select>. The
+     * Auto-Sync board renders it through the same `typeof === 'function'`
+     * guard the vanilla uses (auto-sync.js 1927-1929), so an absent global
+     * simply yields no select. `compact` is the third argument.
+     */
+    playlistQualityProfileSelectHtml?: (
+      playlistId: string | number | undefined,
+      source: string | undefined,
+      compact?: boolean,
+    ) => string;
+    /**
+     * shared-helpers.js — fills those selects with the real profile list after
+     * the markup lands (auto-sync.js 1089-1096).
+     */
+    hydratePlaylistQualityProfileSelects?: (
+      playlistId: string | number | undefined,
+      source: string | undefined,
+      currentProfileId?: string | number | null,
+    ) => Promise<void> | void;
     hydrateDiscoverDownloadsFromSnapshot?: () => Promise<void>;
     /** core.js bridge: one discover download's process record, or null. */
     discoverDownloadProcess?: (

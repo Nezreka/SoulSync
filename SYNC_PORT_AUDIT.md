@@ -4204,3 +4204,71 @@ Full suite 6448 tests. Build clean. Lint clean.
 
 **Next:** slice B, the hourly board (lanes, sidebar groups, drag-drop,
 custom-interval lanes, scroll preservation).
+
+### AUTO-SYNC SLICE B — the hourly board
+
+`renderAutoSyncSchedulePanel` (741-859) and everything it reaches: the source
+icon (197-203), the sidebar kind-groups (436-457), the scheduled card
+(1951-1976), the health dot (1978-1996), the next-run label (1999-2011), the
+organize toggle (1920-1931) and the five drag handlers (2013-2049). Pure lane
+model in `-sync.autosync.ts`, markup in `-ui/autosync-board.tsx`.
+
+**Three vanilla globals dissolve rather than port.** `_autoSyncSidebarFilter`
+exists only because the vanilla re-renders the whole panel through `innerHTML`
+on every keystroke and then has to re-focus the input and restore the caret
+(1080-1102); React keeps the input mounted, so the global, the re-render and
+the caret dance all go. `_autoSyncExpandedKinds` becomes board state.
+`_autoSyncIsDragging` is set by three handlers and read by the poller — it
+belongs to slice E's wiring, not to the board.
+
+**What reading the vanilla actually bought this slice.** `autoSyncBuildLanes`
+merges custom intervals that are in use into the standard buckets. Without it a
+6h schedule made on the Automations page has no lane and vanishes from the
+board — the vanilla has a comment saying exactly that at 793-796, and the port
+would have dropped it silently had the model been written from the bucket list
+alone.
+
+**Three tests that proved nothing, all caught by mutation.**
+
+1. `autoSyncGroupBySource` sorts by DISPLAY LABEL, not the raw source key. With
+   today's twelve labels the two orderings coincide for every pair — every
+   label is essentially its key capitalised — so a test using real sources
+   passes just as happily against a key sort. The labeller is now injectable
+   and the test supplies one that genuinely reorders. The day a label stops
+   matching its key the difference becomes user-visible.
+2. The lane de-dupe needs TWO playlists sharing one custom interval, not one.
+   With a single 6h schedule the `new Set` is unreachable.
+3. `autoSyncMatchesFilter` searches the label, so the fixture has to use a
+   source whose label differs from its key — `file` → `File Imports`, matched
+   on "imports".
+
+**A jsdom trap worth writing down.** jsdom implements no `DragEvent`, so
+`fireEvent.dragLeave(el, { relatedTarget })` silently DROPS the property. Both
+drag-leave tests were passing while asserting nothing about the child-guard at
+2032 — the guard that stops the highlight flickering when the cursor moves onto
+a card inside the lane. The fix is a real `MouseEvent`, which does carry
+`relatedTarget`, handed to `fireEvent` so the state update flushes inside
+`act()`. Dispatching it directly leaves the assertion reading pre-update DOM,
+which is a second silent pass.
+
+**Health dot ordering — still unverified, deliberately unchanged.** The P0 read
+flagged that `.slice(0, 3)` calls the FIRST three rows "the last 3 runs". I
+still have not found the ORDER BY for the pipeline-history table, so the port
+transcribes it and says so in the docblock rather than reversing it on a guess.
+
+**Mutation pass: 43 mutants, 43 killed** after one round of three survivors —
+the health window (fixtures never exceeded three rows), the `typeof` guard on
+the quality-profile seam (no fixture supplied a non-callable value), and the
+drag-start payload (no test ever dragged a card FROM a lane). All three now
+have tests; a fourth mutant was added for the sidebar card's drag-start, which
+the first pass had not covered at all. The lane-model pass went 24/24.
+
+**The export gate caught the three card helpers** — six consecutive slices.
+They were exercised only through the component, which the gate correctly
+refuses to count.
+
+**Artefact check:** all 53 classes the board emits resolve in `static/style.css`.
+
+Full suite 6510 tests. Build clean. Lint clean.
+
+**Next:** slice C, the weekly board + the controlled editor popover.

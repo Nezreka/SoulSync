@@ -19,6 +19,12 @@ import { describe, expect, it } from 'vitest';
 
 import { extractFunction } from '../../test/vanilla-extract';
 import {
+  autoSyncBuildLanes,
+  autoSyncGroupBySource,
+  autoSyncMatchesFilter,
+  autoSyncNextRunLabel,
+  autoSyncParseUTC,
+  autoSyncPlaylistHealth,
   buildAutoSyncScheduleState,
   AUTO_SYNC_BUCKETS,
   AUTO_SYNC_WEEKDAYS,
@@ -819,5 +825,229 @@ describe('buildAutoSyncScheduleState (471-569)', () => {
     const state = buildAutoSyncScheduleState([], [{ action_type: 'something_else', id: 9 }]);
     expect(state.automationPipelines).toEqual([]);
     expect(state.playlistSchedules).toEqual({});
+  });
+});
+
+describe("the hourly board's lane model (741-823)", () => {
+  const row = (id: number, name: string, source = 'spotify') => ({ id, name, source });
+
+  describe('autoSyncMatchesFilter', () => {
+    it('matches the NAME or the SOURCE LABEL, case-insensitively', () => {
+      const p = row(1, 'Late Night', 'tidal');
+      expect(autoSyncMatchesFilter(p, 'late')).toBe(true);
+      expect(autoSyncMatchesFilter(p, 'NIGHT')).toBe(true);
+      // 744: the label, not the raw key — so 'tidal' finds it even though the
+      // name does not contain it.
+      expect(autoSyncMatchesFilter(p, 'tidal')).toBe(true);
+      expect(autoSyncMatchesFilter(p, 'spotify')).toBe(false);
+      // A source whose LABEL differs from its key proves it is the label being
+      // searched: 'file' is labelled 'File Imports', so 'imports' matches
+      // although the key contains no such text.
+      expect(autoSyncMatchesFilter(row(2, 'Mixtape', 'file'), 'imports')).toBe(true);
+    });
+
+    it('matches everything for an empty or whitespace filter', () => {
+      expect(autoSyncMatchesFilter(row(1, 'x'), '')).toBe(true);
+      expect(autoSyncMatchesFilter(row(1, 'x'), '   ')).toBe(true);
+    });
+
+    it('survives a row with no name or source', () => {
+      expect(autoSyncMatchesFilter({ id: 1 }, 'anything')).toBe(false);
+      expect(autoSyncMatchesFilter({ id: 1 }, '')).toBe(true);
+    });
+  });
+
+  describe('autoSyncGroupBySource', () => {
+    it('groups by source, preserving encounter order within a group', () => {
+      const groups = autoSyncGroupBySource([
+        row(1, 'a', 'tidal'),
+        row(2, 'b', 'file'),
+        row(3, 'c', 'tidal'),
+      ]);
+      expect(groups.map((g) => g.source)).toEqual(['file', 'tidal']);
+      expect(groups[1].rows.map((r) => r.id)).toEqual([1, 3]);
+    });
+
+    it('orders by DISPLAY LABEL, which the real labels cannot demonstrate', () => {
+      // With today's twelve labels, key-order and label-order coincide for
+      // every pair — so a test using real sources would pass just as happily
+      // if this sorted by the key. An injected labeller that genuinely
+      // reorders is the only way to assert the actual rule.
+      const label = (s: string) => ({ zebra: 'Alpha', alpha: 'Zebra' })[s] || s;
+      const groups = autoSyncGroupBySource([row(1, 'a', 'alpha'), row(2, 'b', 'zebra')], label);
+      expect(groups.map((g) => g.source)).toEqual(['zebra', 'alpha']);
+    });
+
+    it("buckets a source-less row under 'other'", () => {
+      expect(autoSyncGroupBySource([{ id: 1, name: 'x' }])[0].source).toBe('other');
+    });
+
+    it('is empty for no rows', () => {
+      expect(autoSyncGroupBySource([])).toEqual([]);
+    });
+  });
+
+  describe('autoSyncBuildLanes', () => {
+    it('renders the ten standard buckets even when nothing is scheduled', () => {
+      const lanes = autoSyncBuildLanes([], {});
+      expect(lanes.map((l) => l.hours)).toEqual([...AUTO_SYNC_BUCKETS]);
+      expect(lanes.every((l) => !l.isCustom && l.playlists.length === 0)).toBe(true);
+    });
+
+    it('MERGES an in-use custom interval into its sorted position', () => {
+      // 795-802. A 6h schedule made on the Automations page would otherwise
+      // have no lane and vanish from the board.
+      const lanes = autoSyncBuildLanes([row(1, 'a')], { '1': { hours: 6 } });
+      const hours = lanes.map((l) => l.hours);
+      expect(hours).toContain(6);
+      // Sorted ascending, so it sits between 4 and 8 rather than at the end.
+      expect(hours.indexOf(6)).toBe(hours.indexOf(4) + 1);
+      expect(hours.indexOf(8)).toBe(hours.indexOf(6) + 1);
+      expect(lanes.find((l) => l.hours === 6)?.isCustom).toBe(true);
+      expect(lanes.find((l) => l.hours === 24)?.isCustom).toBe(false);
+    });
+
+    it('does not duplicate a lane when TWO playlists share a custom interval', () => {
+      // Both contribute 6 to customHours; without the de-dupe the board grows
+      // two identical 6-hour lanes.
+      const lanes = autoSyncBuildLanes([row(1, 'a'), row(2, 'b')], {
+        '1': { hours: 6 },
+        '2': { hours: 6 },
+      });
+      expect(lanes.filter((l) => l.hours === 6)).toHaveLength(1);
+      expect(lanes.find((l) => l.hours === 6)?.playlists.map((p) => p.id)).toEqual([1, 2]);
+    });
+
+    it('does not duplicate a lane when a schedule uses a standard bucket', () => {
+      const lanes = autoSyncBuildLanes([row(1, 'a')], { '1': { hours: 24 } });
+      expect(lanes.filter((l) => l.hours === 24)).toHaveLength(1);
+      expect(lanes.map((l) => l.hours)).toEqual([...AUTO_SYNC_BUCKETS]);
+    });
+
+    it('rejects corrupt hour values rather than inventing a lane', () => {
+      const lanes = autoSyncBuildLanes([], {
+        a: { hours: 0 },
+        b: { hours: -5 },
+        c: { hours: Number.NaN },
+        d: undefined,
+      });
+      expect(lanes.map((l) => l.hours)).toEqual([...AUTO_SYNC_BUCKETS]);
+    });
+
+    it('assigns each playlist to the lane matching its scheduled hours', () => {
+      const lanes = autoSyncBuildLanes([row(1, 'a'), row(2, 'b'), row(3, 'c')], {
+        '1': { hours: 24 },
+        '2': { hours: 24 },
+        '3': { hours: 1 },
+      });
+      expect(lanes.find((l) => l.hours === 24)?.playlists.map((p) => p.id)).toEqual([1, 2]);
+      expect(lanes.find((l) => l.hours === 1)?.playlists.map((p) => p.id)).toEqual([3]);
+      expect(lanes.find((l) => l.hours === 48)?.playlists).toEqual([]);
+    });
+
+    it('leaves an UNSCHEDULED playlist out of every lane', () => {
+      const lanes = autoSyncBuildLanes([row(1, 'a')], {});
+      expect(lanes.every((l) => l.playlists.length === 0)).toBe(true);
+    });
+
+    it('handles the negative ids the synthetic personalized rows carry', () => {
+      // The synthetic rows use NEGATIVE ids so they never collide with real
+      // mirrored ones; they must still land in a lane.
+      const lanes = autoSyncBuildLanes([row(-5, 'mix')], { '-5': { hours: 12 } });
+      expect(lanes.find((l) => l.hours === 12)?.playlists.map((p) => p.id)).toEqual([-5]);
+    });
+  });
+});
+
+describe('the scheduled-card helpers (1978-2011)', () => {
+  const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
+
+  describe('autoSyncParseUTC', () => {
+    it('treats a bare timestamp as UTC rather than local', () => {
+      expect(autoSyncParseUTC('2026-01-01T12:00:00')).toBe(NOW);
+    });
+
+    it('respects a timestamp that already carries its zone', () => {
+      expect(autoSyncParseUTC('2026-01-01T12:00:00Z')).toBe(NOW);
+      expect(autoSyncParseUTC('2026-01-01T13:00:00+01:00')).toBe(NOW);
+      expect(autoSyncParseUTC('2026-01-01T11:00:00-01:00')).toBe(NOW);
+    });
+
+    it('is NaN for something unparseable, which callers check for', () => {
+      expect(Number.isNaN(autoSyncParseUTC('not a date'))).toBe(true);
+    });
+  });
+
+  describe('autoSyncNextRunLabel', () => {
+    const at = (ms: number) => new Date(NOW + ms).toISOString().replace('Z', '');
+
+    it('counts minutes below the hour and hours below the day', () => {
+      expect(autoSyncNextRunLabel(at(90_000), NOW)).toBe('next in 2m');
+      expect(autoSyncNextRunLabel(at(59 * 60_000), NOW)).toBe('next in 59m');
+      // 60 minutes exactly crosses into the hours branch.
+      expect(autoSyncNextRunLabel(at(60 * 60_000), NOW)).toBe('next in 1h');
+      expect(autoSyncNextRunLabel(at(23 * 3600_000), NOW)).toBe('next in 23h');
+      expect(autoSyncNextRunLabel(at(25 * 3600_000), NOW)).toBe('next in 2d');
+    });
+
+    it('rounds UP, so a run 30 seconds out is a minute away not zero', () => {
+      expect(autoSyncNextRunLabel(at(30_000), NOW)).toBe('next in 1m');
+    });
+
+    it("says 'due now' once the moment has passed", () => {
+      expect(autoSyncNextRunLabel(at(0), NOW)).toBe('due now');
+      expect(autoSyncNextRunLabel(at(-60_000), NOW)).toBe('due now');
+    });
+
+    it('is empty for a missing or unparseable timestamp', () => {
+      expect(autoSyncNextRunLabel(null, NOW)).toBe('');
+      expect(autoSyncNextRunLabel('', NOW)).toBe('');
+      expect(autoSyncNextRunLabel('garbage', NOW)).toBe('');
+    });
+  });
+
+  describe('autoSyncPlaylistHealth', () => {
+    const h = (playlist_id: number, status: string) => ({ playlist_id, status });
+
+    it('is ok with no history at all', () => {
+      expect(autoSyncPlaylistHealth([], 1)).toEqual({ level: 'ok', tooltip: '' });
+      expect(autoSyncPlaylistHealth(null, 1).level).toBe('ok');
+    });
+
+    it('counts a skipped run as a failure, not a success', () => {
+      expect(autoSyncPlaylistHealth([h(1, 'skipped'), h(1, 'success')], 1)).toEqual({
+        level: 'warning',
+        tooltip: '1 of last 2 runs failed',
+      });
+    });
+
+    it('goes red only at three failures in the window', () => {
+      expect(autoSyncPlaylistHealth([h(1, 'error'), h(1, 'error')], 1).level).toBe('warning');
+      expect(autoSyncPlaylistHealth([h(1, 'error'), h(1, 'error'), h(1, 'error')], 1)).toEqual({
+        level: 'failing',
+        tooltip: 'Last 3 runs failed — check Run History tab',
+      });
+    });
+
+    it('only reads the first three rows for that playlist', () => {
+      const history = [h(1, 'success'), h(1, 'success'), h(1, 'success'), h(1, 'error')];
+      expect(autoSyncPlaylistHealth(history, 1).level).toBe('ok');
+    });
+
+    it('filters by playlist BEFORE taking three, so another playlist cannot crowd it out', () => {
+      // Three foreign rows sit in front; without the filter-first order the
+      // window would contain none of playlist 1's runs.
+      const history = [h(9, 'success'), h(9, 'success'), h(9, 'success'), h(1, 'error')];
+      expect(autoSyncPlaylistHealth(history, 1)).toEqual({
+        level: 'warning',
+        tooltip: '1 of last 1 runs failed',
+      });
+    });
+
+    it('matches a string playlist id against a numeric one', () => {
+      expect(autoSyncPlaylistHealth([{ playlist_id: '7', status: 'error' }], 7).level).toBe(
+        'warning',
+      );
+    });
   });
 });
