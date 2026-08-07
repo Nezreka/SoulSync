@@ -4003,3 +4003,106 @@ Three live vanilla bugs were found by reading and fixed in the vanilla itself
 **Sync-port remaining after Beatport:** the auto-sync schedule board, the 15-tab
 page shell + sidebar, then the flip, the vanilla severs and the full
 original-vs-port review.
+
+## AUTO-SYNC SCHEDULE BOARD — P0 READ COMPLETE (auto-sync.js 436-2525)
+
+The earlier entry read 35-470 verbatim and only INVENTORY-MAPPED 471-2525. This
+closes that: 436-2525 is now read line by line. The pure core (35-470) is
+already ported — `-sync.autosync.ts`, 30 exports, done in Sync P1c — so the
+work ahead is the state builder, the four panels and the interaction layer.
+
+### TENANCY — the file has THREE tenants, and only two are ours
+
+1. **The schedule board** (436-2356) — this wave.
+2. **The mirrored-pipeline tail** (2358-2525: parseMirroredPipelineResponse,
+   editMirroredCustomName, editMirroredSourceRef, applyMirroredPipelineState,
+   runMirroredPlaylistPipeline, pollMirroredPipelineStatus). **NOT ours to
+   port** — stats-automations.js calls all five from the mirrored CARDS and the
+   mirrored modal (604-606, 1150-1151), and the React mirrored tab already
+   ports the behaviour. The board only CONSUMES one of them
+   (runAutoSyncScheduledPlaylist → runMirroredPlaylistPipeline).
+3. **Two shared-helpers.js seams the board calls through `typeof` guards**:
+   `playlistQualityProfileSelectHtml` (1150) and
+   `hydratePlaylistQualityProfileSelects` (1381). Both survive the flip; both
+   need a seam-test row before the board can rely on them.
+
+### THE STATE BUILDER — buildAutoSyncScheduleState (471-569), pure, P1 gold
+
+Two passes over automations. The FIRST (playlist_pipeline) pushes anything it
+cannot bucket onto `automationPipelines` — the read-only panel. The SECOND
+(personalized_pipeline) does NOT: an unbucketable personalized automation is
+silently dropped. **That asymmetry is real and easy to "tidy" away.**
+
+**The deliberate `|| {}` asymmetry (496-501, commented in the vanilla).**
+`trigger_type === 'schedule'` reads `auto.trigger_config || {}`;
+`weekly_time` passes `auto.trigger_config` RAW. A null/non-object config on a
+weekly row must fall through to `automationPipelines` as a broken row rather
+than be silently bucketed as an every-day schedule — because
+autoSyncWeeklyFromTrigger's defensive defaults would otherwise turn garbage
+into "all 7 days". Transcribe exactly.
+
+`enabled: auto.enabled !== false && auto.enabled !== 0` — tri-state, not truthy.
+
+### FIVE FETCHES, THREE REQUIRED (602-650)
+
+`/api/mirrored-playlists`, `/api/automations`,
+`/api/playlist-pipeline/history?limit=<state>` are required and each checked
+`!res.ok || data.error`. `/api/personalized/kinds` and
+`/api/personalized/playlists` are BEST-EFFORT — `.catch(() => null)` plus their
+own try/catch, so a kinds failure never breaks the board. ORDER MATTERS:
+enrich first (tags variants, drops orphaned mirrors), THEN append the
+synthetic not-yet-generated rows built against the enriched list.
+
+### FINDINGS THE PORT MUST NOT LOSE
+
+- **Scroll preservation across the full re-render (656-660, 726-729).** Reads
+  `.auto-sync-tab-panel.active .auto-sync-lanes` scrollTop before rebuilding
+  and restores it after — targeting the ACTIVE tab so it works on both boards.
+  Without it, dropping a playlist snaps the board to the top. React's
+  reconciliation removes the need only if the lanes element is not remounted.
+- **Custom-interval lanes (795-802).** Buckets are merged with any in-use hours
+  that are NOT in AUTO_SYNC_BUCKETS, so a 6h or 36h schedule made on the
+  Automations page still gets its own lane instead of vanishing from the board.
+- **`renderAutoSyncWeeklyPanel(playlists, playlistSchedules)` is NOT a bug.**
+  It reads `weeklySchedules` from module state (862) and uses the passed HOURLY
+  map only to mark a card `scheduled-elsewhere` and label it 'Hourly (…)'.
+- **Multi-day weekly cards render under EVERY matching day** (922-928), built
+  by iterating the schedules once rather than scanning per day.
+- **Only the hourly sidebar has a Bulk button.** The weekly sidebar omits it.
+- **One-schedule-per-playlist is enforced in BOTH directions, by delete-then-
+  create** (2059-2067 and 2251-2263), each best-effort. The vanilla's own
+  comment accepts the failure mode: a failed POST leaves the playlist
+  unscheduled, which is recoverable.
+- **Health dot (1981-1998):** last 3 runs for that playlist; ≥3 errored →
+  'failing', ≥1 → 'warning'. Counts `skipped` as an error.
+- **Polling (2334-2350):** 3s interval, started only when some playlist is
+  `running`, and **skipped entirely while a drag is in progress**
+  (`_autoSyncIsDragging`) so a refresh cannot yank the card out from under the
+  pointer.
+- **Run now is polymorphic (2308-2332):** a synthetic personalized row has no
+  mirrored pipeline, so it POSTs `/api/automations/<id>/run` instead — and
+  toasts 'Schedule it first, then Run now.' when unscheduled.
+- **History is DOM-built, not innerHTML** (1394-1572) with a per-entry
+  try/catch that swaps in an error card, plus a whole-list fallback when the
+  renderer produced zero cards from a non-empty list. The filter is applied at
+  populate time, and 'error' includes `skipped` while 'completed' includes
+  `finished`.
+- `loadMoreAutoSyncHistory` raises the limit by 50, capped at 500, and REFETCHES.
+- The bulk menu is a transient body-appended popover positioned off the anchor
+  rect, closed by a `{ once: true }` outside-click listener registered in a
+  `setTimeout(0)` so the opening click does not immediately close it.
+- **`promptAutoSyncBulkCustom` uses `window.prompt`** (1305) — forbidden by this
+  repo's rules. The port must use the SoulSync confirm/prompt modal.
+
+### PORT SHAPE
+
+The dossier's earlier note holds: this is the most React-shaped vanilla in the
+family — controlled editor draft state, pure helpers, DOM-built lists. The
+weekly editor is already a controlled component in all but name (draft object,
+discard on outside click, save/cancel).
+
+Suggested slices: A) state builder + api layer (pure, differential-testable);
+B) the hourly board; C) the weekly board + editor; D) monitor + automations +
+history panels; E) wiring, polling and the two shared-helpers seams.
+
+**Read status: COMPLETE.** No code written.
