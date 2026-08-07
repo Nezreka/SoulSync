@@ -35,6 +35,64 @@ function functionBody(name: string): string {
   return SOURCE.slice(start, end);
 }
 
+describe('the sync page binds its listeners exactly once', () => {
+  /**
+   * initializeSyncPage is called at boot AND from loadPageData's `case 'sync'`,
+   * which runs on every navigation to the page. The markup is static, so the
+   * listeners only need binding once — binding per visit stacked a duplicate
+   * set each time, and one of them is the Start Sync button whose handler is a
+   * toggle. After an even number of visits, one click started the sync and
+   * immediately cancelled it.
+   */
+  const SYNC_SERVICES = readFileSync(
+    resolve(__dirname, '../../static/sync-services.js'),
+    'utf8',
+  );
+
+  function initBody(): string {
+    const start = SYNC_SERVICES.indexOf('function initializeSyncPage() {');
+    expect(start, 'initializeSyncPage should exist').toBeGreaterThan(-1);
+    const end = SYNC_SERVICES.indexOf('\n}', start);
+    return SYNC_SERVICES.slice(start, end);
+  }
+
+  it('returns early once the bindings have run', () => {
+    const body = initBody();
+    expect(body).toContain('if (_syncPageListenersBound) return;');
+    expect(body).toContain('_syncPageListenersBound = true;');
+  });
+
+  it('sets the flag BEFORE binding anything', () => {
+    // Guard-then-bind, not bind-then-guard: a throw mid-binding must not leave
+    // the flag clear and let the next visit stack a second partial set.
+    const body = initBody();
+    expect(body.indexOf('_syncPageListenersBound = true;')).toBeLessThan(
+      body.indexOf('addEventListener'),
+    );
+  });
+
+  it('keeps the per-visit refreshes OUTSIDE the guard', () => {
+    const body = initBody();
+    const guard = body.indexOf('if (_syncPageListenersBound) return;');
+    expect(guard).toBeGreaterThan(-1);
+    // Both are idempotent refreshes, not bindings, and must run every visit.
+    // Each is asserted PRESENT before its position is compared: indexOf gives
+    // -1 for a deleted call, and -1 is less than the guard index, so a
+    // position-only check passes when the call is gone. Caught by mutation.
+    for (const call of ['ensureBeatportContentLoaded()', 'updateBeatportClearButtonState()']) {
+      const at = body.indexOf(call);
+      expect(at, `${call} should still be called`).toBeGreaterThan(-1);
+      expect(at, `${call} should run on every visit, not once`).toBeLessThan(guard);
+    }
+  });
+
+  it('declares the flag at module scope, not inside the function', () => {
+    // A `let` inside the function would reset on every call and guard nothing.
+    expect(SYNC_SERVICES).toMatch(/^let _syncPageListenersBound = false;$/m);
+    expect(initBody()).not.toContain('let _syncPageListenersBound');
+  });
+});
+
 describe('bulk unschedule sees BOTH kinds of schedule', () => {
   /**
    * The sibling of the save-path bug: the bulk paths predate weekly schedules,

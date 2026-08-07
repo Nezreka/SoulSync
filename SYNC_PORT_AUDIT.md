@@ -4800,10 +4800,26 @@ elements; there is no accumulate-on-init path to get wrong. The bug cannot be
 carried across unless someone reintroduces manual `addEventListener` in an
 effect without a cleanup — which is what the effect-cleanup discipline is for.
 
-**Whether to fix the vanilla too is Boulder's call.** The one-line version is
-to give the 21 the same `removeEventListener`-first treatment the other four
-already have; the arrow-function handlers need their references hoisted first,
-so it is not purely mechanical. It is live today and the flip is a wave away.
+**FIXED in the vanilla, at the root rather than per-binding.** Adding 21
+`removeEventListener` calls would have treated the symptom — and half of those
+handlers are arrow functions whose references would have had to be hoisted
+first. The actual defect is that an INITIALIZER is being called as a per-visit
+hook. The markup is static in index.html and never re-created, so the bindings
+only need to happen once: a module-scoped `_syncPageListenersBound` flag now
+guards them, with the two genuinely per-visit calls (`ensureBeatportContentLoaded`
+when the Beatport tab is already active, and `updateBeatportClearButtonState`)
+hoisted ABOVE the guard so they still run on every navigation.
+
+Six mutants, all killed: no guard at all; the flag set AFTER binding so a throw
+mid-bind re-stacks on the next visit; the flag declared inside the function
+where it resets every call; and each of the two per-visit refreshes falling
+inside the guard.
+
+**One of those mutants initially SURVIVED, and it was my test that was wrong.**
+The assertion compared `body.indexOf(call) < guardIndex` — but `indexOf`
+returns -1 when the call is DELETED, and -1 is less than any index, so the test
+passed on absence. It now asserts presence first, then position. Same family as
+the earlier lesson about tests that pass while measuring nothing.
 
 ### The sidebar — read, and smaller than it looks
 
