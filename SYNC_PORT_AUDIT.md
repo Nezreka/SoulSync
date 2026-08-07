@@ -3370,3 +3370,78 @@ the odd one out, which is the sort of inconsistency that only shows up when
 someone later writes a selector against it.
 
 Full suite 285 files / 6220 tests.
+
+### BEATPORT P7 — the download bridge (-beatport.downloads.ts)
+
+The region where a click becomes files on disk (beatport-ui.js 1855-2228), read
+again line by line before any of it was written.
+
+**Four card types, ONE release handler.** The hero slide (149), the releases
+slider (502), the hype picks (974) and the top-10 release cards (1834) all call
+handleBeatportReleaseCardClick. Only the "which release was clicked" question
+differs between them, and that is settled in the components. So the bridge is
+three flows, not seven: release, chart card, Top 100.
+
+**A release is an ALBUM; a chart is a COMPILATION.** Different endpoint,
+different contextType, different bubble image, different artist. The two call
+sites look alike, and the difference in the release one is an argument that
+ISN'T THERE — it passes six arguments and takes shared-helpers.js 1763's
+`contextType = 'artist_album'` default. Verified that default rather than
+assumed it, and the port passes it explicitly so the difference is visible.
+
+**The latch is applied five ways, all reproduced.** Release clicks hold it for
+the whole of the work; the two Top 100 buttons release it on a blind 2s timer
+(so a slower scrape reopens the gate mid-flight); openBeatportChartAsDownloadModal
+clears it unconditionally whether or not it set it; the featured-chart and
+DJ-chart card clicks never touch it at all. Unifying them would change which
+clicks are swallowed on the path that queues 100 downloads, so they are
+transcribed and each one is asserted.
+
+**ONE declared divergence, and it is tiny.** The vanilla has no `data.album`
+check and instead throws a TypeError one line later when it logs
+`data.album.name`. Both land in the same catch and show a toast; only the
+wording differs, and a response with tracks but no album is malformed either
+way. The port checks it explicitly.
+
+**Anchored on the vanilla, verified not assumed:**
+- the toast copy differs per variant in four places ('No chart URL available'
+  vs 'No DJ chart URL available', 'Featured Chart: ' vs 'DJ Chart: ', and the
+  two empty-chart messages),
+- the chart's DISPLAY name (`name - creator`) and the name sent to the SCRAPER
+  (prefixed) are deliberately different strings,
+- the chart's album id (2005) has NO random suffix where the virtual playlist id
+  (2047) does, and the enrichment id (1939) uses a 6-char suffix where the
+  playlist ids use 9,
+- neither Top 100 button shows a 'Loading…' toast, where every other flow does,
+- enrichment progress is written STRAIGHT into `#loading-overlay .loading-message`
+  and null-guarded (1964-1966). Kept that way rather than re-calling
+  showLoadingOverlay, because downloads.js 4321 does NOT null-guard the overlay
+  element — routing through it would turn a missing overlay from a silent no-op
+  into a throw inside the download path.
+
+**A FLIP-WAVE CARVE-OUT, found by following registerBeatportDownload.** It lives
+in shared-helpers.js 3390 and writes into `beatportDownloadBubbles`, a top-level
+`let` in core.js 555 that no module can reach — so React must call it, and
+showBeatportDownloadsSection (3430) renders into `#beatport-downloads-section`
+(index.html 2865). That div is an ADOPTED REGION: the React Beatport tab must
+render it and never touch its contents, or every download bubble silently stops
+appearing. Added to vanilla-seams.test.ts so deleting the function fails loudly.
+
+**Mutation pass: 31 mutants, 31 killed.** Four rounds — two survivors were real
+test gaps and two were my own bad anchors:
+- SURVIVED: leaking the latch on the release no-url exit. Real gap: the test
+  asserted the toast and the absent fetch but not the latch, and a leak there
+  would silently swallow every release click for the rest of the session.
+- SURVIVED: shortening the release id suffix from 9 to 6. Real gap: the test
+  matched the id's prefix only, and the downloads test pinned `random` to 0.5,
+  whose token is one character at either length.
+- ANCHOR MISS (2x): `copy.noTracks` appears in both the chart and Top 100
+  guards. Re-anchored each on the fetch line above it — and the second guard,
+  which the first anchor had been hiding, got its own mutant.
+- ANCHOR MISS (0x): oxfmt had reflowed the token expression across lines.
+Neither anchor miss was counted as a pass.
+
+Full suite 287 files / 6254 tests. Build clean. Lint clean.
+
+**Beatport remaining:** wiring the five sections to these handlers, the three
+top-10 lists, and the genre browser (~1,400 lines).

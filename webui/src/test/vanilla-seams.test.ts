@@ -76,6 +76,14 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     usedBy: "React's Deezer-ARL tab, when rehydrating a sync in flight",
   },
   {
+    file: 'static/shared-helpers.js',
+    symbol: 'registerBeatportDownload',
+    pattern: /function registerBeatportDownload\b/,
+    usedBy:
+      "React's Beatport tab, for every release and chart download — it owns the " +
+      'bubble registry, which is a top-level `let` in core.js',
+  },
+  {
     file: 'static/core.js',
     symbol: 'startDiscoverVirtualSync',
     pattern: /window\.startDiscoverVirtualSync\s*=/,

@@ -373,6 +373,51 @@ export function releaseBubbleImage(
   return fromAlbum || releaseImageUrl || '';
 }
 
+/* ── The synthetic ids (1896, 1939, 2005, 2047) ───────────────────────────── */
+
+/**
+ * `Math.random().toString(36).substr(2, n)` — the vanilla's id suffix.
+ *
+ * `substr` is deprecated but not wrong; `slice(2, 2 + n)` is the same string for
+ * every input this can receive, since the argument is always a positive
+ * fractional number and both forms count from the same offset. Injected rather
+ * than called directly so a test can pin the id.
+ */
+export function beatportRandomToken(random: () => number, length: number): string {
+  return random()
+    .toString(36)
+    .slice(2, 2 + length);
+}
+
+/**
+ * The four id shapes, kept together because they are NOT interchangeable:
+ *
+ *  - a release's virtual playlist (1896) and a chart's (2047) both carry a
+ *    9-char suffix, but different prefixes,
+ *  - the chart's ALBUM id (2005) has no random suffix at all — just the
+ *    timestamp — so two charts opened in the same millisecond share it,
+ *  - the enrichment id (1939) uses a SHORTER 6-char suffix.
+ *
+ * Transcribed as-is. The album-id collision is not reachable in practice (a
+ * chart open costs a scrape), and widening it would change the id the download
+ * engine keys on.
+ */
+export function beatportReleasePlaylistId(now: () => number, random: () => number): string {
+  return `beatport_release_${now()}_${beatportRandomToken(random, 9)}`;
+}
+
+export function beatportChartPlaylistId(now: () => number, random: () => number): string {
+  return `beatport_chart_${now()}_${beatportRandomToken(random, 9)}`;
+}
+
+export function beatportChartAlbumId(now: () => number): string {
+  return `beatport_chart_${now()}`;
+}
+
+export function beatportEnrichmentId(now: () => number, random: () => number): string {
+  return `enrich_${now()}_${beatportRandomToken(random, 6)}`;
+}
+
 /**
  * 1891-1894. A release's tracks arrive with artists as objects OR strings
  * depending on the scrape; the download modal wants strings either way.

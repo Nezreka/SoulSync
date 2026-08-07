@@ -11,7 +11,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BEATPORT_COMPILATION_ARTIST,
+  beatportChartAlbumId,
+  beatportChartPlaylistId,
   beatportDownloadContext,
+  beatportEnrichmentId,
+  beatportRandomToken,
+  beatportReleasePlaylistId,
   releaseBubbleImage,
   BEATPORT_SLIDERS,
   EXCLUDED_GENRE_NAMES,
@@ -365,5 +370,41 @@ describe('releaseBubbleImage (1910)', () => {
     expect(releaseBubbleImage(null, 'http://card.jpg')).toBe('http://card.jpg');
     expect(releaseBubbleImage(undefined, undefined)).toBe('');
     expect(releaseBubbleImage({ images: [] }, '')).toBe('');
+  });
+});
+
+describe('the four synthetic ids (1896, 1939, 2005, 2047)', () => {
+  const now = () => 1700000000000;
+
+  it("matches substr(2, n) on the vanilla's random suffix", () => {
+    // 0.5.toString(36) is '0.i', so substr(2, 9) is 'i' — the suffix is
+    // shorter than n whenever the fraction is short, and that is fine.
+    expect(beatportRandomToken(() => 0.5, 9)).toBe('i');
+    expect(beatportRandomToken(() => 0.123456789, 9)).toBe((0.123456789).toString(36).substr(2, 9));
+    expect(beatportRandomToken(() => 0.123456789, 6)).toBe((0.123456789).toString(36).substr(2, 6));
+  });
+
+  it('gives releases and charts DIFFERENT prefixes and the same 9-char suffix', () => {
+    const random = () => 0.123456789;
+    const suffix = (0.123456789).toString(36).substr(2, 9);
+    expect(suffix).toHaveLength(9);
+    expect(beatportReleasePlaylistId(now, random)).toBe(`beatport_release_1700000000000_${suffix}`);
+    expect(beatportChartPlaylistId(now, random)).toBe(`beatport_chart_1700000000000_${suffix}`);
+  });
+
+  it("gives the chart's ALBUM id no random suffix at all", () => {
+    // 2005. Two charts opened in the same millisecond would share it. Kept as
+    // the vanilla has it: this is the id the download engine keys on.
+    expect(beatportChartAlbumId(now)).toBe('beatport_chart_1700000000000');
+    expect(beatportChartAlbumId(now)).toBe(beatportChartAlbumId(now));
+  });
+
+  it('gives the enrichment id a SHORTER suffix than the playlist ids', () => {
+    const random = () => 0.123456789;
+    const enrich = beatportEnrichmentId(now, random).split('_')[2];
+    const playlist = beatportChartPlaylistId(now, random).split('_')[3];
+    expect(enrich).toHaveLength(6);
+    expect(playlist).toHaveLength(9);
+    expect(beatportEnrichmentId(now, random)).toMatch(/^enrich_1700000000000_/);
   });
 });

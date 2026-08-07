@@ -202,6 +202,20 @@ declare global {
       contextType?: string,
     ) => void | Promise<void>;
     /**
+     * shared-helpers.js 3390 — registers a Beatport download so its bubble
+     * appears in `#beatport-downloads-section`.
+     *
+     * It writes into `beatportDownloadBubbles`, a top-level `let` in core.js
+     * (555), so no module can maintain that registry itself — the React
+     * Beatport tab must call this and must keep the section div for it to
+     * render into.
+     */
+    registerBeatportDownload?: (
+      chartName: string,
+      chartImage: string,
+      virtualPlaylistId: string,
+    ) => void;
+    /**
      * core.js — shows the modal of an already-active download process.
      *
      * `activeDownloadProcesses` is a top-level `let` in a classic script, so it
