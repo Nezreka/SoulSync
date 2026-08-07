@@ -9,6 +9,20 @@
  * schedules dict ONCE and pushes into per-day buckets rather than scanning all
  * schedules per day (917-931); `autoSyncWeeklyCardsByDay` keeps that shape.
  *
+ * A SECOND DECLARED DIVERGENCE — the vanilla's Save leaves the editor on
+ * screen. `saveAutoSyncWeeklyFromEditor` (2218-2227) awaits the save, which
+ * ends in `await refreshAutoSyncScheduleModal()` (2284) — a full re-render
+ * taken while `_autoSyncWeeklyEditor` is STILL set, so the popover is rendered
+ * back into the DOM — and only then nulls the flag, with no further render.
+ * Nothing re-renders afterwards: the status poller (2346) runs only while a
+ * pipeline is running, so in the ordinary case the popover just sits there
+ * until the user dismisses it by hand. The sibling exit
+ * `unscheduleAutoSyncWeeklyFromEditor` (2229-2234) nulls FIRST and is correct;
+ * the two were written in opposite orders and only one of them works. This
+ * port closes on save, matching the unschedule path's evident intent. It also
+ * closes immediately rather than after the request settles, which the vanilla
+ * cannot meaningfully be said to do either way.
+ *
  * The editor is a controlled draft. In the vanilla the day toggle re-renders
  * the entire modal (2200) while the time and tz inputs deliberately do NOT
  * (2205-2215) — because a re-render would blow away the caret mid-typing. That
@@ -319,7 +333,10 @@ export function AutoSyncWeeklyBoard({
                 onDropPlaylist={(playlistId) => {
                   // 2153-2158. A source that cannot be refreshed is refused
                   // here rather than at the sidebar, because the card is
-                  // draggable either way.
+                  // draggable either way. The vanilla also re-checks that the
+                  // day is one of the seven (2152); here `day` comes from
+                  // mapping AUTO_SYNC_WEEKDAYS itself, so that check has
+                  // nothing to guard against and is dropped.
                   const playlist = playlists.find((p) => parseInt(String(p.id), 10) === playlistId);
                   if (!playlist || !autoSyncCanSchedulePlaylist(playlist)) {
                     window.showToast?.(

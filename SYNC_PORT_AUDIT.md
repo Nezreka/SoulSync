@@ -4302,6 +4302,28 @@ mid-drag. The shared lane carries the guard, so the weekly board gains the
 hourly board's behaviour. This is an asymmetry with no design behind it — the
 vanilla's own hourly board is the evidence for what was intended.
 
+**A SECOND declared divergence, found in the post-slice verification pass —
+and it is live bug #5.** The vanilla's editor Save leaves the popover on
+screen. `saveAutoSyncWeeklyFromEditor` (2218-2227) awaits the save, which ends
+in `await refreshAutoSyncScheduleModal()` (2284) — a full re-render taken while
+`_autoSyncWeeklyEditor` is STILL set, so the editor is rendered back into the
+DOM — and only then nulls the flag, with no further render. Nothing re-renders
+afterwards: the status poller (2346) only runs while a pipeline is running, so
+in the ordinary case the popover sits there until the user dismisses it by
+hand. The sibling exit `unscheduleAutoSyncWeeklyFromEditor` (2229-2234) nulls
+FIRST and is correct. The two exits were written in opposite orders and only
+one of them works — which is what made it findable: the asymmetry was the tell,
+not the symptom. The port closes on save.
+
+I had already built it correctly and had a passing test and a killed mutant for
+it ("leave the editor open after a successful save"), but had NOT written the
+divergence down. Building the right thing by accident is not the same as
+declaring it, so this is recorded rather than quietly enjoyed.
+
+**One piece of vanilla defensiveness intentionally dropped.** `autoSyncWeeklyDrop`
+re-checks `AUTO_SYNC_WEEKDAYS.includes(day)` (2152). In the port `day` comes
+from mapping `AUTO_SYNC_WEEKDAYS` itself, so the check has nothing to guard.
+
 **Two vanilla workarounds that dissolve.** The editor's day toggle re-renders
 the whole modal (2200) while its time and tz inputs deliberately do not
 (2205-2215) — an asymmetry that exists purely because an innerHTML re-render
