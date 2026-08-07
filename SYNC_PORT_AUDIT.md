@@ -4872,9 +4872,7 @@ the same DOM-derived array until the shell flips.
 
 ### Build slices, in order
 
-**S1 — the shell chrome.** Header (title, subtitle, four buttons incl. the
-Auto-Sync entry point), the 15-tab strip, and the tab panel switch. Pure core
-for the tab list and normalization; component; tests; the three seam rows.
+**S1 — the shell chrome. DONE.** See the entry below.
 
 **S2 — the sidebar.** Two sections, the selection info line, Start Sync, the
 progress bar/text/log. Shown only while a sync runs and only above 1300px.
@@ -4884,3 +4882,64 @@ per-tab lazy-load equivalents (React does this with mount, not one-shot flags).
 
 **S4 — the route flip, severs and deletions**, with the reachability checks
 above and the `startSequentialSync` parameter.
+
+
+### SHELL SLICE S1 — header, the fifteen-tab strip, the panel switch
+
+`-sync.shell.ts` (the tab table and the two small decisions) and
+`-ui/sync-shell.tsx`. index.html 2226-2295 plus the tab handler at
+sync-services.js 3694-3803.
+
+**The vanilla's tab handler did four things and only one is code here.** It
+moved the `active` class (this component), re-hid the sidebar (S2), ran a
+one-shot lazy load per tab, and computed an `isMobile` const it never read.
+
+**The one-shot load flags dissolve into mounting — but only half of them do.**
+Each was `if (tabId === 'x' && !xLoaded) { xLoaded = true; loadX(); }` against a
+script-scoped or `window` flag: a hand-rolled mount hook, needed because all
+fifteen panels exist in the DOM from page load and only their class changes.
+The "run once" half is just mounting. The OTHER half is that the flags never
+reset, so leaving a tab keeps what it loaded — which is why the shell records
+an `opened` Set and keeps a panel MOUNTED after you navigate away rather than
+unmounting it. Unmounting would have been the obvious React shape and would
+have re-fetched on every revisit. There is a test that counts mounts across
+three round trips and expects exactly one.
+
+**That mount test was wrong first.** It counted in the render body, which
+counts RENDERS — and a panel that stays mounted still re-renders when the shell
+changes tab, so it ticked without a remount and proved nothing. Moved into a
+`useEffect(…, [])`.
+
+**The tab table is checked against the markup, not just transcribed from it.**
+`-sync.shell.test.ts` reads index.html and asserts the same fifteen ids in the
+same order, the same label for each (used as both the visible label and the
+title), the same sprite class, the same three `data-link` tabs, and that the
+default is the one the markup marks `active`. A transcription test that only
+compares the port to itself would pass while drifting.
+
+**`normalizeSyncTab` has no vanilla counterpart.** The vanilla trusts
+`dataset.tab` and then does an unguarded
+`getElementById(`${tabId}-tab-content`)`, which throws mid-handler on a bad id
+and leaves the strip half-updated. It survived the first mutation round because
+nothing in the component can reach it — the strip only ever passes ids from the
+table — so it now has direct tests, including that `__proto__` and `toString`
+are not tab ids (they would be, with a plain-object lookup instead of a Set).
+
+**Three seams, all safe.** Library Match, Sync History and Download Origins
+call `window.x?.()`; their targets live in manual-library-match.js,
+wishlist-tools.js and origin-history.js, none of which the flip touches. Rows
+added to vanilla-seams.test.ts, plus a test that a missing seam no-ops rather
+than throwing. Download Origins keeps its literal `'playlist'` scope argument.
+
+**One new class, one transcribed rule.** The vanilla styles the header button
+row inline (`style="display:flex;gap:8px;align-items:center;"` at 2236); the
+port emits `.sync-header-actions` and the CSS is a 1:1 transcription of those
+three declarations.
+
+**Mutation pass: 35 mutants, 35 killed** after one round, the single survivor
+being the unreachable normalizer above.
+
+Full suite 6803 tests. Build clean. Lint clean. All 35 emitted classes resolve.
+
+**Next:** S2, the sidebar — two sections, the selection line, Start Sync, and
+the progress bar/text/log, shown only while a sync runs and only above 1300px.

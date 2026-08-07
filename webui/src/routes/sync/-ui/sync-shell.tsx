@@ -1,0 +1,154 @@
+/**
+ * The sync page's chrome — header, the fifteen-tab strip, and the panel
+ * switch. index.html 2226-2295 plus the tab handler at sync-services.js
+ * 3694-3803.
+ *
+ * THE VANILLA'S TAB HANDLER DOES FOUR THINGS; only one survives as code here.
+ * It moved the `active` class on the buttons and panels (that is this
+ * component), re-hid the sidebar (S2 owns that), ran a one-shot lazy load per
+ * tab, and computed an `isMobile` const it never read.
+ *
+ * The lazy loads dissolve. Each was `if (tabId === 'x' && !xLoaded) { xLoaded
+ * = true; loadX(); }` against a script-scoped or `window` flag — a hand-rolled
+ * mount hook, needed because the panels all exist in the DOM from page load
+ * and only their `active` class changes. Here each panel's content is a
+ * component that fetches on mount, so "first time this tab is opened" is just
+ * "first time this subtree renders". The flags have no counterpart — but the
+ * `opened` Set below does the other half of their job: a panel stays MOUNTED
+ * once opened rather than unmounting on the way out, which is what makes
+ * leaving a tab keep what it loaded, exactly as the one-shot flags did.
+ *
+ * Beatport is the one exception in the vanilla — it has a teardown
+ * (`cleanupBeatportContent`) on leaving. That belongs to the Beatport wave's
+ * own components, not the shell.
+ */
+
+import { Fragment, useState, type ReactNode } from 'react';
+
+import {
+  SYNC_DEFAULT_TAB,
+  SYNC_HEADER_ACTIONS,
+  SYNC_TABS,
+  normalizeSyncTab,
+  type SyncTabId,
+} from '../-sync.shell';
+
+export interface SyncShellProps {
+  /** One node per tab id. A tab with no entry renders an empty panel. */
+  panels: Partial<Record<SyncTabId, ReactNode>>;
+  onAutoSync: () => void;
+  /** The right-hand sidebar (S2). Rendered as the second grid column. */
+  sidebar?: ReactNode;
+}
+
+/** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
+function runHeaderAction(key: string, onAutoSync: () => void) {
+  if (key === 'auto-sync') {
+    onAutoSync();
+    return;
+  }
+  if (key === 'library-match') {
+    window.openManualLibraryMatchTool?.();
+    return;
+  }
+  if (key === 'sync-history') {
+    window.openSyncHistoryModal?.();
+    return;
+  }
+  // 2241 passes the literal 'playlist' — the modal is shared with other pages
+  // and filters on it.
+  window.openDownloadOriginsModal?.('playlist');
+}
+
+export function SyncShell({ panels, onAutoSync, sidebar }: SyncShellProps) {
+  const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
+  // Which panels have ever been opened. See the header note: the vanilla's
+  // one-shot load flags mean a tab keeps what it loaded after you leave it.
+  const [opened, setOpened] = useState<Set<SyncTabId>>(() => new Set([SYNC_DEFAULT_TAB]));
+
+  const open = (next: SyncTabId) => {
+    const id = normalizeSyncTab(next);
+    setTab(id);
+    setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  };
+
+  return (
+    <div className="page-shell">
+      <div className="sync-header">
+        <div className="sync-header-row">
+          <div>
+            <h2 className="sync-title">
+              <img src="/static/sync.png" className="page-header-icon" alt="" />
+              <span>Playlist Sync</span>
+            </h2>
+            <p className="sync-subtitle">
+              Synchronize your Spotify, Tidal, and YouTube playlists with your media server
+            </p>
+          </div>
+          {/* The vanilla styles this row inline (2236). A class is used here
+              because the port does not emit inline styles; the rule is a 1:1
+              transcription of those three declarations. */}
+          <div className="sync-header-actions">
+            {SYNC_HEADER_ACTIONS.map((action) => (
+              <button
+                key={action.key}
+                type="button"
+                className={`btn btn--sm btn--secondary sync-history-btn${
+                  action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
+                }`}
+                title={action.title}
+                onClick={() => {
+                  runHeaderAction(action.key, onAutoSync);
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="sync-content-area">
+        <div className="sync-main-panel">
+          <div className="sync-tabs" role="tablist">
+            {SYNC_TABS.map((t) => (
+              <Fragment key={t.id}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t.id}
+                  className={`sync-tab-button${t.id === 'server' ? ' sync-tab-server' : ''}${
+                    tab === t.id ? ' active' : ''
+                  }`}
+                  data-tab={t.id}
+                  {...(t.link ? { 'data-link': 'true' } : {})}
+                  title={t.label}
+                  onClick={() => {
+                    open(t.id);
+                  }}
+                >
+                  <span className={`tab-icon ${t.icon}`} />
+                  <span className="sync-tab-label">{t.label}</span>
+                </button>
+                {/* 2253: the divider sits after Server Playlists only. */}
+                {t.id === 'server' ? <div className="sync-tab-divider" /> : null}
+              </Fragment>
+            ))}
+          </div>
+
+          {SYNC_TABS.map((t) => (
+            <div
+              key={t.id}
+              className={`sync-tab-content${tab === t.id ? ' active' : ''}`}
+              id={`${t.id}-tab-content`}
+              role="tabpanel"
+            >
+              {opened.has(t.id) ? panels[t.id] : null}
+            </div>
+          ))}
+        </div>
+        {sidebar}
+      </div>
+    </div>
+  );
+}

@@ -12938,6 +12938,14 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 /* The inline custom-interval field. The vanilla asked for this value with
    window.prompt, which the React port replaces per the repo's no-prompt rule,
    so these two classes are NEW rather than transcribed. */
+/* The sync header's button row. The vanilla writes these three declarations
+   inline at index.html 2236; the React port emits classes, not inline styles. */
+.sync-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .auto-sync-bulk-menu-custom-row {
     display: grid;
     grid-template-columns: 1fr auto;

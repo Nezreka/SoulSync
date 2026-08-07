@@ -322,6 +322,18 @@ declare global {
       playlistId: number,
       playlistName: string,
     ) => Promise<void> | void;
+    /**
+     * manual-library-match.js — the Library Match tool. Stays vanilla: its
+     * file is untouched by the sync flip (index.html header button, 2239).
+     */
+    openManualLibraryMatchTool?: () => void;
+    /** wishlist-tools.js — the Sync History modal (index.html 2240). */
+    openSyncHistoryModal?: () => void;
+    /**
+     * origin-history.js — the Download Origins modal. The sync page passes the
+     * literal 'playlist'; the modal is shared and filters on it (2241).
+     */
+    openDownloadOriginsModal?: (scope: string) => void;
     playlistQualityProfileSelectHtml?: (
       playlistId: string | number | undefined,
       source: string | undefined,
