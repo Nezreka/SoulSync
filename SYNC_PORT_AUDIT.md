@@ -4106,3 +4106,66 @@ B) the hourly board; C) the weekly board + editor; D) monitor + automations +
 history panels; E) wiring, polling and the two shared-helpers seams.
 
 **Read status: COMPLETE.** No code written.
+
+### AUTO-SYNC P0 ADDENDUM — the live-bug pass the entry above was missing
+
+Boulder pulled me up on this: headline outcome #3 of this document makes
+"LIVE BUGS for day-one knowing-fixes" a P0 deliverable, and my first write-up
+skipped it. Done properly now.
+
+**LIVE BUG 1 — bulk scheduling breaks the one-schedule-per-playlist invariant.**
+`saveAutoSyncPlaylistSchedule` (2059-2067) deletes an existing WEEKLY automation
+before installing an hourly one, and `saveAutoSyncWeeklySchedule` (2251-2263)
+does the mirror-image delete. Both carry comments explaining that the UI assumes
+one schedule per playlist. **`saveAutoSyncPlaylistScheduleSilent` (1368-1392) —
+the function the BULK path calls — has no such delete.** So:
+
+> Sidebar → a source's `Bulk` → any interval, on a source containing a playlist
+> that already has a WEEKLY schedule, leaves BOTH automations live.
+
+The playlist then runs on two schedules, appears as scheduled on both boards,
+and unscheduling from one board leaves the other running. Non-obvious to a user
+because each board looks correct in isolation. Fix is one block copied from
+2059-2067 into the silent path.
+
+**LIVE BUG 2 — "Unschedule all" only unschedules half.**
+`bulkUnscheduleAutoSyncSource` (1343) selects its targets with
+`playlistSchedules[p.id]` alone, so weekly schedules are untouched by a menu
+item labelled "Unschedule all" (1280) and a confirm that says "Removes the
+Auto-Sync schedules" (1350). Same root cause as bug 1: the bulk path predates
+the weekly board and was never extended.
+
+**REPO-RULE VIOLATION — `window.prompt` at 1305.** `promptAutoSyncBulkCustom`
+uses the native prompt for the custom-interval entry. This repo forbids
+window.confirm/alert/prompt; the port must use the SoulSync modal. (Note the
+neighbouring bulk confirms already use `showConfirmDialog` correctly — only the
+prompt is native.)
+
+**UNVERIFIED, flagged for P1 rather than asserted — the health dot's ordering
+assumption.** `autoSyncPlaylistHealth` (1986-1988) takes `.slice(0, 3)` of the
+playlist's history and calls it "the last 3 runs". That is only true if
+`/api/playlist-pipeline/history` returns newest-first. I traced the endpoint to
+web_server.py 37961 but did not find the ORDER BY for the pipeline-history table
+(the `ORDER BY started_at DESC` I found is `sync_history`, a different table).
+**If the pipeline history is oldest-first, every health dot is reporting on the
+three OLDEST runs.** P1 must confirm the query before this is ported as-is —
+and the React version should sort defensively regardless, since the cost is one
+comparator.
+
+**Escaping — clean, with one theoretical hole.** The board uses `_esc`/`_escAttr`
+throughout and interpolates only numeric ids into inline handlers. The one
+exception: `openAutoSyncBulkMenu` and its buttons interpolate `_escAttr(source)`
+inside a SINGLE-QUOTED JS string in an `onclick` (774, 1267, 1275, 1279).
+`_escAttr` escapes HTML entities, not JS quotes, so a source key containing an
+apostrophe would break out. Not reachable today — `source` is a fixed enum from
+the mirrored-playlist rows — and it disappears entirely in React, where handlers
+are functions rather than strings. Recorded so nobody "fixes" it into the port.
+
+**Port notes.** No download-engine coupling: the board talks only to
+`/api/automations*`, `/api/mirrored-playlists*`, `/api/playlist-pipeline/history`
+and `/api/personalized/*`. `_autoSyncScheduleState` and the five UI variables are
+script-scoped and read by NOTHING outside this file, so they become React state
+cleanly. The two `typeof`-guarded shared-helpers seams
+(`playlistQualityProfileSelectHtml`, `hydratePlaylistQualityProfileSelects`)
+must gain a vanilla-seams.test.ts row before the board relies on them, because
+both are optional-chained today and would fail silently.
