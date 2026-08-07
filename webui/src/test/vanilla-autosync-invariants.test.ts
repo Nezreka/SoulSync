@@ -35,6 +35,40 @@ function functionBody(name: string): string {
   return SOURCE.slice(start, end);
 }
 
+describe('bulk unschedule sees BOTH kinds of schedule', () => {
+  /**
+   * The sibling of the save-path bug: the bulk paths predate weekly schedules,
+   * so "Unschedule all" read the hourly map alone. It undercounted in its own
+   * confirm dialog, said there was nothing to unschedule when weekly schedules
+   * existed, and left them running.
+   */
+  it('resolves a playlist through the shared both-kinds accessor', () => {
+    const body = functionBody('bulkUnscheduleAutoSyncSource');
+    expect(body).toContain('autoSyncSchedulesForPlaylist(p.id).length');
+    expect(body).toContain('for (const schedule of autoSyncSchedulesForPlaylist(playlist.id))');
+    // The old single-map reads must be gone, not merely supplemented.
+    expect(body).not.toContain('playlistSchedules[p.id]');
+    expect(body).not.toContain('playlistSchedules[playlist.id]');
+  });
+
+  it('the accessor reads both maps', () => {
+    const accessor = SOURCE.slice(
+      SOURCE.indexOf('function autoSyncSchedulesForPlaylist('),
+      SOURCE.indexOf('\n}', SOURCE.indexOf('function autoSyncSchedulesForPlaylist(')),
+    );
+    expect(accessor).toContain('playlistSchedules?.[playlistId]');
+    expect(accessor).toContain('weeklySchedules?.[playlistId]');
+    // ...and drops the absent one rather than deleting `undefined.automation_id`.
+    expect(accessor).toContain('.filter(Boolean)');
+  });
+
+  it('tells the user both kinds are going', () => {
+    expect(functionBody('bulkUnscheduleAutoSyncSource')).toContain(
+      'Removes the Auto-Sync schedules, hourly and weekly.',
+    );
+  });
+});
+
 describe('auto-sync save paths enforce one schedule per playlist', () => {
   const SAVE_PATHS: [string, 'hourly' | 'weekly'][] = [
     ['saveAutoSyncPlaylistSchedule', 'hourly'],

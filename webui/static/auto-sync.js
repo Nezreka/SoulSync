@@ -1337,28 +1337,40 @@ async function bulkScheduleAutoSyncSource(source, hours) {
     await refreshAutoSyncScheduleModal();
 }
 
+// Every Auto-Sync schedule attached to a playlist, of EITHER kind. The bulk
+// paths predate weekly schedules and used to read the hourly map alone, which
+// made "Unschedule all" blind to weekly ones: it undercounted in its own
+// confirm dialog, claimed there was nothing to unschedule when there was, and
+// left the weekly automations running.
+function autoSyncSchedulesForPlaylist(playlistId) {
+    const { playlistSchedules, weeklySchedules } = _autoSyncScheduleState;
+    return [playlistSchedules?.[playlistId], weeklySchedules?.[playlistId]].filter(Boolean);
+}
+
+
 async function bulkUnscheduleAutoSyncSource(source) {
     closeAutoSyncBulkMenu();
-    const { playlists, playlistSchedules } = _autoSyncScheduleState;
-    const targets = (playlists || []).filter(p => p.source === source && playlistSchedules[p.id]);
+    const { playlists } = _autoSyncScheduleState;
+    const targets = (playlists || []).filter(
+        p => p.source === source && autoSyncSchedulesForPlaylist(p.id).length);
     if (!targets.length) {
         showToast(`No scheduled ${autoSyncSourceLabel(source)} playlists to unschedule`, 'info');
         return;
     }
     if (!await showConfirmDialog({
         title: `Unschedule ${targets.length} ${autoSyncSourceLabel(source)} playlist${targets.length === 1 ? '' : 's'}`,
-        message: 'Removes the Auto-Sync schedules. Mirrored playlists themselves stay.',
+        message: 'Removes the Auto-Sync schedules, hourly and weekly. Mirrored playlists themselves stay.',
     })) return;
     let ok = 0, fail = 0;
     for (const playlist of targets) {
-        const schedule = playlistSchedules[playlist.id];
-        if (!schedule) continue;
-        try {
-            const res = await fetch(`/api/automations/${schedule.automation_id}`, { method: 'DELETE' });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            ok++;
-        } catch (_err) {
-            fail++;
+        for (const schedule of autoSyncSchedulesForPlaylist(playlist.id)) {
+            try {
+                const res = await fetch(`/api/automations/${schedule.automation_id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                ok++;
+            } catch (_err) {
+                fail++;
+            }
         }
     }
     showToast(`Removed ${ok} schedule${ok === 1 ? '' : 's'}${fail ? ` (${fail} failed)` : ''}`, fail ? 'warning' : 'success');

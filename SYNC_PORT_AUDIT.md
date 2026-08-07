@@ -4518,12 +4518,19 @@ against it — re-introducing the original bug, inverting the helper's two maps,
 and moving the drop after the write — and all three were killed. Delete this
 test file with auto-sync.js at the flip.
 
-**STILL OPEN — live bug #2, deliberately not fixed here.**
-`bulkUnscheduleAutoSyncSource` (1339) filters on `playlistSchedules` alone, so
-"Unschedule all" cannot see weekly schedules: it undercounts in its own confirm
-dialog, says "No scheduled X playlists to unschedule" when weekly ones exist,
-and leaves them running. Same root cause — the bulk paths predate weekly
-schedules and never learned about them. It is left open because fixing it
-changes what a differently-named button DOES (should "Unschedule all" remove
-weekly schedules too?), which is a product call rather than a defect repair.
-My recommendation is yes.
+**LIVE BUG #2 — also fixed, on Boulder's call.** `bulkUnscheduleAutoSyncSource`
+(1339) filtered on `playlistSchedules` alone, so "Unschedule all" could not see
+weekly schedules: it undercounted in its own confirm dialog, said "No scheduled
+X playlists to unschedule" when weekly ones existed, and left them running.
+Same root cause as #1 — the bulk paths predate weekly schedules and never
+learned about them.
+
+I raised it separately rather than folding it into the #1 fix, because it
+changes what a button DOES rather than repairing a defect: "Unschedule all"
+removing weekly schedules too is a product decision. Boulder agreed, so both
+kinds now go, through a shared `autoSyncSchedulesForPlaylist(playlistId)`
+accessor, and the confirm dialog says "hourly and weekly" so the user knows
+what they are agreeing to. Five mutants — reading the hourly map alone,
+deleting only the first schedule found, dropping the weekly map from the
+accessor, keeping the absent one (which would DELETE undefined), and reverting
+the confirm copy — all killed.
