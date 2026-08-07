@@ -3655,3 +3655,61 @@ Full suite 291 files / 6352 tests. Build clean. Lint clean.
 
 **Beatport remaining:** the genre browser MODAL (2243-2340, 2643-2681) and the
 genre detail page (2683-3646).
+
+### REVIEW OF P10a — the vanilla has TWO empty states, and I had collapsed them
+
+Caught reviewing the committed loader against 2369-2377 rather than against my
+own notes. `loadBeatportGenreList` returned a bare array, which cannot express
+the difference between:
+
+- **the API sent nothing** — '⚠️ No genres available' with a RETRY button, no
+  toast, and NOTHING cached, so the next open tries again (the vanilla `return`s
+  at 2376, before the caching at 2424); and
+- **the filter removed everything** — an empty grid, a 'Loaded 0 genres for
+  browsing' toast, and an empty list cached.
+
+One says "try again", the other says "nothing to show". Collapsing them drops
+the Retry button from the only case that can be retried. The loader now returns
+`{ genres, rawCount }` and caches only when `rawCount > 0`.
+
+### BEATPORT P10b — the genre browser modal (-ui/genre-browser-modal.tsx)
+
+The shell around P10a's loader: open/close, the search box, and the four grid
+states. Transcribed the vanilla's own classes rather than adopting the app's
+DialogFrame, because `.genre-browser-modal-overlay` is `display:none` until
+`.active` (style.css 33146-33163) and the whole genre stylesheet hangs off those
+names — so the port renders the overlay WITH `active`, and a test asserts it.
+
+Hand-rolled Escape / backdrop / scroll-lock, matching this port's existing
+overlays (server-search-overlay, server-playlist-list). The backdrop compares
+`event.target` to the overlay itself (2264-2268), so a click inside the modal
+body cannot dismiss it.
+
+**Mutation pass: 25 mutants, 23 killed, 1 removed as unproven code, 1 declared
+equivalent with proof.**
+
+- SURVIVED and REMOVED: a mounted-ref guard on the image callback. I added it
+  during this slice to chase React act() warnings; it did not fix them (the
+  count stayed at 6), React 18 no-ops setState on an unmounted component
+  anyway, and no test could distinguish it. Deleting speculative code beats
+  keeping it behind a comment claiming it matters.
+- SURVIVED and DECLARED EQUIVALENT: 2491's `!imageLoadingActive` re-entry
+  guard. The only ways back into the effect are `open` changing (and closing
+  pauses) or `reloadToken` changing — and the retry that bumps that token only
+  exists in the empty and failed states, where no image run can be in flight.
+  Kept because it is the vanilla's guard and it is what would stop a future
+  second caller doubling the worker count. Reasoning recorded on the line.
+- SURVIVED and FIXED: nothing tested closing the modal WHILE pictures were
+  still arriving. That is the behaviour the whole pause design exists for —
+  without it two workers keep scraping Beatport for a modal nobody is looking
+  at, one request every 100ms. Now tested, including that the run is left
+  PAUSED rather than marked complete so the next open resumes.
+
+**The act() warnings were a real signal, and the fix was test-side.** Six of
+them, all from shell tests whose genre load resolved after their last
+assertion. Those tests are about open/close, so they now hold the request open
+forever; the image tests wait for the workers to drain. Warnings: 0.
+
+Full suite 292 files / 6373 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the genre detail page (2683-3646) — the last region.

@@ -52,7 +52,24 @@ describe('loadBeatportGenreList', () => {
       genres: [genre('tech-house', 1, 'Tech House'), genre('charts', 2, 'Charts')],
     });
     const out = await loadBeatportGenreList();
-    expect(out.map((g) => g.name)).toEqual(['Tech House']);
+    expect(out.genres.map((g) => g.name)).toEqual(['Tech House']);
+  });
+
+  it('distinguishes "the API sent nothing" from "the filter removed everything"', async () => {
+    // Two different empty states in the vanilla, and not the same message: the
+    // first gets '⚠️ No genres available' with a RETRY button and caches
+    // nothing (2369-2377); the second gets an empty grid, a 'Loaded 0 genres'
+    // toast, and an empty list cached. Collapsing them would drop the retry
+    // button from the only case that can be retried.
+    stubGenres({ genres: [] });
+    const empty = await loadBeatportGenreList();
+    expect(empty).toEqual({ genres: [], rawCount: 0 });
+    expect(getCachedGenres()).toBeNull();
+
+    stubGenres({ genres: [genre('charts', 1, 'Charts')] });
+    const allFiltered = await loadBeatportGenreList();
+    expect(allFiltered).toEqual({ genres: [], rawCount: 1 });
+    expect(getCachedGenres()).toEqual([]);
   });
 
   it('caches the FILTERED list, not the raw one', async () => {

@@ -91,18 +91,41 @@ export function pauseGenreImageLoading(): void {
 
 /* ── The list (2341-2448) ─────────────────────────────────────────────────── */
 
+export interface GenreListResult {
+  genres: BeatportGenre[];
+  /**
+   * How many the API returned BEFORE filtering. The caller needs this because
+   * the vanilla has TWO different empty states and they are not the same
+   * message:
+   *
+   *  - the API returned nothing (2369-2377): '⚠️ No genres available' with a
+   *    RETRY button, no toast, and nothing cached;
+   *  - the API returned genres and the filter removed them all: an empty grid,
+   *    a 'Loaded 0 genres for browsing' toast, and an empty list cached.
+   *
+   * One says "try again", the other says "nothing to show". Collapsing them
+   * would drop the retry button from the case that can actually be retried.
+   */
+  rawCount: number;
+}
+
 /**
  * Fetches, filters and caches the genre list.
  *
  * Note this endpoint checks `response.ok`, alone among the Beatport fetches,
  * and reports the status line in the message the user sees (2362-2364).
  */
-export async function loadBeatportGenreList(signal?: AbortSignal): Promise<BeatportGenre[]> {
+export async function loadBeatportGenreList(signal?: AbortSignal): Promise<GenreListResult> {
   const data = await fetchBeatportGenres(signal);
-  const filtered = filterBeatportGenres(data.genres ?? []);
-  cache.genres = filtered;
-  cache.imagesLoaded = false;
-  return filtered;
+  const raw = data.genres ?? [];
+  const filtered = filterBeatportGenres(raw);
+  // 2376 returns BEFORE the caching at 2424, so an empty API response leaves
+  // the cache untouched and the next open retries.
+  if (raw.length > 0) {
+    cache.genres = filtered;
+    cache.imagesLoaded = false;
+  }
+  return { genres: filtered, rawCount: raw.length };
 }
 
 /* ── The images (2526-2625) ───────────────────────────────────────────────── */
