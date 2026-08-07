@@ -37,6 +37,65 @@ export function hasLoadedBeatportSection(key: string): boolean {
 
 export type BeatportSectionStatus = 'idle' | 'loading' | 'ready' | 'failed';
 
+/**
+ * The same load-once lifecycle for a section that is NOT a slider — the two
+ * top-10 track lists and the top-10 releases list.
+ *
+ * They share the cache above for the same reason the sliders do: the vanilla
+ * runs them inside loadBeatportContent, behind `beatportContentState.loaded`,
+ * so they scrape Beatport once per session and not once per tab visit.
+ *
+ * What they do NOT share is the slider config, so this takes none. Every one of
+ * these three renders an error block on failure, which is why there is no
+ * `onFailure` here either — the message is always kept.
+ */
+export function useBeatportOnce<T>(
+  sectionKey: string,
+  load: (signal: AbortSignal) => Promise<T>,
+): { status: BeatportSectionStatus; data: T | null; errorMessage: string | null } {
+  const cached = loadedSections.get(sectionKey) as [T] | undefined;
+  const [status, setStatus] = useState<BeatportSectionStatus>(cached ? 'ready' : 'idle');
+  // Boxed in a one-element array so the shared cache can hold a payload that is
+  // itself an object — `Map.has` is the loaded test, not truthiness of T.
+  const [data, setData] = useState<T | null>(cached ? cached[0] : null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  useEffect(() => {
+    const alreadyLoaded = loadedSections.get(sectionKey) as [T] | undefined;
+    if (alreadyLoaded) {
+      setData(alreadyLoaded[0]);
+      setStatus('ready');
+      return;
+    }
+
+    const controller = new AbortController();
+    setStatus('loading');
+    setErrorMessage(null);
+
+    void (async () => {
+      try {
+        const result = await loadRef.current(controller.signal);
+        if (controller.signal.aborted) return;
+        setData(result);
+        setStatus('ready');
+        loadedSections.set(sectionKey, [result]);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.name === 'AbortError') return;
+        setStatus('failed');
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to load');
+      }
+    })();
+
+    return () => controller.abort();
+  }, [sectionKey]);
+
+  return { status, data, errorMessage };
+}
+
 export interface BeatportSectionState<T> {
   status: BeatportSectionStatus;
   items: T[];

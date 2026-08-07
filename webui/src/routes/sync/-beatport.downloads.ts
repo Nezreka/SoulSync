@@ -329,6 +329,68 @@ export async function openBeatportChartCard(
   }
 }
 
+/* ── The two top-10 track lists — sync-services.js 4893-4936 ──────────────── */
+
+/**
+ * handleRebuildChartClick, the SIXTH download flow and the only one that does
+ * not live in beatport-ui.js.
+ *
+ * The two top-10 track lists have no per-card handler at all. Instead
+ * sync-services.js 3948-3963 binds a click to the whole CONTAINER, so clicking
+ * anywhere in the list — including its header — queues all ten tracks. That is
+ * easy to miss when reading beatport-ui.js alone, where those cards look inert.
+ *
+ * The vanilla then SCRAPES the rendered cards for the track data
+ * (getRebuildPageTrackData, 4937-4992): title, artist, label, url and rank, out
+ * of the DOM it just wrote. The port passes the loaded objects instead.
+ *
+ * That substitution is safe, and it was checked rather than assumed: the scrape
+ * reads text that cleanTrackText has ALREADY been applied to at render time
+ * (1669-1671), and buildChartTracks applies cleanTrackText again downstream —
+ * which is idempotent for these inputs. The scrape's per-field
+ * 'Unknown Title' / 'Unknown Artist' / 'Unknown Label' defaults are the same
+ * ones the renderer used, and buildChartTrackName defaults identically. The
+ * fields the scrape drops (artwork_url) are ones buildChartTracks never reads.
+ *
+ * Latch: set, then released by the same blind 2s timer as the Top 100 buttons.
+ */
+export async function openBeatportTop10List(
+  tracks: readonly BeatportScrapedTrack[],
+  chartName: string,
+  env: BeatportDownloadEnv,
+): Promise<void> {
+  if (modalOpening) return;
+  modalOpening = true;
+  env.schedule(() => {
+    modalOpening = false;
+  }, 2000);
+
+  try {
+    if (tracks.length === 0) {
+      // 4917. The vanilla can also fail one step earlier, inside the scrape,
+      // with 'No track cards found in #beatport-top10-list' — a selector string
+      // shown to the user. There is no container to name here, so the port uses
+      // the other message the same flow already produces.
+      throw new Error(`No track data found for ${chartName}`);
+    }
+
+    // 4925: the overlay opens with the count already in it, unlike every other
+    // flow, whose first overlay message is a 'Scraping …' line.
+    env.showLoadingOverlay(`Fetching track metadata... (0/${tracks.length})`);
+
+    const enriched = await enrichWithOverlayProgress(tracks, env);
+
+    env.hideLoadingOverlay();
+    openBeatportChartAsDownloadModal(enriched, chartName, null, env);
+  } catch (error) {
+    env.hideLoadingOverlay();
+    env.showToast(
+      `Error loading ${chartName}: ${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
+  }
+}
+
 /* ── The two Top 100 buttons (2161-2228) ──────────────────────────────────── */
 
 const TOP_100_COPY = {

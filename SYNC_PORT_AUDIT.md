@@ -3536,3 +3536,69 @@ Full suite 289 files / 6296 tests. Build clean. Lint clean.
 
 **Beatport remaining:** the three top-10 lists (1605-1853) and the genre
 browser (2230-3626, ~1,400 lines).
+
+### BEATPORT P9 — the three top-10 lists, and a SIXTH download flow found by reading
+
+`-ui/beatport-top10.tsx` + two loaders + `openBeatportTop10List`.
+
+**THE FINDING: the two top-10 track lists are clickable, and the handler is not
+in beatport-ui.js.** Reading 1605-1853 alone, those cards look inert — they carry
+a `data-url` and no listener. The listener is in **sync-services.js 3948-3963**,
+bound to the whole CONTAINER, so clicking anywhere in the list (including its
+header) queues all ten tracks via handleRebuildChartClick (4909-4936). Porting
+beatport-ui.js faithfully and stopping there would have shipped two dead panels.
+
+That handler then SCRAPES the rendered cards for the track data
+(getRebuildPageTrackData, 4937-4992). The port passes the loaded objects
+instead, and that substitution was checked rather than assumed:
+- the scrape reads text cleanTrackText has ALREADY been applied to at render
+  time (1669-1671), and buildChartTracks applies it again downstream —
+  idempotent for these inputs;
+- the scrape's per-field 'Unknown …' defaults are the renderer's own, and
+  buildChartTrackName defaults identically;
+- the only field the scrape drops (artwork_url) is one buildChartTracks never
+  reads.
+So the download metadata is unchanged. Declared divergence: the vanilla's
+empty-list failure can show the user a SELECTOR STRING
+('No track cards found in #beatport-top10-list'). There is no container to name
+in the port, so it uses the other message the same flow already produces.
+
+**The three lists are not three copies of one list.**
+- The two TRACK lists come from ONE endpoint, load together and fail together —
+  showTop10ListsError writes the SAME block into BOTH containers, replacing the
+  list headers along with the content.
+- The track lists clean their text; the RELEASES list cleans nothing
+  (1807-1809). Same file, same shape of data.
+- The releases list is the mirror image on clicks: per-card handlers, no
+  container handler — and it is the ONLY one of the four release-card call sites
+  with no url test (1834), which makes it the only place the handler's own
+  'No release URL available' toast is reachable.
+- A successful-but-EMPTY response is NOT a failure for any of the three: they
+  test `data.success` alone (1615, 1767), where every slider also tests length.
+  The populate call then bails and the static 'Loading …' markup stays forever.
+- The hype list's subtitle CHANGES when the data lands: index.html says
+  "Editor's hottest trending picks", 1706 says "Editor's trending picks". The
+  port renders the loaded string.
+
+`useBeatportOnce` added alongside `useBeatportSection` — same session cache, no
+slider config, since all three of these render an error block.
+
+**Mutation pass: 28 mutants, 28 killed** after two rounds. All five first-round
+survivors were real gaps, no bad mutants this time:
+- the releases loader's thrown-fetch copy was never asserted;
+- nothing tested that a second container click is swallowed;
+- the enrichment stub ECHOED its input, so "skipped enrichment entirely"
+  passed — the stub now returns a distinguishable payload;
+- the hype subtitle was never asserted;
+- `useBeatportOnce`'s first-render hydration could not be seen by reading the
+  final state, because `render` flushes effects inside act(). Asserted now by
+  recording every render and checking the FIRST one.
+
+**The full suite caught what the scoped run could not:** the export-coverage
+gate failed on `openBeatportTop10List`, exercised only through the component and
+named by no test. Given direct tests, which also cover its empty-list arm.
+
+Full suite 290 files / 6329 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the genre browser (2230-3626, ~1,400 lines) — the last
+piece.

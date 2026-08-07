@@ -13,6 +13,7 @@ import { BEATPORT_SLIDERS } from './-beatport.core';
 import {
   hasLoadedBeatportSection,
   resetBeatportSectionCache,
+  useBeatportOnce,
   useBeatportSection,
 } from './-beatport.use-section';
 
@@ -264,5 +265,74 @@ describe('useBeatportSection', () => {
       reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
     });
     expect(hasLoadedBeatportSection('test-section')).toBe(false);
+  });
+});
+
+describe('useBeatportOnce', () => {
+  it('loads once and shares the section cache', async () => {
+    const load = vi.fn(async () => ({ a: 1 }));
+    const first = renderHook(() => useBeatportOnce('once-key', load));
+    await waitFor(() => expect(first.result.current.status).toBe('ready'));
+    expect(first.result.current.data).toEqual({ a: 1 });
+    first.unmount();
+
+    const second = renderHook(() => useBeatportOnce('once-key', load));
+    await waitFor(() => expect(second.result.current.status).toBe('ready'));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('hydrates on the FIRST render, with no empty frame', async () => {
+    // Asserted by recording every render rather than by reading the final
+    // state: `render` flushes effects inside act(), so a hook that hydrated in
+    // an effect would still look correct by the time the test could ask. The
+    // difference is a frame of empty list on every tab return.
+    const load = vi.fn(async () => ({ a: 1 }));
+    const first = renderHook(() => useBeatportOnce('once-frame', load));
+    await waitFor(() => expect(first.result.current.status).toBe('ready'));
+    first.unmount();
+
+    const seen: unknown[] = [];
+    renderHook(() => {
+      const result = useBeatportOnce('once-frame', load);
+      seen.push(result.data);
+      return result;
+    });
+    expect(seen[0]).toEqual({ a: 1 });
+  });
+
+  it('keeps the thrown message, since all three of its callers render one', async () => {
+    const { result } = renderHook(() =>
+      useBeatportOnce('once-fail', async () => {
+        throw new Error('beatport is down');
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe('failed'));
+    expect(result.current.errorMessage).toBe('beatport is down');
+  });
+
+  it('does not mark the section loaded when the load fails', async () => {
+    const load = vi.fn(async () => {
+      throw new Error('down');
+    });
+    const first = renderHook(() => useBeatportOnce('once-retry', load));
+    await waitFor(() => expect(first.result.current.status).toBe('failed'));
+    first.unmount();
+
+    const second = renderHook(() => useBeatportOnce('once-retry', load));
+    await waitFor(() => expect(second.result.current.status).toBe('failed'));
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts in flight on unmount', async () => {
+    let seen: AbortSignal | undefined;
+    const { unmount } = renderHook(() =>
+      useBeatportOnce('once-abort', async (signal) => {
+        seen = signal;
+        return new Promise<number>(() => {});
+      }),
+    );
+    await waitFor(() => expect(seen).toBeDefined());
+    unmount();
+    expect(seen?.aborted).toBe(true);
   });
 });

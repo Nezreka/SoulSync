@@ -24,11 +24,14 @@ import {
   type BeatportChart,
   type BeatportHeroTrack,
   type BeatportRelease,
+  type BeatportTop10Track,
   fetchBeatportDJCharts,
   fetchBeatportFeaturedCharts,
   fetchBeatportHeroTracks,
   fetchBeatportHypePicks,
   fetchBeatportNewReleases,
+  fetchBeatportTop10Lists,
+  fetchBeatportTop10Releases,
 } from './-beatport.api';
 
 /**
@@ -106,6 +109,48 @@ export async function loadBeatportDJCharts(signal: AbortSignal): Promise<Beatpor
   const data = await fetchBeatportDJCharts(signal);
   if (data.success && data.charts && data.charts.length > 0) return data.charts;
   return null;
+}
+
+/* ── The two top-10 track lists (1608-1633) ───────────────────────────────── */
+
+/**
+ * ONE endpoint feeds BOTH lists, and its success test is looser than every
+ * slider's: `if (data.success)` alone, with no length check (1615).
+ *
+ * That matters. A successful-but-empty response takes the SUCCESS arm here,
+ * and each populate…List then bails silently on the empty array (1656, 1700) —
+ * so the containers keep their static 'Loading …' markup forever rather than
+ * showing an error. Every slider treats the same response as a failure.
+ * Transcribed: this returns empty arrays and the components render the
+ * placeholder, which is what the user sees today.
+ */
+export async function loadBeatportTop10Lists(
+  signal: AbortSignal,
+): Promise<{ beatport: BeatportTop10Track[]; hype: BeatportTop10Track[] }> {
+  let data;
+  try {
+    data = await fetchBeatportTop10Lists(signal);
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    throw new Error('Failed to load top 10 lists');
+  }
+  if (!data.success) throw new Error(data.error || 'No data available');
+  return { beatport: data.beatport_top10 ?? [], hype: data.hype_top10 ?? [] };
+}
+
+/* ── Top 10 releases (1760-1782) ──────────────────────────────────────────── */
+
+/** Same loose success test as the lists above, and the same silent-empty arm. */
+export async function loadBeatportTop10Releases(signal: AbortSignal): Promise<BeatportRelease[]> {
+  let data;
+  try {
+    data = await fetchBeatportTop10Releases(signal);
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    throw new Error('Failed to load top 10 releases');
+  }
+  if (!data.success) throw new Error(data.error || 'No data available');
+  return data.releases ?? [];
 }
 
 /* ── The hero's click payload (128-138) ───────────────────────────────────── */

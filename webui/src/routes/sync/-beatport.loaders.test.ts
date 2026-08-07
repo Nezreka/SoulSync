@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   heroClickRelease,
+  loadBeatportTop10Lists,
+  loadBeatportTop10Releases,
   isBeatportReleaseClickable,
   loadBeatportDJCharts,
   loadBeatportFeaturedCharts,
@@ -124,6 +126,22 @@ describe('the two chart loaders', () => {
     stubJson({ success: true, charts: [] });
     await expect(loadBeatportFeaturedCharts(SIGNAL)).resolves.toBeNull();
     await expect(loadBeatportDJCharts(SIGNAL)).resolves.toBeNull();
+  });
+});
+
+describe('the two top-10 loaders', () => {
+  it('each has its OWN thrown-fetch copy', async () => {
+    stubThrow(new Error('socket hang up'));
+    await expect(loadBeatportTop10Lists(SIGNAL)).rejects.toThrow('Failed to load top 10 lists');
+    await expect(loadBeatportTop10Releases(SIGNAL)).rejects.toThrow(
+      'Failed to load top 10 releases',
+    );
+  });
+
+  it('share the same API-said-no copy, which the vanilla does too', async () => {
+    stubJson({ success: false });
+    await expect(loadBeatportTop10Lists(SIGNAL)).rejects.toThrow('No data available');
+    await expect(loadBeatportTop10Releases(SIGNAL)).rejects.toThrow('No data available');
   });
 });
 

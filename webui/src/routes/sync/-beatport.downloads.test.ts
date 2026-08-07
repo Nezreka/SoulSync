@@ -16,6 +16,7 @@ import {
   openBeatportChartCard,
   openBeatportRelease,
   openBeatportTop100,
+  openBeatportTop10List,
   resetBeatportModalLatch,
 } from './-beatport.downloads';
 
@@ -358,6 +359,58 @@ describe('openBeatportChartAsDownloadModal', () => {
     // vanilla; collapsing them would change the key the engine tracks.
     expect((args[3] as { id: string }).id).toBe('beatport_chart_1700000000000');
     expect(args[0]).toBe('beatport_chart_1700000000000_i');
+  });
+});
+
+/* ── The top-10 track lists (sync-services.js) ────────────────────────────── */
+
+describe('the top-10 list container flow', () => {
+  it('opens the list as a compilation under the name it is given', async () => {
+    stubFetch(() => ({ success: true, tracks: [{ title: 'A+' }] }));
+    const { env } = makeEnv();
+    await openBeatportTop10List([{ title: 'A' }], 'Beatport Top 10', env);
+
+    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args[1]).toBe('Beatport Top 10');
+    expect(args[6]).toBe('playlist');
+    expect(args[4]).toEqual({ id: 'beatport_various', name: 'Various Artists' });
+    // No image for either list (4931 passes null).
+    expect(env.registerDownload).toHaveBeenCalledWith('Beatport Top 10', '', expect.any(String));
+  });
+
+  it('opens the overlay with the count already filled in', async () => {
+    stubFetch(() => ({ success: true, tracks: [] }));
+    const { env } = makeEnv();
+    await openBeatportTop10List([{ title: 'A' }, { title: 'B' }], 'Hype Top 10', env);
+    // 4925 — every other flow starts with a 'Scraping …' line instead.
+    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Fetching track metadata... (0/2)');
+  });
+
+  it('toasts rather than opening an empty download', async () => {
+    const calls = stubFetch(() => ({ success: true }));
+    const { env } = makeEnv();
+    await openBeatportTop10List([], 'Beatport Top 10', env);
+    // 4917. The vanilla can also fail one step earlier with a selector string
+    // in the message; there is no container to name here, so the port uses the
+    // other message this flow already produces.
+    expect(env.showToast).toHaveBeenCalledWith(
+      'Error loading Beatport Top 10: No track data found for Beatport Top 10',
+      'error',
+    );
+    expect(calls).toHaveLength(0);
+    expect(env.openDownloadModal).not.toHaveBeenCalled();
+    expect(env.hideLoadingOverlay).toHaveBeenCalled();
+  });
+
+  it('is latched, and released by the same blind 2s timer as Top 100', async () => {
+    stubFetch(() => ({ success: true, tracks: [{ title: 'A' }] }));
+    const { env, scheduled } = makeEnv();
+    await openBeatportTop10List([{ title: 'A' }], 'Beatport Top 10', env);
+    expect(scheduled).toEqual([{ callback: expect.any(Function), ms: 2000 }]);
+
+    // The chart-modal opener cleared the latch on the way out, so a second
+    // click is allowed — which is the vanilla's behaviour, not a leak.
+    expect(isBeatportModalOpening()).toBe(false);
   });
 });
 
