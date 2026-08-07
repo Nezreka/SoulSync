@@ -3803,3 +3803,61 @@ single failure whose identity I did not capture before it cleared. I am not
 claiming it was a flake — I am recording that it happened once in four and was
 not reproduced in the three runs since. Lint clean, build clean, working tree
 free of stray mutants.
+
+### BEATPORT P10c-i — the genre page shell + its hero slider
+
+`-ui/genre-page.tsx`, covering 2683-2809 (the shell) and 2811-3118 (the hero).
+
+**The genre hero is the main hero's twin** — same `beatport-rebuild-*` classes,
+one release per slide, 5000ms — so it is BeatportSlider with the hero config and
+its own ids. updateGenreHeroSlide, startGenreHeroSliderAutoPlay and
+addGenreHeroReleaseClickHandlers all dissolve, and with them
+`window.genreHeroSliderState`, which the P0 read flagged as the file's only
+window-scoped state.
+
+**Where it is NOT the twin — three things, each tested:**
+- the artist comes from `artists_string`, not `artist`;
+- the third line is the LABEL, falling back to '<Genre> Hero Release', where the
+  main hero's is the fixed caption 'New on Beatport';
+- **the urls are RELATIVE.** This endpoint alone returns paths (2869-2871), and
+  the url is POSTed to /api/beatport/release-metadata — so an un-absolutised one
+  would reach the scraper with no host. `absoluteBeatportUrl` is pure and
+  directly tested.
+
+**Two more single-endpoint quirks, both caught by writing the test first:**
+- it reports failure in `data.message`, NOT the `data.error` the other nine use
+  (2835). Reading the usual field would show the generic fallback for every
+  backend-reported failure.
+- it checks `response.ok` and puts the status line in front of the user
+  (2828-2830) — one of only two Beatport endpoints that does. My first pass
+  missed this; the test failed and the check went into the api layer where the
+  genres endpoint's already lives.
+
+**NOT transcribed, deliberately:** showGenrePageView stops the MAIN hero's
+autoplay on the way in (2687-2690) and showGenreListView restarts it
+(2791-2796). Both exist because the two sliders drove overlapping global state
+through shared functions — "to prevent conflicts". In the port they are two
+component instances with their own intervals and nothing shared, so there is no
+conflict to prevent; and the modal covers the page either way.
+
+**The genre Top 100 bug cannot recur.** The vanilla built the button block once
+and reused it for every genre, so its listener had to read the genre off the
+dataset — closing over the arguments pinned it to whichever genre was opened
+first and downloaded THAT genre's chart (fixed in the vanilla, 93eaa90ac).
+React remounts per genre, so the closure IS the current genre by construction.
+
+**Mutation pass: 23 mutants, 23 killed** after one round. All three first-round
+survivors were real gaps, and one was interesting: the click payload's `artist`
+and `label` fields are not observable through the download flow at all —
+openBeatportRelease reads only url, title and image_url. They are pinned by
+testing the pure builder directly rather than through a rendered click, which is
+also what the export-coverage gate wants.
+
+**The full suite caught `absoluteBeatportUrl` exported with no test naming it** —
+the same gate that caught openBeatportTop10List in P9. Scoped runs cannot see it.
+
+Full suite 6397 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the genre top-10 lists + their chart handlers
+(3123-3405), the genre Top 100 (3406-3443), and the genre top-10 releases
+(3444-3646).

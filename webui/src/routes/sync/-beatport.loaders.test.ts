@@ -9,7 +9,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  genreHeroAlbumLine,
+  genreHeroClickRelease,
   heroClickRelease,
+  loadGenreHero,
   loadBeatportTop10Lists,
   loadBeatportTop10Releases,
   isBeatportReleaseClickable,
@@ -142,6 +145,62 @@ describe('the two top-10 loaders', () => {
     stubJson({ success: false });
     await expect(loadBeatportTop10Lists(SIGNAL)).rejects.toThrow('No data available');
     await expect(loadBeatportTop10Releases(SIGNAL)).rejects.toThrow('No data available');
+  });
+});
+
+describe('the genre hero loader', () => {
+  it('returns the releases', async () => {
+    stubJson({ success: true, releases: [{ title: 'a' }] });
+    await expect(loadGenreHero('tech-house', 11, SIGNAL)).resolves.toEqual([{ title: 'a' }]);
+  });
+
+  it('treats a successful but EMPTY list as a failure', async () => {
+    stubJson({ success: true, releases: [] });
+    await expect(loadGenreHero('tech-house', 11, SIGNAL)).rejects.toThrow('No hero releases found');
+  });
+
+  it('reads `message`, and ignores the `error` every other loader uses', async () => {
+    stubJson({ success: false, message: 'genre is empty', error: 'IGNORED' });
+    await expect(loadGenreHero('tech-house', 11, SIGNAL)).rejects.toThrow('genre is empty');
+  });
+});
+
+describe("the genre hero's click payload", () => {
+  it('takes its artist from artists_string and absolutises the url', () => {
+    // Both fields differ from the main hero's builder, and NEITHER is visible
+    // through the download flow — `artist` reaches only a console line — so
+    // they are pinned here rather than through a rendered click.
+    expect(
+      genreHeroClickRelease({
+        title: 'Nights',
+        artists_string: 'A, B',
+        artist: 'WRONG',
+        label: 'Blonded',
+        url: '/release/x/1',
+        image_url: 'http://a.jpg',
+      }),
+    ).toEqual({
+      url: 'https://www.beatport.com/release/x/1',
+      title: 'Nights',
+      artist: 'A, B',
+      label: 'Blonded',
+      image_url: 'http://a.jpg',
+    });
+  });
+
+  it('defaults the three text fields and the image', () => {
+    expect(genreHeroClickRelease({ url: 'http://u' })).toEqual({
+      url: 'http://u',
+      title: 'Unknown Title',
+      artist: 'Unknown Artist',
+      label: 'Unknown Label',
+      image_url: '',
+    });
+  });
+
+  it('shows the label, falling back to the genre-named caption', () => {
+    expect(genreHeroAlbumLine({ label: 'Blonded' }, 'Tech House')).toBe('Blonded');
+    expect(genreHeroAlbumLine({}, 'Tech House')).toBe('Tech House Hero Release');
   });
 });
 

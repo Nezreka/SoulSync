@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BEATPORT_COMPILATION_ARTIST,
+  absoluteBeatportUrl,
   beatportChartAlbumId,
   beatportChartPlaylistId,
   beatportDownloadContext,
@@ -406,5 +407,28 @@ describe('the four synthetic ids (1896, 1939, 2005, 2047)', () => {
     expect(enrich).toHaveLength(6);
     expect(playlist).toHaveLength(9);
     expect(beatportEnrichmentId(now, random)).toMatch(/^enrich_1700000000000_/);
+  });
+});
+
+describe('absoluteBeatportUrl (2869-2871)', () => {
+  it('prefixes the host onto a relative path', () => {
+    // The genre hero endpoint is the ONLY one that returns relative urls, and
+    // the url is POSTed to the release-metadata scraper — so a relative one
+    // would arrive with no host at all.
+    expect(absoluteBeatportUrl('/release/nights/1234')).toBe(
+      'https://www.beatport.com/release/nights/1234',
+    );
+  });
+
+  it('leaves an absolute url alone, http or https', () => {
+    expect(absoluteBeatportUrl('https://www.beatport.com/x')).toBe('https://www.beatport.com/x');
+    // The test is startsWith('http'), so plain http passes through too.
+    expect(absoluteBeatportUrl('http://other/x')).toBe('http://other/x');
+  });
+
+  it('is the empty string for nothing', () => {
+    expect(absoluteBeatportUrl('')).toBe('');
+    expect(absoluteBeatportUrl(undefined)).toBe('');
+    expect(absoluteBeatportUrl(null)).toBe('');
   });
 });

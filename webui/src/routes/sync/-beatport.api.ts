@@ -364,13 +364,29 @@ export async function fetchBeatportGenreImage(
   return (await response.json()) as { success?: boolean; image_url?: string };
 }
 
-/** 2827. */
-export function fetchBeatportGenreHero(
+/**
+ * 2827. Note the extra `message`: this endpoint reports its failure text there
+ * rather than in `error` (2835), alone among the twenty. Typed explicitly so a
+ * caller cannot silently read the field that is never populated.
+ */
+export async function fetchBeatportGenreHero(
   slug: string,
   id: string | number,
   signal?: AbortSignal,
-): Promise<BeatportEnvelope & { releases?: BeatportRelease[] }> {
-  return getJson(`/api/beatport/genre/${slug}/${id}/hero`, signal);
+): Promise<BeatportEnvelope & { releases?: BeatportRelease[]; message?: string }> {
+  // 2828-2830: response.ok is checked HERE too — one of only two Beatport
+  // endpoints that does, and it reports the status line to the user.
+  const response = await fetch(
+    `/api/beatport/genre/${slug}/${id}/hero`,
+    signal ? { signal } : undefined,
+  );
+  if (!response.ok) {
+    throw new Error(`API returned ${response.status}: ${response.statusText}`);
+  }
+  return (await response.json()) as BeatportEnvelope & {
+    releases?: BeatportRelease[];
+    message?: string;
+  };
 }
 
 /** 3133. */

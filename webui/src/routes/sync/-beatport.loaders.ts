@@ -26,6 +26,7 @@ import {
   type BeatportRelease,
   type BeatportTop10Track,
   fetchBeatportDJCharts,
+  fetchBeatportGenreHero,
   fetchBeatportFeaturedCharts,
   fetchBeatportHeroTracks,
   fetchBeatportHypePicks,
@@ -33,6 +34,7 @@ import {
   fetchBeatportTop10Lists,
   fetchBeatportTop10Releases,
 } from './-beatport.api';
+import { absoluteBeatportUrl } from './-beatport.core';
 
 /**
  * A page-leave abort must reach the hook untouched — it tests `error.name` to
@@ -151,6 +153,51 @@ export async function loadBeatportTop10Releases(signal: AbortSignal): Promise<Be
   }
   if (!data.success) throw new Error(data.error || 'No data available');
   return data.releases ?? [];
+}
+
+/* ── The genre hero (2811-2864) ───────────────────────────────────────────── */
+
+/**
+ * Unlike every slider loader, this one checks `response.ok` AND reads its
+ * failure text from `data.message` — not `data.error`, which is the field the
+ * other nine use (2835). Copying the wrong field name here would silently show
+ * the generic fallback for every backend-reported failure.
+ */
+export async function loadGenreHero(
+  genreSlug: string,
+  genreId: string | number,
+  signal?: AbortSignal,
+): Promise<BeatportRelease[]> {
+  const data = await fetchBeatportGenreHero(genreSlug, genreId, signal);
+  if (!data.success || !data.releases || data.releases.length === 0) {
+    throw new Error(data.message || 'No hero releases found');
+  }
+  return data.releases;
+}
+
+/**
+ * 2982-2993. The genre hero's click payload, which differs from the main
+ * hero's in three ways:
+ *  - the artist comes from `artists_string`, not `artist`;
+ *  - the url is the ABSOLUTE one, because the endpoint returns a relative path;
+ *  - the label defaults to 'Unknown Label' rather than being dropped.
+ */
+export function genreHeroClickRelease(release: BeatportRelease) {
+  return {
+    url: absoluteBeatportUrl(release.url),
+    title: release.title || 'Unknown Title',
+    artist: release.artists_string || 'Unknown Artist',
+    label: release.label || 'Unknown Label',
+    image_url: release.image_url || '',
+  };
+}
+
+/**
+ * 2886: the third line is the LABEL, falling back to '<Genre> Hero Release' —
+ * where the main hero's third line is the fixed caption 'New on Beatport'.
+ */
+export function genreHeroAlbumLine(release: BeatportRelease, genreName: string): string {
+  return release.label || `${genreName} Hero Release`;
 }
 
 /* ── The hero's click payload (128-138) ───────────────────────────────────── */

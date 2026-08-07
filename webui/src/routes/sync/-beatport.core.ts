@@ -237,6 +237,20 @@ export function slidePosition(index: number, currentSlide: number): 'active' | '
 /* ── Genres ───────────────────────────────────────────────────────────────── */
 
 /**
+ * 2869-2871. The genre hero endpoint returns RELATIVE release urls, alone among
+ * the Beatport endpoints — every other one hands back an absolute link.
+ *
+ * That matters beyond the href: the url is POSTed to /api/beatport/release-
+ * metadata, so a relative one would reach the scraper as a path with no host.
+ * The test is `startsWith('http')`, which also lets an already-absolute url
+ * through untouched.
+ */
+export function absoluteBeatportUrl(url: string | undefined | null): string {
+  if (!url) return '';
+  return url.startsWith('http') ? url : `https://www.beatport.com${url}`;
+}
+
+/**
  * 2382-2392: nine names Beatport returns that are section headings rather than
  * genres. Matched lower-cased and trimmed, exact equality — not a prefix test,
  * so a real genre containing one of these words survives.
