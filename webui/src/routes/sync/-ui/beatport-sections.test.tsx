@@ -146,10 +146,13 @@ describe('the hero section', () => {
     );
   });
 
-  it('renders NOTHING when the load fails, leaving the page placeholders alone', async () => {
+  it('keeps its loading block when the load fails, as the vanilla does', async () => {
     stubApi({ '/api/beatport/hero-tracks': { success: false } });
-    const { container } = render(<BeatportHeroSection env={makeEnv()} />);
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    render(<BeatportHeroSection env={makeEnv()} />);
+    await waitFor(() =>
+      expect(screen.getByText('🎯 Loading Fresh Beatport Tracks...')).toBeInTheDocument(),
+    );
+    expect(document.querySelector('.beatport-rebuild-slide')).toBeNull();
   });
 });
 
@@ -305,11 +308,16 @@ describe('the featured-charts section', () => {
     );
   });
 
-  it('renders NOTHING on failure — no error block at all', async () => {
+  it('shows no error block on failure — just its placeholder', async () => {
     stubApi({ '/api/beatport/featured-charts': { success: false, error: 'down' } });
-    const { container } = render(<BeatportFeaturedChartsSection env={makeEnv()} />);
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    render(<BeatportFeaturedChartsSection env={makeEnv()} />);
+    await waitFor(() =>
+      expect(screen.getByText('📊 Loading Featured Charts...')).toBeInTheDocument(),
+    );
+    // The backend's message is deliberately NOT surfaced: this section has no
+    // error renderer.
     expect(screen.queryByText('down')).not.toBeInTheDocument();
+    expect(document.querySelector('.beatport-chart-card')).toBeNull();
   });
 
   it('uses ten cards per slide', async () => {
@@ -385,10 +393,11 @@ describe('the DJ-charts section', () => {
     );
   });
 
-  it('renders nothing on failure', async () => {
+  it('keeps its placeholder on failure', async () => {
     stubApi({ '/api/beatport/dj-charts': { success: true, charts: [] } });
-    const { container } = render(<BeatportDJChartsSection env={makeEnv()} />);
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    render(<BeatportDJChartsSection env={makeEnv()} />);
+    await waitFor(() => expect(screen.getByText('🎧 Loading DJ Charts...')).toBeInTheDocument());
+    expect(document.querySelector('.beatport-dj-card')).toBeNull();
   });
 });
 

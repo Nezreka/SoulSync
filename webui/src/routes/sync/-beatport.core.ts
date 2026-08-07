@@ -103,6 +103,23 @@ export interface BeatportSliderConfig {
    * hammer it in a way the vanilla never does.
    */
   marksLoadedBeforeFetch: boolean;
+  /**
+   * The section's placeholder copy, from index.html (2823, 2947, 2985, 3022,
+   * 3058) — heading first, subtitle second.
+   *
+   * WHY THE PORT OWNS THIS. In the vanilla the block is page markup: present
+   * before any script runs, replaced when the data lands, so no loader ever
+   * draws one. The flip DELETES that markup — so a section that drew nothing
+   * while loading would be a blank strip, and for the three whose failure arm
+   * replaces nothing (hero, charts, DJ) it would stay blank forever, where
+   * today it keeps showing this copy.
+   *
+   * Found by a coverage sweep rather than by a test. The same reasoning was
+   * already applied to the three top-10 lists; it had simply not been carried
+   * back to the sliders.
+   */
+  loadingTitle: string;
+  loadingSubtitle: string;
 }
 
 /** Every class name a slider owns, derived from its slug in one place. */
@@ -142,6 +159,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     padsLastSlide: false,
     onFailure: 'keep-static-markup',
     marksLoadedBeforeFetch: true,
+    loadingTitle: '🎯 Loading Fresh Beatport Tracks...',
+    loadingSubtitle: 'Fetching the latest music from Beatport',
   },
   releases: {
     slug: 'releases',
@@ -151,6 +170,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     padsLastSlide: true,
     onFailure: 'error-block',
     marksLoadedBeforeFetch: false,
+    loadingTitle: '📀 Loading New Releases...',
+    loadingSubtitle: 'Fetching the latest albums and EPs',
   },
   hypePicks: {
     slug: 'hype-picks',
@@ -160,6 +181,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     padsLastSlide: true,
     onFailure: 'error-block',
     marksLoadedBeforeFetch: false,
+    loadingTitle: '🔥 Loading Hype Picks...',
+    loadingSubtitle: 'Fetching the hottest trending tracks',
   },
   charts: {
     slug: 'charts',
@@ -169,6 +192,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     padsLastSlide: false,
     onFailure: 'nothing',
     marksLoadedBeforeFetch: false,
+    loadingTitle: '📊 Loading Featured Charts...',
+    loadingSubtitle: 'Fetching top chart collections',
   },
   dj: {
     slug: 'dj',
@@ -178,6 +203,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     padsLastSlide: false,
     onFailure: 'nothing',
     marksLoadedBeforeFetch: false,
+    loadingTitle: '🎧 Loading DJ Charts...',
+    loadingSubtitle: 'Fetching curated DJ selections',
   },
 };
 

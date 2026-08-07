@@ -46,11 +46,14 @@ describe('BeatportSection', () => {
     expect(document.querySelector('.beatport-releases-slider-container')).not.toBeNull();
   });
 
-  it('draws nothing at all while loading', () => {
-    const { container } = renderSection('releases', () => new Promise(() => []), 'pending');
-    // The vanilla's spinner lives in the page markup and is overwritten when
-    // the data arrives; the section never draws one itself.
-    expect(container).toBeEmptyDOMElement();
+  it('draws its OWN placeholder while loading', () => {
+    renderSection('releases', () => new Promise(() => []), 'pending');
+    // In the vanilla this block is page markup, present before any script runs
+    // and overwritten when the data lands. The flip deletes that markup, so the
+    // port has to draw it or the section is a blank strip while Beatport is
+    // being scraped.
+    expect(screen.getByText('📀 Loading New Releases...')).toBeInTheDocument();
+    expect(screen.getByText('Fetching the latest albums and EPs')).toBeInTheDocument();
   });
 
   it('renders the error block for a section that has one', async () => {
@@ -78,8 +81,8 @@ describe('BeatportSection', () => {
     expect(document.querySelector('.beatport-hype-picks-loading')).not.toBeNull();
   });
 
-  it('renders NOTHING when charts fail, which is what the vanilla does', async () => {
-    const { container } = renderSection(
+  it('KEEPS the placeholder when charts fail, and shows no error', async () => {
+    renderSection(
       'charts',
       async () => {
         throw new Error('network down');
@@ -87,24 +90,30 @@ describe('BeatportSection', () => {
       'charts-err',
       'Error Loading Charts',
     );
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
-    // No error block, no title — loadBeatportFeaturedCharts has no error
-    // renderer at all, it just returns false.
+    // loadBeatportFeaturedCharts has no error renderer at all — it returns
+    // false and replaces nothing, so what stays on screen is the placeholder.
+    await waitFor(() =>
+      expect(screen.getByText('📊 Loading Featured Charts...')).toBeInTheDocument(),
+    );
     expect(screen.queryByText('❌ Error Loading Charts')).not.toBeInTheDocument();
-    expect(document.querySelector('.beatport-charts-loading')).toBeNull();
+    expect(screen.queryByText('network down')).not.toBeInTheDocument();
   });
 
-  it('renders NOTHING when the DJ charts fail either', async () => {
-    const { container } = renderSection('dj', async () => [], 'dj-err');
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  it('keeps the DJ placeholder too, with its own copy', async () => {
+    renderSection('dj', async () => [], 'dj-err');
+    await waitFor(() => expect(screen.getByText('🎧 Loading DJ Charts...')).toBeInTheDocument());
+    expect(screen.getByText('Fetching curated DJ selections')).toBeInTheDocument();
   });
 
-  it('renders nothing when the hero fails, leaving its static markup alone', async () => {
-    const { container } = renderSection('hero', async () => null, 'hero-err');
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
-    // setupBeatportSliderWithPlaceholders (163-168) wires up the placeholder
-    // slides that are already in index.html — it renders no error.
-    expect(document.querySelector('.beatport-rebuild-loading')).toBeNull();
+  it('keeps the hero placeholder, which is all the vanilla leaves behind', async () => {
+    renderSection('hero', async () => null, 'hero-err');
+    // A correction to the P0 read: index.html has NO hero placeholder slides —
+    // `totalSlides: 4` is a dead initial value. What a failed hero actually
+    // leaves on screen is this loading block, permanently.
+    await waitFor(() =>
+      expect(screen.getByText('🎯 Loading Fresh Beatport Tracks...')).toBeInTheDocument(),
+    );
+    expect(document.querySelector('.beatport-rebuild-loading')).not.toBeNull();
   });
 
   it('passes the ids through to the slider', async () => {

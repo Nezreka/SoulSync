@@ -3713,3 +3713,93 @@ forever; the image tests wait for the workers to drain. Warnings: 0.
 Full suite 292 files / 6373 tests. Build clean. Lint clean.
 
 **Beatport remaining:** the genre detail page (2683-3646) — the last region.
+
+## THOROUGH VERIFICATION SWEEP (Boulder-prompted) — one real gap, one wrong
+## claim of mine, and a self-inflicted hazard
+
+### 1. COVERAGE ENUMERATION — every function in beatport-ui.js, classified
+
+113 top-level functions, counted mechanically rather than estimated:
+
+| region | lines | count | status |
+|---|---|---|---|
+| the five sliders | 14-1603 | 57 | ported or dissolved by React |
+| the three top-10 lists | 1608-1855 | 8 | ported (P9) |
+| the download bridge | 1858-2228 | 8 | ported (P7) |
+| genre browser modal | 2243-2681 | 11 | ported (P10a/b) |
+| **genre detail page** | **2683-3646** | **21** | **NOT YET PORTED** |
+| Settings tenant | 3650+ | 8 | out of scope (documented boundary) |
+
+"Dissolved by React" means the function exists only to manage imperative DOM or
+listeners: setup*Navigation / setup*Indicators / goTo* / start*AutoPlay /
+reset*AutoPlay / setup*HoverPause / cleanup* / populate* / create*Slides, plus
+displayCachedGenres, restoreCachedImages, addGenreBrowserCardClickListeners and
+isGenreBrowserModalOpen. Each was checked to have its BEHAVIOUR present in the
+port, not merely to look dissolvable.
+
+### 2. A CLAIM FROM MY OWN P0 READ WAS WRONG, AND IT COST A REAL BEHAVIOUR
+
+The read said: "totalSlides starts at 4 … the 4 is the count of the static
+placeholders, which is why the failure path works", and "the markup carries real
+placeholder slides".
+
+**index.html contains ZERO `beatport-rebuild-slide` elements.** Counted. The `4`
+is a dead initial value that `populateBeatportSlider` overwrites and nothing
+reads on the failure path. What the hero's failure arm actually leaves on screen
+is the `beatport-rebuild-loading` block — "🎯 Loading Fresh Beatport Tracks…" —
+permanently, with dead arrows.
+
+That mattered, because the port had been written to the wrong claim:
+BeatportSection rendered NOTHING while loading and NOTHING on failure for the
+three sections whose failure arm replaces nothing. In the vanilla that is
+invisible, because the placeholder is PAGE MARKUP. **The flip deletes that
+markup.** So the port as committed would have shipped:
+
+- all five sections as blank strips while Beatport is being scraped, and
+- hero, charts and DJ blank FOREVER on a failed load.
+
+Fixed: `loadingTitle` / `loadingSubtitle` join BEATPORT_SLIDERS (the exact copy
+from index.html 2823, 2947, 2985, 3022, 3058) and BeatportSection renders the
+block while loading and on the two non-error-block failure arms. The identical
+reasoning had already been applied to the three top-10 lists in P9 — it simply
+had not been carried back to the sliders.
+
+Six new mutants cover it; sections suite is now 35/35.
+
+### 3. A HAZARD I CREATED, AND THE FIX
+
+I ran the mutation suites in the BACKGROUND while editing the same files. The
+scripts snapshot every target file at start and rewrite it after each mutant, so
+they silently reverted an edit in progress — and when the run was killed, they
+left a MUTANT in the working tree (`-beatport.loaders.ts` carrying the wrong
+error string, and later `-beatport.sections.tsx` with a swapped cache key). Both
+were caught by `git status` / `git diff` and reverted.
+
+Two fixes, both applied:
+- the scripts now trap SIGTERM/SIGINT/SIGHUP and restore — `atexit` does NOT run
+  on a signal, which is why the mutant survived the kill;
+- mutation suites run in the FOREGROUND only, never concurrently with editing.
+
+Also re-anchored three mutants in the downloads suite that had gone stale: P9's
+openBeatportTop10List introduced a second copy of the latch-and-schedule shape,
+so anchors that were unique when written began matching twice. An anchor that
+matches twice is reported as a survivor, never silently skipped — which is how
+they were found.
+
+### 4. RE-VERIFICATION AGAINST THE COMMITTED CODE
+
+All five mutation suites re-run in the foreground:
+
+| suite | result |
+|---|---|
+| downloads | 32/32 killed |
+| sections (+6 new) | 35/35 killed |
+| top-10 | 28/28 killed |
+| genres | 24/26 — 2 declared equivalent, proven by deleting BOTH |
+| genre modal | 23/24 — 1 declared equivalent, reasoning on the line |
+
+Full suite run FOUR times. Three green at 292 files / 6373 tests; one run had a
+single failure whose identity I did not capture before it cleared. I am not
+claiming it was a flake — I am recording that it happened once in four and was
+not reproduced in the three runs since. Lint clean, build clean, working tree
+free of stray mutants.

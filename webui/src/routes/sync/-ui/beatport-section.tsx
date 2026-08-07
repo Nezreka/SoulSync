@@ -62,37 +62,46 @@ export function BeatportSection<T>({
   });
   const classes = beatportSliderClasses(config.slug);
 
-  if (status === 'failed') {
-    // 'keep-static-markup' (hero) and 'nothing' (charts, DJ) both render
-    // NOTHING here. They differ in intent — the hero has placeholder slides in
-    // the page markup to fall back to and the other two simply show an empty
-    // section — but neither draws anything of its own.
-    if (config.onFailure !== 'error-block') return null;
-    return (
-      <div className={classes.loading}>
-        <div className={classes.loadingContent}>
-          <h3>❌ {errorTitle}</h3>
-          <p>{errorMessage}</p>
-        </div>
+  /**
+   * The section's placeholder, which in the vanilla is PAGE MARKUP rather than
+   * anything a loader draws — and which the port therefore has to draw itself,
+   * because the flip deletes that markup. See BeatportSliderConfig.
+   */
+  const placeholder = (
+    <div className={classes.loading}>
+      <div className={classes.loadingContent}>
+        <h3>{config.loadingTitle}</h3>
+        <p>{config.loadingSubtitle}</p>
       </div>
-    );
+    </div>
+  );
+
+  if (status === 'failed') {
+    if (config.onFailure === 'error-block') {
+      return (
+        <div className={classes.loading}>
+          <div className={classes.loadingContent}>
+            <h3>❌ {errorTitle}</h3>
+            <p>{errorMessage}</p>
+          </div>
+        </div>
+      );
+    }
+    // 'keep-static-markup' (hero) and 'nothing' (charts, DJ) replace NOTHING in
+    // the vanilla, so what a user is left looking at is the placeholder block
+    // the page shipped with — permanently. That is arguably a bug, but it is
+    // what happens today, and drawing nothing instead would leave a blank strip
+    // once the markup is gone.
+    return placeholder;
   }
 
-  // Nothing to show, nothing drawn. The vanilla's spinner markup lives in the
-  // page shell and is overwritten when the data lands, so a loading section
-  // renders none of its own.
+  // Same reasoning while loading: the section shows its own copy from the first
+  // paint, because the markup that used to provide it is going away.
   //
   // DECLARED EQUIVALENT: `status !== 'ready'` behaves identically in every
-  // state reachable today, and so does dropping this line entirely, since
-  // BeatportSlider already returns null for an empty list. Mutation testing
-  // says all three are the same, and they are.
-  //
-  // An earlier version of this comment claimed the content check was needed to
-  // keep items on screen during reload(). That was wrong: BeatportSection does
-  // not expose reload, so the path cannot be reached through this component.
-  // The hook's item retention across a reload is real and tested there; the
-  // justification for testing it HERE was not.
-  if (items.length === 0) return null;
+  // state reachable today — the hook only reports 'ready' for a non-empty
+  // result or for a cache entry that was non-empty when it was stored.
+  if (items.length === 0) return placeholder;
 
   return (
     <BeatportSlider
