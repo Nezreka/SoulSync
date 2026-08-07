@@ -149,10 +149,17 @@ export function BeatportReleasePlaceholder() {
  *  - the three text lines have literal defaults, and the label's is
  *    'Hype Pick' rather than 'Unknown Label'.
  *
- * Those defaults are not merely cosmetic: the vanilla's click handler reads
- * this rendered text back out as the track's metadata, so an untitled release
- * is DOWNLOADED as 'Unknown Title'. The port holds the real object instead —
- * recorded in SYNC_PORT_AUDIT.md as a decision, not a silent improvement.
+ * The vanilla's click handler re-reads this rendered text back out of the DOM
+ * (961-972) rather than closing over the release. Traced through
+ * handleBeatportReleaseCardClick to see what that actually costs: `title` is
+ * used only in two toasts, and the DOWNLOAD is named from `data.album.name`
+ * off the release-metadata endpoint (1897) — so 'Unknown Title' never reaches
+ * the download engine. The re-read touches exactly two things: the toast copy,
+ * and `img.src` (a resolved absolute URL) as the bubble-image fallback.
+ *
+ * The port holds the real object, which is the natural React shape. Recorded
+ * because the difference is real, but it is small and cosmetic — not, as an
+ * earlier pass in SYNC_PORT_AUDIT.md claimed, wrong metadata on disk.
  */
 export function BeatportHypePickCard({
   release,

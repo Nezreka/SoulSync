@@ -245,6 +245,10 @@ export function openBeatportChartAsDownloadModal(
     beatportDownloadContext('chart'),
   );
 
+  // 2063 passes chartImage RAW, so a chart with no image hands it null. The
+  // `|| ''` here is not a change: registerBeatportDownload stores
+  // `chartImage || ''` itself (shared-helpers.js 3398), so both forms produce
+  // the same stored bubble — this one just keeps the type honest.
   env.registerDownload(chartName, chartImage || '', virtualPlaylistId);
 }
 

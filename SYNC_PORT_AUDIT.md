@@ -3445,3 +3445,94 @@ Full suite 287 files / 6254 tests. Build clean. Lint clean.
 
 **Beatport remaining:** wiring the five sections to these handlers, the three
 top-10 lists, and the genre browser (~1,400 lines).
+
+### CORRECTION — the hype-pick "decision" was smaller than I recorded
+
+The P0 read, and the P6 card docblock that carried it forward, said the hype
+picks slider's DOM re-read meant "a release missing a title is DOWNLOADED as
+'Unknown Title'", and filed it as an open decision for Boulder.
+
+Traced end to end during the P7 review and that is WRONG. The re-read is real
+(961-972), but handleBeatportReleaseCardClick uses `release.title` in exactly
+two places — the 'Loading …' toast (1871) and the overlay caption (1872). The
+download's name is `data.album.name` from /api/beatport/release-metadata (1897),
+and the tracks come from that endpoint too. Nothing scraped off the card reaches
+the download engine except `image_url`, and only as the bubble-image FALLBACK
+when the endpoint returned no album art (1910).
+
+So the port holding the real object instead of re-reading rendered text changes:
+the toast copy for an untitled release, and — in the artless case — a raw URL
+where the vanilla passed `img.src`'s resolved absolute form. Both cosmetic.
+NOT an open decision. Corrected in beatport-cards.tsx and its test.
+
+The general warning still stands for the OTHER two DOM-scraping call sites:
+`getGenrePageTrackData` (3348) feeds openBeatportChartAsDownloadModal directly,
+so defaulted strings there really do become track metadata. That one is still
+ahead of us, in the genre-browser wave.
+
+### THE FIVE LOADERS' ERROR COPY — re-read before P8, and it is not uniform
+
+Each error-block section has TWO distinct messages, which the P4 hook's single
+`defaultErrorMessage` would have flattened:
+
+| | API said no | fetch threw |
+|---|---|---|
+| releases (398-410) | `data.error \|\| 'No releases available'` | `'Failed to load releases'` |
+| hype picks (742-754) | `data.error \|\| 'No hype picks available'` | `'Failed to load hype picks'` |
+| charts / DJ | nothing rendered | nothing rendered |
+| hero | keeps its static markup | keeps its static markup |
+
+Note the console line for hype picks says 'No hype picks found' while the
+DISPLAYED string is 'No hype picks available' — the two are not the same, and
+copying the wrong one is the obvious mistake.
+
+So the P8 loaders THROW with the exact message rather than returning empty: the
+hook already renders `error.message` for an error-block section, which makes the
+backend's own `data.error` reach the user, as the vanilla does.
+
+### BEATPORT P8 — the five sections wired end to end
+
+`-beatport.loaders.ts` (the five load functions) + `-ui/beatport-sections.tsx`
+(the five components). A stubbed response now goes in one end and a download
+modal comes out the other, for all five.
+
+**A BREAK THE WIRING CAUGHT.** `BeatportSection` did not forward
+`slideAttributes` to the slider. P3 added the prop, P6 built
+`heroSlideAttributes` to fill it, and the section in between silently dropped
+it — so the hero would have rendered with no artwork at all, and nothing would
+have failed. Neither slice was wrong on its own; the gap only existed at the
+join, which is what this phase is. Forwarded, and mutation-tested by deleting
+the forward again.
+
+**What the wiring alone decides, and is therefore tested here:**
+- WHICH handler a card gets. All four release-ish sections hand off to
+  openBeatportRelease; the two chart sections hand off to openBeatportChartCard
+  with their own variant. A hype pick wired to the chart handler still draws a
+  hype pick and scrapes the wrong endpoint on click.
+- WHETHER a card is clickable. The hero, releases and hype picks all refuse to
+  bind when the url is missing or '#' (128, 500-501, 959). The two chart
+  sections bind UNCONDITIONALLY (1158, 1457) and let the handler toast. Same
+  markup, opposite behaviour, and only visible when the url is missing.
+- The cache key per section, and the slider config per section.
+
+**Mutation pass: 29 mutants, 29 killed** — after three rounds. Two survivors
+were my own bad mutants and three were real test gaps:
+- BAD MUTANT: `release={release as never}` is a type-only change with no runtime
+  effect. Re-anchored onto the actual handler call.
+- BAD MUTANT: an injected `onClick={undefined}` placed BEFORE the real prop —
+  the later JSX prop wins, so it mutated nothing. Re-anchored onto the real one.
+- GAP: nothing asserted the hype-picks SLUG, so borrowing the releases config
+  passed. That would render hype picks under `beatport-releases-*` classes —
+  unstyled where the two differ, and silent.
+- GAP (the interesting one): two sections sharing a cache key survived. On a
+  FIRST mount it is invisible — both start loading before either has cached
+  anything, so both fetch and both render. The damage only appears on the tab
+  switch BACK, when the second section hydrates from the first's items and never
+  re-fetches to correct itself. The test now unmounts and remounts.
+- GAP: the chart sections' bind-unconditionally behaviour was asserted in a
+  comment and nowhere else.
+
+Full suite 289 files / 6296 tests. Build clean. Lint clean.
+
+**Beatport remaining:** the three top-10 lists (1605-1853) and the genre
+browser (2230-3626, ~1,400 lines).

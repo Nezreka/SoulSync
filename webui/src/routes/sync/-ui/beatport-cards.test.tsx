@@ -125,8 +125,9 @@ describe('the hype pick card', () => {
   });
 
   it("defaults its three lines, and the label's default is 'Hype Pick'", () => {
-    // Not cosmetic: the vanilla's click handler reads this text back out as the
-    // track's metadata, so these strings can reach the download engine.
+    // The vanilla's click handler re-reads this text out of the DOM. Traced:
+    // it reaches the two toasts only — the download is named from the
+    // release-metadata endpoint's album, so these strings never land on disk.
     render(<BeatportHypePickCard release={{}} />);
     expect(document.querySelector('.beatport-hype-pick-title')?.textContent).toBe('Unknown Title');
     expect(document.querySelector('.beatport-hype-pick-artist')?.textContent).toBe(

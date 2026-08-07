@@ -11,6 +11,7 @@
 import type { ReactNode } from 'react';
 
 import type { BeatportSliderConfig } from '../-beatport.core';
+import type { BeatportSlideAttributes } from './beatport-slider';
 
 import { beatportSliderClasses } from '../-beatport.core';
 import { useBeatportSection } from '../-beatport.use-section';
@@ -22,6 +23,14 @@ export interface BeatportSectionProps<T> {
   load: (signal: AbortSignal) => Promise<T[] | null>;
   renderItem: (item: T, index: number) => ReactNode;
   renderPlaceholder?: (index: number) => ReactNode;
+  /**
+   * Forwarded to the slider. Only the hero uses it, and only the hero needs
+   * it — its artwork is painted by an attribute selector ON THE SLIDE. A
+   * section that did not pass this through would render a hero with no
+   * background and nothing would fail, which is why it is wired here rather
+   * than left to each caller to remember.
+   */
+  slideAttributes?: (item: T, index: number) => BeatportSlideAttributes | undefined;
   /** e.g. 'Error Loading Releases'. Only used by the error-block sections. */
   errorTitle?: string;
   defaultErrorMessage?: string;
@@ -37,6 +46,7 @@ export function BeatportSection<T>({
   load,
   renderItem,
   renderPlaceholder,
+  slideAttributes,
   errorTitle = 'Error Loading Content',
   defaultErrorMessage = 'Failed to load',
   trackId,
@@ -90,6 +100,7 @@ export function BeatportSection<T>({
       items={items}
       renderItem={renderItem}
       renderPlaceholder={renderPlaceholder}
+      slideAttributes={slideAttributes}
       trackId={trackId}
       prevButtonId={prevButtonId}
       nextButtonId={nextButtonId}
