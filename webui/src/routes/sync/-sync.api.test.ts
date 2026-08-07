@@ -49,6 +49,15 @@ import {
   startSourceDiscovery,
   startSourceSync,
   updateSourcePhase,
+  createAutomation,
+  deleteAutomation,
+  fetchAutomations,
+  fetchPersonalizedKinds,
+  fetchPersonalizedPlaylists,
+  fetchPipelineHistory,
+  patchMirroredPreferences,
+  runAutomation,
+  updateAutomation,
 } from './-sync.api';
 import { buildMirrorPayload } from './-sync.import';
 import { SYNC_SOURCES } from './-sync.sources';
@@ -572,5 +581,82 @@ describe("the account tabs' track endpoints (1861, 2557)", () => {
   it('passes the backend error through for the caller to throw on', async () => {
     stubFetch({ error: 'playlist not found' });
     expect((await fetchSpotifyPlaylistTracks('p1')).error).toBe('playlist not found');
+  });
+});
+
+describe('the Auto-Sync schedule board endpoints', () => {
+  function stub() {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        return new Response('{}', { status: 200 });
+      }),
+    );
+    return calls;
+  }
+
+  it('reads the board: automations + history with the limit as a QUERY PARAM', async () => {
+    const calls = stub();
+    await fetchAutomations();
+    await fetchPipelineHistory(150);
+    expect(calls[0].url).toBe('/api/automations');
+    // 1251-1254: 'Load more' raises the limit and REFETCHES, so the server —
+    // not the client — decides how much history exists.
+    expect(calls[1].url).toBe('/api/playlist-pipeline/history?limit=150');
+  });
+
+  it('writes a schedule: POST to create, PUT to the existing row', async () => {
+    const calls = stub();
+    await createAutomation({ name: 'Auto-Sync: p' });
+    await updateAutomation(42, { name: 'Auto-Sync: p' });
+    expect(calls[0]).toMatchObject({ url: '/api/automations' });
+    expect(calls[0].init?.method).toBe('POST');
+    expect(calls[1].init?.method).toBe('PUT');
+    expect(calls[1].url).toBe('/api/automations/42');
+    // Both send JSON — a schedule saved without the header is rejected.
+    expect(calls[0].init?.headers).toMatchObject({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ name: 'Auto-Sync: p' });
+  });
+
+  it('deletes and runs by automation id', async () => {
+    const calls = stub();
+    await deleteAutomation(7);
+    await runAutomation(7);
+    expect(calls[0]).toMatchObject({ url: '/api/automations/7' });
+    expect(calls[0].init?.method).toBe('DELETE');
+    // The synthetic-personalized Run-now path (2321) — no mirrored pipeline.
+    expect(calls[1].url).toBe('/api/automations/7/run');
+    expect(calls[1].init?.method).toBe('POST');
+  });
+
+  it('PATCHes the organize-by-playlist preference', async () => {
+    const calls = stub();
+    await patchMirroredPreferences(3, { organize_by_playlist: true });
+    expect(calls[0].url).toBe('/api/mirrored-playlists/3/preferences');
+    expect(calls[0].init?.method).toBe('PATCH');
+    expect(JSON.parse(calls[0].init?.body as string)).toEqual({ organize_by_playlist: true });
+  });
+
+  it('the two personalized reads resolve to NULL rather than rejecting', async () => {
+    // 610-611. Best-effort by contract: a kinds outage must cost the user their
+    // synthetic rows, never their schedule board.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('offline'))),
+    );
+    await expect(fetchPersonalizedKinds()).resolves.toBeNull();
+    await expect(fetchPersonalizedPlaylists()).resolves.toBeNull();
+  });
+
+  it('and return the response when the call succeeds', async () => {
+    const calls = stub();
+    await expect(fetchPersonalizedKinds()).resolves.not.toBeNull();
+    await fetchPersonalizedPlaylists();
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/personalized/kinds',
+      '/api/personalized/playlists',
+    ]);
   });
 });

@@ -617,3 +617,79 @@ export async function deleteYouTubePlaylist(urlHash: string): Promise<Response> 
 export async function deleteBeatportChart(chartHash: string): Promise<Response> {
   return fetch(`/api/beatport/charts/delete/${chartHash}`, { method: 'DELETE' });
 }
+
+/* ── Auto-Sync schedule board (auto-sync.js 602-650, 1315-1392, 2051-2331) ── */
+
+/** GET /api/automations (606). */
+export async function fetchAutomations(): Promise<Response> {
+  return fetch('/api/automations');
+}
+
+/**
+ * GET /api/playlist-pipeline/history?limit=<n> (609).
+ *
+ * The limit is a QUERY PARAM, not a client-side slice — 'Load more' raises it
+ * and REFETCHES (1251-1254), so the board never holds more than it asked for.
+ */
+export async function fetchPipelineHistory(limit: number): Promise<Response> {
+  return fetch(`/api/playlist-pipeline/history?limit=${limit}`);
+}
+
+/**
+ * 610-611. Both personalized endpoints are BEST-EFFORT: the vanilla catches
+ * their rejection to null and never lets either block the board. Callers must
+ * preserve that — a kinds outage must not cost the user their schedule board.
+ */
+export async function fetchPersonalizedKinds(): Promise<Response | null> {
+  return fetch('/api/personalized/kinds').catch(() => null);
+}
+
+export async function fetchPersonalizedPlaylists(): Promise<Response | null> {
+  return fetch('/api/personalized/playlists').catch(() => null);
+}
+
+/** POST /api/automations (2080, create arm). */
+export async function createAutomation(payload: unknown): Promise<Response> {
+  return fetch('/api/automations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** PUT /api/automations/<id> (2080, update arm — reuses the existing row). */
+export async function updateAutomation(
+  automationId: number | string,
+  payload: unknown,
+): Promise<Response> {
+  return fetch(`/api/automations/${automationId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** DELETE /api/automations/<id> (2100, 2297, and the two best-effort cleanups). */
+export async function deleteAutomation(automationId: number | string): Promise<Response> {
+  return fetch(`/api/automations/${automationId}`, { method: 'DELETE' });
+}
+
+/**
+ * POST /api/automations/<id>/run (2321) — the Run-now path for a SYNTHETIC
+ * personalized row, which has no mirrored pipeline to run.
+ */
+export async function runAutomation(automationId: number | string): Promise<Response> {
+  return fetch(`/api/automations/${automationId}/run`, { method: 'POST' });
+}
+
+/** PATCH /api/mirrored-playlists/<id>/preferences (1935) — organize-by-playlist. */
+export async function patchMirroredPreferences(
+  playlistId: number | string,
+  preferences: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(`/api/mirrored-playlists/${playlistId}/preferences`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(preferences),
+  });
+}

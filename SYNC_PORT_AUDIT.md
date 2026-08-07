@@ -4169,3 +4169,38 @@ cleanly. The two `typeof`-guarded shared-helpers seams
 (`playlistQualityProfileSelectHtml`, `hydratePlaylistQualityProfileSelects`)
 must gain a vanilla-seams.test.ts row before the board relies on them, because
 both are optional-chained today and would fail silently.
+
+### AUTO-SYNC SLICE A — the state builder + the board's api layer
+
+`buildAutoSyncScheduleState` joins the pure core in `-sync.autosync.ts`, and the
+nine endpoints the board needs join `-sync.api.ts`. No UI yet.
+
+**The two asymmetries from the P0 read are transcribed and pinned by tests:**
+
+1. The `schedule` arm coerces `trigger_config || {}`; the `weekly_time` arm
+   passes it RAW. The test proves WHY, not just that: it asserts the null
+   config lands in the read-only panel, and then asserts
+   `autoSyncWeeklyFromTrigger({})` returns all seven days — so a reader can see
+   what the coercion would have silently produced.
+2. The playlist_pipeline pass panels what it cannot bucket; the personalized
+   pass DROPS it. Three separate tests, because the drop has three different
+   exits — unresolvable row id, unparseable trigger, and a trigger type that is
+   neither schedule nor weekly.
+
+`enabled` is tri-state (`!== false && !== 0`), not truthiness — four assertions.
+
+**Mutation pass: 12 mutants, 12 killed** after two rounds. Both first-round
+survivors were fixtures that returned early and never reached the code under
+test: one stopped at the row-id lookup, the other only used the two trigger
+types the mutant's `else` cannot see. Two earlier test failures were also my
+fixtures rather than the port — ownership has THREE signals (flag, legacy group,
+`Auto-Sync:` name prefix) so clearing only the flag left the row owned, and
+`autoSyncPersonalizedEntry` reads `action_config.kinds` as a one-element ARRAY.
+Both now have tests of their own.
+
+**The export gate caught all nine api additions** — five consecutive slices now.
+
+Full suite 6448 tests. Build clean. Lint clean.
+
+**Next:** slice B, the hourly board (lanes, sidebar groups, drag-drop,
+custom-interval lanes, scroll preservation).

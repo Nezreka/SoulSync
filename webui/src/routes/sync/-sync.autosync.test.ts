@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { extractFunction } from '../../test/vanilla-extract';
 import {
+  buildAutoSyncScheduleState,
   AUTO_SYNC_BUCKETS,
   AUTO_SYNC_WEEKDAYS,
   AUTO_SYNC_WEEKDAY_LABELS,
@@ -603,5 +604,220 @@ describe('gaps the PR review proved unpinned (each mutation-verified)', () => {
     // Kind alone would hand back the 1990s row for a 2000s entry.
     expect(autoSyncRowIdForPersonalized({ kind: 'decade', variant: '2000s' }, rows)).toBe(8);
     expect(autoSyncRowIdForPersonalized({ kind: 'decade', variant: '1990s' }, rows)).toBe(7);
+  });
+});
+
+describe('buildAutoSyncScheduleState (471-569)', () => {
+  const owned = { owned_by: 'auto_sync', action_type: 'playlist_pipeline' };
+  const hourly = (id: number, playlistId: number, extra = {}) => ({
+    ...owned,
+    id,
+    name: `Auto-Sync: p${playlistId}`,
+    action_config: { playlist_id: playlistId },
+    trigger_type: 'schedule',
+    trigger_config: { interval: 24, unit: 'hours' },
+    ...extra,
+  });
+
+  it('buckets an owned hourly pipeline onto its playlist', () => {
+    const state = buildAutoSyncScheduleState([], [hourly(1, 7)]);
+    expect(state.playlistSchedules['7']).toMatchObject({
+      automation_id: 1,
+      hours: 24,
+      enabled: true,
+      owned: true,
+    });
+    expect(state.automationPipelines).toEqual([]);
+  });
+
+  it('treats enabled as TRI-STATE, not truthiness', () => {
+    // 487: false and 0 disable; anything else — including absent — enables.
+    expect(buildAutoSyncScheduleState([], [hourly(1, 7)]).playlistSchedules['7'].enabled).toBe(
+      true,
+    );
+    expect(
+      buildAutoSyncScheduleState([], [hourly(1, 7, { enabled: false })]).playlistSchedules['7']
+        .enabled,
+    ).toBe(false);
+    expect(
+      buildAutoSyncScheduleState([], [hourly(1, 7, { enabled: 0 })]).playlistSchedules['7'].enabled,
+    ).toBe(false);
+    expect(
+      buildAutoSyncScheduleState([], [hourly(1, 7, { enabled: 1 })]).playlistSchedules['7'].enabled,
+    ).toBe(true);
+  });
+
+  it('sends a genuinely UNOWNED pipeline to the read-only panel', () => {
+    // Ownership has THREE signals (autoSyncIsScheduleOwned) — the owned_by
+    // flag, the legacy group name, and an 'Auto-Sync:' name prefix. Dropping
+    // only the flag leaves the row owned via its name, so this fixture clears
+    // all three or it proves nothing.
+    const state = buildAutoSyncScheduleState(
+      [],
+      [{ ...hourly(1, 7), owned_by: undefined, name: 'Nightly refresh' }],
+    );
+    expect(state.playlistSchedules).toEqual({});
+    expect(state.automationPipelines).toHaveLength(1);
+  });
+
+  it('accepts ownership by the legacy group name and by the name prefix', () => {
+    const byGroup = buildAutoSyncScheduleState(
+      [],
+      [{ ...hourly(1, 7), owned_by: undefined, name: 'x', group_name: 'Playlist Auto-Sync' }],
+    );
+    expect(byGroup.playlistSchedules['7']).toBeDefined();
+
+    const byName = buildAutoSyncScheduleState(
+      [],
+      [{ ...hourly(1, 7), owned_by: undefined, group_name: undefined }],
+    );
+    expect(byName.playlistSchedules['7']).toBeDefined();
+  });
+
+  it('sends an owned row with an UNPARSEABLE interval to the panel', () => {
+    const state = buildAutoSyncScheduleState([], [hourly(1, 7, { trigger_config: {} })]);
+    expect(state.playlistSchedules).toEqual({});
+    expect(state.automationPipelines).toHaveLength(1);
+  });
+
+  it('buckets an owned weekly pipeline', () => {
+    const state = buildAutoSyncScheduleState(
+      [],
+      [
+        hourly(2, 9, {
+          trigger_type: 'weekly_time',
+          trigger_config: { time: '07:30', days: ['mon'], tz: 'UTC' },
+        }),
+      ],
+    );
+    expect(state.weeklySchedules['9']).toMatchObject({ time: '07:30', days: ['mon'], tz: 'UTC' });
+    expect(state.automationPipelines).toEqual([]);
+  });
+
+  it('a NULL weekly trigger_config falls through as a broken row, NOT every-day', async () => {
+    // 496-501, the vanilla's own comment. The schedule arm coerces with `|| {}`
+    // and the weekly arm passes RAW, precisely so a hand-edited null lands in
+    // the read-only panel instead of being handed to the codec's defensive
+    // defaults — which would turn garbage into all seven days.
+    const state = buildAutoSyncScheduleState(
+      [],
+      [hourly(3, 11, { trigger_type: 'weekly_time', trigger_config: null })],
+    );
+    expect(state.weeklySchedules).toEqual({});
+    expect(state.automationPipelines).toHaveLength(1);
+
+    // Proof the coercion WOULD have bucketed it: the codec accepts `{}` and
+    // returns all seven days.
+    expect(autoSyncWeeklyFromTrigger({})?.days).toHaveLength(7);
+  });
+
+  it('carries history through, defaulting both fields', () => {
+    expect(buildAutoSyncScheduleState([], [])).toMatchObject({
+      runHistory: [],
+      runHistoryTotal: 0,
+    });
+    expect(buildAutoSyncScheduleState([], [], { history: [{ id: 1 }], total: 12 })).toMatchObject({
+      runHistory: [{ id: 1 }],
+      runHistoryTotal: 12,
+    });
+  });
+
+  it('buckets a personalized schedule onto its row', () => {
+    const playlists = [{ id: -5, _personalized: true, kind: 'weekly_mix', variant: 'a' }];
+    const auto = {
+      id: 4,
+      name: 'Auto-Sync: mix',
+      owned_by: 'auto_sync',
+      action_type: 'personalized_pipeline',
+      // action_config.kinds — an ARRAY of exactly one entry. A multi-kind
+      // pipeline is an Automations-page construct and must never be mistaken
+      // for a per-row board schedule.
+      action_config: { kinds: [{ kind: 'weekly_mix', variant: 'a' }] },
+      trigger_type: 'schedule',
+      trigger_config: { interval: 12, unit: 'hours' },
+    };
+    const state = buildAutoSyncScheduleState(playlists, [auto]);
+    expect(state.playlistSchedules['-5']).toMatchObject({ hours: 12 });
+  });
+
+  it('DROPS an unbucketable personalized row instead of panelling it', () => {
+    // 526-528 vs 518 — the two passes disagree, and the difference is real:
+    // the playlist_pipeline pass panels what it cannot bucket, this one does
+    // not, so the row vanishes from the board entirely.
+    const auto = {
+      id: 5,
+      owned_by: 'auto_sync',
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'nope', variant: 'x' }] },
+      trigger_type: 'schedule',
+      trigger_config: { interval: 6, unit: 'hours' },
+    };
+    const state = buildAutoSyncScheduleState([], [auto]);
+    expect(state.playlistSchedules).toEqual({});
+    expect(state.automationPipelines).toEqual([]);
+  });
+
+  it('DROPS a personalized row whose TRIGGER is unbucketable, still without panelling', () => {
+    // The earlier drop test returns early at the row-id lookup, so it never
+    // reaches the trigger arms. This one resolves to a real row and then fails
+    // to parse — the path where a stray `else` would panel it.
+    const playlists = [{ id: -5, _personalized: true, kind: 'weekly_mix', variant: 'a' }];
+    const auto = {
+      id: 6,
+      owned_by: 'auto_sync',
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'weekly_mix', variant: 'a' }] },
+      trigger_type: 'schedule',
+      trigger_config: {},
+    };
+    const state = buildAutoSyncScheduleState(playlists, [auto]);
+    expect(state.playlistSchedules).toEqual({});
+    expect(state.automationPipelines).toEqual([]);
+  });
+
+  it('requires OWNERSHIP for a personalized row that would otherwise bucket', () => {
+    const playlists = [{ id: -5, _personalized: true, kind: 'weekly_mix', variant: 'a' }];
+    const auto = {
+      id: 7,
+      name: "Someone else's pipeline",
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'weekly_mix', variant: 'a' }] },
+      trigger_type: 'schedule',
+      trigger_config: { interval: 12, unit: 'hours' },
+    };
+    // Identical row WITH ownership buckets, so the only difference is the flag.
+    expect(
+      buildAutoSyncScheduleState(playlists, [{ ...auto, owned_by: 'auto_sync' }]).playlistSchedules[
+        '-5'
+      ],
+    ).toBeDefined();
+    expect(buildAutoSyncScheduleState(playlists, [auto]).playlistSchedules).toEqual({});
+  });
+
+  it('drops an owned personalized row with a THIRD trigger type, without panelling', () => {
+    // Neither 'schedule' nor 'weekly_time' — e.g. a manual personalized
+    // pipeline. It resolves to a row and is owned, so it reaches the trigger
+    // chain and falls off the end. The vanilla has no else there (526-557),
+    // and adding one would surface it in the read-only panel.
+    const playlists = [{ id: -5, _personalized: true, kind: 'weekly_mix', variant: 'a' }];
+    const state = buildAutoSyncScheduleState(playlists, [
+      {
+        id: 8,
+        owned_by: 'auto_sync',
+        action_type: 'personalized_pipeline',
+        action_config: { kinds: [{ kind: 'weekly_mix', variant: 'a' }] },
+        trigger_type: 'manual',
+        trigger_config: {},
+      },
+    ]);
+    expect(state.playlistSchedules).toEqual({});
+    expect(state.weeklySchedules).toEqual({});
+    expect(state.automationPipelines).toEqual([]);
+  });
+
+  it('ignores automations that are not pipelines at all', () => {
+    const state = buildAutoSyncScheduleState([], [{ action_type: 'something_else', id: 9 }]);
+    expect(state.automationPipelines).toEqual([]);
+    expect(state.playlistSchedules).toEqual({});
   });
 });

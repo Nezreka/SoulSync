@@ -62,6 +62,15 @@ export interface AutomationRow {
   owned_by?: string;
   group_name?: string;
   name?: string;
+  /**
+   * The schedule fields the board reads (471-569). Added with the state
+   * builder; the codec helpers above predate them and never needed them.
+   */
+  id?: number | string;
+  trigger_type?: string;
+  trigger_config?: unknown;
+  next_run?: string | null;
+  enabled?: unknown;
 }
 
 export interface WeeklyTriggerConfig {
@@ -470,4 +479,162 @@ export function autoSyncGroupSidebarRows(rows: MirroredRow[] | null | undefined)
     }
   });
   return { flat, groups };
+}
+
+/* ── The schedule-state builder (auto-sync.js 471-569) ────────────────────── */
+
+export interface AutoSyncScheduleEntry {
+  automation_id: number | string;
+  automation_name: string;
+  enabled: boolean;
+  owned: true;
+  next_run?: string | null;
+  trigger_config: unknown;
+}
+
+export interface AutoSyncHourlyEntry extends AutoSyncScheduleEntry {
+  hours: number;
+}
+
+export interface AutoSyncWeeklyEntry extends AutoSyncScheduleEntry, WeeklyTriggerConfig {}
+
+export interface AutoSyncScheduleState {
+  playlists: MirroredRow[];
+  automations: AutomationRow[];
+  playlistSchedules: Record<string, AutoSyncHourlyEntry>;
+  weeklySchedules: Record<string, AutoSyncWeeklyEntry>;
+  /** Pipeline automations this board does NOT own — the read-only panel. */
+  automationPipelines: AutomationRow[];
+  runHistory: unknown[];
+  runHistoryTotal: number;
+}
+
+/**
+ * 487. Tri-state, NOT truthiness: the row is enabled unless it is explicitly
+ * `false` or `0`, so an absent flag counts as enabled.
+ */
+function autoSyncEnabledFlag(auto: AutomationRow): boolean {
+  const enabled = (auto as { enabled?: unknown }).enabled;
+  return enabled !== false && enabled !== 0;
+}
+
+/**
+ * Fold the automations list into the board's two schedule maps plus the
+ * read-only pipeline panel (471-569).
+ *
+ * TWO ASYMMETRIES, both deliberate in the vanilla and both easy to "tidy" into
+ * bugs:
+ *
+ * 1. **`trigger_config || {}` on the schedule arm, RAW on the weekly arm**
+ *    (481 vs 502, with a comment at 496-501). A null or non-object config on a
+ *    weekly row must fall through to `automationPipelines` as a broken row —
+ *    coercing it to `{}` would hand it to autoSyncWeeklyFromTrigger, whose
+ *    defensive defaults would silently turn garbage into an every-day schedule.
+ *
+ * 2. **The playlist_pipeline pass pushes unbucketable rows onto
+ *    `automationPipelines`; the personalized_pipeline pass DROPS them** (518 vs
+ *    526-528). A personalized automation that cannot be bucketed simply
+ *    disappears from the board rather than appearing in the read-only panel.
+ */
+export function buildAutoSyncScheduleState(
+  playlists: MirroredRow[],
+  automations: AutomationRow[],
+  historyData: { history?: unknown[]; total?: number } = {},
+): AutoSyncScheduleState {
+  const playlistSchedules: Record<string, AutoSyncHourlyEntry> = {};
+  const weeklySchedules: Record<string, AutoSyncWeeklyEntry> = {};
+  const automationPipelines: AutomationRow[] = [];
+
+  (automations || []).filter(autoSyncIsPipelineAutomation).forEach((auto) => {
+    const playlistId = autoSyncPlaylistIdFromAutomation(auto);
+    const isOwned = autoSyncIsScheduleOwned(auto);
+
+    if (playlistId && isOwned && auto.trigger_type === 'schedule') {
+      const hours = autoSyncHoursFromTrigger(
+        (auto.trigger_config || {}) as Parameters<typeof autoSyncHoursFromTrigger>[0],
+      );
+      if (hours) {
+        playlistSchedules[String(playlistId)] = {
+          automation_id: auto.id ?? '',
+          automation_name: auto.name ?? '',
+          hours,
+          enabled: autoSyncEnabledFlag(auto),
+          owned: true,
+          next_run: auto.next_run,
+          trigger_config: auto.trigger_config || {},
+        };
+        return;
+      }
+    }
+    if (playlistId && isOwned && auto.trigger_type === 'weekly_time') {
+      // RAW on purpose — see asymmetry 1 above.
+      const parsed = autoSyncWeeklyFromTrigger(auto.trigger_config);
+      if (parsed) {
+        weeklySchedules[String(playlistId)] = {
+          automation_id: auto.id ?? '',
+          automation_name: auto.name ?? '',
+          time: parsed.time,
+          days: parsed.days,
+          tz: parsed.tz,
+          enabled: autoSyncEnabledFlag(auto),
+          owned: true,
+          next_run: auto.next_run,
+          trigger_config: auto.trigger_config || {},
+        };
+        return;
+      }
+    }
+    automationPipelines.push(auto);
+  });
+
+  // 524-558. Board-owned single-kind personalized schedules bucket onto their
+  // row — the real mirrored row when one was generated, else the synthetic one.
+  (automations || []).filter(autoSyncIsPersonalizedAutomation).forEach((auto) => {
+    const entry = autoSyncPersonalizedEntry(auto);
+    if (!entry || !autoSyncIsScheduleOwned(auto)) return;
+    const key = autoSyncRowIdForPersonalized(entry, playlists);
+    if (key == null) return;
+    if (auto.trigger_type === 'schedule') {
+      const hours = autoSyncHoursFromTrigger(
+        (auto.trigger_config || {}) as Parameters<typeof autoSyncHoursFromTrigger>[0],
+      );
+      if (hours) {
+        playlistSchedules[String(key)] = {
+          automation_id: auto.id ?? '',
+          automation_name: auto.name ?? '',
+          hours,
+          enabled: autoSyncEnabledFlag(auto),
+          owned: true,
+          next_run: auto.next_run,
+          trigger_config: auto.trigger_config || {},
+        };
+      }
+    } else if (auto.trigger_type === 'weekly_time') {
+      const parsed = autoSyncWeeklyFromTrigger(auto.trigger_config);
+      if (parsed) {
+        weeklySchedules[String(key)] = {
+          automation_id: auto.id ?? '',
+          automation_name: auto.name ?? '',
+          time: parsed.time,
+          days: parsed.days,
+          tz: parsed.tz,
+          enabled: autoSyncEnabledFlag(auto),
+          owned: true,
+          next_run: auto.next_run,
+          trigger_config: auto.trigger_config || {},
+        };
+      }
+    }
+    // No else — see asymmetry 2 above.
+  });
+
+  return {
+    playlists,
+    automations,
+    playlistSchedules,
+    weeklySchedules,
+    automationPipelines,
+    runHistory: historyData.history || [],
+    runHistoryTotal: historyData.total || 0,
+  };
 }
