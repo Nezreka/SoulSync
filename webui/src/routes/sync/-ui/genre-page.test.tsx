@@ -210,6 +210,20 @@ describe('the genre hero slider', () => {
     await waitFor(() => expect(screen.getByText(/503/)).toBeInTheDocument());
   });
 
+  it('STAYS on the genre page when the hero fails, keeping the block reachable', async () => {
+    // The declared divergence. In the vanilla this loader rethrows (2862), the
+    // Promise.all in handleGenreBrowserCardClick rejects, and showGenreListView
+    // bounces the user to the grid — so the block it just rendered is never
+    // seen and its Retry is dead. Here the page stays put.
+    const onBack = vi.fn();
+    stubApi({ [HERO_URL]: { success: false, message: 'down' } });
+    render(<GenrePage genre={GENRE} onBack={onBack} env={makeEnv()} />);
+    await waitFor(() => expect(screen.getByText('🔄 Retry')).toBeInTheDocument());
+    // Still on the genre page, and nothing navigated away.
+    expect(document.querySelector('.genre-page-title')?.textContent).toBe('Tech House');
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
   it('retries from the error block', async () => {
     stubApi({ [HERO_URL]: { success: false, message: 'down' } });
     render(<GenrePage genre={GENRE} onBack={vi.fn()} env={makeEnv()} />);

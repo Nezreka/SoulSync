@@ -14,6 +14,20 @@
  * With them goes `window.genreHeroSliderState`, which the read flagged as the
  * file's only window-scoped state.
  *
+ * ONE DECLARED DIVERGENCE, and it is the reason this file has a visible error
+ * block at all. loadGenreHeroSlider renders its error block AND RETHROWS
+ * (2862) — alone among the genre page's three loaders, which both swallow.
+ * handleGenreBrowserCardClick runs all three in a Promise.all, so that throw
+ * rejects the lot, toasts, and calls showGenreListView(): the user is bounced
+ * back to the genre grid and NEVER SEES the block that was just rendered. Its
+ * Retry button is dead UI — and would be broken anyway, since it is an inline
+ * `onclick` with the genre name string-interpolated into it.
+ *
+ * The port keeps the user on the genre page and makes the block real, with a
+ * working Retry. Losing the whole page because one of three sections failed —
+ * while the other two would have loaded fine — is not worth reproducing, and
+ * the markup shows what was intended. Declared rather than done quietly.
+ *
  * NOT TRANSCRIBED, deliberately: showGenrePageView stops the MAIN hero's
  * autoplay on the way in (2687-2690) and showGenreListView restarts it
  * (2791-2796). Both exist because the two sliders drove overlapping global

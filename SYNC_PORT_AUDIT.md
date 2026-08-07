@@ -3861,3 +3861,29 @@ Full suite 6397 tests. Build clean. Lint clean.
 **Beatport remaining:** the genre top-10 lists + their chart handlers
 (3123-3405), the genre Top 100 (3406-3443), and the genre top-10 releases
 (3444-3646).
+
+### P10c-i REVIEW — the hero's error block is DEAD UI in the vanilla
+
+Checked the three genre-page loaders against each other rather than each on its
+own, and they do not agree:
+
+| loader | on failure |
+|---|---|
+| loadGenreTop10Lists (3151) | renders an error block, swallows |
+| loadGenreTop10Releases (3464) | renders an error block, swallows |
+| **loadGenreHeroSlider (2852-2862)** | renders an error block **AND RETHROWS** |
+
+handleGenreBrowserCardClick runs all three in a `Promise.all` (2668-2672), so
+the hero's throw rejects the lot, toasts, and calls showGenreListView() — the
+user is bounced back to the genre grid and **never sees the block the hero just
+rendered**. Its Retry button is unreachable, and would be broken anyway: it is
+an inline `onclick` with the genre name string-interpolated into it, so any
+genre containing an apostrophe would produce invalid JS.
+
+The port keeps the user on the genre page and makes the block real, with a
+working Retry — losing the whole page because one of three sections failed,
+while the other two would have loaded fine, is not worth reproducing. DECLARED
+in the component and covered by a test that asserts the page stays put.
+
+This is the sort of thing only a cross-loader comparison finds: each of the
+three reads perfectly sensibly in isolation.
