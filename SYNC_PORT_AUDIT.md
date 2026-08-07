@@ -4602,11 +4602,60 @@ poller stop conditions.
 
 Full suite 6761 tests. Build clean. Lint clean.
 
-**Still open for the shell wave:** the two `typeof`-guarded shared-helpers
-seams (`playlistQualityProfileSelectHtml` is rendered by the card;
-`hydratePlaylistQualityProfileSelects` is NOT yet called after mount) need
-vanilla-seams.test.ts rows before the flip, and the modal needs an entry point
-from the mirrored tab's Auto-Sync button.
+### AUTO-SYNC — the post-wave review pass
+
+Three real defects, found by re-reading the port against the vanilla rather
+than by any test going red.
+
+**1. A FLIP HAZARD I had built in.** `runNow` reached for
+`window.runMirroredPlaylistPipeline` — but that function is defined in
+auto-sync.js ITSELF (2481), the file the flip deletes. It would have worked up
+to the flip and then gone silently dead: exactly the failure mode
+vanilla-seams.test.ts exists to prevent, and the reason that file's header
+calls these seams silent. The ported replacement already existed —
+`-sync.use-pipeline.ts`, written in P5g — so the runner is now a REQUIRED
+injected option rather than a global lookup, and the port has no dependency on
+the doomed symbol at all. The seam row and the globals.d.ts entry I had briefly
+added for it came back out; there is nothing left to guard.
+
+That also closed a stale note: P5g's header said the Auto-Sync board "is its
+own wave and does not exist yet". It does now, and it does not want the
+vanilla's push-based refresh — `useAutoSync` polls and re-reads on its own.
+What it wants is the reverse wiring, which the header now says.
+
+**2. The bulk confirm copy had been collapsed.** The vanilla writes
+`Every ${autoSyncIntervalLabel(hours).toLowerCase().replace(/^every /, '')}.`
+— "Every 12 hours." — while the SUCCESS toast on the same path uses the short
+`autoSyncBucketLabel` — "12h". I had used the short form for both. They differ
+deliberately; fixed, with the exact string pinned and a mutant guarding it.
+
+**3. The hydrate seam was never called.** I had flagged this as "open for the
+shell wave" at the end of E-i, which was wrong — it is squarely slice E's
+scope. `playlistQualityProfileSelectHtml` emits an EMPTY select and
+`hydratePlaylistQualityProfileSelects` fills it; missing the second throws
+nothing and simply renders the control empty forever. It now hydrates per card,
+in the card's own effect, which covers both of the vanilla's call sites
+(735-744 and 1089-1096) and the cases they miss — a card reappearing because a
+filter cleared or a tab switched. Both seams now have vanilla-seams.test.ts
+rows and both resolve.
+
+**A note on my own method.** Two of the scripted edits in this pass SILENTLY
+NO-OPPED because oxfmt had rewrapped the target text and I had not asserted the
+match. A failing test caught it. An edit that reports success while changing
+nothing is the same class of problem as a test that passes while measuring
+nothing — every scripted edit in this repo should assert its anchor, and the
+mutation scripts already do.
+
+Mutation after the fixes: 45/45 on the controller, 87/87 across the boards and
+shared chrome — including three new seam mutants (never hydrate, hydrate with
+no select, hydrate with the wrong profile id) and two for the fixes above.
+
+Full suite 6768 tests. Build clean. Lint clean.
+
+**Still open for the shell wave:** the modal needs an entry point from the
+mirrored tab's Auto-Sync button, and the page must pass
+`useMirroredPipeline().run` into `useAutoSync` as `runPipeline` — the type
+system now requires it, so this cannot be forgotten silently.
 
 ### LIVE BUG FIX — bulk scheduling left weekly schedules running
 

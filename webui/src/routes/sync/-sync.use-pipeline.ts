@@ -9,12 +9,14 @@
  * That map is a ref here, so `resume` is idempotent no matter how many times
  * the list re-renders.
  *
- * DECLARED DEFERRAL: after a successful start the vanilla also patches
+ * DEFERRAL NOW CLOSED, differently. The vanilla also patches
  * _autoSyncScheduleState, re-renders the Auto-Sync schedule modal and kicks
- * its status polling (2478-2483). That board is its own wave and does not
- * exist yet; there is nothing to update, so those three calls have no
- * counterpart here. Same for refreshAutoSyncScheduleModal on the terminal
- * arms (2506, 2512).
+ * its status polling after a successful start (2478-2483), and refreshes it
+ * again on the terminal arms (2506, 2512). When this was written the board did
+ * not exist. It does now — and it does not need any of that: `useAutoSync`
+ * polls on its own while anything is running, and re-reads the whole state
+ * after every action. What it DOES need is the reverse direction, so the page
+ * passes this hook's `run` into `useAutoSync` as its `runPipeline`.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';

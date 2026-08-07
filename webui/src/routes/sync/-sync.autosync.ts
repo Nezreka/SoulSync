@@ -40,6 +40,8 @@ export interface MirroredRow {
   source?: string;
   source_ref?: string;
   source_playlist_id?: string | number;
+  /** Feeds the shared-helpers quality-profile select's hydration (740). */
+  quality_profile_id?: string | number | null;
   description?: string;
   name?: string;
   /** String or number on the wire, which is why every read parseInts it. */

@@ -11,6 +11,9 @@ import { useAutoSync } from './-sync.use-autosync';
 
 const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
 
+/** The ported pipeline runner the page injects (see UseAutoSyncOptions). */
+let runPipeline = vi.fn();
+
 const jsonRes = (body: unknown, ok = true) =>
   ({ ok, status: ok ? 200 : 500, json: async () => body }) as Response;
 
@@ -59,7 +62,7 @@ const weeklyAutomation = (playlistId: number, automationId = 200) => ({
 
 async function mount(over: Partial<Stubs> = {}) {
   stubApi(over);
-  const hook = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+  const hook = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
   await waitFor(() => {
     expect(hook.result.current.loading).toBe(false);
   });
@@ -67,6 +70,7 @@ async function mount(over: Partial<Stubs> = {}) {
 }
 
 beforeEach(() => {
+  runPipeline = vi.fn();
   window.showToast = vi.fn();
   window.showConfirmDialog = vi.fn(async () => true);
 });
@@ -75,7 +79,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete window.showToast;
   delete window.showConfirmDialog;
-  delete window.runMirroredPlaylistPipeline;
 });
 
 describe('loading (602-650)', () => {
@@ -89,7 +92,7 @@ describe('loading (602-650)', () => {
   it('surfaces a load failure as the whole-modal error', async () => {
     stubApi();
     vi.spyOn(api, 'fetchAutomations').mockResolvedValue(jsonRes({ error: 'nope' }, false));
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await waitFor(() => {
       expect(result.current.loadError).toBe('nope');
     });
@@ -98,7 +101,7 @@ describe('loading (602-650)', () => {
   it('uses the endpoint-specific message for each failure', async () => {
     stubApi();
     vi.spyOn(api, 'fetchPipelineHistory').mockResolvedValue(jsonRes({}, false));
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await waitFor(() => {
       expect(result.current.loadError).toBe('Failed to load pipeline run history');
     });
@@ -106,14 +109,14 @@ describe('loading (602-650)', () => {
 
   it('does NOT load at all while closed', () => {
     stubApi();
-    renderHook(() => useAutoSync({ open: false, now: () => NOW }));
+    renderHook(() => useAutoSync({ open: false, now: () => NOW, runPipeline }));
     expect(api.fetchAutomations).not.toHaveBeenCalled();
   });
 
   it('clears a previous error once a later load succeeds', async () => {
     stubApi();
     vi.spyOn(api, 'fetchAutomations').mockResolvedValueOnce(jsonRes({ error: 'nope' }, false));
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await waitFor(() => {
       expect(result.current.loadError).toBe('nope');
     });
@@ -133,7 +136,7 @@ describe('loading (602-650)', () => {
         throw new Error('bad json');
       },
     } as unknown as Response);
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -146,7 +149,7 @@ describe('loading (602-650)', () => {
     vi.spyOn(api, 'fetchPersonalizedKinds').mockResolvedValue(
       jsonRes({ success: true, kinds: null }),
     );
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -299,18 +302,28 @@ describe('unscheduling (2120-2134, 2291-2305)', () => {
 });
 
 describe('Run now (2307-2336)', () => {
-  it('hands a real mirrored playlist to the vanilla engine', async () => {
-    window.runMirroredPlaylistPipeline = vi.fn();
+  it('hands a real mirrored playlist to the INJECTED pipeline runner', async () => {
+    // Injected rather than reached for on window: the vanilla's
+    // runMirroredPlaylistPipeline lives in auto-sync.js itself, the file the
+    // flip deletes, so a window call would go quiet at exactly the wrong
+    // moment. The page passes useMirroredPipeline().run.
     const { result } = await mount();
     await act(async () => {
       await result.current.runNow(1);
     });
-    expect(window.runMirroredPlaylistPipeline).toHaveBeenCalledWith(1, 'Late Night');
+    expect(runPipeline).toHaveBeenCalledWith(1, 'Late Night');
     expect(api.runAutomation).not.toHaveBeenCalled();
   });
 
+  it('falls back to the playlist id when a row has no name', async () => {
+    const { result } = await mount({ playlists: [{ id: 9, source: 'spotify' }] });
+    await act(async () => {
+      await result.current.runNow(9);
+    });
+    expect(runPipeline).toHaveBeenCalledWith(9, 'Playlist #9');
+  });
+
   it('runs a synthetic personalized row through ITS OWN automation', async () => {
-    window.runMirroredPlaylistPipeline = vi.fn();
     const { result } = await mount({
       playlists: [
         { id: 5, name: 'Discovery Mix', source: 'soulsync_discovery', _personalized: true },
@@ -322,12 +335,11 @@ describe('Run now (2307-2336)', () => {
     });
     expect(api.runAutomation).toHaveBeenCalledWith(88);
     expect(window.showToast).toHaveBeenCalledWith('Running Discovery Mix…', 'success');
-    // ...and NOT also through the vanilla engine.
-    expect(window.runMirroredPlaylistPipeline).not.toHaveBeenCalled();
+    // ...and NOT also through the pipeline engine.
+    expect(runPipeline).not.toHaveBeenCalled();
   });
 
   it('tells the user to schedule an unscheduled personalized row first', async () => {
-    window.runMirroredPlaylistPipeline = vi.fn();
     const { result } = await mount({
       playlists: [
         { id: 5, name: 'Discovery Mix', source: 'soulsync_discovery', _personalized: true },
@@ -337,7 +349,7 @@ describe('Run now (2307-2336)', () => {
       await result.current.runNow(5);
     });
     expect(api.runAutomation).not.toHaveBeenCalled();
-    expect(window.runMirroredPlaylistPipeline).not.toHaveBeenCalled();
+    expect(runPipeline).not.toHaveBeenCalled();
     expect(window.showToast).toHaveBeenCalledWith('Schedule it first, then Run now.', 'info');
   });
 });
@@ -432,6 +444,18 @@ describe('bulk scheduling (1315-1338)', () => {
     );
   });
 
+  it('spells the interval out in full in the confirm (1325)', async () => {
+    const { result } = await mount({ playlists: twoSpotify });
+    await act(async () => {
+      await result.current.bulkSchedule('spotify', 12);
+    });
+    expect(window.showConfirmDialog).toHaveBeenCalledWith({
+      title: 'Schedule 2 Spotify playlists',
+      // 'Every 12 hours.', NOT the short 'Every 12h.' the success toast uses.
+      message: 'Every 12 hours. Existing schedules in this source will be updated.',
+    });
+  });
+
   it('stops when the user declines the confirm', async () => {
     window.showConfirmDialog = vi.fn(async () => false);
     const { result } = await mount({ playlists: twoSpotify });
@@ -488,7 +512,7 @@ describe('the status poller (2338-2360)', () => {
   it('does NOT poll while nothing is running', async () => {
     vi.useFakeTimers();
     stubApi();
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -505,7 +529,7 @@ describe('the status poller (2338-2360)', () => {
     stubApi({
       playlists: [{ id: 1, name: 'A', source: 'spotify', pipeline_state: { status: 'running' } }],
     });
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -522,7 +546,7 @@ describe('the status poller (2338-2360)', () => {
     stubApi({
       playlists: [{ id: 1, name: 'A', source: 'spotify', pipeline_state: { status: 'running' } }],
     });
-    renderHook(() => useAutoSync({ open: false, now: () => NOW }));
+    renderHook(() => useAutoSync({ open: false, now: () => NOW, runPipeline }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
@@ -537,9 +561,12 @@ describe('the status poller (2338-2360)', () => {
     stubApi({
       playlists: [{ id: 1, name: 'A', source: 'spotify', pipeline_state: { status: 'running' } }],
     });
-    const { result, rerender } = renderHook(({ open }) => useAutoSync({ open, now: () => NOW }), {
-      initialProps: { open: true },
-    });
+    const { result, rerender } = renderHook(
+      ({ open }) => useAutoSync({ open, now: () => NOW, runPipeline }),
+      {
+        initialProps: { open: true },
+      },
+    );
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -557,7 +584,9 @@ describe('the status poller (2338-2360)', () => {
     stubApi({
       playlists: [{ id: 1, name: 'A', source: 'spotify', pipeline_state: { status: 'running' } }],
     });
-    const { result, unmount } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result, unmount } = renderHook(() =>
+      useAutoSync({ open: true, now: () => NOW, runPipeline }),
+    );
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -575,7 +604,7 @@ describe('the status poller (2338-2360)', () => {
     stubApi({
       playlists: [{ id: 1, name: 'A', source: 'spotify', pipeline_state: { status: 'running' } }],
     });
-    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW }));
+    const { result } = renderHook(() => useAutoSync({ open: true, now: () => NOW, runPipeline }));
     await vi.waitFor(() => {
       expect(result.current.loading).toBe(false);
     });

@@ -40,6 +40,7 @@ import {
 import {
   autoSyncBucketLabel,
   autoSyncCanSchedulePlaylist,
+  autoSyncIntervalLabel,
   autoSyncEnrichDiscoveryRows,
   autoSyncExpandPersonalizedRows,
   autoSyncGeneratedCountMap,
@@ -82,9 +83,22 @@ export interface UseAutoSyncOptions {
   open: boolean;
   /** Injected so the relative labels are deterministic under test. */
   now?: () => number;
+  /**
+   * Runs a REAL mirrored playlist through the pipeline engine — 'Run now' on
+   * anything that is not a synthetic personalized row (2336).
+   *
+   * Required, and injected rather than reached for on `window`, because
+   * `runMirroredPlaylistPipeline` is defined in auto-sync.js ITSELF (2481) —
+   * the file the flip deletes. A `window.runMirroredPlaylistPipeline?.()` call
+   * would keep working right up until the flip and then silently stop, which
+   * is the exact failure mode vanilla-seams.test.ts exists to prevent. The
+   * page passes `useMirroredPipeline().run`, which is the same function
+   * already ported in P5g.
+   */
+  runPipeline: (playlistId: number, playlistName: string) => void;
 }
 
-export function useAutoSync({ open, now = () => Date.now() }: UseAutoSyncOptions) {
+export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAutoSyncOptions) {
   const [state, setState] = useState<AutoSyncScheduleState>(EMPTY_STATE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -326,34 +340,35 @@ export function useAutoSync({ open, now = () => Date.now() }: UseAutoSyncOptions
    * so it runs its own scheduled automation instead — and cannot run at all
    * until it HAS one.
    */
-  const runNow = useCallback(async (playlistId: number) => {
-    const playlist = findPlaylist(playlistId);
-    if (!playlist) return;
-    if (playlist._personalized) {
-      const sched =
-        stateRef.current.playlistSchedules[String(playlistId)] ||
-        stateRef.current.weeklySchedules[String(playlistId)];
-      if (!sched?.automation_id) {
-        toast('Schedule it first, then Run now.', 'info');
+  const runNow = useCallback(
+    async (playlistId: number) => {
+      const playlist = findPlaylist(playlistId);
+      if (!playlist) return;
+      if (playlist._personalized) {
+        const sched =
+          stateRef.current.playlistSchedules[String(playlistId)] ||
+          stateRef.current.weeklySchedules[String(playlistId)];
+        if (!sched?.automation_id) {
+          toast('Schedule it first, then Run now.', 'info');
+          return;
+        }
+        try {
+          const res = await runAutomation(sched.automation_id);
+          const data = (await res.json()) as { error?: string };
+          if (!res.ok || data.error) throw new Error(data.error || 'Failed to run');
+          toast(`Running ${playlist.name}…`, 'success');
+        } catch (err) {
+          toast(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+        }
         return;
       }
-      try {
-        const res = await runAutomation(sched.automation_id);
-        const data = (await res.json()) as { error?: string };
-        if (!res.ok || data.error) throw new Error(data.error || 'Failed to run');
-        toast(`Running ${playlist.name}…`, 'success');
-      } catch (err) {
-        toast(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
-      }
-      return;
-    }
-    // A real mirrored playlist runs through the vanilla engine, which is not
-    // part of this port.
-    void window.runMirroredPlaylistPipeline?.(
-      playlistId,
-      playlist.name || `Playlist #${playlistId}`,
-    );
-  }, []);
+      // A real mirrored playlist goes to the PORTED pipeline controller, which
+      // the page injects — see UseAutoSyncOptions.runPipeline for why this is
+      // not a window lookup.
+      runPipeline(playlistId, playlist.name || `Playlist #${playlistId}`);
+    },
+    [runPipeline],
+  );
 
   /** 1933-1949. */
   const setOrganize = useCallback(
@@ -395,7 +410,12 @@ export function useAutoSync({ open, now = () => Date.now() }: UseAutoSyncOptions
       const label = autoSyncSourceLabel(source);
       const ok = await confirm(
         `Schedule ${targets.length} ${label} playlist${targets.length === 1 ? '' : 's'}`,
-        `Every ${autoSyncBucketLabel(hours)}. Existing schedules in this source will be updated.`,
+        // 1325: the INTERVAL label with its leading 'Every ' stripped, not the
+        // short bucket label — 'Every 12 hours.', not 'Every 12h.'. The success
+        // toast below really does use the short form, so the two differ.
+        `Every ${autoSyncIntervalLabel(hours)
+          .toLowerCase()
+          .replace(/^every /, '')}. Existing schedules in this source will be updated.`,
       );
       if (!ok) return;
       let done = 0;

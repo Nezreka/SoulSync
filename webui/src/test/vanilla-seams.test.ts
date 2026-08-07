@@ -28,6 +28,18 @@ import { describe, expect, it } from 'vitest';
  */
 const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[] = [
   {
+    file: 'static/shared-helpers.js',
+    symbol: 'playlistQualityProfileSelectHtml',
+    pattern: /function playlistQualityProfileSelectHtml\b/,
+    usedBy: "the Auto-Sync scheduled card's quality-profile select (routes/sync/-ui/autosync-shared.tsx)",
+  },
+  {
+    file: 'static/shared-helpers.js',
+    symbol: 'hydratePlaylistQualityProfileSelects',
+    pattern: /function hydratePlaylistQualityProfileSelects\b/,
+    usedBy: "the same card — the select renders EMPTY without it, silently",
+  },
+  {
     file: 'static/pages-extra.js',
     symbol: 'openSyncDetailModal',
     pattern: /async function openSyncDetailModal\b/,

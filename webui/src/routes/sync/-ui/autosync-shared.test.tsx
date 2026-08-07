@@ -37,6 +37,7 @@ const unscheduled: AutoSyncSidebarBadge = {
 
 afterEach(() => {
   delete window.playlistQualityProfileSelectHtml;
+  delete window.hydratePlaylistQualityProfileSelects;
 });
 
 describe('AutoSyncSourceIcon (197-203)', () => {
@@ -233,6 +234,28 @@ describe('AutoSyncScheduledCard (1951-1976 / 979-1024)', () => {
     ).playlistQualityProfileSelectHtml = '<select class="qp-select"></select>';
     const { container } = renderCard(row());
     expect(container.querySelector('.qp-select')).toBeNull();
+  });
+
+  it('HYDRATES the select it renders — the other half of the seam', () => {
+    // playlistQualityProfileSelectHtml emits an EMPTY select;
+    // hydratePlaylistQualityProfileSelects fills it. Miss the second and the
+    // control renders forever empty without throwing — the silent failure.
+    window.playlistQualityProfileSelectHtml = () => '<select class="qp-select"></select>';
+    window.hydratePlaylistQualityProfileSelects = vi.fn();
+    renderCard(row({ source_playlist_id: 'abc', source: 'tidal', quality_profile_id: 7 }));
+    expect(window.hydratePlaylistQualityProfileSelects).toHaveBeenCalledWith('abc', 'tidal', 7);
+  });
+
+  it('does not hydrate when there is no select to hydrate', () => {
+    window.hydratePlaylistQualityProfileSelects = vi.fn();
+    renderCard(row());
+    expect(window.hydratePlaylistQualityProfileSelects).not.toHaveBeenCalled();
+  });
+
+  it('survives the hydrator being absent while the renderer is present', () => {
+    window.playlistQualityProfileSelectHtml = () => '<select class="qp-select"></select>';
+    const { container } = renderCard(row());
+    expect(container.querySelector('.qp-select')).not.toBeNull();
   });
 
   it('renders the quality-profile seam only when the shared global exists', () => {

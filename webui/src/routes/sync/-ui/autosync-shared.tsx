@@ -20,7 +20,7 @@
  * guard, so the weekly board gains the hourly board's behaviour.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   autoSyncGroupSidebarRows,
@@ -72,6 +72,20 @@ function startDrag(e: React.DragEvent, playlistId: number | string | undefined) 
  * 1920-1931. The quality-profile select is a shared-helpers.js global the
  * vanilla renders through a `typeof === 'function'` guard; an absent global
  * yields nothing, which is what this reproduces.
+ *
+ * The markup is only half the seam. `playlistQualityProfileSelectHtml` emits
+ * an EMPTY select; `hydratePlaylistQualityProfileSelects` fills it with the
+ * real profile list afterwards. The vanilla calls the second one in a loop
+ * over every playlist after each full re-render (735-744) and again after a
+ * sidebar filter keystroke (1089-1096) — two call sites for the same job,
+ * because an innerHTML re-render destroys the hydrated options.
+ *
+ * Here it hydrates PER CARD, in the card's own effect. That covers both of the
+ * vanilla's call sites and every case they miss: a card that appears because a
+ * filter was cleared, or because a tab was switched, hydrates itself. Missing
+ * this entirely would not have thrown — the select would simply have rendered
+ * empty forever, which is exactly the silent-seam failure vanilla-seams.test.ts
+ * exists to catch.
  */
 function AutoSyncOrganizeRow({
   playlist,
@@ -84,6 +98,14 @@ function AutoSyncOrganizeRow({
     typeof window.playlistQualityProfileSelectHtml === 'function'
       ? window.playlistQualityProfileSelectHtml(playlist.source_playlist_id, playlist.source, true)
       : '';
+
+  const { source_playlist_id: sourcePlaylistId, source, quality_profile_id: profileId } = playlist;
+  useEffect(() => {
+    if (!profileHtml) return;
+    if (typeof window.hydratePlaylistQualityProfileSelects !== 'function') return;
+    void window.hydratePlaylistQualityProfileSelects(sourcePlaylistId, source, profileId);
+  }, [profileHtml, sourcePlaylistId, source, profileId]);
+
   return (
     <>
       <label
