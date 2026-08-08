@@ -693,6 +693,18 @@ declare global {
     showLaunchPinScreen?: () => void;
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
+
+    /* ── The sync page's download-engine interface (downloads.js / core.js) ──
+     * The engine stays vanilla across the flip; the React page injects these
+     * as a typed object rather than reaching for them at each call site.
+     * `isPlaylistSyncing` and `getSyncAccountPlaylists` are ACCESSORS added for
+     * the port — `activeSyncPollers` and `spotifyPlaylists` are top-level
+     * `let`s, which create no window property at all. */
+    startPlaylistSync?: (playlistId: string) => Promise<void> | void;
+    isPlaylistSyncing?: (playlistId: string) => boolean;
+    disablePlaylistSelection?: (disabled: boolean) => void;
+    updateRefreshButtonState?: () => void;
+    getSyncAccountPlaylists?: () => { id: string | number; name?: string }[];
   }
 }
 

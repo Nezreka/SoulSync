@@ -6017,3 +6017,40 @@ shape every silent failure in this port has taken.
 That is busywork with a cost — 92 accessors nobody calls, each one a seam row
 to maintain and a thing to delete later. The closed-set approach bridges
 exactly what is used, and the type system says when that set grows.
+
+### S3b-ii BUILT (controller half) — `-sync.use-page.ts`
+
+The page's wiring, assembled and tested on its own. Split from the JSX on
+purpose: every failure this port has produced lived in the wiring — a second
+pipeline controller, two unreachable globals, a superset standing in for
+display order — and none of them are visible in markup. The panel mounting is
+mechanical by comparison and stays in the component.
+
+**The engine is resolved at CALL time, not at mount.** Each member reads its
+`window` function inside the closure, so a page that mounts before the vanilla
+scripts finish still works and a missing global no-ops instead of throwing
+during construction. The five members are now declared on `Window` in
+`globals.d.ts`, so a sixth need is a compile error.
+
+**The two arrays are kept apart, and this is the crux.** NAMES resolve from
+`getSyncAccountPlaylists()` — the same array `updateUI` uses (core.js 1365),
+'Unknown' fallback included. ORDER comes from the Spotify tab's registered
+rows. A mutant that takes the order from the engine array is killed by a test
+where the engine lists two playlists and the tab has rendered one: queueing
+from the engine would sync a card that is gone.
+
+**Sidebar visibility is the vanilla's, warts included.** A tab switch hides it
+even mid-run (3751); a fresh start un-hides it (4092). Both have tests and
+both have mutants.
+
+Mutation: 8 mutants, 8 killed — order from the engine array; registered rows
+ignored; `nameFor` not coercing the engine's numeric id; the tab switch not
+hiding; a start not un-hiding; the sidebar ignoring the tab switch; the
+pipeline rebuilt every render; and the selection count not forwarded.
+
+Suite 6972 passing. Build clean. Lint at baseline.
+
+**Remaining for the page:** the JSX — mount the fifteen panels into
+`SyncShell`, pass `onTabChange` through it (a new shell prop), render
+`SyncModals` and the sidebar. Then S4: the route flip, the markup deletion in
+the SAME commit, and the vanilla severs.
