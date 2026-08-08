@@ -5693,3 +5693,18 @@ Suite 6953 passing, clean run. Build clean. Lint at baseline.
 `useMirroredPipeline().run`, because the window function it used to resolve
 lives in the file the flip deletes; the type system enforces it). Then S3b
 mounts the panels.
+
+**Verify pass on the modal mount.** The design keeps NINE hosts permanently
+mounted, one per vertical, with only one open — so it is worth knowing what a
+closed one costs. Checked: `SourceModals` returns `null` when `openId` is null
+(155) and the file contains ZERO `useEffect`. So a closed host is one render
+returning nothing: no overlay, no subscription, no poll. Free, as the design
+assumes.
+
+Pinned with a test, because the mount now DEPENDS on it — if a closed host
+ever started rendering an overlay or mounting an effect, the page would pay
+nine times on every render, and the failure would look like a page-wide
+slowdown rather than a modal bug. 1/1 mutant (a closed host rendering an
+overlay).
+
+Suite 6954. Build clean. Lint at baseline.

@@ -308,6 +308,24 @@ describe('SoulsyncDiscoveryTab', () => {
 });
 
 describe('SourceModals', () => {
+  it('renders NOTHING while closed, and mounts no effects', () => {
+    // The page keeps one host per vertical permanently mounted
+    // (-ui/sync-modals.tsx), so nine of these exist at all times with only one
+    // open. That is only free because a closed host returns null and the file
+    // has no effects at all — if either changed, the page would pay nine
+    // times over on every render.
+    const { container } = render(
+      <SourceModals
+        config={SYNC_SOURCES.tidal}
+        vertical={{ states: {} } as never}
+        openId={null}
+        onClose={() => {}}
+        standalone={false}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   function Harness({ withRows = true }: { withRows?: boolean }) {
     const vertical = useSourceVertical(SYNC_SOURCES.listenbrainz);
     const [openId, setOpenId] = useState<string | null>(null);
