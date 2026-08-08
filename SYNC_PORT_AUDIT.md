@@ -5873,3 +5873,37 @@ baseline.
 **This is why the engine is a REQUIRED injected object.** Had the runner reached
 for `window.activeSyncPollers` itself, the failure would have been a silent
 `undefined` at runtime on a page nobody had flipped yet.
+
+### The SECOND unreachable global — `spotifyPlaylists`
+
+Same class as `activeSyncPollers`, found the same way: by asking what the page
+can actually reach before writing it.
+
+The page needs two more things from the engine side, and both come from
+`spotifyPlaylists`: the ORDER to queue a selection in, and the id→name lookup
+for the sidebar's "Syncing 2/5: Beta". It is another top-level `let` in
+core.js, so React cannot read it.
+
+**`window.getSyncAccountPlaylists()`**, beside the `registerSyncAccountPlaylist`
+seam that fills the array. Three decisions worth stating:
+
+1. **The ENGINE's array, not the tab's React state.** `startPlaylistSync`
+   resolves every id against this same array and bails with 'Could not find
+   playlist data.' for anything missing — so a queue built from it can only
+   contain ids the engine can actually run. Reading React state instead would
+   let the queue hold ids the engine would refuse.
+2. **The order is right.** The Spotify tab renders `rows.map(...)` with no sort
+   or filter, and registers in that same order, so registration order IS
+   display order — which is what the vanilla read off the DOM.
+3. **It returns a COPY.** Handing out the live array would let any caller
+   `sort()` or `splice()` the engine's own list. A mutant that dropped the
+   `.slice()` SURVIVED the first pass — the seam pattern only matched the
+   signature — so the pattern now matches the body too. 6/6.
+
+238 python tests reading core.js pass. Suite 6958. Build clean. Lint at
+baseline.
+
+**Both engine seams now exist, and that was the real unknown in S3b-ii.** The
+page's remaining work is assembly: nine verticals, selection, modals, sidebar,
+runner and the fifteen panels, all against contracts that are now reachable and
+guarded.

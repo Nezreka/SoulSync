@@ -42,6 +42,17 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
   },
   {
     file: 'static/core.js',
+    symbol: 'getSyncAccountPlaylists',
+    // The `.slice()` is part of the contract, not styling: handing out the
+    // live array would let any caller sort or splice the engine's own
+    // playlist list, which startPlaylistSync resolves every id against.
+    pattern:
+      /window\.getSyncAccountPlaylists = function \(\) \{\s*return spotifyPlaylists\.slice\(\);/,
+    usedBy:
+      "the sync page's queue order and the sidebar's name lookup (routes/sync) — spotifyPlaylists is a top-level `let`, so it is NOT on window",
+  },
+  {
+    file: 'static/core.js',
     symbol: 'isPlaylistSyncing',
     pattern: /window\.isPlaylistSyncing = function isPlaylistSyncing\b/,
     usedBy:

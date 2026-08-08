@@ -127,6 +127,28 @@ window.registerSyncAccountPlaylist = function (row) {
     }
 };
 
+/**
+ * The registered account playlists, in registration order.
+ *
+ * The SECOND half of the seam above, and the React sync page needs both:
+ * `startSequentialSync` has to know what order to queue the selection in, and
+ * the sidebar has to resolve a playlist id to a name for "Syncing 2/5: Beta".
+ * `spotifyPlaylists` is a top-level `let`, so — like `activeSyncPollers` — it
+ * is NOT a window property and React cannot read it directly.
+ *
+ * Reading the ENGINE's array rather than the tab's React state is deliberate.
+ * `startPlaylistSync` resolves every id against this same array and bails with
+ * 'Could not find playlist data.' for anything missing, so a queue built from
+ * it can only contain ids the engine can actually run. The tab renders its
+ * rows in the order it registers them, so this order is also the display
+ * order the vanilla read off the DOM.
+ *
+ * A COPY, so a caller cannot reorder or splice the engine's own array.
+ */
+window.getSyncAccountPlaylists = function () {
+    return spotifyPlaylists.slice();
+};
+
 
 /**
  * Bridge for the React discover page: the ListenBrainz/Last.fm playlist
