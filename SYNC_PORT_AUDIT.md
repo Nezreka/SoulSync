@@ -5646,3 +5646,50 @@ stores options in a ref (129-130) and no effect depends on them.
 
 Suite 6942 passing. Build clean. Lint at baseline. The five tab test files that
 consume a vertical all still pass.
+
+### S3a-v BUILT — modal routing
+
+`-sync.use-modals.ts` (which modal is open) and `-ui/sync-modals.tsx` (the
+mount). Controller item 4 of 5.
+
+**NOTHING RENDERED `SourceModals` BEFORE THIS.** It existed, it was tested, and
+it had no production mount site anywhere in `src/` — the tabs only ever
+signalled `onOpen` into the void. Confirmed by grepping every reference.
+
+**ONE modal at a time, declared.** The vanilla keeps a separate open-flag per
+tab, but only one tab is ever active, so two can never be reached — the
+per-tab state is an artefact of nine regions written separately, not a
+capability. Nine independent ids here would preserve the artefact AND add
+something the vanilla cannot do: open Tidal's modal, switch tabs, open
+Qobuz's, and both are mounted. A single slot cannot express it.
+
+**The four `onOpen` shapes are NOT unified.** `(sourceId)`,
+`(sourceId, playlist)`, `(card)` and the server tab's `(playlist, mirrored)`
+stay distinct: only the first two open a source modal, the LB/Last.fm card
+shape is resolved to a source id by its own tab, and the server tab's is a view
+switch, not a modal. Flattening them behind one handler is exactly how a modal
+opens on the wrong argument.
+
+**Table-driven again**, from `SYNC_VERTICAL_IDS`, so a source in the table
+cannot end up with no modal — the failure mode of nine hand-written blocks.
+
+**`discoveryStartBody` deliberately NOT passed.** `SourceModals` already
+derives the ListenBrainz `{playlist}` body from `config.discovery.startBody`,
+with a comment saying it does so precisely so a wiring omission cannot break
+the start invisibly. Passing it from here would put one decision in two places,
+and this would be the copy that drifts. `standalone` comes from the existing
+page-level `useStandalone()` — one signal, same for all nine.
+
+**Mutation: 9 mutants, 9 killed** — `openIdFor` ignoring its argument (every
+modal opens at once); open not replacing (two stack); close doing nothing;
+`openIdFor` frozen by empty deps (the modal never moves); `openModal` identity
+churning; every modal handed the same id; `mirroredSource` given to all nine;
+a source dropped from the mount; and the wrong config per source.
+
+Suite 6953 passing, clean run. Build clean. Lint at baseline.
+
+**Controller status: 4 of 5.** Remaining: inject `runPipeline` into
+`useAutoSync` — small, and already decided (it must come from
+`useMirroredPipeline().run`, because the window function it used to resolve
+lives in the file the flip deletes; the type system enforces it). Then S3b
+mounts the panels.
