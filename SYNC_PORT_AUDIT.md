@@ -6106,3 +6106,30 @@ applied downstream, so the page must pass the BARE mbid.
 the read cost minutes and removed three chances to wire a handler to the wrong
 shape — the Beatport one would have been a duplicate env builder that looked
 correct and diverged the moment either copy changed.
+
+### One contract left to read: AutoSyncModal's grouped actions
+
+The fifteen panels are fully specified. The Auto-Sync modal — reached from the
+header button, not a panel — is not, quite.
+
+`AutoSyncModal` takes 15 props. Thirteen map 1:1 onto what `useAutoSync`
+already returns (`state`, `loading`, `loadError`, `now`, `historyFilter`,
+`setHistoryFilter` → `onHistoryFilterChange`, `loadMoreHistory` →
+`onLoadMoreHistory`, `refresh` → `onRefresh`, `bulkSchedule`/`bulkUnschedule`,
+`runNow` → `onRunAgain`, plus `onClose` and `onOpenDetails` from the page).
+
+**The two that are NOT 1:1 are `boardActions` and `weeklyActions`** — grouped
+objects the hook does not return in that shape. It returns the members flat:
+`saveHourly`, `saveWeekly`, `unscheduleHourly`, `unscheduleWeekly`,
+`setOrganize`, `setDragging`. Which of those belongs in which group, and under
+what names, is in `AutoSyncModalProps` and has not been read.
+
+Assembling it by inference would mean guessing which save goes in which group —
+and a weekly action wired into the board group would schedule the wrong
+cadence, which is the bug class this port already fixed twice in the vanilla
+(the one-schedule-per-playlist invariant). Not a guess worth making.
+
+**Remaining before the page component can be written in one pass:** read
+`AutoSyncModalProps`' `boardActions`/`weeklyActions` shapes. Everything else —
+fifteen panels, sidebar, modals, shell, controller — is specified, built and
+tested.
