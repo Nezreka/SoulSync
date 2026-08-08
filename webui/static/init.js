@@ -3371,9 +3371,6 @@ async function loadPageData(pageId) {
             case 'chat':
                 if (window.ChatPage) window.ChatPage.open();
                 break;
-            case 'help':
-                initializeDocsPage();
-                break;
         }
     } catch (error) {
         console.error(`Error loading ${pageId} data:`, error);

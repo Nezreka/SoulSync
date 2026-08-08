@@ -15,7 +15,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_DOCS = (_ROOT / "webui" / "static" / "docs.js").read_text(encoding="utf-8")
+_DOCS = (_ROOT / "webui" / "src" / "routes" / "help" / "-help.sections.ts").read_text(encoding="utf-8")
 _WIZ = (_ROOT / "webui" / "static" / "setup-wizard.js").read_text(encoding="utf-8")
 
 

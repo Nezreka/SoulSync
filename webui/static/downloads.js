@@ -4643,7 +4643,7 @@ function showToast(message, type = 'success', helpSection = null) {
         const link = document.createElement('span');
         link.className = 'toast-compact-link';
         link.textContent = 'Learn more →';
-        link.onclick = e => { e.stopPropagation(); if (typeof navigateToDocsSection === 'function') navigateToDocsSection(helpSection); };
+        link.onclick = e => { e.stopPropagation(); if (typeof window.navigateToDocsSection === 'function') window.navigateToDocsSection(helpSection); };
         toast.appendChild(link);
     }
     toast.onclick = () => { toast.classList.add('toast-exit'); setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 200); };
@@ -4773,7 +4773,7 @@ function _notifEntriesHTML() {
         const icon = _notifIcons[e.type] || 'ℹ';
         const ago = _notifTimeAgo(e.timestamp);
         const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
-        const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
+        const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); window.navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
         return `
             <div class="notif-entry notif-entry-${e.type}">
                 ${unreadDot}

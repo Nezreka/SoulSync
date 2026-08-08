@@ -1,48 +1,75 @@
-// ===============================
-// HELP & DOCS PAGE
-// ===============================
+/**
+ * The Help/Docs document, ported verbatim from the legacy
+ * `webui/static/docs.js` (`DOCS_SECTIONS`). Content is trusted, in-repo
+ * authored HTML — the page renders it with `dangerouslySetInnerHTML`, the
+ * exact trust model the vanilla had with `innerHTML`. Class names and ids are
+ * preserved byte-for-byte: style.css and the characterization spec
+ * (`webui/tests/pages/help.spec.ts`) both key on them.
+ */
 
-function docsImg(src, alt) {
-    return `<div class="docs-screenshot-wrapper" onclick="openDocsLightbox(this)">
+export interface DocsChild {
+  id: string;
+  title: string;
+}
+
+export interface DocsSection {
+  id: string;
+  title: string;
+  icon: string;
+  children: DocsChild[];
+  content: () => string;
+}
+
+interface ApiParam {
+  name: string;
+  type: string;
+  required: boolean;
+  desc: string;
+  default?: string;
+}
+
+interface ApiExample {
+  request?: string;
+  response?: string;
+}
+
+interface ApiEndpoint {
+  method: string;
+  path: string;
+  desc: string;
+  params: ApiParam[];
+  bodyFields: ApiParam[] | null;
+  example: ApiExample | null;
+}
+
+declare global {
+  interface Window {
+    _apiEndpointRegistry?: ApiEndpoint[];
+    _apiTryIt?: (idx: number) => Promise<void>;
+  }
+}
+
+export function docsImg(src: string, alt: string): string {
+  return `<div class="docs-screenshot-wrapper" onclick="openDocsLightbox(this)">
         <img class="docs-screenshot" src="/static/docs/${src}" alt="${alt}" loading="lazy" onerror="this.parentElement.style.display='none'">
         <span class="docs-screenshot-label">${alt}</span>
     </div>`;
 }
 
-function openDocsLightbox(wrapper) {
-    const img = wrapper.querySelector('.docs-screenshot');
-    if (!img) return;
-    const existing = document.querySelector('.docs-lightbox');
-    if (existing) existing.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'docs-lightbox';
-    overlay.innerHTML = `<button class="docs-lightbox-close">&times;</button><img src="${img.src}" alt="${img.alt}">`;
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add('active'));
-    const close = () => {
-        overlay.classList.remove('active');
-        setTimeout(() => overlay.remove(), 250);
-    };
-    overlay.addEventListener('click', close);
-    document.addEventListener('keydown', function handler(e) {
-        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
-    });
-}
-
-const DOCS_SECTIONS = [
-    {
-        id: 'getting-started',
-        title: 'Getting Started',
-        icon: '/static/dashboard.jpg',
-        children: [
-            { id: 'gs-overview', title: 'Overview' },
-            { id: 'gs-first-setup', title: 'First-Time Setup' },
-            { id: 'gs-connecting', title: 'Connecting Services' },
-            { id: 'gs-interface', title: 'Understanding the Interface' },
-            { id: 'gs-folders', title: 'Folder Setup (Downloads & Transfer)' },
-            { id: 'gs-docker', title: 'Docker & Deployment' }
-        ],
-        content: () => `
+export const DOCS_SECTIONS: DocsSection[] = [
+  {
+    id: 'getting-started',
+    title: 'Getting Started',
+    icon: '/static/dashboard.jpg',
+    children: [
+      { id: 'gs-overview', title: 'Overview' },
+      { id: 'gs-first-setup', title: 'First-Time Setup' },
+      { id: 'gs-connecting', title: 'Connecting Services' },
+      { id: 'gs-interface', title: 'Understanding the Interface' },
+      { id: 'gs-folders', title: 'Folder Setup (Downloads & Transfer)' },
+      { id: 'gs-docker', title: 'Docker & Deployment' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Deezer</strong>, <strong>Discogs</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and downloads from <strong>Soulseek</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>HiFi</strong>, and <strong>Deezer</strong>. Your library is served through <strong>Plex</strong>, <strong>Jellyfin/Emby</strong>, or <strong>Navidrome</strong>.</p>
@@ -318,21 +345,21 @@ const DOCS_SECTIONS = [
                 <p class="docs-text"><strong>Podman / Rootless Docker</strong>: SoulSync supports Podman rootless (keep-id) and rootless Docker setups. The entrypoint handles permission alignment automatically.</p>
                 <p class="docs-text"><strong>Config migration</strong>: When upgrading from older versions, SoulSync automatically migrates settings from <code>config.json</code> to the database on first startup. No manual migration is needed.</p>
             </div>
-        `
-    },
-    {
-        id: 'workflows',
-        title: 'Quick Start Workflows',
-        icon: '/static/help.jpg',
-        children: [
-            { id: 'wf-first', title: 'What Should I Do First?' },
-            { id: 'wf-download', title: 'How to: Download an Album' },
-            { id: 'wf-sync', title: 'How to: Sync a Spotify Playlist' },
-            { id: 'wf-auto', title: 'How to: Set Up Auto-Downloads' },
-            { id: 'wf-import', title: 'How to: Import Existing Music' },
-            { id: 'wf-media', title: 'How to: Connect Your Media Server' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'workflows',
+    title: 'Quick Start Workflows',
+    icon: '/static/help.jpg',
+    children: [
+      { id: 'wf-first', title: 'What Should I Do First?' },
+      { id: 'wf-download', title: 'How to: Download an Album' },
+      { id: 'wf-sync', title: 'How to: Sync a Spotify Playlist' },
+      { id: 'wf-auto', title: 'How to: Set Up Auto-Downloads' },
+      { id: 'wf-import', title: 'How to: Import Existing Music' },
+      { id: 'wf-media', title: 'How to: Connect Your Media Server' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="wf-first">
                 <h3 class="docs-subsection-title">What Should I Do First?</h3>
                 <p class="docs-text">SoulSync can do a lot, but you don't need to learn everything at once. Here are the <strong>6 essential workflows</strong> that cover 90% of what most users need. Start with whichever one matches your goal, and explore the rest later.</p>
@@ -452,24 +479,24 @@ const DOCS_SECTIONS = [
                 ${docsImg('wf-media-server.gif', 'Connecting media server')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Make sure your Output Path points to the same folder your media server monitors. This is how new downloads automatically appear in your library.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'dashboard',
-        title: 'Dashboard',
-        icon: '/static/dashboard.jpg',
-        children: [
-            { id: 'dash-overview', title: 'Overview & Stats' },
-            { id: 'dash-history', title: 'Download History' },
-            { id: 'dash-global-search', title: 'Global Search' },
-            { id: 'dash-workers', title: 'Enrichment Workers' },
-            { id: 'dash-tools', title: 'Tool Cards' },
-            { id: 'dash-retag', title: 'Retag Tool' },
-            { id: 'dash-backup', title: 'Backup Manager' },
-            { id: 'dash-repair', title: 'Repair & Maintenance' },
-            { id: 'dash-activity', title: 'Activity Feed' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'dashboard',
+    title: 'Dashboard',
+    icon: '/static/dashboard.jpg',
+    children: [
+      { id: 'dash-overview', title: 'Overview & Stats' },
+      { id: 'dash-history', title: 'Download History' },
+      { id: 'dash-global-search', title: 'Global Search' },
+      { id: 'dash-workers', title: 'Enrichment Workers' },
+      { id: 'dash-tools', title: 'Tool Cards' },
+      { id: 'dash-retag', title: 'Retag Tool' },
+      { id: 'dash-backup', title: 'Backup Manager' },
+      { id: 'dash-repair', title: 'Repair & Maintenance' },
+      { id: 'dash-activity', title: 'Activity Feed' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="dash-overview">
                 <h3 class="docs-subsection-title">Overview & Stats</h3>
                 <p class="docs-text">The dashboard is your command center. At the top you'll see <strong>service status indicators</strong> for Spotify, your media server, and Soulseek &mdash; showing connected/disconnected state at a glance. Below that, stat cards display your library totals: artists, albums, tracks, and total library size.</p>
@@ -600,30 +627,30 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">The activity feed at the bottom of the dashboard shows recent system events: downloads completed, syncs started, settings changed, automation runs, and errors. Events appear in real-time via WebSocket.</p>
                 <p class="docs-text">Events include: downloads started/completed/failed, playlist syncs, watchlist scans, automation runs, enrichment worker progress, settings changes, and system errors. The feed shows the 10 most recent events and updates in real-time via WebSocket. Older events are available in the application logs.</p>
             </div>
-        `
-    },
-    {
-        id: 'sync',
-        title: 'Playlist Sync',
-        icon: '/static/sync.jpg',
-        children: [
-            { id: 'sync-overview', title: 'Overview' },
-            { id: 'sync-spotify', title: 'Spotify Playlists' },
-            { id: 'sync-spotify-public', title: 'Spotify Public Links' },
-            { id: 'sync-youtube', title: 'YouTube Playlists' },
-            { id: 'sync-tidal', title: 'Tidal Playlists' },
-            { id: 'sync-deezer', title: 'Deezer Playlists' },
-            { id: 'sync-deezer-link', title: 'Deezer Link' },
-            { id: 'sync-listenbrainz', title: 'ListenBrainz' },
-            { id: 'sync-beatport', title: 'Beatport' },
-            { id: 'sync-import-file', title: 'Import from File' },
-            { id: 'sync-mirrored', title: 'Mirrored Playlists' },
-            { id: 'sync-history', title: 'Sync History' },
-            { id: 'sync-m3u', title: 'M3U Export' },
-            { id: 'sync-discovery', title: 'Discovery Pipeline' },
-            { id: 'sync-explorer', title: 'Playlist Explorer' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'sync',
+    title: 'Playlist Sync',
+    icon: '/static/sync.jpg',
+    children: [
+      { id: 'sync-overview', title: 'Overview' },
+      { id: 'sync-spotify', title: 'Spotify Playlists' },
+      { id: 'sync-spotify-public', title: 'Spotify Public Links' },
+      { id: 'sync-youtube', title: 'YouTube Playlists' },
+      { id: 'sync-tidal', title: 'Tidal Playlists' },
+      { id: 'sync-deezer', title: 'Deezer Playlists' },
+      { id: 'sync-deezer-link', title: 'Deezer Link' },
+      { id: 'sync-listenbrainz', title: 'ListenBrainz' },
+      { id: 'sync-beatport', title: 'Beatport' },
+      { id: 'sync-import-file', title: 'Import from File' },
+      { id: 'sync-mirrored', title: 'Mirrored Playlists' },
+      { id: 'sync-history', title: 'Sync History' },
+      { id: 'sync-m3u', title: 'M3U Export' },
+      { id: 'sync-discovery', title: 'Discovery Pipeline' },
+      { id: 'sync-explorer', title: 'Playlist Explorer' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="sync-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">The Sync page lets you import playlists from <strong>Spotify</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, and <strong>Beatport</strong>. Once imported, playlists are <strong>mirrored</strong> &mdash; they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.</p>
@@ -764,22 +791,22 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Playlist Explorer</h3>
                 <p class="docs-text">A visual tree-based browser for exploring playlists across all sources. Navigate through your server playlists, Spotify playlists, and mirrored playlists in a unified interface. Click any playlist to expand and view its tracks, then download or sync directly.</p>
             </div>
-        `
-    },
-    {
-        id: 'search',
-        title: 'Music Downloads',
-        icon: '/static/search.jpg',
-        children: [
-            { id: 'search-enhanced', title: 'Enhanced Search' },
-            { id: 'search-basic', title: 'Basic Search' },
-            { id: 'search-sources', title: 'Download Sources' },
-            { id: 'search-downloading', title: 'Downloading Music' },
-            { id: 'search-postprocess', title: 'Post-Processing Pipeline' },
-            { id: 'search-quality', title: 'Quality Profiles' },
-            { id: 'search-manager', title: 'Download Manager' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'search',
+    title: 'Music Downloads',
+    icon: '/static/search.jpg',
+    children: [
+      { id: 'search-enhanced', title: 'Enhanced Search' },
+      { id: 'search-basic', title: 'Basic Search' },
+      { id: 'search-sources', title: 'Download Sources' },
+      { id: 'search-downloading', title: 'Downloading Music' },
+      { id: 'search-postprocess', title: 'Post-Processing Pipeline' },
+      { id: 'search-quality', title: 'Quality Profiles' },
+      { id: 'search-manager', title: 'Download Manager' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="search-enhanced">
                 <h3 class="docs-subsection-title">Enhanced Search</h3>
                 <p class="docs-text">The default search mode. Type an artist, album, or track name and results appear in a categorized dropdown: <strong>In Your Library</strong>, <strong>Artists</strong>, <strong>Albums</strong>, <strong>Singles & EPs</strong>, and <strong>Tracks</strong>. Results come from your primary metadata source (Spotify by default).</p>
@@ -862,22 +889,22 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Download Manager</h3>
                 <p class="docs-text">Toggle the download manager panel (right sidebar) to see all active and completed downloads. Each download shows real-time progress: track name, format, speed, ETA, and a cancel button. Use <strong>Clear Completed</strong> to clean up finished items.</p>
             </div>
-        `
-    },
-    {
-        id: 'discover',
-        title: 'Discover Artists',
-        icon: '/static/discover.jpg',
-        children: [
-            { id: 'disc-hero', title: 'Featured Artists' },
-            { id: 'disc-playlists', title: 'Discovery Playlists' },
-            { id: 'disc-build', title: 'Build Custom Playlist' },
-            { id: 'disc-seasonal', title: 'Seasonal & Curated' },
-            { id: 'disc-timemachine', title: 'Time Machine' },
-            { id: 'disc-artist-map', title: 'Artist Map' },
-            { id: 'disc-stats', title: 'Listening Stats' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'discover',
+    title: 'Discover Artists',
+    icon: '/static/discover.jpg',
+    children: [
+      { id: 'disc-hero', title: 'Featured Artists' },
+      { id: 'disc-playlists', title: 'Discovery Playlists' },
+      { id: 'disc-build', title: 'Build Custom Playlist' },
+      { id: 'disc-seasonal', title: 'Seasonal & Curated' },
+      { id: 'disc-timemachine', title: 'Time Machine' },
+      { id: 'disc-artist-map', title: 'Artist Map' },
+      { id: 'disc-stats', title: 'Listening Stats' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="disc-hero">
                 <h3 class="docs-subsection-title">Featured Artists</h3>
                 <p class="docs-text">The hero slider showcases <strong>recommended artists</strong> based on your watchlist. Each slide shows the artist's image, name, popularity score, genres, and similarity context. Use the arrows or dots to navigate, or click:</p>
@@ -952,21 +979,21 @@ const DOCS_SECTIONS = [
                     <li><strong>Listening timeline</strong> &mdash; Activity over time when scrobbling is configured</li>
                 </ul>
             </div>
-        `
-    },
-    {
-        id: 'artists',
-        title: 'Artists & Watchlist',
-        icon: '/static/artists.jpg',
-        children: [
-            { id: 'art-search', title: 'Artist Search' },
-            { id: 'art-detail', title: 'Artist Detail & Discography' },
-            { id: 'art-watchlist', title: 'Watchlist' },
-            { id: 'art-scanning', title: 'New Release Scanning' },
-            { id: 'art-wishlist', title: 'Wishlist' },
-            { id: 'art-settings', title: 'Watchlist Settings' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'artists',
+    title: 'Artists & Watchlist',
+    icon: '/static/artists.jpg',
+    children: [
+      { id: 'art-search', title: 'Artist Search' },
+      { id: 'art-detail', title: 'Artist Detail & Discography' },
+      { id: 'art-watchlist', title: 'Watchlist' },
+      { id: 'art-scanning', title: 'New Release Scanning' },
+      { id: 'art-wishlist', title: 'Wishlist' },
+      { id: 'art-settings', title: 'Watchlist Settings' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="art-search">
                 <h3 class="docs-subsection-title">Artist Search</h3>
                 <p class="docs-text">Search for any artist by name. Results show artist cards with images and genres. Results come from Spotify (or iTunes as fallback). Click any card to open the artist detail view.</p>
@@ -1027,22 +1054,22 @@ const DOCS_SECTIONS = [
                 <p class="docs-text"><strong>Per-Artist Settings</strong> &mdash; Click the config icon on any watched artist to customize what release types to include: Albums, EPs, Singles, Live versions, Remixes, Acoustic versions, Compilations.</p>
                 <p class="docs-text"><strong>Global Settings</strong> &mdash; Override all per-artist settings at once. Enable Global Override, select which types to include, and all watchlist scans will follow the global config.</p>
             </div>
-        `
-    },
-    {
-        id: 'automations',
-        title: 'Automations',
-        icon: '/static/automation.jpg',
-        children: [
-            { id: 'auto-overview', title: 'Overview' },
-            { id: 'auto-builder', title: 'Builder' },
-            { id: 'auto-triggers', title: 'All Triggers' },
-            { id: 'auto-actions', title: 'All Actions' },
-            { id: 'auto-then', title: 'Then-Actions & Signals' },
-            { id: 'auto-history', title: 'Execution History' },
-            { id: 'auto-system', title: 'System Automations' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'automations',
+    title: 'Automations',
+    icon: '/static/automation.jpg',
+    children: [
+      { id: 'auto-overview', title: 'Overview' },
+      { id: 'auto-builder', title: 'Builder' },
+      { id: 'auto-triggers', title: 'All Triggers' },
+      { id: 'auto-actions', title: 'All Actions' },
+      { id: 'auto-then', title: 'Then-Actions & Signals' },
+      { id: 'auto-history', title: 'Execution History' },
+      { id: 'auto-system', title: 'System Automations' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="auto-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
                 <p class="docs-text">Automations let you schedule tasks and react to events with a visual <strong>WHEN &rarr; DO &rarr; THEN</strong> builder. Create custom workflows like "When a download completes, update the database, then notify me on Discord."</p>
@@ -1159,24 +1186,24 @@ const DOCS_SECTIONS = [
                 </table>
                 ${docsImg('auto-system.jpg', 'System automations')}
             </div>
-        `
-    },
-    {
-        id: 'library',
-        title: 'Music Library',
-        icon: '/static/library.jpg',
-        children: [
-            { id: 'lib-standard', title: 'Standard View' },
-            { id: 'lib-enhanced', title: 'Enhanced Library Manager' },
-            { id: 'lib-matching', title: 'Service Matching' },
-            { id: 'lib-tags', title: 'Write Tags to File' },
-            { id: 'lib-bulk', title: 'Bulk Operations' },
-            { id: 'lib-missing', title: 'Download Missing Tracks' },
-            { id: 'lib-smart-delete', title: 'Smart Delete' },
-            { id: 'lib-redownload', title: 'Track Redownload' },
-            { id: 'lib-issues', title: 'Library Issues' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'library',
+    title: 'Music Library',
+    icon: '/static/library.jpg',
+    children: [
+      { id: 'lib-standard', title: 'Standard View' },
+      { id: 'lib-enhanced', title: 'Enhanced Library Manager' },
+      { id: 'lib-matching', title: 'Service Matching' },
+      { id: 'lib-tags', title: 'Write Tags to File' },
+      { id: 'lib-bulk', title: 'Bulk Operations' },
+      { id: 'lib-missing', title: 'Download Missing Tracks' },
+      { id: 'lib-smart-delete', title: 'Smart Delete' },
+      { id: 'lib-redownload', title: 'Track Redownload' },
+      { id: 'lib-issues', title: 'Library Issues' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="lib-standard">
                 <h3 class="docs-subsection-title">Standard View</h3>
                 <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz) indicating which services have matched this artist.</p>
@@ -1260,20 +1287,20 @@ const DOCS_SECTIONS = [
                 </ul>
                 <p class="docs-text">Each issue can be fixed individually or in bulk. Orphan files can be moved to staging (safe, reversible) or deleted. Mass deletions (50+ files) require typing <strong>"witness me"</strong> to confirm.</p>
             </div>
-        `
-    },
-    {
-        id: 'import',
-        title: 'Import Music',
-        icon: '/static/import.jpg',
-        children: [
-            { id: 'imp-setup', title: 'Staging Setup' },
-            { id: 'imp-workflow', title: 'Import Workflow' },
-            { id: 'imp-singles', title: 'Singles Import' },
-            { id: 'imp-matching', title: 'Track Matching' },
-            { id: 'imp-textfile', title: 'Import from Text File' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'import',
+    title: 'Import Music',
+    icon: '/static/import.jpg',
+    children: [
+      { id: 'imp-setup', title: 'Staging Setup' },
+      { id: 'imp-workflow', title: 'Import Workflow' },
+      { id: 'imp-singles', title: 'Singles Import' },
+      { id: 'imp-matching', title: 'Track Matching' },
+      { id: 'imp-textfile', title: 'Import from Text File' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="imp-setup">
                 <h3 class="docs-subsection-title">Staging Setup</h3>
                 <p class="docs-text">Set your <strong>import folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
@@ -1318,19 +1345,19 @@ const DOCS_SECTIONS = [
                 </ol>
                 ${docsImg('imp-textfile.jpg', 'Text file import')}
             </div>
-        `
-    },
-    {
-        id: 'player',
-        title: 'Media Player',
-        icon: '/static/library.jpg',
-        children: [
-            { id: 'player-controls', title: 'Playback Controls' },
-            { id: 'player-streaming', title: 'Streaming & Sources' },
-            { id: 'player-queue', title: 'Queue & Smart Radio' },
-            { id: 'player-shortcuts', title: 'Keyboard Shortcuts' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'player',
+    title: 'Media Player',
+    icon: '/static/library.jpg',
+    children: [
+      { id: 'player-controls', title: 'Playback Controls' },
+      { id: 'player-streaming', title: 'Streaming & Sources' },
+      { id: 'player-queue', title: 'Queue & Smart Radio' },
+      { id: 'player-shortcuts', title: 'Keyboard Shortcuts' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="player-controls">
                 <h3 class="docs-subsection-title">Playback Controls</h3>
                 <p class="docs-text">The sidebar media player is always visible when a track is loaded. It shows album art, track info, a seekable progress bar, and playback controls (play/pause, previous, next, volume, repeat, shuffle).</p>
@@ -1371,22 +1398,22 @@ const DOCS_SECTIONS = [
                 </table>
                 <p class="docs-text"><strong>Media Session API</strong> &mdash; SoulSync integrates with your OS media controls (lock screen, system tray) for play/pause, next/previous, and seek.</p>
             </div>
-        `
-    },
-    {
-        id: 'settings',
-        title: 'Settings',
-        icon: '/static/settings.jpg',
-        children: [
-            { id: 'set-services', title: 'Service Credentials' },
-            { id: 'set-media', title: 'Media Server Setup' },
-            { id: 'set-download', title: 'Download Settings' },
-            { id: 'set-processing', title: 'Processing & Organization' },
-            { id: 'set-quality', title: 'Quality Profiles' },
-            { id: 'set-other', title: 'Other Settings' },
-            { id: 'set-db-maintenance', title: 'Database Maintenance' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'settings',
+    title: 'Settings',
+    icon: '/static/settings.jpg',
+    children: [
+      { id: 'set-services', title: 'Service Credentials' },
+      { id: 'set-media', title: 'Media Server Setup' },
+      { id: 'set-download', title: 'Download Settings' },
+      { id: 'set-processing', title: 'Processing & Organization' },
+      { id: 'set-quality', title: 'Quality Profiles' },
+      { id: 'set-other', title: 'Other Settings' },
+      { id: 'set-db-maintenance', title: 'Database Maintenance' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="set-services">
                 <h3 class="docs-subsection-title">Service Credentials</h3>
                 <p class="docs-text">Configure credentials for each external service. All fields are saved to your local database and <strong>encrypted at rest</strong> using a Fernet key generated on first launch. Nothing is sent to external servers except during actual API calls. Each service has a <strong>Test Connection</strong> button to verify your credentials are working.</p>
@@ -1476,19 +1503,19 @@ const DOCS_SECTIONS = [
                 </ul>
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>VACUUM requires temporary disk space equal to the database size. For a 5 GB database, ensure at least 5 GB free space before running.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'profiles',
-        title: 'Multi-Profile',
-        icon: '/static/settings.jpg',
-        children: [
-            { id: 'prof-overview', title: 'How Profiles Work' },
-            { id: 'prof-manage', title: 'Managing Profiles' },
-            { id: 'prof-permissions', title: 'Permissions & Page Access' },
-            { id: 'prof-home', title: 'Home Page & Preferences' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'profiles',
+    title: 'Multi-Profile',
+    icon: '/static/settings.jpg',
+    children: [
+      { id: 'prof-overview', title: 'How Profiles Work' },
+      { id: 'prof-manage', title: 'Managing Profiles' },
+      { id: 'prof-permissions', title: 'Permissions & Page Access' },
+      { id: 'prof-home', title: 'Home Page & Preferences' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="prof-overview">
                 <h3 class="docs-subsection-title">How Profiles Work</h3>
                 <p class="docs-text">SoulSync supports <strong>Netflix-style multiple profiles</strong> for shared households. Each profile gets its own:</p>
@@ -1540,19 +1567,19 @@ const DOCS_SECTIONS = [
                     <li>The home page selector only shows pages the user has access to</li>
                 </ul>
             </div>
-        `
-    },
-    {
-        id: 'troubleshooting',
-        title: 'Troubleshooting',
-        icon: '/static/settings.jpg',
-        children: [
-            { id: 'ts-logs', title: 'Understanding Logs' },
-            { id: 'ts-debug', title: 'Copy Debug Info' },
-            { id: 'ts-common', title: 'Common Issues' },
-            { id: 'ts-reporting', title: 'Reporting Issues' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'troubleshooting',
+    title: 'Troubleshooting',
+    icon: '/static/settings.jpg',
+    children: [
+      { id: 'ts-logs', title: 'Understanding Logs' },
+      { id: 'ts-debug', title: 'Copy Debug Info' },
+      { id: 'ts-common', title: 'Common Issues' },
+      { id: 'ts-reporting', title: 'Reporting Issues' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="ts-logs">
                 <h3 class="docs-subsection-title">Understanding Logs</h3>
                 <p class="docs-text">SoulSync writes several log files that are critical for diagnosing issues. All logs are in the <code>logs/</code> directory (Docker: <code>/app/logs/</code>).</p>
@@ -1634,20 +1661,20 @@ const DOCS_SECTIONS = [
                 </ol>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>The more context you provide, the faster the fix.</strong> A debug info snapshot + steps to reproduce + DEBUG log excerpt is the ideal bug report. Even if you think you know the cause, the logs often reveal something unexpected.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'video-overview',
-        title: 'Video: Overview',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vid-what', title: 'What the Video Side Is' },
-            { id: 'vid-switch', title: 'Switching Sides' },
-            { id: 'vid-server', title: 'Connecting a Media Server' },
-            { id: 'vid-sources', title: 'Download Sources' },
-            { id: 'vid-access', title: 'Per-Profile Side Access' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-overview',
+    title: 'Video: Overview',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vid-what', title: 'What the Video Side Is' },
+      { id: 'vid-switch', title: 'Switching Sides' },
+      { id: 'vid-server', title: 'Connecting a Media Server' },
+      { id: 'vid-sources', title: 'Download Sources' },
+      { id: 'vid-access', title: 'Per-Profile Side Access' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vid-what">
                 <h3 class="docs-subsection-title">What the Video Side Is</h3>
                 <p class="docs-text">SoulSync's <strong>Video</strong> side is a self-hosted movies &amp; TV manager that lives inside the same app as the music side but runs as an <strong>isolated application</strong> &mdash; its own database, its own pages, its own API blueprint. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync. It connects to <strong>Plex</strong> or <strong>Jellyfin/Emby</strong> to read your movie and TV libraries, enriches every title from <strong>TMDB</strong>, <strong>TVDB</strong>, <strong>OMDb</strong>, <strong>fanart.tv</strong>, <strong>OpenSubtitles</strong> and more, and can search, grab, organize, and upgrade downloads to fill the gaps.</p>
@@ -1687,18 +1714,18 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">With multi-profile enabled, each profile can be granted access to <strong>Music</strong>, <strong>Video</strong>, or <strong>both</strong>. A music-only profile can't see or reach the video side at all &mdash; the whole Video navigation is hidden and the video API rejects its requests server-side. Admins always have both sides. See <strong>Video: Settings</strong> and <strong>Multi-Profile</strong> for how to set this per profile.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Side access is enforced on the server, not just hidden in the UI &mdash; a music-only profile that tries to hit a <code>/api/video/*</code> URL directly gets a <code>403</code>.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'video-dashboard',
-        title: 'Video: Dashboard',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vdash-overview', title: 'Overview & Health' },
-            { id: 'vdash-continue', title: 'Continue Watching' },
-            { id: 'vdash-activity', title: 'Recent & Activity' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-dashboard',
+    title: 'Video: Dashboard',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vdash-overview', title: 'Overview & Health' },
+      { id: 'vdash-continue', title: 'Continue Watching' },
+      { id: 'vdash-activity', title: 'Recent & Activity' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vdash-overview">
                 <h3 class="docs-subsection-title">Overview &amp; Health</h3>
                 <p class="docs-text">The Video <strong>Dashboard</strong> is your at-a-glance home for the video side: library counts (movies, shows, episodes), download activity, enrichment coverage, and a health strip that flags whether your media server, indexers, and download clients are reachable.</p>
@@ -1712,18 +1739,18 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Recent &amp; Activity</h3>
                 <p class="docs-text">Recently added titles and a running activity feed (scans, grabs, imports, upgrades) keep you current on what the video side has been doing without opening every page.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-search',
-        title: 'Video: Search & Studios',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vsearch-search', title: 'Searching' },
-            { id: 'vsearch-trending', title: 'Trending' },
-            { id: 'vsearch-studios', title: 'Studios' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-search',
+    title: 'Video: Search & Studios',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vsearch-search', title: 'Searching' },
+      { id: 'vsearch-trending', title: 'Trending' },
+      { id: 'vsearch-studios', title: 'Studios' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vsearch-search">
                 <h3 class="docs-subsection-title">Searching</h3>
                 <p class="docs-text">Search across <strong>movies</strong>, <strong>TV shows</strong>, <strong>people</strong>, and <strong>studios</strong> from one bar. Results are source-agnostic and show whether you already own a title, so you can jump to a detail page, add something to your wishlist, or open a person/studio to browse their catalog.</p>
@@ -1737,20 +1764,20 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Studios</h3>
                 <p class="docs-text">Search for a production company (studio) and open its <strong>Studio detail</strong> page to browse its full filmography, paged from TMDB. <strong>Studio presets</strong> give quick access to well-known studios, and you can <strong>follow</strong> a studio to have its new releases auto-added (see <strong>Video: Watchlist</strong>).</p>
             </div>
-        `
-    },
-    {
-        id: 'video-discover',
-        title: 'Video: Discover',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vdisc-hero', title: 'Cinematic Hero' },
-            { id: 'vdisc-foryou', title: 'For You & Taste' },
-            { id: 'vdisc-more', title: 'More Like This & Gaps' },
-            { id: 'vdisc-browse', title: 'Genres & Browsing' },
-            { id: 'vdisc-prefs', title: 'Preferences' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-discover',
+    title: 'Video: Discover',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vdisc-hero', title: 'Cinematic Hero' },
+      { id: 'vdisc-foryou', title: 'For You & Taste' },
+      { id: 'vdisc-more', title: 'More Like This & Gaps' },
+      { id: 'vdisc-browse', title: 'Genres & Browsing' },
+      { id: 'vdisc-prefs', title: 'Preferences' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vdisc-hero">
                 <h3 class="docs-subsection-title">Cinematic Hero</h3>
                 <p class="docs-text">Discover opens on a full-bleed <strong>billboard</strong> that rotates through standout titles with logos, backdrops, and a one-click <strong>trailer</strong>. It's built to feel like a streaming home screen rather than a database.</p>
@@ -1772,18 +1799,18 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Preferences</h3>
                 <p class="docs-text">Tune Discover to your region and services: set preferred <strong>languages</strong>, restrict recommendations to your streaming <strong>providers</strong>, and <strong>ignore</strong> titles you never want to see again. These preferences persist per profile.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-library',
-        title: 'Video: Library',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vlib-browse', title: 'Browsing & Filters' },
-            { id: 'vlib-manage', title: 'Manage Panel' },
-            { id: 'vlib-bulk', title: 'Bulk Operations' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-library',
+    title: 'Video: Library',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vlib-browse', title: 'Browsing & Filters' },
+      { id: 'vlib-manage', title: 'Manage Panel' },
+      { id: 'vlib-bulk', title: 'Bulk Operations' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vlib-browse">
                 <h3 class="docs-subsection-title">Browsing &amp; Filters</h3>
                 <p class="docs-text">The <strong>Library</strong> page is your owned movies and shows as a poster wall. Filter by <strong>resolution</strong>, <strong>genre</strong>, monitored state, and more; sort by title, added date, release year, or rating; and the page remembers your scroll position when you come back.</p>
@@ -1798,20 +1825,20 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">Select multiple titles to act on them at once &mdash; bulk monitor/unmonitor, bulk quality-profile assignment, bulk metadata edits, and mass mark-watched. Large bulk jobs run in the background so the UI stays responsive.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Library edits, deletes, re-matches, and bulk jobs are <strong>admin-only</strong> &mdash; content views can read everything, but mutating the library requires an admin profile.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'video-detail',
-        title: 'Video: Detail Pages',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vdet-layout', title: 'Movie & Show Pages' },
-            { id: 'vdet-watch', title: 'Watch State & History' },
-            { id: 'vdet-meta', title: 'Metadata Edit & Lock' },
-            { id: 'vdet-quality', title: 'Per-Title Quality & Series Type' },
-            { id: 'vdet-people', title: 'People & Studios' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-detail',
+    title: 'Video: Detail Pages',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vdet-layout', title: 'Movie & Show Pages' },
+      { id: 'vdet-watch', title: 'Watch State & History' },
+      { id: 'vdet-meta', title: 'Metadata Edit & Lock' },
+      { id: 'vdet-quality', title: 'Per-Title Quality & Series Type' },
+      { id: 'vdet-people', title: 'People & Studios' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vdet-layout">
                 <h3 class="docs-subsection-title">Movie &amp; Show Pages</h3>
                 <p class="docs-text">Every title has a rich <strong>detail page</strong>: hero art, overview, cast &amp; crew, ratings, awards, a post-credits/stinger flag, format badges (HDR / Dolby Vision / Atmos / channel layout), and &mdash; for shows &mdash; a full season/episode breakdown. Movies and shows can come from either server and render the same way.</p>
@@ -1834,18 +1861,18 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">People &amp; Studios</h3>
                 <p class="docs-text"><strong>Person</strong> pages show an actor/director's filmography with what you own highlighted; <strong>Studio</strong> pages show a production company's catalog. From either you can follow them to your watchlist so new releases are auto-added.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-watchlist',
-        title: 'Video: Watchlist',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vwatch-follow', title: 'Following People & Studios' },
-            { id: 'vwatch-settings', title: 'Per-Follow Settings' },
-            { id: 'vwatch-scan', title: 'Release Scanning' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-watchlist',
+    title: 'Video: Watchlist',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vwatch-follow', title: 'Following People & Studios' },
+      { id: 'vwatch-settings', title: 'Per-Follow Settings' },
+      { id: 'vwatch-scan', title: 'Release Scanning' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vwatch-follow">
                 <h3 class="docs-subsection-title">Following People &amp; Studios</h3>
                 <p class="docs-text">The video <strong>Watchlist</strong> is how you tell SoulSync "keep an eye on this." Follow an <strong>actor</strong>, <strong>director</strong>, or <strong>studio</strong> and their upcoming and newly-released titles are automatically added to your <strong>Wishlist</strong> so the download pipeline can go find them.</p>
@@ -1859,18 +1886,18 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Release Scanning</h3>
                 <p class="docs-text">A scan automation walks your follows on a schedule, finds anything new, and writes it into the wishlist with poster art and season metadata so it renders correctly and is ready to grab. You can also trigger a check on demand.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-wishlist',
-        title: 'Video: Wishlist',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vwish-wanted', title: 'Wanted & Cutoff-Unmet' },
-            { id: 'vwish-search', title: 'Search Now & Status' },
-            { id: 'vwish-upgrade', title: 'Upgrade Until Cutoff' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-wishlist',
+    title: 'Video: Wishlist',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vwish-wanted', title: 'Wanted & Cutoff-Unmet' },
+      { id: 'vwish-search', title: 'Search Now & Status' },
+      { id: 'vwish-upgrade', title: 'Upgrade Until Cutoff' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vwish-wanted">
                 <h3 class="docs-subsection-title">Wanted &amp; Cutoff-Unmet</h3>
                 <p class="docs-text">The <strong>Wishlist</strong> is everything the video side wants but doesn't have at the quality you asked for &mdash; titles you don't own yet (<strong>wanted</strong>) and titles you own below their profile's cutoff (<strong>cutoff-unmet</strong>). It's the video equivalent of a Sonarr/Radarr "Wanted" queue.</p>
@@ -1884,21 +1911,21 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Upgrade Until Cutoff</h3>
                 <p class="docs-text">Titles below their profile's cutoff stay on the wishlist and are re-grabbed only when a <strong>strictly better</strong> release appears. When an upgrade lands it replaces the file in place, in the real library folder, using the video path resolver &mdash; so you upgrade quality without duplicating files or breaking your server's paths.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-downloads',
-        title: 'Video: Downloads',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vdl-queue', title: 'The Download Queue' },
-            { id: 'vdl-quality', title: 'Quality Profiles & Formats' },
-            { id: 'vdl-lists', title: 'Import Lists' },
-            { id: 'vdl-blocklist', title: 'Blocklist & Recycle Bin' },
-            { id: 'vdl-history', title: 'History' },
-            { id: 'vdl-organize', title: 'Organization & Rename' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-downloads',
+    title: 'Video: Downloads',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vdl-queue', title: 'The Download Queue' },
+      { id: 'vdl-quality', title: 'Quality Profiles & Formats' },
+      { id: 'vdl-lists', title: 'Import Lists' },
+      { id: 'vdl-blocklist', title: 'Blocklist & Recycle Bin' },
+      { id: 'vdl-history', title: 'History' },
+      { id: 'vdl-organize', title: 'Organization & Rename' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vdl-queue">
                 <h3 class="docs-subsection-title">The Download Queue</h3>
                 <p class="docs-text">The <strong>Downloads</strong> page is a live queue of everything in flight &mdash; per-item speed, ETA, progress, and state. Grab a release manually, retry a failed one, cancel, or clear completed. Grabs are evaluated against your quality profile and custom formats before they're accepted, then monitored to completion and organized into your library.</p>
@@ -1925,34 +1952,32 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Organization &amp; Rename</h3>
                 <p class="docs-text">Set your naming scheme and folder layout, then use <strong>mass rename</strong> with a preview to bring existing files in line before applying. Failed imports can be manually placed or dismissed from the <strong>Import</strong> tools.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-requests',
-        title: 'Video: Requests',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vreq-flow', title: 'Request → Approve → Wishlist' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-requests',
+    title: 'Video: Requests',
+    icon: '/static/video/video-nav.jpg',
+    children: [{ id: 'vreq-flow', title: 'Request → Approve → Wishlist' }],
+    content: () => `
             <div class="docs-subsection" id="vreq-flow">
                 <h3 class="docs-subsection-title">Request &rarr; Approve &rarr; Wishlist</h3>
                 <p class="docs-text">The <strong>Requests</strong> system lets non-admin members ask for a movie or show. An admin reviews the queue and <strong>approves</strong> (which drops the title straight onto the wishlist for the pipeline to fulfill) or <strong>denies</strong> it. A counts badge keeps admins aware of pending requests, and resolved requests can be cleared.</p>
                 ${docsImg('video-requests.jpg', 'Video requests queue')}
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>Members submit and see their own requests; approve/deny and viewing everyone's requests are admin actions.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'video-calendar',
-        title: 'Video: Calendar',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vcal-grid', title: 'Week Grid & Air Times' },
-            { id: 'vcal-movie', title: 'Movie Lane' },
-            { id: 'vcal-ical', title: 'iCal Feed' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-calendar',
+    title: 'Video: Calendar',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vcal-grid', title: 'Week Grid & Air Times' },
+      { id: 'vcal-movie', title: 'Movie Lane' },
+      { id: 'vcal-ical', title: 'iCal Feed' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vcal-grid">
                 <h3 class="docs-subsection-title">Week Grid &amp; Air Times</h3>
                 <p class="docs-text">The <strong>Calendar</strong> lays out upcoming episodes on a week grid with air times, a per-day agenda, and a click-through modal &mdash; the same shape as the Sonarr/Radarr calendars. Everything is scoped per media server so you only see what's relevant.</p>
@@ -1966,17 +1991,17 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">iCal Feed</h3>
                 <p class="docs-text">Subscribe to the calendar from any calendar app via the <strong>iCal</strong> feed (<code>/api/video/calendar.ics</code>) to see upcoming airings and releases outside SoulSync.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-automations',
-        title: 'Video: Automations',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vauto-shared', title: 'Shared System Automations' },
-            { id: 'vauto-events', title: 'Event Triggers' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-automations',
+    title: 'Video: Automations',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vauto-shared', title: 'Shared System Automations' },
+      { id: 'vauto-events', title: 'Event Triggers' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vauto-shared">
                 <h3 class="docs-subsection-title">Shared System Automations</h3>
                 <p class="docs-text">The video side surfaces the same SYSTEM automation engine the music side uses &mdash; scheduled tasks and event-driven workflows &mdash; minus the music-only kinds (Beatport, user, playlist). Use it to schedule library refreshes, wishlist scans, watchlist checks, and enrichment passes.</p>
@@ -1986,18 +2011,18 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Event Triggers</h3>
                 <p class="docs-text">A generic <strong>event bus</strong> lets video events (a grab completes, a scan finishes, a title is added) trigger downstream blocks, so you can chain workflows &mdash; for example, "after a scan, run enrichment, then refresh art."</p>
             </div>
-        `
-    },
-    {
-        id: 'video-youtube',
-        title: 'Video: YouTube Channels',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vyt-follow', title: 'Following Channels' },
-            { id: 'vyt-import', title: 'Import Subscriptions' },
-            { id: 'vyt-downloaded', title: 'Downloaded State' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-youtube',
+    title: 'Video: YouTube Channels',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vyt-follow', title: 'Following Channels' },
+      { id: 'vyt-import', title: 'Import Subscriptions' },
+      { id: 'vyt-downloaded', title: 'Downloaded State' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vyt-follow">
                 <h3 class="docs-subsection-title">Following Channels</h3>
                 <p class="docs-text">Follow a <strong>YouTube channel</strong> (or a specific <strong>playlist</strong>) like a show. SoulSync uses <strong>yt-dlp</strong> to track new uploads and bridges them into the video wishlist/watchlist so they flow through the same download pipeline as everything else. It's visual-first &mdash; channels get art and a proper detail page.</p>
@@ -2011,21 +2036,21 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Downloaded State</h3>
                 <p class="docs-text">Ownership is tracked by your actual download history, so a channel's video list honestly shows what you already have versus what's still available &mdash; the extractor's title is treated as authoritative to avoid mismatches.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-tools',
-        title: 'Video: Tools',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vtool-overlays', title: 'Overlay Studio' },
-            { id: 'vtool-collections', title: 'Collection Manager' },
-            { id: 'vtool-repair', title: 'Library Maintenance' },
-            { id: 'vtool-enrichment', title: 'Enrichment' },
-            { id: 'vtool-activity', title: 'Server Activity' },
-            { id: 'vtool-backups', title: 'Backups' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-tools',
+    title: 'Video: Tools',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vtool-overlays', title: 'Overlay Studio' },
+      { id: 'vtool-collections', title: 'Collection Manager' },
+      { id: 'vtool-repair', title: 'Library Maintenance' },
+      { id: 'vtool-enrichment', title: 'Enrichment' },
+      { id: 'vtool-activity', title: 'Server Activity' },
+      { id: 'vtool-backups', title: 'Backups' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vtool-overlays">
                 <h3 class="docs-subsection-title">Overlay Studio</h3>
                 <p class="docs-text">A visual, Kometa-style <strong>overlay template editor</strong>. Design badges (resolution, HDR, ratings, audio, awards, custom text, logo packs) on a live preview, assign templates to filtered sets of titles, and <strong>apply</strong> them &mdash; SoulSync renders the overlays with Pillow and writes them straight back to Plex/Jellyfin posters. A cleanup tool removes overlays again when you want the originals back.</p>
@@ -2054,34 +2079,32 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Backups</h3>
                 <p class="docs-text">Take on-demand or scheduled <strong>backups</strong> of the video database and restore or download them when needed. Because a restore replaces the whole database, backup endpoints are admin-only.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-import',
-        title: 'Video: Import',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vimp-failed', title: 'Failed Imports' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-import',
+    title: 'Video: Import',
+    icon: '/static/video/video-nav.jpg',
+    children: [{ id: 'vimp-failed', title: 'Failed Imports' }],
+    content: () => `
             <div class="docs-subsection" id="vimp-failed">
                 <h3 class="docs-subsection-title">Failed Imports</h3>
                 <p class="docs-text">When a completed download can't be automatically placed into the library (ambiguous match, unexpected layout), it lands in <strong>Failed Imports</strong>. From there an admin can manually <strong>place</strong> it into the right title, or <strong>dismiss</strong> it. This is the video equivalent of the music side's manual import step.</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x1F512;</span><div>Manual import placement is admin-only, since it mutates the library on disk.</div></div>
             </div>
-        `
-    },
-    {
-        id: 'video-settings',
-        title: 'Video: Settings & Side Access',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vset-server', title: 'Server & Libraries' },
-            { id: 'vset-services', title: 'Enrichment Services & Keys' },
-            { id: 'vset-notify', title: 'Notifications' },
-            { id: 'vset-access', title: 'Side Access' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-settings',
+    title: 'Video: Settings & Side Access',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vset-server', title: 'Server & Libraries' },
+      { id: 'vset-services', title: 'Enrichment Services & Keys' },
+      { id: 'vset-notify', title: 'Notifications' },
+      { id: 'vset-access', title: 'Side Access' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vset-server">
                 <h3 class="docs-subsection-title">Server &amp; Libraries</h3>
                 <p class="docs-text">Configure your Plex/Jellyfin connection, test it, and pick which <strong>libraries</strong> the video side manages. For Jellyfin you can select the user whose watch state to read. Server and library config is written from the admin-only Settings page.</p>
@@ -2099,21 +2122,21 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Side Access</h3>
                 <p class="docs-text">Under multi-profile, an admin grants each profile access to <strong>Music</strong>, <strong>Video</strong>, or <strong>both</strong> when creating or editing the profile. A music-only profile has the entire video side hidden and blocked server-side. See <strong>Multi-Profile</strong> for the full permission model.</p>
             </div>
-        `
-    },
-    {
-        id: 'video-api',
-        title: 'Video: API Reference',
-        icon: '/static/video/video-nav.jpg',
-        children: [
-            { id: 'vapi-auth', title: 'Auth Model' },
-            { id: 'vapi-content', title: 'Library, Detail & Discover' },
-            { id: 'vapi-acquire', title: 'Downloads, Wishlist & Watchlist' },
-            { id: 'vapi-manage', title: 'Studios (Overlays/Collections/Repair)' },
-            { id: 'vapi-settings', title: 'Settings & Enrichment' },
-            { id: 'vapi-youtube', title: 'YouTube' }
-        ],
-        content: () => `
+        `,
+  },
+  {
+    id: 'video-api',
+    title: 'Video: API Reference',
+    icon: '/static/video/video-nav.jpg',
+    children: [
+      { id: 'vapi-auth', title: 'Auth Model' },
+      { id: 'vapi-content', title: 'Library, Detail & Discover' },
+      { id: 'vapi-acquire', title: 'Downloads, Wishlist & Watchlist' },
+      { id: 'vapi-manage', title: 'Studios (Overlays/Collections/Repair)' },
+      { id: 'vapi-settings', title: 'Settings & Enrichment' },
+      { id: 'vapi-youtube', title: 'YouTube' },
+    ],
+    content: () => `
             <div class="docs-subsection" id="vapi-auth">
                 <h3 class="docs-subsection-title">Auth Model</h3>
                 <p class="docs-text">The video API lives under <code>/api/video</code> and is <strong>session-authenticated</strong> &mdash; it uses your logged-in browser session and active profile, <em>not</em> the <code>sk_</code> API keys the public <a onclick="document.getElementById('docs-api').scrollIntoView()">REST API</a> uses. It's the app's own internal API; there is no key-authenticated public surface for the video side. A single blueprint-level gate enforces three rules on every request:</p>
@@ -2232,1239 +2255,1276 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
             </div>
-        `
-    },
-    {
-        id: 'api',
-        title: 'REST API',
-        icon: '/static/settings.jpg',
-        children: [
-            { id: 'api-auth', title: 'Authentication' },
-            { id: 'api-system', title: 'System' },
-            { id: 'api-library', title: 'Library' },
-            { id: 'api-search', title: 'Search' },
-            { id: 'api-downloads', title: 'Downloads' },
-            { id: 'api-playlists', title: 'Playlists' },
-            { id: 'api-watchlist', title: 'Watchlist' },
-            { id: 'api-wishlist', title: 'Wishlist' },
-            { id: 'api-request', title: 'Requests' },
-            { id: 'api-discover', title: 'Discover' },
-            { id: 'api-profiles', title: 'Profiles' },
-            { id: 'api-settings', title: 'Settings & Keys' },
-            { id: 'api-retag', title: 'Retag' },
-            { id: 'api-cache', title: 'Cache' },
-            { id: 'api-listenbrainz', title: 'ListenBrainz' },
-            { id: 'api-websocket', title: 'WebSocket Events' }
-        ],
-        content: () => {
-            // --- API Endpoint definitions ---
-            const E = (method, path, desc, params, bodyFields, example) => ({ method, path, desc, params, bodyFields, example });
-            const P = (name, type, req, desc, def) => ({ name, type, required: req, desc, default: def });
+        `,
+  },
+  {
+    id: 'api',
+    title: 'REST API',
+    icon: '/static/settings.jpg',
+    children: [
+      { id: 'api-auth', title: 'Authentication' },
+      { id: 'api-system', title: 'System' },
+      { id: 'api-library', title: 'Library' },
+      { id: 'api-search', title: 'Search' },
+      { id: 'api-downloads', title: 'Downloads' },
+      { id: 'api-playlists', title: 'Playlists' },
+      { id: 'api-watchlist', title: 'Watchlist' },
+      { id: 'api-wishlist', title: 'Wishlist' },
+      { id: 'api-request', title: 'Requests' },
+      { id: 'api-discover', title: 'Discover' },
+      { id: 'api-profiles', title: 'Profiles' },
+      { id: 'api-settings', title: 'Settings & Keys' },
+      { id: 'api-retag', title: 'Retag' },
+      { id: 'api-cache', title: 'Cache' },
+      { id: 'api-listenbrainz', title: 'ListenBrainz' },
+      { id: 'api-websocket', title: 'WebSocket Events' },
+    ],
+    content: () => {
+      // --- API Endpoint definitions ---
+      const E = (
+        method: string,
+        path: string,
+        desc: string,
+        params: ApiParam[],
+        bodyFields: ApiParam[] | null,
+        example: ApiExample | null,
+      ): ApiEndpoint => ({ method, path, desc, params, bodyFields, example });
+      const P = (
+        name: string,
+        type: string,
+        req: boolean,
+        desc: string,
+        def?: string,
+      ): ApiParam => ({ name, type, required: req, desc, default: def });
 
-            const apiGroups = [
-                {
-                    id: 'api-system', title: 'System', desc: 'Server status, activity feed, and combined statistics.',
-                    endpoints: [
-                        E('GET', '/system/status', 'Server uptime and service connectivity', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "uptime": "4h 32m 10s",\n    "uptime_seconds": 16330,\n    "services": {\n      "spotify": true,\n      "soulseek": true,\n      "hydrabase": false\n    }\n  }\n}'
-                        }),
-                        E('GET', '/system/stats', 'Combined library and download statistics', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "library": { "artists": 342, "albums": 1205, "tracks": 14832 },\n    "database": { "size_mb": 45.2, "last_update": "2026-03-13T08:00:00Z" },\n    "downloads": { "active": 3 }\n  }\n}'
-                        }),
-                        E('GET', '/system/activity', 'Recent activity feed', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "activities": [\n      { "timestamp": "2026-03-13T10:30:00Z", "type": "download", "message": "Downloaded: Radiohead - Karma Police" }\n    ]\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-library', title: 'Library', desc: 'Browse artists, albums, tracks, genres, and library statistics. Most endpoints support <code>?fields=</code> for field selection and pagination via <code>?page=</code> and <code>?limit=</code>.',
-                    endpoints: [
-                        E('GET', '/library/artists', 'List library artists with search, letter filter, and pagination', [
-                            P('search', 'string', false, 'Substring filter on artist name', '""'),
-                            P('letter', 'string', false, 'Filter by first letter, or "all"', '"all"'),
-                            P('watchlist', 'string', false, 'Filter by watchlist status', '"all"'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated field names to include', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "name": "Radiohead",\n        "thumb_url": "https://...",\n        "banner_url": "https://...",\n        "genres": ["alternative rock", "art rock"],\n        "summary": "English rock band...",\n        "style": "Alternative/Indie", "mood": "Melancholy",\n        "label": "XL Recordings",\n        "musicbrainz_id": "a74b1b7f-...",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "itunes_artist_id": "657515",\n        "deezer_id": "399", "tidal_id": "3746724",\n        "qobuz_id": "61592", "genius_id": "604",\n        "lastfm_listeners": 5832451,\n        "lastfm_playcount": 328456789,\n        "genius_url": "https://genius.com/artists/Radiohead",\n        "album_count": 9, "track_count": 101,\n        "...": "all 50+ fields included"\n      }\n    ]\n  },\n  "pagination": {\n    "page": 1, "limit": 50, "total": 342, "total_pages": 7,\n    "has_next": true, "has_prev": false\n  }\n}'
-                        }),
-                        E('GET', '/library/artists/{artist_id}', 'Get a single artist with all metadata and album list', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artist": {\n      "id": 1, "name": "Radiohead",\n      "thumb_url": "https://...", "banner_url": "https://...",\n      "genres": ["alternative rock", "art rock"],\n      "summary": "English rock band formed in 1985...",\n      "style": "Alternative/Indie", "mood": "Melancholy",\n      "label": "XL Recordings",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "musicbrainz_id": "a74b1b7f-71a3-4b73-8c51-5c1f3a71c9e8",\n      "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n      "itunes_artist_id": "657515",\n      "audiodb_id": "111239",\n      "deezer_id": "399",\n      "tidal_id": "3746724",\n      "qobuz_id": "61592",\n      "genius_id": "604",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 5832451,\n      "lastfm_playcount": 328456789,\n      "lastfm_tags": "alternative, rock, experimental",\n      "lastfm_similar": "Thom Yorke, Atoms for Peace, Portishead",\n      "lastfm_bio": "Radiohead are an English rock band...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead",\n      "genius_description": "Radiohead is an English rock band...",\n      "genius_alt_names": "On a Friday",\n      "genius_url": "https://genius.com/artists/Radiohead",\n      "album_count": 9, "track_count": 101\n    },\n    "albums": [\n      { "id": 10, "title": "OK Computer", "year": 1997, "track_count": 12, "record_type": "album" }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/library/artists/{artist_id}/albums', 'List albums for an artist', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n        "thumb_url": "https://...", "track_count": 12, "duration": 3214000,\n        "genres": ["alternative rock"],\n        "style": "Art Rock", "mood": "Atmospheric",\n        "label": "Parlophone", "record_type": "album", "explicit": false,\n        "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n        "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "tidal_id": "17914997", "qobuz_id": "0724385522529",\n        "lastfm_listeners": 1543000, "lastfm_playcount": 89234567,\n        "...": "all 45+ fields included"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/library/albums', 'List or search albums with pagination', [
-                            P('search', 'string', false, 'Substring filter on album title', '""'),
-                            P('artist_id', 'int', false, 'Filter by artist ID'),
-                            P('year', 'int', false, 'Filter by release year'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": { "albums": [ { "id": 10, "title": "OK Computer", "year": 1997, "artist_id": 1 } ] },\n  "pagination": { "page": 1, "limit": 50, "total": 1205, "total_pages": 25, "has_next": true, "has_prev": false }\n}'
-                        }),
-                        E('GET', '/library/albums/{album_id}', 'Get a single album with metadata and embedded tracks', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "album": {\n      "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n      "thumb_url": "https://...",\n      "genres": ["alternative rock"],\n      "track_count": 12, "duration": 3214000,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "label": "Parlophone", "explicit": false, "record_type": "album",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n      "musicbrainz_release_id": "b1a9c0e7-...",\n      "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n      "itunes_album_id": "1097861387",\n      "audiodb_id": "2115888",\n      "deezer_id": "6575789",\n      "tidal_id": "17914997",\n      "qobuz_id": "0724385522529",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 1543000,\n      "lastfm_playcount": 89234567,\n      "lastfm_tags": "alternative, 90s, rock",\n      "lastfm_wiki": "OK Computer is the third studio album...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/OK+Computer"\n    },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "track_number": 1, "duration": 284000, "bitrate": 1411 }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/library/albums/{album_id}/tracks', 'List tracks in an album', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n        "track_number": 1, "duration": 284000,\n        "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n        "bitrate": 1411, "bpm": 120.5, "explicit": false,\n        "isrc": "GBAYE9700106",\n        "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n        "tidal_id": "17914998", "genius_id": "1342",\n        "lastfm_listeners": 892000, "lastfm_playcount": 4567890,\n        "genius_url": "https://genius.com/Radiohead-airbag-lyrics",\n        "...": "all 55+ fields included"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/library/tracks/{track_id}', 'Get a single track with all metadata', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "track": {\n      "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n      "track_number": 1, "duration": 284000,\n      "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n      "bitrate": 1411, "bpm": 120.5, "explicit": false,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "repair_status": null, "repair_last_checked": null,\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "isrc": "GBAYE9700106", "copyright": "1997 Parlophone Records",\n      "musicbrainz_recording_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",\n      "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n      "itunes_track_id": "1097861700",\n      "audiodb_id": null,\n      "deezer_id": "72420132",\n      "tidal_id": "17914998",\n      "qobuz_id": "24517824",\n      "genius_id": "1342",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "not_found",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 892000,\n      "lastfm_playcount": 4567890,\n      "lastfm_tags": "alternative rock, radiohead",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/_/Airbag",\n      "genius_lyrics": "In the next world war, in a jackknifed juggernaut...",\n      "genius_description": "The opening track of OK Computer...",\n      "genius_url": "https://genius.com/Radiohead-airbag-lyrics"\n    }\n  }\n}'
-                        }),
-                        E('GET', '/library/tracks', 'Search tracks by title and/or artist', [
-                            P('title', 'string', false, 'Track title to search (at least one of title/artist required)', '""'),
-                            P('artist', 'string', false, 'Artist name to search', '""'),
-                            P('limit', 'int', false, 'Max results (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      { "id": 100, "title": "Airbag", "artist_name": "Radiohead", "album_title": "OK Computer" }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/library/genres', 'List all genres with occurrence counts', [
-                            P('source', 'string', false, '"artists" or "albums"', '"artists"')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "genres": [ { "name": "alternative rock", "count": 45 }, { "name": "electronic", "count": 38 } ],\n    "source": "artists"\n  }\n}'
-                        }),
-                        E('GET', '/library/recently-added', 'Get recently added content', [
-                            P('type', 'string', false, '"albums", "artists", or "tracks"', '"albums"'),
-                            P('limit', 'int', false, 'Max items (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "items": [ { "id": 10, "title": "OK Computer", "year": 1997, "created_at": "2026-03-12T10:00:00Z" } ],\n    "type": "albums"\n  }\n}'
-                        }),
-                        E('GET', '/library/lookup', 'Look up a library entity by external provider ID', [
-                            P('type', 'string', true, '"artist", "album", or "track"'),
-                            P('provider', 'string', true, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius"'),
-                            P('id', 'string', true, 'The external ID value'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artist": { "id": 1, "name": "Radiohead", "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb" }\n  }\n}'
-                        }),
-                        E('GET', '/library/stats', 'Get library statistics', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artists": 342,\n    "albums": 1205,\n    "tracks": 14832,\n    "database_size_mb": 45.2,\n    "last_update": "2026-03-13T08:00:00Z"\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-search', title: 'Search', desc: 'Search external music sources (Spotify, iTunes, Hydrabase). All search endpoints use POST with a JSON body.',
-                    endpoints: [
-                        E('POST', '/search/tracks', 'Search for tracks across music sources', [], [
-                            P('query', 'string', true, 'Search query'),
-                            P('source', 'string', false, '"spotify", "itunes", or "auto"', '"auto"'),
-                            P('limit', 'int', false, 'Max results (1-50)', '20')
-                        ], {
-                            request: '{\n  "query": "Karma Police",\n  "source": "auto",\n  "limit": 10\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": "3SVAN3BRByDmHOhKyIDxfC",\n        "name": "Karma Police",\n        "artists": ["Radiohead"],\n        "album": "OK Computer",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "image_url": "https://...",\n        "release_date": "1997-05-28"\n      }\n    ],\n    "source": "spotify"\n  }\n}'
-                        }),
-                        E('POST', '/search/albums', 'Search for albums', [], [
-                            P('query', 'string', true, 'Search query'),
-                            P('limit', 'int', false, 'Max results (1-50)', '20')
-                        ], {
-                            request: '{\n  "query": "OK Computer",\n  "limit": 5\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "name": "OK Computer",\n        "artists": ["Radiohead"],\n        "release_date": "1997-05-28",\n        "total_tracks": 12,\n        "album_type": "album",\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
-                        }),
-                        E('POST', '/search/artists', 'Search for artists', [], [
-                            P('query', 'string', true, 'Search query'),
-                            P('limit', 'int', false, 'Max results (1-50)', '20')
-                        ], {
-                            request: '{\n  "query": "Radiohead",\n  "limit": 5\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "name": "Radiohead",\n        "popularity": 79,\n        "genres": ["alternative rock", "art rock"],\n        "followers": 8500000,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-downloads', title: 'Downloads', desc: 'List active downloads, cancel individual or all downloads.',
-                    endpoints: [
-                        E('GET', '/downloads', 'List active and recent download tasks', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "downloads": [\n      {\n        "id": "abc123",\n        "status": "downloading",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "username": "slsk_user42",\n        "progress": 67,\n        "size": 34500000,\n        "batch_id": null,\n        "error": null\n      }\n    ]\n  }\n}'
-                        }),
-                        E('POST', '/downloads/{download_id}/cancel', 'Cancel a specific download', [], [
-                            P('username', 'string', true, 'Soulseek username for the transfer')
-                        ], {
-                            request: '{\n  "username": "slsk_user42"\n}',
-                            response: '{\n  "success": true,\n  "data": { "message": "Download cancelled." }\n}'
-                        }),
-                        E('POST', '/downloads/cancel-all', 'Cancel all active downloads and clear completed', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "All downloads cancelled and cleared." }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-playlists', title: 'Playlists', desc: 'List and inspect playlists from Spotify or Tidal, and trigger playlist sync.',
-                    endpoints: [
-                        E('GET', '/playlists', 'List user playlists from Spotify or Tidal', [
-                            P('source', 'string', false, '"spotify" or "tidal"', '"spotify"')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": "37i9dQZF1DXcBWIGoYBM5M",\n        "name": "Today\'s Top Hits",\n        "owner": "spotify",\n        "track_count": 50,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}'
-                        }),
-                        E('GET', '/playlists/{playlist_id}', 'Get playlist details with tracks', [
-                            P('source', 'string', false, 'Only "spotify" is supported', '"spotify"')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": "37i9dQZF1DXcBWIGoYBM5M",\n      "name": "Today\'s Top Hits",\n      "owner": "spotify",\n      "total_tracks": 50,\n      "tracks": [\n        {\n          "id": "3SVAN3BRByDmHOhKyIDxfC",\n          "name": "Karma Police",\n          "artists": ["Radiohead"],\n          "album": "OK Computer",\n          "duration_ms": 264066,\n          "image_url": "https://..."\n        }\n      ]\n    },\n    "source": "spotify"\n  }\n}'
-                        }),
-                        E('POST', '/playlists/{playlist_id}/sync', 'Trigger playlist sync and download', [], [
-                            P('playlist_name', 'string', true, 'Name of the playlist'),
-                            P('tracks', 'array', true, 'Array of track objects to sync')
-                        ], {
-                            request: '{\n  "playlist_name": "My Playlist",\n  "tracks": [\n    { "id": "3SVAN3...", "name": "Karma Police", "artists": [{ "name": "Radiohead" }] }\n  ]\n}',
-                            response: '{\n  "success": true,\n  "data": { "message": "Playlist sync started.", "playlist_id": "37i9dQZF1DXcBWIGoYBM5M" }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-watchlist', title: 'Watchlist', desc: 'View, add, remove watched artists and trigger new release scans. Profile-scoped via <code>X-Profile-Id</code> header.',
-                    endpoints: [
-                        E('GET', '/watchlist', 'List all watchlist artists for the current profile', [
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "artist_name": "Radiohead",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "image_url": "https://...",\n        "date_added": "2026-01-15T10:00:00Z",\n        "include_albums": true,\n        "include_eps": true,\n        "include_singles": true,\n        "include_live": false,\n        "include_remixes": false,\n        "profile_id": 1\n      }\n    ]\n  }\n}'
-                        }),
-                        E('POST', '/watchlist', 'Add an artist to the watchlist', [], [
-                            P('artist_id', 'string', true, 'Spotify or iTunes artist ID'),
-                            P('artist_name', 'string', true, 'Artist display name')
-                        ], {
-                            request: '{\n  "artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n  "artist_name": "Radiohead"\n}',
-                            response: '{\n  "success": true,\n  "data": { "message": "Added Radiohead to watchlist." }\n}'
-                        }),
-                        E('DELETE', '/watchlist/{artist_id}', 'Remove an artist from the watchlist', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Artist removed from watchlist." }\n}'
-                        }),
-                        E('PATCH', '/watchlist/{artist_id}', 'Update content type filters for a watchlist artist', [], [
-                            P('include_albums', 'bool', false, 'Include albums'),
-                            P('include_eps', 'bool', false, 'Include EPs'),
-                            P('include_singles', 'bool', false, 'Include singles'),
-                            P('include_live', 'bool', false, 'Include live recordings'),
-                            P('include_remixes', 'bool', false, 'Include remixes'),
-                            P('include_acoustic', 'bool', false, 'Include acoustic versions'),
-                            P('include_compilations', 'bool', false, 'Include compilations')
-                        ], {
-                            request: '{\n  "include_live": true,\n  "include_remixes": false\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "message": "Watchlist filters updated.",\n    "updated": { "include_live": true, "include_remixes": false }\n  }\n}'
-                        }),
-                        E('POST', '/watchlist/scan', 'Trigger a watchlist scan for new releases', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Watchlist scan started." }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-wishlist', title: 'Wishlist', desc: 'View, add, remove wishlist tracks and trigger download processing. Profile-scoped.',
-                    endpoints: [
-                        E('GET', '/wishlist', 'List wishlist tracks with optional category filter', [
-                            P('category', 'string', false, '"singles" or "albums"', 'all'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3BRByDmHOhKyIDxfC",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "failure_reason": "No suitable source found",\n        "retry_count": 2,\n        "last_attempted": "2026-03-12T10:00:00Z",\n        "date_added": "2026-03-10T08:00:00Z",\n        "source_type": "playlist_sync"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}'
-                        }),
-                        E('POST', '/wishlist', 'Add a track to the wishlist', [], [
-                            P('spotify_track_data', 'object', true, 'Full Spotify track data object'),
-                            P('failure_reason', 'string', false, 'Reason for adding', '"Added via API"'),
-                            P('source_type', 'string', false, 'Source identifier', '"api"')
-                        ], {
-                            request: '{\n  "spotify_track_data": {\n    "id": "3SVAN3BRByDmHOhKyIDxfC",\n    "name": "Karma Police",\n    "artists": [{ "name": "Radiohead" }],\n    "album": { "name": "OK Computer", "album_type": "album" }\n  },\n  "source_type": "api"\n}',
-                            response: '{\n  "success": true,\n  "data": { "message": "Track added to wishlist." }\n}'
-                        }),
-                        E('DELETE', '/wishlist/{track_id}', 'Remove a track by Spotify track ID', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Track removed from wishlist." }\n}'
-                        }),
-                        E('POST', '/wishlist/process', 'Trigger wishlist download processing', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Wishlist processing started." }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-request', title: 'Requests', desc: 'Submit a one-off "find and download this" request (for external clients like Discord bots) and poll its status. The search/match/download runs asynchronously.',
-                    endpoints: [
-                        E('POST', '/request', 'Queue a search-and-download request', [], [
-                            P('query', 'string', true, 'What to find, e.g. "Radiohead Karma Police"'),
-                            P('notify_url', 'string', false, 'Optional callback URL POSTed with the final status'),
-                            P('metadata', 'object', false, 'Optional passthrough metadata echoed back')
-                        ], {
-                            request: '{\n  "query": "Radiohead Karma Police",\n  "notify_url": "https://example.com/hook"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "queued",\n    "query": "Radiohead Karma Police"\n  }\n}'
-                        }),
-                        E('GET', '/request/{request_id}', 'Poll the status of a request', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "downloading",\n    "download_id": "abc123",\n    "error": null,\n    "completed_at": null\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-discover', title: 'Discover', desc: 'Browse the discovery pool, similar artists, recent releases, and bubble snapshots. Profile-scoped.',
-                    endpoints: [
-                        E('GET', '/discover/pool', 'List discovery pool tracks with optional filters', [
-                            P('new_releases_only', 'string', false, '"true" to filter new releases only', 'false'),
-                            P('source', 'string', false, '"spotify" or "itunes"', 'all'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Max tracks (max 500)', '100'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3...",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "album_cover_url": "https://...",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "is_new_release": false,\n        "source": "spotify"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 100, "total": 850, "total_pages": 9, "has_next": true, "has_prev": false }\n}'
-                        }),
-                        E('GET', '/discover/similar-artists', 'List top similar artists from the watchlist', [
-                            P('limit', 'int', false, 'Max artists (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "similar_artist_name": "Thom Yorke",\n        "similar_artist_spotify_id": "2x9SpqnPi8rlE9pjHBwN5z",\n        "similarity_rank": 1,\n        "occurrence_count": 5\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/discover/recent-releases', 'List recent releases from watched artists', [
-                            P('limit', 'int', false, 'Max releases (max 200)', '50'),
-                            P('fields', 'string', false, 'Comma-separated fields', 'all')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "releases": [\n      {\n        "id": 1,\n        "album_name": "A Moon Shaped Pool",\n        "album_spotify_id": "2ix8vWvvSp2Yo7rKMiWpkg",\n        "release_date": "2016-05-08",\n        "album_cover_url": "https://...",\n        "track_count": 11,\n        "source": "spotify"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/discover/pool/metadata', 'Get discovery pool metadata', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "last_populated": "2026-03-12T10:00:00Z",\n    "track_count": 850,\n    "updated_at": "2026-03-12T10:00:00Z"\n  }\n}'
-                        }),
-                        E('GET', '/discover/bubbles', 'List all bubble snapshots for the current profile', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "snapshots": {\n      "artist_bubbles": { "snapshot_data": [...], "updated_at": "..." },\n      "search_bubbles": null,\n      "discover_downloads": null\n    }\n  }\n}'
-                        }),
-                        E('GET', '/discover/bubbles/{snapshot_type}', 'Get a specific bubble snapshot (artist_bubbles, search_bubbles, discover_downloads)', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "snapshot": { "snapshot_data": [...], "updated_at": "2026-03-12T10:00:00Z" }\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-profiles', title: 'Profiles', desc: 'Manage multi-profile support. Create, update, delete profiles with PIN protection and page access control.',
-                    endpoints: [
-                        E('GET', '/profiles', 'List all profiles', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "profiles": [\n      {\n        "id": 1,\n        "name": "Admin",\n        "is_admin": 1,\n        "avatar_color": "#6366f1",\n        "avatar_url": null,\n        "created_at": "2026-01-01T00:00:00Z"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/profiles/{profile_id}', 'Get a single profile by ID', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 1, "name": "Admin", "is_admin": 1,\n      "avatar_color": "#6366f1", "avatar_url": null\n    }\n  }\n}'
-                        }),
-                        E('POST', '/profiles', 'Create a new profile', [], [
-                            P('name', 'string', true, 'Profile display name'),
-                            P('avatar_color', 'string', false, 'Hex color for avatar', '"#6366f1"'),
-                            P('avatar_url', 'string', false, 'Custom avatar image URL'),
-                            P('is_admin', 'bool', false, 'Admin privileges', 'false'),
-                            P('pin', 'string', false, 'PIN for profile protection')
-                        ], {
-                            request: '{\n  "name": "Family Room",\n  "is_admin": false,\n  "avatar_color": "#22c55e",\n  "pin": "1234"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 3, "name": "Family Room", "is_admin": 0,\n      "avatar_color": "#22c55e"\n    }\n  }\n}'
-                        }),
-                        E('PUT', '/profiles/{profile_id}', 'Update a profile', [], [
-                            P('name', 'string', false, 'New display name'),
-                            P('avatar_color', 'string', false, 'Hex color'),
-                            P('avatar_url', 'string', false, 'Avatar image URL'),
-                            P('is_admin', 'bool', false, 'Admin privileges'),
-                            P('pin', 'string', false, 'New PIN (empty string clears PIN)')
-                        ], {
-                            request: '{\n  "name": "Kids Room",\n  "avatar_color": "#f59e0b"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "profile": { "id": 3, "name": "Kids Room", "avatar_color": "#f59e0b" }\n  }\n}'
-                        }),
-                        E('DELETE', '/profiles/{profile_id}', 'Delete a profile (cannot delete profile 1)', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Profile 3 deleted." }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-settings', title: 'Settings & API Keys', desc: 'Read and update application settings. Manage API keys. Sensitive values are always redacted in GET responses.',
-                    endpoints: [
-                        E('GET', '/settings', 'Get current settings (sensitive values redacted)', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "settings": {\n      "spotify": {\n        "client_id": "***REDACTED***",\n        "country": "US"\n      },\n      "download_path": "/music",\n      "download_source": "hybrid",\n      "ui_appearance": {\n        "accent_preset": "green",\n        "particles_enabled": true\n      }\n    }\n  }\n}'
-                        }),
-                        E('PATCH', '/settings', 'Update settings (partial, dot-notation keys accepted)', [], [
-                            P('{key}', 'any', true, 'One or more key-value pairs. The "api_keys" key is blocked.')
-                        ], {
-                            request: '{\n  "spotify.country": "GB",\n  "download_path": "/new/music/path"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "message": "Settings updated.",\n    "updated_keys": ["spotify.country", "download_path"]\n  }\n}'
-                        }),
-                        E('GET', '/api-keys', 'List all API keys (prefix and label only, never the full key)', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "keys": [\n      {\n        "id": "a1b2c3d4-...",\n        "label": "My Bot",\n        "key_prefix": "sk_AbCdEfGh",\n        "created_at": "2026-03-01T10:00:00Z",\n        "last_used_at": "2026-03-13T09:15:00Z"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('POST', '/api-keys', 'Generate a new API key (raw key returned once)', [], [
-                            P('label', 'string', false, 'Descriptive label for the key', '""')
-                        ], {
-                            request: '{\n  "label": "Home Assistant"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "key": "sk_AbCdEfGhIjKlMnOpQrStUvWxYz123456789...",\n    "id": "a1b2c3d4-...",\n    "label": "Home Assistant",\n    "key_prefix": "sk_AbCdEfGh",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}'
-                        }),
-                        E('DELETE', '/api-keys/{key_id}', 'Revoke an API key by its UUID', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "API key revoked." }\n}'
-                        }),
-                        E('POST', '/api-keys/bootstrap', 'Generate the first API key when none exist (NO AUTH REQUIRED)', [], [
-                            P('label', 'string', false, 'Label for the key', '"Default"')
-                        ], {
-                            request: '{\n  "label": "My First Key"\n}',
-                            response: '{\n  "success": true,\n  "data": {\n    "key": "sk_...",\n    "id": "...",\n    "label": "My First Key",\n    "key_prefix": "sk_...",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-retag', title: 'Retag', desc: 'View and manage the pending metadata correction queue.',
-                    endpoints: [
-                        E('GET', '/retag/groups', 'List all retag groups with track counts', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "groups": [\n      {\n        "id": 1,\n        "original_artist": "Radiohed",\n        "corrected_artist": "Radiohead",\n        "track_count": 5,\n        "created_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  }\n}'
-                        }),
-                        E('GET', '/retag/groups/{group_id}', 'Get a retag group with its tracks', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "group": { "id": 1, "original_artist": "Radiohed", "corrected_artist": "Radiohead" },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "file_path": "/music/..." }\n    ]\n  }\n}'
-                        }),
-                        E('DELETE', '/retag/groups/{group_id}', 'Delete a retag group and its tracks', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Retag group 1 deleted." }\n}'
-                        }),
-                        E('DELETE', '/retag/groups', 'Delete all retag groups and tracks', [], null, {
-                            response: '{\n  "success": true,\n  "data": { "message": "Cleared 5 retag groups." }\n}'
-                        }),
-                        E('GET', '/retag/stats', 'Get retag queue statistics', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "total_groups": 5,\n    "total_tracks": 23,\n    "pending": 18,\n    "completed": 5\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-cache', title: 'Cache', desc: 'Browse MusicBrainz and discovery match caches for debugging and inspection.',
-                    endpoints: [
-                        E('GET', '/cache/musicbrainz', 'List cached MusicBrainz lookups', [
-                            P('entity_type', 'string', false, '"artist", "album", or "track"'),
-                            P('search', 'string', false, 'Filter by entity name'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "entity_type": "artist",\n        "entity_name": "Radiohead",\n        "musicbrainz_id": "a74b1b7f-...",\n        "last_updated": "2026-03-12T10:00:00Z",\n        "metadata_json": { "type": "Group", "country": "GB" }\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false }\n}'
-                        }),
-                        E('GET', '/cache/musicbrainz/stats', 'Get MusicBrainz cache statistics', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "total": 1024,\n    "matched": 890,\n    "unmatched": 134,\n    "by_type": { "artist": 342, "album": 450, "track": 232 }\n  }\n}'
-                        }),
-                        E('GET', '/cache/discovery-matches', 'List cached discovery provider matches', [
-                            P('provider', 'string', false, '"spotify", "itunes", etc.'),
-                            P('search', 'string', false, 'Filter by title or artist'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "provider": "spotify",\n        "original_title": "Karma Police",\n        "original_artist": "Radiohead",\n        "matched_data_json": { "id": "3SVAN3...", "confidence": 0.95 },\n        "use_count": 3,\n        "last_used_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 5000, "total_pages": 100, "has_next": true, "has_prev": false }\n}'
-                        }),
-                        E('GET', '/cache/discovery-matches/stats', 'Get discovery match cache statistics', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "total": 5000,\n    "total_uses": 18500,\n    "avg_confidence": 0.872,\n    "by_provider": { "spotify": 3200, "itunes": 1800 }\n  }\n}'
-                        })
-                    ]
-                },
-                {
-                    id: 'api-listenbrainz', title: 'ListenBrainz', desc: 'Browse cached ListenBrainz playlists and their tracks.',
-                    endpoints: [
-                        E('GET', '/listenbrainz/playlists', 'List cached ListenBrainz playlists', [
-                            P('type', 'string', false, 'Filter by playlist_type (e.g. "weekly-jams")'),
-                            P('page', 'int', false, 'Page number', '1'),
-                            P('limit', 'int', false, 'Results per page (max 200)', '50')
-                        ], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": 1,\n        "playlist_mbid": "a1b2c3d4-...",\n        "title": "Weekly Jams for user",\n        "playlist_type": "weekly-jams",\n        "track_count": 50,\n        "created_at": "2026-03-10T00:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}'
-                        }),
-                        E('GET', '/listenbrainz/playlists/{playlist_id}', 'Get a ListenBrainz playlist with tracks (ID or MBID)', [], null, {
-                            response: '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": 1,\n      "playlist_mbid": "a1b2c3d4-...",\n      "title": "Weekly Jams for user",\n      "playlist_type": "weekly-jams"\n    },\n    "tracks": [\n      {\n        "id": 1,\n        "position": 0,\n        "recording_mbid": "e1f2g3h4-...",\n        "title": "Karma Police",\n        "artist": "Radiohead"\n      }\n    ]\n  }\n}'
-                        })
-                    ]
-                }
-            ];
+      const apiGroups = [
+        {
+          id: 'api-system',
+          title: 'System',
+          desc: 'Server status, activity feed, and combined statistics.',
+          endpoints: [
+            E('GET', '/system/status', 'Server uptime and service connectivity', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "uptime": "4h 32m 10s",\n    "uptime_seconds": 16330,\n    "services": {\n      "spotify": true,\n      "soulseek": true,\n      "hydrabase": false\n    }\n  }\n}',
+            }),
+            E('GET', '/system/stats', 'Combined library and download statistics', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "library": { "artists": 342, "albums": 1205, "tracks": 14832 },\n    "database": { "size_mb": 45.2, "last_update": "2026-03-13T08:00:00Z" },\n    "downloads": { "active": 3 }\n  }\n}',
+            }),
+            E('GET', '/system/activity', 'Recent activity feed', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "activities": [\n      { "timestamp": "2026-03-13T10:30:00Z", "type": "download", "message": "Downloaded: Radiohead - Karma Police" }\n    ]\n  }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-library',
+          title: 'Library',
+          desc: 'Browse artists, albums, tracks, genres, and library statistics. Most endpoints support <code>?fields=</code> for field selection and pagination via <code>?page=</code> and <code>?limit=</code>.',
+          endpoints: [
+            E(
+              'GET',
+              '/library/artists',
+              'List library artists with search, letter filter, and pagination',
+              [
+                P('search', 'string', false, 'Substring filter on artist name', '""'),
+                P('letter', 'string', false, 'Filter by first letter, or "all"', '"all"'),
+                P('watchlist', 'string', false, 'Filter by watchlist status', '"all"'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated field names to include', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "name": "Radiohead",\n        "thumb_url": "https://...",\n        "banner_url": "https://...",\n        "genres": ["alternative rock", "art rock"],\n        "summary": "English rock band...",\n        "style": "Alternative/Indie", "mood": "Melancholy",\n        "label": "XL Recordings",\n        "musicbrainz_id": "a74b1b7f-...",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "itunes_artist_id": "657515",\n        "deezer_id": "399", "tidal_id": "3746724",\n        "qobuz_id": "61592", "genius_id": "604",\n        "lastfm_listeners": 5832451,\n        "lastfm_playcount": 328456789,\n        "genius_url": "https://genius.com/artists/Radiohead",\n        "album_count": 9, "track_count": 101,\n        "...": "all 50+ fields included"\n      }\n    ]\n  },\n  "pagination": {\n    "page": 1, "limit": 50, "total": 342, "total_pages": 7,\n    "has_next": true, "has_prev": false\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/artists/{artist_id}',
+              'Get a single artist with all metadata and album list',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artist": {\n      "id": 1, "name": "Radiohead",\n      "thumb_url": "https://...", "banner_url": "https://...",\n      "genres": ["alternative rock", "art rock"],\n      "summary": "English rock band formed in 1985...",\n      "style": "Alternative/Indie", "mood": "Melancholy",\n      "label": "XL Recordings",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "musicbrainz_id": "a74b1b7f-71a3-4b73-8c51-5c1f3a71c9e8",\n      "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n      "itunes_artist_id": "657515",\n      "audiodb_id": "111239",\n      "deezer_id": "399",\n      "tidal_id": "3746724",\n      "qobuz_id": "61592",\n      "genius_id": "604",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 5832451,\n      "lastfm_playcount": 328456789,\n      "lastfm_tags": "alternative, rock, experimental",\n      "lastfm_similar": "Thom Yorke, Atoms for Peace, Portishead",\n      "lastfm_bio": "Radiohead are an English rock band...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead",\n      "genius_description": "Radiohead is an English rock band...",\n      "genius_alt_names": "On a Friday",\n      "genius_url": "https://genius.com/artists/Radiohead",\n      "album_count": 9, "track_count": 101\n    },\n    "albums": [\n      { "id": 10, "title": "OK Computer", "year": 1997, "track_count": 12, "record_type": "album" }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/artists/{artist_id}/albums',
+              'List albums for an artist',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n        "thumb_url": "https://...", "track_count": 12, "duration": 3214000,\n        "genres": ["alternative rock"],\n        "style": "Art Rock", "mood": "Atmospheric",\n        "label": "Parlophone", "record_type": "album", "explicit": false,\n        "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n        "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "tidal_id": "17914997", "qobuz_id": "0724385522529",\n        "lastfm_listeners": 1543000, "lastfm_playcount": 89234567,\n        "...": "all 45+ fields included"\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/albums',
+              'List or search albums with pagination',
+              [
+                P('search', 'string', false, 'Substring filter on album title', '""'),
+                P('artist_id', 'int', false, 'Filter by artist ID'),
+                P('year', 'int', false, 'Filter by release year'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": { "albums": [ { "id": 10, "title": "OK Computer", "year": 1997, "artist_id": 1 } ] },\n  "pagination": { "page": 1, "limit": 50, "total": 1205, "total_pages": 25, "has_next": true, "has_prev": false }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/albums/{album_id}',
+              'Get a single album with metadata and embedded tracks',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "album": {\n      "id": 10, "artist_id": 1, "title": "OK Computer", "year": 1997,\n      "thumb_url": "https://...",\n      "genres": ["alternative rock"],\n      "track_count": 12, "duration": 3214000,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "label": "Parlophone", "explicit": false, "record_type": "album",\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "upc": "0724385522529", "copyright": "1997 Parlophone Records",\n      "musicbrainz_release_id": "b1a9c0e7-...",\n      "spotify_album_id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n      "itunes_album_id": "1097861387",\n      "audiodb_id": "2115888",\n      "deezer_id": "6575789",\n      "tidal_id": "17914997",\n      "qobuz_id": "0724385522529",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "matched",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 1543000,\n      "lastfm_playcount": 89234567,\n      "lastfm_tags": "alternative, 90s, rock",\n      "lastfm_wiki": "OK Computer is the third studio album...",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/OK+Computer"\n    },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "track_number": 1, "duration": 284000, "bitrate": 1411 }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/albums/{album_id}/tracks',
+              'List tracks in an album',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n        "track_number": 1, "duration": 284000,\n        "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n        "bitrate": 1411, "bpm": 120.5, "explicit": false,\n        "isrc": "GBAYE9700106",\n        "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n        "tidal_id": "17914998", "genius_id": "1342",\n        "lastfm_listeners": 892000, "lastfm_playcount": 4567890,\n        "genius_url": "https://genius.com/Radiohead-airbag-lyrics",\n        "...": "all 55+ fields included"\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/tracks/{track_id}',
+              'Get a single track with all metadata',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "track": {\n      "id": 100, "album_id": 10, "artist_id": 1, "title": "Airbag",\n      "track_number": 1, "duration": 284000,\n      "file_path": "/music/Radiohead/OK Computer/01 Airbag.flac",\n      "bitrate": 1411, "bpm": 120.5, "explicit": false,\n      "style": "Art Rock", "mood": "Atmospheric",\n      "repair_status": null, "repair_last_checked": null,\n      "server_source": "plex",\n      "created_at": "2026-01-15T10:00:00Z",\n      "updated_at": "2026-03-13T08:00:00Z",\n      "isrc": "GBAYE9700106", "copyright": "1997 Parlophone Records",\n      "musicbrainz_recording_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",\n      "spotify_track_id": "6anwyDGQmsg45JKiVKpKGA",\n      "itunes_track_id": "1097861700",\n      "audiodb_id": null,\n      "deezer_id": "72420132",\n      "tidal_id": "17914998",\n      "qobuz_id": "24517824",\n      "genius_id": "1342",\n      "musicbrainz_match_status": "matched",\n      "spotify_match_status": "matched",\n      "itunes_match_status": "matched",\n      "audiodb_match_status": "not_found",\n      "deezer_match_status": "matched",\n      "lastfm_match_status": "matched",\n      "genius_match_status": "matched",\n      "tidal_match_status": "matched",\n      "qobuz_match_status": "matched",\n      "musicbrainz_last_attempted": "2026-03-10T08:00:00Z",\n      "spotify_last_attempted": "2026-03-10T08:00:00Z",\n      "itunes_last_attempted": "2026-03-10T08:00:00Z",\n      "audiodb_last_attempted": "2026-03-10T08:00:00Z",\n      "deezer_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_last_attempted": "2026-03-10T08:00:00Z",\n      "genius_last_attempted": "2026-03-10T08:00:00Z",\n      "tidal_last_attempted": "2026-03-10T08:00:00Z",\n      "qobuz_last_attempted": "2026-03-10T08:00:00Z",\n      "lastfm_listeners": 892000,\n      "lastfm_playcount": 4567890,\n      "lastfm_tags": "alternative rock, radiohead",\n      "lastfm_url": "https://www.last.fm/music/Radiohead/_/Airbag",\n      "genius_lyrics": "In the next world war, in a jackknifed juggernaut...",\n      "genius_description": "The opening track of OK Computer...",\n      "genius_url": "https://genius.com/Radiohead-airbag-lyrics"\n    }\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/tracks',
+              'Search tracks by title and/or artist',
+              [
+                P(
+                  'title',
+                  'string',
+                  false,
+                  'Track title to search (at least one of title/artist required)',
+                  '""',
+                ),
+                P('artist', 'string', false, 'Artist name to search', '""'),
+                P('limit', 'int', false, 'Max results (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "tracks": [\n      { "id": 100, "title": "Airbag", "artist_name": "Radiohead", "album_title": "OK Computer" }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/genres',
+              'List all genres with occurrence counts',
+              [P('source', 'string', false, '"artists" or "albums"', '"artists"')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "genres": [ { "name": "alternative rock", "count": 45 }, { "name": "electronic", "count": 38 } ],\n    "source": "artists"\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/recently-added',
+              'Get recently added content',
+              [
+                P('type', 'string', false, '"albums", "artists", or "tracks"', '"albums"'),
+                P('limit', 'int', false, 'Max items (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "items": [ { "id": 10, "title": "OK Computer", "year": 1997, "created_at": "2026-03-12T10:00:00Z" } ],\n    "type": "albums"\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/library/lookup',
+              'Look up a library entity by external provider ID',
+              [
+                P('type', 'string', true, '"artist", "album", or "track"'),
+                P(
+                  'provider',
+                  'string',
+                  true,
+                  '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius"',
+                ),
+                P('id', 'string', true, 'The external ID value'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artist": { "id": 1, "name": "Radiohead", "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb" }\n  }\n}',
+              },
+            ),
+            E('GET', '/library/stats', 'Get library statistics', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "artists": 342,\n    "albums": 1205,\n    "tracks": 14832,\n    "database_size_mb": 45.2,\n    "last_update": "2026-03-13T08:00:00Z"\n  }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-search',
+          title: 'Search',
+          desc: 'Search external music sources (Spotify, iTunes, Hydrabase). All search endpoints use POST with a JSON body.',
+          endpoints: [
+            E(
+              'POST',
+              '/search/tracks',
+              'Search for tracks across music sources',
+              [],
+              [
+                P('query', 'string', true, 'Search query'),
+                P('source', 'string', false, '"spotify", "itunes", or "auto"', '"auto"'),
+                P('limit', 'int', false, 'Max results (1-50)', '20'),
+              ],
+              {
+                request: '{\n  "query": "Karma Police",\n  "source": "auto",\n  "limit": 10\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": "3SVAN3BRByDmHOhKyIDxfC",\n        "name": "Karma Police",\n        "artists": ["Radiohead"],\n        "album": "OK Computer",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "image_url": "https://...",\n        "release_date": "1997-05-28"\n      }\n    ],\n    "source": "spotify"\n  }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/search/albums',
+              'Search for albums',
+              [],
+              [
+                P('query', 'string', true, 'Search query'),
+                P('limit', 'int', false, 'Max results (1-50)', '20'),
+              ],
+              {
+                request: '{\n  "query": "OK Computer",\n  "limit": 5\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "albums": [\n      {\n        "id": "6dVIqQ8qmQ5GBnJ9shOYGE",\n        "name": "OK Computer",\n        "artists": ["Radiohead"],\n        "release_date": "1997-05-28",\n        "total_tracks": 12,\n        "album_type": "album",\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/search/artists',
+              'Search for artists',
+              [],
+              [
+                P('query', 'string', true, 'Search query'),
+                P('limit', 'int', false, 'Max results (1-50)', '20'),
+              ],
+              {
+                request: '{\n  "query": "Radiohead",\n  "limit": 5\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "name": "Radiohead",\n        "popularity": 79,\n        "genres": ["alternative rock", "art rock"],\n        "followers": 8500000,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-downloads',
+          title: 'Downloads',
+          desc: 'List active downloads, cancel individual or all downloads.',
+          endpoints: [
+            E('GET', '/downloads', 'List active and recent download tasks', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "downloads": [\n      {\n        "id": "abc123",\n        "status": "downloading",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "username": "slsk_user42",\n        "progress": 67,\n        "size": 34500000,\n        "batch_id": null,\n        "error": null\n      }\n    ]\n  }\n}',
+            }),
+            E(
+              'POST',
+              '/downloads/{download_id}/cancel',
+              'Cancel a specific download',
+              [],
+              [P('username', 'string', true, 'Soulseek username for the transfer')],
+              {
+                request: '{\n  "username": "slsk_user42"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "Download cancelled." }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/downloads/cancel-all',
+              'Cancel all active downloads and clear completed',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "All downloads cancelled and cleared." }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-playlists',
+          title: 'Playlists',
+          desc: 'List and inspect playlists from Spotify or Tidal, and trigger playlist sync.',
+          endpoints: [
+            E(
+              'GET',
+              '/playlists',
+              'List user playlists from Spotify or Tidal',
+              [P('source', 'string', false, '"spotify" or "tidal"', '"spotify"')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": "37i9dQZF1DXcBWIGoYBM5M",\n        "name": "Today\'s Top Hits",\n        "owner": "spotify",\n        "track_count": 50,\n        "image_url": "https://..."\n      }\n    ],\n    "source": "spotify"\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/playlists/{playlist_id}',
+              'Get playlist details with tracks',
+              [P('source', 'string', false, 'Only "spotify" is supported', '"spotify"')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": "37i9dQZF1DXcBWIGoYBM5M",\n      "name": "Today\'s Top Hits",\n      "owner": "spotify",\n      "total_tracks": 50,\n      "tracks": [\n        {\n          "id": "3SVAN3BRByDmHOhKyIDxfC",\n          "name": "Karma Police",\n          "artists": ["Radiohead"],\n          "album": "OK Computer",\n          "duration_ms": 264066,\n          "image_url": "https://..."\n        }\n      ]\n    },\n    "source": "spotify"\n  }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/playlists/{playlist_id}/sync',
+              'Trigger playlist sync and download',
+              [],
+              [
+                P('playlist_name', 'string', true, 'Name of the playlist'),
+                P('tracks', 'array', true, 'Array of track objects to sync'),
+              ],
+              {
+                request:
+                  '{\n  "playlist_name": "My Playlist",\n  "tracks": [\n    { "id": "3SVAN3...", "name": "Karma Police", "artists": [{ "name": "Radiohead" }] }\n  ]\n}',
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "Playlist sync started.", "playlist_id": "37i9dQZF1DXcBWIGoYBM5M" }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-watchlist',
+          title: 'Watchlist',
+          desc: 'View, add, remove watched artists and trigger new release scans. Profile-scoped via <code>X-Profile-Id</code> header.',
+          endpoints: [
+            E(
+              'GET',
+              '/watchlist',
+              'List all watchlist artists for the current profile',
+              [P('fields', 'string', false, 'Comma-separated fields', 'all')],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "artist_name": "Radiohead",\n        "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n        "image_url": "https://...",\n        "date_added": "2026-01-15T10:00:00Z",\n        "include_albums": true,\n        "include_eps": true,\n        "include_singles": true,\n        "include_live": false,\n        "include_remixes": false,\n        "profile_id": 1\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/watchlist',
+              'Add an artist to the watchlist',
+              [],
+              [
+                P('artist_id', 'string', true, 'Spotify or iTunes artist ID'),
+                P('artist_name', 'string', true, 'Artist display name'),
+              ],
+              {
+                request:
+                  '{\n  "artist_id": "4Z8W4fKeB5YxbusRsdQVPb",\n  "artist_name": "Radiohead"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "Added Radiohead to watchlist." }\n}',
+              },
+            ),
+            E('DELETE', '/watchlist/{artist_id}', 'Remove an artist from the watchlist', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": { "message": "Artist removed from watchlist." }\n}',
+            }),
+            E(
+              'PATCH',
+              '/watchlist/{artist_id}',
+              'Update content type filters for a watchlist artist',
+              [],
+              [
+                P('include_albums', 'bool', false, 'Include albums'),
+                P('include_eps', 'bool', false, 'Include EPs'),
+                P('include_singles', 'bool', false, 'Include singles'),
+                P('include_live', 'bool', false, 'Include live recordings'),
+                P('include_remixes', 'bool', false, 'Include remixes'),
+                P('include_acoustic', 'bool', false, 'Include acoustic versions'),
+                P('include_compilations', 'bool', false, 'Include compilations'),
+              ],
+              {
+                request: '{\n  "include_live": true,\n  "include_remixes": false\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "message": "Watchlist filters updated.",\n    "updated": { "include_live": true, "include_remixes": false }\n  }\n}',
+              },
+            ),
+            E('POST', '/watchlist/scan', 'Trigger a watchlist scan for new releases', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": { "message": "Watchlist scan started." }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-wishlist',
+          title: 'Wishlist',
+          desc: 'View, add, remove wishlist tracks and trigger download processing. Profile-scoped.',
+          endpoints: [
+            E(
+              'GET',
+              '/wishlist',
+              'List wishlist tracks with optional category filter',
+              [
+                P('category', 'string', false, '"singles" or "albums"', 'all'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3BRByDmHOhKyIDxfC",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "failure_reason": "No suitable source found",\n        "retry_count": 2,\n        "last_attempted": "2026-03-12T10:00:00Z",\n        "date_added": "2026-03-10T08:00:00Z",\n        "source_type": "playlist_sync"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/wishlist',
+              'Add a track to the wishlist',
+              [],
+              [
+                P('spotify_track_data', 'object', true, 'Full Spotify track data object'),
+                P('failure_reason', 'string', false, 'Reason for adding', '"Added via API"'),
+                P('source_type', 'string', false, 'Source identifier', '"api"'),
+              ],
+              {
+                request:
+                  '{\n  "spotify_track_data": {\n    "id": "3SVAN3BRByDmHOhKyIDxfC",\n    "name": "Karma Police",\n    "artists": [{ "name": "Radiohead" }],\n    "album": { "name": "OK Computer", "album_type": "album" }\n  },\n  "source_type": "api"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "Track added to wishlist." }\n}',
+              },
+            ),
+            E('DELETE', '/wishlist/{track_id}', 'Remove a track by Spotify track ID', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": { "message": "Track removed from wishlist." }\n}',
+            }),
+            E('POST', '/wishlist/process', 'Trigger wishlist download processing', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": { "message": "Wishlist processing started." }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-request',
+          title: 'Requests',
+          desc: 'Submit a one-off "find and download this" request (for external clients like Discord bots) and poll its status. The search/match/download runs asynchronously.',
+          endpoints: [
+            E(
+              'POST',
+              '/request',
+              'Queue a search-and-download request',
+              [],
+              [
+                P('query', 'string', true, 'What to find, e.g. "Radiohead Karma Police"'),
+                P(
+                  'notify_url',
+                  'string',
+                  false,
+                  'Optional callback URL POSTed with the final status',
+                ),
+                P('metadata', 'object', false, 'Optional passthrough metadata echoed back'),
+              ],
+              {
+                request:
+                  '{\n  "query": "Radiohead Karma Police",\n  "notify_url": "https://example.com/hook"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "queued",\n    "query": "Radiohead Karma Police"\n  }\n}',
+              },
+            ),
+            E('GET', '/request/{request_id}', 'Poll the status of a request', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "request_id": "b1e7...",\n    "status": "downloading",\n    "download_id": "abc123",\n    "error": null,\n    "completed_at": null\n  }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-discover',
+          title: 'Discover',
+          desc: 'Browse the discovery pool, similar artists, recent releases, and bubble snapshots. Profile-scoped.',
+          endpoints: [
+            E(
+              'GET',
+              '/discover/pool',
+              'List discovery pool tracks with optional filters',
+              [
+                P(
+                  'new_releases_only',
+                  'string',
+                  false,
+                  '"true" to filter new releases only',
+                  'false',
+                ),
+                P('source', 'string', false, '"spotify" or "itunes"', 'all'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Max tracks (max 500)', '100'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "tracks": [\n      {\n        "id": 1,\n        "spotify_track_id": "3SVAN3...",\n        "track_name": "Karma Police",\n        "artist_name": "Radiohead",\n        "album_name": "OK Computer",\n        "album_cover_url": "https://...",\n        "duration_ms": 264066,\n        "popularity": 78,\n        "is_new_release": false,\n        "source": "spotify"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 100, "total": 850, "total_pages": 9, "has_next": true, "has_prev": false }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/discover/similar-artists',
+              'List top similar artists from the watchlist',
+              [
+                P('limit', 'int', false, 'Max artists (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "artists": [\n      {\n        "id": 1,\n        "similar_artist_name": "Thom Yorke",\n        "similar_artist_spotify_id": "2x9SpqnPi8rlE9pjHBwN5z",\n        "similarity_rank": 1,\n        "occurrence_count": 5\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/discover/recent-releases',
+              'List recent releases from watched artists',
+              [
+                P('limit', 'int', false, 'Max releases (max 200)', '50'),
+                P('fields', 'string', false, 'Comma-separated fields', 'all'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "releases": [\n      {\n        "id": 1,\n        "album_name": "A Moon Shaped Pool",\n        "album_spotify_id": "2ix8vWvvSp2Yo7rKMiWpkg",\n        "release_date": "2016-05-08",\n        "album_cover_url": "https://...",\n        "track_count": 11,\n        "source": "spotify"\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E('GET', '/discover/pool/metadata', 'Get discovery pool metadata', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "last_populated": "2026-03-12T10:00:00Z",\n    "track_count": 850,\n    "updated_at": "2026-03-12T10:00:00Z"\n  }\n}',
+            }),
+            E(
+              'GET',
+              '/discover/bubbles',
+              'List all bubble snapshots for the current profile',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "snapshots": {\n      "artist_bubbles": { "snapshot_data": [...], "updated_at": "..." },\n      "search_bubbles": null,\n      "discover_downloads": null\n    }\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/discover/bubbles/{snapshot_type}',
+              'Get a specific bubble snapshot (artist_bubbles, search_bubbles, discover_downloads)',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "snapshot": { "snapshot_data": [...], "updated_at": "2026-03-12T10:00:00Z" }\n  }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-profiles',
+          title: 'Profiles',
+          desc: 'Manage multi-profile support. Create, update, delete profiles with PIN protection and page access control.',
+          endpoints: [
+            E('GET', '/profiles', 'List all profiles', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "profiles": [\n      {\n        "id": 1,\n        "name": "Admin",\n        "is_admin": 1,\n        "avatar_color": "#6366f1",\n        "avatar_url": null,\n        "created_at": "2026-01-01T00:00:00Z"\n      }\n    ]\n  }\n}',
+            }),
+            E('GET', '/profiles/{profile_id}', 'Get a single profile by ID', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 1, "name": "Admin", "is_admin": 1,\n      "avatar_color": "#6366f1", "avatar_url": null\n    }\n  }\n}',
+            }),
+            E(
+              'POST',
+              '/profiles',
+              'Create a new profile',
+              [],
+              [
+                P('name', 'string', true, 'Profile display name'),
+                P('avatar_color', 'string', false, 'Hex color for avatar', '"#6366f1"'),
+                P('avatar_url', 'string', false, 'Custom avatar image URL'),
+                P('is_admin', 'bool', false, 'Admin privileges', 'false'),
+                P('pin', 'string', false, 'PIN for profile protection'),
+              ],
+              {
+                request:
+                  '{\n  "name": "Family Room",\n  "is_admin": false,\n  "avatar_color": "#22c55e",\n  "pin": "1234"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "profile": {\n      "id": 3, "name": "Family Room", "is_admin": 0,\n      "avatar_color": "#22c55e"\n    }\n  }\n}',
+              },
+            ),
+            E(
+              'PUT',
+              '/profiles/{profile_id}',
+              'Update a profile',
+              [],
+              [
+                P('name', 'string', false, 'New display name'),
+                P('avatar_color', 'string', false, 'Hex color'),
+                P('avatar_url', 'string', false, 'Avatar image URL'),
+                P('is_admin', 'bool', false, 'Admin privileges'),
+                P('pin', 'string', false, 'New PIN (empty string clears PIN)'),
+              ],
+              {
+                request: '{\n  "name": "Kids Room",\n  "avatar_color": "#f59e0b"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "profile": { "id": 3, "name": "Kids Room", "avatar_color": "#f59e0b" }\n  }\n}',
+              },
+            ),
+            E(
+              'DELETE',
+              '/profiles/{profile_id}',
+              'Delete a profile (cannot delete profile 1)',
+              [],
+              null,
+              {
+                response: '{\n  "success": true,\n  "data": { "message": "Profile 3 deleted." }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-settings',
+          title: 'Settings & API Keys',
+          desc: 'Read and update application settings. Manage API keys. Sensitive values are always redacted in GET responses.',
+          endpoints: [
+            E('GET', '/settings', 'Get current settings (sensitive values redacted)', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "settings": {\n      "spotify": {\n        "client_id": "***REDACTED***",\n        "country": "US"\n      },\n      "download_path": "/music",\n      "download_source": "hybrid",\n      "ui_appearance": {\n        "accent_preset": "green",\n        "particles_enabled": true\n      }\n    }\n  }\n}',
+            }),
+            E(
+              'PATCH',
+              '/settings',
+              'Update settings (partial, dot-notation keys accepted)',
+              [],
+              [
+                P(
+                  '{key}',
+                  'any',
+                  true,
+                  'One or more key-value pairs. The "api_keys" key is blocked.',
+                ),
+              ],
+              {
+                request: '{\n  "spotify.country": "GB",\n  "download_path": "/new/music/path"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "message": "Settings updated.",\n    "updated_keys": ["spotify.country", "download_path"]\n  }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/api-keys',
+              'List all API keys (prefix and label only, never the full key)',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "keys": [\n      {\n        "id": "a1b2c3d4-...",\n        "label": "My Bot",\n        "key_prefix": "sk_AbCdEfGh",\n        "created_at": "2026-03-01T10:00:00Z",\n        "last_used_at": "2026-03-13T09:15:00Z"\n      }\n    ]\n  }\n}',
+              },
+            ),
+            E(
+              'POST',
+              '/api-keys',
+              'Generate a new API key (raw key returned once)',
+              [],
+              [P('label', 'string', false, 'Descriptive label for the key', '""')],
+              {
+                request: '{\n  "label": "Home Assistant"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "key": "sk_AbCdEfGhIjKlMnOpQrStUvWxYz123456789...",\n    "id": "a1b2c3d4-...",\n    "label": "Home Assistant",\n    "key_prefix": "sk_AbCdEfGh",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}',
+              },
+            ),
+            E('DELETE', '/api-keys/{key_id}', 'Revoke an API key by its UUID', [], null, {
+              response: '{\n  "success": true,\n  "data": { "message": "API key revoked." }\n}',
+            }),
+            E(
+              'POST',
+              '/api-keys/bootstrap',
+              'Generate the first API key when none exist (NO AUTH REQUIRED)',
+              [],
+              [P('label', 'string', false, 'Label for the key', '"Default"')],
+              {
+                request: '{\n  "label": "My First Key"\n}',
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "key": "sk_...",\n    "id": "...",\n    "label": "My First Key",\n    "key_prefix": "sk_...",\n    "created_at": "2026-03-13T10:00:00Z"\n  }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-retag',
+          title: 'Retag',
+          desc: 'View and manage the pending metadata correction queue.',
+          endpoints: [
+            E('GET', '/retag/groups', 'List all retag groups with track counts', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "groups": [\n      {\n        "id": 1,\n        "original_artist": "Radiohed",\n        "corrected_artist": "Radiohead",\n        "track_count": 5,\n        "created_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  }\n}',
+            }),
+            E('GET', '/retag/groups/{group_id}', 'Get a retag group with its tracks', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "group": { "id": 1, "original_artist": "Radiohed", "corrected_artist": "Radiohead" },\n    "tracks": [\n      { "id": 100, "title": "Airbag", "file_path": "/music/..." }\n    ]\n  }\n}',
+            }),
+            E(
+              'DELETE',
+              '/retag/groups/{group_id}',
+              'Delete a retag group and its tracks',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": { "message": "Retag group 1 deleted." }\n}',
+              },
+            ),
+            E('DELETE', '/retag/groups', 'Delete all retag groups and tracks', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": { "message": "Cleared 5 retag groups." }\n}',
+            }),
+            E('GET', '/retag/stats', 'Get retag queue statistics', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "total_groups": 5,\n    "total_tracks": 23,\n    "pending": 18,\n    "completed": 5\n  }\n}',
+            }),
+          ],
+        },
+        {
+          id: 'api-cache',
+          title: 'Cache',
+          desc: 'Browse MusicBrainz and discovery match caches for debugging and inspection.',
+          endpoints: [
+            E(
+              'GET',
+              '/cache/musicbrainz',
+              'List cached MusicBrainz lookups',
+              [
+                P('entity_type', 'string', false, '"artist", "album", or "track"'),
+                P('search', 'string', false, 'Filter by entity name'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "entity_type": "artist",\n        "entity_name": "Radiohead",\n        "musicbrainz_id": "a74b1b7f-...",\n        "last_updated": "2026-03-12T10:00:00Z",\n        "metadata_json": { "type": "Group", "country": "GB" }\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false }\n}',
+              },
+            ),
+            E('GET', '/cache/musicbrainz/stats', 'Get MusicBrainz cache statistics', [], null, {
+              response:
+                '{\n  "success": true,\n  "data": {\n    "total": 1024,\n    "matched": 890,\n    "unmatched": 134,\n    "by_type": { "artist": 342, "album": 450, "track": 232 }\n  }\n}',
+            }),
+            E(
+              'GET',
+              '/cache/discovery-matches',
+              'List cached discovery provider matches',
+              [
+                P('provider', 'string', false, '"spotify", "itunes", etc.'),
+                P('search', 'string', false, 'Filter by title or artist'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "entries": [\n      {\n        "provider": "spotify",\n        "original_title": "Karma Police",\n        "original_artist": "Radiohead",\n        "matched_data_json": { "id": "3SVAN3...", "confidence": 0.95 },\n        "use_count": 3,\n        "last_used_at": "2026-03-12T10:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 5000, "total_pages": 100, "has_next": true, "has_prev": false }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/cache/discovery-matches/stats',
+              'Get discovery match cache statistics',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "total": 5000,\n    "total_uses": 18500,\n    "avg_confidence": 0.872,\n    "by_provider": { "spotify": 3200, "itunes": 1800 }\n  }\n}',
+              },
+            ),
+          ],
+        },
+        {
+          id: 'api-listenbrainz',
+          title: 'ListenBrainz',
+          desc: 'Browse cached ListenBrainz playlists and their tracks.',
+          endpoints: [
+            E(
+              'GET',
+              '/listenbrainz/playlists',
+              'List cached ListenBrainz playlists',
+              [
+                P('type', 'string', false, 'Filter by playlist_type (e.g. "weekly-jams")'),
+                P('page', 'int', false, 'Page number', '1'),
+                P('limit', 'int', false, 'Results per page (max 200)', '50'),
+              ],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "playlists": [\n      {\n        "id": 1,\n        "playlist_mbid": "a1b2c3d4-...",\n        "title": "Weekly Jams for user",\n        "playlist_type": "weekly-jams",\n        "track_count": 50,\n        "created_at": "2026-03-10T00:00:00Z"\n      }\n    ]\n  },\n  "pagination": { "page": 1, "limit": 50, "total": 12, "total_pages": 1, "has_next": false, "has_prev": false }\n}',
+              },
+            ),
+            E(
+              'GET',
+              '/listenbrainz/playlists/{playlist_id}',
+              'Get a ListenBrainz playlist with tracks (ID or MBID)',
+              [],
+              null,
+              {
+                response:
+                  '{\n  "success": true,\n  "data": {\n    "playlist": {\n      "id": 1,\n      "playlist_mbid": "a1b2c3d4-...",\n      "title": "Weekly Jams for user",\n      "playlist_type": "weekly-jams"\n    },\n    "tracks": [\n      {\n        "id": 1,\n        "position": 0,\n        "recording_mbid": "e1f2g3h4-...",\n        "title": "Karma Police",\n        "artist": "Radiohead"\n      }\n    ]\n  }\n}',
+              },
+            ),
+          ],
+        },
+      ];
 
-            // --- Build endpoint HTML ---
-            function methodClass(m) { return m.toLowerCase(); }
+      // --- Build endpoint HTML ---
+      function methodClass(m: string): string {
+        return m.toLowerCase();
+      }
 
-            function buildParamsTable(params) {
-                if (!params || !params.length) return '';
-                let html = '<div class="api-detail-label">Parameters</div>';
-                html += '<table class="api-params-table"><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
-                params.forEach(p => {
-                    const req = p.required ? '<span class="api-param-required">required</span>' : '<span class="api-param-optional">optional</span>';
-                    const def = p.default !== undefined ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>' : '';
-                    html += '<tr><td>' + p.name + '</td><td>' + p.type + '</td><td>' + req + '</td><td>' + p.desc + def + '</td></tr>';
-                });
-                html += '</tbody></table>';
-                return html;
-            }
+      function buildParamsTable(params: ApiParam[] | null): string {
+        if (!params || !params.length) return '';
+        let html = '<div class="api-detail-label">Parameters</div>';
+        html +=
+          '<table class="api-params-table"><thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
+        params.forEach((p) => {
+          const req = p.required
+            ? '<span class="api-param-required">required</span>'
+            : '<span class="api-param-optional">optional</span>';
+          const def =
+            p.default !== undefined
+              ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>'
+              : '';
+          html +=
+            '<tr><td>' +
+            p.name +
+            '</td><td>' +
+            p.type +
+            '</td><td>' +
+            req +
+            '</td><td>' +
+            p.desc +
+            def +
+            '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      }
 
-            function buildBodyTable(fields) {
-                if (!fields || !fields.length) return '';
-                let html = '<div class="api-detail-label">Request Body (JSON)</div>';
-                html += '<table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
-                fields.forEach(p => {
-                    const req = p.required ? '<span class="api-param-required">required</span>' : '<span class="api-param-optional">optional</span>';
-                    const def = p.default !== undefined ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>' : '';
-                    html += '<tr><td>' + p.name + '</td><td>' + p.type + '</td><td>' + req + '</td><td>' + p.desc + def + '</td></tr>';
-                });
-                html += '</tbody></table>';
-                return html;
-            }
+      function buildBodyTable(fields: ApiParam[] | null): string {
+        if (!fields || !fields.length) return '';
+        let html = '<div class="api-detail-label">Request Body (JSON)</div>';
+        html +=
+          '<table class="api-params-table"><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody>';
+        fields.forEach((p) => {
+          const req = p.required
+            ? '<span class="api-param-required">required</span>'
+            : '<span class="api-param-optional">optional</span>';
+          const def =
+            p.default !== undefined
+              ? ' <span style="color:rgba(255,255,255,0.25)">(default: ' + p.default + ')</span>'
+              : '';
+          html +=
+            '<tr><td>' +
+            p.name +
+            '</td><td>' +
+            p.type +
+            '</td><td>' +
+            req +
+            '</td><td>' +
+            p.desc +
+            def +
+            '</td></tr>';
+        });
+        html += '</tbody></table>';
+        return html;
+      }
 
-            function buildExample(ex) {
-                if (!ex) return '';
-                let html = '';
-                if (ex.request) {
-                    html += '<div class="api-detail-label">Example Request Body</div>';
-                    html += '<div class="api-example-json">' + escHtml(ex.request) + '</div>';
-                }
-                if (ex.response) {
-                    html += '<div class="api-detail-label">Example Response</div>';
-                    html += '<div class="api-example-json">' + escHtml(ex.response) + '</div>';
-                }
-                return html;
-            }
-
-            function escHtml(s) {
-                return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            }
-
-            function buildTryIt(ep, idx) {
-                const hasPathParam = ep.path.includes('{');
-                const pathParams = [];
-                const pathMatch = ep.path.match(/\{([^}]+)\}/g);
-                if (pathMatch) pathMatch.forEach(m => pathParams.push(m.replace(/[{}]/g, '')));
-
-                let html = '<div class="api-detail-label">Try It</div>';
-
-                // Path param inputs
-                if (pathParams.length) {
-                    html += '<div class="api-try-params">';
-                    pathParams.forEach(pp => {
-                        html += '<div class="api-try-param"><label>' + pp + '</label><input type="text" id="api-try-path-' + idx + '-' + pp + '" placeholder="' + pp + '"></div>';
-                    });
-                    html += '</div>';
-                }
-
-                // Query param inputs for GET endpoints
-                if (ep.params && ep.params.length && (ep.method === 'GET')) {
-                    html += '<div class="api-try-params">';
-                    ep.params.forEach(p => {
-                        if (p.name === 'fields') return; // skip fields param in try-it
-                        html += '<div class="api-try-param"><label>' + p.name + '</label><input type="text" id="api-try-q-' + idx + '-' + p.name + '" placeholder="' + (p.default || '') + '"></div>';
-                    });
-                    html += '</div>';
-                }
-
-                html += '<div class="api-try-bar">';
-                // Body textarea for POST/PUT/PATCH/DELETE with body
-                if (ep.bodyFields && ep.bodyFields.length) {
-                    const defaultBody = ep.example && ep.example.request ? ep.example.request : '{}';
-                    html += '<textarea class="api-try-body" id="api-try-body-' + idx + '">' + escHtml(defaultBody) + '</textarea>';
-                }
-                html += '<button class="api-try-btn" onclick="window._apiTryIt(' + idx + ')" id="api-try-btn-' + idx + '">&#9654; Send</button>';
-                html += '</div>';
-
-                html += '<div id="api-try-result-' + idx + '"></div>';
-                return html;
-            }
-
-            // Build all sections
-            let sectionsHTML = '';
-
-            // Auth section (not a group)
-            sectionsHTML += '<div class="docs-subsection" id="api-auth">';
-            sectionsHTML += '<h3 class="docs-subsection-title">Authentication</h3>';
-            sectionsHTML += '<p class="docs-text">All API v1 endpoints require an API key (except <code>POST /api-keys/bootstrap</code>). Generate keys in <strong>Settings &rarr; API Keys</strong> or via the bootstrap endpoint.</p>';
-            sectionsHTML += '<div class="api-detail-label">Two authentication methods</div>';
-            sectionsHTML += '<table class="api-params-table"><thead><tr><th>Method</th><th>Format</th><th>Example</th></tr></thead><tbody>';
-            sectionsHTML += '<tr><td>Header</td><td>Authorization: Bearer {key}</td><td><code>Authorization: Bearer sk_AbCd...</code></td></tr>';
-            sectionsHTML += '<tr><td>Query</td><td>?api_key={key}</td><td><code>/api/v1/system/status?api_key=sk_AbCd...</code></td></tr>';
-            sectionsHTML += '</tbody></table>';
-            sectionsHTML += '<div class="api-note">Keys use the <code>sk_</code> prefix. The raw key is shown exactly once at creation time. Only a SHA-256 hash is stored server-side. Rate limit: 60 requests per minute per IP.</div>';
-            sectionsHTML += '<div class="api-detail-label">Base URL</div>';
-            sectionsHTML += '<p class="docs-text">All endpoints are prefixed with <code class="api-base-url">/api/v1</code></p>';
-            sectionsHTML += '<div class="api-detail-label">Response Envelope</div>';
-            sectionsHTML += '<p class="docs-text">Every response follows this structure:</p>';
-            sectionsHTML += '<div class="api-example-json">{\n  "success": true | false,\n  "data": { ... } | null,\n  "error": { "code": "ERROR_CODE", "message": "..." } | null,\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false } | null\n}</div>';
-            sectionsHTML += '<div class="api-detail-label">Error Codes</div>';
-            sectionsHTML += '<table class="api-params-table"><thead><tr><th>Status</th><th>Code</th><th>Meaning</th></tr></thead><tbody>';
-            sectionsHTML += '<tr><td>400</td><td>BAD_REQUEST</td><td>Missing or invalid parameters</td></tr>';
-            sectionsHTML += '<tr><td>401</td><td>AUTH_REQUIRED</td><td>No API key provided</td></tr>';
-            sectionsHTML += '<tr><td>403</td><td>INVALID_KEY / FORBIDDEN</td><td>Invalid key or insufficient permissions</td></tr>';
-            sectionsHTML += '<tr><td>404</td><td>NOT_FOUND</td><td>Resource not found</td></tr>';
-            sectionsHTML += '<tr><td>409</td><td>CONFLICT</td><td>Resource already exists or action in progress</td></tr>';
-            sectionsHTML += '<tr><td>429</td><td>RATE_LIMITED</td><td>Too many requests</td></tr>';
-            sectionsHTML += '<tr><td>500</td><td>*_ERROR</td><td>Internal server error</td></tr>';
-            sectionsHTML += '</tbody></table>';
-            sectionsHTML += '<div class="api-detail-label">cURL Example</div>';
-            sectionsHTML += '<div class="api-example-json">curl -H "Authorization: Bearer sk_abc123..." \\\n     http://localhost:5000/api/v1/system/status</div>';
-            sectionsHTML += '</div>';
-
-            // API key input bar
-            sectionsHTML += '<div class="api-key-bar">';
-            sectionsHTML += '<label>API Key</label>';
-            sectionsHTML += '<input type="password" id="api-tester-key" placeholder="sk_..." autocomplete="off">';
-            sectionsHTML += '<span class="api-key-status" id="api-key-status">Enter key to test endpoints</span>';
-            sectionsHTML += '</div>';
-
-            // Endpoint groups
-            let globalIdx = 0;
-            const endpointRegistry = [];
-
-            apiGroups.forEach(group => {
-                sectionsHTML += '<div class="docs-subsection" id="' + group.id + '">';
-                sectionsHTML += '<h3 class="docs-subsection-title">' + group.title + '</h3>';
-                sectionsHTML += '<p class="docs-text">' + group.desc + '</p>';
-
-                group.endpoints.forEach(ep => {
-                    const idx = globalIdx++;
-                    endpointRegistry.push(ep);
-
-                    sectionsHTML += '<div class="api-endpoint" id="api-ep-' + idx + '">';
-                    sectionsHTML += '<div class="api-endpoint-header" onclick="this.parentElement.classList.toggle(\'expanded\')">';
-                    sectionsHTML += '<span class="api-method ' + methodClass(ep.method) + '">' + ep.method + '</span>';
-                    sectionsHTML += '<span class="api-endpoint-path">' + ep.path + '</span>';
-                    sectionsHTML += '<span class="api-endpoint-desc">' + ep.desc + '</span>';
-                    sectionsHTML += '<span class="api-endpoint-arrow">&#x25B6;</span>';
-                    sectionsHTML += '</div>';
-                    sectionsHTML += '<div class="api-endpoint-body">';
-                    sectionsHTML += '<p class="docs-text" style="margin-top:10px">' + ep.desc + '</p>';
-                    sectionsHTML += buildParamsTable(ep.params);
-                    sectionsHTML += buildBodyTable(ep.bodyFields);
-                    sectionsHTML += buildExample(ep.example);
-                    sectionsHTML += buildTryIt(ep, idx);
-                    sectionsHTML += '</div></div>';
-                });
-
-                sectionsHTML += '</div>';
-            });
-
-            // WebSocket section
-            sectionsHTML += '<div class="docs-subsection" id="api-websocket">';
-            sectionsHTML += '<h3 class="docs-subsection-title">WebSocket Events</h3>';
-            sectionsHTML += '<p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time updates. Connect to the same host/port as the web UI. No API key required for WebSocket connections.</p>';
-            sectionsHTML += '<table class="docs-table"><thead><tr><th>Event</th><th>Description</th><th>Key Fields</th></tr></thead><tbody>';
-            sectionsHTML += '<tr><td><code>download_progress</code></td><td>Per-track download progress</td><td>title, percent, speed, eta</td></tr>';
-            sectionsHTML += '<tr><td><code>download_complete</code></td><td>Track finished downloading</td><td>title, artist, album, file_path</td></tr>';
-            sectionsHTML += '<tr><td><code>batch_progress</code></td><td>Album/playlist batch status</td><td>batch_id, completed, total, current_track</td></tr>';
-            sectionsHTML += '<tr><td><code>worker_status</code></td><td>Enrichment worker updates</td><td>worker, status, matched, total, current</td></tr>';
-            sectionsHTML += '<tr><td><code>scan_progress</code></td><td>Library/quality/duplicate scan</td><td>type, progress, total, current</td></tr>';
-            sectionsHTML += '<tr><td><code>system_status</code></td><td>Service connectivity changes</td><td>service, connected, rate_limited</td></tr>';
-            sectionsHTML += '<tr><td><code>activity</code></td><td>Activity feed entries</td><td>timestamp, type, message</td></tr>';
-            sectionsHTML += '<tr><td><code>wishlist_update</code></td><td>Wishlist item changes</td><td>action, track_id, track_name</td></tr>';
-            sectionsHTML += '<tr><td><code>automation_run</code></td><td>Automation execution events</td><td>automation_id, status, result</td></tr>';
-            sectionsHTML += '</tbody></table>';
-            sectionsHTML += '<div class="api-detail-label">JavaScript Example</div>';
-            sectionsHTML += '<div class="api-example-json">import { io } from "socket.io-client";\n\nconst socket = io("http://localhost:5000");\n\nsocket.on("download_progress", (data) =&gt; {\n  console.log(`${data.title}: ${data.percent}%`);\n});\n\nsocket.on("worker_status", (data) =&gt; {\n  console.log(`${data.worker}: ${data.status} (${data.matched}/${data.total})`);\n});\n\nsocket.on("activity", (data) =&gt; {\n  console.log(`[${data.timestamp}] ${data.message}`);\n});</div>';
-            sectionsHTML += '</div>';
-
-            // Wire up API key status indicator
-            setTimeout(() => {
-                const keyInput = document.getElementById('api-tester-key');
-                const keyStatus = document.getElementById('api-key-status');
-                if (keyInput && keyStatus) {
-                    keyInput.addEventListener('input', () => {
-                        const val = keyInput.value.trim();
-                        if (!val) {
-                            keyStatus.textContent = 'Enter key to test endpoints';
-                            keyStatus.classList.remove('connected');
-                        } else if (val.startsWith('sk_')) {
-                            keyStatus.textContent = 'Key set \u2713';
-                            keyStatus.classList.add('connected');
-                        } else {
-                            keyStatus.textContent = 'Key should start with sk_';
-                            keyStatus.classList.remove('connected');
-                        }
-                    });
-                }
-            }, 0);
-
-            // Register the try-it handler on window
-            window._apiEndpointRegistry = endpointRegistry;
-            window._apiTryIt = async function(idx) {
-                const ep = endpointRegistry[idx];
-                const btn = document.getElementById('api-try-btn-' + idx);
-                const resultDiv = document.getElementById('api-try-result-' + idx);
-                const apiKey = document.getElementById('api-tester-key')?.value?.trim();
-
-                if (!apiKey) {
-                    resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Enter your API key above first</span></div></div>';
-                    return;
-                }
-
-                // Build path
-                let path = ep.path;
-                const pathMatch = path.match(/\{([^}]+)\}/g);
-                if (pathMatch) {
-                    for (const m of pathMatch) {
-                        const paramName = m.replace(/[{}]/g, '');
-                        const input = document.getElementById('api-try-path-' + idx + '-' + paramName);
-                        const val = input?.value?.trim();
-                        if (!val) {
-                            resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Fill in path parameter: ' + paramName + '</span></div></div>';
-                            return;
-                        }
-                        path = path.replace(m, encodeURIComponent(val));
-                    }
-                }
-
-                // Build query string for GET
-                let qs = '';
-                if (ep.method === 'GET' && ep.params) {
-                    const parts = [];
-                    ep.params.forEach(p => {
-                        if (p.name === 'fields') return;
-                        const input = document.getElementById('api-try-q-' + idx + '-' + p.name);
-                        const val = input?.value?.trim();
-                        if (val) parts.push(encodeURIComponent(p.name) + '=' + encodeURIComponent(val));
-                    });
-                    if (parts.length) qs = '?' + parts.join('&');
-                }
-
-                const url = '/api/v1' + path + qs;
-                const fetchOpts = {
-                    method: ep.method === 'PATCH' ? 'PATCH' : ep.method,
-                    headers: { 'Authorization': 'Bearer ' + apiKey }
-                };
-
-                // Body
-                if (ep.bodyFields && ep.bodyFields.length) {
-                    const bodyEl = document.getElementById('api-try-body-' + idx);
-                    if (bodyEl) {
-                        fetchOpts.headers['Content-Type'] = 'application/json';
-                        fetchOpts.body = bodyEl.value;
-                    }
-                }
-
-                btn.classList.add('loading');
-                btn.innerHTML = '&#9203; Sending...';
-                resultDiv.innerHTML = '';
-
-                const startTime = performance.now();
-                try {
-                    const resp = await fetch(url, fetchOpts);
-                    const elapsed = Math.round(performance.now() - startTime);
-                    let bodyText;
-                    try { bodyText = await resp.text(); } catch(e) { bodyText = '(empty response)'; }
-
-                    let formatted = bodyText;
-                    try {
-                        const parsed = JSON.parse(bodyText);
-                        formatted = JSON.stringify(parsed, null, 2);
-                    } catch(e) {}
-
-                    const statusClass = resp.status < 300 ? 's2xx' : resp.status < 500 ? 's4xx' : 's5xx';
-                    resultDiv.innerHTML = '<div class="api-response-panel">' +
-                        '<div class="api-response-header">' +
-                        '<span class="api-response-status ' + statusClass + '">' + resp.status + ' ' + resp.statusText + '</span>' +
-                        '<span class="api-response-time">' + elapsed + 'ms</span>' +
-                        '</div>' +
-                        '<div class="api-response-body">' + syntaxHighlight(escHtml2(formatted)) + '</div>' +
-                        '</div>';
-                } catch(err) {
-                    resultDiv.innerHTML = '<div class="api-response-panel"><div class="api-response-header"><span class="api-response-status s5xx">Network Error</span></div><div class="api-response-body">' + escHtml2(err.message) + '</div></div>';
-                }
-                btn.classList.remove('loading');
-                btn.innerHTML = '&#9654; Send';
-            };
-
-            function escHtml2(s) {
-                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            }
-
-            function syntaxHighlight(json) {
-                return json.replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
-                           .replace(/: "((?:[^"\\]|\\.)*)"/g, ': <span class="json-string">"$1"</span>')
-                           .replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
-                           .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>')
-                           .replace(/: (null)/g, ': <span class="json-null">$1</span>');
-            }
-
-            return sectionsHTML;
+      function buildExample(ex: ApiExample | null): string {
+        if (!ex) return '';
+        let html = '';
+        if (ex.request) {
+          html += '<div class="api-detail-label">Example Request Body</div>';
+          html += '<div class="api-example-json">' + escHtml(ex.request) + '</div>';
         }
-    }
-];
-
-function _showDebugTextModal(text) {
-    // Remove existing modal if any
-    const existing = document.getElementById('debug-text-modal');
-    if (existing) existing.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'debug-text-modal';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-
-    const modal = document.createElement('div');
-    modal.style.cssText = 'background:#1a1a2e;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;width:90%;max-width:700px;max-height:80vh;display:flex;flex-direction:column;gap:12px;';
-
-    const header = document.createElement('div');
-    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
-    header.innerHTML = '<span style="color:#fff;font-weight:600;">Debug Info — Select All &amp; Copy</span>';
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '\u2715';
-    closeBtn.style.cssText = 'background:none;border:none;color:#888;font-size:18px;cursor:pointer;';
-    closeBtn.onclick = () => overlay.remove();
-    header.appendChild(closeBtn);
-
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.readOnly = true;
-    ta.style.cssText = 'width:100%;height:50vh;background:#0d0d1a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:12px;font-family:monospace;font-size:12px;resize:none;outline:none;';
-
-    modal.appendChild(header);
-    modal.appendChild(ta);
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    // Auto-select all text for easy copying
-    ta.focus();
-    ta.select();
-}
-
-let _docsInitialized = false;
-
-function initializeDocsPage() {
-    if (_docsInitialized) return;
-    _docsInitialized = true;
-
-    const nav = document.getElementById('docs-nav');
-    const content = document.getElementById('docs-content');
-    if (!nav || !content) return;
-
-    // Build sidebar nav
-    let navHTML = '';
-    DOCS_SECTIONS.forEach(section => {
-        navHTML += `<div class="docs-nav-section" data-section="${section.id}">`;
-        navHTML += `<div class="docs-nav-section-title" data-target="${section.id}">`;
-        navHTML += `<img class="docs-nav-icon" src="${section.icon}" onerror="this.style.display='none'">`;
-        navHTML += `<span>${section.title}</span>`;
-        navHTML += `<span class="docs-nav-arrow">&#x25B6;</span>`;
-        navHTML += `</div>`;
-        if (section.children && section.children.length) {
-            navHTML += `<div class="docs-nav-children" data-parent="${section.id}">`;
-            section.children.forEach(child => {
-                navHTML += `<div class="docs-nav-child" data-target="${child.id}">${child.title}</div>`;
-            });
-            navHTML += `</div>`;
+        if (ex.response) {
+          html += '<div class="api-detail-label">Example Response</div>';
+          html += '<div class="api-example-json">' + escHtml(ex.response) + '</div>';
         }
-        navHTML += `</div>`;
-    });
-    nav.innerHTML = navHTML;
+        return html;
+      }
 
-    // Add debug info panel to sidebar header
-    const sidebarHeader = document.querySelector('.docs-sidebar-header');
-    if (sidebarHeader) {
-        const debugWrap = document.createElement('div');
-        debugWrap.className = 'docs-debug-wrap';
-        debugWrap.innerHTML = `
-            <button class="docs-debug-button">&#x1F4CB; Copy Debug Info</button>
-            <div class="docs-debug-options">
-                <div class="docs-debug-row">
-                    <label>Log lines</label>
-                    <select class="docs-debug-select" id="debug-log-lines">
-                        <option value="20">20</option>
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
-                        <option value="200">200</option>
-                        <option value="500">500</option>
-                    </select>
-                </div>
-                <div class="docs-debug-row">
-                    <label>Log source</label>
-                    <select class="docs-debug-select" id="debug-log-source">
-                        <option value="app">app.log</option>
-                        <option value="post_processing">post_processing.log</option>
-                        <option value="acoustid">acoustid.log</option>
-                        <option value="source_reuse">source_reuse.log</option>
-                    </select>
-                </div>
-            </div>
-        `;
-        sidebarHeader.appendChild(debugWrap);
+      function escHtml(s: string): string {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
 
-        const debugBtn = debugWrap.querySelector('.docs-debug-button');
-        debugBtn.onclick = async () => {
-            const logLines = document.getElementById('debug-log-lines').value;
-            const logSource = document.getElementById('debug-log-source').value;
-            try {
-                debugBtn.textContent = 'Collecting...';
-                const resp = await fetch(`/api/debug-info?lines=${logLines}&log=${logSource}`);
-                const data = await resp.json();
+      function buildTryIt(ep: ApiEndpoint, idx: number): string {
+        const hasPathParam = ep.path.includes('{');
+        const pathParams: string[] = [];
+        const pathMatch = ep.path.match(/\{([^}]+)\}/g);
+        if (pathMatch) pathMatch.forEach((m) => pathParams.push(m.replace(/[{}]/g, '')));
 
-                const ck = '\u2713';
-                const ex = '\u2717';
-                let text = 'SoulSync Debug Info\n';
-                text += '═══════════════════════════════════\n\n';
+        let html = '<div class="api-detail-label">Try It</div>';
 
-                text += '── System ──\n';
-                text += `Version:     ${data.version}\n`;
-                text += `OS:          ${data.os}${data.docker ? ' (Docker)' : ''}\n`;
-                text += `Python:      ${data.python}\n`;
-                text += `ffmpeg:      ${data.ffmpeg || 'unknown'}\n`;
-                text += `Runner:      ${data.runner || 'unknown'}\n`;
-                text += `Uptime:      ${data.uptime || 'unknown'}\n`;
-                text += `Memory:      ${data.memory_usage || '?'} (system: ${data.system_memory || '?'})\n`;
-                text += `CPU:         ${data.cpu_percent || '?'}\n`;
-                text += `Threads:     ${data.thread_count || '?'}\n\n`;
-
-                text += '── Services ──\n';
-                text += `Music Source:  ${data.services?.music_source || 'unknown'}\n`;
-                text += `Spotify:       ${data.services?.spotify_connected ? ck + ' Connected' : ex + ' Disconnected'}${data.services?.spotify_rate_limited ? ' (RATE LIMITED)' : ''}\n`;
-                text += `Media Server:  ${data.services?.media_server_type || 'none'} ${data.services?.media_server_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
-                text += `Soulseek:      ${data.services?.soulseek_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
-                text += `Tidal:         ${data.services?.tidal_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
-                text += `Qobuz:         ${data.services?.qobuz_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
-                text += `Discogs:       ${data.services?.discogs_connected ? ck + ' Connected' : ex + ' No Token'}\n`;
-                text += `Download Mode: ${data.services?.download_source || 'unknown'}\n\n`;
-
-                text += '── Library ──\n';
-                text += `Artists:  ${data.library?.artists?.toLocaleString() || '0'}\n`;
-                text += `Albums:   ${data.library?.albums?.toLocaleString() || '0'}\n`;
-                text += `Tracks:   ${data.library?.tracks?.toLocaleString() || '0'}\n`;
-                text += `Database: ${data.database_size || 'unknown'}\n`;
-                text += `Watchlist: ${data.watchlist_count || 0} artists\n`;
-                text += `Wishlist:  ${data.wishlist_count || 0} pending\n`;
-                text += `Automations: ${data.automations?.enabled || 0} enabled / ${data.automations?.total || 0} total\n\n`;
-
-                text += '── Active ──\n';
-                text += `Downloads: ${data.active_downloads || 0}\n`;
-                text += `Syncs:     ${data.active_syncs || 0}\n\n`;
-
-                text += '── Paths ──\n';
-                const pathStatus = (exists, writable) => exists ? (writable ? ck + ' ok' : ck + ' exists ' + ex + ' not writable') : ex + ' missing';
-                text += `Input:    ${data.paths?.download_path || '(not set)'} [${pathStatus(data.paths?.download_path_exists, data.paths?.download_path_writable)}]\n`;
-                text += `Output:   ${data.paths?.transfer_folder || '(not set)'} [${pathStatus(data.paths?.transfer_folder_exists, data.paths?.transfer_folder_writable)}]\n`;
-                text += `Import:   ${data.paths?.staging_folder ? data.paths.staging_folder + ' [' + (data.paths.staging_folder_exists ? ck + ' ok' : ex + ' missing') + ']' : '(not configured — optional)'}\n`;
-                if (data.paths?.music_videos_path) {
-                    text += `Videos:   ${data.paths.music_videos_path} [${data.paths.music_videos_path_exists ? ck + ' ok' : ex + ' missing'}]\n`;
-                }
-                if (data.paths?.music_library_paths?.length) {
-                    text += `Library Paths:\n`;
-                    data.paths.music_library_paths.forEach(p => {
-                        text += `  ${p.path} [${p.exists ? ck + ' ok' : ex + ' missing'}]\n`;
-                    });
-                }
-                text += '\n';
-
-                text += '── Config ──\n';
-                if (data.config) {
-                    text += `Log Level:        ${data.config.log_level || 'INFO'}\n`;
-                    text += `Source Mode:      ${data.config.source_mode || 'unknown'}\n`;
-                    if (data.config.source_mode === 'hybrid' && data.config.hybrid_sources?.length) {
-                        text += `Hybrid Priority:  ${data.config.hybrid_sources.join(' → ')}\n`;
-                    }
-                    text += `Metadata Source:  ${data.config.primary_metadata_source || 'deezer'}\n`;
-                    text += `Quality Profile:  ${data.config.quality_profile || 'default'}\n`;
-                    text += `Folder Template:  ${data.config.organization_template || '(default)'}\n`;
-                    text += `Post-Processing:  ${data.config.post_processing_enabled ? 'enabled' : 'disabled'}\n`;
-                    if (data.config.lossy_copy_enabled) {
-                        text += `Lossy Copy:       ${data.config.lossy_copy_format?.toUpperCase()} @ ${data.config.lossy_copy_bitrate}kbps\n`;
-                    }
-                    text += `AcoustID:         ${data.config.acoustid_enabled ? 'enabled' : 'disabled'}\n`;
-                    text += `Auto Scan:        ${data.config.auto_scan_enabled ? 'enabled' : 'disabled'}\n`;
-                    text += `Auto Import:      ${data.config.auto_import_enabled ? 'enabled' : 'disabled'}\n`;
-                    text += `Duplicate Tracks: ${data.config.allow_duplicate_tracks ? 'allowed' : 'rejected'}\n`;
-                    text += `Replace Quality:  ${data.config.replace_lower_quality ? 'enabled' : 'disabled'}\n`;
-                    text += `M3U Export:       ${data.config.m3u_export_enabled ? 'enabled' : 'disabled'}\n`;
-                }
-                text += '\n';
-
-                text += '── Enrichment Workers ──\n';
-                if (data.enrichment_workers) {
-                    const active = [], paused = [];
-                    Object.entries(data.enrichment_workers).forEach(([name, status]) => {
-                        (status === 'active' ? active : paused).push(name);
-                    });
-                    text += `Active:  ${active.length > 0 ? active.join(', ') : 'none'}\n`;
-                    text += `Paused:  ${paused.length > 0 ? paused.join(', ') : 'none'}\n`;
-                }
-                text += '\n';
-
-                if (data.download_client_failures?.length > 0) {
-                    text += '── Download Client Failures ──\n';
-                    data.download_client_failures.forEach(f => { text += `  ❌ ${f}\n`; });
-                    text += '\n';
-                }
-
-                text += '── API Rates (calls/min) ──\n';
-                if (data.api_rates) {
-                    Object.entries(data.api_rates).forEach(([svc, info]) => {
-                        const cpm = info.cpm || 0;
-                        const limit = info.limit || '?';
-                        const pct = limit ? Math.round(cpm / limit * 100) : 0;
-                        text += `${svc.padEnd(14)} ${String(cpm).padStart(5)}/min  (limit: ${limit}, ${pct}%)`;
-                        if (info.endpoints && Object.keys(info.endpoints).length > 0) {
-                            text += `  endpoints: ${Object.entries(info.endpoints).map(([e, c]) => `${e}:${c}`).join(', ')}`;
-                        }
-                        text += '\n';
-                    });
-                }
-                if (data.spotify_rate_limit?.active) {
-                    const rl = data.spotify_rate_limit;
-                    const mins = Math.ceil((rl.remaining_seconds || 0) / 60);
-                    text += `\n*** SPOTIFY RATE LIMITED ***\n`;
-                    text += `Triggered by: ${rl.endpoint || 'unknown'}\n`;
-                    text += `Remaining:    ${mins} minutes\n`;
-                    text += `Retry-After:  ${rl.retry_after || '?'}s\n`;
-                }
-                text += '\n';
-
-                if (data.available_logs?.length) {
-                    text += '── Log Files ──\n';
-                    data.available_logs.forEach(log => {
-                        text += `  ${log.file.padEnd(24)} ${log.size}\n`;
-                    });
-                    text += '\n';
-                }
-
-                text += `── Logs: ${data.log_source || 'app'}.log (last ${data.recent_logs?.length || 0} lines) ──\n`;
-                if (data.recent_logs?.length) {
-                    data.recent_logs.forEach(line => { text += line + '\n'; });
-                } else {
-                    text += '(no log lines)\n';
-                }
-                text += '\n---\nPaste this output into your GitHub issue at https://github.com/Nezreka/SoulSync/issues\n';
-
-                // Copy to clipboard — navigator.clipboard requires HTTPS/localhost,
-                // so fall back to execCommand for Docker/LAN HTTP access
-                let copied = false;
-                if (navigator.clipboard && window.isSecureContext) {
-                    try {
-                        await navigator.clipboard.writeText(text);
-                        copied = true;
-                    } catch (_) {}
-                }
-                if (!copied) {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { copied = document.execCommand('copy'); } catch (_) {}
-                    document.body.removeChild(ta);
-                }
-                if (copied) {
-                    debugBtn.innerHTML = '&#x2705; Copied!';
-                    debugBtn.classList.add('copied');
-                    setTimeout(() => {
-                        debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
-                        debugBtn.classList.remove('copied');
-                    }, 2000);
-                } else {
-                    // Clipboard APIs blocked (HTTP over LAN) — show selectable text modal
-                    _showDebugTextModal(text);
-                    debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info';
-                }
-            } catch (err) {
-                debugBtn.innerHTML = '&#x274C; Failed';
-                console.error('Debug info error:', err);
-                setTimeout(() => { debugBtn.innerHTML = '&#x1F4CB; Copy Debug Info'; }, 2000);
-            }
-        };
-    }
-
-    // Build content
-    let contentHTML = '';
-    DOCS_SECTIONS.forEach(section => {
-        contentHTML += `<div class="docs-section" id="docs-${section.id}">`;
-        contentHTML += `<h2 class="docs-section-title">`;
-        contentHTML += `<img class="docs-section-icon" src="${section.icon}" onerror="this.style.display='none'">`;
-        contentHTML += `<span>${section.title}</span>`;
-        contentHTML += `</h2>`;
-        contentHTML += section.content();
-        contentHTML += `</div>`;
-    });
-    content.innerHTML = contentHTML;
-
-    // Suppress scroll spy during click-initiated scrolls
-    let _scrollSpySuppressed = false;
-
-    function suppressScrollSpy() {
-        _scrollSpySuppressed = true;
-        clearTimeout(suppressScrollSpy._timer);
-        suppressScrollSpy._timer = setTimeout(() => { _scrollSpySuppressed = false; }, 800);
-    }
-
-    // Scroll a target element into view within the docs-content container.
-    // Uses manual offsetTop calculation instead of scrollIntoView to avoid
-    // misalignment caused by lazy-loaded images that haven't reserved height yet.
-    // Does an initial scroll, then a correction after images near the target load.
-    function scrollDocTarget(target) {
-        if (!target || !docsContent) return;
-        suppressScrollSpy();
-
-        function calcOffset(el) {
-            let offset = 0;
-            let current = el;
-            while (current && current !== docsContent) {
-                offset += current.offsetTop;
-                current = current.offsetParent;
-            }
-            return offset;
+        // Path param inputs
+        if (pathParams.length) {
+          html += '<div class="api-try-params">';
+          pathParams.forEach((pp) => {
+            html +=
+              '<div class="api-try-param"><label>' +
+              pp +
+              '</label><input type="text" id="api-try-path-' +
+              idx +
+              '-' +
+              pp +
+              '" placeholder="' +
+              pp +
+              '"></div>';
+          });
+          html += '</div>';
         }
 
-        function place() {
-            // Desktop: .docs-content is its own scroll container. The mobile
-            // layout stacks the panels (overflow: visible) so the page
-            // scroller owns the document instead — assigning scrollTop on
-            // .docs-content is a silent no-op there.
-            if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
-                docsContent.scrollTop = calcOffset(target);
+        // Query param inputs for GET endpoints
+        if (ep.params && ep.params.length && ep.method === 'GET') {
+          html += '<div class="api-try-params">';
+          ep.params.forEach((p) => {
+            if (p.name === 'fields') return; // skip fields param in try-it
+            html +=
+              '<div class="api-try-param"><label>' +
+              p.name +
+              '</label><input type="text" id="api-try-q-' +
+              idx +
+              '-' +
+              p.name +
+              '" placeholder="' +
+              (p.default || '') +
+              '"></div>';
+          });
+          html += '</div>';
+        }
+
+        html += '<div class="api-try-bar">';
+        // Body textarea for POST/PUT/PATCH/DELETE with body
+        if (ep.bodyFields && ep.bodyFields.length) {
+          const defaultBody = ep.example && ep.example.request ? ep.example.request : '{}';
+          html +=
+            '<textarea class="api-try-body" id="api-try-body-' +
+            idx +
+            '">' +
+            escHtml(defaultBody) +
+            '</textarea>';
+        }
+        html +=
+          '<button class="api-try-btn" onclick="window._apiTryIt(' +
+          idx +
+          ')" id="api-try-btn-' +
+          idx +
+          '">&#9654; Send</button>';
+        html += '</div>';
+
+        html += '<div id="api-try-result-' + idx + '"></div>';
+        return html;
+      }
+
+      // Build all sections
+      let sectionsHTML = '';
+
+      // Auth section (not a group)
+      sectionsHTML += '<div class="docs-subsection" id="api-auth">';
+      sectionsHTML += '<h3 class="docs-subsection-title">Authentication</h3>';
+      sectionsHTML +=
+        '<p class="docs-text">All API v1 endpoints require an API key (except <code>POST /api-keys/bootstrap</code>). Generate keys in <strong>Settings &rarr; API Keys</strong> or via the bootstrap endpoint.</p>';
+      sectionsHTML += '<div class="api-detail-label">Two authentication methods</div>';
+      sectionsHTML +=
+        '<table class="api-params-table"><thead><tr><th>Method</th><th>Format</th><th>Example</th></tr></thead><tbody>';
+      sectionsHTML +=
+        '<tr><td>Header</td><td>Authorization: Bearer {key}</td><td><code>Authorization: Bearer sk_AbCd...</code></td></tr>';
+      sectionsHTML +=
+        '<tr><td>Query</td><td>?api_key={key}</td><td><code>/api/v1/system/status?api_key=sk_AbCd...</code></td></tr>';
+      sectionsHTML += '</tbody></table>';
+      sectionsHTML +=
+        '<div class="api-note">Keys use the <code>sk_</code> prefix. The raw key is shown exactly once at creation time. Only a SHA-256 hash is stored server-side. Rate limit: 60 requests per minute per IP.</div>';
+      sectionsHTML += '<div class="api-detail-label">Base URL</div>';
+      sectionsHTML +=
+        '<p class="docs-text">All endpoints are prefixed with <code class="api-base-url">/api/v1</code></p>';
+      sectionsHTML += '<div class="api-detail-label">Response Envelope</div>';
+      sectionsHTML += '<p class="docs-text">Every response follows this structure:</p>';
+      sectionsHTML +=
+        '<div class="api-example-json">{\n  "success": true | false,\n  "data": { ... } | null,\n  "error": { "code": "ERROR_CODE", "message": "..." } | null,\n  "pagination": { "page": 1, "limit": 50, "total": 342, "total_pages": 7, "has_next": true, "has_prev": false } | null\n}</div>';
+      sectionsHTML += '<div class="api-detail-label">Error Codes</div>';
+      sectionsHTML +=
+        '<table class="api-params-table"><thead><tr><th>Status</th><th>Code</th><th>Meaning</th></tr></thead><tbody>';
+      sectionsHTML +=
+        '<tr><td>400</td><td>BAD_REQUEST</td><td>Missing or invalid parameters</td></tr>';
+      sectionsHTML += '<tr><td>401</td><td>AUTH_REQUIRED</td><td>No API key provided</td></tr>';
+      sectionsHTML +=
+        '<tr><td>403</td><td>INVALID_KEY / FORBIDDEN</td><td>Invalid key or insufficient permissions</td></tr>';
+      sectionsHTML += '<tr><td>404</td><td>NOT_FOUND</td><td>Resource not found</td></tr>';
+      sectionsHTML +=
+        '<tr><td>409</td><td>CONFLICT</td><td>Resource already exists or action in progress</td></tr>';
+      sectionsHTML += '<tr><td>429</td><td>RATE_LIMITED</td><td>Too many requests</td></tr>';
+      sectionsHTML += '<tr><td>500</td><td>*_ERROR</td><td>Internal server error</td></tr>';
+      sectionsHTML += '</tbody></table>';
+      sectionsHTML += '<div class="api-detail-label">cURL Example</div>';
+      sectionsHTML +=
+        '<div class="api-example-json">curl -H "Authorization: Bearer sk_abc123..." \\\n     http://localhost:5000/api/v1/system/status</div>';
+      sectionsHTML += '</div>';
+
+      // API key input bar
+      sectionsHTML += '<div class="api-key-bar">';
+      sectionsHTML += '<label>API Key</label>';
+      sectionsHTML +=
+        '<input type="password" id="api-tester-key" placeholder="sk_..." autocomplete="off">';
+      sectionsHTML +=
+        '<span class="api-key-status" id="api-key-status">Enter key to test endpoints</span>';
+      sectionsHTML += '</div>';
+
+      // Endpoint groups
+      let globalIdx = 0;
+      const endpointRegistry: ApiEndpoint[] = [];
+
+      apiGroups.forEach((group) => {
+        sectionsHTML += '<div class="docs-subsection" id="' + group.id + '">';
+        sectionsHTML += '<h3 class="docs-subsection-title">' + group.title + '</h3>';
+        sectionsHTML += '<p class="docs-text">' + group.desc + '</p>';
+
+        group.endpoints.forEach((ep) => {
+          const idx = globalIdx++;
+          endpointRegistry.push(ep);
+
+          sectionsHTML += '<div class="api-endpoint" id="api-ep-' + idx + '">';
+          sectionsHTML +=
+            '<div class="api-endpoint-header" onclick="this.parentElement.classList.toggle(\'expanded\')">';
+          sectionsHTML +=
+            '<span class="api-method ' + methodClass(ep.method) + '">' + ep.method + '</span>';
+          sectionsHTML += '<span class="api-endpoint-path">' + ep.path + '</span>';
+          sectionsHTML += '<span class="api-endpoint-desc">' + ep.desc + '</span>';
+          sectionsHTML += '<span class="api-endpoint-arrow">&#x25B6;</span>';
+          sectionsHTML += '</div>';
+          sectionsHTML += '<div class="api-endpoint-body">';
+          sectionsHTML += '<p class="docs-text" style="margin-top:10px">' + ep.desc + '</p>';
+          sectionsHTML += buildParamsTable(ep.params);
+          sectionsHTML += buildBodyTable(ep.bodyFields);
+          sectionsHTML += buildExample(ep.example);
+          sectionsHTML += buildTryIt(ep, idx);
+          sectionsHTML += '</div></div>';
+        });
+
+        sectionsHTML += '</div>';
+      });
+
+      // WebSocket section
+      sectionsHTML += '<div class="docs-subsection" id="api-websocket">';
+      sectionsHTML += '<h3 class="docs-subsection-title">WebSocket Events</h3>';
+      sectionsHTML +=
+        '<p class="docs-text">SoulSync uses <strong>Socket.IO</strong> for real-time updates. Connect to the same host/port as the web UI. No API key required for WebSocket connections.</p>';
+      sectionsHTML +=
+        '<table class="docs-table"><thead><tr><th>Event</th><th>Description</th><th>Key Fields</th></tr></thead><tbody>';
+      sectionsHTML +=
+        '<tr><td><code>download_progress</code></td><td>Per-track download progress</td><td>title, percent, speed, eta</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>download_complete</code></td><td>Track finished downloading</td><td>title, artist, album, file_path</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>batch_progress</code></td><td>Album/playlist batch status</td><td>batch_id, completed, total, current_track</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>worker_status</code></td><td>Enrichment worker updates</td><td>worker, status, matched, total, current</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>scan_progress</code></td><td>Library/quality/duplicate scan</td><td>type, progress, total, current</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>system_status</code></td><td>Service connectivity changes</td><td>service, connected, rate_limited</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>activity</code></td><td>Activity feed entries</td><td>timestamp, type, message</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>wishlist_update</code></td><td>Wishlist item changes</td><td>action, track_id, track_name</td></tr>';
+      sectionsHTML +=
+        '<tr><td><code>automation_run</code></td><td>Automation execution events</td><td>automation_id, status, result</td></tr>';
+      sectionsHTML += '</tbody></table>';
+      sectionsHTML += '<div class="api-detail-label">JavaScript Example</div>';
+      sectionsHTML +=
+        '<div class="api-example-json">import { io } from "socket.io-client";\n\nconst socket = io("http://localhost:5000");\n\nsocket.on("download_progress", (data) =&gt; {\n  console.log(`${data.title}: ${data.percent}%`);\n});\n\nsocket.on("worker_status", (data) =&gt; {\n  console.log(`${data.worker}: ${data.status} (${data.matched}/${data.total})`);\n});\n\nsocket.on("activity", (data) =&gt; {\n  console.log(`[${data.timestamp}] ${data.message}`);\n});</div>';
+      sectionsHTML += '</div>';
+
+      // Wire up API key status indicator
+      setTimeout(() => {
+        const keyInput = document.getElementById('api-tester-key') as HTMLInputElement | null;
+        const keyStatus = document.getElementById('api-key-status');
+        if (keyInput && keyStatus) {
+          keyInput.addEventListener('input', () => {
+            const val = keyInput.value.trim();
+            if (!val) {
+              keyStatus.textContent = 'Enter key to test endpoints';
+              keyStatus.classList.remove('connected');
+            } else if (val.startsWith('sk_')) {
+              keyStatus.textContent = 'Key set \u2713';
+              keyStatus.classList.add('connected');
             } else {
-                target.scrollIntoView();
+              keyStatus.textContent = 'Key should start with sk_';
+              keyStatus.classList.remove('connected');
             }
+          });
+        }
+      }, 0);
+
+      // Register the try-it handler on window
+      window._apiEndpointRegistry = endpointRegistry;
+      window._apiTryIt = async function (idx: number) {
+        const ep = endpointRegistry[idx];
+        const btn = document.getElementById('api-try-btn-' + idx);
+        if (!btn) return;
+        const resultDiv = document.getElementById('api-try-result-' + idx);
+        if (!resultDiv) return;
+        const apiKey = (
+          document.getElementById('api-tester-key') as HTMLInputElement | null
+        )?.value?.trim();
+
+        if (!apiKey) {
+          resultDiv.innerHTML =
+            '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Enter your API key above first</span></div></div>';
+          return;
         }
 
-        // Initial scroll
-        place();
-
-        // Correction pass after lazy images near the target have had time to load
-        // and shift layout. Two passes cover most reflow scenarios.
-        setTimeout(place, 150);
-        setTimeout(place, 500);
-    }
-
-    // Section title click → expand/collapse children + scroll
-    nav.querySelectorAll('.docs-nav-section-title').forEach(title => {
-        title.addEventListener('click', () => {
-            const sectionId = title.dataset.target;
-            const children = nav.querySelector(`.docs-nav-children[data-parent="${sectionId}"]`);
-
-            // Toggle expanded
-            const isExpanded = title.classList.contains('expanded');
-            // Collapse all
-            nav.querySelectorAll('.docs-nav-section-title').forEach(t => t.classList.remove('expanded', 'active'));
-            nav.querySelectorAll('.docs-nav-children').forEach(c => c.classList.remove('expanded'));
-
-            if (!isExpanded) {
-                title.classList.add('expanded', 'active');
-                if (children) children.classList.add('expanded');
+        // Build path
+        let path = ep.path;
+        const pathMatch = path.match(/\{([^}]+)\}/g);
+        if (pathMatch) {
+          for (const m of pathMatch) {
+            const paramName = m.replace(/[{}]/g, '');
+            const input = document.getElementById(
+              'api-try-path-' + idx + '-' + paramName,
+            ) as HTMLInputElement | null;
+            const val = input?.value?.trim();
+            if (!val) {
+              resultDiv.innerHTML =
+                '<div class="api-response-panel"><div class="api-response-header"><span style="color:#f14668">Fill in path parameter: ' +
+                paramName +
+                '</span></div></div>';
+              return;
             }
-
-            // Scroll to section
-            const target = document.getElementById('docs-' + sectionId);
-            scrollDocTarget(target);
-        });
-    });
-
-    // Child click → scroll to subsection
-    nav.querySelectorAll('.docs-nav-child').forEach(child => {
-        child.addEventListener('click', (e) => {
-            e.stopPropagation();
-            nav.querySelectorAll('.docs-nav-child').forEach(c => c.classList.remove('active'));
-            child.classList.add('active');
-
-            // Keep parent section expanded
-            const target = document.getElementById(child.dataset.target);
-            scrollDocTarget(target);
-        });
-    });
-
-    // Search filter
-    const searchInput = document.getElementById('docs-search-input');
-    if (searchInput) {
-        searchInput.addEventListener('input', () => {
-            const q = searchInput.value.toLowerCase().trim();
-            document.querySelectorAll('.docs-section').forEach(sec => {
-                if (!q) {
-                    sec.style.display = '';
-                    return;
-                }
-                sec.style.display = sec.textContent.toLowerCase().includes(q) ? '' : 'none';
-            });
-            // Also filter nav
-            nav.querySelectorAll('.docs-nav-section').forEach(navSec => {
-                const sectionId = navSec.dataset.section;
-                const docSection = document.getElementById('docs-' + sectionId);
-                navSec.style.display = (!q || (docSection && docSection.style.display !== 'none')) ? '' : 'none';
-            });
-        });
-    }
-
-    // Scroll spy — highlight active section in nav
-    const docsContent = document.getElementById('docs-content');
-    if (docsContent) {
-        docsContent.addEventListener('scroll', () => {
-            if (_scrollSpySuppressed) return;
-
-            const containerRect = docsContent.getBoundingClientRect();
-            const threshold = containerRect.top + 120;
-            let activeSection = null;
-            let activeChild = null;
-
-            // Find which section is currently in view using getBoundingClientRect
-            DOCS_SECTIONS.forEach(section => {
-                const el = document.getElementById('docs-' + section.id);
-                if (el) {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.top <= threshold) {
-                        activeSection = section.id;
-                    }
-                }
-                if (section.children) {
-                    section.children.forEach(child => {
-                        const childEl = document.getElementById(child.id);
-                        if (childEl) {
-                            const childRect = childEl.getBoundingClientRect();
-                            if (childRect.top <= threshold) {
-                                activeChild = child.id;
-                            }
-                        }
-                    });
-                }
-            });
-
-            // Default to first section if nothing scrolled past threshold yet
-            if (!activeSection && DOCS_SECTIONS.length) {
-                activeSection = DOCS_SECTIONS[0].id;
-                if (DOCS_SECTIONS[0].children && DOCS_SECTIONS[0].children.length) {
-                    activeChild = DOCS_SECTIONS[0].children[0].id;
-                }
-            }
-
-            // Update nav highlighting
-            nav.querySelectorAll('.docs-nav-section-title').forEach(t => {
-                const isActive = t.dataset.target === activeSection;
-                t.classList.toggle('active', isActive);
-                t.classList.toggle('expanded', isActive);
-            });
-            nav.querySelectorAll('.docs-nav-children').forEach(c => {
-                c.classList.toggle('expanded', c.dataset.parent === activeSection);
-            });
-            nav.querySelectorAll('.docs-nav-child').forEach(c => {
-                c.classList.toggle('active', c.dataset.target === activeChild);
-            });
-        });
-    }
-
-    // Reset scroll position and auto-expand first section
-    if (docsContent) docsContent.scrollTop = 0;
-    const firstTitle = nav.querySelector('.docs-nav-section-title');
-    if (firstTitle) {
-        firstTitle.classList.add('expanded', 'active');
-        const firstChildren = nav.querySelector('.docs-nav-children');
-        if (firstChildren) firstChildren.classList.add('expanded');
-    }
-}
-
-function navigateToDocsSection(sectionId) {
-    // Switch to help page
-    if (typeof navigateToPage === 'function') navigateToPage('help');
-    // Wait for docs to initialize, then use manual scroll with correction passes
-    setTimeout(() => {
-        const target = document.getElementById(sectionId);
-        const docsContent = document.getElementById('docs-content');
-        if (target && docsContent) {
-            function calcOffset(el) {
-                let offset = 0;
-                let current = el;
-                while (current && current !== docsContent) {
-                    offset += current.offsetTop;
-                    current = current.offsetParent;
-                }
-                return offset;
-            }
-            function place() {
-                // Desktop: .docs-content is its own scroll container. The mobile
-                // layout stacks the panels (overflow: visible) so the page scroller
-                // owns the document — assigning scrollTop on .docs-content is a
-                // silent no-op there, so fall back to scrollIntoView (same fix as
-                // scrollDocTarget). Reached from "Learn more →" links / notifications.
-                if (docsContent.scrollHeight > docsContent.clientHeight + 1) {
-                    docsContent.scrollTop = calcOffset(target);
-                } else {
-                    target.scrollIntoView();
-                }
-            }
-            place();
-            setTimeout(place, 150);
-            setTimeout(place, 500);
+            path = path.replace(m, encodeURIComponent(val));
+          }
         }
-    }, 300);
-}
+
+        // Build query string for GET
+        let qs = '';
+        if (ep.method === 'GET' && ep.params) {
+          const parts: string[] = [];
+          ep.params.forEach((p) => {
+            if (p.name === 'fields') return;
+            const input = document.getElementById(
+              'api-try-q-' + idx + '-' + p.name,
+            ) as HTMLInputElement | null;
+            const val = input?.value?.trim();
+            if (val) parts.push(encodeURIComponent(p.name) + '=' + encodeURIComponent(val));
+          });
+          if (parts.length) qs = '?' + parts.join('&');
+        }
+
+        const url = '/api/v1' + path + qs;
+        const fetchOpts: RequestInit & { headers: Record<string, string> } = {
+          method: ep.method === 'PATCH' ? 'PATCH' : ep.method,
+          headers: { Authorization: 'Bearer ' + apiKey },
+        };
+
+        // Body
+        if (ep.bodyFields && ep.bodyFields.length) {
+          const bodyEl = document.getElementById(
+            'api-try-body-' + idx,
+          ) as HTMLTextAreaElement | null;
+          if (bodyEl) {
+            fetchOpts.headers['Content-Type'] = 'application/json';
+            fetchOpts.body = bodyEl.value;
+          }
+        }
+
+        btn.classList.add('loading');
+        btn.innerHTML = '&#9203; Sending...';
+        resultDiv.innerHTML = '';
+
+        const startTime = performance.now();
+        try {
+          const resp = await fetch(url, fetchOpts);
+          const elapsed = Math.round(performance.now() - startTime);
+          let bodyText: string;
+          try {
+            bodyText = await resp.text();
+          } catch {
+            bodyText = '(empty response)';
+          }
+
+          let formatted = bodyText;
+          try {
+            const parsed = JSON.parse(bodyText);
+            formatted = JSON.stringify(parsed, null, 2);
+          } catch {
+            /* not JSON — show raw */
+          }
+
+          const statusClass = resp.status < 300 ? 's2xx' : resp.status < 500 ? 's4xx' : 's5xx';
+          resultDiv.innerHTML =
+            '<div class="api-response-panel">' +
+            '<div class="api-response-header">' +
+            '<span class="api-response-status ' +
+            statusClass +
+            '">' +
+            resp.status +
+            ' ' +
+            resp.statusText +
+            '</span>' +
+            '<span class="api-response-time">' +
+            elapsed +
+            'ms</span>' +
+            '</div>' +
+            '<div class="api-response-body">' +
+            syntaxHighlight(escHtml2(formatted)) +
+            '</div>' +
+            '</div>';
+        } catch (err) {
+          resultDiv.innerHTML =
+            '<div class="api-response-panel"><div class="api-response-header"><span class="api-response-status s5xx">Network Error</span></div><div class="api-response-body">' +
+            escHtml2(err instanceof Error ? err.message : err) +
+            '</div></div>';
+        }
+        btn.classList.remove('loading');
+        btn.innerHTML = '&#9654; Send';
+      };
+
+      function escHtml2(s: unknown): string {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function syntaxHighlight(json: string): string {
+        return json
+          .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+          .replace(/: "((?:[^"\\]|\\.)*)"/g, ': <span class="json-string">"$1"</span>')
+          .replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+          .replace(/: (true|false)/g, ': <span class="json-bool">$1</span>')
+          .replace(/: (null)/g, ': <span class="json-null">$1</span>');
+      }
+
+      return sectionsHTML;
+    },
+  },
+];

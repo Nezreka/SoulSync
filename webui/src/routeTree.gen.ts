@@ -19,6 +19,7 @@ import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-exp
 import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
+import { Route as HelpRouteRouteImport } from './routes/help/route'
 import { Route as DiscoverRouteRouteImport } from './routes/discover/route'
 import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
 import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
@@ -79,6 +80,11 @@ const IssuesRouteRoute = IssuesRouteRouteImport.update({
 const ImportRouteRoute = ImportRouteRouteImport.update({
   id: '/import',
   path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRouteRoute = HelpRouteRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DiscoverRouteRoute = DiscoverRouteRouteImport.update({
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/automations': typeof AutomationsRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
+  '/help': typeof HelpRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
@@ -166,6 +173,7 @@ export interface FileRoutesByTo {
   '/automations': typeof AutomationsRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
+  '/help': typeof HelpRouteRoute
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
@@ -189,6 +197,7 @@ export interface FileRoutesById {
   '/automations': typeof AutomationsRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
+  '/help': typeof HelpRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
@@ -214,6 +223,7 @@ export interface FileRouteTypes {
     | '/automations'
     | '/dashboard'
     | '/discover'
+    | '/help'
     | '/import'
     | '/issues'
     | '/library'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/automations'
     | '/dashboard'
     | '/discover'
+    | '/help'
     | '/issues'
     | '/library'
     | '/playlist-explorer'
@@ -259,6 +270,7 @@ export interface FileRouteTypes {
     | '/automations'
     | '/dashboard'
     | '/discover'
+    | '/help'
     | '/import'
     | '/issues'
     | '/library'
@@ -283,6 +295,7 @@ export interface RootRouteChildren {
   AutomationsRouteRoute: typeof AutomationsRouteRoute
   DashboardRouteRoute: typeof DashboardRouteRoute
   DiscoverRouteRoute: typeof DiscoverRouteRoute
+  HelpRouteRoute: typeof HelpRouteRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   LibraryRouteRoute: typeof LibraryRouteRoute
@@ -367,6 +380,13 @@ declare module '@tanstack/react-router' {
       path: '/import'
       fullPath: '/import'
       preLoaderRoute: typeof ImportRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/discover': {
@@ -473,6 +493,7 @@ const rootRouteChildren: RootRouteChildren = {
   AutomationsRouteRoute: AutomationsRouteRoute,
   DashboardRouteRoute: DashboardRouteRoute,
   DiscoverRouteRoute: DiscoverRouteRoute,
+  HelpRouteRoute: HelpRouteRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   LibraryRouteRoute: LibraryRouteRoute,
