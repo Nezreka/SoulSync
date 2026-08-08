@@ -5788,3 +5788,21 @@ Suite 6955 passing. Build clean. Lint at baseline.
 **Next: S3b-ii** — the page component itself: the nine verticals, the selection
 store, the modal mount, the sidebar, the sequential runner and the fifteen
 panels, wired into `SyncShell`.
+
+**Verify pass on S3b-i — the same trap `useAutoSync` fell into.**
+`registerReload` was listed in the effect's dependency array. It is a PROP, so
+a caller writing `registerReload={(fn) => …}` inline hands the tab a new
+function every render and the effect re-fires on every one. That is exactly the
+shape that made `useAutoSync`'s `now` loop forever refetching five endpoints,
+and the page would have been written with an inline arrow without a second
+thought.
+
+Held in a ref now, so only `reload` decides when to re-register — the same fix,
+in the same codebase, for the same reason.
+
+Found by re-reading, not by a test, and the claim is no longer untested: a case
+re-renders the parent with a fresh `registerReload` each time and asserts the
+registration count does NOT move. Mutation extended to 6/6, the new one being
+`registerReload` put back into the deps.
+
+Suite 6956 passing. Build clean. Lint at baseline.

@@ -40,7 +40,7 @@
  *   row.quality_profile_id is carried on the row type ready for it.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { ExportMode } from '../-sync.export';
@@ -174,11 +174,21 @@ export function MirroredTab({
     void load();
   }, [load]);
 
-  // The controller is the page's; this is the half of it only this tab can
-  // supply. See MirroredTabProps.registerReload.
+  /**
+   * The controller is the page's; this is the half of it only this tab can
+   * supply. See MirroredTabProps.registerReload.
+   *
+   * `registerReload` is held in a ref rather than listed as a dependency: it
+   * is a prop, so a caller writing `registerReload={(fn) => …}` inline hands
+   * us a NEW function every render, and the effect would re-fire on every one.
+   * Same trap `useAutoSync`'s `now` fell into — there it looped forever
+   * refetching five endpoints. Only `reload` should decide when to re-register.
+   */
+  const registerRef = useRef(registerReload);
+  registerRef.current = registerReload;
   useEffect(() => {
-    registerReload(reload);
-  }, [registerReload, reload]);
+    registerRef.current(reload);
+  }, [reload]);
 
   /**
    * The render-time poller resume (stats-automations.js 653-655): a row the

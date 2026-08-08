@@ -698,6 +698,37 @@ describe('MirroredTab — it hands its reload to the controller owner', () => {
    * arms call a no-op and the mirrored list silently stops refreshing when a
    * pipeline finishes — no error, just a stale card.
    */
+  it('does NOT re-register when the caller passes a fresh function each render', async () => {
+    // registerReload is a prop, so `registerReload={(fn) => …}` inline is a
+    // NEW function every render. Listing it as a dependency would re-fire the
+    // effect on every one — the trap useAutoSync's `now` fell into, where it
+    // looped forever refetching five endpoints. Held in a ref instead, so only
+    // `reload` decides.
+    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
+    stubFetch();
+
+    let registrations = 0;
+    function Wrapper({ tick }: { tick: number }) {
+      return (
+        <div>
+          <span data-testid="tick">{tick}</span>
+          <Harness
+            registerReload={() => {
+              registrations += 1;
+            }}
+          />
+        </div>
+      );
+    }
+    const { rerender } = render(<Wrapper tick={0} />);
+    await screen.findByText('Road Trip');
+    const after = registrations;
+
+    rerender(<Wrapper tick={1} />);
+    rerender(<Wrapper tick={2} />);
+    expect(registrations).toBe(after);
+  });
+
   it('registers a working reload that refetches the list', async () => {
     const calls: string[] = [];
     responder = (url) => {
