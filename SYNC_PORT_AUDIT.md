@@ -5806,3 +5806,36 @@ registration count does NOT move. Mutation extended to 6/6, the new one being
 `registerReload` put back into the deps.
 
 Suite 6956 passing. Build clean. Lint at baseline.
+
+### AUDIT — every effect in the sync route that depends on a prop
+
+Prompted by hitting the same shape twice. Scripted over `routes/sync`: for each
+component, collect the props it destructures, then flag every
+`useEffect`/`useLayoutEffect` whose dependency array names one. **12 hits, and
+none of them is a bug.**
+
+- **7 are VALUE props** (`open`, `source`, `playlistRef`) — a boolean or string
+  has a stable identity, so nothing re-fires.
+- **4 are `onClose`** (autosync-modal, genre-browser-modal,
+  server-playlist-list, server-search-overlay). Each effect only adds and
+  removes a document listener. A re-fire swaps a listener; it sets no state, so
+  it cannot feed itself.
+- **1 is `pipeline`** (mirrored-tab, the resume effect). Checked rather than
+  assumed, because `useSourceVertical` had just been caught returning a fresh
+  object every render: `useMirroredPipeline` DOES memoise — `return
+  useMemo(() => ({ run, resume }), [run, resume])` with both members
+  `useCallback` — so the controller is stable and the effect is quiet.
+
+**CORRECTION to the previous entry.** It said the `registerReload` dependency
+was "the trap useAutoSync's `now` fell into, where it looped forever". The
+SHAPE is the same — a prop function in a dependency array — but the
+consequence is not. `useAutoSync`'s effect set state, so re-firing fed itself
+into an infinite refetch. Registering a reload only assigns a ref, so the worst
+case there was needless effect churn, not a loop. The fix is still right (it
+matches how this codebase already handles the pattern, and the page WILL be
+written with an inline arrow), but it was hardening, not a live-bug fix, and
+the earlier wording overstated it.
+
+**The rule, stated accurately for the page build:** a prop function in a
+dependency array is only dangerous when the effect can change state. Listener
+registration is churn; anything that calls `setState` is a loop.
