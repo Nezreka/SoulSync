@@ -5527,3 +5527,51 @@ property the store exists to provide.
 Suite 6924 passing, clean run. Build clean. Lint at the 684 baseline —
 a count, not a "0 errors", because an unused variable in a test had already
 slipped past once this session as 685.
+
+### S3a-iii BUILT — the vertical registry (kettui-safe)
+
+`-sync.verticals.ts`. Built against kettui's fourth observation — *similar
+things get reimplemented per feature instead of sharing an abstraction*. Nine
+hand-written `useSourceVertical(SYNC_SOURCES.x, …)` calls at a page's top level
+is precisely that shape: nine places to forget an option, nine to update when
+the contract changes, and no way to notice a tenth source was added and missed.
+One table drives it instead.
+
+**NINE verticals, not fifteen — and the earlier note saying thirteen was
+wrong.** Several tabs share one: Last.fm Radio rides ListenBrainz's machinery,
+Deezer-link rides Deezer's. A test pins the count so that if it ever equals the
+tab count someone has conflated the two.
+
+**Hook order is safe** because `SYNC_VERTICAL_IDS` is a frozen module constant —
+same ids, same order, every render, which is all the rules of hooks require. It
+is declared explicitly rather than derived from `Object.keys`, so the order is a
+stated contract instead of an accident of how the table was typed. A test
+asserts it covers `SYNC_SOURCES` exactly, so a source added to the table cannot
+silently skip the registry.
+
+**The ListenBrainz trap is now table data, not a call-site.**
+`onDiscoveryComplete` auto-mirrors matched tracks when a discovery finishes,
+and it is what puts LB and Last.fm playlists into the Mirrored tab and onto the
+Auto-Sync board. Miss it and two surfaces come up empty with nothing failing —
+so it belongs somewhere the registry always reads.
+
+**One test was rewritten because it proved nothing.** The first version checked
+`perSource` by asserting the returned vertical "was defined" — true whether or
+not the option arrived, since options are invisible on `SourceVertical`. It now
+mocks the vertical and asserts the ACTUAL call arguments: the named source gets
+its options, every other source gets `{}`, and the configs arrive in the
+declared order. Fifth instance this session of a test passing for reasons
+unrelated to its claim.
+
+**Mutation: 7 mutants, 7 killed** — a source dropped from the list; a source
+listed twice; `perSource` ignored; options handed to the wrong source;
+`undefined` instead of `{}`; every source given the same config; one vertical
+shared by all.
+
+**Lint caught 5 type ERRORS, not warnings.** `vi.fn(() => …)` infers a zero-arg
+mock, so `mock.calls` typed as empty tuples and every destructure was an error.
+Only visible because the check is `oxlint --type-check src` over the whole tree
+and the count is compared against the 684 baseline — a per-file run of the
+source alone was clean.
+
+Suite 6933 passing, clean run. Build clean. Lint back at baseline.
