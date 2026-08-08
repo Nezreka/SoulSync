@@ -5575,3 +5575,44 @@ and the count is compared against the 684 baseline — a per-file run of the
 source alone was clean.
 
 Suite 6933 passing, clean run. Build clean. Lint back at baseline.
+
+### S3a-iv BUILT — the selection store
+
+`-sync.use-selection.ts`. Deliberately tiny, because the vanilla's is: EVERY
+mutation app-wide is the add/delete pair inside `togglePlaylistSelection`
+(sync-spotify.js 1804-1808). The other four references to `selectedPlaylists`
+only read `.size` or `.has`. Verified by grepping every occurrence — there is no
+clear, no prune, no bulk select anywhere.
+
+**Two behaviours that read like bugs and are the shipped design**, both
+transcribed rather than corrected:
+
+1. **A finished sync leaves everything still selected.** `complete()` resets the
+   QUEUE, never the selection, so the sidebar goes straight back to "3
+   playlists selected" with Start Sync live again.
+2. **Refreshing does not prune ids whose cards are gone.** That is only safe
+   because `syncOrderedSelection` keeps solely what the page currently lists —
+   the two behaviours are a PAIR, and a test says so, because pruning one
+   without the other would silently change which playlists sync.
+
+**No `clear()`.** Nothing in the vanilla calls one, so adding it would be
+inventing API — and an export no test could honestly justify. A mutant that
+adds one to the surface is killed.
+
+Mutation: 5 mutants, 5 killed — toggle that only adds; the set mutated in place
+(consumers would go stale); count decoupled from the set; toggle identity
+changing every render (it is handed to every playlist row); and a `clear()`
+appearing on the surface.
+
+Suite 6941 passing, clean run. Build clean. Lint at baseline.
+
+**Controller status: 3 of 5 done.** Sequential sync ✓, verticals ✓, selection ✓.
+Remaining: modal routing (five modals, four distinct `onOpen` signatures) and
+the `runPipeline` injection into `useAutoSync`. Then S3b mounts the panels.
+
+### Verification note — the python gap from the core.js fix
+
+The live-bug-#7 fix touched `core.js` and that wave was verified with the JS
+suite only. Closed now: the **9 python tests that read core.js pass, 238 cases**.
+Recording it because the rule that keeps catching things is to run the tests
+that read the FILES a change touched, not the tests that sound related.
