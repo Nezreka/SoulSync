@@ -23,7 +23,7 @@
  * socket and always-on poll can both reach the block and toast twice.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { DiscoveryPayload, SourcePlaylistState } from './-sync.state';
@@ -424,20 +424,45 @@ export function useSourceVertical(
     };
   }, []);
 
-  return {
-    states,
-    seed,
-    hydrate,
-    patchState: patch,
-    dropState,
-    startDiscovery,
-    resumeDiscovery,
-    startSync,
-    resumeSync,
-    cancelSync,
-    closeModalReset,
-    resetDiscovery,
-  };
+  /**
+   * Memoised because the PAGE builds nine of these (-sync.verticals.ts) and
+   * hands each one down as a prop. A fresh object literal per render would
+   * give every tab a new `vertical` prop on every page re-render — and the
+   * page re-renders on each selection toggle, tab switch, sequential-sync
+   * progress step and log frame — re-running any consumer effect or callback
+   * keyed on it. Every member below is already stable (all useCallback), so
+   * the identity now changes only when `states` actually changes.
+   */
+  return useMemo(
+    () => ({
+      states,
+      seed,
+      hydrate,
+      patchState: patch,
+      dropState,
+      startDiscovery,
+      resumeDiscovery,
+      startSync,
+      resumeSync,
+      cancelSync,
+      closeModalReset,
+      resetDiscovery,
+    }),
+    [
+      states,
+      seed,
+      hydrate,
+      patch,
+      dropState,
+      startDiscovery,
+      resumeDiscovery,
+      startSync,
+      resumeSync,
+      cancelSync,
+      closeModalReset,
+      resetDiscovery,
+    ],
+  );
 }
 
 /**

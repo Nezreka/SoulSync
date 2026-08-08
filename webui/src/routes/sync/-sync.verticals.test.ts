@@ -4,7 +4,7 @@
  * silently empties two pages when missed must be provably reaching its source.
  */
 
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { SourceVerticalConfig } from './-sync.sources';
@@ -53,12 +53,29 @@ describe('the registry', () => {
   });
 
   it('keeps a stable vertical per id across re-renders', () => {
+    // The WHOLE vertical, not just its states. The page hands each one down as
+    // a prop, and it re-renders on every selection toggle, tab switch, sync
+    // progress step and 3s log frame — a fresh object literal each time would
+    // hand every tab a new `vertical` and re-run any effect keyed on it.
     const { result, rerender } = renderHook(() => useSyncVerticals());
-    const before = result.current.mirrored.states;
+    const before = result.current.mirrored;
     rerender();
-    // Identity of the STATE is what downstream memoisation keys off; a fresh
-    // object every render would re-run every consumer's effects.
-    expect(result.current.mirrored.states).toBe(before);
+    rerender();
+    expect(result.current.mirrored).toBe(before);
+    expect(result.current.mirrored.states).toBe(before.states);
+  });
+
+  it('but DOES hand out a new object once its state actually changes', () => {
+    // The memo must not be so sticky that consumers miss real updates.
+    const { result } = renderHook(() => useSyncVerticals());
+    const before = result.current.tidal;
+    act(() => {
+      result.current.tidal.seed('p1');
+    });
+    expect(result.current.tidal).not.toBe(before);
+    expect(Object.keys(result.current.tidal.states)).toEqual(['p1']);
+    // ...and its neighbours are untouched.
+    expect(result.current.qobuz.states).toEqual({});
   });
 });
 

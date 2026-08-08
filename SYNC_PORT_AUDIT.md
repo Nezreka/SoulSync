@@ -5616,3 +5616,33 @@ The live-bug-#7 fix touched `core.js` and that wave was verified with the JS
 suite only. Closed now: the **9 python tests that read core.js pass, 238 cases**.
 Recording it because the rule that keeps catching things is to run the tests
 that read the FILES a change touched, not the tests that sound related.
+
+### VERIFY PASS — the vertical was a new object on every render
+
+Found by re-reading the registry rather than by a test. `useSourceVertical`
+returned a fresh object literal every render — `useMemo` appeared ZERO times in
+the file — so `verticals.tidal` had a new identity on each pass.
+
+That was survivable while each tab was mounted on its own. It stops being
+survivable now the PAGE builds nine of them and hands each down as a prop: the
+sync page re-renders on every selection toggle, every tab switch, every
+sequential-sync progress step and every 3s log frame, and each one would have
+handed all fifteen tabs a new `vertical`, re-running any consumer effect or
+callback keyed on it.
+
+Fixed at the source rather than papered over in the registry, so every existing
+consumer benefits. All eleven returned members were already `useCallback`, so
+the memo's deps are exact and the identity now changes only when `states`
+genuinely changes.
+
+Two tests, both discriminating: the whole vertical (not just `.states`) is
+stable across repeated re-renders, and it DOES hand out a new object once a
+seed lands — a memo too sticky to update would be the opposite failure. 2/2
+mutants: memo removed, and the memo never invalidating.
+
+Checked and NOT a problem, while looking: the registry passes `perSource?.[id]
+?? {}`, a fresh `{}` per source per render. Harmless — `useSourceVertical`
+stores options in a ref (129-130) and no effect depends on them.
+
+Suite 6942 passing. Build clean. Lint at baseline. The five tab test files that
+consume a vertical all still pass.
