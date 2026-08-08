@@ -214,6 +214,37 @@ describe('switching tabs (3702-3715)', () => {
   });
 });
 
+describe('the tab-change signal', () => {
+  it('fires on every switch, with the tab already updated', () => {
+    const onTabChange = vi.fn();
+    const { container } = renderShell({ onTabChange });
+    fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
+    expect(onTabChange).toHaveBeenCalledTimes(1);
+    fireEvent.click(container.querySelector('[data-tab="qobuz"]') as HTMLElement);
+    expect(onTabChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('fires for a click on the tab that is ALREADY active', () => {
+    // The vanilla handler runs its whole body on any tab click, including the
+    // active one, and its unconditional sidebar re-hide is what the page keys
+    // off. Filtering same-tab clicks would change that behaviour.
+    const onTabChange = vi.fn();
+    const { container } = renderShell({ onTabChange });
+    const server = container.querySelector('[data-tab="server"]') as HTMLElement;
+    fireEvent.click(server);
+    fireEvent.click(server);
+    expect(onTabChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('is optional — the shell works without it', () => {
+    const { container } = renderShell();
+    expect(() => {
+      fireEvent.click(container.querySelector('[data-tab="tidal"]') as HTMLElement);
+    }).not.toThrow();
+    expect(container.querySelector('#tidal-tab-content')?.className).toContain('active');
+  });
+});
+
 describe('panel mounting — the one-shot load flags (3724-3803)', () => {
   const panels = {
     server: <div data-testid="p-server">server</div>,

@@ -47,6 +47,13 @@ export interface SyncShellProps {
    * and the two classes are transcriptions of those inline styles.
    */
   sidebarVisible?: boolean;
+  /**
+   * Fired on every tab switch, including a click on the tab already active —
+   * the vanilla's handler runs its whole body regardless (sync-services.js
+   * 3732), and its unconditional sidebar re-hide is what the page keys off.
+   * Filtering out same-tab clicks here would change that.
+   */
+  onTabChange?: () => void;
 }
 
 /** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
@@ -68,7 +75,13 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
   window.openDownloadOriginsModal?.('playlist');
 }
 
-export function SyncShell({ panels, onAutoSync, sidebar, sidebarVisible }: SyncShellProps) {
+export function SyncShell({
+  panels,
+  onAutoSync,
+  sidebar,
+  sidebarVisible,
+  onTabChange,
+}: SyncShellProps) {
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   // Which panels have ever been opened. See the header note: the vanilla's
   // one-shot load flags mean a tab keeps what it loaded after you leave it.
@@ -76,6 +89,7 @@ export function SyncShell({ panels, onAutoSync, sidebar, sidebarVisible }: SyncS
 
   const open = (next: SyncTabId) => {
     const id = normalizeSyncTab(next);
+    onTabChange?.();
     setTab(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };

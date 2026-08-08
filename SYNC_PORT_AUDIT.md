@@ -6054,3 +6054,21 @@ Suite 6972 passing. Build clean. Lint at baseline.
 `SyncShell`, pass `onTabChange` through it (a new shell prop), render
 `SyncModals` and the sidebar. Then S4: the route flip, the markup deletion in
 the SAME commit, and the vanilla severs.
+
+### The shell's tab-change signal
+
+`onTabChange` on `SyncShell`, the one shell change the page needs. Optional, so
+the shell still stands alone in its own tests.
+
+**It fires on EVERY tab click, including one on the tab already active.** The
+vanilla's handler runs its whole body regardless (sync-services.js 3732) and
+its unconditional sidebar re-hide is exactly what the page keys off — filtering
+same-tab clicks would look like an obvious optimisation and would quietly
+change behaviour. A mutant adding that filter is killed by a test that clicks
+the active tab twice.
+
+2/2 mutants. Suite 6975 passing. Build clean. Lint at baseline.
+
+**Remaining for the page:** the panel JSX itself — fifteen entries into
+`panels`, plus `SyncModals` and `SyncSidebar` around it. Every prop it needs is
+now typed and reachable; the risky wiring is done and tested separately.
