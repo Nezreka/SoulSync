@@ -1,6 +1,6 @@
 /**
  * Drives the sequential-sync machine against the download engine —
- * `SequentialSyncManager.syncNext/waitForSyncCompletion` (core.js 1254-1297)
+ * `SequentialSyncManager.syncNext/waitForSyncCompletion` (core.js 1254-1305)
  * and `startSequentialSync` (downloads.js 4059-4099).
  *
  * THE ENGINE STAYS VANILLA. `startPlaylistSync`, the `activeSyncPollers` map
@@ -10,12 +10,19 @@
  * silently resolves to undefined is a dead button, and the type system can
  * make that impossible instead.
  *
- * The loop is an async runner held in a ref, not an effect. Effects re-run on
- * dependency changes; a sync run must survive every re-render the page makes
- * while it is going.
+ * THE STATE IS MODULE-SCOPED, not component state, because
+ * `sequentialSyncManager` is a module singleton (core.js 409) and a run
+ * OUTLIVES THE PAGE. Leaving /sync mid-sync and coming back finds the vanilla
+ * still going. Per-component state would come back reading idle while the
+ * engine was still working, and the runner would be left holding refs to an
+ * unmounted tree. The store below is the singleton's counterpart; the hook is
+ * just a subscription to it.
+ *
+ * The loop is a plain async function, not an effect. Effects re-run on
+ * dependency changes and die with the component; this run has to survive both.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 import type { SyncActionsState } from './-sync.sidebar';
 
@@ -51,6 +58,146 @@ export interface SequentialSyncEngine {
   toast: (message: string, kind: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
+/* ── The singleton's counterpart ──────────────────────────────────────────── */
+
+let storeState: SequentialSyncState = SEQUENTIAL_IDLE;
+const listeners = new Set<() => void>();
+
+/**
+ * Raised by cancel, checked at every await boundary in the runner.
+ *
+ * THE VANILLA NEEDED A GUARD HERE TOO, and lacked one until this port found
+ * it: `cancel()` reset the manager while the `setTimeout(syncNext, 1000)` from
+ * the previous iteration was still queued, so the callback read `0 >= 0`,
+ * called `complete()`, and announced a success for zero playlists — with a
+ * duration measured against a `startTime` cancel had already nulled. Fixed in
+ * core.js; here it simply cannot happen, because the runner stops at the flag.
+ */
+let cancelled = false;
+let running = false;
+
+function emit(next: SequentialSyncState) {
+  storeState = next;
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** Stable identity while unchanged — useSyncExternalStore requires it. */
+function getSnapshot() {
+  return storeState;
+}
+
+/**
+ * TEST ONLY. Module state persists across renders by design, which also means
+ * it persists across tests; each one starts from a clean run.
+ */
+export function resetSequentialSyncStore(): void {
+  storeState = SEQUENTIAL_IDLE;
+  cancelled = false;
+  running = false;
+  listeners.clear();
+}
+
+export interface SequentialSyncDeps {
+  engine: SequentialSyncEngine;
+  nameFor: (playlistId: string) => string | null | undefined;
+  now: () => number;
+  wait: (ms: number) => Promise<void>;
+}
+
+function finish(deps: SequentialSyncDeps, announce: () => void) {
+  emit(SEQUENTIAL_IDLE);
+  running = false;
+  deps.engine.setSelectionDisabled(false);
+  announce();
+  deps.engine.refreshButtons();
+}
+
+async function runQueue(deps: SequentialSyncDeps, queue: readonly string[], startedAt: number) {
+  const { engine, nameFor, now, wait } = deps;
+
+  for (let index = 0; index < queue.length; index += 1) {
+    if (cancelled) break;
+    const playlistId = queue[index];
+    if (storeState.running) emit({ ...storeState, currentIndex: index });
+
+    try {
+      await engine.startPlaylistSync(playlistId);
+      // waitForSyncCompletion (1283-1297): the poller vanishing IS the
+      // completion signal. Re-checked against the cancel flag so a cancel
+      // during a long sync does not sit here until the engine finishes.
+      while (engine.isSyncing(playlistId) && !cancelled) {
+        await wait(1000);
+      }
+    } catch (error) {
+      // 1273-1276: a failure is announced and the run CONTINUES to the next
+      // playlist. One bad playlist must not strand the queue.
+      engine.toast(
+        sequentialFailureToast(
+          nameFor(playlistId),
+          playlistId,
+          error instanceof Error ? error.message : String(error),
+        ),
+        'error',
+      );
+    }
+
+    if (cancelled) break;
+    // 1280 — the deliberate gap between syncs.
+    await wait(1000);
+  }
+
+  if (cancelled) {
+    finish(deps, () => {
+      engine.toast(SEQUENTIAL_CANCELLED, 'info');
+    });
+    return;
+  }
+  const duration = sequentialDurationSeconds({ ...SEQUENTIAL_IDLE, startedAt }, now());
+  finish(deps, () => {
+    engine.toast(sequentialCompleteToast(queue.length, duration), 'success');
+  });
+}
+
+/**
+ * The Start Sync button's ONE action, matching the vanilla toggle: starts when
+ * idle, cancels when running. Module-level so a cancel works from any mount.
+ */
+export function toggleSequentialSync(
+  deps: SequentialSyncDeps,
+  order: readonly string[],
+  selected: ReadonlySet<string>,
+): void {
+  if (running) {
+    // The cancel half. The runner sees the flag at its next boundary and
+    // announces; doing it here too would toast twice.
+    cancelled = true;
+    return;
+  }
+
+  const queue = syncOrderedSelection(order, selected);
+  if (queue.length === 0) {
+    // 4073-4076 — refuses, with a toast, before touching the manager.
+    deps.engine.toast(SEQUENTIAL_NONE_SELECTED, 'error');
+    return;
+  }
+
+  const startedAt = deps.now();
+  const next = sequentialStart(storeState, queue, startedAt);
+  if (next === storeState) return; // refused; nothing to do
+  cancelled = false;
+  running = true;
+  emit(next);
+  deps.engine.setSelectionDisabled(true);
+  void runQueue(deps, queue, startedAt);
+}
+
 export interface UseSequentialSyncOptions {
   engine: SequentialSyncEngine;
   /**
@@ -80,11 +227,7 @@ export interface UseSequentialSync {
   actions: SyncActionsState;
   /** Whether playlist selection is frozen for the duration of the run. */
   locked: boolean;
-  /**
-   * The Start Sync button's ONE handler, matching the vanilla toggle: starts
-   * when idle, cancels when running. `order` is the ids as the page lists
-   * them — see syncOrderedSelection for why that is a parameter.
-   */
+  /** Start when idle, cancel when running — the vanilla's one toggle. */
   toggle: (order: readonly string[], selected: ReadonlySet<string>) => void;
 }
 
@@ -95,112 +238,15 @@ export function useSequentialSync({
   now = Date.now,
   wait = realWait,
 }: UseSequentialSyncOptions): UseSequentialSync {
-  const [state, setState] = useState<SequentialSyncState>(SEQUENTIAL_IDLE);
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  /**
-   * Raised by cancel, checked at every await boundary in the runner.
-   *
-   * THE VANILLA HAS NO SUCH FLAG, and that is a live bug. `cancel()` resets
-   * the manager but the pending `setTimeout(() => this.syncNext(), 1000)` from
-   * the previous iteration still fires. It then finds `currentIndex (0) >=
-   * queue.length (0)` and calls `complete()`, which announces a SUCCESS toast
-   * for zero playlists — and computes its duration from a `startTime` cancel
-   * has already set to null, so `Date.now() - null` yields the epoch in
-   * seconds. Cancelling a run pops a green "Sequential sync completed for 0
-   * playlists in 1754584800.0s" a second later. Recorded in the dossier; the
-   * port simply cannot reproduce it, because the runner stops at the flag.
-   */
-  const cancelledRef = useRef(false);
-  const runningRef = useRef(false);
-
-  const finish = useCallback(
-    (announce: () => void) => {
-      setState(SEQUENTIAL_IDLE);
-      stateRef.current = SEQUENTIAL_IDLE;
-      runningRef.current = false;
-      engine.setSelectionDisabled(false);
-      announce();
-      engine.refreshButtons();
-    },
-    [engine],
-  );
-
-  const run = useCallback(
-    async (queue: readonly string[], startedAt: number) => {
-      for (let index = 0; index < queue.length; index += 1) {
-        if (cancelledRef.current) break;
-        const playlistId = queue[index];
-        setState((prev) => (prev.running ? { ...prev, currentIndex: index } : prev));
-
-        try {
-          await engine.startPlaylistSync(playlistId);
-          // waitForSyncCompletion (1283-1297): the poller vanishing IS the
-          // completion signal. Re-checked against the cancel flag so a cancel
-          // during a long sync does not sit here until the engine finishes.
-          while (engine.isSyncing(playlistId) && !cancelledRef.current) {
-            await wait(1000);
-          }
-        } catch (error) {
-          // 1273-1276: a failure is announced and the run CONTINUES to the
-          // next playlist. One bad playlist must not strand the queue.
-          engine.toast(
-            sequentialFailureToast(
-              nameFor(playlistId),
-              playlistId,
-              error instanceof Error ? error.message : String(error),
-            ),
-            'error',
-          );
-        }
-
-        if (cancelledRef.current) break;
-        // 1280 — the deliberate gap between syncs.
-        await wait(1000);
-      }
-
-      if (cancelledRef.current) {
-        finish(() => {
-          engine.toast(SEQUENTIAL_CANCELLED, 'info');
-        });
-        return;
-      }
-      const duration = sequentialDurationSeconds({ ...SEQUENTIAL_IDLE, startedAt }, now());
-      finish(() => {
-        engine.toast(sequentialCompleteToast(queue.length, duration), 'success');
-      });
-    },
-    [engine, nameFor, now, wait, finish],
-  );
+  // Subscribing rather than owning: a run started by an earlier mount is still
+  // the same run, and this is how a remount picks it back up mid-flight.
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const toggle = useCallback(
     (order: readonly string[], selected: ReadonlySet<string>) => {
-      if (runningRef.current) {
-        // The cancel half. The runner sees the flag at its next boundary and
-        // announces; doing it here too would toast twice.
-        cancelledRef.current = true;
-        return;
-      }
-
-      const queue = syncOrderedSelection(order, selected);
-      if (queue.length === 0) {
-        // 4073-4076 — refuses, with a toast, before touching the manager.
-        engine.toast(SEQUENTIAL_NONE_SELECTED, 'error');
-        return;
-      }
-
-      const startedAt = now();
-      const next = sequentialStart(stateRef.current, queue, startedAt);
-      if (next === stateRef.current) return; // refused; nothing to do
-      cancelledRef.current = false;
-      runningRef.current = true;
-      setState(next);
-      stateRef.current = next;
-      engine.setSelectionDisabled(true);
-      void run(queue, startedAt);
+      toggleSequentialSync({ engine, nameFor, now, wait }, order, selected);
     },
-    [engine, now, run],
+    [engine, nameFor, now, wait],
   );
 
   return {

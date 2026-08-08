@@ -8,7 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SequentialSyncEngine } from './-sync.use-sequential';
 
-import { useSequentialSync } from './-sync.use-sequential';
+import {
+  resetSequentialSyncStore,
+  toggleSequentialSync,
+  useSequentialSync,
+} from './-sync.use-sequential';
 
 /**
  * A fake download engine. `startPlaylistSync` marks the playlist as syncing;
@@ -40,6 +44,9 @@ function fakeEngine(over: Partial<SequentialSyncEngine> = {}) {
  * controls the loop precisely and exercises the actual poll interval.
  */
 beforeEach(() => {
+  // The store is module-scoped so a run survives navigation, which also means
+  // it survives the previous test. Every case starts from a clean run.
+  resetSequentialSyncStore();
   vi.useFakeTimers();
 });
 
@@ -309,6 +316,161 @@ describe('cancelling', () => {
     });
     expect(result.current.state.running).toBe(true);
     expect(result.current.state.queue).toEqual(['b']);
+  });
+});
+
+describe('surviving navigation', () => {
+  /**
+   * `sequentialSyncManager` is a module singleton (core.js 409), so a run
+   * outlives the page — leave /sync mid-sync and come back and the vanilla is
+   * still going. Component state would come back reading idle while the engine
+   * was still working, which is the whole reason the store is module-scoped.
+   */
+  it('keeps running when the page unmounts', async () => {
+    const { fake, result, unmount } = mount();
+    act(() => {
+      result.current.toggle(['a', 'b'], new Set(['a', 'b']));
+    });
+    unmount();
+
+    fake.settle('a');
+    await tick();
+    // The engine kept being driven with nothing mounted.
+    expect(fake.started).toEqual(['a', 'b']);
+  });
+
+  it('a remount picks the run back up mid-flight', async () => {
+    const fake = fakeEngine();
+    const props = {
+      engine: fake.engine,
+      selectedCount: 2,
+      nameFor: (id: string) => ({ a: 'Alpha', b: 'Beta' })[id],
+      now: () => 1000,
+    } as Parameters<typeof useSequentialSync>[0];
+
+    const first = renderHook(() => useSequentialSync(props));
+    act(() => {
+      first.result.current.toggle(['a', 'b'], new Set(['a', 'b']));
+    });
+    first.unmount();
+
+    const second = renderHook(() => useSequentialSync(props));
+    expect(second.result.current.state.running).toBe(true);
+    expect(second.result.current.state.queue).toEqual(['a', 'b']);
+    expect(second.result.current.locked).toBe(true);
+    expect(second.result.current.actions.currentName).toBe('Alpha');
+  });
+
+  it('the new mount can cancel the run the old one started', async () => {
+    const fake = fakeEngine();
+    const props = {
+      engine: fake.engine,
+      selectedCount: 2,
+      nameFor: () => 'Alpha',
+      now: () => 1000,
+    } as Parameters<typeof useSequentialSync>[0];
+
+    const first = renderHook(() => useSequentialSync(props));
+    act(() => {
+      first.result.current.toggle(['a', 'b'], new Set(['a', 'b']));
+    });
+    first.unmount();
+
+    const second = renderHook(() => useSequentialSync(props));
+    act(() => {
+      second.result.current.toggle(['a', 'b'], new Set(['a', 'b']));
+    });
+    await tick();
+
+    expect(fake.engine.toast).toHaveBeenCalledWith('Sequential sync cancelled', 'info');
+    expect(second.result.current.state.running).toBe(false);
+    expect(fake.started).toEqual(['a']);
+  });
+
+  it('the remount SEES later progress, not a frozen snapshot', async () => {
+    const fake = fakeEngine();
+    const props = {
+      engine: fake.engine,
+      selectedCount: 2,
+      nameFor: (id: string) => ({ a: 'Alpha', b: 'Beta' })[id],
+      now: () => 1000,
+    } as Parameters<typeof useSequentialSync>[0];
+
+    const first = renderHook(() => useSequentialSync(props));
+    act(() => {
+      first.result.current.toggle(['a', 'b'], new Set(['a', 'b']));
+    });
+    first.unmount();
+
+    const second = renderHook(() => useSequentialSync(props));
+    expect(second.result.current.actions.currentName).toBe('Alpha');
+
+    fake.settle('a');
+    await tick();
+    // A snapshot read once at mount would still say Alpha.
+    expect(second.result.current.actions.currentName).toBe('Beta');
+  });
+});
+
+describe('driving it with no component at all', () => {
+  /**
+   * `toggleSequentialSync` is the module-level entry the hook wraps. It works
+   * with nothing mounted, which is the whole point of the store: the vanilla's
+   * manager is a singleton, and a run is not owned by any page.
+   */
+  function deps(fake: ReturnType<typeof fakeEngine>) {
+    return {
+      engine: fake.engine,
+      nameFor: (id: string) => ({ a: 'Alpha', b: 'Beta' })[id],
+      now: () => 1000,
+      wait: (ms: number) =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, ms);
+        }),
+    };
+  }
+
+  it('runs a queue without React involved', async () => {
+    const fake = fakeEngine();
+    toggleSequentialSync(deps(fake), ['a', 'b'], new Set(['a', 'b']));
+    expect(fake.started).toEqual(['a']);
+    expect(fake.engine.setSelectionDisabled).toHaveBeenCalledWith(true);
+
+    fake.settle('a');
+    await tick();
+    expect(fake.started).toEqual(['a', 'b']);
+  });
+
+  it('refuses an empty selection the same way', () => {
+    const fake = fakeEngine();
+    toggleSequentialSync(deps(fake), ['a'], new Set());
+    expect(fake.engine.toast).toHaveBeenCalledWith('No playlists selected for sync', 'error');
+    expect(fake.started).toEqual([]);
+  });
+
+  it('cancels on a second call, like the button does', async () => {
+    const fake = fakeEngine();
+    toggleSequentialSync(deps(fake), ['a', 'b'], new Set(['a', 'b']));
+    toggleSequentialSync(deps(fake), ['a', 'b'], new Set(['a', 'b']));
+    await tick();
+    expect(fake.engine.toast).toHaveBeenCalledWith('Sequential sync cancelled', 'info');
+    expect(fake.started).toEqual(['a']);
+  });
+
+  it('and a mounted hook SEES that run', () => {
+    const fake = fakeEngine();
+    toggleSequentialSync(deps(fake), ['a', 'b'], new Set(['a', 'b']));
+
+    const { result } = renderHook(() =>
+      useSequentialSync({
+        engine: fake.engine,
+        selectedCount: 2,
+        nameFor: (id: string) => ({ a: 'Alpha', b: 'Beta' })[id],
+        now: () => 1000,
+      }),
+    );
+    expect(result.current.state.running).toBe(true);
+    expect(result.current.actions.currentName).toBe('Alpha');
   });
 });
 

@@ -1252,6 +1252,15 @@ class SequentialSyncManager {
     }
 
     async syncNext() {
+        // A cancel between iterations zeroes the queue AND clears isRunning,
+        // but the `setTimeout(() => this.syncNext(), 1000)` queued by the
+        // previous iteration still fires. Without this guard it then reads
+        // `0 >= 0`, calls complete(), and announces a SUCCESS toast for zero
+        // playlists — with a duration measured against a startTime cancel has
+        // already set to null, so `Date.now() - null` renders the epoch in
+        // seconds ("completed for 0 playlists in 1754584800.0s").
+        if (!this.isRunning) return;
+
         if (this.currentIndex >= this.queue.length) {
             this.complete();
             return;

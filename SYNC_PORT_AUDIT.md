@@ -5470,3 +5470,60 @@ sitting: either the state is hoisted into a module-scoped store (closest to the
 vanilla), or the controller lives above the route so it is not unmounted. That
 is an S3b decision and it needs the page structure to exist first. Recorded so
 the flip does not ship with a sidebar that forgets a running sync.
+
+### LIVE BUG #7 FIXED — cancel no longer announces a bogus completion
+
+`syncNext` now bails when the run is no longer running:
+
+```js
+async syncNext() {
+    if (!this.isRunning) return;
+    if (this.currentIndex >= this.queue.length) { this.complete(); return; }
+```
+
+The guard goes FIRST, and that ordering is the whole fix — placed after the
+completion branch, the bad `complete()` has already fired. `cancel()` zeroes
+the queue and nulls `startTime` while the previous iteration's
+`setTimeout(syncNext, 1000)` is still pending; the callback then read `0 >= 0`,
+called `complete()`, and popped a green *"Sequential sync completed for 0
+playlists in 1754584800.0s"* — the epoch, because `Date.now() - null` is
+`Date.now()`.
+
+Five mutants, all killed: guard removed; guard moved after the completion
+branch; guard inverted; cancel no longer clearing `isRunning`; cancel losing
+its own not-running guard. Source-level regression tests sit with the other
+vanilla invariants.
+
+### THE RUN NOW SURVIVES NAVIGATION — the store is module-scoped
+
+Previously flagged as open for S3b; it was not actually blocked. The fix does
+not depend on where the controller sits, so it lands here.
+
+`sequentialSyncManager` is a module singleton (core.js 409): leave /sync
+mid-run and come back and the vanilla is still going. The hook's state was
+per-mount, so React would have come back reading idle while the engine was
+still syncing, with the runner holding refs to an unmounted tree.
+
+The state now lives in a module-scoped store the hook subscribes to via
+`useSyncExternalStore`, and the runner and the toggle are module-level
+functions. Four tests pin the behaviour: a run keeps driving the engine after
+unmount; a remount reads it as running; the new mount can cancel the run the
+old one started; and the remount sees LATER progress rather than a snapshot
+frozen at mount.
+
+`toggleSequentialSync` is exported as the module-level entry — a run is not
+owned by any page, and four more tests drive a full queue, a refusal and a
+cancel with no component mounted at all.
+
+**Mutation: 14/14** after re-anchoring, including two new ones for the store
+itself (reading `storeState` directly instead of subscribing; `emit` no longer
+notifying listeners).
+
+**The export-coverage gate fired for the THIRTEENTH consecutive slice** —
+`toggleSequentialSync` was exported and named by no test. Closed by testing it
+rather than un-exporting it, since driving a run without React is exactly the
+property the store exists to provide.
+
+Suite 6924 passing, clean run. Build clean. Lint at the 684 baseline —
+a count, not a "0 errors", because an unused variable in a test had already
+slipped past once this session as 685.
