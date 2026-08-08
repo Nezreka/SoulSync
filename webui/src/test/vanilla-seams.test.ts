@@ -31,13 +31,21 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     file: 'static/shared-helpers.js',
     symbol: 'playlistQualityProfileSelectHtml',
     pattern: /function playlistQualityProfileSelectHtml\b/,
-    usedBy: "the Auto-Sync scheduled card's quality-profile select (routes/sync/-ui/autosync-shared.tsx)",
+    usedBy:
+      "the Auto-Sync scheduled card's quality-profile select (routes/sync/-ui/autosync-shared.tsx)",
   },
   {
     file: 'static/shared-helpers.js',
     symbol: 'hydratePlaylistQualityProfileSelects',
     pattern: /function hydratePlaylistQualityProfileSelects\b/,
-    usedBy: "the same card — the select renders EMPTY without it, silently",
+    usedBy: 'the same card — the select renders EMPTY without it, silently',
+  },
+  {
+    file: 'static/core.js',
+    symbol: 'isPlaylistSyncing',
+    pattern: /window\.isPlaylistSyncing = function isPlaylistSyncing\b/,
+    usedBy:
+      "the sequential-sync runner's completion watch (routes/sync/-sync.use-sequential.ts) — activeSyncPollers is a top-level `let`, so it is NOT on window and this accessor is the only way to read it",
   },
   {
     file: 'static/pages-extra.js',

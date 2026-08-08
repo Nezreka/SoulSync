@@ -33,6 +33,23 @@ let wishlistPageState = { isInitialized: false };
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+
+/**
+ * Whether the download engine still holds a sync poller for this playlist.
+ *
+ * A SEAM for the React sync page. `activeSyncPollers` is a top-level `let`,
+ * which — unlike a `function` declaration — creates NO property on `window`,
+ * so React cannot read it however it is spelled. The sequential-sync runner
+ * needs exactly one bit from it: is this playlist still syncing. It watches
+ * the poller's disappearance rather than any completion event, because
+ * `stopSyncPolling` is the single place every terminal path funnels through.
+ *
+ * A function rather than an alias of the object: the binding stays private,
+ * and the closure reads it live even if it were ever reassigned.
+ */
+window.isPlaylistSyncing = function isPlaylistSyncing(playlistId) {
+    return Boolean(activeSyncPollers[playlistId]);
+};
 // Phase 5: WebSocket sync/discovery/scan state
 let _syncProgressCallbacks = {};
 let _discoveryProgressCallbacks = {};

@@ -5839,3 +5839,37 @@ the earlier wording overstated it.
 **The rule, stated accurately for the page build:** a prop function in a
 dependency array is only dangerous when the effect can change state. Listener
 registration is churn; anything that calls `setState` is a loop.
+
+### S3b-ii BLOCKER, found before writing a line of the page
+
+The page has to hand `useSequentialSync` an engine with five members. Four are
+reachable — `startPlaylistSync`, `disablePlaylistSelection` and
+`updateRefreshButtonState` are `function` declarations in downloads.js (so
+implicitly on `window`), and `showToast` is assigned to `window` explicitly.
+
+**The fifth is not.** `isSyncing` reads `activeSyncPollers`, which is
+`let activeSyncPollers = {}` at core.js top level — and a top-level `let`,
+unlike a `function` declaration, creates NO property on `window`. React cannot
+read it however it is spelled. Every mount of the page would have handed the
+runner an engine whose completion watch could never see a sync finish: the
+first playlist would start, the poll would never resolve, and the queue would
+sit there forever with the sidebar reading "Syncing 1/N".
+
+**Fixed with an explicit accessor, not by leaking the object.**
+`window.isPlaylistSyncing(playlistId)` in core.js, beside the declaration. A
+function rather than an alias keeps the binding private and reads it live; the
+runner needs exactly one bit, not the map. Verified the binding is only ever
+mutated in place, never reassigned, so an alias would ALSO have worked — the
+function is the better shape regardless.
+
+Row added to `vanilla-seams.test.ts`, which is the file that exists because
+these fail silently: every React→vanilla call is optional-chained, so deleting
+the definition produces no error, no toast and no failing test. 3/3 mutants —
+seam deleted, renamed, and demoted to a local so it is no longer on `window`.
+
+The 238 python tests that read core.js pass. Suite 6957. Build clean. Lint at
+baseline.
+
+**This is why the engine is a REQUIRED injected object.** Had the runner reached
+for `window.activeSyncPollers` itself, the failure would have been a silent
+`undefined` at runtime on a page nobody had flipped yet.
