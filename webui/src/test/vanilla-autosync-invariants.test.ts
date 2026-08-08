@@ -21,10 +21,7 @@ import { describe, expect, it } from 'vitest';
  * behavioural tests. DELETE THIS FILE with auto-sync.js at the flip; a failure
  * here after that point means the file is gone, not that the invariant broke.
  */
-const SOURCE = readFileSync(
-  resolve(__dirname, '../../static/auto-sync.js'),
-  'utf8',
-);
+const SOURCE = readFileSync(resolve(__dirname, '../../static/auto-sync.js'), 'utf8');
 
 /** Everything between `async function NAME(` and the next column-0 brace. */
 function functionBody(name: string): string {
@@ -44,10 +41,7 @@ describe('the sync page binds its listeners exactly once', () => {
    * toggle. After an even number of visits, one click started the sync and
    * immediately cancelled it.
    */
-  const SYNC_SERVICES = readFileSync(
-    resolve(__dirname, '../../static/sync-services.js'),
-    'utf8',
-  );
+  const SYNC_SERVICES = readFileSync(resolve(__dirname, '../../static/sync-services.js'), 'utf8');
 
   function initBody(): string {
     const start = SYNC_SERVICES.indexOf('function initializeSyncPage() {');
@@ -75,15 +69,42 @@ describe('the sync page binds its listeners exactly once', () => {
     const body = initBody();
     const guard = body.indexOf('if (_syncPageListenersBound) return;');
     expect(guard).toBeGreaterThan(-1);
-    // Both are idempotent refreshes, not bindings, and must run every visit.
+    // All three are idempotent refreshes, not bindings, and must run every
+    // visit.
     // Each is asserted PRESENT before its position is compared: indexOf gives
     // -1 for a deleted call, and -1 is less than the guard index, so a
     // position-only check passes when the call is gone. Caught by mutation.
-    for (const call of ['ensureBeatportContentLoaded()', 'updateBeatportClearButtonState()']) {
+    for (const call of [
+      'ensureBeatportContentLoaded()',
+      'updateBeatportClearButtonState()',
+      'initializeLiveLogViewer()',
+    ]) {
       const at = body.indexOf(call);
       expect(at, `${call} should still be called`).toBeGreaterThan(-1);
       expect(at, `${call} should run on every visit, not once`).toBeLessThan(guard);
     }
+  });
+
+  it('restarts log polling on every visit, because navigation always stops it', () => {
+    // This one is load-bearing for a cross-file reason, so it gets its own
+    // test. `loadPageData` calls `stopLogPolling()` unconditionally at the top,
+    // for EVERY page — including sync itself — and `initializeLiveLogViewer` is
+    // the only thing that ever calls `startLogPolling`. Leaving it below the
+    // binding guard meant polling stopped on the first navigation and never
+    // came back. Only visible with the socket down: `tool:logs` writes the same
+    // textarea via `updateLogsFromData`, and the HTTP poll is its twin.
+    const INIT = readFileSync(resolve(__dirname, '../../static/init.js'), 'utf8');
+    const loadPageData = INIT.slice(
+      INIT.indexOf('async function loadPageData(pageId) {'),
+      INIT.indexOf("case 'sync':"),
+    );
+    expect(loadPageData, 'loadPageData should still exist ahead of its sync case').not.toBe('');
+    expect(loadPageData).toContain('stopLogPolling();');
+
+    // One call site, and it is the hoisted one — a second copy left at the
+    // bottom of the bindings would make this test pass while the bug returned.
+    const calls = SYNC_SERVICES.match(/^\s*initializeLiveLogViewer\(\);$/gm) || [];
+    expect(calls).toHaveLength(1);
   });
 
   it('declares the flag at module scope, not inside the function', () => {
@@ -158,8 +179,9 @@ describe('auto-sync save paths enforce one schedule per playlist', () => {
     const helper = SOURCE.match(/async function dropOpposingAutoSyncSchedule\(/g) || [];
     expect(helper).toHaveLength(1);
     const inlineDeletes =
-      SOURCE.match(/const existing(Weekly|Hourly) = _autoSyncScheduleState\.\w+\?\.\[playlistId\];\s*\n\s*if \(existing/g) ||
-      [];
+      SOURCE.match(
+        /const existing(Weekly|Hourly) = _autoSyncScheduleState\.\w+\?\.\[playlistId\];\s*\n\s*if \(existing/g,
+      ) || [];
     expect(inlineDeletes).toHaveLength(0);
   });
 

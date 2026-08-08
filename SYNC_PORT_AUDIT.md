@@ -4953,3 +4953,105 @@ Full suite 6803 tests. Build clean. Lint clean. All 35 emitted classes resolve.
 
 **Next:** S2, the sidebar — two sections, the selection line, Start Sync, and
 the progress bar/text/log, shown only while a sync runs and only above 1300px.
+
+## S2 — the sidebar: the full writer map
+
+The read went wider than the P0 note suggested. Five elements, but **six writer
+sites across five files** — and the note had missed two of them.
+
+| element | written by |
+|---|---|
+| `#selection-info` | core.js 1340-1369 (`SequentialSyncManager.updateUI`), sync-spotify.js 1812-1830 (`updateSyncActionsUI`) |
+| `#start-sync-btn` | the same two (text + `disabled`); click bound at sync-services.js 3990-3993 |
+| `#sync-progress-bar` | **nothing** |
+| `#sync-progress-text` | **nothing** |
+| `#sync-log-area` | api-monitor.js 1075 / 1122 / 1131 |
+
+`helper.js` 798-811 is not a writer: it is the tour/help copy table, keyed by
+selector, alongside a tour step at 2394 and the page's anchor list at 3449.
+Those three are content, not behaviour, and they keep working as long as the
+selectors survive the flip — which is a reason to keep `.sync-sidebar`,
+`#start-sync-btn` and `#sync-log-area` as the port's real class and ids.
+
+### The two writers the P0 note missed
+
+`sync-services.js:3990` binds the Start Sync click (the P0 note had the handler
+but not the binding site), and `helper.js` turned out to be three references,
+not the two the note listed. Both found by grepping every id rather than
+trusting the note — the same reason the method says re-read the vanilla before
+each slice instead of porting from notes.
+
+### FINDING — the Sync Progress bar and text are DEAD UI
+
+`#sync-progress-bar` and `#sync-progress-text` have **no writer anywhere**.
+Confirmed by grepping both ids across `static/`, `index.html` and `src/`: the
+only hits are the markup itself and one CSS rule (`#sync-progress-text`, style.css
+19067). No indirect writer either — the `.progress-bar-fill` class IS used
+elsewhere, but every JS site that writes one targets a different, dynamically
+built id (`youtube-discovery-progress-*`, `modal-sync-bar-*`,
+`sync-history-bar-*`), never this one.
+
+So in a live sync the bar sits at `width: 0%` and the text reads
+"Ready to sync..." from page load to page close. The section header says "Sync
+Progress" and two of its three children have never moved.
+
+The one that DOES work is the log textarea, which is what makes this hard to
+notice: the section looks alive because logs scroll past underneath a frozen bar.
+
+**Not a bug to fix in the vanilla** — there is no "correct" value to restore,
+because nothing ever computed one. It is unbuilt UI, not broken UI. The port
+carries the decision instead: see the S2 build notes.
+
+### NOT a bug — the log area's socket gate (checked, because it looked like one)
+
+`loadLogs` opens with `if (socketConnected) return; // WebSocket handles this`
+(api-monitor.js 1115), and no socket handler in api-monitor.js writes the
+textarea. That reads exactly like a poller whose promised twin was never
+written — which would have meant the log area froze on
+"Loading activity feed..." for every user with a working socket.
+
+It is fine. The twin lives in **core.js 885**:
+`socket.on('tool:logs', (data) => updateLogsFromData(data))` — the same
+`updateLogsFromData` in api-monitor.js that the HTTP path calls, fed by
+`socketio.emit('tool:logs', ...)` (web_server.py 41653), which formats the
+activity feed identically to `/api/logs`. Socket up: push. Socket down: 3s
+poll. A correct poller-twin, just one whose halves live in different files.
+
+Recorded because the near-miss is the point: the finding was written up as a
+live bug and deleted after checking. `logs:live` (settings.js 3876) is a
+different stream — the settings page's log viewer, tailing app.log.
+
+### LIVE BUG — log polling stopped after the first visit (mine, from the
+Start-Sync fix)
+
+The `_syncPageListenersBound` guard from the previous fix returns early on
+every visit after the first. `initializeLiveLogViewer()` sat at the BOTTOM of
+`initializeSyncPage`, below that guard — and `loadPageData` calls
+`stopLogPolling()` unconditionally at the top of EVERY navigation (init.js
+3278), for every page including sync itself.
+
+So: boot starts polling; the first navigation stops it; `initializeSyncPage`
+returns early from then on and nothing ever calls `startLogPolling` again.
+The activity feed died permanently after one navigation.
+
+Masked in normal operation by the `tool:logs` socket twin above — with the
+socket up the poll is a no-op anyway. It only bites when the socket is down,
+which is precisely the case the poll exists to cover.
+
+**Fixed** by hoisting `initializeLiveLogViewer()` into the per-visit block
+above the guard, where the two Beatport refreshes already live. It is
+idempotent — `startLogPolling` returns early when already polling — so this
+restores exactly the pre-guard behaviour rather than approximating it.
+
+Four mutants, all killed: the call moved back below the guard; the call
+deleted; a duplicate copy left at the bottom (the half-applied fix); and
+`stopLogPolling` removed from `loadPageData`, which is the cross-file fact that
+makes the hoist necessary at all. The last one is why that assertion reads
+init.js rather than asserting position alone.
+
+**Method note.** This was found by reading the writer files for S2, not by a
+test — the previous slice's own mutation pass could not have caught it, because
+every mutant was scoped to the fix's own file. The lesson is the one the
+reachability rule already encodes: a guard that changes WHEN a function runs
+has to be checked against every caller of everything below it, not just the
+lines it sits next to.

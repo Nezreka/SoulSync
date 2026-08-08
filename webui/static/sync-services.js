@@ -3710,7 +3710,7 @@ async function startDeezerDownloadMissing(urlHash) {
 let _syncPageListenersBound = false;
 
 function initializeSyncPage() {
-    // Per-visit work, which must run on EVERY call: both are idempotent
+    // Per-visit work, which must run on EVERY call: all three are idempotent
     // refreshes rather than bindings.
     const _activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
     if (_activeBeatportTab) {
@@ -3719,6 +3719,14 @@ function initializeSyncPage() {
     if (document.getElementById('beatport-clear-btn')) {
         updateBeatportClearButtonState();
     }
+    // MUST stay above the guard. `loadPageData` calls `stopLogPolling()` at the
+    // top of EVERY navigation (init.js), and this is the only thing that ever
+    // restarts it — so leaving it below the early return stopped the activity
+    // feed after the first visit and never brought it back. That only shows
+    // when the socket is down, because `tool:logs` (core.js) writes the same
+    // textarea through `updateLogsFromData` and the HTTP poll is its twin.
+    // It is idempotent: `startLogPolling` returns early when already polling.
+    initializeLiveLogViewer();
 
     if (_syncPageListenersBound) return;
     _syncPageListenersBound = true;
@@ -4051,9 +4059,6 @@ function initializeSyncPage() {
     if (hypeTop100Btn) {
         hypeTop100Btn.addEventListener('click', handleHypeTop100Click);
     }
-
-    // Initialize live log viewer
-    initializeLiveLogViewer();
 }
 
 
