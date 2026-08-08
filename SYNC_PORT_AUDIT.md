@@ -5305,3 +5305,43 @@ catch this.
    owns the selection state.
 4. Consider adding the missing duplicate-id scan as a permanent guard; it would
    have caught this class of bug on several earlier flips too.
+
+### CORRECTION — the duplicate-id guard DOES exist
+
+The entry above says "Checked for a guard: there is none." **That is wrong.**
+`tests/test_react_ids_are_not_duplicated.py` exists and enforces exactly this.
+My greps searched for "duplicate" (the file says "duplicated") and looked in
+`webui/src/test/`, which is the wrong side — the guard is python.
+
+What that changes, and what it does not:
+
+**The hazard is real and unchanged.** An id rendered by a React page must not
+also live in index.html, because `getElementById` then resolves by document
+order. The guard's own docstring says the current arrangement "happens to work
+today only because `#webui-react-root` sits near the top of index.html", and
+that document-order dependence is the thing being forbidden.
+
+**But it is caught, not silent.** CI fails on it. The discover flip proved this
+the hard way — `f6369f914` was a follow-up commit fixing 81 collisions after a
+flip that had leaned on exactly the document-order reasoning above. The guard
+was born from the wishlist port, where duplicated modal ids made the Back
+button poke the wrong copy.
+
+**The sync branch is ALREADY red on this test, and was before S2.** Verified by
+running it in a worktree at `64672160a`: **55 collisions pre-S2, 60 now.** The
+five new ones are the sidebar's, exactly as expected. Every sync tab component
+built in P5a-P5g contributed to the other 55. This is the normal mid-port state
+— the components exist, the vanilla markup has not been deleted yet — and it
+goes green at S4, not before.
+
+**So the S4 requirement stands, for a better reason than I gave.** Deleting
+index.html's sync markup in the same commit as the flip is not defensive
+guesswork; it is the only way this test passes. There is no allowlist to lean
+on: both `ADOPTED` and `KNOWN_PRE_EXISTING` in that file are empty sets, and
+the comments say keeping them empty is deliberate.
+
+**Method note.** This is the second "there is no X" claim I have made this
+session that turned out to be false — the first was the log-area socket twin,
+which I checked before reporting; this one I reported first. A negative claim
+about a codebase this size needs the same standard of proof as a positive one,
+and one failed grep is not proof.
