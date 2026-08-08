@@ -5262,3 +5262,46 @@ S3 is two slices, not one:
 
 Doing them as one would produce a large untested-in-the-middle component, which
 is exactly what the per-slice mutation discipline is meant to prevent.
+
+### Extra review pass — three checks clean, one new hazard
+
+**Clean.** (a) Both edited vanilla files parse: `oxlint static/api-monitor.js`
+and `static/sync-services.js`, 0 errors. Nothing in the vitest suite EXECUTES
+those files — it reads them as text — so a syntax error would have shipped
+silently. (b) 189 python tests read them (`test_dashboard_seam`,
+`test_script_split_integrity`, `test_tools_page_selectors`,
+`test_vanilla_globals_resolve`, plus two wishlist UI tests); all pass. The
+python suite had not been run at all for this work. (c) The CSS cascade was
+verified by line number rather than by reasoning: `.sync-sidebar--visible`
+(14756) lands after `.sync-sidebar { display: none }` (14744), the ≤1300px
+`display: none !important` (14722) still wins, and no later rule sets `display`
+on `.sync-sidebar` — 19089 is the `.progress-section` descendant.
+
+**NEW HAZARD for S4 — five duplicate ids, and there is no guard.**
+
+The React sidebar renders `#selection-info`, `#start-sync-btn`,
+`#sync-progress-bar`, `#sync-progress-text` and `#sync-log-area`. The vanilla
+markup at index.html 3301-3315 defines the same five. The moment the React page
+mounts, every one exists TWICE unless that markup is deleted in the same change.
+
+That is worse than untidy. Three surviving vanilla writers still call
+`document.getElementById` on these — `SequentialSyncManager.updateUI`
+(core.js), `updateSyncActionsUI` (sync-spotify.js) and `updateLogsFromData`
+(api-monitor.js). `getElementById` returns the FIRST match in document order,
+which would be the vanilla node — the one nobody can see. React would render
+the visible one and the vanilla would keep writing the invisible one, so the
+sidebar would look permanently frozen with nothing throwing.
+
+**Checked for a guard: there is none.** No python test and no vitest test scans
+index.html for duplicate ids. The "duplicate-id guard" from the discover flip
+was a reasoning step in that PR, not a test that survived. So nothing would
+catch this.
+
+**S4 requirements, therefore:**
+1. Delete index.html 3301-3315 in the SAME commit that mounts the React
+   sidebar — not a follow-up.
+2. Make `updateLogsFromData` dispatch-only (already recorded).
+3. Sever the other two writers, which lose their reason to exist once React
+   owns the selection state.
+4. Consider adding the missing duplicate-id scan as a permanent guard; it would
+   have caught this class of bug on several earlier flips too.
