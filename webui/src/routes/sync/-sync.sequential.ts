@@ -1,6 +1,6 @@
 /**
  * The sequential-sync state machine and the selection store — the vanilla's
- * `SequentialSyncManager` (core.js 1229-1370), `startSequentialSync`
+ * `SequentialSyncManager` (core.js 1268-1418), `startSequentialSync`
  * (downloads.js 4059-4099) and `selectedPlaylists`.
  *
  * Pure on purpose. The vanilla keeps this state on a singleton whose methods

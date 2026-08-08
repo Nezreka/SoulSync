@@ -1,6 +1,6 @@
 /**
  * URL-import helpers — the pure halves of the url-history bar and the
- * per-source id extraction, ported from sync-services.js 8654-8800 (history)
+ * per-source id extraction, ported from sync-services.js 8680-8826 (history)
  * plus the parse-side regexes the link tabs share. localStorage/DOM stay in
  * the controller; everything here is data in, data out.
  */
@@ -22,7 +22,7 @@ export const URL_HISTORY_SOURCES: Readonly<Record<string, { key: string; icon: s
 };
 
 /**
- * saveUrlHistory's list op (sync-services.js 8674-8680): drop the duplicate
+ * saveUrlHistory's list op (sync-services.js 8700-8706): drop the duplicate
  * url, unshift the new entry (name falls back to the url), cap at 10.
  */
 export function historyWithEntry(
@@ -42,14 +42,14 @@ export function historyWithout(history: UrlHistoryEntry[], url: string): UrlHist
   return history.filter((h) => h.url !== url);
 }
 
-/** Pill label truncation (sync-services.js 8708): >30 chars → first 28 + '...'. */
+/** Pill label truncation (sync-services.js 8734): >30 chars → first 28 + '...'. */
 export function pillDisplayName(name: string): string {
   return name.length > 30 ? name.substring(0, 28) + '...' : name;
 }
 
 /**
  * Deezer playlist id from a URL or a bare numeric id (the regex at
- * sync-services.js 8757-8758, shared with the Deezer-link parse head).
+ * sync-services.js 8783-8784, shared with the Deezer-link parse head).
  */
 export function extractDeezerPlaylistId(url: string): string | null {
   const match = url.match(/deezer\.com\/(?:[a-z]{2}\/)?playlist\/(\d+)/i);
@@ -58,7 +58,7 @@ export function extractDeezerPlaylistId(url: string): string | null {
 
 /**
  * Spotify id + type from an open.spotify.com playlist/album URL (the regex at
- * sync-services.js 8763, shared with parseSpotifyPublicUrl).
+ * sync-services.js 8789, shared with parseSpotifyPublicUrl).
  */
 export function extractSpotifyPublicId(url: string): { type: string; id: string } | null {
   const m = url.match(/open\.spotify\.com\/(playlist|album)\/([a-zA-Z0-9]+)/);
@@ -66,7 +66,7 @@ export function extractSpotifyPublicId(url: string): { type: string; id: string 
 }
 
 /**
- * iTunes/Apple Music link id extraction (sync-services.js 8776-8794): 6 URI
+ * iTunes/Apple Music link id extraction (sync-services.js 8802-8820): 6 URI
  * schemes, the ?i= track param, /song and /album numeric path ids, and pl.*
  * playlist ids. Null for anything unrecognisable (including non-URLs).
  */

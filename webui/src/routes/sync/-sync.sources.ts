@@ -50,14 +50,14 @@ export interface SourceVerticalConfig {
     /**
      * listenbrainz has NO cancel endpoint — the vanilla's cancel button calls
      * cancelYouTubeSync, which posts the mbid to the YOUTUBE endpoint
-     * (sync-services.js 9806: 'cancelYouTubeSync' for isListenBrainz).
+     * (sync-services.js 9832: 'cancelYouTubeSync' for isListenBrainz).
      */
     syncCancel: (id: string) => string;
     syncStatus: (id: string) => string;
     /**
      * Phase writes: hyphen endpoints = beatport + listenbrainz; underscore =
      * youtube/tidal/qobuz/deezer/spotify-public/itunes (closeYouTubeDiscovery
-     * Modal reset blocks, sync-services.js 10237-10455).
+     * Modal reset blocks, sync-services.js 10263-10481).
      */
     updatePhase: (id: string) => string;
     /** Full-state fetch (discovery results etc.); null = no such endpoint. */

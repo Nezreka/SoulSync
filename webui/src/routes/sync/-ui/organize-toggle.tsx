@@ -2,7 +2,7 @@
  * The organize-by-playlist toggle for the discovery modal footer — the
  * spotify_public-only control the vanilla renders via
  * discoveryModalOrganizeFooterHtml + playlistOrganizeToggleHtml
- * (sync-services.js 9552-9585, shared-helpers.js 1312-1330): reads the
+ * (sync-services.js 9578-9611, shared-helpers.js 1312-1330): reads the
  * mirrored playlist's preference on mount, PATCHes on change.
  *
  * Declared divergence: the vanilla leaves the checkbox at the NEW value when
@@ -19,7 +19,7 @@ import { fetchOrganizePreference, setOrganizePreference } from '../-sync.fix';
 export interface OrganizeToggleProps {
   /**
    * The mirror-resolution ref — the BARE source id, NOT the prefixed vpid.
-   * The vanilla builds spotify_public_<hash> (sync-services.js 9557) and then
+   * The vanilla builds spotify_public_<hash> (sync-services.js 9583) and then
    * normalizePlaylistOrganizeRef strips it straight back off
    * (shared-helpers.js 1113-1115), so the backend only ever matches the bare
    * hash. Sending the prefixed form was the P4b review's caught bug.

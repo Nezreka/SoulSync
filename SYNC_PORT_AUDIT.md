@@ -1100,7 +1100,7 @@ auth-failure surfaced ('not authenticated' → connect prompt), sub-tabs by
 _lbSyncCurrentType, cards read shared listenbrainzPlaylistStates + phase
 maps; click → fills listenbrainzTracksCache on demand
 (/api/discover/listenbrainz/playlist/<mbid>) → hands off to
-**openDownloadModalForListenBrainzPlaylist — REHOMED TO core.js:1765 during
+**openDownloadModalForListenBrainzPlaylist — REHOMED TO core.js:1834 during
 the discover port** (reachability VERIFIED alive; the 'discover.js may be
 missing' comment is stale). THE 500ms CARD REFRESH LOOP
 (_startLbSyncCardRefreshLoop): idempotent, self-stops when neither LB nor
@@ -1302,7 +1302,7 @@ all mapped in the ecosystem section).
 
 - **formatDuration is a THREE-WAY drift, not a two-way duplicate** (found by
   the P1b differential): sync-spotify.js 1967 has NO falsy guard (undefined →
-  'NaN:NaN'), wishlist-tools.js 1575 guards to '--:--', sync-services.js 10036
+  'NaN:NaN'), wishlist-tools.js 1575 guards to '--:--', sync-services.js 10062
   guards to '0:00'. All plain global declarations; load order (sync-spotify →
   wishlist-tools → sync-services) means the sync-services copy is the ONE
   every runtime caller gets — including wishlist-tools' own callers, which
@@ -1625,7 +1625,7 @@ all mapped in the ecosystem section).
     against the real <script> order in index.html (8372/8376/8382).
   * **config/api found a REAL transcription bug**: itunes_link's
     fakeHashPrefix was 'itunes_link_'; the vanilla spells the fake hash
-    `ituneslink_` (sync-services.js 7885, 8273, 8276) while the vpid is
+    `ituneslink_` (sync-services.js 7911, 8273, 8276) while the vpid is
     `itunes_link_` (7859, 8626). So iTunes is a SECOND mismatched hash/vpid
     pair — the table's comment had called spotify_public's "the" inconsistent
     pair. Fixed, and both pairs are now anchored to the live sources so
@@ -1795,7 +1795,7 @@ written down.
 Read line by line: stats-automations.js 1066-1197 (openMirroredPlaylistModal,
 closeMirroredModal, clearMirroredDiscovery), 2043-2149
 (discoverMirroredPlaylist), 2155-2194 (retryFailedMirroredDiscovery);
-sync-services.js 9189-9205 (_discoveryCompleteToast); and ALL FIVE external
+sync-services.js 9215-9231 (_discoveryCompleteToast); and ALL FIVE external
 call sites. Six findings, every one verified by grep, not inferred:
 
 1. **openMirroredPlaylistModal must be ADOPTED, not ported.** Five callers,
@@ -2123,7 +2123,7 @@ the same problem one level down. This is the identical class of trap as
 SEEDING. The two are different problems and I had merged them.
 
 **There is an exact precedent.** `window.startDiscoverVirtualSync`
-(core.js:75-81) was added during the DISCOVER port to solve this same thing,
+(core.js:92-98) was added during the DISCOVER port to solve this same thing,
 and its docblock generalises the reasoning:
 
     `spotifyPlaylists` are top-level `let`s in this script's lexical scope, so
@@ -2260,7 +2260,7 @@ production caller.
 
 ### THREE NEW GAPS, all inside phases marked COMPLETE
 
-1. **`_mirrorListenBrainzAfterDiscovery` (sync-services.js 10928-11020) is
+1. **`_mirrorListenBrainzAfterDiscovery` (sync-services.js 10954-11046) is
    entirely unported — P5a.** Both LB discovery-completion paths call it (11075
    socket, 11170 poll). It mirrors the MATCHED tracks (spotify_data.id required)
    into the Mirrored tab with extra_data {discovered, provider, confidence,
@@ -2621,7 +2621,7 @@ interaction, on a page nobody is exercising while porting the sync page.
   editMirroredCustomName, editMirroredSourceRef, getMirroredSourceRef,
   runMirroredPlaylistPipeline, pollMirroredPipelineStatus.
 - **core.js → beatport-ui (5).** THE SECOND FLAW IN THE BOUNDARY ENTRY: core.js
-  calls all five Beatport slider cleanups on page-leave (core.js 507-511). The
+  calls all five Beatport slider cleanups on page-leave (core.js 546-550). The
   earlier check grepped for a `beatportUI` NAMESPACE, which does not exist —
   wrong probe entirely for a classic script whose functions are bare globals.
 - **settings.js → beatport-ui (4).** The tenant already covered.
@@ -2760,7 +2760,7 @@ Read status: 661 of ~3,600 in-scope lines.
 
 Found by the read, fixed with Boulder's approval rather than ported.
 
-**The bug.** Leaving the sync page runs core.js 507-511, which calls each
+**The bug.** Leaving the sync page runs core.js 546-550, which calls each
 slider's cleanup, and each cleanup clears its autoplay interval. Coming back
 re-runs the initialisers, which see their already-initialised guard and return —
 without restarting the interval they no longer have. The slider then never
@@ -3421,7 +3421,7 @@ way. The port checks it explicitly.
 
 **A FLIP-WAVE CARVE-OUT, found by following registerBeatportDownload.** It lives
 in shared-helpers.js 3390 and writes into `beatportDownloadBubbles`, a top-level
-`let` in core.js 555 that no module can reach — so React must call it, and
+`let` in core.js 594 that no module can reach — so React must call it, and
 showBeatportDownloadsSection (3430) renders into `#beatport-downloads-section`
 (index.html 2865). That div is an ADOPTED REGION: the React Beatport tab must
 render it and never touch its contents, or every download bubble silently stops
@@ -3543,7 +3543,7 @@ browser (2230-3626, ~1,400 lines).
 
 **THE FINDING: the two top-10 track lists are clickable, and the handler is not
 in beatport-ui.js.** Reading 1605-1853 alone, those cards look inert — they carry
-a `data-url` and no listener. The listener is in **sync-services.js 3948-3963**,
+a `data-url` and no listener. The listener is in **sync-services.js 3977-3992**,
 bound to the whole CONTAINER, so clicking anywhere in the list (including its
 header) queues all ten tracks via handleRebuildChartClick (4909-4936). Porting
 beatport-ui.js faithfully and stopping there would have shipped two dead panels.
@@ -4713,7 +4713,7 @@ with what remains explicitly listed. No building starts until it is complete.
 
 **Extent.** The markup is index.html 2226-3318 (1,093 lines), closing cleanly
 at the `#sync-page` div. The controller is `initializeSyncPage` in
-sync-services.js 3694-4036 (343 lines) — the tab click handler plus whatever
+sync-services.js 3694-4062 (343 lines) — the tab click handler plus whatever
 follows it; sync-services.js is 11,482 lines total, so the shell is a small
 region of a very large file and the boundary matters.
 
@@ -4779,7 +4779,7 @@ nothing for half the users who reach it.
 5. `startSequentialSync` (downloads.js 4060) is a TOGGLE: if the manager is
    already running it CANCELS and returns (4067-4070).
 6. `SequentialSyncManager.start()` sets `this.isRunning = true` SYNCHRONOUSLY
-   (core.js 1246), before any async work.
+   (core.js 1285), before any async work.
 
 **So:** visit /sync, navigate away, come back → the button has 2 listeners →
 one click runs `startSequentialSync` twice in a row → the first call starts the
@@ -4888,7 +4888,7 @@ above and the `startSequentialSync` parameter.
 
 `-sync.shell.ts` (the tab table and the two small decisions) and
 `-ui/sync-shell.tsx`. index.html 2226-2295 plus the tab handler at
-sync-services.js 3694-3803.
+sync-services.js 3694-3811.
 
 **The vanilla's tab handler did four things and only one is code here.** It
 moved the `active` class (this component), re-hid the sidebar (S2), ran a
@@ -4961,8 +4961,8 @@ sites across five files** — and the note had missed two of them.
 
 | element | written by |
 |---|---|
-| `#selection-info` | core.js 1340-1369 (`SequentialSyncManager.updateUI`), sync-spotify.js 1812-1830 (`updateSyncActionsUI`) |
-| `#start-sync-btn` | the same two (text + `disabled`); click bound at sync-services.js 3990-3993 |
+| `#selection-info` | core.js 1388-1417 (`SequentialSyncManager.updateUI`), sync-spotify.js 1812-1830 (`updateSyncActionsUI`) |
+| `#start-sync-btn` | the same two (text + `disabled`); click bound at sync-services.js 3997-4001 |
 | `#sync-progress-bar` | **nothing** |
 | `#sync-progress-text` | **nothing** |
 | `#sync-log-area` | api-monitor.js 1075 / 1122 / 1131 |
@@ -4975,7 +4975,7 @@ selectors survive the flip — which is a reason to keep `.sync-sidebar`,
 
 ### The two writers the P0 note missed
 
-`sync-services.js:3990` binds the Start Sync click (the P0 note had the handler
+`sync-services.js:3998` binds the Start Sync click (the P0 note had the handler
 but not the binding site), and `helper.js` turned out to be three references,
 not the two the note listed. Both found by grepping every id rather than
 trusting the note — the same reason the method says re-read the vanilla before
@@ -5010,7 +5010,7 @@ textarea. That reads exactly like a poller whose promised twin was never
 written — which would have meant the log area froze on
 "Loading activity feed..." for every user with a working socket.
 
-It is fine. The twin lives in **core.js 885**:
+It is fine. The twin lives in **core.js 924**:
 `socket.on('tool:logs', (data) => updateLogsFromData(data))` — the same
 `updateLogsFromData` in api-monitor.js that the HTTP path calls, fed by
 `socketio.emit('tool:logs', ...)` (web_server.py 41653), which formats the
@@ -5147,7 +5147,7 @@ element, exactly the hazard the dashboard's P7 hardening pass dealt with. That
 function must become dispatch-only at S4. `initializeLiveLogViewer`,
 `startLogPolling`, `loadLogs` and `cleanupSyncPageLogs` all become unreachable
 at the same moment (`cleanupSyncPageLogs` is ALREADY dead — defined at
-api-monitor.js 1154 and called from nowhere); each needs the usual reachability
+api-monitor.js 1161 and called from nowhere); each needs the usual reachability
 check, because `stopLogPolling` is called from init.js and `updateLogsFromData`
 is bound app-wide in core.js, not per page.
 
@@ -5459,7 +5459,7 @@ a timeout as a kill, so a mutant that hangs cannot be scored as a survivor.
 
 ### OPEN for S3b — the run does not survive navigation
 
-`sequentialSyncManager` is a MODULE SINGLETON (core.js 409). Leaving /sync
+`sequentialSyncManager` is a MODULE SINGLETON (core.js 448). Leaving /sync
 mid-run and coming back finds the vanilla still running, because the manager
 outlives the page. The hook's state is per-mount, so the React sidebar would
 come back reading idle while the engine is still syncing — and the runner
@@ -5499,7 +5499,7 @@ vanilla invariants.
 Previously flagged as open for S3b; it was not actually blocked. The fix does
 not depend on where the controller sits, so it lands here.
 
-`sequentialSyncManager` is a module singleton (core.js 409): leave /sync
+`sequentialSyncManager` is a module singleton (core.js 448): leave /sync
 mid-run and come back and the vanilla is still going. The hook's state was
 per-mount, so React would have come back reading idle while the engine was
 still syncing, with the runner holding refs to an unmounted tree.
@@ -6033,7 +6033,7 @@ during construction. The five members are now declared on `Window` in
 `globals.d.ts`, so a sixth need is a compile error.
 
 **The two arrays are kept apart, and this is the crux.** NAMES resolve from
-`getSyncAccountPlaylists()` — the same array `updateUI` uses (core.js 1365),
+`getSyncAccountPlaylists()` — the same array `updateUI` uses (core.js 1388),
 'Unknown' fallback included. ORDER comes from the Spotify tab's registered
 rows. A mutant that takes the order from the engine array is killed by a test
 where the engine lists two playlists and the tab has rendered one: queueing
@@ -6061,7 +6061,7 @@ the SAME commit, and the vanilla severs.
 the shell still stands alone in its own tests.
 
 **It fires on EVERY tab click, including one on the tab already active.** The
-vanilla's handler runs its whole body regardless (sync-services.js 3732) and
+vanilla's handler runs its whole body regardless (sync-services.js 3740) and
 its unconditional sidebar re-hide is exactly what the page keys off — filtering
 same-tab clicks would look like an obvious optimisation and would quietly
 change behaviour. A mutant adding that filter is killed by a test that clicks

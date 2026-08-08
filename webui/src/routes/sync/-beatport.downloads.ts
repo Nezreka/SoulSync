@@ -330,14 +330,14 @@ export async function openBeatportChartCard(
   }
 }
 
-/* ── The two top-10 track lists — sync-services.js 4893-4936 ──────────────── */
+/* ── The two top-10 track lists — sync-services.js 4919-4962 ──────────────── */
 
 /**
  * handleRebuildChartClick, the SIXTH download flow and the only one that does
  * not live in beatport-ui.js.
  *
  * The two top-10 track lists have no per-card handler at all. Instead
- * sync-services.js 3948-3963 binds a click to the whole CONTAINER, so clicking
+ * sync-services.js 3977-3992 binds a click to the whole CONTAINER, so clicking
  * anywhere in the list — including its header — queues all ten tracks. That is
  * easy to miss when reading beatport-ui.js alone, where those cards look inert.
  *

@@ -121,7 +121,7 @@ export function useLbCardOpen(
         }
         if (!tracks || tracks.length === 0) throw new Error('Playlist has no tracks');
         window.hideLoadingOverlay?.();
-        // The vanilla's LB state.playlist, field for field (core.js 238-252):
+        // The vanilla's LB state.playlist, field for field (core.js 298-312):
         // name + tracks + a DERIVED description and the source tag. The
         // description is not decoration — the post-discovery mirror sends it
         // as the mirrored row's description (11012).

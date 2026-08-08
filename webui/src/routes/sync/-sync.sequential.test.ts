@@ -1,5 +1,5 @@
 /**
- * Differential tests for the sequential-sync machine — core.js 1229-1370 and
+ * Differential tests for the sequential-sync machine — core.js 1268-1418 and
  * downloads.js 4059-4106.
  */
 

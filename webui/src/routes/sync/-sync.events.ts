@@ -5,7 +5,7 @@
  * INSIDE the handler function, never at the socket binding, so every transport
  * that reaches the handler reaches React too. For logs that handler is
  * `updateLogsFromData` (api-monitor.js), which both the `tool:logs` socket
- * push (core.js 885) and the 3s `/api/logs` poll call — one seam covers both.
+ * push (core.js 924) and the 3s `/api/logs` poll call — one seam covers both.
  */
 
 import { useEffect } from 'react';

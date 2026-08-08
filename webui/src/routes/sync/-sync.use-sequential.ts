@@ -1,6 +1,6 @@
 /**
  * Drives the sequential-sync machine against the download engine —
- * `SequentialSyncManager.syncNext/waitForSyncCompletion` (core.js 1254-1305)
+ * `SequentialSyncManager.syncNext/waitForSyncCompletion` (core.js 1293-1344)
  * and `startSequentialSync` (downloads.js 4059-4099).
  *
  * THE ENGINE STAYS VANILLA. `startPlaylistSync`, the `activeSyncPollers` map
@@ -11,7 +11,7 @@
  * make that impossible instead.
  *
  * THE STATE IS MODULE-SCOPED, not component state, because
- * `sequentialSyncManager` is a module singleton (core.js 409) and a run
+ * `sequentialSyncManager` is a module singleton (core.js 448) and a run
  * OUTLIVES THE PAGE. Leaving /sync mid-sync and coming back finds the vanilla
  * still going. Per-component state would come back reading idle while the
  * engine was still working, and the runner would be left holding refs to an

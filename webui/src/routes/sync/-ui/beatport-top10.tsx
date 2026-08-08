@@ -44,7 +44,7 @@ const TRACK_LIST_VARIANTS = {
     placeholderIcon: '🎵',
     loadingTitle: '🎵 Loading Beatport Top 10...',
     loadingSubtitle: 'Fetching trending tracks',
-    /** The name the download is filed under (sync-services.js 4897). */
+    /** The name the download is filed under (sync-services.js 4923). */
     chartName: 'Beatport Top 10',
   },
   hype: {
@@ -132,7 +132,7 @@ export function TrackTop10List({
     <div
       className={`beatport-${copy.slug}-list`}
       id={listId ?? `beatport-${copy.slug}-list`}
-      // sync-services.js 3948-3963: the CONTAINER is the button. Clicking the
+      // sync-services.js 3977-3992: the CONTAINER is the button. Clicking the
       // header queues all ten tracks, which is unobvious but is the behaviour.
       onClick={() => {
         void openBeatportTop10List(tracks, chartName ?? copy.chartName, env);

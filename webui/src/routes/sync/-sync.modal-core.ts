@@ -1,6 +1,6 @@
 /**
  * Shared discovery modal — pure helpers, ported from the modal builder
- * (openYouTubeDiscoveryModal, sync-services.js 9302-9550) and its text
+ * (openYouTubeDiscoveryModal, sync-services.js 9328-9576) and its text
  * generators (getModalDescription/getInitialProgressText, 9930-9959), with the
  * source dispatch driven by the config instead of ten boolean parameters.
  *

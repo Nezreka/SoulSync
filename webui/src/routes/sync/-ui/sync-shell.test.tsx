@@ -1,6 +1,6 @@
 /**
  * Differential tests for the sync page's shell — index.html 2226-2295 and the
- * tab handler at sync-services.js 3694-3803.
+ * tab handler at sync-services.js 3694-3811.
  */
 
 import { fireEvent, render } from '@testing-library/react';

@@ -126,7 +126,7 @@ describe('sidebar visibility', () => {
   });
 
   it('is hidden again by a tab switch, even mid-run', () => {
-    // sync-services.js 3751 re-hides unconditionally. Transcribed.
+    // sync-services.js 3759 re-hides unconditionally. Transcribed.
     const { result } = renderHook(() => useSyncPage());
     act(() => {
       result.current.registerSpotifyRows(['a']);

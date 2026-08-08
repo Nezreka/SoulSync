@@ -1,5 +1,5 @@
 /**
- * Behavioural tests for the sequential-sync runner — core.js 1254-1297 and
+ * Behavioural tests for the sequential-sync runner — core.js 1293-1345 and
  * downloads.js 4059-4099, driven against a fake engine.
  */
 
@@ -321,7 +321,7 @@ describe('cancelling', () => {
 
 describe('surviving navigation', () => {
   /**
-   * `sequentialSyncManager` is a module singleton (core.js 409), so a run
+   * `sequentialSyncManager` is a module singleton (core.js 448), so a run
    * outlives the page — leave /sync mid-sync and come back and the vanilla is
    * still going. Component state would come back reading idle while the engine
    * was still working, which is the whole reason the store is module-scoped.

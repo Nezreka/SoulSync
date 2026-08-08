@@ -1,7 +1,7 @@
 /**
  * The standalone-mode signal — is there a real media server, or is SoulSync
  * its own library ("soulsync" server type)? The vanilla keeps this in the
- * script-scoped `_isSoulsyncStandalone` (core.js:1373), unreachable from
+ * script-scoped `_isSoulsyncStandalone` (core.js:1442), unreachable from
  * modules; both its writers derive it from the service-status payload's
  * `media_server.type`, and core.js re-broadcasts every status frame as the
  * `ss:service-status` CustomEvent — so this hook derives the same flag from

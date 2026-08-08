@@ -174,7 +174,7 @@ describe('heroSourceLabel', () => {
   });
 });
 
-/* ── Virtual id ladder (sync-services.js 10761, inline — literals) ────────── */
+/* ── Virtual id ladder (sync-services.js 10787, inline — literals) ────────── */
 
 describe('virtualPlaylistIdFor', () => {
   it('maps each single flag', () => {
@@ -401,7 +401,7 @@ describe('formatDuration (differential vs the load-order WINNER)', () => {
   /**
    * THREE vanilla declarations exist and they disagree: sync-spotify.js 1967
    * has no falsy guard (undefined → 'NaN:NaN'), wishlist-tools.js 1575 guards
-   * to '--:--', sync-services.js 10036 guards to '0:00'. All are plain global
+   * to '--:--', sync-services.js 10062 guards to '0:00'. All are plain global
    * function declarations, so index.html load order (sync-spotify →
    * wishlist-tools → sync-services) makes the sync-services copy the ONE every
    * runtime caller actually gets. The port matches the winner.
@@ -454,7 +454,7 @@ describe('formatDuration (differential vs the load-order WINNER)', () => {
 
 /* ── discoveryCompleteToast (differential vs _discoveryCompleteToast, 9192) ── */
 
-describe('discoveryCompleteToast (differential vs sync-services.js 9192-9205)', () => {
+describe('discoveryCompleteToast (differential vs sync-services.js 9218-9231)', () => {
   type ToastVanilla = { _discoveryCompleteToast: (hash: string) => void };
   const toastVanilla = lift<ToastVanilla>(['_discoveryCompleteToast'], SYNC_SERVICES);
 

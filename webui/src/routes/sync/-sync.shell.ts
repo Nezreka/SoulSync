@@ -1,7 +1,7 @@
 /**
  * The sync page's shell — the tab table and the small pure decisions the
  * header and tab strip make. Transcribed from index.html 2249-2295 and the
- * tab handler at sync-services.js 3694-3803.
+ * tab handler at sync-services.js 3694-3811.
  */
 
 export type SyncTabId =

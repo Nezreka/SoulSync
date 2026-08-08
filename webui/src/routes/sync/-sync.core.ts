@@ -130,7 +130,7 @@ export function heroSourceLabel(virtualPlaylistId: string): string {
 
 /**
  * Virtual playlist id for a discovery state's download hand-off — the flag
- * ladder in startYouTubeDownloadMissing (sync-services.js 10761). Priority:
+ * ladder in startYouTubeDownloadMissing (sync-services.js 10787). Priority:
  * ListenBrainz > Deezer > Beatport > Tidal > Qobuz > YouTube.
  */
 export function virtualPlaylistIdFor(flags: VirtualSourceFlags, urlHash: string): string {
@@ -180,7 +180,7 @@ export function isFoundRowQobuz(r: DiscoveryResultRow): boolean {
 
 /**
  * Actions-cell classification — generateDiscoveryActionButton
- * (sync-services.js 10046-10095). NOTE this uses a STRICTER found-test than
+ * (sync-services.js 10072-10121). NOTE this uses a STRICTER found-test than
  * the transforms (no spotify_data/spotify_track fallback), and not-found/error
  * outranks wing-it, which outranks found.
  */
@@ -352,7 +352,7 @@ export function discoveryCompleteToast(
   return { message: defaultMessage, type: 'success' };
 }
 
-/* ── formatDuration (sync-services.js 10036; sync-spotify.js 1967 is a twin) ── */
+/* ── formatDuration (sync-services.js 10062; sync-spotify.js 1967 is a twin) ── */
 
 export function formatDuration(durationMs: number | null | undefined): string {
   if (!durationMs) return '0:00';

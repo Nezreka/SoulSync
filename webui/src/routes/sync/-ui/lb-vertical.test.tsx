@@ -1,6 +1,6 @@
 /**
  * useListenBrainzVertical exists for ONE reason: the post-discovery mirror
- * (_mirrorListenBrainzAfterDiscovery, sync-services.js 10928, fired at
+ * (_mirrorListenBrainzAfterDiscovery, sync-services.js 10954, fired at
  * 11075/11170) went missing from the port entirely. This test is the guarantee
  * that building the ListenBrainz vertical this way still mirrors.
  */

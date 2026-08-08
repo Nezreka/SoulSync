@@ -1,6 +1,6 @@
 /**
  * The Recent-URLs pill bar under each URL-import input (renderUrlHistory,
- * sync-services.js 8694-8742): 'Recent' label + one pill per entry (source
+ * sync-services.js 8720-8768): 'Recent' label + one pill per entry (source
  * icon, truncated name, title tooltip, × remove). Hidden entirely when the
  * history is empty (the vanilla toggles display none/flex — here it just
  * doesn't render). Escaping is by construction; the vanilla escaped too (the

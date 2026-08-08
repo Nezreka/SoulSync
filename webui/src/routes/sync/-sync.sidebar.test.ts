@@ -1,5 +1,5 @@
 /**
- * Differential tests for the sidebar's pure core — core.js 1340-1369,
+ * Differential tests for the sidebar's pure core — core.js 1388-1417,
  * sync-spotify.js 1812-1830, api-monitor.js 1129-1148, downloads.js 4041-4057.
  */
 
@@ -190,7 +190,7 @@ describe('the log scroll rule (1137-1147)', () => {
   });
 });
 
-describe('sidebar visibility (downloads.js 4041-4057, sync-services.js 3747-3753)', () => {
+describe('sidebar visibility (downloads.js 4041-4057, sync-services.js 3755-3761)', () => {
   it('is hidden at rest', () => {
     expect(syncSidebarVisible(false, false)).toBe(false);
   });

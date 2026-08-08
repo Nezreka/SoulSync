@@ -3,7 +3,7 @@
  * that drive it and the log area's scroll rule.
  *
  * THE SIDEBAR HAS TWO WRITERS IN THE VANILLA, saying the same things.
- * `SequentialSyncManager.updateUI` (core.js 1340-1369) owns both the running
+ * `SequentialSyncManager.updateUI` (core.js 1388-1417) owns both the running
  * and the idle case; `updateSyncActionsUI` (sync-spotify.js 1812-1830) handles
  * selection changes and DELEGATES to updateUI whenever a sync is running
  * (1814-1817). Their idle branches are the same three strings, so one function
@@ -116,7 +116,7 @@ export function syncLogShouldScrollTop(
 
 /**
  * showSyncSidebar / hideSyncSidebar (downloads.js 4041-4057) and the tab
- * handler's unconditional re-hide (sync-services.js 3747-3753).
+ * handler's unconditional re-hide (sync-services.js 3755-3761).
  *
  * The vanilla state is: hidden by CSS at rest, shown when a sequential sync
  * starts, hidden again on completion, cancellation, or ANY tab switch —

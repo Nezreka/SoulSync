@@ -65,7 +65,7 @@ async function readJson<T>(response: Response): Promise<T> {
 
 /**
  * POST discovery/start. The body follows the source's startBody policy:
- * listenbrainz sends the whole playlist (sync-services.js 11276), beatport
+ * listenbrainz sends the whole playlist (sync-services.js 11302), beatport
  * sends {chart_data} (4648), everyone else sends nothing.
  */
 export async function startSourceDiscovery(
@@ -246,7 +246,7 @@ export async function generatePlaylistM3u(body: {
   });
 }
 
-/** POST /api/wishlist/cleanup (cleanupWishlist, sync-services.js 4114). */
+/** POST /api/wishlist/cleanup (cleanupWishlist, sync-services.js 4140). */
 export async function postWishlistCleanup(): Promise<{
   success?: boolean;
   removed_count?: number;
@@ -256,7 +256,7 @@ export async function postWishlistCleanup(): Promise<{
   return readJson(await fetch('/api/wishlist/cleanup', { method: 'POST' }));
 }
 
-/** POST /api/wishlist/clear (clearWishlist, sync-services.js 4176). */
+/** POST /api/wishlist/clear (clearWishlist, sync-services.js 4202). */
 export async function postWishlistClear(): Promise<{ success?: boolean; error?: string }> {
   return readJson(await fetch('/api/wishlist/clear', { method: 'POST' }));
 }
@@ -274,7 +274,7 @@ export async function detectLbSeries(
 
 /* ── URL-import parse endpoints ───────────────────────────────────────────── */
 
-/** POST /api/youtube/parse (parseYouTubePlaylist, sync-services.js 8806). */
+/** POST /api/youtube/parse (parseYouTubePlaylist, sync-services.js 8832). */
 export async function parseYouTubeUrl(
   url: string,
 ): Promise<{ error?: string; url_hash?: string; playlist_name?: string; track_count?: number }> {
@@ -287,7 +287,7 @@ export async function parseYouTubeUrl(
   );
 }
 
-/** POST /api/spotify/parse-public (parseSpotifyPublicUrl, sync-services.js 6611). */
+/** POST /api/spotify/parse-public (parseSpotifyPublicUrl, sync-services.js 6637). */
 export async function parseSpotifyPublicUrl(
   url: string,
 ): Promise<{ error?: string; url_hash?: string; type?: string; name?: string; subtitle?: string }> {
@@ -300,7 +300,7 @@ export async function parseSpotifyPublicUrl(
   );
 }
 
-/** POST /api/itunes-link/parse (parseITunesLinkUrl, sync-services.js 7633). */
+/** POST /api/itunes-link/parse (parseITunesLinkUrl, sync-services.js 7659). */
 export async function parseITunesLinkUrl(
   url: string,
 ): Promise<{ error?: string; url_hash?: string; type?: string; name?: string }> {

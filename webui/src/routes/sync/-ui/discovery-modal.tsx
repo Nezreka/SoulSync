@@ -1,7 +1,7 @@
 /**
  * The shared discovery modal — ONE component for the nine sources, replacing
  * openYouTubeDiscoveryModal + getModalActionButtons + generateTableRowsFromState
- * (sync-services.js 9302-10095). Source behaviour comes from the config; state
+ * (sync-services.js 9328-10121). Source behaviour comes from the config; state
  * lives in useSourceVertical, so the vanilla's hide-don't-remove DOM-as-state
  * dance is simply gone.
  *

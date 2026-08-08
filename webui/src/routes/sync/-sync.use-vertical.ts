@@ -7,7 +7,7 @@
  * Transport: the HTTP poll at the source's vanilla cadence is THE guaranteed
  * path — nothing on this page emits discovery:subscribe, so the server's
  * room-scoped discovery:progress frames only reach the ss:discovery-progress
- * CustomEvent (core.js:878) when some OTHER surface subscribed the id (e.g.
+ * CustomEvent (core.js:938) when some OTHER surface subscribed the id (e.g.
  * the explorer's mirrored discoveries). The listener is kept for exactly that
  * case, filtered by frame id AND platform. Sync progress is HTTP-poll only,
  * the discover-port precedent.

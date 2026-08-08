@@ -83,7 +83,7 @@ export function useSyncPage(): SyncPage {
 
   /**
    * Names come from the ENGINE's array, which is what `updateUI` resolves
-   * against (core.js 1365) — including its 'Unknown' fallback for anything it
+   * against (core.js 1413) — including its 'Unknown' fallback for anything it
    * cannot find. ORDER does not: that array is never pruned and also holds
    * virtual playlists, so it is a superset of what is on screen.
    */
@@ -114,7 +114,7 @@ export function useSyncPage(): SyncPage {
 
   /**
    * The vanilla's tab handler re-hides the sidebar on EVERY switch, without
-   * asking whether a run is in progress (sync-services.js 3751). Transcribed:
+   * asking whether a run is in progress (sync-services.js 3759). Transcribed:
    * switching tabs mid-sync drops the progress panel until the next run.
    */
   const [hiddenByTabSwitch, setHiddenByTabSwitch] = useState(false);

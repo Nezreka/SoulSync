@@ -227,7 +227,7 @@ describe('id extractors (differential vs extractITunesLinkId + _isUrlAlreadyLoad
 });
 
 describe('gaps the PR review proved unpinned', () => {
-  it('an Apple playlist id MUST start with pl. (sync-services.js 8788)', () => {
+  it('an Apple playlist id MUST start with pl. (sync-services.js 8814)', () => {
     expect(extractITunesLinkId('https://music.apple.com/us/playlist/x/pl.abc123')).toEqual({
       type: 'playlist',
       id: 'pl.abc123',
