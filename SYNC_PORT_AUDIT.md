@@ -5980,3 +5980,40 @@ Suite 6961 passing. Build clean. Lint at baseline.
 selection, modals, the sidebar, the sequential runner, one pipeline controller,
 two engine seams, and both registrations (mirrored reload, Spotify order). What
 remains in S3b-ii is the component that assembles them.
+
+### Should the systemic issues be fixed before the page? — NO, and here is the evidence
+
+Four findings this wave shared one root: vanilla state lives in top-level
+`let`s, which create no `window` property, and the bridges fail silently.
+Reasonable to ask whether that deserves a remediation phase before S3b-ii.
+
+**The sweep says no.** 92 top-level `let`/`var` bindings across core.js,
+downloads.js, sync-services.js and sync-spotify.js are unreachable from React.
+That number sounds alarming and is the wrong denominator: the page does not
+reach for 92 things. Its vanilla surface is a CLOSED, TYPED set —
+
+- **5 members** on `SequentialSyncEngine` (`startPlaylistSync`, `isSyncing`,
+  `setSelectionDisabled`, `refreshButtons`, `toast`), all verified reachable,
+  two of them only because this wave added the accessors.
+- **16 rows** in `vanilla-seams.test.ts` guarding every React→vanilla call.
+- **2 registrations** going the other way (mirrored reload, Spotify order).
+
+Everything else in those 92 is state the page never touches.
+
+**All four findings are already fixed**, so there is no backlog to work through.
+More importantly the STRUCTURAL protection is already in place, and it is what
+makes a remediation phase unnecessary: the engine is a REQUIRED typed
+interface, so a future need for vanilla state is a compile error at the mount
+site, not an `undefined` discovered by a user. That is precisely why
+`isPlaylistSyncing` surfaced during the read instead of after the flip.
+
+**The rule, for the flip and for whatever page comes next:** never let React
+reach into vanilla state directly. Declare what is needed as a typed interface,
+inject it, and add a seam row. A missing member then fails at build time. The
+alternative — an optional prop or a `window.x?.()` at the call site — is the
+shape every silent failure in this port has taken.
+
+**What a remediation phase WOULD be for:** bridging the other 92 pre-emptively.
+That is busywork with a cost — 92 accessors nobody calls, each one a seam row
+to maintain and a thing to delete later. The closed-set approach bridges
+exactly what is used, and the type system says when that set grows.
