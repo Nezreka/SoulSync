@@ -6133,3 +6133,37 @@ cadence, which is the bug class this port already fixed twice in the vanilla
 `AutoSyncModalProps`' `boardActions`/`weeklyActions` shapes. Everything else —
 fifteen panels, sidebar, modals, shell, controller — is specified, built and
 tested.
+
+### AutoSyncModal's grouped actions — READ. The trap is a NAME COLLISION.
+
+Both groups extend the same base, `AutoSyncCardActions { onRun, onUnschedule,
+onOrganizeChange }`, and each adds one:
+
+- `boardActions`  = base + `onDrop(playlistId, hours)`   (hourly lanes)
+- `weeklyActions` = base + `onSave(draft)`               (weekly grid + editor)
+
+Mapping onto `useAutoSync`'s flat returns:
+
+| prop | boardActions | weeklyActions |
+|---|---|---|
+| `onRun` | `runNow` | `runNow` |
+| `onOrganizeChange` | `setOrganize` | `setOrganize` |
+| **`onUnschedule`** | **`unscheduleHourly`** | **`unscheduleWeekly`** |
+| the extra | `onDrop` → `saveHourly` | `onSave` → `saveWeekly` |
+
+**`onUnschedule` is the same property name in both groups and MUST bind to
+different functions.** Three of the four members are genuinely identical
+between the groups, which is what makes the fourth easy to copy-paste. Wire
+both to the same unschedule and the modal deletes the wrong cadence: unschedule
+a weekly playlist and its weekly automation survives while the hourly one it
+never had is "removed". The playlist then keeps refreshing on a cadence the UI
+says is gone.
+
+That is the SAME invariant this port already fixed twice in the vanilla — the
+one-schedule-per-playlist bug, where the fix was to stop copy-pasting the
+enforcement per call site. Inferring this mapping would have reintroduced it in
+React on day one, and it would have looked completely reasonable in review.
+
+**The assembly is now fully specified.** Fifteen panels, the sidebar, the modal
+router, the shell and the Auto-Sync modal — every prop known, nothing left to
+infer.
