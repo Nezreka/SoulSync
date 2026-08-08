@@ -5345,3 +5345,27 @@ session that turned out to be false — the first was the log-area socket twin,
 which I checked before reporting; this one I reported first. A negative claim
 about a codebase this size needs the same standard of proof as a positive one,
 and one failed grep is not proof.
+
+### Verification coverage for this wave — the exact boundary
+
+Recorded so the scope of "verified" is not re-litigated later. The change
+surface is four non-doc files: `sync-services.js`, `api-monitor.js`,
+`style.css`, and the React sync files.
+
+- **JS suite: 6870 passing**, two consecutive clean runs.
+- **Mutation:** 29/29 on the sidebar core + component (one survivor proven
+  equivalent), 6/6 on the scroll rule, 2/2 on the grid modifier, 4/4 on the
+  log-polling hoist, 3/3 on the socket seam.
+- **Python, every test that reads a file this wave touched:**
+  189 (the two vanilla JS files) + 208 (style.css readers) + 241 (the broad
+  `static/*.js` scanners, including `test_helper_tours` — the sidebar keeps
+  helper.js's tour anchors on purpose). **638 passing, 0 failing.**
+- **`test_react_ids_are_not_duplicated`: RED, pre-existing.** 55 collisions
+  before this wave, 60 after; the five added are the sidebar's. Goes green at
+  S4. See the correction above.
+- **Both vanilla files parse** (`oxlint`, 0 errors) — nothing in the JS suite
+  executes them, so this is the only thing standing between a typo and prod.
+
+**NOT run: the full python suite** (~9351 tests, ~40 min). The claim being made
+is narrower and precise — every test that reads a file this wave changed passes.
+A full run is an S4 gate, not a per-slice one.
