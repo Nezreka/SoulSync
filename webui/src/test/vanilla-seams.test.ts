@@ -128,6 +128,50 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
       "React's account tabs — a bridge added BY this migration, because " +
       '`spotifyPlaylists` is a top-level let no module can reach',
   },
+  /*
+   * The five below were found by sweeping every `window.x` the sync route reads
+   * and classifying it against the vanilla. All five are real, live calls that
+   * had NO row here — they were typed in `declare global` blocks inside the
+   * component files rather than in globals.d.ts, so nothing pointed the seam
+   * list at them. A local declaration type-checks perfectly while asserting
+   * nothing about the vanilla, which is the gap this file exists to close.
+   */
+  {
+    file: 'static/stats-automations.js',
+    symbol: 'openMirroredPlaylistModal',
+    pattern: /async function openMirroredPlaylistModal\b/,
+    usedBy:
+      "the SoulSync Discovery tab after a mirror (routes/sync/-ui/soulsync-discovery-tab.tsx) " +
+      'and the Auto-Sync monitor\'s Details button — note S4 deletes _initImportFileTab from ' +
+      'this same file, so a region-sized deletion could take this with it',
+  },
+  {
+    file: 'static/core.js',
+    symbol: 'getActiveMetadataSource',
+    pattern: /function getActiveMetadataSource\b/,
+    usedBy:
+      "metadataSourceLabel() (routes/sync/-sync.modal-core.ts) — the knowing fix for the " +
+      "vanilla's hardcoded 'Spotify' headers; without it the label silently reverts to the " +
+      'wrong provider name rather than failing',
+  },
+  {
+    file: 'static/shared-helpers.js',
+    symbol: 'getMetadataSourceLabel',
+    pattern: /function getMetadataSourceLabel\b/,
+    usedBy: 'the other half of metadataSourceLabel() — maps the source key to its display name',
+  },
+  {
+    file: 'static/downloads.js',
+    symbol: 'wingItDownload',
+    pattern: /async function wingItDownload\b/,
+    usedBy: "the discovery modal's Download action (routes/sync/-ui/discovery-modal.tsx)",
+  },
+  {
+    file: 'static/downloads.js',
+    symbol: '_wingItSyncFromModal',
+    pattern: /async function _wingItSyncFromModal\b/,
+    usedBy: "the discovery modal's Sync action — the Wing It twin of the above",
+  },
 ];
 
 describe('vanilla seams React calls through window still exist', () => {

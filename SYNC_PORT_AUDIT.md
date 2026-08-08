@@ -6167,3 +6167,79 @@ React on day one, and it would have looked completely reasonable in review.
 **The assembly is now fully specified.** Fifteen panels, the sidebar, the modal
 router, the shell and the Auto-Sync modal — every prop known, nothing left to
 infer.
+
+### CORRECTION + the seam sweep — "fully specified" was not quite true
+
+Writing the page component started with a read of every contract it touches.
+Three things came out of it, and the first is a correction to my own claim
+earlier in this session.
+
+**1. CORRECTION — `currentMusicSourceName` is a CONSTANT, and the default is
+parity.**
+
+`MirroredTab` takes `sourceName`, documented as the vanilla's
+`currentMusicSourceName`. I flagged it as a third unreachable global and said
+the page would render "discovered on Spotify" for iTunes and Deezer users —
+i.e. a silent wrong value React would introduce.
+
+**The reachability is real; the consequence was wrong.** core.js 15 declares it
+`let currentMusicSourceName = 'Spotify'` and **nothing anywhere assigns to it**
+— the trailing comment "updated from status endpoint" is stale. So the vanilla
+also always says Spotify. `sourceName = 'Spotify'` as a default is EXACT
+PARITY, and the page passing nothing is correct.
+
+Better still, this was already known and already solved: `-sync.modal-core.ts`
+carries `metadataSourceLabel()`, which asks
+`window.getMetadataSourceLabel(window.getActiveMetadataSource())` and was built
+as a knowing fix for the same hardcoded-'Spotify' problem in the discovery
+modal's headers. **No new seam. No core.js edit.** The page uses the existing
+helper if it wants the live label, and the vanilla's own hardcoding is a
+recorded divergence, not a bug to re-derive.
+
+Method note: the finding was produced by reading the declaration, and the
+correction by reading the ASSIGNMENTS. Half a read is how a true observation
+grows a false conclusion.
+
+**2. FIVE seams were live, called and UNGUARDED.**
+
+Sweeping every `window.x` the sync route reads and classifying each against the
+vanilla (top-level `function`/`var` and `window.x =` are reachable;
+`let`/`const`/`class` are not) turned up thirty-six names. Five had NO row in
+`vanilla-seams.test.ts`:
+
+| seam | defined in | used by |
+|---|---|---|
+| `openMirroredPlaylistModal` | stats-automations.js 1066 | SoulSync Discovery tab, Auto-Sync Details |
+| `getActiveMetadataSource` | core.js 1444 | `metadataSourceLabel()` |
+| `getMetadataSourceLabel` | shared-helpers.js 4106 | `metadataSourceLabel()` |
+| `wingItDownload` | downloads.js 144 | discovery modal's Download |
+| `_wingItSyncFromModal` | downloads.js 101 | discovery modal's Sync |
+
+**Why they slipped:** each is typed in a `declare global` block inside the
+component file that uses it, rather than in `globals.d.ts`. A local declaration
+type-checks perfectly and asserts NOTHING about the vanilla — and every call is
+optional-chained, so a rename or a region deletion makes the button quietly do
+nothing. `openMirroredPlaylistModal` lives in the same file as
+`_initImportFileTab`, which S4 deletes; a region-sized deletion there takes it
+with it, silently.
+
+Rows added; mutation 5/5 killed (each vanilla definition renamed in turn, each
+kills its own row and names its own symbol).
+
+**Two false positives worth recording**, both caught by reading rather than
+trusting the sweep: `window._disambigEsc` and `window.genreHeroSliderState`
+appear only in COMMENTS explaining that React replaced them. A grep for
+`window\.x` finds prose.
+
+**3. Two page-assembly facts the panel map missed** (not defects, just not
+specified): `onRunAgain(playlistId, playlistName)` needs an adapter because
+`runNow` takes only the id; and `ServerCompareEditor` has no mount site
+anywhere, so the server panel's list-vs-compare switch is the page's to own.
+
+**4. A dead guard, in already-committed components.** `useAutoSync` returns
+`setDragging` and its poller checks `dragging.current` (the vanilla's mid-drag
+skip, auto-sync.js 2338-2350) — but NOTHING calls `setDragging`. The boards do
+drag-and-drop through `onDropPlaylist` and never signal drag start/end upward,
+and `AutoSyncModalProps` has no dragging prop. So a 3s refresh can re-render a
+card mid-drag, which is exactly what the vanilla took care to prevent. The page
+cannot fix this; it needs `onDragStart`/`onDragEnd` on both boards.
