@@ -5907,3 +5907,42 @@ baseline.
 page's remaining work is assembly: nine verticals, selection, modals, sidebar,
 runner and the fifteen panels, all against contracts that are now reachable and
 guarded.
+
+### CORRECTION — the accessor is right for NAMES, wrong for ORDER
+
+The entry above claims "the order is right" because the Spotify tab renders its
+rows unsorted in registration order. **That reasoning is incomplete and the
+conclusion is wrong.**
+
+`spotifyPlaylists` is only ever PUSHED to — core.js 95 and 126 — and never
+cleared, spliced or pruned. Two consequences the order claim missed:
+
+1. **It accumulates.** Refresh the Spotify tab after a playlist is deleted
+   upstream and its row is gone from the screen, but its entry stays in the
+   array forever. `registerSyncAccountPlaylist` is idempotent by id, so a
+   reload adds the new and never removes the departed.
+2. **It is not only account rows.** Line 95 pushes VIRTUAL playlists from an
+   unrelated flow into the same array.
+
+So the array is a SUPERSET of what the page displays. Queueing from it could
+sync a playlist whose card is gone — which the vanilla cannot do, because it
+builds its queue from `document.querySelectorAll('.playlist-card')`: only
+what is on screen right now.
+
+**The accessor stays, and is right for the job it is actually right for.**
+`updateUI` resolves names with `spotifyPlaylists.find(...)` against this same
+superset, so the id→name lookup matching it is exact parity — including the
+'Unknown' fallback for anything it cannot resolve.
+
+**ORDER must come from the tab's live rows instead.** The page takes it the way
+it takes the mirrored reload: the Spotify tab registers its currently-rendered
+ids upward. That is what "display order" means, and it prunes itself for free
+because it IS the render.
+
+Recorded rather than built — this is the page's wiring, and S3b-ii should do it
+with the registration in hand rather than inherit a superset and hope.
+
+**Method note.** The accessor was verified three ways — mutation 6/6, the seam
+guard, 238 python tests — and all of them passed while the reasoning behind one
+of its two uses was wrong. Tests confirm the code does what it says; only
+re-reading the code it talks to catches the claim being about the wrong thing.
