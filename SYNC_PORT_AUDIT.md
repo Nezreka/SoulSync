@@ -5708,3 +5708,41 @@ slowdown rather than a modal bug. 1/1 mutant (a closed host rendering an
 overlay).
 
 Suite 6954. Build clean. Lint at baseline.
+
+### Controller item 5 is NOT a slice — but it surfaced a collision
+
+`runPipeline` needs no build. Both sides already exist and the types already
+meet: `PipelineController.run` is `(playlistId: number, name: string) =>
+Promise<void>` and `UseAutoSyncOptions.runPipeline` is `(playlistId: number,
+playlistName: string) => void`. It is one line at the page level, so it belongs
+to S3b.
+
+**But checking who OWNS the controller found a real collision.**
+`MirroredTab` already builds its own (`mirrored-tab.tsx` 171). If the page
+builds a second one to feed `useAutoSync`, there are TWO controllers with TWO
+poller maps, and a playlist started from the Auto-Sync board would be polled by
+both — the same status endpoint, twice, forever. Not broken, exactly: the
+board's copy would write through a page-level `onState` while the tab's own
+`resume` (653-655) picks the row up and renders it. Just a silent doubling of
+the request rate, which is the exact class of problem the request-flood phase
+already had to claw back once.
+
+**One controller, owned by the page.** Its two collaborators split cleanly:
+
+- `onState` writes through `verticals.mirrored.patchState` — the page HAS the
+  vertical now, since the registry owns all nine. It can build this itself.
+- `reload` refetches the mirrored rows, which only `MirroredTab` knows how to
+  do. That is the one piece the page does not have.
+
+**Recommended shape:** the page owns the controller and supplies
+`reload: () => reloadRef.current?.()`, with `MirroredTab` registering its
+`load` into that ref on mount. This is consistent with the hook's existing
+design — its own docblock says "the collaborators live in refs so the returned
+controller is STABLE" — and avoids hoisting the richest tab's row state, which
+would be a far larger refactor for no additional correctness.
+
+It changes `MirroredTab`'s props, so it gets built and tested as part of S3b
+rather than bolted on here.
+
+**Controller status: 4 built, 1 resolved-as-wiring.** S3b now has a named
+design decision waiting for it instead of a trap.
