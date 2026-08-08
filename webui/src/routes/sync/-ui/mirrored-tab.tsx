@@ -45,7 +45,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { ExportMode } from '../-sync.export';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
-import type { MirroredPipelineState } from '../-sync.pipeline';
+import type { PipelineController } from '../-sync.use-pipeline';
 import type { SourceVertical } from '../-sync.use-vertical';
 
 import {
@@ -69,11 +69,10 @@ import {
   pipelinePhaseFor,
   timeAgo,
 } from '../-sync.mirrored';
-import { SOURCE_REF_FAILED, applyPipelineState, sourceRefUpdatedToast } from '../-sync.pipeline';
+import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
-import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
 import { SourceRefModal } from './source-ref-modal';
@@ -85,9 +84,32 @@ export interface MirroredTabProps {
   onOpen: (sourceId: string) => void;
   /** The metadata source the ratio line names (currentMusicSourceName). */
   sourceName?: string;
+  /**
+   * The page's ONE pipeline controller. REQUIRED, not optional-with-fallback:
+   * the Auto-Sync board's Run-now needs the same controller this tab uses, and
+   * a tab that quietly built its own would give the app two poller maps
+   * hammering the same status endpoint for the same playlist. An optional prop
+   * would make that failure silent; a required one makes it a compile error.
+   * Same reasoning as useAutoSync's runPipeline.
+   */
+  pipeline: PipelineController;
+  /**
+   * Hand this tab's row refetch up to whoever owns the controller. The
+   * controller needs a `reload` at construction and only this tab knows how to
+   * do one, so the owner holds a slot and the tab fills it — which is how the
+   * hook already treats its collaborators ("the collaborators live in refs so
+   * the returned controller is STABLE").
+   */
+  registerReload: (reload: () => void) => void;
 }
 
-export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: MirroredTabProps) {
+export function MirroredTab({
+  vertical,
+  onOpen,
+  sourceName = 'Spotify',
+  pipeline,
+  registerReload,
+}: MirroredTabProps) {
   const config = SYNC_SOURCES.mirrored;
   const [rows, setRows] = useState<MirroredPlaylistRow[] | null>(null);
   const [placeholder, setPlaceholder] = useState('Loading mirrored playlists...');
@@ -147,28 +169,16 @@ export function MirroredTab({ vertical, onOpen, sourceName = 'Spotify' }: Mirror
     void load();
   }, [load]);
 
-  /**
-   * applyMirroredPipelineState (auto-sync.js 2443-2464). patchState both
-   * materialises an absent entry and merges, which is what the vanilla's
-   * `{ ...(youtubePlaylistStates[hash] || {}), ... }` assignment does.
-   */
-  const onPipelineState = useCallback(
-    (playlistId: number, state: MirroredPipelineState) => {
-      vertical.patchState(mirroredHash(playlistId), (s) => ({
-        ...s,
-        ...applyPipelineState(s.phase, state),
-      }));
-    },
-    [vertical],
-  );
-
-  // Memoised so the controller's callbacks stay stable and the resume effect
-  // below does not re-run on every render.
+  // Memoised so the registration below does not re-fire on every render.
   const reload = useCallback(() => {
     void load();
   }, [load]);
 
-  const pipeline = useMirroredPipeline({ onState: onPipelineState, reload });
+  // The controller is the page's; this is the half of it only this tab can
+  // supply. See MirroredTabProps.registerReload.
+  useEffect(() => {
+    registerReload(reload);
+  }, [registerReload, reload]);
 
   /**
    * The render-time poller resume (stats-automations.js 653-655): a row the

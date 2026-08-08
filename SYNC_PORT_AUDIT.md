@@ -5746,3 +5746,45 @@ rather than bolted on here.
 
 **Controller status: 4 built, 1 resolved-as-wiring.** S3b now has a named
 design decision waiting for it instead of a trap.
+
+### S3b-i BUILT — one pipeline controller, owned by the page
+
+The collision recorded above, fixed before the page exists so the page can
+just use it.
+
+**`pipeline` is a REQUIRED prop on `MirroredTab`, not optional-with-fallback.**
+An optional prop would let the page forget it and the tab quietly build its own
+again — two poller maps on the same status endpoint, and nothing would fail.
+Required makes that a compile error instead. Same reasoning as
+`useAutoSync`'s `runPipeline`, and it worked exactly as intended: making the
+change broke the mirrored tests loudly rather than silently.
+
+**`registerReload` is the other half.** The controller needs a `reload` at
+construction and only the tab can refetch its rows, so the owner holds a slot
+and the tab fills it on mount. That matches the hook's own design — its
+docblock already keeps collaborators in refs so the controller stays stable.
+
+**The state writer MOVED rather than being duplicated.**
+`mirroredPipelineStateWriter` now lives in `-sync.mirrored.ts` beside
+`mirroredHash`. The page needs it to construct the controller, and re-deriving
+`mirroredHash` + `applyPipelineState` at the mount site would have put one
+decision in two places — with the mount-site copy being the one that drifts.
+
+**The test harness now performs the PAGE's wiring, not a stub.** The first
+version handed the tab a no-op controller, which made the two pipeline tests
+pass while asserting nothing. It now builds a real controller with the shared
+writer and a reload slot — the same shape the page will use — so those tests
+exercise the real thing.
+
+**Mutation: 5 mutants, 5 killed** after one round. The survivor was
+`registerReload` never being called: nothing asserted the tab hands its reload
+up, which is the hinge of the whole design — without it the controller's
+terminal arms call a no-op and the mirrored list silently stops refreshing when
+a pipeline finishes. The new test registers, then CALLS the registered function
+and asserts the list actually refetches, so a stale closure fails too.
+
+Suite 6955 passing. Build clean. Lint at baseline.
+
+**Next: S3b-ii** — the page component itself: the nine verticals, the selection
+store, the modal mount, the sidebar, the sequential runner and the fifteen
+panels, wired into `SyncShell`.

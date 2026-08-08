@@ -3,11 +3,13 @@
  * useSourceVertical hook — load → card → the three actions → click dispatch.
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { mirroredPipelineStateWriter } from '../-sync.mirrored';
 import { SYNC_SOURCES } from '../-sync.sources';
+import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { useSourceVertical } from '../-sync.use-vertical';
 import { MirroredTab } from './mirrored-tab';
 
@@ -55,9 +57,27 @@ afterEach(() => {
 function Harness(props: Partial<Parameters<typeof MirroredTab>[0]> = {}) {
   const vertical = useSourceVertical(SYNC_SOURCES.mirrored);
   const [openId, setOpenId] = useState<string | null>(null);
+  /**
+   * The harness performs the PAGE's wiring, not a stub: one controller, its
+   * state writer from the shared module, and reload delegated to a slot the
+   * tab fills via registerReload. A stubbed controller would leave the two
+   * pipeline tests below asserting against a no-op.
+   */
+  const reloadRef = useRef<(() => void) | undefined>(undefined);
+  const onState = useMemo(() => mirroredPipelineStateWriter(vertical), [vertical]);
+  const reload = useCallback(() => reloadRef.current?.(), []);
+  const pipeline = useMirroredPipeline({ onState, reload });
   return (
     <div>
-      <MirroredTab vertical={vertical} onOpen={setOpenId} {...props} />
+      <MirroredTab
+        vertical={vertical}
+        onOpen={setOpenId}
+        pipeline={pipeline}
+        registerReload={(fn) => {
+          reloadRef.current = fn;
+        }}
+        {...props}
+      />
       <span data-testid="open-id">{openId ?? 'none'}</span>
       <span data-testid="phase">{vertical.states.mirrored_3?.phase ?? 'unseeded'}</span>
       <span data-testid="seeded">
@@ -666,6 +686,47 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     expect(calls.some((c) => c.url.endsWith('/source-ref'))).toBe(false);
     // ...and the editor stays open so the value can be fixed.
     expect(document.querySelector('.mirrored-source-ref-input')).not.toBeNull();
+  });
+});
+
+describe('MirroredTab — it hands its reload to the controller owner', () => {
+  /**
+   * The page owns ONE pipeline controller so the Auto-Sync board and this tab
+   * cannot poll the same playlist twice. The controller needs a `reload` at
+   * construction and only this tab can do one, so the owner holds a slot and
+   * the tab fills it. If the tab never registers, the controller's terminal
+   * arms call a no-op and the mirrored list silently stops refreshing when a
+   * pipeline finishes — no error, just a stale card.
+   */
+  it('registers a working reload that refetches the list', async () => {
+    const calls: string[] = [];
+    responder = (url) => {
+      calls.push(url);
+      return url === '/api/mirrored-playlists' ? [ROW] : { states: [] };
+    };
+    stubFetch();
+
+    let registered: (() => void) | undefined;
+    render(
+      <Harness
+        registerReload={(fn) => {
+          registered = fn;
+        }}
+      />,
+    );
+    await screen.findByText('Road Trip');
+
+    // It registered a function, not nothing.
+    expect(typeof registered).toBe('function');
+
+    // ...and calling it actually refetches the list, rather than being a
+    // stale closure over a dead render.
+    const before = calls.filter((u) => u === '/api/mirrored-playlists').length;
+    await act(async () => {
+      registered?.();
+    });
+    const after = calls.filter((u) => u === '/api/mirrored-playlists').length;
+    expect(after).toBeGreaterThan(before);
   });
 });
 

@@ -12,9 +12,11 @@
  * ONLY when no live per-hash state exists (534-542).
  */
 
+import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVertical } from './-sync.use-vertical';
 
 import { postRetryFailedDiscovery } from './-sync.api';
+import { applyPipelineState } from './-sync.pipeline';
 
 /** The row as /api/mirrored-playlists returns it. */
 export interface MirroredPlaylistRow {
@@ -322,4 +324,28 @@ export function timeAgo(dateStr: string | null | undefined, now: number): string
 /** The registry key / fake hash — the 'mirrored_' marker is PART of the id. */
 export function mirroredHash(id: number | string): string {
   return `mirrored_${id}`;
+}
+
+/**
+ * The pipeline's state writer — applyMirroredPipelineState (auto-sync.js
+ * 2443-2464). `patchState` both materialises an absent entry and merges, which
+ * is what the vanilla's `{ ...(youtubePlaylistStates[hash] || {}), ... }`
+ * assignment does.
+ *
+ * It lives HERE, not in the mirrored tab, because the page owns the one
+ * pipeline controller now (the tab building its own gave the app two poller
+ * maps on the same endpoint). The page needs this writer to construct that
+ * controller, and re-deriving `mirroredHash` + `applyPipelineState` up there
+ * would put one decision in two places — with the copy at the mount site being
+ * the one that drifts.
+ */
+export function mirroredPipelineStateWriter(
+  vertical: Pick<SourceVertical, 'patchState'>,
+): (playlistId: number, state: MirroredPipelineState) => void {
+  return (playlistId, state) => {
+    vertical.patchState(mirroredHash(playlistId), (s) => ({
+      ...s,
+      ...applyPipelineState(s.phase, state),
+    }));
+  };
 }
