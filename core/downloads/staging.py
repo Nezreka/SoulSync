@@ -102,6 +102,50 @@ def _extract_release_filename_title(stem: str) -> str:
     return ''
 
 
+@dataclass(frozen=True)
+class _ReleaseFilenameParts:
+    track_number: int = 0
+    artist: str = ''
+    title: str = ''
+
+
+def _parse_release_filename_parts(stem: str) -> _ReleaseFilenameParts:
+    """Parse common release filename stems into track / artist / title parts.
+
+    Torrent album bundles often arrive without tags, so the staging cache falls
+    back to filename stems. Keep this conservative and data-only: callers decide
+    whether to trust the parsed artist/title based on context.
+
+    Supported examples:
+    - ``01 - Artist - Title`` -> track=1, artist=Artist, title=Title
+    - ``01 - Title`` -> track=1, title=Title
+    - ``Artist_-_Title`` -> artist=Artist, title=Title
+    """
+    compacted = re.sub(r'[_]+', ' ', str(stem or '').strip())
+    compacted = re.sub(r'\s+', ' ', compacted).strip()
+    if not compacted:
+        return _ReleaseFilenameParts()
+
+    parts = [p.strip() for p in compacted.split(' - ') if p.strip()]
+    if len(parts) < 2:
+        return _ReleaseFilenameParts()
+
+    first_track = _coerce_positive_int(parts[0], 0)
+    if first_track:
+        if len(parts) >= 3:
+            return _ReleaseFilenameParts(
+                track_number=first_track,
+                artist=parts[1],
+                title=' - '.join(parts[2:]).strip(),
+            )
+        return _ReleaseFilenameParts(track_number=first_track, title=parts[1])
+
+    if len(parts) == 2:
+        return _ReleaseFilenameParts(artist=parts[0], title=parts[1])
+
+    return _ReleaseFilenameParts()
+
+
 def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list[str]:
     """Return conservative title variants for release-file matching.
 
@@ -201,6 +245,27 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     norm_artist = normalize(track_artist)
     title_variants = _staging_title_variants(track_title, normalize) or [norm_title]
 
+    _private_album_bundle_staging = False
+    if batch_id and deps.get_batch_field is not None:
+        try:
+            _private_album_bundle_staging = bool(
+                deps.get_batch_field(batch_id, 'album_bundle_private_staging')
+            )
+        except Exception as _exc:
+            logger.debug("get_batch_field failed: %s", _exc)
+
+    with tasks_lock:
+        _task_track_info = download_tasks.get(task_id, {}).get('track_info', {})
+    if not isinstance(_task_track_info, dict):
+        _task_track_info = {}
+    # The task's stored track_info can carry weak defaults from earlier album
+    # setup paths. Only use the live track object's explicit number as a hard
+    # filename-matching guard; context building below can still let selected
+    # files override weak defaults when no live number exists.
+    expected_match_track_number = _coerce_positive_int(
+        getattr(track, 'track_number', 0), 0,
+    )
+
     best_match = None
     best_score = 0.0
     # Track per-candidate scoring so the rejection log can show the
@@ -209,8 +274,45 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     candidate_scores: list = []
 
     for sf in staging_files:
+        full_path = sf.get('full_path', '')
+        if full_path and not os.path.exists(full_path):
+            logger.debug(
+                "[Staging] Skip candidate %s — file no longer exists",
+                os.path.basename(full_path),
+            )
+            continue
+
+        filename_stem = os.path.splitext(os.path.basename(str(full_path or '')))[0]
+        parsed_filename = _parse_release_filename_parts(filename_stem or sf.get('title', ''))
+        parsed_track_number = (
+            _coerce_positive_int(sf.get('track_number'), 0) or
+            parsed_filename.track_number or
+            _extract_explicit_track_number(full_path)
+        )
+        if (
+            _private_album_bundle_staging and
+            expected_match_track_number and
+            parsed_track_number and
+            parsed_track_number != expected_match_track_number
+        ):
+            logger.debug(
+                "[Staging] Skip candidate %s — track_number=%s expected=%s",
+                os.path.basename(full_path or '?'), parsed_track_number,
+                expected_match_track_number,
+            )
+            continue
+
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
+        if _private_album_bundle_staging and parsed_filename.title:
+            parsed_title = normalize(parsed_filename.title)
+            if parsed_title and parsed_title not in sf_title_variants:
+                sf_title_variants.append(parsed_title)
         sf_norm_artist = normalize(sf['artist'])
+        sf_artist_variants = [sf_norm_artist] if sf_norm_artist else []
+        if _private_album_bundle_staging and parsed_filename.artist:
+            parsed_artist = normalize(parsed_filename.artist)
+            if parsed_artist and parsed_artist not in sf_artist_variants:
+                sf_artist_variants.append(parsed_artist)
 
         if not sf_title_variants:
             logger.debug(
@@ -236,13 +338,16 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
         # Artist similarity (secondary)
         artist_sim = 0.0
-        if norm_artist and sf_norm_artist:
-            artist_sim = SequenceMatcher(None, norm_artist, sf_norm_artist).ratio()
-        elif not norm_artist and not sf_norm_artist:
+        if norm_artist and sf_artist_variants:
+            artist_sim = max(
+                SequenceMatcher(None, norm_artist, candidate).ratio()
+                for candidate in sf_artist_variants
+            )
+        elif not norm_artist and not sf_artist_variants:
             artist_sim = 0.5  # Both unknown — neutral
-        elif norm_artist and not sf_norm_artist:
+        elif norm_artist and not sf_artist_variants:
             artist_sim = 0.3  # Staging file lacks artist — partial credit if title is strong
-        elif sf_norm_artist and not norm_artist:
+        elif sf_artist_variants and not norm_artist:
             artist_sim = 0.3  # Track lacks artist — same partial credit
 
         # Combined score: title-weighted (these are user-curated staging files)
@@ -251,6 +356,12 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             combined = (title_sim * 0.55) + (artist_sim * 0.45)
         else:
             combined = (title_sim * 0.80) + (artist_sim * 0.20)
+        if (
+            _private_album_bundle_staging and
+            expected_match_track_number and
+            parsed_track_number == expected_match_track_number
+        ):
+            combined = min(1.0, combined + 0.10)
 
         candidate_scores.append((sf, title_sim, artist_sim, combined))
 
