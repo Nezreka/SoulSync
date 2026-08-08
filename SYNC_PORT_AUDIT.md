@@ -5369,3 +5369,48 @@ surface is four non-doc files: `sync-services.js`, `api-monitor.js`,
 **NOT run: the full python suite** (~9351 tests, ~40 min). The claim being made
 is narrower and precise — every test that reads a file this wave changed passes.
 A full run is an S4 gate, not a per-slice one.
+
+### S3a-i BUILT — the sequential-sync machine + the selection store
+
+`-sync.sequential.ts`. Pure, because the vanilla's version is a singleton whose
+methods also write the DOM — which is how `updateUI` became the only place that
+knows what the button says. Here the rules are values, the sidebar renders
+them, and the engine calls belong to the hook (S3a-ii).
+
+**Order is an argument now, not a DOM query.** `startSequentialSync` builds its
+queue by walking `document.querySelectorAll('.playlist-card')` and keeping the
+selected ones (4079-4087). That makes React's render order a load-bearing
+contract of the download engine: reorder the grid and the sync order changes.
+`syncOrderedSelection(order, selected)` takes it explicitly. This was the
+decision already recorded for S4; it lands here.
+
+**complete() and cancel() are ONE function.** Their resets are identical
+(1304-1307 vs 1324-1327) — they differ only in the toast and in cancel's
+`if (!this.isRunning) return`. `sequentialFinish` is the reset; the caller
+picks the announcement.
+
+**One declared hardening: an empty queue is refused.** The vanilla's `start()`
+would accept one; it never gets the chance because 4073 bails earlier with a
+toast. Letting it through would set `running` with nothing to run — a sidebar
+stuck on "Syncing 1/0" whose only exit is Cancel. Refused at the source
+instead of relying on a guard two files away.
+
+**The name lookup is injected.** 1365 resolves against `spotifyPlaylists`,
+which is precisely why the label falls back to 'Unknown' for a queued id from
+any other source. The bridge takes a `nameFor` and passes an unresolved name
+straight through — `syncSelectionLabel` owns the 'Unknown' fallback, and
+duplicating it would put one decision in two places. A test asserts the lookup
+is not called at all while idle.
+
+**Mutation: 17 mutants, 17 killed** — after one round. The first pass had a
+survivor on `sequentialFinish`'s not-running guard, and the test was at fault,
+not the code: it passed `SEQUENTIAL_IDLE`, for which the guarded and unguarded
+versions return that same constant. Added the input where they disagree — a
+stopped state that still carries residue. Fourth time this session that a test
+has passed for reasons unrelated to what it claims to check.
+
+Full suite 6898 passing, clean run. Build clean. Lint clean.
+
+**Next: S3a-ii** — the hook that drives this against the engine (thirteen
+`useSourceVertical` instances, `startPlaylistSync`, the completion poll), then
+S3b mounts the panels.
