@@ -245,7 +245,7 @@ describe('seeding — the engine must be able to FIND the playlist (2235-2240)',
     // The second row's id is a NUMBER — the engine matches with === against
     // the string the card rendered (2235), so seeding must coerce.
     responder = () => [SPOTIFY_ROW, { id: 99, name: 'Second', track_count: 3 }];
-    render(<SpotifyTab />);
+    render(<SpotifyTab registerRows={() => {}} />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     expect(seeded).toHaveLength(2);
     expect(seeded[0]).toMatchObject({ id: 'p1', name: 'Road Trip' });
@@ -329,9 +329,58 @@ describe('the header count is per-tab drift (1901 vs 2592)', () => {
 });
 
 describe('SpotifyTab', () => {
+  it('registers the RENDERED ids, in display order', async () => {
+    // This is the sequential sync's queue order. It must be what is on screen:
+    // the engine's own spotifyPlaylists is never pruned and also holds virtual
+    // playlists, so queueing from it could sync a card that is gone.
+    const seen: string[][] = [];
+    responder = () => [SPOTIFY_ROW, { id: 99, name: 'Second', track_count: 3 }];
+    render(<SpotifyTab registerRows={(ids) => seen.push(ids)} />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+
+    // Ids are coerced to strings, matching what the selection store holds.
+    expect(seen.at(-1)).toEqual(['p1', '99']);
+  });
+
+  it('registers an EMPTY list before anything has loaded', async () => {
+    // Otherwise the page would hold a stale order from a previous mount and
+    // Start Sync could queue against playlists no longer listed.
+    const seen: string[][] = [];
+    responder = () => [];
+    render(<SpotifyTab registerRows={(ids) => seen.push(ids)} />);
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    expect(seen[0]).toEqual([]);
+  });
+
+  it('does NOT re-register when the caller passes a fresh function each render', async () => {
+    // registerRows is a prop; an inline arrow is a new function every render.
+    // Held in a ref so only `rows` decides — the same trap useAutoSync's `now`
+    // fell into.
+    let calls = 0;
+    responder = () => [SPOTIFY_ROW];
+    function Wrapper({ tick }: { tick: number }) {
+      return (
+        <div>
+          <span data-testid="tick">{tick}</span>
+          <SpotifyTab
+            registerRows={() => {
+              calls += 1;
+            }}
+          />
+        </div>
+      );
+    }
+    const { rerender } = render(<Wrapper tick={0} />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    const after = calls;
+    rerender(<Wrapper tick={1} />);
+    rerender(<Wrapper tick={2} />);
+    expect(calls).toBe(after);
+  });
+
   it('loads, renders cards, and keeps the vanilla container + button ids', async () => {
     responder = () => [SPOTIFY_ROW];
-    render(<SpotifyTab />);
+    render(<SpotifyTab registerRows={() => {}} />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     expect(document.querySelector('#spotify-playlist-container')).not.toBeNull();
     expect(document.querySelector('#spotify-refresh-btn')).not.toBeNull();
@@ -340,7 +389,7 @@ describe('SpotifyTab', () => {
 
   it('shows the empty copy, not an empty list', async () => {
     responder = () => [];
-    render(<SpotifyTab />);
+    render(<SpotifyTab registerRows={() => {}} />);
     await waitFor(() =>
       expect(screen.getByText('No Spotify playlists found.')).toBeInTheDocument(),
     );
@@ -353,7 +402,7 @@ describe('SpotifyTab', () => {
         throw new Error('network down');
       }),
     );
-    render(<SpotifyTab />);
+    render(<SpotifyTab registerRows={() => {}} />);
     await waitFor(() => expect(screen.getByText('❌ Error: network down')).toBeInTheDocument());
     expect(window.showToast).toHaveBeenCalledWith('Error loading playlists: network down', 'error');
     // The finally arm — a failed load must not leave the button stuck.
@@ -365,7 +414,7 @@ describe('SpotifyTab', () => {
   it('opening a card fetches its tracks and shows the details modal', async () => {
     responder = (url) =>
       url === '/api/spotify/playlists' ? [SPOTIFY_ROW] : { name: 'Road Trip', tracks: [] };
-    render(<SpotifyTab />);
+    render(<SpotifyTab registerRows={() => {}} />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(document.querySelector('#action-btn-p1') as Element);
     await waitFor(() => expect(document.querySelector('#playlist-details-modal')).not.toBeNull());

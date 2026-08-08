@@ -5946,3 +5946,37 @@ with the registration in hand rather than inherit a superset and hope.
 guard, 238 python tests — and all of them passed while the reasoning behind one
 of its two uses was wrong. Tests confirm the code does what it says; only
 re-reading the code it talks to catches the claim being about the wrong thing.
+
+### S3b-iii BUILT — the Spotify tab registers its display order
+
+The requirement the correction above identified, built rather than left as a
+note.
+
+`registerRows` on `AccountTabProps`, **required**, same reasoning as the
+mirrored `pipeline`: optional would let the page forget it, and Start Sync
+would queue nothing while the checkboxes looked fine. Required made the account
+tests fail loudly the moment the prop appeared.
+
+**It reports the RENDERED ids, in render order.** That is what the vanilla's
+`document.querySelectorAll('.playlist-card')` means, and it prunes itself
+because it IS the render — no stale entries, no virtual playlists, unlike the
+engine's array. Ids are coerced with `String()` to match what the selection
+store holds; a mutant dropping the coercion is killed.
+
+**An empty list is registered too**, before anything loads, so a remount cannot
+leave the page holding a previous mount's order.
+
+**`registerRows` is held in a ref**, not a dependency — the lesson from
+`registerReload`, applied while writing rather than after. A mutant putting it
+back in the deps is killed.
+
+Mutation: 5 mutants, 5 killed — never registered; ids not coerced; null rows
+registering nothing instead of empty; the prop back in the deps; and the order
+reversed.
+
+Suite 6961 passing. Build clean. Lint at baseline.
+
+**The page's inputs are now all present and guarded:** nine verticals,
+selection, modals, the sidebar, the sequential runner, one pipeline controller,
+two engine seams, and both registrations (mirrored reload, Spotify order). What
+remains in S3b-ii is the component that assembles them.

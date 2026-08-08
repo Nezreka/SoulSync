@@ -32,7 +32,7 @@
  * nothing consumes, which is exactly what the reverted P5h did.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AccountPlaylistRow } from '../-sync.accounts';
 import type { AccountPlaylistTracks } from '../-sync.api';
@@ -64,12 +64,37 @@ export interface AccountTabProps {
   /** The shell's selection store — Spotify only (1794-1809). */
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (playlistId: string) => void;
+  /**
+   * Hand the CURRENTLY RENDERED row ids up, in display order.
+   *
+   * This is the sequential sync's queue order, and it has to come from what is
+   * on screen. The vanilla reads it off
+   * `document.querySelectorAll('.playlist-card')` — live cards only. The
+   * engine's own `spotifyPlaylists` cannot substitute: it is never pruned, so
+   * a playlist deleted upstream keeps its entry after a refresh, and an
+   * unrelated flow pushes virtual playlists into the same array. Queueing from
+   * that superset could sync a playlist whose card is gone.
+   *
+   * REQUIRED, so the page cannot forget it and leave Start Sync queueing
+   * nothing.
+   */
+  registerRows: (playlistIds: string[]) => void;
 }
 
 /* ── The Spotify tab (1598-1630, 1832-1876) ───────────────────────────────── */
 
-export function SpotifyTab({ selectedIds, onToggleSelect }: AccountTabProps) {
+export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: AccountTabProps) {
+  /**
+   * Held in a ref, not a dependency: `registerRows` is a prop, so an inline
+   * arrow at the call site would be a new function every render and this
+   * effect would re-fire on every one. Only `rows` should decide.
+   */
+  const registerRef = useRef(registerRows);
+  registerRef.current = registerRows;
   const [rows, setRows] = useState<AccountPlaylistRow[] | null>(null);
+  useEffect(() => {
+    registerRef.current((rows ?? []).map((row) => String(row.id)));
+  }, [rows]);
   const [placeholder, setPlaceholder] = useState('🔄 Loading playlists...');
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<OpenDetail | null>(null);
