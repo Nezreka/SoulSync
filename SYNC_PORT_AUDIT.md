@@ -5414,3 +5414,59 @@ Full suite 6898 passing, clean run. Build clean. Lint clean.
 **Next: S3a-ii** — the hook that drives this against the engine (thirteen
 `useSourceVertical` instances, `startPlaylistSync`, the completion poll), then
 S3b mounts the panels.
+
+### S3a-ii BUILT — the runner
+
+`-sync.use-sequential.ts`. Drives the machine against the download engine,
+which STAYS VANILLA: `startPlaylistSync`, the `activeSyncPollers` map and
+`disablePlaylistSelection` all live in downloads.js and survive the flip. They
+arrive as a REQUIRED injected object, same rule as `runPipeline` on
+useAutoSync — a window lookup that resolves to undefined is a dead button, and
+the type system can forbid it instead.
+
+The loop is an async runner in a ref, not an effect: effects re-run on
+dependency changes, and a sync run has to survive every re-render the page
+makes while it is going.
+
+**LIVE BUG #7 — cancelling pops a bogus success toast.** The vanilla's
+`cancel()` resets the manager, but the `setTimeout(() => this.syncNext(), 1000)`
+queued by the previous iteration still fires. It then finds `currentIndex (0)
+>= queue.length (0)` — both just zeroed — and calls `complete()`, which
+announces SUCCESS for zero playlists and computes its duration from a
+`startTime` that cancel has already set to null. `Date.now() - null` is
+`Date.now()`, so the toast reads roughly:
+
+    Sequential sync completed for 0 playlists in 1754584800.0s
+
+...in green, a second after you cancel. Not fixed in the vanilla — the flip is
+close and the port cannot reproduce it, because the runner checks a cancel flag
+at every await boundary. Same call as live bug #5. **Boulder's to decide.**
+
+**Mutation: 12 mutants, 12 killed** — after two rounds, and BOTH survivors were
+the tests, not the code. One asserted cancellation with `tick(1000)`, which
+fires the inter-sync gap timer and lets the broken version reach the same toast;
+the other never checked that the progress index advances at all, so a runner
+that started every sync but never moved the label looked identical from the
+engine's side. Fixed by advancing exactly `0` — flush the microtasks, fire no
+timers — and by asserting the label moves from Alpha to Beta.
+
+**A test harness that hung the suite.** The first version injected a `wait` that
+resolved immediately, which turns the completion poll into an unbounded
+microtask loop whenever a playlist never settles: it starves the event loop, so
+vitest's own 5s timeout cannot fire and the run hangs rather than fails. Now on
+fake timers driving the hook's REAL 1s cadence. The mutation script also treats
+a timeout as a kill, so a mutant that hangs cannot be scored as a survivor.
+
+### OPEN for S3b — the run does not survive navigation
+
+`sequentialSyncManager` is a MODULE SINGLETON (core.js 409). Leaving /sync
+mid-run and coming back finds the vanilla still running, because the manager
+outlives the page. The hook's state is per-mount, so the React sidebar would
+come back reading idle while the engine is still syncing — and the runner
+closure would still be alive, holding refs to a dead component.
+
+Not solved here because the fix depends on where the controller ends up
+sitting: either the state is hoisted into a module-scoped store (closest to the
+vanilla), or the controller lives above the route so it is not unmounted. That
+is an S3b decision and it needs the page structure to exist first. Recorded so
+the flip does not ship with a sidebar that forgets a running sync.
