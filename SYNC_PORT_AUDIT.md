@@ -6072,3 +6072,37 @@ the active tab twice.
 **Remaining for the page:** the panel JSX itself — fifteen entries into
 `panels`, plus `SyncModals` and `SyncSidebar` around it. Every prop it needs is
 now typed and reachable; the risky wiring is done and tested separately.
+
+### The three unknown panel contracts — READ, all resolved
+
+The panel map was complete except for three, each on the argument-shape axis
+where a wrong guess renders fine and misbehaves on one click. All three are
+now known, and none needs new code.
+
+**1. Server — a VIEW SWITCH, not a modal.**
+`ServerCompareEditor { playlist: ServerPlaylist; mirrored: MirroredMatch | null;
+onBack: () => void }`, both types from `-sync.server`. So the panel is a small
+piece of local state: null renders `ServerPlaylistList` with its
+`onOpenCompare(playlist, mirrored)`, non-null renders the editor with `onBack`
+clearing it. That is why the server tab's handler must NOT be folded in with
+the modal openers — it opens a different view of the same panel.
+
+**2. Beatport — the env builder already exists.**
+`BeatportDownloadEnv` is a bag of injected functions (toast, overlay control,
+`openDownloadModal`), and `defaultBeatportDownloadEnv()` (-beatport.downloads.ts
+114) already builds it from the vanilla globals. The page memoises one and
+passes it to each `Beatport*Section`. Nothing to write — this was already
+solved when the Beatport wave was ported, and guessing would have meant
+building a second one.
+
+**3. ListenBrainz / Last.fm — the source id is the mbid.**
+`LbCardData { mbid, title, creator, count }`, so `onOpen={(card) =>
+openModal('listenbrainz', card.mbid)}`. Confirmed against the existing
+small-tabs test, which opens with `'mbid-1'` and sees the engine receive
+`'listenbrainz_mbid-1'` — the `listenbrainz_` prefix is the vertical's own,
+applied downstream, so the page must pass the BARE mbid.
+
+**The panel map is now complete and the assembly is mechanical.** Worth noting
+the read cost minutes and removed three chances to wire a handler to the wrong
+shape — the Beatport one would have been a duplicate env builder that looked
+correct and diverged the moment either copy changed.
