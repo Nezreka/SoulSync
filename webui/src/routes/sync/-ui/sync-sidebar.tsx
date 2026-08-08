@@ -20,7 +20,7 @@
  * the accumulated-listener bug bite.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { SyncActionsState } from '../-sync.sidebar';
 
@@ -123,17 +123,40 @@ export function SyncSidebar({ state, onStartSync, visible, logText }: SyncSideba
   const text = logText ?? polled;
   const logRef = useRef<HTMLTextAreaElement>(null);
 
-  // updateLogsFromData's scroll rule (1137-1147). Read the scroll position
-  // BEFORE the new text lands, which in React means sampling it in the layout
-  // effect that runs after the DOM has the new value — so the measurement uses
-  // the retained ref values from the previous render.
-  const previous = useRef(text);
-  useEffect(() => {
+  /**
+   * updateLogsFromData's scroll rule (1137-1147).
+   *
+   * The vanilla measures the scroll position BEFORE assigning the new value.
+   * An effect cannot: it runs after React has already committed the text, and
+   * writing a textarea's value can clamp scrollTop, so measuring there would
+   * read post-update numbers the vanilla never sees. So the metrics are
+   * captured on scroll instead — that is the position the reader actually left
+   * the box in, which is exactly what the rule is asking about. They start at
+   * zero, which reads as "at the top" and matches a freshly-rendered box.
+   */
+  const metrics = useRef({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+  const onScroll = () => {
     const el = logRef.current;
-    if (!el || previous.current === text) return;
-    previous.current = text;
-    if (syncLogShouldScrollTop(el.scrollTop, el.scrollHeight, el.clientHeight)) {
+    if (el) {
+      metrics.current = {
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      };
+    }
+  };
+
+  // Layout effect, not a passive one: the reset must land before paint, or a
+  // new frame flashes at the old offset first. `[text]` is the whole guard —
+  // a re-render that does not change the log (a selection change, say) must
+  // leave the reader's position alone, and the dependency already ensures it.
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = metrics.current;
+    if (syncLogShouldScrollTop(scrollTop, scrollHeight, clientHeight)) {
       el.scrollTop = 0;
+      metrics.current = { ...metrics.current, scrollTop: 0 };
     }
   }, [text]);
 
@@ -162,7 +185,7 @@ export function SyncSidebar({ state, onStartSync, visible, logText }: SyncSideba
           />
         </div>
         <div id="sync-progress-text">{syncProgressLabel(state)}</div>
-        <textarea id="sync-log-area" readOnly ref={logRef} value={text} />
+        <textarea id="sync-log-area" readOnly ref={logRef} value={text} onScroll={onScroll} />
       </div>
     </div>
   );

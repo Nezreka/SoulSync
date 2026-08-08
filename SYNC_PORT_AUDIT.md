@@ -5152,3 +5152,52 @@ check, because `stopLogPolling` is called from init.js and `updateLogsFromData`
 is bound app-wide in core.js, not per page.
 
 **Next:** S3 — mount the fifteen ported tabs into `SyncShell`'s `panels` prop.
+
+### S2 post-slice review — three defects in my own work
+
+The review pass after committing S2 found three, all in the log area's scroll
+handling. Worth recording because two of them are the same failure mode this
+dossier keeps naming.
+
+**1. The code did not do what its comment said.** The docblock claimed the
+scroll position was sampled "in the layout effect", from "the retained ref
+values from the previous render". It was a plain `useEffect` reading the
+element directly — which runs AFTER React has committed the new text, and
+writing a textarea's value can clamp `scrollTop`. So it measured post-update
+numbers the vanilla never sees, and the comment described an implementation
+that did not exist.
+
+Fixed by capturing the metrics in an `onScroll` handler — the position the
+reader actually left the box in, which is what the rule is asking about — and
+switching to `useLayoutEffect` so the reset lands before paint.
+
+**2. There was no test for any of it.** The pure predicate
+`syncLogShouldScrollTop` was well covered; the code that FEEDS it was not
+exercised at all, so the whole measurement path was unverified. Four tests
+added, with jsdom's zero-height elements given real `scrollHeight`/
+`clientHeight` via `Object.defineProperty` — without that every position reads
+as "at the top" and the tests assert nothing.
+
+**3. Two of those four tests initially measured nothing.** Both the
+"measures where the reader LEFT the box" and "text is unchanged" cases were
+written so the correct and the broken implementation produce the SAME result,
+so neither could ever fail. Rewritten with inputs on which the two disagree:
+the recorded metrics say one thing, the element says the other, and the
+assertion distinguishes them. This is the third time in this port a test has
+passed while measuring nothing — first the jsdom `DragEvent` case, then the
+`indexOf`-returns-−1 case, now this. The pattern is always the same: the
+assertion is true for reasons unrelated to the behaviour under test. Mutation
+testing caught all three; nothing else would have.
+
+**A fourth, minor: a redundant guard.** The effect carried a
+`previous.current === text` check that duplicated its own `[text]` dependency —
+a mutant removing it SURVIVED, correctly. Deleted rather than annotated, since
+the dependency array already says it.
+
+Also closed: `SyncShell`'s new `sidebarVisible` prop shipped with no test. The
+grid modifier now has one, plus two mutants.
+
+Scroll rule: 6 mutants, 6 killed. Grid modifier: 2/2. Suite 6870 passing on two
+consecutive clean runs — an earlier run in the same batch had one failure whose
+name I did not capture, consistent with the known load-dependent flake but not
+positively identified.

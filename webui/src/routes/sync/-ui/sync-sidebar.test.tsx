@@ -152,6 +152,80 @@ describe('the progress section', () => {
   });
 });
 
+describe('the log area scroll rule', () => {
+  /**
+   * jsdom does no layout, so scrollHeight/clientHeight are 0 and every position
+   * would read as "at the top". They are defined per-element here to model a
+   * box with real overflow — 1000 tall in a 100 viewport, so the bottom is
+   * scrollTop 900.
+   */
+  function overflowing(el: HTMLTextAreaElement) {
+    Object.defineProperty(el, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(el, 'clientHeight', { value: 100, configurable: true });
+  }
+
+  function mount() {
+    const view = renderSidebar({ logText: 'first' });
+    const el = view.container.querySelector('#sync-log-area') as HTMLTextAreaElement;
+    overflowing(el);
+    return { ...view, el };
+  }
+
+  it('leaves a reader parked in the middle where they were', () => {
+    const { rerender, el, props } = mount();
+    el.scrollTop = 400;
+    fireEvent.scroll(el);
+
+    rerender(<SyncSidebar {...props} logText="second" />);
+    expect(el.scrollTop).toBe(400);
+  });
+
+  it('returns to the top for a reader who was at the top', () => {
+    const { rerender, el, props } = mount();
+    el.scrollTop = 500;
+    fireEvent.scroll(el); // parked mid-way...
+    el.scrollTop = 5;
+    fireEvent.scroll(el); // ...then back near the top
+    el.scrollTop = 500; // a stale offset the update should discard
+
+    rerender(<SyncSidebar {...props} logText="second" />);
+    expect(el.scrollTop).toBe(0);
+  });
+
+  it('measures where the reader LEFT the box, not where it ended up', () => {
+    // The whole reason the metrics are captured on scroll rather than read off
+    // the element in the effect: after the commit the element can hold a
+    // position the vanilla never measures.
+    //
+    // Both halves of this case are chosen so the two implementations DISAGREE.
+    // The reader left the box mid-scroll at 400, which says "leave it alone".
+    // The element then ends up at 950 — past the bottom of 900 — which the
+    // same rule reads as "return to the top". Reading the element would snap
+    // to 0; reading the metrics leaves 950 where it is.
+    const { rerender, el, props } = mount();
+    el.scrollTop = 400;
+    fireEvent.scroll(el);
+    el.scrollTop = 950; // moved with no scroll event of its own
+
+    rerender(<SyncSidebar {...props} logText="second" />);
+    expect(el.scrollTop).toBe(950);
+  });
+
+  it('does not touch the scroll position when the text is unchanged', () => {
+    // A re-render driven by something else — a selection change here — must
+    // not disturb the reader. Chosen so the two behaviours DISAGREE: the
+    // recorded metrics say "at the top", so a rule that ran on this render
+    // would snap the box to 0, while leaving it alone keeps 400.
+    const { rerender, el, props } = mount();
+    el.scrollTop = 5;
+    fireEvent.scroll(el);
+    el.scrollTop = 400;
+
+    rerender(<SyncSidebar {...props} logText="first" state={state({ selectedCount: 2 })} />);
+    expect(el.scrollTop).toBe(400);
+  });
+});
+
 describe('useSyncLog on its own', () => {
   it('starts on the markup placeholder, before any data', () => {
     // The textarea's own initial content (3313) — so a page with no feed yet

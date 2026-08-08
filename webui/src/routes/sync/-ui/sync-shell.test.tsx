@@ -293,4 +293,21 @@ describe('the sidebar slot', () => {
     const { container } = renderShell();
     expect(container.querySelector('.sync-content-area')?.children).toHaveLength(1);
   });
+
+  it('widens the grid to two columns only while the sidebar is shown', () => {
+    // showSyncSidebar/hideSyncSidebar (downloads.js 4041-4057) set
+    // gridTemplateColumns inline alongside the sidebar's own display. The port
+    // splits them — each element's visibility lives with the component that
+    // renders it — so the shell owns this half and the sidebar owns the other.
+    const closed = renderShell({ sidebar: <aside /> });
+    expect(closed.container.querySelector('.sync-content-area')?.className).toBe(
+      'sync-content-area',
+    );
+    closed.unmount();
+
+    const open = renderShell({ sidebar: <aside />, sidebarVisible: true });
+    expect(open.container.querySelector('.sync-content-area')?.className).toBe(
+      'sync-content-area sync-content-area--with-sidebar',
+    );
+  });
 });
