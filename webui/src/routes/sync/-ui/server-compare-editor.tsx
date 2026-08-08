@@ -555,45 +555,72 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
 
   return (
     <div id="server-editor">
+      {/* index.html 3255-3272. The vanilla only FILLED this markup, so the
+          classes here are not decoration: every one of them carries a rule in
+          style.css (61126-61367). Emitting the ids alone — which is what the
+          first pass did, because the ids are what the vanilla JS looked up —
+          leaves the whole view unstyled while every id still resolves. */}
       <div className="server-editor-header">
         <button type="button" className="server-editor-back" onClick={onBack}>
           ← Back
         </button>
-        <div id="server-editor-name">{playlist.name}</div>
-        <div id="server-editor-meta">{meta}</div>
-        {/* 657/694: the label IS the button state. The vanilla restores
-            whatever text it captured, falling back to this same string — a
-            fallback that can only ever produce the string it already had. */}
+        <div className="server-editor-info">
+          <h4 className="server-editor-name" id="server-editor-name">
+            {playlist.name}
+          </h4>
+          <span className="server-editor-meta" id="server-editor-meta">
+            {meta}
+          </span>
+        </div>
+        {/* 356-367: the stats live INSIDE the header, between the name and the
+            refresh button — not below the banner. */}
+        <div className="server-editor-stats" id="server-editor-stats">
+          <div className="server-editor-stat">
+            <div className="server-editor-stat-num matched">{stats.matched}</div>
+            <div className="server-editor-stat-label">Matched</div>
+          </div>
+          <div className="server-editor-stat">
+            <div className="server-editor-stat-num missing">{stats.missing}</div>
+            <div className="server-editor-stat-label">Missing</div>
+          </div>
+          {/* 366: the Extra tile appears only when there are any. */}
+          {stats.extra > 0 && (
+            <div className="server-editor-stat">
+              <div className="server-editor-stat-num extra">{stats.extra}</div>
+              <div className="server-editor-stat-label">Extra</div>
+            </div>
+          )}
+        </div>
+        {/* _serverEditorRefresh (630-632) re-opens the view, which is a refetch
+            and nothing else. It was missing entirely from the first pass. */}
         <button
           type="button"
-          id="server-editor-export-btn"
-          disabled={exporting}
-          onClick={() => void exportM3u()}
+          className="server-editor-refresh"
+          title="Re-fetch from server"
+          onClick={() => void loadCompare()}
         >
-          {exporting ? '⏳ Exporting…' : '📋 Export M3U'}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 2v6h-6M3 12a9 9 0 0115.356-6.356L21 8M3 22v-6h6M21 12a9 9 0 01-15.356 6.356L3 16" />
+          </svg>
         </button>
       </div>
 
-      {/* 304-306: only when there is no mirrored source at all. */}
-      {data && !mirrored && <div id="server-no-source-banner" />}
-
-      <div id="server-editor-stats">
-        <div className="server-editor-stat">
-          <div className="server-editor-stat-num matched">{stats.matched}</div>
-          <div className="server-editor-stat-label">Matched</div>
+      {/* 304-306: only when there is no mirrored source at all. The copy is the
+          markup's own — the vanilla never wrote this text, it just unhid it. */}
+      {data && !mirrored && (
+        <div id="server-no-source-banner" className="server-no-source-banner">
+          No mirrored playlist found matching this name. Showing server tracks only.
         </div>
-        <div className="server-editor-stat">
-          <div className="server-editor-stat-num missing">{stats.missing}</div>
-          <div className="server-editor-stat-label">Missing</div>
-        </div>
-        {/* 366: the Extra tile appears only when there are any. */}
-        {stats.extra > 0 && (
-          <div className="server-editor-stat">
-            <div className="server-editor-stat-num extra">{stats.extra}</div>
-            <div className="server-editor-stat-label">Extra</div>
-          </div>
-        )}
-      </div>
+      )}
 
       <div className="server-editor-filters">
         {FILTERS.map((f) => (
@@ -607,20 +634,36 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
             {compareFilterLabel(f, stats)}
           </button>
         ))}
+        {/* The export button is the fifth pill in this row, pushed right — NOT
+            a header button. 657/694: the label IS the button state. */}
+        <button
+          type="button"
+          className="discog-filter server-editor-export"
+          id="server-editor-export-btn"
+          style={{ marginLeft: 'auto' }}
+          disabled={exporting}
+          title="Export this server playlist as an M3U file (for Music Assistant etc.)"
+          onClick={() => void exportM3u()}
+        >
+          {exporting ? '⏳ Exporting…' : '📋 Export M3U'}
+        </button>
       </div>
 
       <div className="server-compare-columns">
-        <div id="server-col-source">
+        <div className="server-compare-col source" id="server-col-source">
           <div className="server-col-header">
-            <span id="server-col-source-icon">
+            <span className="server-col-icon" id="server-col-source-icon">
               {mirrored ? compareSourceIcon(mirrored.source) : '📋'}
             </span>
-            <span id="server-col-source-label">
+            <span className="server-col-label" id="server-col-source-label">
               {compareSourceLabel(mirrored?.source, Boolean(mirrored))}
             </span>
-            <span id="server-col-source-count">{data?.source_track_count || 0} tracks</span>
+            <span className="server-col-count" id="server-col-source-count">
+              {data?.source_track_count || 0} tracks
+            </span>
           </div>
           <div
+            className="server-col-scroll"
             id="server-col-source-scroll"
             ref={sourceScroll}
             onScroll={() => syncScroll(sourceScroll.current, serverScroll.current)}
@@ -651,11 +694,15 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
           </div>
         </div>
 
-        <div id="server-col-server">
+        <div className="server-compare-col server" id="server-col-server">
           <div className="server-col-header">
-            <span id="server-col-server-icon">{compareServerIcon(data?.server_type)}</span>
-            <span id="server-col-server-label">{serverLabel}</span>
-            <span id="server-col-server-count">
+            <span className="server-col-icon" id="server-col-server-icon">
+              {compareServerIcon(data?.server_type)}
+            </span>
+            <span className="server-col-label" id="server-col-server-label">
+              {serverLabel}
+            </span>
+            <span className="server-col-count" id="server-col-server-count">
               {data?.server_track_count || 0} tracks{' '}
               {outOfOrder && (
                 <button
@@ -670,6 +717,7 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
             </span>
           </div>
           <div
+            className="server-col-scroll"
             id="server-col-server-scroll"
             ref={serverScroll}
             onScroll={() => syncScroll(serverScroll.current, sourceScroll.current)}
@@ -704,7 +752,9 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
         </div>
       </div>
 
-      <div id="server-editor-footer">{compareFooterText(stats)}</div>
+      <div className="server-editor-footer" id="server-editor-footer">
+        {compareFooterText(stats)}
+      </div>
 
       {showOrder && (
         <ServerOrderModal
