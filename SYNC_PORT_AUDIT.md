@@ -5201,3 +5201,64 @@ Scroll rule: 6 mutants, 6 killed. Grid modifier: 2/2. Suite 6870 passing on two
 consecutive clean runs — an earlier run in the same batch had one failure whose
 name I did not capture, consistent with the known load-dependent flake but not
 positively identified.
+
+## S3 READ — the fifteen panels, and why this is not "just wiring"
+
+Every tab component exists. What does NOT exist is the thing that feeds them,
+and the earlier note calling S3 "wiring; every tab is already ported" was
+optimistic. The components take **five different `onOpen` signatures**, thirteen
+of them need a `SourceVertical` instance, and two need shared selection state.
+That is a page controller, and it should be built and tested as one.
+
+### The panel map
+
+| tab id | component | needs |
+|---|---|---|
+| `server` | `ServerPlaylistList` | `onOpenCompare(playlist, mirrored \| null)` |
+| `spotify` | `SpotifyTab` | `selectedIds`, `onToggleSelect` |
+| `spotify-public` | `SpotifyPublicTab` | `vertical`, `onOpen(sourceId, playlist)` |
+| `itunes-link` | `ITunesLinkTab` | `vertical`, `onOpen(sourceId, playlist)` |
+| `tidal` | `TidalTab` | `vertical`, `onOpen(sourceId)` |
+| `qobuz` | `QobuzTab` | `vertical`, `onOpen(sourceId)` |
+| `deezer` | `DeezerArlTab` | — |
+| `deezer-link` | `DeezerLinkTab` | `vertical`, `onOpen(sourceId, playlist)` |
+| `youtube` | `YouTubeTab` | `vertical`, `onOpen(sourceId, playlist)` |
+| `beatport` | the `Beatport*Section` set | `env` |
+| `listenbrainz-sync` | `ListenBrainzSyncTab` | `vertical`, `onOpen(card)` |
+| `lastfm-sync` | `LastfmSyncTab` | `vertical`, `onOpen(card)` |
+| `soulsync-discovery-sync` | `SoulsyncDiscoveryTab` | — |
+| `import-file` | `ImportFileTab` | `onImported()` |
+| `mirrored` | `MirroredTab` | `vertical`, `onOpen(sourceId)`, `sourceName` |
+
+Four signatures for `onOpen` (`(sourceId)`, `(sourceId, playlist)`, `(card)`,
+`(playlist, mirrored)`) plus `onImported`. They are NOT interchangeable, and
+collapsing them behind one handler is how a modal ends up opening on the wrong
+argument.
+
+### What the controller owns
+
+1. **Thirteen `useSourceVertical` instances**, one per `SYNC_SOURCES` entry.
+   ListenBrainz needs its `onDiscoveryComplete` option — that auto-mirror is
+   what puts LB and Last.fm rows in the Mirrored tab and therefore on the
+   Auto-Sync board, so omitting it silently empties two downstream surfaces.
+2. **The selection store** — `selectedPlaylists` in the vanilla. Read by the
+   Spotify tab AND by the sidebar's `SyncActionsState`. One source of truth.
+3. **The shared modals** — discovery, fix, source-ref, export, auto-sync.
+4. **`runPipeline`**, injected into `useAutoSync`; it must come from
+   `useMirroredPipeline().run`, because the window function it used to resolve
+   lives in the file the flip deletes. The type system already enforces this.
+5. **The sequential-sync bridge** — the sidebar's one toggle, plus the
+   `startSequentialSync(orderedIds)` parameter decision, which stops React
+   render order being a load-bearing contract of the download engine.
+
+### Recommended split
+
+S3 is two slices, not one:
+
+- **S3a — the controller.** Verticals, selection store, modal routing, the
+  sequential-sync bridge. Pure-core where it can be, tested on its own.
+- **S3b — the mount.** `panels` assembled from S3a's handles, plus the
+  artefact check that all fifteen ids still resolve.
+
+Doing them as one would produce a large untested-in-the-middle component, which
+is exactly what the per-slice mutation discipline is meant to prevent.
