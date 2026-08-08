@@ -81,6 +81,7 @@ describe('shellRouteManifest', () => {
       'label-detail',
       'stats',
       'issues',
+      'help',
     ]);
     // The dashboard flipped to React (the 12th and final music page).
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(false);

@@ -2134,41 +2134,11 @@ const HELPER_CONTENT = {
 function _navigateToDocsSection(docsId) {
     dismissHelperPopover();
     toggleHelperMode();
-    navigateToPage('help');
-
-    // Wait for docs page to initialize, then simulate a nav click
-    setTimeout(() => {
-        // Try clicking the nav section title first (top-level like 'dashboard', 'sync')
-        const navTitle = document.querySelector(`.docs-nav-section-title[data-target="${docsId}"]`);
-        if (navTitle) {
-            navTitle.click();
-            return;
-        }
-
-        // Try clicking a child nav item (subsections like 'gs-connecting', 'set-media')
-        const navChild = document.querySelector(`.docs-nav-child[data-target="${docsId}"]`);
-        if (navChild) {
-            // Expand parent section first
-            const parentSection = navChild.closest('.docs-nav-section');
-            if (parentSection) {
-                const parentTitle = parentSection.querySelector('.docs-nav-section-title');
-                if (parentTitle && !parentTitle.classList.contains('expanded')) {
-                    parentTitle.click();
-                }
-            }
-            setTimeout(() => navChild.click(), 200);
-            return;
-        }
-
-        // Fallback: scroll to element by ID
-        const el = document.getElementById(docsId) || document.getElementById('docs-' + docsId);
-        if (el) {
-            const docsContent = document.getElementById('docs-content');
-            if (docsContent) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        }
-    }, 600);
+    // The help page is React now — its bridge owns routing, section/child
+    // resolution and the scroll (window.navigateToDocsSection, help route).
+    if (typeof window.navigateToDocsSection === 'function') {
+        window.navigateToDocsSection(docsId);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
