@@ -39,6 +39,14 @@ export interface SyncShellProps {
   onAutoSync: () => void;
   /** The right-hand sidebar (S2). Rendered as the second grid column. */
   sidebar?: ReactNode;
+  /**
+   * Whether that sidebar is currently shown. Drives the grid only — the
+   * sidebar owns its own display. The vanilla wrote both inline together
+   * (`showSyncSidebar`/`hideSyncSidebar`, downloads.js 4041-4057); splitting
+   * them keeps each element's visibility in the component that renders it,
+   * and the two classes are transcriptions of those inline styles.
+   */
+  sidebarVisible?: boolean;
 }
 
 /** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
@@ -60,7 +68,7 @@ function runHeaderAction(key: string, onAutoSync: () => void) {
   window.openDownloadOriginsModal?.('playlist');
 }
 
-export function SyncShell({ panels, onAutoSync, sidebar }: SyncShellProps) {
+export function SyncShell({ panels, onAutoSync, sidebar, sidebarVisible }: SyncShellProps) {
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   // Which panels have ever been opened. See the header note: the vanilla's
   // one-shot load flags mean a tab keeps what it loaded after you leave it.
@@ -113,7 +121,9 @@ export function SyncShell({ panels, onAutoSync, sidebar }: SyncShellProps) {
         </div>
       </div>
 
-      <div className="sync-content-area">
+      <div
+        className={`sync-content-area${sidebarVisible ? ' sync-content-area--with-sidebar' : ''}`}
+      >
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
             {SYNC_TABS.map((t) => (

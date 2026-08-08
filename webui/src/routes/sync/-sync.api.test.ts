@@ -35,6 +35,7 @@ import {
   patchMirroredSourceRef,
   fetchSourcePlaylistsStates,
   fetchSourceState,
+  fetchSyncLogs,
   fetchSourceSyncStatus,
   fetchSpotifyPlaylists,
   generatePlaylistM3u,
@@ -658,5 +659,31 @@ describe('the Auto-Sync schedule board endpoints', () => {
       '/api/personalized/kinds',
       '/api/personalized/playlists',
     ]);
+  });
+});
+
+describe('the sidebar log feed', () => {
+  it('GETs /api/logs and returns the frame', async () => {
+    stubFetch({ logs: ['[12:00] one'] });
+    await expect(fetchSyncLogs()).resolves.toEqual({ logs: ['[12:00] one'] });
+    expect(calls[0].url).toBe('/api/logs');
+    expect(calls[0].method).toBe('GET');
+  });
+
+  it('resolves to NULL on a non-ok response', async () => {
+    // The caller keeps the text it has rather than blanking the textarea.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('nope', { status: 500 })),
+    );
+    await expect(fetchSyncLogs()).resolves.toBeNull();
+  });
+
+  it('resolves to NULL rather than rejecting when the network is down', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('offline'))),
+    );
+    await expect(fetchSyncLogs()).resolves.toBeNull();
   });
 });

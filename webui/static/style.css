@@ -14746,6 +14746,35 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: none;
 }
 
+/*
+ * The React port's transcription of showSyncSidebar/hideSyncSidebar
+ * (downloads.js), which set these same two declarations inline. `flex` rather
+ * than `block` because the shared .sync-main-panel/.sync-sidebar rule above
+ * lays the sidebar out as a column — the vanilla restored it by clearing the
+ * inline display and letting that rule apply.
+ */
+.sync-sidebar--visible {
+    display: flex;
+}
+
+.sync-content-area--with-sidebar {
+    grid-template-columns: 2.5fr 0.75fr;
+}
+
+/*
+ * Re-assert the narrow-screen collapse for the modifier. The ≤1300px block
+ * above pins .sync-content-area to a single column, but it appears EARLIER in
+ * the file and carries the same specificity, so the modifier would otherwise
+ * win and leave a two-column grid with a display:none second column. The
+ * sidebar itself needs no such repeat: that rule uses !important.
+ */
+@media (max-width: 1300px) {
+    .sync-content-area--with-sidebar {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+}
+
 /* Tab System */
 .sync-tabs {
     display: flex;

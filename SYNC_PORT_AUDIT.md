@@ -5055,3 +5055,100 @@ every mutant was scoped to the fix's own file. The lesson is the one the
 reachability rule already encodes: a guard that changes WHEN a function runs
 has to be checked against every caller of everything below it, not just the
 lines it sits next to.
+
+### S2 BUILT — the sidebar
+
+`-sync.sidebar.ts` (pure core), `-sync.events.ts` (the socket seam),
+`-ui/sync-sidebar.tsx` (component + `useSyncLog`), `fetchSyncLogs` on the api
+layer, two CSS modifiers, and the `ss:sync-logs` re-broadcast in
+api-monitor.js.
+
+**One function covers both writers.** `SequentialSyncManager.updateUI` and
+`updateSyncActionsUI` say the same three things when idle, and the second
+delegates to the first whenever a sync is running (sync-spotify.js 1814-1817).
+The only asymmetry is that `updateSyncActionsUI` never sets the button LABEL —
+safe only because it cannot run while the label is anything but 'Start Sync'.
+The port collapses them, and a test pins that a selection change mid-run cannot
+overwrite the progress line.
+
+**Start Sync stays ONE callback.** The vanilla handler is a toggle and the
+caller decides from `running`. Splitting it into `onStart`/`onCancel` would let
+a caller wire the two inconsistently, which is the shape the accumulated-
+listener bug took. There is a test for the single callback.
+
+**DECLARED DIVERGENCE — the progress bar and text are now wired.** They had no
+writer in the vanilla (see the S2 read above). Rather than transcribe two
+permanently-dead elements into new React, the port feeds them from the numbers
+`SequentialSyncManager` already computes for the selection line:
+`syncProgressPercent` counts COMPLETED playlists over the queue (0% at the
+start of the first, 100% only after the last), and `syncProgressLabel` reads
+"N of M playlists". The idle strings are untouched — a page that never starts a
+sync is byte-identical to today's. Both are clamped, so a stale index cannot
+render a bar wider than its container.
+
+**DECLARED DIVERGENCE — the >1300px rule moves to CSS.** `showSyncSidebar`
+samples `window.innerWidth` once, at start, so a sync begun on a narrow window
+keeps the sidebar hidden even after the window is widened. The stylesheet
+already enforces the same rule with `!important`, so the port lets it, and the
+wart goes away. The port re-asserts the single-column grid for the new
+`.sync-content-area--with-sidebar` inside its own ≤1300px block: the existing
+media query has equal specificity and appears EARLIER in the file, so without
+that repeat a narrow screen would get a two-column grid whose second column is
+`display: none`.
+
+**Transcribed, not corrected: the tab switch hides the sidebar mid-sync.** The
+vanilla tab handler hides it unconditionally (3751), without checking whether a
+run is in progress, so switching tabs during a sync drops the progress panel
+until the next run. `syncSidebarVisible(running, hiddenByTabSwitch)` keeps that
+exactly, with a test naming it.
+
+**The sidebar stays MOUNTED while hidden.** The vanilla log poller runs for as
+long as the page is open regardless of whether the panel is on screen;
+unmounting on hide would stop the feed. Only the display flips.
+
+**The log feed is a poller twin, and both halves are pinned.** `ss:sync-logs`
+(push) plus a 3s `/api/logs` fetch gated on `window._socketConnected` — the
+same cadence and the same gate as `loadLogs`. The re-broadcast goes INSIDE
+`updateLogsFromData`, before its shape guard, so the socket push and the HTTP
+poll both reach React through one seam. Because the dispatch lives in a browser
+script the port cannot import, `-sync.events.test.ts` reads api-monitor.js and
+asserts the channel name, the enclosing function, and the ordering — this is
+the seam direction `vanilla-seams.test.ts` does not cover (that file guards
+React calling INTO vanilla; this guards vanilla dispatching OUT).
+
+**A race the vanilla loses, fixed here.** A `/api/logs` request is in flight
+for as long as the server takes; a socket push landing meanwhile is strictly
+newer. The vanilla applies whichever resolves last, so the feed visibly
+rewinds. `useSyncLog` counts pushes and drops a fetch result whose count
+changed while it was awaiting. Found by a test, and it has its own mutant.
+
+**The ids are load-bearing.** `.sync-sidebar`, `#start-sync-btn` and
+`#sync-log-area` are helper.js tour anchors (798-811, plus the anchor list at
+3449). Renaming any of them empties a help bubble silently rather than failing
+anything, so there is a test asserting all three survive, and a mutant that
+renames one.
+
+**Mutation: 29 mutants, 28 killed.** The survivor is proven equivalent and
+annotated in place — dropping the `data === null` check in `hydrate` changes
+nothing, because `apply` already discards a nullish frame via `syncLogText`.
+
+**The export-coverage gate fired again — twelfth consecutive slice.**
+`fetchSyncLogs`, `SYNC_LOGS_EVENT`/`useSyncLogsEvent` and `useSyncLog` were all
+exercised indirectly but named by no test. Closed with real tests, not by
+un-exporting: three api cases (ok, non-ok, network down), five seam cases, and
+two on the hook directly. The seam assertions got their own 3/3 mutation pass.
+
+Full suite 6865 passing, clean run. Build clean. Lint clean. All nine emitted
+classes resolve in style.css.
+
+**Added to the S4 worklist.** After the flip, `#sync-log-area` is React-owned
+DOM, but `updateLogsFromData` still writes it — a second writer on a React
+element, exactly the hazard the dashboard's P7 hardening pass dealt with. That
+function must become dispatch-only at S4. `initializeLiveLogViewer`,
+`startLogPolling`, `loadLogs` and `cleanupSyncPageLogs` all become unreachable
+at the same moment (`cleanupSyncPageLogs` is ALREADY dead — defined at
+api-monitor.js 1154 and called from nowhere); each needs the usual reachability
+check, because `stopLogPolling` is called from init.js and `updateLogsFromData`
+is bound app-wide in core.js, not per page.
+
+**Next:** S3 — mount the fifteen ported tabs into `SyncShell`'s `panels` prop.
