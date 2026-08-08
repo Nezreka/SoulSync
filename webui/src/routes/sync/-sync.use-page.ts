@@ -51,6 +51,15 @@ export interface SyncPage {
   onTabChange: () => void;
   /** Handed to MirroredTab. */
   registerMirroredReload: (reload: () => void) => void;
+  /**
+   * Refetch the mirrored rows. The page already holds the tab's reload for the
+   * pipeline controller; the import tab needs the same one, because
+   * importFileSubmit's tail re-loaded that list after writing a playlist
+   * (sync-services.js 449-455). No-op until MirroredTab has mounted and
+   * registered — which matches the vanilla, where the list simply was not
+   * there to refresh yet.
+   */
+  reloadMirrored: () => void;
   /** Handed to SpotifyTab. */
   registerSpotifyRows: (playlistIds: string[]) => void;
 }
@@ -140,6 +149,7 @@ export function useSyncPage(): SyncPage {
     sidebarVisible: syncSidebarVisible(sequential.state.running, hiddenByTabSwitch),
     onTabChange,
     registerMirroredReload,
+    reloadMirrored,
     registerSpotifyRows,
   };
 }

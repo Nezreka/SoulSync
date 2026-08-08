@@ -3,7 +3,7 @@
  * tab handler at sync-services.js 3694-3811.
  */
 
-import { fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -323,6 +323,29 @@ describe('the sidebar slot', () => {
   it('omits it entirely when there is none', () => {
     const { container } = renderShell();
     expect(container.querySelector('.sync-content-area')?.children).toHaveLength(1);
+  });
+
+  it('hands the host an opener that switches tabs like a click does', () => {
+    // The import tab has to send the user to Mirrored after a write
+    // (sync-services.js 449-455) and the shell owns tab state, so it registers
+    // the opener upward. Opening this way must be indistinguishable from a
+    // click: the panel mounts AND the sidebar re-hide fires, because the
+    // vanilla got there BY clicking the button.
+    let open: ((tab: 'mirrored') => void) | undefined;
+    const onTabChange = vi.fn();
+    renderShell({
+      panels: { mirrored: <div data-testid="mirrored-panel" /> },
+      onTabChange,
+      registerOpenTab: (fn) => {
+        open = fn as (tab: 'mirrored') => void;
+      },
+    });
+    expect(document.querySelector('[data-testid="mirrored-panel"]')).toBeNull();
+    expect(onTabChange).not.toHaveBeenCalled();
+
+    act(() => open?.('mirrored'));
+    expect(document.querySelector('[data-testid="mirrored-panel"]')).not.toBeNull();
+    expect(onTabChange).toHaveBeenCalledTimes(1);
   });
 
   it('widens the grid to two columns only while the sidebar is shown', () => {

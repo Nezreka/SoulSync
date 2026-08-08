@@ -23,7 +23,7 @@
  * own components, not the shell.
  */
 
-import { Fragment, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
   SYNC_DEFAULT_TAB,
@@ -54,6 +54,22 @@ export interface SyncShellProps {
    * Filtering out same-tab clicks here would change that.
    */
   onTabChange?: () => void;
+  /**
+   * Hand the host a function that opens a tab programmatically.
+   *
+   * The shell owns tab state, so a panel that needs to send the user elsewhere
+   * cannot do it alone — the import tab is the case: importFileSubmit's tail
+   * clicked the mirrored tab button and reloaded that list (sync-services.js
+   * 449-455). Registration upward is the idiom this port already uses for
+   * MirroredTab's reload and the Spotify tab's row order, rather than lifting
+   * tab state into the page and re-plumbing every panel.
+   *
+   * Optional: the shell stands alone in its own tests, and nothing breaks if a
+   * host does not want it. Opening a tab this way marks it opened and fires
+   * `onTabChange`, exactly as a click does — the vanilla got there BY clicking
+   * the button, so the sidebar re-hide must happen too.
+   */
+  registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
 
 /** 2237-2241. Three of the four are vanilla seams; see -sync.shell.ts. */
@@ -81,18 +97,32 @@ export function SyncShell({
   sidebar,
   sidebarVisible,
   onTabChange,
+  registerOpenTab,
 }: SyncShellProps) {
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   // Which panels have ever been opened. See the header note: the vanilla's
   // one-shot load flags mean a tab keeps what it loaded after you leave it.
   const [opened, setOpened] = useState<Set<SyncTabId>>(() => new Set([SYNC_DEFAULT_TAB]));
 
-  const open = (next: SyncTabId) => {
+  // Both props live in refs so `open` can be STABLE. A host that writes
+  // `onTabChange={() => …}` inline hands a new function every render, and an
+  // `open` rebuilt each time would re-fire the registration effect forever —
+  // the trap useAutoSync's `now` fell into, applied here while writing.
+  const onTabChangeRef = useRef(onTabChange);
+  onTabChangeRef.current = onTabChange;
+  const registerOpenTabRef = useRef(registerOpenTab);
+  registerOpenTabRef.current = registerOpenTab;
+
+  const open = useCallback((next: SyncTabId) => {
     const id = normalizeSyncTab(next);
-    onTabChange?.();
+    onTabChangeRef.current?.();
     setTab(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-  };
+  }, []);
+
+  useEffect(() => {
+    registerOpenTabRef.current?.(open);
+  }, [open]);
 
   return (
     // `page-shell` plus the page id, matching the convention every flipped

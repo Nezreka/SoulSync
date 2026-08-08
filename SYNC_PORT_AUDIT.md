@@ -6243,3 +6243,52 @@ drag-and-drop through `onDropPlaylist` and never signal drag start/end upward,
 and `AutoSyncModalProps` has no dragging prop. So a 3s refresh can re-render a
 card mid-drag, which is exactly what the vanilla took care to prevent. The page
 cannot fix this; it needs `onDragStart`/`onDragEnd` on both boards.
+
+### S3b-ii BUILT — the page assembly, minus Beatport
+
+`-ui/sync-page.tsx`. Fourteen of the fifteen panels, the sidebar, the modal
+router, the shell and the Auto-Sync modal.
+
+**Two enablers the assembly needed**, both discovered by wiring `onImported`
+rather than by planning:
+
+1. **`useSyncPage().reloadMirrored`** — the import tab has to refetch the
+   mirrored rows (importFileSubmit's tail, sync-services.js 449-455). The page
+   already held that reload for the pipeline controller and had no way to call
+   it.
+2. **`SyncShell`'s `registerOpenTab`** — the shell owns tab state, so a panel
+   cannot send the user elsewhere. Same registration idiom as MirroredTab's
+   reload and the Spotify row order, rather than lifting tab state into the
+   page and re-plumbing fifteen panels. Both props sit in REFS so the
+   registered `open` is stable; an inline `onTabChange` would otherwise rebuild
+   it every render and re-fire the effect forever.
+
+**Mutation 6/6 — but 4/6 on the first pass.** The two survivors were both
+panel WIRING, and both matter:
+
+- `vertical={page.verticals.deezer}` swapped to `youtube`: the Deezer link tab
+  renders, fetches and looks perfect while driving YouTube's state.
+- the LB card opened on `card.title` instead of `card.mbid`: the wrong source
+  id reaches the modal.
+
+Neither is visible to any panel's own tests, because each panel is correct in
+isolation — the defect is which object the PAGE handed it. Killed with an
+identity assertion (`deezerLink !== youtube`) and an mbid-vs-title stub whose
+two fields deliberately differ. **The lesson generalises: a page component's
+tests must assert the wiring, because every part it wires is already tested and
+still passes.**
+
+Also renamed a test whose title claimed a list-to-compare swap its body never
+performed — the sixth instance this wave of a test saying more than it checks.
+
+**BEATPORT IS DELIBERATELY UNWIRED.** The panel map's "the Beatport*Section
+set" understates it: index.html 2395+ is a sub-shell with two inner tabs (My
+Playlists / Rebuild), a hero slider with its own nav and indicators, three nav
+buttons that switch to a genre browser and two Top-100 views, a download-bubble
+region, then the section stack. Every piece exists as a component; the
+composition and its view state do not. `SyncShell` renders an empty panel for a
+tab with no entry, so the gap is VISIBLE rather than subtly wrong, and a test
+asserts it stays empty — filling it in is then a test change, not a silent one.
+
+**Next: S3b-iii** — read index.html 2395+ end to end, then build the Beatport
+sub-shell. After that, S4.

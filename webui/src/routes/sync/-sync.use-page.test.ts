@@ -175,6 +175,21 @@ describe('what it assembles', () => {
     expect(result.current.pipeline).toBe(before);
   });
 
+  it('routes reloadMirrored to whatever the mirrored tab registered', () => {
+    // The import tab needs this refetch (sync-services.js 449-455) and the
+    // pipeline controller needs the same one. A no-op here looks fine until a
+    // file import leaves the mirrored list showing yesterday's rows.
+    const reload = vi.fn();
+    const { result } = renderHook(() => useSyncPage());
+    result.current.reloadMirrored(); // before registration: must not throw
+    expect(reload).not.toHaveBeenCalled();
+    act(() => {
+      result.current.registerMirroredReload(reload);
+    });
+    result.current.reloadMirrored();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it('starts with no modal open', () => {
     const { result } = renderHook(() => useSyncPage());
     expect(result.current.modals.open).toBeNull();
