@@ -1,25 +1,32 @@
 """The AcoustID decision core against REAL fingerprint answers.
 
-Every row is a file that actually sits in a working SoulSync library, its
-expected title/artist, and the recordings AcoustID really returned for its
-fingerprint (captured live via fpcalc + api.acoustid.org). 138 tracks:
-Hiroyuki Sawano's Attack on Titan scores (romaji tags vs MusicBrainz's kanji
-credit 澤野弘之, ASCII-mangled OST titles like 'Shingeki Pf - Adlib - B 20130218
-Kyojin', bracket-credit forms '<Vocal: mpi>'), PianoPrinceOfAnime's epic-cover
-catalogue, Michael Jackson remasters, Justin Bieber, James Brown.
+139 files that actually sit in a working SoulSync library, each with the
+recordings AcoustID really returned for its fingerprint (captured live via
+fpcalc + api.acoustid.org): Hiroyuki Sawano's Attack on Titan scores,
+PianoPrinceOfAnime's epic-cover catalogue, Michael Jackson, Justin Bieber,
+James Brown.
 
-The property under test is the one that matters to a user: a file that IS what
-it claims must never be quarantined. Every row here is a correct file, so no
-row may come back FAIL.
+WHAT THIS FILE ACTUALLY DEFENDS — established by mutation, not by assertion.
+Breaking each of these makes it go red, and nothing else in the suite catches
+them:
 
-Cross-script artist credits are bridged by the alias provider, exactly as
-``core/acoustid_verification`` wires it in production. The map below is a static
-stand-in for the live MusicBrainz lookup so the test needs no network.
+  * the cross-script artist bridge (46 rows). Tags say 'Hiroyuki Sawano',
+    MusicBrainz credits 澤野弘之, direct artist similarity is 0.00, and only the
+    alias provider rescues it. Drop the provider and 46 correct files are
+    quarantined.
+  * CJK identity in normalize() (70 rows). Narrow the character class from
+    ``\\w`` to ASCII and every Japanese title becomes an empty string.
+  * the FAIL/SKIP threshold (6 rows).
+
+It is NOT a test of the version-tail rule — only 6 of these titles carry a dash
+tail at all, and mutating that rule leaves this file green. The tail rule is
+covered by ``_TAIL_PAIRS`` at the bottom of this file and by
+``tests/text/test_version_qualifier_corpus.py``.
 """
 
 import pytest
 
-from core.matching.audio_verification import Decision, evaluate, normalize
+from core.matching.audio_verification import Decision, evaluate, normalize, similarity
 
 
 _ALIASES = {
@@ -32,289 +39,302 @@ def _aliases_for(artist):
     return lambda: _ALIASES.get((artist or '').strip().lower(), [])
 
 
-# (expected_title, expected_artist, [(acoustid_title, acoustid_artist), ...], score)
+# (expected_title, expected_artist, [(acoustid_title, acoustid_artist), ...],
+#  fingerprint_score, decision)
 _REAL_LOOKUPS = [
     ('2Volt', 'Hiroyuki Sawano',
-     [('2Volt', '澤野弘之')], 0.99),
+     [('2Volt', '澤野弘之')], 0.99, 'pass'),
     ('2chijou', 'Hiroyuki Sawano',
-     [('2chi城', '澤野弘之')], 0.99),
+     [('2chi城', '澤野弘之')], 0.99, 'skip'),
     ('APETITAN', 'Hiroyuki Sawano',
-     [('APETITAN', '澤野弘之')], 0.99),
+     [('APETITAN', '澤野弘之')], 0.99, 'pass'),
     ('Aots2m #1', 'Hiroyuki Sawano',
-     [('AOTs2M他1', '澤野弘之')], 0.99),
+     [('AOTs2M他1', '澤野弘之')], 0.99, 'pass'),
     ('Aots2m #2', 'Hiroyuki Sawano',
-     [('AOTs2M他2', '澤野弘之')], 1.0),
+     [('AOTs2M他2', '澤野弘之')], 1.0, 'pass'),
     ('Aots2m #3', 'Hiroyuki Sawano',
-     [('AOTs2M他3', '澤野弘之')], 1.0),
+     [('AOTs2M他3', '澤野弘之')], 1.0, 'pass'),
     ('Aots2m #4', 'Hiroyuki Sawano',
-     [('AOTs2M他4', '澤野弘之')], 1.0),
+     [('AOTs2M他4', '澤野弘之')], 1.0, 'pass'),
     ('Army-Attack', 'Hiroyuki Sawano',
-     [('army⇒G♂', '澤野弘之')], 0.98),
+     [('army⇒G♂', '澤野弘之')], 0.98, 'skip'),
     ('Attack on D', 'Hiroyuki Sawano',
-     [('attack音D', '澤野弘之')], 1.0),
+     [('attack音D', '澤野弘之')], 1.0, 'pass'),
     ('Attack on Titan', 'Hiroyuki Sawano',
-     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('(intro) Attack on Titan', '小林未郁')], 0.99),
+     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('(intro) Attack on Titan', '小林未郁')], 0.99, 'skip'),
     ('Barricades', 'Hiroyuki Sawano',
-     [('Barricades', '澤野弘之')], 0.99),
+     [('Barricades', '澤野弘之')], 0.99, 'pass'),
     ('Bauklotze', 'Hiroyuki Sawano',
-     [('Bauklötze', '澤野弘之 <Vocal: MIKA KOBAYASHI>')], 0.98),
+     [('Bauklötze', '澤野弘之 <Vocal: MIKA KOBAYASHI>')], 0.98, 'pass'),
     ('Call Your Name', 'Hiroyuki Sawano',
-     [('Call your name', '澤野弘之 <Vocal: mpi & CASG (Caramel Apple Sound Gadget)>')], 0.99),
+     [('Call your name', '澤野弘之 <Vocal: mpi & CASG (Caramel Apple Sound Gadget)>')], 0.99, 'pass'),
     ('Call of Silence', 'Hiroyuki Sawano',
-     [('Call of Silence', '澤野弘之')], 1.0),
+     [('Call of Silence', '澤野弘之')], 1.0, 'pass'),
     ('Counter Attack-Mankind', 'Hiroyuki Sawano',
-     [('cóunter・attàck-mˈænkάɪnd', '澤野弘之')], 0.98),
+     [('cóunter・attàck-mˈænkάɪnd', '澤野弘之')], 0.98, 'pass'),
     ('DOA', 'Hiroyuki Sawano',
-     [('DOA', '澤野弘之 <Vocal: AIMEE BLACKSCHLEGER>')], 0.99),
+     [('DOA', '澤野弘之 <Vocal: AIMEE BLACKSCHLEGER>')], 0.99, 'pass'),
     ('E.M.A', 'Hiroyuki Sawano',
-     [('E・M・A', '澤野弘之')], 0.97),
+     [('E・M・A', '澤野弘之')], 0.97, 'pass'),
     ('EMAymniam', 'Hiroyuki Sawano',
-     [('EMAymniam', '澤野弘之')], 0.96),
+     [('EMAymniam', '澤野弘之')], 0.96, 'pass'),
     ('Eye-Water', 'Hiroyuki Sawano',
-     [('eye-water', '澤野弘之')], 0.98),
+     [('eye-water', '澤野弘之')], 0.98, 'pass'),
     ('Omake-Pfadlib', 'Hiroyuki Sawano',
-     [('omake-pfadlib', '澤野弘之')], 0.97),
+     [('omake-pfadlib', '澤野弘之')], 0.97, 'pass'),
     ('Rittaikidou', 'Hiroyuki Sawano',
-     [('立body機motion', '澤野弘之')], 0.98),
+     [('立body機motion', '澤野弘之')], 0.98, 'skip'),
     ('Shingeki Gt 20130218 Kyojin', 'Hiroyuki Sawano',
-     [('進撃gt20130218巨人', '澤野弘之'), ('eye-water', '澤野弘之')], 0.94),
+     [('進撃gt20130218巨人', '澤野弘之'), ('eye-water', '澤野弘之')], 0.94, 'skip'),
     ('Shingeki Pf - Adlib - B 20130218 Kyojin', 'Hiroyuki Sawano',
-     [('Vogel im Käfig', '澤野弘之 <Vocal: Cyua>'), ('進撃pf-adlib-b20130218巨人', '澤野弘之')], 0.97),
+     [('Vogel im Käfig', '澤野弘之 <Vocal: Cyua>'), ('進撃pf-adlib-b20130218巨人', '澤野弘之')], 0.97, 'skip'),
     ('Shingeki Pf - Adlib - C 20130218 Kyojin', 'Hiroyuki Sawano',
-     [('進撃pf-adlib-c20130218巨人', '澤野弘之'), ('凸】♀】♂】←巨人', '澤野弘之')], 0.96),
+     [('進撃pf-adlib-c20130218巨人', '澤野弘之'), ('凸】♀】♂】←巨人', '澤野弘之')], 0.96, 'skip'),
     ('Shingeki Pf - Medley 20130629 Kyojin', 'Hiroyuki Sawano',
-     [('巨♀〜9地区', '澤野弘之'), ('進撃pf-medley20130629巨人', '澤野弘之')], 0.99),
+     [('巨♀〜9地区', '澤野弘之'), ('進撃pf-medley20130629巨人', '澤野弘之')], 0.99, 'skip'),
     ('Shingeki Pf 20130218 Kyojin', 'Hiroyuki Sawano',
-     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>'), ('進撃pf20130218巨人', '澤野弘之')], 0.95),
+     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>'), ('進撃pf20130218巨人', '澤野弘之')], 0.95, 'skip'),
     ('Shingeki St - Hrn - Gt 20130629 Kyojin', 'Hiroyuki Sawano',
-     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('進撃st-hrn-gt20130629巨人', '澤野弘之')], 0.99),
+     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('進撃st-hrn-gt20130629巨人', '澤野弘之')], 0.99, 'skip'),
     ('Shingeki St - Hrn- Egt 20130629 Kyojin', 'Hiroyuki Sawano',
-     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('進撃st-hrn-egt20130629巨人', '澤野弘之')], 0.97),
+     [('ətˈæk 0N tάɪtn', '澤野弘之 <Vocal: MIKA KOBAYASHI>'), ('進撃st-hrn-egt20130629巨人', '澤野弘之')], 0.97, 'skip'),
     ('Shingeki St 20130629 Kyojin', 'Hiroyuki Sawano',
-     [('進撃st20130629巨人', '澤野弘之'), ('巨♀〜9地区', '澤野弘之')], 0.99),
+     [('進撃st20130629巨人', '澤野弘之'), ('巨♀〜9地区', '澤野弘之')], 0.99, 'skip'),
     ('Shingeki Vn - Pf 20130524 Kyojin', 'Hiroyuki Sawano',
-     [('進撃vn-pf20130524巨人', '澤野弘之'), ('army⇒G♂', '澤野弘之')], 0.98),
+     [('進撃vn-pf20130524巨人', '澤野弘之'), ('army⇒G♂', '澤野弘之')], 0.98, 'skip'),
     ('So ist es immer', 'Hiroyuki Sawano',
-     [('So ist es immer', '澤野弘之')], 1.0),
+     [('So ist es immer', '澤野弘之')], 1.0, 'pass'),
     ('TWO-lives', 'Hiroyuki Sawano',
-     [('TWO-lives', '澤野弘之')], 0.97),
+     [('TWO-lives', '澤野弘之')], 0.97, 'pass'),
     ('The Reluctant Heroes', 'Hiroyuki Sawano',
-     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>')], 0.99),
+     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>')], 0.99, 'pass'),
     ('The Reluctant Heroes <MODv>', 'Hiroyuki Sawano',
-     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>')], 0.99),
+     [('The Reluctant Heroes', '澤野弘之 <Vocal: mpi>')], 0.99, 'pass'),
     ('TheWeightOfLives', 'Hiroyuki Sawano',
-     [('TheWeightOfLives', '澤野弘之')], 0.97),
+     [('TheWeightOfLives', '澤野弘之')], 0.97, 'pass'),
     ('Titan♀～9chiku', 'Hiroyuki Sawano',
-     [('巨♀〜9地区', '澤野弘之')], 0.98),
+     [('巨♀〜9地区', '澤野弘之')], 0.98, 'skip'),
     ('Vogel Im Kafig', 'Hiroyuki Sawano',
-     [('Vogel im Käfig', '澤野弘之 <Vocal: Cyua>')], 1.0),
+     [('Vogel im Käfig', '澤野弘之 <Vocal: Cyua>')], 1.0, 'pass'),
     ('Xl-Tt', 'Hiroyuki Sawano',
-     [('XL-TT', '澤野弘之')], 0.95),
+     [('XL-TT', '澤野弘之')], 0.95, 'pass'),
     ('YAMANAIAME', 'Hiroyuki Sawano',
-     [('YAMANAIAME', '澤野弘之'), ('YAMANAIAME (Instrumental)', '澤野弘之')], 0.99),
+     [('YAMANAIAME', '澤野弘之'), ('YAMANAIAME (Instrumental)', '澤野弘之')], 0.99, 'pass'),
     ('YAMANAIAME <FMv>', 'Hiroyuki Sawano',
-     [('YAMANAIAME', '澤野弘之'), ('YAMANAIAME (Instrumental)', '澤野弘之')], 0.99),
+     [('YAMANAIAME', '澤野弘之'), ('YAMANAIAME (Instrumental)', '澤野弘之')], 0.99, 'pass'),
     ('YouSeeBIGGIRL/T:T', 'Hiroyuki Sawano',
-     [('YouSeeBIGGIRL/T:T', '澤野弘之')], 0.97),
+     [('YouSeeBIGGIRL/T:T', '澤野弘之')], 0.97, 'pass'),
     ('son2seaVer', 'Hiroyuki Sawano',
-     [('son2seaVer', '澤野弘之')], 0.99),
+     [('son2seaVer', '澤野弘之')], 0.99, 'pass'),
     ('theDOGS', 'Hiroyuki Sawano',
-     [('theDOGS', '澤野弘之'), ('theDOGS (Instrumental)', '澤野弘之')], 0.99),
+     [('theDOGS', '澤野弘之'), ('theDOGS (Instrumental)', '澤野弘之')], 0.99, 'pass'),
     ('ymniam-MKorch', 'Hiroyuki Sawano',
-     [('ymniam-MKorch', '澤野弘之')], 0.98),
+     [('ymniam-MKorch', '澤野弘之')], 0.98, 'pass'),
     ('ymniam-orch', 'Hiroyuki Sawano',
-     [('ymniam-orch (sm2_Final#2)', '澤野弘之')], 0.97),
+     [('ymniam-orch (sm2_Final#2)', '澤野弘之')], 0.97, 'pass'),
     ('凸】♀】♂】←Titan', 'Hiroyuki Sawano',
-     [('凸】♀】♂】←巨人', '澤野弘之')], 0.96),
+     [('凸】♀】♂】←巨人', '澤野弘之')], 0.96, 'skip'),
     ('405', 'Justin Bieber',
-     [('405', 'Justin Bieber')], 0.99),
+     [('405', 'Justin Bieber')], 0.99, 'pass'),
     ('405', 'Justin Bieber',
-     [('405', 'Justin Bieber')], 0.97),
+     [('405', 'Justin Bieber')], 0.97, 'pass'),
     ('ALL I CAN TAKE', 'Justin Bieber',
-     [('ALL I CAN TAKE', 'Justin Bieber')], 1.0),
+     [('ALL I CAN TAKE', 'Justin Bieber')], 1.0, 'pass'),
     ('ALL I CAN TAKE', 'Justin Bieber',
-     [('ALL I CAN TAKE', 'Justin Bieber')], 0.98),
+     [('ALL I CAN TAKE', 'Justin Bieber')], 0.98, 'pass'),
     ('ALL THE WAY', 'Justin Bieber',
-     [('ALL THE WAY', 'Justin Bieber')], 0.97),
+     [('ALL THE WAY', 'Justin Bieber')], 0.97, 'pass'),
     ('BAD HONEY', 'Justin Bieber',
-     [('BAD HONEY', 'Justin Bieber')], 0.94),
+     [('BAD HONEY', 'Justin Bieber')], 0.94, 'pass'),
     ('BETTER MAN', 'Justin Bieber',
-     [('BETTER MAN', 'Justin Bieber')], 0.92),
+     [('BETTER MAN', 'Justin Bieber')], 0.92, 'pass'),
     ('BUTTERFLIES', 'Justin Bieber',
-     [('BUTTERFLIES', 'Justin Bieber')], 0.99),
+     [('BUTTERFLIES', 'Justin Bieber')], 0.99, 'pass'),
     ('BUTTERFLIES', 'Justin Bieber',
-     [('BUTTERFLIES', 'Justin Bieber')], 0.99),
+     [('BUTTERFLIES', 'Justin Bieber')], 0.99, 'pass'),
     ('DADZ LOVE', 'Justin Bieber',
-     [('DADZ LOVE', 'Justin Bieber & Lil B')], 0.97),
+     [('DADZ LOVE', 'Justin Bieber & Lil B')], 0.97, 'pass'),
     ('DADZ LOVE', 'Justin Bieber',
-     [('DADZ LOVE', 'Justin Bieber & Lil B')], 0.97),
+     [('DADZ LOVE', 'Justin Bieber & Lil B')], 0.97, 'pass'),
     ('DAISIES', 'Justin Bieber',
-     [('DAISIES', 'Justin Bieber'), ('DAISIES', 'Justin Bieber'), ('Daisies', 'Justin Bieber')], 0.97),
+     [('DAISIES', 'Justin Bieber'), ('DAISIES', 'Justin Bieber'), ('Daisies', 'Justin Bieber')], 0.97, 'pass'),
     ('DAISIES', 'Justin Bieber',
-     [('DAISIES', 'Justin Bieber'), ('DAISIES', 'Justin Bieber'), ('Daisies', 'Justin Bieber')], 0.98),
+     [('DAISIES', 'Justin Bieber'), ('DAISIES', 'Justin Bieber'), ('Daisies', 'Justin Bieber')], 0.98, 'pass'),
     ('DEVOTION', 'Justin Bieber',
-     [('DEVOTION', 'Justin Bieber & Dijon')], 0.99),
+     [('DEVOTION', 'Justin Bieber & Dijon')], 0.99, 'pass'),
     ('DEVOTION', 'Justin Bieber',
-     [('DEVOTION', 'Justin Bieber & Dijon')], 0.99),
+     [('DEVOTION', 'Justin Bieber & Dijon')], 0.99, 'pass'),
     ("DON'T WANNA", 'Justin Bieber',
-     [('DON’T WANNA', 'Justin Bieber & Bakar')], 0.96),
+     [('DON’T WANNA', 'Justin Bieber & Bakar')], 0.96, 'pass'),
     ('DOTTED LINE', 'Justin Bieber',
-     [('DOTTED LINE', 'Justin Bieber')], 0.97),
+     [('DOTTED LINE', 'Justin Bieber')], 0.97, 'pass'),
     ('EVERYTHING HALLELUJAH', 'Justin Bieber',
-     [('EVERYTHING HALLELUJAH', 'Justin Bieber')], 0.97),
+     [('EVERYTHING HALLELUJAH', 'Justin Bieber')], 0.97, 'pass'),
     ('EYE CANDY', 'Justin Bieber',
-     [('EYE CANDY', 'Justin Bieber')], 0.98),
+     [('EYE CANDY', 'Justin Bieber')], 0.98, 'pass'),
     ('FIRST PLACE', 'Justin Bieber',
-     [('FIRST PLACE', 'Justin Bieber')], 1.0),
+     [('FIRST PLACE', 'Justin Bieber')], 1.0, 'pass'),
     ('FIRST PLACE', 'Justin Bieber',
-     [('FIRST PLACE', 'Justin Bieber')], 0.98),
+     [('FIRST PLACE', 'Justin Bieber')], 0.98, 'pass'),
     ('FORGIVENESS', 'Justin Bieber',
-     [('FORGIVENESS', 'Marvin Winans')], 0.99),
+     [('FORGIVENESS', 'Marvin Winans')], 0.99, 'skip'),
     ('FORGIVENESS', 'Justin Bieber',
-     [('FORGIVENESS', 'Marvin Winans')], 0.98),
+     [('FORGIVENESS', 'Marvin Winans')], 0.98, 'skip'),
     ('GLORY VOICE MEMO', 'Justin Bieber',
-     [('GLORY VOICE MEMO', 'Justin Bieber')], 0.97),
+     [('GLORY VOICE MEMO', 'Justin Bieber')], 0.97, 'pass'),
     ('GLORY VOICE MEMO', 'Justin Bieber',
-     [('GLORY VOICE MEMO', 'Justin Bieber')], 0.99),
+     [('GLORY VOICE MEMO', 'Justin Bieber')], 0.99, 'pass'),
     ('GO BABY', 'Justin Bieber',
-     [('GO BABY', 'Justin Bieber')], 0.96),
+     [('GO BABY', 'Justin Bieber')], 0.96, 'pass'),
     ('I DO', 'Justin Bieber',
-     [('I DO', 'Justin Bieber')], 0.97),
+     [('I DO', 'Justin Bieber')], 0.97, 'pass'),
     ("I THINK YOU'RE SPECIAL", 'Justin Bieber',
-     [("I THINK YOU'RE SPECIAL", 'Justin Bieber & Tems')], 0.99),
+     [("I THINK YOU'RE SPECIAL", 'Justin Bieber & Tems')], 0.99, 'pass'),
     ('LOVE SONG', 'Justin Bieber',
-     [('LOVE SONG', 'Justin Bieber')], 0.97),
+     [('LOVE SONG', 'Justin Bieber')], 0.97, 'pass'),
     ("LYIN'", 'Justin Bieber',
-     [('LYIN’', 'Justin Bieber')], 0.99),
+     [('LYIN’', 'Justin Bieber')], 0.99, 'pass'),
     ('MOTHER IN YOU', 'Justin Bieber',
-     [('MOTHER IN YOU', 'Justin Bieber')], 0.97),
+     [('MOTHER IN YOU', 'Justin Bieber')], 0.97, 'pass'),
     ('MOVING FAST', 'Justin Bieber',
-     [('MOVING FAST', 'Justin Bieber')], 0.97),
+     [('MOVING FAST', 'Justin Bieber')], 0.97, 'pass'),
     ('NEED IT', 'Justin Bieber',
-     [('NEED IT', 'Justin Bieber')], 0.97),
+     [('NEED IT', 'Justin Bieber')], 0.97, 'pass'),
     ('OH MAN', 'Justin Bieber',
-     [('OH MAN', 'Justin Bieber')], 0.97),
+     [('OH MAN', 'Justin Bieber')], 0.97, 'pass'),
     ('OPEN UP YOUR HEART', 'Justin Bieber',
-     [('OPEN UP YOUR HEART', 'Justin Bieber & Eddie Benjamin')], 0.97),
+     [('OPEN UP YOUR HEART', 'Justin Bieber & Eddie Benjamin')], 0.97, 'pass'),
     ('PETTING ZOO', 'Justin Bieber',
-     [('PETTING ZOO', 'Justin Bieber')], 0.98),
+     [('PETTING ZOO', 'Justin Bieber')], 0.98, 'pass'),
     ('POPPIN’ MY S***', 'Justin Bieber',
-     [('POPPIN’ MY S***', 'Justin Bieber & Hurricane Chris')], 0.98),
+     [('POPPIN’ MY S***', 'Justin Bieber & Hurricane Chris')], 0.98, 'pass'),
     ('SAFE SPACE', 'Justin Bieber',
-     [('SAFE SPACE', 'Justin Bieber & Lil B')], 0.97),
+     [('SAFE SPACE', 'Justin Bieber & Lil B')], 0.97, 'pass'),
     ('SOULFUL', 'Justin Bieber',
-     [('SOULFUL', 'Justin Bieber & Druski'), ('SOULFUL', 'Justin Bieber & Druski')], 0.99),
+     [('SOULFUL', 'Justin Bieber & Druski'), ('SOULFUL', 'Justin Bieber & Druski')], 0.99, 'pass'),
     ('SOULFUL', 'Justin Bieber',
-     [('SOULFUL', 'Justin Bieber & Druski'), ('SOULFUL', 'Justin Bieber & Druski')], 0.99),
+     [('SOULFUL', 'Justin Bieber & Druski'), ('SOULFUL', 'Justin Bieber & Druski')], 0.99, 'pass'),
     ('SPEED DEMON', 'Justin Bieber',
-     [('SPEED DEMON', 'Justin Bieber')], 1.0),
+     [('SPEED DEMON', 'Justin Bieber')], 1.0, 'pass'),
     ('STANDING ON BUSINESS', 'Justin Bieber',
-     [('STANDING ON BUSINESS', 'Justin Bieber & Druski'), ('STANDING ON BUSINESS', 'Justin Bieber & Druski')], 0.96),
+     [('STANDING ON BUSINESS', 'Justin Bieber & Druski'), ('STANDING ON BUSINESS', 'Justin Bieber & Druski')], 0.96, 'pass'),
     ('STANDING ON BUSINESS', 'Justin Bieber',
-     [('STANDING ON BUSINESS', 'Justin Bieber & Druski'), ('STANDING ON BUSINESS', 'Justin Bieber & Druski')], 0.99),
+     [('STANDING ON BUSINESS', 'Justin Bieber & Druski'), ('STANDING ON BUSINESS', 'Justin Bieber & Druski')], 0.99, 'pass'),
     ('STORY OF GOD', 'Justin Bieber',
-     [('STORY OF GOD', 'Justin Bieber')], 0.97),
+     [('STORY OF GOD', 'Justin Bieber')], 0.97, 'pass'),
     ('SWAG', 'Justin Bieber',
-     [('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin'), ('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin')], 0.97),
+     [('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin'), ('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin')], 0.97, 'skip'),
     ('SWAG', 'Justin Bieber',
-     [('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin'), ('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin')], 0.97),
+     [('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin'), ('SWAG', 'Justin Bieber, Cash Cobain & Eddie Benjamin')], 0.97, 'skip'),
     ('SWEET SPOT', 'Justin Bieber',
-     [('SWEET SPOT', 'Justin Bieber & Sexyy Red'), ('SWEET SPOT', 'Justin Bieber & Sexyy Red')], 1.0),
+     [('SWEET SPOT', 'Justin Bieber & Sexyy Red'), ('SWEET SPOT', 'Justin Bieber & Sexyy Red')], 1.0, 'pass'),
     ('SWEET SPOT', 'Justin Bieber',
-     [('SWEET SPOT', 'Justin Bieber & Sexyy Red'), ('SWEET SPOT', 'Justin Bieber & Sexyy Red')], 0.99),
+     [('SWEET SPOT', 'Justin Bieber & Sexyy Red'), ('SWEET SPOT', 'Justin Bieber & Sexyy Red')], 0.99, 'pass'),
     ('THERAPY SESSION', 'Justin Bieber',
-     [('THERAPY SESSION', 'Justin Bieber & Druski'), ('THERAPY SESSION', 'Justin Bieber & Druski')], 0.99),
+     [('THERAPY SESSION', 'Justin Bieber & Druski'), ('THERAPY SESSION', 'Justin Bieber & Druski')], 0.99, 'pass'),
     ('THERAPY SESSION', 'Justin Bieber',
-     [('THERAPY SESSION', 'Justin Bieber & Druski'), ('THERAPY SESSION', 'Justin Bieber & Druski')], 0.99),
+     [('THERAPY SESSION', 'Justin Bieber & Druski'), ('THERAPY SESSION', 'Justin Bieber & Druski')], 0.99, 'pass'),
     ('THINGS YOU DO', 'Justin Bieber',
-     [('THINGS YOU DO', 'Justin Bieber')], 0.96),
+     [('THINGS YOU DO', 'Justin Bieber')], 0.96, 'pass'),
     ('THINGS YOU DO', 'Justin Bieber',
-     [('THINGS YOU DO', 'Justin Bieber')], 0.99),
+     [('THINGS YOU DO', 'Justin Bieber')], 0.99, 'pass'),
     ('TOO LONG', 'Justin Bieber',
-     [('TOO LONG', 'Justin Bieber'), ('TOO LONG', 'Justin Bieber')], 0.97),
+     [('TOO LONG', 'Justin Bieber'), ('TOO LONG', 'Justin Bieber')], 0.97, 'pass'),
     ('TOO LONG', 'Justin Bieber',
-     [('TOO LONG', 'Justin Bieber'), ('TOO LONG', 'Justin Bieber')], 0.97),
+     [('TOO LONG', 'Justin Bieber'), ('TOO LONG', 'Justin Bieber')], 0.97, 'pass'),
     ('WALKING AWAY', 'Justin Bieber',
-     [('WALKING AWAY', 'Justin Bieber'), ('WALKING AWAY', 'Justin Bieber')], 0.81),
+     [('WALKING AWAY', 'Justin Bieber'), ('WALKING AWAY', 'Justin Bieber')], 0.81, 'pass'),
     ('WALKING AWAY', 'Justin Bieber',
-     [('WALKING AWAY', 'Justin Bieber'), ('WALKING AWAY', 'Justin Bieber')], 0.81),
+     [('WALKING AWAY', 'Justin Bieber'), ('WALKING AWAY', 'Justin Bieber')], 0.81, 'pass'),
     ('WAY IT IS', 'Justin Bieber',
-     [('WAY IT IS', 'Justin Bieber & Gunna')], 0.97),
+     [('WAY IT IS', 'Justin Bieber & Gunna')], 0.97, 'pass'),
     ('WAY IT IS', 'Justin Bieber',
-     [('WAY IT IS', 'Justin Bieber & Gunna')], 0.99),
+     [('WAY IT IS', 'Justin Bieber & Gunna')], 0.99, 'pass'),
     ("WHEN IT'S OVER", 'Justin Bieber',
-     [('WHEN IT’S OVER', 'Justin Bieber')], 0.97),
+     [('WHEN IT’S OVER', 'Justin Bieber')], 0.97, 'pass'),
     ('WITCHYA', 'Justin Bieber',
-     [('WITCHYA', 'Justin Bieber')], 0.97),
+     [('WITCHYA', 'Justin Bieber')], 0.97, 'pass'),
     ('YUKON', 'Justin Bieber',
-     [('YUKON', 'Justin Bieber')], 0.97),
+     [('YUKON', 'Justin Bieber')], 0.97, 'pass'),
     ('YUKON', 'Justin Bieber',
-     [('YUKON', 'Justin Bieber')], 0.99),
+     [('YUKON', 'Justin Bieber')], 0.99, 'pass'),
     ('ZUMA HOUSE', 'Justin Bieber',
-     [('ZUMA HOUSE', 'Justin Bieber')], 0.97),
+     [('ZUMA HOUSE', 'Justin Bieber')], 0.97, 'pass'),
     ('ZUMA HOUSE', 'Justin Bieber',
-     [('ZUMA HOUSE', 'Justin Bieber')], 0.99),
+     [('ZUMA HOUSE', 'Justin Bieber')], 0.99, 'pass'),
     ('Baby Be Mine', 'Michael Jackson',
-     [('Monkey Business', 'Michael Jackson'), ('Baby Be Mine', 'Michael Jackson'), ('One Day in Your Life', 'Michael Jackson')], 0.96),
+     [('Monkey Business', 'Michael Jackson'), ('Baby Be Mine', 'Michael Jackson'), ('One Day in Your Life', 'Michael Jackson')], 0.96, 'pass'),
     ('Black or White', 'Michael Jackson',
-     [('Black or White (single version)', 'Michael Jackson'), ('Black or White', 'Michael Jackson'), ('Black or White', 'Michael Jackson')], 0.97),
+     [('Black or White (single version)', 'Michael Jackson'), ('Black or White', 'Michael Jackson'), ('Black or White', 'Michael Jackson')], 0.97, 'pass'),
     ('Blood On The Dance Floor X Dangerous (The White Panda Mash-Up)', 'Michael Jackson',
-     [('Blood on the Dance Floor X Dangerous (The White Panda Mash‐Up)', 'Michael Jackson')], 0.89),
+     [('Blood on the Dance Floor X Dangerous (The White Panda Mash‐Up)', 'Michael Jackson')], 0.89, 'pass'),
     ('Blood on the Dance Floor', 'Michael Jackson',
-     [('Blood on the Dance Floor', 'Michael Jackson'), ('Blood on the Dance Floor', 'Michael Jackson'), ('The Finer Things', 'Steve Winwood')], 0.98),
+     [('Blood on the Dance Floor', 'Michael Jackson'), ('Blood on the Dance Floor', 'Michael Jackson'), ('The Finer Things', 'Steve Winwood')], 0.98, 'pass'),
     ("Can't Let Her Get Away", 'Michael Jackson',
-     [("Can't Let Her Get Away", 'Michael Jackson'), ('Can’t Let Her Get Away', 'Michael Jackson')], 0.97),
+     [("Can't Let Her Get Away", 'Michael Jackson'), ('Can’t Let Her Get Away', 'Michael Jackson')], 0.97, 'pass'),
     ('Dangerous', 'Michael Jackson',
-     [('Dangerous', 'Michael Jackson'), ('You Can’t Win', 'Michael Jackson'), ('Earth Song', 'Michael Jackson')], 0.98),
+     [('Dangerous', 'Michael Jackson'), ('You Can’t Win', 'Michael Jackson'), ('Earth Song', 'Michael Jackson')], 0.98, 'pass'),
     ('Dangerous', 'Michael Jackson',
-     [('Dangerous', 'Michael Jackson'), ('You Can’t Win', 'Michael Jackson'), ('Earth Song', 'Michael Jackson')], 0.98),
+     [('Dangerous', 'Michael Jackson'), ('You Can’t Win', 'Michael Jackson'), ('Earth Song', 'Michael Jackson')], 0.98, 'pass'),
     ('Dirty Diana (2012 Remaster)', 'Michael Jackson',
-     [('Dirty Diana', 'Michael Jackson'), ('Dirty Diana', 'Michael Jackson'), ('Dirty Diana', 'Michael Jackson')], 0.98),
+     [('Dirty Diana', 'Michael Jackson'), ('Dirty Diana', 'Michael Jackson'), ('Dirty Diana', 'Michael Jackson')], 0.98, 'pass'),
     ('Ghosts', 'Michael Jackson',
-     [('Ghost', 'Michael Jackson'), ('Jealous Ghost', 'Michael Jackson'), ('Ghosts', 'Michael Jackson')], 0.97),
+     [('Ghost', 'Michael Jackson'), ('Jealous Ghost', 'Michael Jackson'), ('Ghosts', 'Michael Jackson')], 0.97, 'pass'),
     ('Give In to Me', 'Michael Jackson',
-     [("Give In to Me (Michael Jackson's Vision)", 'Michael Jackson'), ('Give in to Me', 'Michael Jackson'), ('Give In to Me', 'Michael Jackson')], 0.98),
+     [("Give In to Me (Michael Jackson's Vision)", 'Michael Jackson'), ('Give in to Me', 'Michael Jackson'), ('Give In to Me', 'Michael Jackson')], 0.98, 'pass'),
     ('Heal the World', 'Michael Jackson',
-     [('Heal the World', 'Michael Jackson'), ('Heal the World (album version)', 'Michael Jackson'), ('Heal the World', 'Michael Jackson')], 0.92),
+     [('Heal the World', 'Michael Jackson'), ('Heal the World (album version)', 'Michael Jackson'), ('Heal the World', 'Michael Jackson')], 0.92, 'pass'),
     ('In the Closet', 'Michael Jackson',
-     [("In the Closet (Michael Jackson's Vision)", 'Michael Jackson'), ('Heal the World', 'Michael Jackson'), ('In the Closet', 'Michael Jackson')], 0.95),
+     [("In the Closet (Michael Jackson's Vision)", 'Michael Jackson'), ('Heal the World', 'Michael Jackson'), ('In the Closet', 'Michael Jackson')], 0.95, 'pass'),
     ('Jam', 'Michael Jackson',
-     [("Don't Stop Till You Get Enough", 'Michael Jackson'), ('Jam', 'Michael Jackson'), ('Jam', 'Michael Jackson')], 0.95),
+     [("Don't Stop Till You Get Enough", 'Michael Jackson'), ('Jam', 'Michael Jackson'), ('Jam', 'Michael Jackson')], 0.95, 'pass'),
     ('Keep the Faith', 'Michael Jackson',
-     [('Keep the Faith', 'Michael Jackson'), ('Keep the Faith', 'Michael Jackson'), ('Keep the Faith', 'Michael Jackson')], 0.98),
+     [('Keep the Faith', 'Michael Jackson'), ('Keep the Faith', 'Michael Jackson'), ('Keep the Faith', 'Michael Jackson')], 0.98, 'pass'),
     ('Leave Me Alone (2012 Remaster)', 'Michael Jackson',
-     [('Leave Me Alone', 'Michael Jackson'), ('Leave Me Alone', 'Michael Jackson'), ('Leave Me Alone', 'Michael Jackson')], 0.98),
+     [('Leave Me Alone', 'Michael Jackson'), ('Leave Me Alone', 'Michael Jackson'), ('Leave Me Alone', 'Michael Jackson')], 0.98, 'pass'),
     ('Remember the Time', 'Michael Jackson',
-     [('Come Together', 'Michael Jackson'), ('She Drives Me Wild', 'Michael Jackson'), ('Remember the Time', 'Julian Vaughn')], 0.97),
+     [('Come Together', 'Michael Jackson'), ('She Drives Me Wild', 'Michael Jackson'), ('Remember the Time', 'Julian Vaughn')], 0.97, 'pass'),
     ('Scream', 'Michael Jackson',
-     [('Scream', 'Blue Train'), ('Scream', 'Michael Jackson'), ('Scream (clean album version)', 'Michael Jackson & Janet Jackson')], 0.97),
+     [('Scream', 'Blue Train'), ('Scream', 'Michael Jackson'), ('Scream (clean album version)', 'Michael Jackson & Janet Jackson')], 0.97, 'pass'),
     ('She Drives Me Wild', 'Michael Jackson',
-     [('She Drives Me Wild', 'Michael Jackson'), ('The Girl Is Mine', 'Michael Jackson with Paul McCartney')], 0.96),
+     [('She Drives Me Wild', 'Michael Jackson'), ('The Girl Is Mine', 'Michael Jackson with Paul McCartney')], 0.96, 'pass'),
     ('Threatened', 'Michael Jackson',
-     [('Threatened', 'Michael Jackson'), ('Threatened', 'Michael Jackson'), ('Threatened', 'Michael Jackson')], 0.99),
+     [('Threatened', 'Michael Jackson'), ('Threatened', 'Michael Jackson'), ('Threatened', 'Michael Jackson')], 0.99, 'pass'),
     ('Torture', 'Michael Jackson',
-     [('Torture', 'The Jacksons'), ('Torture', 'The Jacksons'), ('Torture', 'The Jacksons')], 0.96),
+     [('Torture', 'The Jacksons'), ('Torture', 'The Jacksons'), ('Torture', 'The Jacksons')], 0.96, 'pass'),
     ('Unbreakable', 'Michael Jackson',
-     [('Ben', 'Michael Jackson'), ('Unbreakable', 'Michael Jackson'), ('Unbreakable', 'Michael Jackson')], 0.99),
+     [('Ben', 'Michael Jackson'), ('Unbreakable', 'Michael Jackson'), ('Unbreakable', 'Michael Jackson')], 0.99, 'pass'),
     ("Wanna Be Startin' Somethin'", 'Michael Jackson',
-     [('Wanna Be Startin’ Somethin’', 'Michael Jackson'), ('Wanna Be Startin’ Somethin’', 'Michael Jackson'), ('Thriller', 'Michael Jackson')], 1.0),
+     [('Wanna Be Startin’ Somethin’', 'Michael Jackson'), ('Wanna Be Startin’ Somethin’', 'Michael Jackson'), ('Thriller', 'Michael Jackson')], 1.0, 'pass'),
     ('Who Is It', 'Michael Jackson',
-     [('Who Is It', 'Michael Jackson'), ('Who Is It', 'Michael Jackson'), ('Who Is It', 'Michael Jackson')], 0.97),
+     [('Who Is It', 'Michael Jackson'), ('Who Is It', 'Michael Jackson'), ('Who Is It', 'Michael Jackson')], 0.97, 'pass'),
     ('Why You Wanna Trip on Me', 'Michael Jackson',
-     [('Why You Wanna Trip on Me', 'Michael Jackson')], 0.97),
+     [('Why You Wanna Trip on Me', 'Michael Jackson')], 0.97, 'pass'),
     ('Will You Be There', 'Michael Jackson',
-     [('Will You Be There', 'Michael Jackson'), ('Will You Be There', 'Michael Jackson'), ('Will You Be There (album version)', 'Michael Jackson')], 0.96),
+     [('Will You Be There', 'Michael Jackson'), ('Will You Be There', 'Michael Jackson'), ('Will You Be There (album version)', 'Michael Jackson')], 0.96, 'pass'),
     ('Xscape', 'Michael Jackson',
-     [('Xscape', 'Michael Jackson'), ('Xscape', 'Michael Jackson')], 0.99),
+     [('Xscape', 'Michael Jackson'), ('Xscape', 'Michael Jackson')], 0.99, 'pass'),
     ('Memory Reboot', 'VØJ',
-     [('Memory Reboot', 'VØJ & Narvent')], 1.0),
+     [('Memory Reboot', 'VØJ & Narvent')], 1.0, 'skip'),
     ('Memory Reboot', 'VØJ',
-     [('Memory Reboot', 'VØJ & Narvent')], 0.98),
+     [('Memory Reboot', 'VØJ & Narvent')], 0.98, 'skip'),
 ]
 
+# AcoustID answers these fingerprints with a DIFFERENT artist's recording of the
+# same title (a metal cover). Titles match, artists do not, so the one thing the
+# core must not do is call them verified — they belong in the review queue, not
+# in the invariant above.
+_AMBIGUOUS_LOOKUPS = [
+    ("Somebody's Watching Me (Single Version)", 'Michael Jackson',
+     [('Somebody’s Watching Me', 'Rockwell'), ("Somebody's Watching Me (Single Version)", 'Rockwell'), ('Somebody’s Watching Me', 'Gene Rockwell')], 0.98, 'fail'),
+]
 
-@pytest.mark.parametrize("title,artist,recordings,score", _REAL_LOOKUPS)
-def test_a_correct_file_is_never_quarantined(title, artist, recordings, score):
+_CLEAN_LOOKUPS = _REAL_LOOKUPS
+
+
+@pytest.mark.parametrize("title,artist,recordings,score,decision", _CLEAN_LOOKUPS)
+def test_a_correct_file_is_never_quarantined(title, artist, recordings, score, decision):
+    """Every row is a file that IS what it claims, so none may come back FAIL."""
     out = evaluate(
         title, artist,
         [{'title': t, 'artist': a} for t, a in recordings],
@@ -328,20 +348,25 @@ def test_a_correct_file_is_never_quarantined(title, artist, recordings, score):
     )
 
 
-# --- the one genuinely ambiguous row in the capture ---
+@pytest.mark.parametrize("title,artist,recordings,score,decision",
+                         _REAL_LOOKUPS + _AMBIGUOUS_LOOKUPS)
+def test_the_decision_on_real_data_does_not_drift(title, artist, recordings, score, decision):
+    """Golden master: PASS must not quietly become SKIP either. 'Not FAIL' alone
+    would let a threshold change silently stop verifying half the library."""
+    out = evaluate(
+        title, artist,
+        [{'title': t, 'artist': a} for t, a in recordings],
+        fingerprint_score=score,
+        aliases_provider=_aliases_for(artist),
+    )
+    assert out.decision.value == decision, (
+        f"{title!r}: {decision} -> {out.decision.value} ({out.reason})"
+    )
 
-_BOUNDARY = [
-    ("Somebody's Watching Me (Single Version)", 'Michael Jackson',
-     [('Somebody’s Watching Me', 'Rockwell'), ("Somebody's Watching Me (Single Version)", 'Rockwell'), ('Somebody’s Watching Me', 'Gene Rockwell')], 0.98),
-]
 
-
-@pytest.mark.parametrize("title,artist,recordings,score", _BOUNDARY)
-def test_a_foreign_cover_of_the_same_title_is_not_a_pass(title, artist, recordings, score):
-    """AcoustID answers this MJ fingerprint with a metal cover by Warmen. The
-    titles are identical, the artists are not related, so the one thing the
-    core must not do is call it verified. FAIL or SKIP are both defensible —
-    production's live alias lookup lands on SKIP, this static map on FAIL."""
+@pytest.mark.parametrize("title,artist,recordings,score,decision", _AMBIGUOUS_LOOKUPS)
+def test_a_foreign_cover_of_the_same_title_is_not_a_pass(title, artist, recordings,
+                                                         score, decision):
     out = evaluate(
         title, artist,
         [{'title': t, 'artist': a} for t, a in recordings],
@@ -351,11 +376,62 @@ def test_a_foreign_cover_of_the_same_title_is_not_a_pass(title, artist, recordin
     assert out.decision != Decision.PASS
 
 
-# --- CJK identity must survive normalization ---
+# --- the version-tail rule, on real catalogue titles ---
 #
-# `normalize` keeps word characters of every script, so a Japanese/Korean title
-# must come out comparable rather than empty. An empty normalization scores 0.0
-# against everything, which is a SKIP for a file nothing is wrong with.
+# One representative per distinct tail shape found in the 13,728-title corpus.
+# A version tail must leave the title scoring 1.00 against its own bare form —
+# that is exactly what AcoustID sees when the provider labels the version and
+# MusicBrainz returns the plain recording title.
+
+_TAIL_PAIRS = [
+    ('Dinata Dinata - C&N Project Mix', 'Dinata Dinata'),
+    ("Cat's Eye Main Theme - Chill Ver.", "Cat's Eye Main Theme"),
+    ('1106 TYBW CH united - Cover', '1106 TYBW CH united'),
+    ('Above and Beyoncé - Dance Mixes', 'Above and Beyoncé'),
+    ("Don't You Want Me - Delta Heavy Remix", "Don't You Want Me"),
+    ('DARK ARIA <LV.2> - Solo Leveling S2 - Emotional Cover', 'DARK ARIA <LV.2> - Solo Leveling S2'),
+    ('HIS THEME - Undertale - Emotional Version', 'HIS THEME - Undertale'),
+    ('#tBt - EP', '#tBt'),
+    ('10th S-RANK HUNTER - aikari - Solo Leveling S2 - Epic Cover', '10th S-RANK HUNTER - aikari - Solo Leveling S2'),
+    ('AIZO - Jujutsu Kaisen S3 Opening Song - Epic Version', 'AIZO - Jujutsu Kaisen S3 Opening Song'),
+    ('How Does It Feel - Extended', 'How Does It Feel'),
+    ('Edge of Desire - Extended Mix', 'Edge of Desire'),
+    ('Kataomoi - From THE FIRST TAKE', 'Kataomoi'),
+    ("Cat's Eye Theme: Smooth set - Inst Ver.", "Cat's Eye Theme: Smooth set"),
+    ('HEADSHOT - Instrumental', 'HEADSHOT'),
+    ('I really want to stay at your house - EPIC VERSION - Instrumental ver.', 'I really want to stay at your house - EPIC VERSION'),
+    ('Runaway Love - Kanye West Remix', 'Runaway Love'),
+    ('Blumenkranz -Karaoke Version', 'Blumenkranz'),
+    ('Bring Me Home - Live 2011', 'Bring Me Home'),
+    ('Bee Gees - Lay it On Me - Live American Broadcast', 'Bee Gees - Lay it On Me'),
+    ('The Great James Brown - Live At The Apollo 1995', 'The Great James Brown'),
+    ('Sixth Magnitude Star - MHA Arr Ver.', 'Sixth Magnitude Star'),
+    ('Funkot Dance! - Sexy Hyper Dance Party - Michael Jackson Mix', 'Funkot Dance! - Sexy Hyper Dance Party'),
+    ('Groovejet - not without friends Extended Remix', 'Groovejet'),
+    ('S_Team -Orchestra Version', 'S_Team'),
+    ('WISHING - To Be Hero X Ep 9 OST - Piano & Orchestra Version', 'WISHING - To Be Hero X Ep 9 OST'),
+    ('Vogel im Käfig - Rain Version', 'Vogel im Käfig'),
+    ('the boy is mine – Remix', 'the boy is mine'),
+    ('Can You Feel It - Remixes', 'Can You Feel It'),
+    ('10,000 Hours - Single', '10,000 Hours'),
+    ('GLOW - Slowed', 'GLOW'),
+    ('School Rooftop - Slowed Down Version', 'School Rooftop'),
+    ('MY COLOR - To Be Hero X Ep 10 OST - Soft Piano Version', 'MY COLOR - To Be Hero X Ep 10 OST'),
+    ('12" Masters - The Essential Mixes', '12" Masters'),
+    ('That Acid - The Remixes', 'That Acid'),
+    ('Superman Theme - Trailer Version', 'Superman Theme'),
+    ('Before My Body Is Dry - Version', 'Before My Body Is Dry'),
+]
+
+
+@pytest.mark.parametrize("full,bare", _TAIL_PAIRS)
+def test_a_real_version_tail_still_matches_the_bare_recording(full, bare):
+    assert similarity(full, bare) == 1.0, (
+        f"{full!r} no longer matches its own bare title {bare!r}"
+    )
+
+
+# --- CJK identity must survive normalization ---
 
 _CJK_TITLES = [
     '"Attack On Titan" Season 3 (Original Soundtrack) = 「進撃の巨人」Season 3 オリジナルサウンドトラック',
