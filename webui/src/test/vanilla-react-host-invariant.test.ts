@@ -59,7 +59,9 @@ describe('the React host is never deactivated for a React page', () => {
     const lines = SOURCE.split('\n');
     const callers = lines
       .map((line, i) => ({ line, i }))
-      .filter(({ line }) => /(?<!function )\bactivatePage\(/.test(line) && !line.trim().startsWith('//'))
+      .filter(
+        ({ line }) => /(?<!function )\bactivatePage\(/.test(line) && !line.trim().startsWith('//'),
+      )
       .map(({ i }) => i);
 
     expect(callers.length, 'shell-bridge.js should still call activatePage').toBeGreaterThan(0);

@@ -141,8 +141,8 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     symbol: 'openMirroredPlaylistModal',
     pattern: /async function openMirroredPlaylistModal\b/,
     usedBy:
-      "the SoulSync Discovery tab after a mirror (routes/sync/-ui/soulsync-discovery-tab.tsx) " +
-      'and the Auto-Sync monitor\'s Details button — note S4 deletes _initImportFileTab from ' +
+      'the SoulSync Discovery tab after a mirror (routes/sync/-ui/soulsync-discovery-tab.tsx) ' +
+      "and the Auto-Sync monitor's Details button — note S4 deletes _initImportFileTab from " +
       'this same file, so a region-sized deletion could take this with it',
   },
   {
@@ -150,7 +150,7 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     symbol: 'getActiveMetadataSource',
     pattern: /function getActiveMetadataSource\b/,
     usedBy:
-      "metadataSourceLabel() (routes/sync/-sync.modal-core.ts) — the knowing fix for the " +
+      'metadataSourceLabel() (routes/sync/-sync.modal-core.ts) — the knowing fix for the ' +
       "vanilla's hardcoded 'Spotify' headers; without it the label silently reverts to the " +
       'wrong provider name rather than failing',
   },

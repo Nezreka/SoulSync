@@ -52,10 +52,7 @@ describe('the tab table matches the markup it was transcribed from', () => {
    * independently-written things agree. Transcribing the answers into the test
    * would leave it asserting that the table equals itself.
    */
-  const SHELL = readFileSync(
-    resolve(__dirname, '__fixtures__/-vanilla-sync-markup.html'),
-    'utf8',
-  );
+  const SHELL = readFileSync(resolve(__dirname, '__fixtures__/-vanilla-sync-markup.html'), 'utf8');
 
   it('has the same fifteen ids, in the same order', () => {
     const inMarkup = [
