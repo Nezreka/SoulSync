@@ -6645,3 +6645,84 @@ suppress under oxlint. It silently does nothing, which showed up as lint 686 vs
 the 684 baseline. The explanation has to go on its own line above.
 
 Suite 7029/7029, lint 684/0.
+
+### THE 42-EDGE REVIEW — every one, with a disposition
+
+#### Finding 1: NONE of them is guarded. All 42 throw.
+
+Every call site was checked for `typeof fn === 'function'`, `window.fn?.()` or an
+equivalent. **Zero of 42 are guarded at every site; 0/104 individual call sites
+are guarded.** In a classic script a bare call to a deleted global is a
+`ReferenceError` that kills the whole enclosing handler — not a silent no-op.
+
+This is the opposite of the REACT -> vanilla seams, which are all optional-chained
+and fail silently. These fail loudly, in someone else's page, at their next click.
+
+#### Finding 2: the Download Missing Tracks modal is inside sync-spotify.js
+
+`sync-spotify.js` 1973 carries its own banner: `// DOWNLOAD MISSING TRACKS
+MODAL`, then 1986 `// HERO SECTION HELPER FUNCTIONS`. That region — roughly
+1973-2622, ~650 lines — is the shared download modal, called from downloads.js,
+shared-helpers.js and wishlist-tools.js. It is not sync-page code and it is not
+ported: React has `-sync.modal-core.ts` / `-sync.use-modals.ts` for the SYNC
+page's own modals, which is a different thing.
+
+**Same trap as beatport-ui.js, four times the size**, and it is the reason
+Boulder's earlier question — "is the download modal from sync?" — has a
+consequence: the modal is reachable from pages that are not sync, so deleting
+its file breaks them.
+
+#### Finding 3: sync-services.js cannot be carved by region
+
+Its 19 edges sit at lines 333, 428, 3333, 3357, 3712, 4140, 4202, 5330, 7285,
+7309, 8335, 8997, 9233, 9328, 10072, 10524, 10718, 11048, 11210 — spread across
+the whole 11,508-line file and interleaved with genuine sync-page code. There is
+no block to lift. Each needs an individual decision.
+
+#### The dispositions
+
+**A. DELETE THE CALLER TOO — 7 edges, no rehome needed.**
+
+| edge | why |
+|---|---|
+| `cleanupBeatport{Rebuild,Releases,HypePicks,Charts,DJ}Slider` ×5 | all five are called only from `cleanupBeatportContent` (core.js 535-556), which exists solely to tear down the vanilla Beatport tab. React unmounts its own sliders. The whole function and `beatportContentState` go. |
+| `initializeSyncPage` | init.js 2885 (global bootstrap, runs on EVERY page) and 3290 (`case 'sync'` in loadPageData, which only runs for legacy-kind routes). Both call sites go with the flip. |
+| `loadSyncData` | init.js 3291, same `case 'sync'`. |
+
+**B. REHOME the download-modal region — 10 edges, sync-spotify.js.**
+`rehydrateModal` (7 sites across api-monitor, core, downloads, init,
+wishlist-tools), `generateDownloadModalHeroSection`, `applyProgressiveTrackRendering`,
+`openDownloadMissingModal`, `closePlaylistDetailsModal`, `cleanupDownloadProcess`,
+`getActionButtonText`, `updatePlaylistCardUI`, `exportPlaylistAsM3U`,
+`autoSavePlaylistM3U`. These move to a surviving home — `shared-helpers.js` is
+the natural one, since it already calls six of them.
+
+**C. INDIVIDUAL DECISIONS — 19 edges, sync-services.js.** Three sub-shapes:
+- **card painters** (`update{YouTube,Tidal,Beatport,Deezer,SpotifyPublic}CardPhase`,
+  `update{Deezer,ITunesLink,SpotifyPublic}CardProgress`) — they write to sync-page
+  DOM that will not exist. Candidate: delete the definitions AND make the engine
+  stop calling them, since React paints its own cards from the same socket events.
+  Needs confirming that React actually subscribes to every phase these cover.
+- **pollers + modal chrome** (`start{YouTube,ListenBrainz}{Sync,Discovery}Polling`,
+  `updateYouTubeModalButtons`, `updateCompletedModalResults`,
+  `openYouTubeDiscoveryModal`, `generateDiscoveryActionButton`,
+  `closeDeezerArlPlaylistDetailsModal`) — reached from the download modal and the
+  Wing It flow in downloads.js, so they follow group B: rehome.
+- **wishlist** (`cleanupWishlist`, `clearWishlist`) — downloads.js 1538/1541.
+
+**D. REHOME — 5 edges, auto-sync.js.** `editMirroredCustomName`,
+`editMirroredSourceRef`, `getMirroredSourceRef`, `runMirroredPlaylistPipeline`,
+`pollMirroredPipelineStatus`, all called from stats-automations.js, which is the
+Automations/Stats page and survives untouched.
+
+**E. DONE — 1.** `formatDuration`, pinned in shared-helpers.js.
+
+#### What this means for the plan
+
+The flip is not "delete seven files". It is: **rehome ~650 lines of download
+modal, resolve 19 sync-services functions one at a time, rehome 5 mirrored
+helpers, and only then delete what is left.** Group A is the only part that is
+pure deletion.
+
+Nothing is deleted. 42 edges: 7 resolved-by-deletion-of-caller, 34 needing a
+rehome or a decision, 1 done.
