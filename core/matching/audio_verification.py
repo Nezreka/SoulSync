@@ -143,19 +143,35 @@ def _alias_aware_artist_sim(expected_artist: str, actual_artist: str,
 
 def _find_best_title_artist_match(recordings, expected_title, expected_artist,
                                   aliases=None):
-    """Return (best_recording, title_sim, artist_sim) — title weighted higher."""
+    """Return (best_recording, title_sim, artist_sim) — title weighted higher.
+
+    Ties are broken in favour of a candidate whose VERSION matches the expected
+    one. `normalize` deliberately strips bracketed version tags, so "Celebrity"
+    and "Celebrity (karaoke)" both score title_sim 1.0 against an expected
+    "Celebrity" — an exact tie. With a strict `>` the winner was simply whichever
+    MusicBrainz happened to list first, and `evaluate`'s version gate then failed
+    on it and reported "Wrong download: 'Celebrity' is actually 'Celebrity
+    (karaoke)'" — for a file that is perfectly correct, with the matching
+    recording sitting in the same candidate list (#1132).
+
+    Reversing the candidate order flipped the verdict between FAIL and PASS,
+    which is what makes this a bug rather than a judgement call.
+    """
+    expected_version = _detect_title_version(expected_title or '')
     best_rec = None
     best_title_sim = 0.0
     best_artist_sim = 0.0
-    best_combined = 0.0
+    best_key = None
     for rec in recordings:
         title = rec.get('title') or ''
         artist = rec.get('artist') or ''
         title_sim = similarity(expected_title, title)
         artist_sim = _alias_aware_artist_sim(expected_artist, artist, aliases)
         combined = (title_sim * 0.6) + (artist_sim * 0.4)
-        if combined > best_combined:
-            best_combined = combined
+        # Similarity dominates; version agreement only settles a draw.
+        key = (combined, 1 if _detect_title_version(title) == expected_version else 0)
+        if best_key is None or key > best_key:
+            best_key = key
             best_rec = rec
             best_title_sim = title_sim
             best_artist_sim = artist_sim
