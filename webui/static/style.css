@@ -12935,6 +12935,49 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     margin-top: 2px;
 }
 
+/* The inline custom-interval field. The vanilla asked for this value with
+   window.prompt, which the React port replaces per the repo's no-prompt rule,
+   so these two classes are NEW rather than transcribed. */
+/* The sync header's button row. The vanilla writes these three declarations
+   inline at index.html 2236; the React port emits classes, not inline styles. */
+.sync-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.auto-sync-bulk-menu-custom-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.auto-sync-bulk-menu-custom-row input {
+    padding: 6px 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    min-width: 0;
+}
+
+.auto-sync-bulk-menu-custom-row input:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.auto-sync-bulk-menu-error {
+    grid-column: 1 / -1;
+    color: #ef4444;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
 .auto-sync-bulk-menu-unschedule {
     color: rgba(255, 255, 255, 0.55) !important;
 }
@@ -14701,6 +14744,35 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 .sync-sidebar {
     overflow: hidden;
     display: none;
+}
+
+/*
+ * The React port's transcription of showSyncSidebar/hideSyncSidebar
+ * (downloads.js), which set these same two declarations inline. `flex` rather
+ * than `block` because the shared .sync-main-panel/.sync-sidebar rule above
+ * lays the sidebar out as a column — the vanilla restored it by clearing the
+ * inline display and letting that rule apply.
+ */
+.sync-sidebar--visible {
+    display: flex;
+}
+
+.sync-content-area--with-sidebar {
+    grid-template-columns: 2.5fr 0.75fr;
+}
+
+/*
+ * Re-assert the narrow-screen collapse for the modifier. The ≤1300px block
+ * above pins .sync-content-area to a single column, but it appears EARLIER in
+ * the file and carries the same specificity, so the modifier would otherwise
+ * win and leave a two-column grid with a display:none second column. The
+ * sidebar itself needs no such repeat: that rule uses !important.
+ */
+@media (max-width: 1300px) {
+    .sync-content-area--with-sidebar {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
 }
 
 /* Tab System */

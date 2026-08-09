@@ -13,6 +13,7 @@ import { Route as SplatRouteImport } from './routes/$'
 import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
 import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
 import { Route as ToolsRouteRouteImport } from './routes/tools/route'
+import { Route as SyncRouteRouteImport } from './routes/sync/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
 import { Route as SearchRouteRouteImport } from './routes/search/route'
 import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-explorer/route'
@@ -49,6 +50,11 @@ const WatchlistRouteRoute = WatchlistRouteRouteImport.update({
 const ToolsRouteRoute = ToolsRouteRouteImport.update({
   id: '/tools',
   path: '/tools',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SyncRouteRoute = SyncRouteRouteImport.update({
+  id: '/sync',
+  path: '/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
 const StatsRouteRoute = StatsRouteRouteImport.update({
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
   '/tools': typeof ToolsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
   '/tools': typeof ToolsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -195,6 +203,7 @@ export interface FileRoutesById {
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
   '/tools': typeof ToolsRouteRoute
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | '/playlist-explorer'
     | '/search'
     | '/stats'
+    | '/sync'
     | '/tools'
     | '/watchlist'
     | '/wishlist'
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | '/playlist-explorer'
     | '/search'
     | '/stats'
+    | '/sync'
     | '/tools'
     | '/watchlist'
     | '/wishlist'
@@ -265,6 +276,7 @@ export interface FileRouteTypes {
     | '/playlist-explorer'
     | '/search'
     | '/stats'
+    | '/sync'
     | '/tools'
     | '/watchlist'
     | '/wishlist'
@@ -289,6 +301,7 @@ export interface RootRouteChildren {
   PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
   SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
+  SyncRouteRoute: typeof SyncRouteRoute
   ToolsRouteRoute: typeof ToolsRouteRoute
   WatchlistRouteRoute: typeof WatchlistRouteRoute
   WishlistRouteRoute: typeof WishlistRouteRoute
@@ -325,6 +338,13 @@ declare module '@tanstack/react-router' {
       path: '/tools'
       fullPath: '/tools'
       preLoaderRoute: typeof ToolsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sync': {
+      id: '/sync'
+      path: '/sync'
+      fullPath: '/sync'
+      preLoaderRoute: typeof SyncRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/stats': {
@@ -479,6 +499,7 @@ const rootRouteChildren: RootRouteChildren = {
   PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
   SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
+  SyncRouteRoute: SyncRouteRoute,
   ToolsRouteRoute: ToolsRouteRoute,
   WatchlistRouteRoute: WatchlistRouteRoute,
   WishlistRouteRoute: WishlistRouteRoute,

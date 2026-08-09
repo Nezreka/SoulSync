@@ -798,6 +798,24 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     download_batches[batch_id]['phase'] = 'complete'
                     download_batches[batch_id]['completion_time'] = time.time()  # Track for auto-cleanup
 
+                    # album_bundle_state is a LIVE MIRROR of the plugin's progress
+                    # (album_bundle_dispatch._emit writes whatever the last payload
+                    # said), and it has no completion value — only 'searching',
+                    # 'fallback', 'staged' and 'failed' are ever assigned. Nothing
+                    # cleared it, so _build_album_bundle_status kept emitting a
+                    # bundle row forever, frozen at the last tick: a finished album
+                    # showed "Soulseek downloading release 42%" on the Downloads
+                    # page indefinitely.
+                    #
+                    # Cleared HERE and not earlier: task_worker reads
+                    # `album_bundle_state == 'staged'` while the per-track flow
+                    # runs, so the field has to survive until the batch is done.
+                    # Only the state is dropped — the source/release details stay
+                    # for anything that reports on how the album arrived.
+                    download_batches[batch_id]['album_bundle_state'] = ''
+                    for _mirrored in ('progress', 'speed', 'downloaded', 'count', 'failed'):
+                        download_batches[batch_id].pop(f'album_bundle_{_mirrored}', None)
+
                     # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                     if playlist_id.startswith('youtube_'):
                         url_hash = playlist_id.replace('youtube_', '')

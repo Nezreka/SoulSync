@@ -395,3 +395,81 @@ class TestGetAlbumForSourceBandcamp:
         assert metadata_album_tracks.get_album_for_source(
             "bandcamp", "album-1", artist_name="Nobody", album_name="Nothing",
         ) is None
+
+
+def test_id_collision_in_foreign_catalog_is_rejected_by_name(monkeypatch):
+    """The GNX → Lady Blacktronika bug: a library DB row id (or any foreign id)
+    reaching the wrong catalog returns whatever unrelated release owns that
+    number there, and the chain used to stop at that first 'success'. With the
+    requested album name provided, a served album whose name bears no
+    resemblance must be REJECTED so the chain can continue to a source that
+    has the real thing."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
+
+    def fake_get_album_for_source(source, album_id, **kwargs):
+        if source == "deezer":
+            return _album("580654", "Luv Hate Us")          # the colliding stranger
+        if source == "itunes":
+            return _album("580654", "GNX")                  # the real release
+        return None
+
+    def fake_get_album_tracks_for_source(source, album_id):
+        return {"items": [_track()]}
+
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_for_source", fake_get_album_for_source)
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_tracks_for_source", fake_get_album_tracks_for_source)
+
+    result = metadata_album_tracks.get_artist_album_tracks(
+        "580654", artist_name="Kendrick Lamar", album_name="GNX",
+    )
+
+    assert result["success"] is True
+    assert result["source"] == "itunes"
+    assert result["album"]["name"] == "GNX"
+
+
+def test_name_guard_accepts_edition_variants(monkeypatch):
+    """Deluxe/edition subtitles must NOT trip the guard — containment and the
+    fuzzy ratio both tolerate real-world title noise."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
+
+    monkeypatch.setattr(
+        "core.metadata.album_tracks.get_album_for_source",
+        lambda source, album_id, **kwargs: _album("a1", "GNX (Deluxe Edition)"),
+    )
+    monkeypatch.setattr(
+        "core.metadata.album_tracks.get_album_tracks_for_source",
+        lambda source, album_id: {"items": [_track()]},
+    )
+
+    result = metadata_album_tracks.get_artist_album_tracks(
+        "a1", artist_name="Kendrick Lamar", album_name="GNX",
+    )
+    # Accepted (not rejected as a collision). The payload's display name is the
+    # builder's business — the caller-provided name wins there by design.
+    assert result["success"] is True
+    assert len(result["tracks"]) == 1
+
+
+def test_name_guard_is_inert_without_a_requested_name(monkeypatch):
+    """No requested name → no basis to reject; the first hit serves as before."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
+
+    monkeypatch.setattr(
+        "core.metadata.album_tracks.get_album_for_source",
+        lambda source, album_id, **kwargs: _album("a1", "Anything At All"),
+    )
+    monkeypatch.setattr(
+        "core.metadata.album_tracks.get_album_tracks_for_source",
+        lambda source, album_id: {"items": [_track()]},
+    )
+
+    result = metadata_album_tracks.get_artist_album_tracks("a1")
+    assert result["success"] is True
+    assert len(result["tracks"]) == 1

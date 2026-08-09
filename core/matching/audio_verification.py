@@ -211,6 +211,60 @@ def _find_best_title_artist_match(recordings, expected_title, expected_artist,
     return best_rec, best_title_sim, best_artist_sim
 
 
+def fingerprint_is_ambiguous(recordings: List[dict]) -> bool:
+    """True when the fingerprint's best-scoring recordings name DIFFERENT songs.
+
+    AcoustID returns results, and each result carries a whole LIST of MusicBrainz
+    recordings that all share that result's single score (see
+    ``acoustid.parse_lookup_result``). So "the top match" is frequently a tie
+    between several recordings, and their order is just MusicBrainz's — not a
+    ranking. Mature AcoustID entries accumulate mis-submitted links, so that tie
+    can span genuinely different songs by the same artist.
+
+    When that happens the fingerprint honestly cannot say which track this is,
+    and any single "it's actually X" claim is a coin flip. #1132: a file of
+    Chicago's "You're the Inspiration" was reported as "Saturday in the Park",
+    and the reporter found "almost all suggestions are wrong" — different songs,
+    or instrumental/karaoke/acoustic variants of the right one.
+
+    Deciding whether the file is MISLABELLED is still sound (that asks whether
+    ANY candidate matches, which ties don't affect). Only the claim about what
+    the file actually IS has to be withheld.
+    """
+    if not recordings:
+        return False
+    scored = [r for r in recordings if r.get('score') is not None]
+    if not scored:
+        # No per-recording scores to compare — treat >1 distinct title as
+        # ambiguous, since nothing distinguishes them.
+        titles = {_recording_identity(r.get('title')) for r in recordings}
+        titles.discard('')
+        return len(titles) > 1
+    top = max(r['score'] for r in scored)
+    top_titles = {
+        _recording_identity(r.get('title'))
+        for r in scored if r['score'] >= top
+    }
+    top_titles.discard('')
+    return len(top_titles) > 1
+
+
+def _recording_identity(title: Optional[str]) -> str:
+    """Case/punctuation-insensitive key for "is this the same RECORDING".
+
+    Deliberately NOT `normalize`: that strips bracketed version tags (so
+    "Song" and "Song (Instrumental)" collapse to one string — which is what
+    makes the separate version gate necessary). Here an instrumental IS a
+    different recording, and reporting one in place of the other is exactly
+    what #1132 complained about, so the qualifier has to survive.
+    """
+    if not title:
+        return ""
+    s = str(title).lower().strip()
+    s = re.sub(r'[^\w\s]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
 def evaluate(expected_title: str, expected_artist: str,
              recordings: List[dict], *, fingerprint_score: float,
              aliases_provider: Optional[Any] = None) -> Outcome:

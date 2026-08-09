@@ -6760,6 +6760,16 @@ def search_music():
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+def _mark_request_free_ok_for_spotify(source: str) -> None:
+    """Explicit-Spotify request marker: lets the no-auth Spotify source serve
+    THIS request even without the persistent metadata-source opt-in (the
+    client's _free_wanted reads g._spotify_free_ok). Only interactive
+    endpoints where the USER pointed at Spotify call this."""
+    if (source or '').strip().lower() in ('spotify', 'spotify_free'):
+        g._spotify_free_ok = True
+
+
 @app.route('/api/enhanced-search', methods=['POST'])
 def enhanced_search():
     """Unified metadata search across configured sources + local DB artists.
@@ -6776,6 +6786,7 @@ def enhanced_search():
         requested_source = ''
     if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
         return jsonify({"error": f"Unknown source: {requested_source}"}), 400
+    _mark_request_free_ok_for_spotify(requested_source)
 
     if not query:
         return jsonify(_search_orchestrator.empty_response())
@@ -6864,11 +6875,20 @@ def enhanced_search_source(source_name):
 
     try:
         client, _available = _search_orchestrator.resolve_client(source_name, deps)
+        prefer_free = False
+        if source_name == 'spotify' and deps.spotify_client:
+            try:
+                if (deps.spotify_client._free_installed()
+                        and not deps.spotify_client.is_spotify_authenticated()):
+                    client = client or deps.spotify_client
+                    prefer_free = True
+            except Exception as e:
+                logger.debug(f"Spotify free-fallback availability check failed: {e}")
         if client is None:
             return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
         return app.response_class(
-            _search_orchestrator.stream_metadata_source(source_name, query, client),
+            _search_orchestrator.stream_metadata_source(source_name, query, client, prefer_free=prefer_free),
             mimetype='application/x-ndjson',
         )
     except Exception as e:
@@ -9600,6 +9620,7 @@ def get_artist_detail(artist_id):
                     "error": f"{source_param} is not enabled",
                 }), 503
 
+        _mark_request_free_ok_for_spotify(source_param)
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -10365,6 +10386,7 @@ def get_artist_discography(artist_id):
         artist_name = request.args.get('artist_name', '').strip()
         # Optional source override from multi-source search tabs
         source_override = request.args.get('source', '').strip().lower()
+        _mark_request_free_ok_for_spotify(source_override)
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
@@ -11086,6 +11108,8 @@ def get_album_tracks(album_id):
                 source_override = 'itunes'
             else:
                 source_override = 'spotify'
+
+        _mark_request_free_ok_for_spotify(source_override)
 
         from core.metadata_service import get_artist_album_tracks as _get_artist_album_tracks
 
@@ -16151,7 +16175,9 @@ def _sanitize_filename(filename: str) -> str:
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Windows forbids trailing dots/spaces on files and folders.
     # Artists like "Fred again.." would create mangled 8.3 short names.
-    sanitized = sanitized.rstrip('. ') or '_'
+    # A LEADING dot is just as bad the other way: Unix treats it as a hidden
+    # entry and media servers skip it (#1129, "...Baby One More Time").
+    sanitized = sanitized.strip('. ') or '_'
     # Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     # can't be used as file or folder names even with extensions.
     if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', sanitized, re.IGNORECASE):
@@ -23256,6 +23282,7 @@ def get_playlist_tracks(playlist_id):
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
 def get_spotify_album_tracks(album_id):
     """Fetches full track details for a specific album."""
+    _mark_request_free_ok_for_spotify('spotify')  # the URL itself targets Spotify
     use_hydrabase = _is_hydrabase_active()
 
     # Try Hydrabase first when active — look up by album soul_id
