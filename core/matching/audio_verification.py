@@ -26,11 +26,19 @@ MIN_ACOUSTID_SCORE = 0.80       # Minimum fingerprint score to trust a match.
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity to consider a match.
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity to consider a match.
 CLEAR_MISMATCH_THRESHOLD = 0.30  # Below this artist sim = clear wrong song.
-# Spotify's version separator is a SPACED dash (' - Remastered 2011'). Requiring
-# the spaces keeps hyphenated words ('Spider-Man', 'Post-Remix') out of the rule
-# — with `\s*` a bare intra-word hyphen matched and 'Post-Remix' normalized to
-# 'post'. En/em dashes appear in the same role in provider metadata.
-_DASH_QUALIFIER_RE = re.compile(r"\s+[-–—]\s+(?P<qualifier>[^-–—]+)$")
+# Spotify's version separator is a SPACED dash (' - Remastered 2011'), so the
+# rule needs whitespace next to the dash — with `\s*` a bare intra-word hyphen
+# matched and 'Post-Remix' normalized to 'post'. ONE side is enough, and has to
+# be: real catalogue rows write ']- Single' ('Cold Water … [Anirudh Diwali
+# Edition]- Single'), where the bracket strip has already eaten the space in
+# front. En/em dashes appear in the same role in provider metadata.
+# The dash class covers what real metadata actually writes: ASCII hyphen, the
+# unicode hyphen/en/em dashes, the minus sign, and the FULLWIDTH hyphen-minus a
+# Japanese tagger produces (残酷な天使のテーゼ － Instrumental).
+_DASH_CHARS = r"\-‐‑‒–—―−－"
+_DASH_QUALIFIER_RE = re.compile(
+    rf"(?:\s[{_DASH_CHARS}]\s*|\s*[{_DASH_CHARS}]\s)(?P<qualifier>[^{_DASH_CHARS}]+)$"
+)
 
 
 class Decision(Enum):

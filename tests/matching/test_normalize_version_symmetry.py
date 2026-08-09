@@ -195,3 +195,82 @@ def test_genuinely_different_song_still_fails():
         fingerprint_score=0.85,
     )
     assert out.decision == Decision.FAIL
+
+
+# --- the dash needs whitespace on ONE side, not both ---
+#
+# Real catalogue rows write ']- Single' (the bracket group absorbs the space
+# before the dash), so demanding a space on both sides left 'single' glued to
+# the title. Demanding one is still enough to keep 'Spider-Man' intact.
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Cold Water [Anirudh Diwali Edition]- Single", "cold water"),
+        ("Some Song -Remastered 2011", "some song"),
+        ("Some Song- Live at Wembley", "some song"),
+        ("Spider-Man", "spiderman"),
+        ("Post-Remix", "postremix"),
+    ],
+)
+def test_dash_separator_needs_one_adjacent_space(title, expected):
+    assert normalize(title) == expected
+
+
+# --- CJK identity must survive normalization ---
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("夜に駆ける", "夜に駆ける"),
+        ("紅蓮華 - Instrumental", "紅蓮華"),
+        ("残酷な天使のテーゼ - TV Size", "残酷な天使のテーゼ"),
+        ("僕の戦争 - 僕の戦争", "僕の戦争 僕の戦争"),
+    ],
+)
+def test_cjk_titles_keep_their_identity(title, expected):
+    assert normalize(title) == expected
+
+
+# --- separators used by Japanese and provider metadata ---
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        # ideographic space around an ASCII dash
+        ("残酷な天使のテーゼ　-　Instrumental", "残酷な天使のテーゼ"),
+        # fullwidth hyphen-minus (U+FF0D) — what a JP tagger writes
+        ("残酷な天使のテーゼ － Instrumental", "残酷な天使のテーゼ"),
+        ("紅蓮華 － ライブ", "紅蓮華"),
+        # unicode hyphen (U+2010) and minus sign (U+2212)
+        ("Bohemian Rhapsody ‐ Remastered 2011", "bohemian rhapsody"),
+        ("Bohemian Rhapsody − Remastered 2011", "bohemian rhapsody"),
+        # a CJK title is never emptied by any of this
+        ("紅蓮華 － 紅蓮華", "紅蓮華 紅蓮華"),
+    ],
+)
+def test_unicode_dash_separators(title, expected):
+    assert normalize(title) == expected
+
+
+@pytest.mark.parametrize(
+    "dashed,bare",
+    [
+        ("残酷な天使のテーゼ - Remastered 2019", "残酷な天使のテーゼ"),
+        ("紅蓮華 - TV Size", "紅蓮華"),
+        ("YOASOBI - Instrumental Ver.", "YOASOBI"),
+        ("この街 - Off Vocal", "この街"),
+        ("Vogel im Käfig - Live at Budokan", "Vogel im Käfig"),
+        ("Barricades - 2013 Remaster", "Barricades"),
+    ],
+)
+def test_japanese_and_mixed_script_version_tails(dashed, bare):
+    assert similarity(dashed, bare) == 1.0
+
+
+def test_a_version_strip_never_empties_a_title():
+    """The strip removes a SUFFIX; if it ever consumed the whole string the
+    title would score 0.0 against everything and a correct file would be
+    reported unverifiable."""
+    for title in ["Live - Live", "Instrumental - Instrumental",
+                  "ライブ - ライブ", "Remix - Remix", "EP - EP"]:
+        assert normalize(title), f"{title!r} normalized to empty"
