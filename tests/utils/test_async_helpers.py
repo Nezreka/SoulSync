@@ -10,7 +10,6 @@ import threading
 import time
 from pathlib import Path
 
-from utils import async_helpers
 from utils.async_helpers import run_async
 
 
@@ -46,6 +45,44 @@ def test_concurrent_run_async_calls_interleave_instead_of_serializing():
     )
 
 
+def test_cross_thread_submissions_never_lose_a_wakeup():
+    """The failure this bridge exists to prevent: a submission that never wakes
+    the loop's selector, so the caller blocks on Future.result() forever with
+    nothing in the logs. Creating the loop inside its own thread is what fixes
+    it — this pins that under real cross-thread load."""
+    errors = []
+
+    def submitter(base):
+        try:
+            for index in range(60):
+                assert run_async(
+                    asyncio.sleep(0, result=base + index), timeout=10,
+                ) == base + index
+        except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=submitter, args=(k * 1000,)) for k in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert not any(t.is_alive() for t in threads), "a run_async caller hung"
+    assert errors == []
+
+
+def test_run_async_adds_no_polling_latency_floor():
+    """PR #1121 review: the queue+pump workaround polled at 100 Hz, so every
+    call paid up to 10 ms of scheduling latency on every interpreter."""
+    start = time.monotonic()
+    for _ in range(50):
+        run_async(asyncio.sleep(0))
+    elapsed = time.monotonic() - start
+
+    # 50 calls × up to 10 ms of pump latency each ≈ 0.25-0.5 s.
+    assert elapsed < 0.15, f"50 trivial run_async calls took {elapsed:.3f}s"
+
+
 def test_first_run_async_call_waits_for_event_loop_startup():
     repo_root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(
@@ -69,9 +106,13 @@ def test_first_run_async_call_waits_for_event_loop_startup():
 
 
 def test_submitted_task_is_retained_until_it_finishes():
+    """asyncio keeps only WEAK references to tasks, so a suspended job has to
+    be held by the submission machinery — otherwise an opportunistic GC cycle
+    destroys it mid-flight and the caller blocks on result() forever. Asserted
+    through the public behaviour (the call still returns after a collection),
+    not through whichever internal happens to hold the reference."""
     started = threading.Event()
     release = threading.Event()
-    baseline = set(async_helpers._active_tasks)
 
     async def suspended_job():
         started.set()
@@ -86,15 +127,10 @@ def test_submitted_task_is_retained_until_it_finishes():
     worker.start()
     assert started.wait(2)
 
-    gc.collect()
-    retained = set(async_helpers._active_tasks) - baseline
-    assert retained
+    for _ in range(3):
+        gc.collect()
     release.set()
 
-    worker.join(2)
-    assert not worker.is_alive()
+    worker.join(5)
+    assert not worker.is_alive(), "the submitted job was collected mid-flight"
     assert result == {"value": "finished"}
-    deadline = time.monotonic() + 1
-    while retained.intersection(async_helpers._active_tasks) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert not retained.intersection(async_helpers._active_tasks)

@@ -145,17 +145,28 @@ _VERSION_MARKER_TOKENS = frozenset({
 })
 
 
-def is_version_qualifier(text: str) -> bool:
-    """Whether ``text`` describes a recording/version rather than a subtitle.
+def is_trailing_version_qualifier(text: str) -> bool:
+    """Whether a DASH-separated tail describes a version rather than a title.
 
-    Keep this decision shared by title matching and audio verification so a
-    provider's ``Title (Producer Remix)`` and ``Title - Producer Remix`` forms
-    cannot drift into different normalized identities.
+    Brackets are unambiguous — anything inside ``(...)`` is an annotation, so
+    a single marker token anywhere in the group is enough there. A dash is
+    not: it separates artist from title, and plenty of real titles open with
+    a marker word. "Contains a marker" therefore over-strips catastrophically
+    (PR #1121 review — ``Queen - Radio Ga Ga`` → ``queen``, ``Billy Joel -
+    Piano Man`` → ``billy joel``), and those decisions feed AcoustID
+    verification, so it mis-verifies genuine tracks.
+
+    The marker's POSITION is what separates the two families: a version tag
+    ends in its marker (``Don Diablo Edit``, ``2011 Remaster``, ``Slowed +
+    Reverb``, ``Original Mix``), while a real title only happens to start
+    with one (``Radio Ga Ga``, ``Single Ladies``, ``Take On Me``). Requiring
+    the qualifier to be *entirely* marker words would be safe but would drop
+    the producer-credit forms this rule exists for, so require only that the
+    LAST token is one. ``_VERSION_MARKER_TOKENS`` stays shared with
+    :func:`strip_subtitle_qualifiers` so both paths grow the same vocabulary.
     """
-    return any(
-        token in _VERSION_MARKER_TOKENS
-        for token in _TOKEN_RE.findall((text or "").casefold())
-    )
+    tokens = _TOKEN_RE.findall((text or "").casefold())
+    return bool(tokens) and tokens[-1] in _VERSION_MARKER_TOKENS
 
 
 def strip_subtitle_qualifiers(title: str, other_title: str) -> str:
@@ -284,7 +295,7 @@ def choose_best_title_candidate(
 
 __all__ = [
     "titles_plausibly_same",
-    "is_version_qualifier",
+    "is_trailing_version_qualifier",
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",

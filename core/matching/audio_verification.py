@@ -16,7 +16,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, List, Optional
 
-from core.text.title_match import is_version_qualifier
+from core.text.title_match import is_trailing_version_qualifier
 from utils.logging_config import get_logger
 
 logger = get_logger("audio_verification")
@@ -64,7 +64,7 @@ def normalize(text: str) -> str:
     # Trailing featuring / version tags.
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
     dash_qualifier = _DASH_QUALIFIER_RE.search(s)
-    if dash_qualifier and is_version_qualifier(dash_qualifier.group("qualifier")):
+    if dash_qualifier and is_trailing_version_qualifier(dash_qualifier.group("qualifier")):
         s = s[:dash_qualifier.start()].rstrip()
     s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
     # Path/separator punctuation -> space so a title keeps matching a source

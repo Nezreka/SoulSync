@@ -261,6 +261,38 @@ class TestPerTrackProgressUpdates:
             'completed', 'failed',
         ]
 
+    def test_leftover_files_do_not_downgrade_a_clean_import(
+        self, auto_import_worker, tmp_path,
+    ):
+        """PR #1121 review: ``unmatched_files`` also holds quality-dedup losers
+        (the lower-bitrate copy of a track that DID import), so counting them as
+        errors marked healthy albums 'partial' — and ``_is_already_processed``
+        includes 'partial', so the folder was never revisited. Only a track that
+        failed to import may block 'completed'."""
+        source = tmp_path / "ok.flac"
+        source.write_bytes(b"audio")
+        leftover = tmp_path / "ok (1).mp3"
+        leftover.write_bytes(b"audio")
+        candidate = _FakeCandidate(path=str(tmp_path), name="Album")
+        match_result = _make_match_result()
+        match_result['matches'] = [{
+            'track': {'id': 'ok', 'name': 'OK', 'track_number': 1},
+            'file': str(source), 'confidence': 0.95,
+        }]
+        match_result['unmatched_files'] = [str(leftover)]
+
+        def ok(_key, context, path):
+            context['_final_processed_path'] = path
+            context['_pipeline_import_succeeded'] = True
+
+        auto_import_worker._process_callback = ok
+        status, errors = auto_import_worker._process_matches(
+            candidate, _make_identification(), match_result,
+        )
+
+        assert status == 'completed'
+        assert errors == []
+
 
 # ---------------------------------------------------------------------------
 # In-progress + finalize DB round trip

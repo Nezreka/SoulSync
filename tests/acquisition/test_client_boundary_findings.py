@@ -56,17 +56,29 @@ def test_the_monitor_has_a_client_call_budget():
     assert CLIENT_CALL_TIMEOUT_S > 0
 
 
-def test_the_loop_pump_is_referenced_and_supervised():
-    """dd28-47: an unreferenced, callback-less pump could die silently."""
+def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging():
+    """dd28-47 in its surviving form.
+
+    The finding was that a silently dead pump task left every later run_async
+    blocked forever. The pump is gone (PR #1121 review — the 3.14.6 lost
+    wakeup came from creating the loop outside its own thread, not from
+    run_coroutine_threadsafe itself), so what has to hold is the more general
+    guarantee: a loop thread that stops for any reason is REBUILT on the next
+    call rather than leaving callers hanging.
+    """
     import utils.async_helpers as helpers
 
     run_async(asyncio.sleep(0))  # make sure the loop thread exists
+    dead = helpers._get_loop()
+    dead.call_soon_threadsafe(dead.stop)
 
-    assert helpers._pump_task is not None
-    assert helpers._pump_task.done() is False
-    # A done-callback is what turns "pump died" into a visible failure instead
-    # of every later run_async hanging forever.
-    assert helpers._on_pump_done is not None
+    deadline = time.monotonic() + 5
+    while helpers._thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not helpers._thread.is_alive(), "the loop thread outlived its loop"
+
+    assert run_async(asyncio.sleep(0, result="alive"), timeout=10) == "alive"
+    assert helpers._get_loop() is not dead
 
 
 # --------------------------------------------------------------------------

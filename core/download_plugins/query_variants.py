@@ -31,6 +31,12 @@ _CLOSERS = {")", "]"}
 
 # Words that only ever appear in catalog metadata, never in a scene/p2p release
 # name.  Dropping them widens a query without changing which release it means.
+# Credit words that a release name almost never carries but a metadata title
+# often does. "with" is the aggressive one — it appears in real titles
+# ("Sleeping With Sirens", "Dancing With Myself") as well as in Spotify's
+# "(with Artist)" credit form. It stays because dropping a token can only
+# WIDEN an indexer's AND-search: the relaxed variant is a superset of the
+# exact query, which already ran first and won if it had hits.
 _NOISE_TOKENS = frozenset({
     "feat", "feat.", "ft", "ft.", "featuring", "with",
     "prod", "prod.", "produced",
@@ -46,8 +52,10 @@ def _collapse_whitespace(text: str) -> str:
 def strip_bracket_groups(text: str) -> str:
     """Remove every *balanced* ``(...)``/``[...]`` group, nesting included.
 
-    An unbalanced opener is left in place along with everything after it — a
-    stray "(" in a title must not swallow the rest of the query.
+    Everything after an unbalanced opener is KEPT — a stray "(" in a title must
+    not swallow the rest of the query. The stray opener itself becomes a space
+    (it would only confuse the indexer); an unbalanced closer is left as-is,
+    since it can't be told apart from a title's own punctuation.
     """
     source = str(text or "")
     drop = [False] * len(source)

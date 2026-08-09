@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import threading
+import time
 
 import pytest
 
@@ -75,3 +76,16 @@ def test_control_calls_are_not_starved_by_slow_calls(monkeypatch):
         release.set()
         slow.shutdown()
         control.shutdown()
+
+
+def test_run_blocking_has_no_polling_latency_floor():
+    """PR #1121 review: the old ``while not done: await sleep(0.05)`` put a
+    50 ms floor under every call and woke the loop 20×/s per in-flight job."""
+    async def probe():
+        start = time.perf_counter()
+        for _ in range(5):
+            await run_blocking(lambda: None)
+        return time.perf_counter() - start
+
+    # 5 sequential calls under the old poll cost ≥250 ms.
+    assert asyncio.run(probe()) < 0.1
