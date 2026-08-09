@@ -82,6 +82,7 @@ from core.prowlarr_client import (
     ProwlarrClient,
     ProwlarrSearchError,
     ProwlarrSearchResult,
+    canonical_protocol,
 )
 from core.torrent_clients import get_active_adapter as get_active_torrent_adapter
 from utils.async_helpers import run_async
@@ -835,7 +836,10 @@ async def prowlarr_search_with_variants(
     variants = indexer_query_variants(query)
     if not variants:
         return []
-    protocol = str(protocol or "").strip().lower()
+    # Canonical spelling, matching what the client stores on every parsed
+    # result — this is the value the `usable` comparison below is made against
+    # (`indexer_ids_for_protocol` normalizes its own argument).
+    protocol = canonical_protocol(protocol)
     indexer_ids = prowlarr.indexer_ids_for_protocol(
         _parse_indexer_id_filter(), protocol,
     )
@@ -859,7 +863,7 @@ async def prowlarr_search_with_variants(
             logger.error("Prowlarr %s search errored for %r: %s", protocol, variant, e)
             first_error = first_error or e
             continue
-        usable = [r for r in results if str(r.protocol or "").lower() == protocol]
+        usable = [r for r in results if r.protocol == protocol]
         if usable:
             if attempt:
                 logger.info(
@@ -869,7 +873,10 @@ async def prowlarr_search_with_variants(
             # Only this protocol's releases: a mixed answer's foreign entries
             # can never be grabbed by the caller (every one re-filters before
             # projecting), and returning them made the retry decision and the
-            # return value disagree about what "usable" meant.
+            # return value disagree about what "usable" meant. Both sides of
+            # this comparison are canonical (`canonical_protocol` on the way
+            # in, `_parse_result` on every release), so what survives here also
+            # survives the callers' case-sensitive filters.
             return usable
     if first_error is not None:
         raise ProwlarrSearchError(str(first_error)) from first_error

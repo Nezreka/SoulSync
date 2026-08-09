@@ -338,3 +338,69 @@ def test_plugin_helper_returns_only_the_requested_protocol():
     results = asyncio.run(prowlarr_search_with_variants(fake, query, "usenet"))
 
     assert [r.protocol for r in results] == ["usenet"]
+
+
+# --------------------------------------------------------------------------
+# PR #1121 review — one canonical protocol spelling
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw", ["Torrent", "TORRENT", " torrent "])
+def test_parsed_results_carry_a_canonical_protocol(raw):
+    """Prowlarr answers with 'Torrent' as readily as 'torrent'. The helper
+    compared case-INsensitively while every caller re-filters with
+    ``result.protocol != 'torrent'``, so a capitalised release survived the
+    search, ended the relaxed-query ladder, and was then dropped by the
+    projection — a search that found hits returning nothing. Normalising once
+    at the parse boundary is what makes both spellings agree."""
+    client = ProwlarrClient.__new__(ProwlarrClient)
+    parsed = ProwlarrClient._parse_result(client, {
+        'guid': 'g', 'title': 't', 'indexerId': 1, 'indexer': 'i',
+        'protocol': raw, 'downloadUrl': 'http://x',
+    })
+    assert parsed.protocol == 'torrent'
+
+
+def test_parsed_indexers_carry_a_canonical_protocol():
+    client = ProwlarrClient.__new__(ProwlarrClient)
+    parsed = ProwlarrClient._parse_indexer(client, {
+        'id': 3, 'name': 'n', 'protocol': 'Usenet',
+    })
+    assert parsed.protocol == 'usenet'
+
+
+def test_a_capitalised_release_survives_to_the_caller_filter():
+    """End to end: the helper's answer must satisfy the case-SENSITIVE filter
+    every caller applies before projecting or grabbing."""
+    from core.download_plugins.torrent import prowlarr_search_with_variants
+
+    client = ProwlarrClient.__new__(ProwlarrClient)
+    capitalised = ProwlarrClient._parse_result(client, {
+        'guid': 'g', 'title': 't', 'indexerId': 1, 'indexer': 'i',
+        'protocol': 'Torrent', 'magnetUrl': 'magnet:?xt=1',
+    })
+    query = "Some Album"
+    fake = _FakeProwlarr({query: [capitalised]})
+
+    results = asyncio.run(prowlarr_search_with_variants(fake, query, "torrent"))
+
+    assert results, "the helper dropped a hit it had already accepted"
+    assert [r for r in results if r.protocol == 'torrent'] == results
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # A mismatched pair is NOT a balanced group: the '(' must not be
+        # closed by a ']'. Popping on any closer dropped "Live] Remix"'s
+        # first half and returned a query the user never typed.
+        ("Song (Live] Remix", "Song Live] Remix"),
+        ("Song [Live) Remix", "Song Live) Remix"),
+        # …while genuine groups of either kind still go.
+        ("Song (Live) [2015] Remix", "Song Remix"),
+        # An opener that never closes still yields its own character only.
+        ("Song (Live Remix", "Song Live Remix"),
+    ],
+)
+def test_strip_bracket_groups_requires_a_matching_closer(text, expected):
+    assert strip_bracket_groups(text) == expected

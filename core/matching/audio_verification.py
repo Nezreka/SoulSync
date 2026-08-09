@@ -26,7 +26,11 @@ MIN_ACOUSTID_SCORE = 0.80       # Minimum fingerprint score to trust a match.
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity to consider a match.
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity to consider a match.
 CLEAR_MISMATCH_THRESHOLD = 0.30  # Below this artist sim = clear wrong song.
-_DASH_QUALIFIER_RE = re.compile(r"\s*-\s*(?P<qualifier>[^-]+)$")
+# Spotify's version separator is a SPACED dash (' - Remastered 2011'). Requiring
+# the spaces keeps hyphenated words ('Spider-Man', 'Post-Remix') out of the rule
+# — with `\s*` a bare intra-word hyphen matched and 'Post-Remix' normalized to
+# 'post'. En/em dashes appear in the same role in provider metadata.
+_DASH_QUALIFIER_RE = re.compile(r"\s+[-–—]\s+(?P<qualifier>[^-–—]+)$")
 
 
 class Decision(Enum):
@@ -45,17 +49,32 @@ class Outcome:
     reason: str = ""
 
 
-def normalize(text: str) -> str:
-    """Normalize a title/artist for comparison.
+def _finish_normalization(s: str) -> str:
+    s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
+    # Path/separator punctuation -> space so a title keeps matching a source
+    # filename that substituted '_' for an illegal '/' or ':' (#851): the on-disk
+    # "You See Big Girl _ T_T" must normalize the same as "You See Big Girl / T:T".
+    # Done before the strip below so they become word boundaries, not joins.
+    s = re.sub(r'[\\/:_]+', ' ', s)
+    # Drop remaining punctuation but keep word chars (incl. CJK) + spaces.
+    s = re.sub(r'[^\w\s]', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
 
-    lowercase; strip ``()`` / ``[]`` / ``<>`` annotations (version tags,
-    performer credits like ``<Vocal: MIKA KOBAYASHI>``); strip trailing
-    version / featuring tags; KEEP CJK characters (``\\w`` is unicode-aware) so
-    Japanese/Chinese/Korean titles produce a comparable form instead of an empty
-    string; collapse whitespace.
+
+def _normalized_readings(text: str) -> tuple:
+    """``(canonical, verbatim)`` normalized forms of ``text``.
+
+    ``verbatim`` is ``None`` unless a ``' - <qualifier>'`` version tail was
+    actually dropped, in which case it is the same normalization with the tail
+    kept. No token rule can tell ``Taylor Swift - Long Live`` (artist + title)
+    from ``Halo - Long Live`` (title + version tag) — both end in a version
+    marker — so :func:`similarity` scores both readings and keeps the better
+    one. That is what stops the strip from being load-bearing: a wrong strip
+    costs a few points instead of collapsing a real title to the artist name
+    and quarantining a correct file.
     """
     if not text:
-        return ""
+        return "", None
     s = text.lower().strip()
     # Annotations that are metadata, not core identity.
     s = re.sub(r'\s*\([^)]*\)', '', s)
@@ -65,27 +84,49 @@ def normalize(text: str) -> str:
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
     dash_qualifier = _DASH_QUALIFIER_RE.search(s)
     if dash_qualifier and is_trailing_version_qualifier(dash_qualifier.group("qualifier")):
-        s = s[:dash_qualifier.start()].rstrip()
-    s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
-    # Path/separator punctuation -> space so a title keeps matching a source
-    # filename that substituted '_' for an illegal '/' or ':' (#851): the on-disk
-    # "You See Big Girl _ T_T" must normalize the same as "You See Big Girl / T:T".
-    # Done before the strip below so they become word boundaries, not joins.
-    s = re.sub(r'[\\/:_]+', ' ', s)
-    # Drop remaining punctuation but keep word chars (incl. CJK) + spaces.
-    s = re.sub(r'[^\w\s]', '', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
+        return (
+            _finish_normalization(s[:dash_qualifier.start()].rstrip()),
+            _finish_normalization(s),
+        )
+    return _finish_normalization(s), None
+
+
+def normalize(text: str, *, strip_version_tail: bool = True) -> str:
+    """Normalize a title/artist for comparison.
+
+    lowercase; strip ``()`` / ``[]`` / ``<>`` annotations (version tags,
+    performer credits like ``<Vocal: MIKA KOBAYASHI>``); strip trailing
+    version / featuring tags; KEEP CJK characters (``\\w`` is unicode-aware) so
+    Japanese/Chinese/Korean titles produce a comparable form instead of an empty
+    string; collapse whitespace.
+
+    ``strip_version_tail=False`` keeps a ``' - <qualifier>'`` tail — the second
+    reading :func:`similarity` scores, see :func:`_normalized_readings`.
+    """
+    canonical, verbatim = _normalized_readings(text)
+    if not strip_version_tail and verbatim is not None:
+        return verbatim
+    return canonical
 
 
 def similarity(a: str, b: str) -> float:
-    """Similarity (0.0–1.0) between two strings after normalization."""
-    na, nb = normalize(a), normalize(b)
-    if not na or not nb:
+    """Similarity (0.0–1.0) between two strings after normalization.
+
+    Scored across both readings of each side (see :func:`_normalized_readings`),
+    best pairing wins. Only a stripped dash tail produces a second reading, so
+    the common path is the single comparison it has always been.
+    """
+    va = [v for v in _normalized_readings(a) if v]
+    vb = [v for v in _normalized_readings(b) if v]
+    if not va or not vb:
         return 0.0
-    if na == nb:
-        return 1.0
-    return SequenceMatcher(None, na, nb).ratio()
+    best = 0.0
+    for na in va:
+        for nb in vb:
+            if na == nb:
+                return 1.0
+            best = max(best, SequenceMatcher(None, na, nb).ratio())
+    return best
 
 
 _match_engine = None

@@ -56,7 +56,7 @@ def test_the_monitor_has_a_client_call_budget():
     assert CLIENT_CALL_TIMEOUT_S > 0
 
 
-def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging():
+def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging(isolated_async_loop):
     """dd28-47 in its surviving form.
 
     The finding was that a silently dead pump task left every later run_async
@@ -65,10 +65,15 @@ def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging():
     run_coroutine_threadsafe itself), so what has to hold is the more general
     guarantee: a loop thread that stops for any reason is REBUILT on the next
     call rather than leaving callers hanging.
-    """
-    import utils.async_helpers as helpers
 
-    run_async(asyncio.sleep(0))  # make sure the loop thread exists
+    Runs on a PRIVATE loop: stopping the process-wide one strands every
+    coroutine another subsystem has in flight on it, and those callers block on
+    the default ``timeout=None`` — hanging the session rather than failing a
+    test.
+    """
+    helpers = isolated_async_loop
+
+    helpers.run_async(asyncio.sleep(0))  # make sure the loop thread exists
     dead = helpers._get_loop()
     dead.call_soon_threadsafe(dead.stop)
 
@@ -77,7 +82,7 @@ def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging():
         time.sleep(0.01)
     assert not helpers._thread.is_alive(), "the loop thread outlived its loop"
 
-    assert run_async(asyncio.sleep(0, result="alive"), timeout=10) == "alive"
+    assert helpers.run_async(asyncio.sleep(0, result="alive"), timeout=10) == "alive"
     assert helpers._get_loop() is not dead
 
 

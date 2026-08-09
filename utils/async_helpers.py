@@ -36,6 +36,45 @@ def _run_loop(ready, holder):
         holder["error"] = exc
         ready.set()
         raise
+    finally:
+        # run_forever() returning does NOT close the loop — only this thread
+        # dies. A loop left open still answers is_closed() with False, so
+        # _get_loop() hands it back and run_coroutine_threadsafe accepts a
+        # callback nothing will ever pump: the caller blocks on result() with
+        # the default timeout=None forever, with nothing in the logs. That is
+        # the silent-hang class this module exists to prevent. Closing here
+        # makes a submission into that window an immediate RuntimeError
+        # (run_async rebuilds and retries) and releases the loop's epoll +
+        # self-pipe FDs, which is the FD-leak avoidance run_async documents.
+        try:
+            _drain_pending(loop)
+        finally:
+            # Nested so the close happens even if the drain is interrupted —
+            # a loop left open is the very failure this block exists for.
+            try:
+                asyncio.set_event_loop(None)
+                loop.close()
+            except Exception:
+                pass
+
+
+def _drain_pending(loop):
+    """Cancel and settle whatever was still in flight when the loop stopped.
+
+    Without this, work already submitted resolves nowhere: the concurrent
+    Future handed to the caller is chained to an asyncio task that will never
+    run again, so the caller waits forever. Cancelling and pumping the loop one
+    last time propagates a CancelledError to every such caller instead.
+    """
+    try:
+        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        if not pending:
+            return
+        for task in pending:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+    except Exception:
+        pass
 
 
 def _get_loop():
@@ -62,6 +101,24 @@ def _get_loop():
     return _loop
 
 
+def _submit(coro):
+    """Schedule ``coro`` on the shared loop, rebuilding it once if it died.
+
+    The loop is looked up and submitted to OUTSIDE ``_lock`` (holding it across
+    a submission would serialise every caller), so the loop can be torn down in
+    that gap. It is closed on the way out, so the submission raises instead of
+    hanging — and since ``call_soon_threadsafe`` raises before it touches the
+    coroutine, the same object can go straight onto the replacement loop. One
+    retry is enough: ``_get_loop`` rebuilds on a closed loop, so a second
+    failure is a real one and propagates.
+    """
+    loop = _get_loop()
+    try:
+        return asyncio.run_coroutine_threadsafe(coro, loop)
+    except RuntimeError:
+        return asyncio.run_coroutine_threadsafe(coro, _get_loop())
+
+
 def run_async(coro, *, timeout=None):
     """Drop-in replacement for asyncio.run() that uses a single shared event loop.
 
@@ -78,8 +135,7 @@ def run_async(coro, *, timeout=None):
     waits on an external client MUST pass one, or a single hung HTTP call
     freezes that subsystem permanently with no error anywhere.
     """
-    loop = _get_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future = _submit(coro)
     if timeout is None:
         return future.result()
     try:

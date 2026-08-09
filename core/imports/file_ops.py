@@ -104,6 +104,37 @@ def cleanup_slskd_dedup_siblings(source_path) -> List[str]:
     return deleted
 
 
+def _apply_publish_mode(path: Path, dest_dir: Path) -> None:
+    """Widen ``path``'s permissions to the audience ``dest_dir`` implies.
+
+    An imported file must not simply inherit the staging file's mode. The
+    staging file was written by a download client, and slskd/SABnzbd running in
+    a container with umask 077 writes its downloads 0600 — carrying that into
+    the library publishes a track only the importing user can read, while
+    Plex/Jellyfin run as somebody else. That is the whole symptom the
+    permission handling exists to fix (PR #1121 review), and copying the source
+    mode only fixes it when the downloader already got it right.
+
+    The destination DIRECTORY is the statement of who the library is for, so
+    the read/write bits come from it — 0755 → 0644, 0775 → 0664, 0700 → 0600.
+    Only ever widening (union with what the file already grants) means an
+    import can never narrow a file that was already shareable, and a private
+    library stays private because nobody can traverse the directory anyway.
+    """
+    try:
+        current = os.stat(path).st_mode & 0o777
+        desired = current | (os.stat(dest_dir).st_mode & 0o666) | 0o600
+    except OSError as e:
+        logger.debug("could not resolve publish mode for %s: %s", path, e)
+        return
+    if desired == current:
+        return
+    try:
+        os.chmod(path, desired)
+    except OSError as e:
+        logger.debug("could not widen permissions on %s: %s", path, e)
+
+
 def _atomic_cross_device_move(src: Path, dst: Path) -> None:
     """Move ``src`` to ``dst`` across filesystems WITHOUT ever exposing a partial file at
     the final path.
@@ -126,20 +157,13 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
             f_dst.flush()
             os.fsync(f_dst.fileno())
         try:
-            # Permissions FIRST and on their own: mkstemp() creates at 0600 by
-            # design, and os.replace preserves the temp's mode, so anything
-            # that aborts copystat before its chmod would publish a file only
-            # the importing user can read — media servers run as someone else
-            # (PR #1121 review). copystat's later utime/xattr steps are the
-            # ones that realistically fail, so they must not take the mode
-            # with them.
-            shutil.copymode(str(src), str(tmp))
-        except OSError:
-            pass
-        try:
             shutil.copystat(str(src), str(tmp))   # preserve mtime/permissions (copy2-like)
         except OSError:
             pass
+        # AFTER copystat, which re-applies the source's mode and can also fail
+        # partway (its utime/xattr steps are the ones that realistically do),
+        # leaving mkstemp's 0600 on the file about to be published.
+        _apply_publish_mode(tmp, dst.parent)
         os.replace(str(tmp), str(dst))            # atomic within dst's filesystem
     except Exception:
         if fd >= 0:
@@ -177,6 +201,10 @@ def safe_move_file(src, dst):
         # EPERM/EACCES) and we copy atomically below instead of letting the move write the
         # destination incrementally — the partial-file-at-final-name is what caused tracks
         # to land in Jellyfin with null/incomplete metadata (no disc).
+        # The rename keeps the source's mode, so widen BEFORE it — same inode,
+        # and the published file is then never briefly visible at a mode the
+        # media server cannot read.
+        _apply_publish_mode(src, dst.parent)
         os.replace(str(src), str(dst))
         return
     except FileNotFoundError:
