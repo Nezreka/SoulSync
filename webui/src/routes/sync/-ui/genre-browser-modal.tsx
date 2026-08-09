@@ -13,7 +13,7 @@
  * so reopening is instant and only queues what is still missing.
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -54,9 +54,27 @@ export interface GenreBrowserModalProps {
   onClose: () => void;
   /** Opening a genre replaces the modal with the genre page (2659-2680). */
   onSelectGenre: (genre: BeatportGenre) => void;
+  /**
+   * The genre page, when one is open. Rendered INSIDE
+   * `.genre-browser-modal-content` in place of the search box and the grid —
+   * which is exactly what the vanilla does (2696-2745): it hides
+   * `.genre-browser-search-section` and `.genre-browser-genres-section` and
+   * appends `.genre-page-content` alongside them. The overlay, container and
+   * header stay, so the close button and the backdrop keep working.
+   *
+   * A SLOT rather than the caller re-creating the modal chrome: this component
+   * owns that markup, and a second copy would be a second thing to keep in
+   * step with the stylesheet.
+   */
+  genreView?: ReactNode;
 }
 
-export function GenreBrowserModal({ open, onClose, onSelectGenre }: GenreBrowserModalProps) {
+export function GenreBrowserModal({
+  open,
+  onClose,
+  onSelectGenre,
+  genreView,
+}: GenreBrowserModalProps) {
   const [genres, setGenres] = useState<BeatportGenre[] | null>(getCachedGenres);
   const [images, setImages] = useState<Map<string, string>>(getCachedGenreImages);
   const [status, setStatus] = useState<GridStatus>(() =>
@@ -180,57 +198,66 @@ export function GenreBrowserModal({ open, onClose, onSelectGenre }: GenreBrowser
         </div>
 
         <div className="genre-browser-modal-content">
-          <div className="genre-browser-search-section">
-            <div className="genre-browser-search-container">
-              <input
-                type="text"
-                className="genre-browser-search-input"
-                placeholder="Search genres..."
-                id="genre-browser-search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-              <span className="genre-browser-search-icon">🔍</span>
-            </div>
-          </div>
-
-          <div className="genre-browser-genres-section">
-            <div className="genre-browser-genres-grid" id="genre-browser-genres-grid">
-              {status === 'loading' ? (
-                <div className="genre-browser-loading-container">
-                  <div className="genre-browser-loading-spinner" />
-                  <p className="genre-browser-loading-text">
-                    🔍 Discovering current Beatport genres...
-                  </p>
+          {/* 2696-2699: with a genre open the search box and the grid are
+              HIDDEN, not unmounted — but nothing reads their state while they
+              are hidden, and the genre list itself lives in the module cache,
+              so rendering one or the other is the same behaviour without
+              keeping a dead subtree around. */}
+          {genreView ?? (
+            <>
+              <div className="genre-browser-search-section">
+                <div className="genre-browser-search-container">
+                  <input
+                    type="text"
+                    className="genre-browser-search-input"
+                    placeholder="Search genres..."
+                    id="genre-browser-search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                  <span className="genre-browser-search-icon">🔍</span>
                 </div>
-              ) : null}
+              </div>
 
-              {status === 'empty' ? (
-                <div className="genre-browser-loading-container">
-                  <p style={MESSAGE_STYLE}>⚠️ No genres available</p>
-                  <RetryButton onClick={() => setReloadToken((token) => token + 1)} />
+              <div className="genre-browser-genres-section">
+                <div className="genre-browser-genres-grid" id="genre-browser-genres-grid">
+                  {status === 'loading' ? (
+                    <div className="genre-browser-loading-container">
+                      <div className="genre-browser-loading-spinner" />
+                      <p className="genre-browser-loading-text">
+                        🔍 Discovering current Beatport genres...
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {status === 'empty' ? (
+                    <div className="genre-browser-loading-container">
+                      <p style={MESSAGE_STYLE}>⚠️ No genres available</p>
+                      <RetryButton onClick={() => setReloadToken((token) => token + 1)} />
+                    </div>
+                  ) : null}
+
+                  {status === 'failed' ? (
+                    <div className="genre-browser-loading-container">
+                      <p style={MESSAGE_STYLE}>❌ Failed to load genres: {errorMessage}</p>
+                      <RetryButton onClick={() => setReloadToken((token) => token + 1)} />
+                    </div>
+                  ) : null}
+
+                  {status === 'ready'
+                    ? visible.map((genre) => (
+                        <GenreCard
+                          key={beatportGenreKey(genre)}
+                          genre={genre}
+                          imageUrl={images.get(beatportGenreKey(genre))}
+                          onClick={() => onSelectGenre(genre)}
+                        />
+                      ))
+                    : null}
                 </div>
-              ) : null}
-
-              {status === 'failed' ? (
-                <div className="genre-browser-loading-container">
-                  <p style={MESSAGE_STYLE}>❌ Failed to load genres: {errorMessage}</p>
-                  <RetryButton onClick={() => setReloadToken((token) => token + 1)} />
-                </div>
-              ) : null}
-
-              {status === 'ready'
-                ? visible.map((genre) => (
-                    <GenreCard
-                      key={beatportGenreKey(genre)}
-                      genre={genre}
-                      imageUrl={images.get(beatportGenreKey(genre))}
-                      onClick={() => onSelectGenre(genre)}
-                    />
-                  ))
-                : null}
-            </div>
-          </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

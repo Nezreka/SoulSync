@@ -2,16 +2,15 @@
  * The sync page — the assembly. `useSyncPage()` owns the wiring; this owns the
  * markup and the panel map.
  *
- * BEATPORT IS DELIBERATELY ABSENT from `panels`, and that is not an oversight.
- * The panel map in the dossier lists it as "the Beatport*Section set", but the
- * vanilla tab (index.html 2395+) is a sub-shell of its own: two inner tabs (My
- * Playlists / Rebuild), a hero slider with its own nav and indicators, three
- * nav buttons that switch to a genre browser and two Top-100 views, a download
- * bubble region, and then the section stack. Every piece exists as a component;
- * the composition and its view state do not, and inventing them here would mean
- * guessing a layout rather than transcribing one. `SyncShell` renders an empty
- * panel for a tab with no entry, so the gap is VISIBLE rather than subtly
- * wrong — which is the point. It is the next slice.
+ * CORRECTION — Beatport. This header previously said the tab was "a sub-shell
+ * of its own: two inner tabs (My Playlists / Rebuild) … three nav buttons that
+ * switch to a genre browser and two Top-100 views". That was inferred from a
+ * skim and the read disproved all of it. The inner tab strip is
+ * `style="display: none"` with its own comment saying Browse is the only view,
+ * so there is ONE reachable pane; and the two Top-100 buttons do not switch
+ * views at all, they scrape and open the download modal. `BeatportTab` is that
+ * one pane. The lesson is the usual one: the skim invented structure the
+ * vanilla does not have.
  *
  * Two panels are views, not lists. The server tab swaps between the playlist
  * list and the compare editor; that state lives here because `ServerPlaylistList`
@@ -31,6 +30,7 @@ import { useSyncPage } from '../-sync.use-page';
 import { QobuzTab, TidalTab } from './account-tab';
 import { DeezerArlTab, SpotifyTab } from './account-tabs';
 import { AutoSyncModal } from './autosync-modal';
+import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab } from './lb-sync-tab';
@@ -166,6 +166,7 @@ export function SyncPage() {
         onOpen={(sourceId) => openSourceModal('qobuz', sourceId)}
       />
     ),
+    beatport: <BeatportTab />,
     deezer: <DeezerArlTab />,
     // The link variant is the same SERVICE: one config, one vertical, one
     // modal id space. Only the way a playlist arrives differs.
