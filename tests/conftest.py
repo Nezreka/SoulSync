@@ -1415,3 +1415,38 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     media_scan_state.update(copy.deepcopy(_DEFAULT_MEDIA_SCAN_STATE))
     wishlist_stats_state.clear()
     wishlist_stats_state.update(copy.deepcopy(_DEFAULT_WISHLIST_STATS))
+
+
+# ---------------------------------------------------------------------------
+# Shared async bridge — isolation for tests that tear the loop down
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def isolated_async_loop():
+    """Swap ``utils.async_helpers``'s process-wide loop for a private one.
+
+    ``run_async`` is a singleton bridge: one loop thread serves every caller in
+    the process. A test that stops that loop to prove the rebuild path also
+    abandons whatever another subsystem has in flight on it — those callers
+    hold a ``concurrent.futures.Future`` that will never resolve and block on
+    the default ``timeout=None``, hanging the pytest session instead of failing
+    one test. Yields the module with a freshly-built private loop installed and
+    restores the original globals afterwards.
+    """
+    import utils.async_helpers as helpers
+
+    with helpers._lock:
+        saved_loop, saved_thread = helpers._loop, helpers._thread
+        helpers._loop = helpers._thread = None
+    try:
+        helpers._get_loop()
+        yield helpers
+    finally:
+        borrowed_loop, borrowed_thread = helpers._loop, helpers._thread
+        with helpers._lock:
+            helpers._loop, helpers._thread = saved_loop, saved_thread
+        if borrowed_loop is not None and not borrowed_loop.is_closed():
+            borrowed_loop.call_soon_threadsafe(borrowed_loop.stop)
+        if borrowed_thread is not None:
+            borrowed_thread.join(timeout=5)

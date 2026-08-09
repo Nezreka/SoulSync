@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from core.metadata import registry as metadata_registry
@@ -266,6 +268,32 @@ def _audiodb_candidate(name: str, sid: str):
 # round instead of taking every other source down with it.
 _CANDIDATE_GATHER_TIMEOUT_S = 10
 
+# The fan-out runs on ONE process-wide pool, not a fresh executor per call.
+# Per call, `max_workers=len(sources)` looks bounded — the priority chain is
+# single digits — but nothing capped threads ACROSS calls: the gather returns
+# after its wall-clock budget while the stragglers keep sleeping inside their
+# providers' rate-limit backoff (tens of seconds), so every picker open added
+# a full set of live threads on top of the last one's. A shared pool trades
+# that for a real ceiling; sized well above one chain so an ordinary picker
+# open still starts every source at once, and a source that does queue behind
+# a busy moment loses only this round, exactly like one that times out.
+_CANDIDATE_POOL_MAX_WORKERS = 16
+_candidate_pool_lock = threading.Lock()
+_candidate_pool_instance = None
+
+
+def _candidate_pool():
+    """The shared, lazily-built executor for candidate fan-out."""
+    global _candidate_pool_instance
+    if _candidate_pool_instance is None:
+        with _candidate_pool_lock:
+            if _candidate_pool_instance is None:
+                _candidate_pool_instance = ThreadPoolExecutor(
+                    max_workers=_CANDIDATE_POOL_MAX_WORKERS,
+                    thread_name_prefix="soulsync-art-candidate",
+                )
+    return _candidate_pool_instance
+
 
 def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] = None) -> list:
     """One candidate photo per CONNECTED metadata source, for the artist
@@ -339,15 +367,9 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
             logger.debug("artist image candidate failed for %s: %s", source, exc)
             return None
 
-    from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import wait as _wait_futures
 
-    # One worker per source, not a fixed cap: the budget below is wall-clock
-    # for the whole fan-out, so a queued source doesn't get a slow start — it
-    # gets no start at all, and a provider silently vanishes from the picker
-    # depending on where the priority chain happened to put it. The chain is a
-    # small fixed registry (single digits), so this is bounded by construction.
-    pool = ThreadPoolExecutor(max_workers=max(len(sources), 1))
+    pool = _candidate_pool()
     future_by_source = {
         source: pool.submit(_one, source)
         for source in sources
@@ -372,14 +394,10 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
             continue
         # Still running past the budget — leave it be (threads can't be
         # killed) rather than block the response on it; it just misses
-        # this round's candidate list.
+        # this round's candidate list. The pool is shared and long-lived, so
+        # the straggler releases its worker when its own HTTP call returns
+        # and nothing is shut down under it.
         logger.debug("artist image candidate timed out for %s", source)
-    # Deliberately not waiting: a straggler's HTTP call is already past the
-    # budget and its result is unwanted, but the thread can't be killed and
-    # blocking here would just move the stall into the request. The pool's
-    # threads are non-daemon, so a straggler still gets joined at exit rather
-    # than being leaked.
-    pool.shutdown(wait=False)
 
     candidates, seen = [], set()
     for entry in results:

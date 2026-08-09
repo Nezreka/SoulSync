@@ -88,10 +88,94 @@ def test_leading_marker_in_a_real_title_is_not_a_version_tag(combined, expected)
     assert normalize(combined) == expected
 
 
-def test_hyphenated_word_not_treated_as_version_tail():
-    # No space before the hyphen → the version-tail strip must not fire; the
-    # bare hyphen is then dropped as punctuation (existing behaviour).
-    assert normalize("Spider-Man") == "spiderman"
+@pytest.mark.parametrize(
+    "combined",
+    [
+        "Spider-Man",
+        # 'remix'/'live' are markers, but an UNSPACED hyphen is part of a word,
+        # not Spotify's ' - ' version separator — the strip must not fire.
+        "Post-Remix",
+        "Alt-Live",
+    ],
+)
+def test_hyphenated_word_not_treated_as_version_tail(combined):
+    assert normalize(combined) == combined.lower().replace("-", "")
+
+
+# --- Spotify's canonical tails must normalize like their bracket twin ---
+#
+# The two most common version tags in the catalogue both END in a non-marker
+# word ('Remastered 2011', 'Live at Wembley Stadium'), so a last-token-only
+# rule left the dash form and the bracket form with different identities —
+# the drift this whole helper exists to prevent. Bare title on the right is
+# what MusicBrainz/AcoustID actually returns for these recordings.
+@pytest.mark.parametrize(
+    "dashed,bracketed",
+    [
+        ("Bohemian Rhapsody - Remastered 2011", "Bohemian Rhapsody (Remastered 2011)"),
+        ("Hey Jude - Remastered 2015", "Hey Jude (Remastered 2015)"),
+        ("Baba O'Riley - Remaster 2009", "Baba O'Riley (Remaster 2009)"),
+        ("Wish You Were Here - Live at Wembley 1974",
+         "Wish You Were Here (Live at Wembley 1974)"),
+        ("Redemption Song - Live From Paris", "Redemption Song (Live From Paris)"),
+        ("Nothing Else Matters - Sped Up", "Nothing Else Matters (Sped Up)"),
+    ],
+)
+def test_spotify_canonical_tails_match_the_bracket_form(dashed, bracketed):
+    assert normalize(dashed) == normalize(bracketed)
+    assert similarity(dashed, bracketed) == 1.0
+
+
+@pytest.mark.parametrize(
+    "dashed,bare",
+    [
+        ("Bohemian Rhapsody - Remastered 2011", "Bohemian Rhapsody"),
+        ("Hotel California - 2013 Remaster", "Hotel California"),
+        ("Comfortably Numb - Live at Earls Court", "Comfortably Numb"),
+    ],
+)
+def test_version_tail_matches_the_bare_recording_title(dashed, bare):
+    assert similarity(dashed, bare) == 1.0
+
+
+# --- a tail naming a DIFFERENT track is never dropped ---
+#
+# Collapsing 'Song - Pt. 1' and 'Song - Pt. 2' (or a song and its interlude)
+# onto one identity scores the WRONG file at 1.00, which is a verification
+# PASS for a file that should FAIL.
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("Sicko Mode - Pt. 2", "Sicko Mode - Pt. 1"),
+        ("Runaway - Part II", "Runaway - Part I"),
+        ("Yellow - Interlude", "Yellow"),
+        ("Blinding Lights - Intro", "Blinding Lights"),
+    ],
+)
+def test_distinct_track_tails_keep_their_identity(a, b):
+    assert normalize(a) != normalize(b)
+    assert similarity(a, b) < 1.0
+
+
+# --- an over-stripped tail must never crater a genuine comparison ---
+#
+# No token rule can tell 'Taylor Swift - Long Live' (artist + title) from
+# 'Halo - Long Live' (title + version tag) — both end in a marker. So the
+# strip is not allowed to be load-bearing: similarity() also scores the
+# un-stripped form and keeps the better result, which turns a wrong strip
+# from a quarantined track into a slightly lower score.
+@pytest.mark.parametrize(
+    "combined,title",
+    [
+        ("Taylor Swift - Long Live", "Long Live"),
+        ("Portugal. The Man - Live in the Moment", "Live in the Moment"),
+        ("The Prodigy - Smack My Bitch Up", "Smack My Bitch Up"),
+    ],
+)
+def test_overstripped_tail_still_scores_against_the_real_title(combined, title):
+    # Without the un-stripped fallback these collapse to the artist name and
+    # score ~0.1 against the recording title.
+    assert similarity(combined, title) > 0.5
 
 
 # --- existing behaviour must still hold ---

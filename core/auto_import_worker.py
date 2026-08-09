@@ -79,6 +79,25 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
     return hashlib.md5('|'.join(items).encode()).hexdigest()
 
 
+# Statuses that end a folder's automatic lifecycle. Anything else ('scanning',
+# 'processing', 'approved') is in flight and must stay re-pickable.
+_TERMINAL_IMPORT_STATUSES = (
+    'completed', 'partial', 'pending_review', 'needs_identification',
+    'failed', 'rejected',
+)
+
+
+def _summarize_names(names: List[str], limit: int = 10) -> str:
+    """Comma-joined ``names``, truncated with an explicit remainder marker.
+
+    A bare ``names[:10]`` reads as the complete list next to a count of 30 —
+    which matters where the log line is the only record that the files exist.
+    """
+    if len(names) <= limit:
+        return ', '.join(names)
+    return f"{', '.join(names[:limit])} … and {len(names) - limit} more"
+
+
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
     """Read embedded tags from an audio file.
 
@@ -555,7 +574,7 @@ class AutoImportWorker:
                 break
 
             # Skip if already processed (DB-level dedup)
-            if self._is_already_processed(candidate.folder_hash):
+            if self._is_already_processed(candidate):
                 continue
 
             # Skip if already submitted to / running in the pool. This
@@ -970,25 +989,61 @@ class AutoImportWorker:
             return False  # First scan — wait for next cycle to confirm stability
         return abs(current_mtime - prev) < 0.01  # Unchanged
 
-    def _is_already_processed(self, folder_hash: str) -> bool:
-        """Check if this folder was already processed."""
+    def _is_already_processed(self, candidate: FolderCandidate) -> bool:
+        """Whether this folder already has a terminal auto-import row.
+
+        'partial' is terminal like 'failed': recovery is the user's explicit
+        re-identify / re-import action, not another automatic pass.
+
+        Two lookups, because ``folder_hash`` is CONTENT-derived
+        (``_compute_folder_hash`` = basename:size of the folder's audio files).
+        A successful import moves the matched tracks out, so what is left hashes
+        to something the history has never seen — the status check alone can
+        never fire for a remnant, and the folder gets identified as a brand-new
+        album and imported again. That path is on the happy path now that
+        leftovers ARE a normal outcome (quality-dedup losers). The second lookup
+        matches on ``folder_path`` and only claims the folder when every file
+        still in it was recorded as a leftover of that finished run, so a new
+        album dropped into the same path — which shares no filename with the
+        leftovers — is still picked up.
+        """
         try:
             conn = self.database._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT status FROM auto_import_history WHERE folder_hash = ? ORDER BY created_at DESC LIMIT 1",
-                           (folder_hash,))
-            row = cursor.fetchone()
-            conn.close()
-            # 'partial' is terminal like 'failed': the tracks that landed are
-            # already out of the folder, so a re-run would re-identify a
-            # remnant as a new album. Recovery is the user's explicit
-            # re-identify / re-import action, same as for 'failed'.
-            return row and row['status'] in (
-                'completed', 'partial', 'pending_review', 'needs_identification',
-                'failed', 'rejected',
-            )
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT status FROM auto_import_history WHERE folder_hash = ?"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (candidate.folder_hash,),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    return row['status'] in _TERMINAL_IMPORT_STATUSES
+                return self._is_import_remnant(cursor, candidate)
+            finally:
+                conn.close()
         except Exception:
             return False
+
+    def _is_import_remnant(self, cursor, candidate: FolderCandidate) -> bool:
+        """Whether ``candidate`` is only what a finished import left behind."""
+        current = {os.path.basename(f) for f in (candidate.audio_files or [])}
+        if not current:
+            return False
+        cursor.execute(
+            "SELECT match_data FROM auto_import_history WHERE folder_path = ?"
+            f" AND status IN ({','.join('?' * len(_TERMINAL_IMPORT_STATUSES))})"
+            " ORDER BY created_at DESC LIMIT 1",
+            (candidate.path, *_TERMINAL_IMPORT_STATUSES),
+        )
+        row = cursor.fetchone()
+        if row is None or not row['match_data']:
+            return False
+        try:
+            leftovers = set(json.loads(row['match_data']).get('unmatched_files') or [])
+        except (ValueError, TypeError):
+            return False
+        return bool(leftovers) and current <= leftovers
 
     def _consume_approval(self, candidate: FolderCandidate) -> Optional[int]:
         """Atomically claim one approval bound to this exact candidate."""
@@ -2029,17 +2084,26 @@ class AutoImportWorker:
                 match['import_error'] = str(e)
                 logger.warning(f"[Auto-Import] Error processing track: {e}")
 
-        # Leftovers are NOT errors. `unmatched_files` also carries the
-        # quality-dedup losers — the lower-bitrate copy of a track that did
-        # import — so counting them as failures marked healthy albums 'partial'
-        # forever (that status suppresses re-processing, by design). The full
-        # list already reaches the UI through the serialized match_data; log it
-        # so the folder's leftovers are greppable without inventing a failure.
-        leftovers = [os.path.basename(f) for f in (match_result.get('unmatched_files') or [])]
-        if leftovers:
+        # Leftovers split two ways. A quality-dedup loser — the lower-bitrate
+        # copy of a track that DID import — is the expected outcome of a healthy
+        # album, and counting it as a failure marked those albums 'partial'
+        # forever (that status suppresses re-processing, by design). A leftover
+        # that is NOT a dedup loser is a real song the match never claimed;
+        # swallowing that one reports 'completed' with no error_message, drops
+        # the file in staging with only a log line, and — since `success =
+        # status == 'completed'` — releases `_finalize_rematch_hint` to delete
+        # the replaced original. So it stays an error. Match results without
+        # `duplicate_files` (older callers, re-identify hints) get the safe
+        # reading: unexplained leftovers block 'completed'.
+        leftovers = list(match_result.get('unmatched_files') or [])
+        dedup_losers = set(match_result.get('duplicate_files') or [])
+        for unmatched in (f for f in leftovers if f not in dedup_losers):
+            errors.append(f"Unmatched file: {os.path.basename(unmatched)}")
+        dropped = [os.path.basename(f) for f in leftovers if f in dedup_losers]
+        if dropped:
             logger.info(
-                "[Auto-Import] %d file(s) in %s matched no track and stay where they are: %s",
-                len(leftovers), candidate.name, ', '.join(leftovers[:10]),
+                "[Auto-Import] %d quality-duplicate file(s) in %s stay where they are: %s",
+                len(dropped), candidate.name, _summarize_names(dropped),
             )
 
         # Emit automation events

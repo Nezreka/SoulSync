@@ -64,12 +64,26 @@ DEFAULT_MUSIC_CATEGORIES: tuple = (
 )
 
 
+def canonical_protocol(raw: Any) -> str:
+    """Lowercase, stripped protocol name.
+
+    Prowlarr answers 'Torrent' as readily as 'torrent'. Normalising once here,
+    at the parse boundary, is what lets the rest of the codebase compare with a
+    plain ``result.protocol != 'torrent'``. Without it the plugin helper (which
+    compared case-insensitively) kept a capitalised release, ended the
+    relaxed-query ladder on it, and the caller's case-sensitive filter then
+    dropped it — a search that found hits returning nothing.
+    """
+    return str(raw or '').strip().lower()
+
+
 @dataclass
 class ProwlarrIndexer:
     """One configured indexer exposed by Prowlarr."""
 
     id: int
     name: str
+    # Always lowercase — normalized in `_parse_indexer`, see `canonical_protocol`.
     protocol: str          # "torrent" | "usenet"
     enable: bool
     privacy: str           # "public" | "private" | "semiPrivate"
@@ -91,6 +105,7 @@ class ProwlarrSearchResult:
     title: str
     indexer_id: int
     indexer_name: str
+    # Always lowercase — normalized in `_parse_result`, see `canonical_protocol`.
     protocol: str           # "torrent" | "usenet"
     download_url: Optional[str] = None
     magnet_uri: Optional[str] = None
@@ -174,7 +189,7 @@ class ProwlarrClient:
         wanted = [int(i) for i in configured_ids or []]
         if not wanted:
             return []
-        protocol = str(protocol or "").strip().lower()
+        protocol = canonical_protocol(protocol)
         try:
             known = self._get_indexers_sync()
         except Exception as exc:  # noqa: BLE001 - never block a search on this
@@ -185,7 +200,7 @@ class ProwlarrClient:
         by_id = {indexer.id: indexer for indexer in known}
         matching = [
             i for i in wanted
-            if i in by_id and str(by_id[i].protocol or "").strip().lower() == protocol
+            if i in by_id and by_id[i].protocol == protocol
         ]
         unknown = [i for i in wanted if i not in by_id]
         # Unknown IDs are kept: Prowlarr may simply not have listed them (a
@@ -289,7 +304,7 @@ class ProwlarrClient:
         return ProwlarrIndexer(
             id=int(entry.get('id') or 0),
             name=entry.get('name') or '',
-            protocol=entry.get('protocol') or '',
+            protocol=canonical_protocol(entry.get('protocol')),
             enable=bool(entry.get('enable', True)),
             privacy=entry.get('privacy') or '',
             categories=[int(c.get('id') or 0) for c in entry.get('capabilities', {}).get('categories', []) if isinstance(c, dict)],
@@ -313,7 +328,7 @@ class ProwlarrClient:
             title=entry.get('title') or '',
             indexer_id=int(entry.get('indexerId') or 0),
             indexer_name=entry.get('indexer') or '',
-            protocol=entry.get('protocol') or '',
+            protocol=canonical_protocol(entry.get('protocol')),
             download_url=entry.get('downloadUrl') or None,
             magnet_uri=entry.get('magnetUrl') or None,
             info_url=entry.get('infoUrl') or None,

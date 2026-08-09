@@ -261,17 +261,17 @@ class TestPerTrackProgressUpdates:
             'completed', 'failed',
         ]
 
-    def test_leftover_files_do_not_downgrade_a_clean_import(
+    def test_quality_dedup_losers_do_not_downgrade_a_clean_import(
         self, auto_import_worker, tmp_path,
     ):
         """PR #1121 review: ``unmatched_files`` also holds quality-dedup losers
         (the lower-bitrate copy of a track that DID import), so counting them as
         errors marked healthy albums 'partial' — and ``_is_already_processed``
-        includes 'partial', so the folder was never revisited. Only a track that
-        failed to import may block 'completed'."""
+        includes 'partial', so the folder was never revisited. A dedup loser is
+        not a failure."""
         source = tmp_path / "ok.flac"
         source.write_bytes(b"audio")
-        leftover = tmp_path / "ok (1).mp3"
+        leftover = tmp_path / "ok.mp3"
         leftover.write_bytes(b"audio")
         candidate = _FakeCandidate(path=str(tmp_path), name="Album")
         match_result = _make_match_result()
@@ -280,6 +280,7 @@ class TestPerTrackProgressUpdates:
             'file': str(source), 'confidence': 0.95,
         }]
         match_result['unmatched_files'] = [str(leftover)]
+        match_result['duplicate_files'] = [str(leftover)]
 
         def ok(_key, context, path):
             context['_final_processed_path'] = path
@@ -292,6 +293,70 @@ class TestPerTrackProgressUpdates:
 
         assert status == 'completed'
         assert errors == []
+
+    def test_unclaimed_real_files_still_block_completed(
+        self, auto_import_worker, tmp_path,
+    ):
+        """The other half of the same review point: a file that is NOT a dedup
+        loser is a real song the match never claimed. Reporting the folder
+        'completed' abandons it in staging with no error_message, and — since
+        `success = status == 'completed'` — also releases `_finalize_rematch_hint`
+        to delete the replaced original."""
+        source = tmp_path / "ok.flac"
+        source.write_bytes(b"audio")
+        stray = tmp_path / "07 - Another Song.flac"
+        stray.write_bytes(b"audio")
+        candidate = _FakeCandidate(path=str(tmp_path), name="Album")
+        match_result = _make_match_result()
+        match_result['matches'] = [{
+            'track': {'id': 'ok', 'name': 'OK', 'track_number': 1},
+            'file': str(source), 'confidence': 0.95,
+        }]
+        match_result['unmatched_files'] = [str(stray)]
+        match_result['duplicate_files'] = []
+
+        def ok(_key, context, path):
+            context['_final_processed_path'] = path
+            context['_pipeline_import_succeeded'] = True
+
+        auto_import_worker._process_callback = ok
+        status, errors = auto_import_worker._process_matches(
+            candidate, _make_identification(), match_result,
+        )
+
+        assert status == 'partial'
+        assert errors == ['Unmatched file: 07 - Another Song.flac']
+
+    def test_missing_duplicate_files_key_treats_leftovers_as_unclaimed(
+        self, auto_import_worker, tmp_path,
+    ):
+        """`duplicate_files` is absent on match results built by older callers
+        (and on the re-identify hint path). Fall back to the safe reading —
+        an unexplained leftover blocks 'completed' rather than being waved
+        through as a dedup loser."""
+        source = tmp_path / "ok.flac"
+        source.write_bytes(b"audio")
+        stray = tmp_path / "stray.flac"
+        stray.write_bytes(b"audio")
+        candidate = _FakeCandidate(path=str(tmp_path), name="Album")
+        match_result = _make_match_result()
+        match_result['matches'] = [{
+            'track': {'id': 'ok', 'name': 'OK', 'track_number': 1},
+            'file': str(source), 'confidence': 0.95,
+        }]
+        match_result['unmatched_files'] = [str(stray)]
+
+        def ok(_key, context, path):
+            context['_final_processed_path'] = path
+            context['_pipeline_import_succeeded'] = True
+
+        auto_import_worker._process_callback = ok
+        status, errors = auto_import_worker._process_matches(
+            candidate, _make_identification(), match_result,
+        )
+
+        assert status == 'partial'
+        assert errors == ['Unmatched file: stray.flac']
 
 
 # ---------------------------------------------------------------------------

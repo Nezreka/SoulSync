@@ -29,14 +29,15 @@ from typing import List
 _OPENERS = {"(": ")", "[": "]"}
 _CLOSERS = {")", "]"}
 
-# Words that only ever appear in catalog metadata, never in a scene/p2p release
-# name.  Dropping them widens a query without changing which release it means.
 # Credit words that a release name almost never carries but a metadata title
-# often does. "with" is the aggressive one — it appears in real titles
-# ("Sleeping With Sirens", "Dancing With Myself") as well as in Spotify's
-# "(with Artist)" credit form. It stays because dropping a token can only
-# WIDEN an indexer's AND-search: the relaxed variant is a superset of the
-# exact query, which already ran first and won if it had hits.
+# often does. Dropping them widens a query without changing which release it
+# means. "with" is the aggressive one — it appears in real titles ("Sleeping
+# With Sirens", "Dancing With Myself") as well as in Spotify's "(with Artist)"
+# credit form, so it is NOT a pure-metadata word. It stays anyway because
+# dropping a token can only WIDEN an indexer's AND-search: the relaxed variant
+# is a superset of the exact query, which already ran first and won if it had
+# hits. Anything added here needs that same argument — "appears only in
+# metadata" is not the bar, and was never true of the whole set.
 _NOISE_TOKENS = frozenset({
     "feat", "feat.", "ft", "ft.", "featuring", "with",
     "prod", "prod.", "produced",
@@ -59,12 +60,16 @@ def strip_bracket_groups(text: str) -> str:
     """
     source = str(text or "")
     drop = [False] * len(source)
-    stack: List[int] = []
+    # (opening index, the closer that would balance it) — matching on the
+    # closer is what makes "balanced" true. Popping on ANY closer paired the
+    # '(' of "Song (Live] Remix" with the ']' and dropped a group that never
+    # existed, returning "Song Remix".
+    stack: List[tuple] = []
     for index, char in enumerate(source):
         if char in _OPENERS:
-            stack.append(index)
-        elif char in _CLOSERS and stack:
-            start = stack.pop()
+            stack.append((index, _OPENERS[char]))
+        elif char in _CLOSERS and stack and stack[-1][1] == char:
+            start, _closer = stack.pop()
             for position in range(start, index + 1):
                 drop[position] = True
     kept = "".join(

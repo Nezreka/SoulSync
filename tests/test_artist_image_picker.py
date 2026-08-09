@@ -315,3 +315,44 @@ def test_text_artist_ids_work_end_to_end(tmp_path):
     assert db.get_artist('7dB07x8Q2P9jPvGeDHxIFa').thumb_url == 'https://x/p.jpg'
     albums = db.get_albums_by_artist('7dB07x8Q2P9jPvGeDHxIFa')
     assert [a.title for a in albums] == ['Divide']
+
+
+def test_candidate_fan_out_uses_one_bounded_process_wide_pool(monkeypatch):
+    """PR #1121 review: a fresh ThreadPoolExecutor per call, sized to the
+    source list and abandoned with shutdown(wait=False), means nothing caps
+    threads ACROSS calls — every picker open adds a full set while the
+    previous stragglers are still sleeping inside a rate-limit backoff. Two
+    picker opens must reuse the same bounded pool."""
+    import threading as _threading
+
+    seen_threads = set()
+
+    class _RecordingClient(_Client):
+        def search_artists(self, name, limit=1):
+            seen_threads.add(_threading.current_thread().name)
+            return super().search_artists(name, limit=limit)
+
+    clients = {
+        "deezer": _RecordingClient(search_hit=SimpleNamespace(image_url="https://dz/1.jpg")),
+        "itunes": _RecordingClient(search_hit=SimpleNamespace(image_url="https://it/1.jpg")),
+    }
+    _wire_registry(monkeypatch, clients, ["deezer", "itunes"])
+
+    rounds = 20
+    for _ in range(rounds):
+        ai.gather_artist_image_candidates("Adele", {})
+
+    assert seen_threads, "no worker thread ran"
+    # A per-call executor gives each round its own threads, so the distinct
+    # count grows with the number of picker opens. A shared pool cannot exceed
+    # its cap however many times the picker is opened.
+    assert len(seen_threads) <= ai._CANDIDATE_POOL_MAX_WORKERS, (
+        f"{rounds} picker opens produced {len(seen_threads)} distinct worker "
+        f"threads: {sorted(seen_threads)}"
+    )
+
+
+def test_candidate_pool_is_capped():
+    pool = ai._candidate_pool()
+    assert ai._candidate_pool() is pool, "the pool must be process-wide"
+    assert 0 < pool._max_workers <= ai._CANDIDATE_POOL_MAX_WORKERS
