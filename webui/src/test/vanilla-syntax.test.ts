@@ -23,6 +23,7 @@ describe('vanilla shell scripts parse', () => {
     'static/downloads.js',
     'static/sync-services.js',
     'static/wishlist-tools.js',
+    'static/beatport-ui.js',
   ]) {
     it(file, () => {
       const source = readFileSync(resolve(process.cwd(), file), 'utf8');

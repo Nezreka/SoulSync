@@ -3693,7 +3693,44 @@ async function startDeezerDownloadMissing(urlHash) {
 // SYNC PAGE FUNCTIONALITY (REDESIGNED)
 // ===============================
 
+// Set once the listener bindings below have run. `initializeSyncPage` is
+// called from TWO places in init.js — once at boot (2885) and again from
+// loadPageData's `case 'sync'` (3290), which fires on every navigation to the
+// page. The sync markup is static in index.html and is never re-created, so
+// the listeners only ever need binding once; binding them per visit stacked a
+// duplicate set each time.
+//
+// That was not merely wasteful. Only four of the 25 bindings guarded
+// themselves with a removeEventListener first (the Spotify/Tidal/Deezer-ARL/
+// Qobuz refresh buttons). One of the other 21 is the Start Sync button, and
+// `startSequentialSync` is a TOGGLE — it cancels when the manager is already
+// running, and `SequentialSyncManager.start` sets `isRunning` synchronously.
+// So after an even number of visits to the page a single click started the
+// sync and immediately cancelled it, and the button looked dead.
+let _syncPageListenersBound = false;
+
 function initializeSyncPage() {
+    // Per-visit work, which must run on EVERY call: all three are idempotent
+    // refreshes rather than bindings.
+    const _activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
+    if (_activeBeatportTab) {
+        ensureBeatportContentLoaded();
+    }
+    if (document.getElementById('beatport-clear-btn')) {
+        updateBeatportClearButtonState();
+    }
+    // MUST stay above the guard. `loadPageData` calls `stopLogPolling()` at the
+    // top of EVERY navigation (init.js), and this is the only thing that ever
+    // restarts it — so leaving it below the early return stopped the activity
+    // feed after the first visit and never brought it back. That only shows
+    // when the socket is down, because `tool:logs` (core.js) writes the same
+    // textarea through `updateLogsFromData` and the HTTP poll is its twin.
+    // It is idempotent: `startLogPolling` returns early when already polling.
+    initializeLiveLogViewer();
+
+    if (_syncPageListenersBound) return;
+    _syncPageListenersBound = true;
+
     // Logic for tab switching
     const tabButtons = document.querySelectorAll('.sync-tab-button');
     const syncSidebar = document.querySelector('.sync-sidebar');
@@ -3802,12 +3839,6 @@ function initializeSyncPage() {
         });
     });
 
-    // If the Beatport tab is already active when Sync initializes, load it now.
-    const activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
-    if (activeBeatportTab) {
-        ensureBeatportContentLoaded();
-    }
-
     // Logic for the Spotify refresh button
     const refreshBtn = document.getElementById('spotify-refresh-btn');
     if (refreshBtn) {
@@ -3863,8 +3894,6 @@ function initializeSyncPage() {
     const beatportClearBtn = document.getElementById('beatport-clear-btn');
     if (beatportClearBtn) {
         beatportClearBtn.addEventListener('click', clearBeatportPlaylists);
-        // Set initial clear button state
-        updateBeatportClearButtonState();
     }
 
     // Logic for Beatport nested tabs
@@ -4030,9 +4059,6 @@ function initializeSyncPage() {
     if (hypeTop100Btn) {
         hypeTop100Btn.addEventListener('click', handleHypeTop100Click);
     }
-
-    // Initialize live log viewer
-    initializeLiveLogViewer();
 }
 
 

@@ -38,6 +38,7 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(process.cwd(), 'src/routes/discover');
 const EXPLORER_ROOT = resolve(process.cwd(), 'src/routes/playlist-explorer');
+const SYNC_ROOT = resolve(process.cwd(), 'src/routes/sync');
 
 /**
  * Modules with pre-existing gaps, from the phases of this port that predate the
@@ -144,6 +145,23 @@ describe('every export is named by a test', () => {
       (f) => f.includes('artist-map') || f.includes('artist-web'),
     );
     expect(viz).toEqual([]);
+  });
+});
+
+describe('the sync port is born fully covered', () => {
+  // Like playlist-explorer below: this port started after the check existed,
+  // so no KNOWN_GAPS list — every module it adds is covered from the start.
+  it('exports nothing a test does not name', () => {
+    const offenders = [...gapsFor(SYNC_ROOT).entries()].map(
+      ([file, names]) => `${file}: ${names.join(', ')}`,
+    );
+    expect(
+      offenders,
+      offenders.length
+        ? `\nThese sync modules export values no test mentions.\n` +
+            `Test them, or stop exporting them.\n`
+        : undefined,
+    ).toEqual([]);
   });
 });
 

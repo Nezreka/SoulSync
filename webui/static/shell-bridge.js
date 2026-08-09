@@ -86,6 +86,28 @@ function activateLegacyPath(pathname) {
     _optimisticNavPageId = null;
 
     notifyPageWillChange(targetPage);
+
+    // A REACT-owned page must never go through activatePage(): showLegacyPage
+    // strips `active` from #webui-react-root and hands it to `#<page>-page`,
+    // which no longer exists once that page's vanilla markup has been deleted.
+    // The host goes dark and nothing replaces it — React is still mounted, just
+    // hidden, which is why navigating elsewhere and back "fixes" it.
+    //
+    // This is reachable from the VIDEO side: its URLs (/video-dashboard) match
+    // no React route, so the catch-all route ($.tsx -> LegacyRouteController)
+    // calls in here, and _getPageFromPath maps any unknown path to 'dashboard'
+    // (init.js 2961). Switching back to music then leaves a blank page.
+    //
+    // syncActivePageFromLocation below already does this check; this function
+    // simply never got it. The `!legacyPageElement` arm covers a page that is
+    // still marked legacy in the manifest but whose markup has gone.
+    const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+    const legacyPageElement = document.getElementById(`${targetPage}-page`);
+    if (route?.kind === 'react' || !legacyPageElement) {
+        showReactHost(targetPage);
+        setActivePageChrome(targetPage);
+        return;
+    }
     activatePage(targetPage, { forceReload: true });
 }
 

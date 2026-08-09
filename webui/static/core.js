@@ -33,6 +33,23 @@ let wishlistPageState = { isInitialized: false };
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+
+/**
+ * Whether the download engine still holds a sync poller for this playlist.
+ *
+ * A SEAM for the React sync page. `activeSyncPollers` is a top-level `let`,
+ * which — unlike a `function` declaration — creates NO property on `window`,
+ * so React cannot read it however it is spelled. The sequential-sync runner
+ * needs exactly one bit from it: is this playlist still syncing. It watches
+ * the poller's disappearance rather than any completion event, because
+ * `stopSyncPolling` is the single place every terminal path funnels through.
+ *
+ * A function rather than an alias of the object: the binding stays private,
+ * and the closure reads it live even if it were ever reassigned.
+ */
+window.isPlaylistSyncing = function isPlaylistSyncing(playlistId) {
+    return Boolean(activeSyncPollers[playlistId]);
+};
 // Phase 5: WebSocket sync/discovery/scan state
 let _syncProgressCallbacks = {};
 let _discoveryProgressCallbacks = {};
@@ -87,6 +104,49 @@ window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTrac
  */
 window.discoverDownloadProcess = function (virtualPlaylistId) {
     return activeDownloadProcesses[virtualPlaylistId] || null;
+};
+
+/**
+ * Bridge for the React SYNC page's account tabs (Spotify + Deezer ARL): put a
+ * playlist row into `spotifyPlaylists` so `openDownloadMissingModal` can find
+ * it. Same lexical-scope story as startDiscoverVirtualSync above — and the same
+ * shape, minus the sync kickoff, because this one only seeds.
+ *
+ * Without it openDownloadMissingModal bails at its `if (!playlist)` guard with
+ * 'Could not find playlist data.' (sync-spotify.js 2235-2240). The vanilla page
+ * never needed a bridge: loadSpotifyPlaylists assigns the whole array (1612)
+ * and the ARL flow pushes its own shim rows (sync-services.js 2471, 2646-2654).
+ * Once React owns those tabs, neither of those runs.
+ *
+ * Idempotent by id, exactly like the push it replaces.
+ */
+window.registerSyncAccountPlaylist = function (row) {
+    if (!row || !row.id) return;
+    if (!spotifyPlaylists.find(p => p.id === row.id)) {
+        spotifyPlaylists.push(row);
+    }
+};
+
+/**
+ * The registered account playlists, in registration order.
+ *
+ * The SECOND half of the seam above, and the React sync page needs both:
+ * `startSequentialSync` has to know what order to queue the selection in, and
+ * the sidebar has to resolve a playlist id to a name for "Syncing 2/5: Beta".
+ * `spotifyPlaylists` is a top-level `let`, so — like `activeSyncPollers` — it
+ * is NOT a window property and React cannot read it directly.
+ *
+ * Reading the ENGINE's array rather than the tab's React state is deliberate.
+ * `startPlaylistSync` resolves every id against this same array and bails with
+ * 'Could not find playlist data.' for anything missing, so a queue built from
+ * it can only contain ids the engine can actually run. The tab renders its
+ * rows in the order it registers them, so this order is also the display
+ * order the vanilla read off the DOM.
+ *
+ * A COPY, so a caller cannot reorder or splice the engine's own array.
+ */
+window.getSyncAccountPlaylists = function () {
+    return spotifyPlaylists.slice();
 };
 
 
@@ -454,21 +514,17 @@ function stopBeatportDiscoveryAndSyncPolling() {
 }
 
 function resetBeatportSliderInitFlags() {
-    const rebuildSlider = document.getElementById('beatport-rebuild-slider');
-    if (rebuildSlider) rebuildSlider.dataset.initialized = 'false';
-
-    const releasesSlider = document.getElementById('beatport-releases-slider');
-    if (releasesSlider) releasesSlider.dataset.initialized = 'false';
+    // The four `dataset.initialized = 'false'` writes that stood here are gone.
+    // They targeted #beatport-{rebuild,releases,charts,dj}-slider, ids the sync
+    // flip deleted along with the page — every lookup returned null, so every
+    // write was already a no-op. Removing them is behaviour-neutral and stops
+    // four dead `getElementById` calls tripping the class-as-id guard.
+    //
+    // The state resets below are KEPT: they are plain object writes, not DOM,
+    // and the slider state objects still exist in this file.
     beatportReleasesSliderState.isInitialized = false;
-
     beatportHypePicksSliderState.isInitialized = false;
-
-    const chartsSlider = document.getElementById('beatport-charts-slider');
-    if (chartsSlider) chartsSlider.dataset.initialized = 'false';
     beatportChartsSliderState.isInitialized = false;
-
-    const djSlider = document.getElementById('beatport-dj-slider');
-    if (djSlider) djSlider.dataset.initialized = 'false';
     beatportDJSliderState.isInitialized = false;
 }
 
@@ -1231,6 +1287,15 @@ class SequentialSyncManager {
     }
 
     async syncNext() {
+        // A cancel between iterations zeroes the queue AND clears isRunning,
+        // but the `setTimeout(() => this.syncNext(), 1000)` queued by the
+        // previous iteration still fires. Without this guard it then reads
+        // `0 >= 0`, calls complete(), and announces a SUCCESS toast for zero
+        // playlists — with a duration measured against a startTime cancel has
+        // already set to null, so `Date.now() - null` renders the epoch in
+        // seconds ("completed for 0 playlists in 1754584800.0s").
+        if (!this.isRunning) return;
+
         if (this.currentIndex >= this.queue.length) {
             this.complete();
             return;
