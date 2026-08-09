@@ -126,6 +126,17 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
             f_dst.flush()
             os.fsync(f_dst.fileno())
         try:
+            # Permissions FIRST and on their own: mkstemp() creates at 0600 by
+            # design, and os.replace preserves the temp's mode, so anything
+            # that aborts copystat before its chmod would publish a file only
+            # the importing user can read — media servers run as someone else
+            # (PR #1121 review). copystat's later utime/xattr steps are the
+            # ones that realistically fail, so they must not take the mode
+            # with them.
+            shutil.copymode(str(src), str(tmp))
+        except OSError:
+            pass
+        try:
             shutil.copystat(str(src), str(tmp))   # preserve mtime/permissions (copy2-like)
         except OSError:
             pass

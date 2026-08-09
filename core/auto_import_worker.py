@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
+from core.imports.pipeline import import_rejection_reason
 from utils.logging_config import get_logger
 
 logger = get_logger("auto_import")
@@ -978,6 +979,10 @@ class AutoImportWorker:
                            (folder_hash,))
             row = cursor.fetchone()
             conn.close()
+            # 'partial' is terminal like 'failed': the tracks that landed are
+            # already out of the folder, so a re-run would re-identify a
+            # remnant as a new album. Recovery is the user's explicit
+            # re-identify / re-import action, same as for 'failed'.
             return row and row['status'] in (
                 'completed', 'partial', 'pending_review', 'needs_identification',
                 'failed', 'rejected',
@@ -1999,7 +2004,6 @@ class AutoImportWorker:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
 
                 self._process_callback(context_key, context, file_path)
-                from core.imports.pipeline import import_rejection_reason
                 rejection = import_rejection_reason(context)
                 final_path = context.get('_final_processed_path') or context.get('_final_path')
                 if rejection:
@@ -2025,8 +2029,18 @@ class AutoImportWorker:
                 match['import_error'] = str(e)
                 logger.warning(f"[Auto-Import] Error processing track: {e}")
 
-        for unmatched in match_result.get('unmatched_files', []) or []:
-            errors.append(f"Unmatched file: {os.path.basename(unmatched)}")
+        # Leftovers are NOT errors. `unmatched_files` also carries the
+        # quality-dedup losers — the lower-bitrate copy of a track that did
+        # import — so counting them as failures marked healthy albums 'partial'
+        # forever (that status suppresses re-processing, by design). The full
+        # list already reaches the UI through the serialized match_data; log it
+        # so the folder's leftovers are greppable without inventing a failure.
+        leftovers = [os.path.basename(f) for f in (match_result.get('unmatched_files') or [])]
+        if leftovers:
+            logger.info(
+                "[Auto-Import] %d file(s) in %s matched no track and stay where they are: %s",
+                len(leftovers), candidate.name, ', '.join(leftovers[:10]),
+            )
 
         # Emit automation events
         if processed > 0 and self._automation_engine:

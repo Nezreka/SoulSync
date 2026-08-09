@@ -94,7 +94,16 @@ class ImportRouteRuntime:
 
 
 def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[Optional[str], str]:
-    """Resolve a client path and require containment in a configured source root."""
+    """Resolve a client path and require containment in a configured source root.
+
+    The roots are the staging folder and the download folder — between them
+    they cover everything ``staging_files`` can ever hand the client, and the
+    client cannot name a path it wasn't given (there is no path-entry UI).
+    Containment is checked AFTER resolution, so a symlink inside staging that
+    points elsewhere is rejected too: this endpoint MOVES the file it is given.
+    A rejection is logged with the roots, because the message alone can't tell
+    a user with a symlinked staging tree what the server actually allows.
+    """
     if not isinstance(raw_path, str) or not raw_path:
         return None, "File path is missing"
     try:
@@ -113,6 +122,13 @@ def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[O
     except (OSError, RuntimeError, TypeError):
         pass
     if not any(root.is_dir() and candidate.is_relative_to(root) for root in roots):
+        try:
+            runtime.logger.warning(
+                "Rejected import of %s: outside the allowed roots %s",
+                candidate, [str(r) for r in roots],
+            )
+        except Exception:  # noqa: BLE001 - a logger stub must not fail a request
+            pass
         return None, "File is outside the allowed import folders"
     return str(candidate), ""
 

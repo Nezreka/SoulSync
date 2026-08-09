@@ -67,6 +67,27 @@ def test_non_version_dash_tail_preserved():
     assert normalize("Marvin's Room - Bad Girl") == "marvins room bad girl"
 
 
+# --- a marker INSIDE the tail is not a version tag (PR #1121 review) ---
+#
+# Nezreka: a rule of "the qualifier CONTAINS a version token" eats real titles,
+# because 'radio', 'piano', 'single', 'live' and 'take' are all markers. These
+# are "Artist - Title" strings whose title must survive intact.
+@pytest.mark.parametrize(
+    "combined,expected",
+    [
+        ('Queen - Radio Ga Ga', 'queen radio ga ga'),
+        ('Billy Joel - Piano Man', 'billy joel piano man'),
+        ('Beyonce - Single Ladies', 'beyonce single ladies'),
+        ('Wings - Live and Let Die', 'wings live and let die'),
+        ('a-ha - Take On Me', 'aha take on me'),
+        ('Bruce Springsteen - Radio Nowhere', 'bruce springsteen radio nowhere'),
+        ('Prince - Little Red Corvette', 'prince little red corvette'),
+    ],
+)
+def test_leading_marker_in_a_real_title_is_not_a_version_tag(combined, expected):
+    assert normalize(combined) == expected
+
+
 def test_hyphenated_word_not_treated_as_version_tail():
     # No space before the hyphen → the version-tail strip must not fire; the
     # bare hyphen is then dropped as punctuation (existing behaviour).

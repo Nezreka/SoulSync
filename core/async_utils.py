@@ -27,14 +27,12 @@ async def _run(
     *args: Any,
     **kwargs: Any,
 ) -> _T:
-    worker = executor.submit(func, *args, **kwargs)
-    try:
-        while not worker.done():
-            await asyncio.sleep(0.05)
-        return worker.result()
-    except asyncio.CancelledError:
-        worker.cancel()
-        raise
+    # wrap_future, not a poll loop: the loop is woken by the worker's own
+    # completion callback instead of 20 times a second per in-flight call,
+    # and there is no 50 ms latency floor on a fast worker. Not
+    # loop.run_in_executor(None, ...) — that installs a loop-OWNED default
+    # executor, which is exactly what these shared pools exist to avoid.
+    return await asyncio.wrap_future(executor.submit(func, *args, **kwargs))
 
 
 async def run_blocking(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:

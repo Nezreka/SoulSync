@@ -825,10 +825,10 @@ async def prowlarr_search_with_variants(
     variants = indexer_query_variants(query)
     if not variants:
         return []
+    protocol = str(protocol or "").strip().lower()
     indexer_ids = prowlarr.indexer_ids_for_protocol(
         _parse_indexer_id_filter(), protocol,
     )
-    protocol = str(protocol or "").strip().lower()
     first_error: Optional[Exception] = None
     for attempt, variant in enumerate(variants):
         try:
@@ -856,7 +856,11 @@ async def prowlarr_search_with_variants(
                     "Prowlarr %s search matched on relaxed query %r (original %r)",
                     protocol, variant, variants[0],
                 )
-            return results
+            # Only this protocol's releases: a mixed answer's foreign entries
+            # can never be grabbed by the caller (every one re-filters before
+            # projecting), and returning them made the retry decision and the
+            # return value disagree about what "usable" meant.
+            return usable
     if first_error is not None:
         raise ProwlarrSearchError(str(first_error)) from first_error
     return []

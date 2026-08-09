@@ -44,6 +44,44 @@ def test_concurrent_run_async_calls_interleave_instead_of_serializing():
     )
 
 
+def test_cross_thread_submissions_never_lose_a_wakeup():
+    """The failure this bridge exists to prevent: a submission that never wakes
+    the loop's selector, so the caller blocks on Future.result() forever with
+    nothing in the logs. Creating the loop inside its own thread is what fixes
+    it — this pins that under real cross-thread load."""
+    errors = []
+
+    def submitter(base):
+        try:
+            for index in range(60):
+                assert run_async(
+                    asyncio.sleep(0, result=base + index), timeout=10,
+                ) == base + index
+        except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=submitter, args=(k * 1000,)) for k in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert not any(t.is_alive() for t in threads), "a run_async caller hung"
+    assert errors == []
+
+
+def test_run_async_adds_no_polling_latency_floor():
+    """PR #1121 review: the queue+pump workaround polled at 100 Hz, so every
+    call paid up to 10 ms of scheduling latency on every interpreter."""
+    start = time.monotonic()
+    for _ in range(50):
+        run_async(asyncio.sleep(0))
+    elapsed = time.monotonic() - start
+
+    # 50 calls × up to 10 ms of pump latency each ≈ 0.25-0.5 s.
+    assert elapsed < 0.15, f"50 trivial run_async calls took {elapsed:.3f}s"
+
+
 def test_first_run_async_call_waits_for_event_loop_startup():
     repo_root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(

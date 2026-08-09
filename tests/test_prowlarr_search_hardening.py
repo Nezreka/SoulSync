@@ -319,3 +319,22 @@ def test_plugin_helper_ignores_other_protocols_when_deciding_to_retry():
     results = asyncio.run(prowlarr_search_with_variants(fake, original, "usenet"))
 
     assert any(r.protocol == "usenet" for r in results)
+
+
+def test_plugin_helper_returns_only_the_requested_protocol():
+    """PR #1121 review: the protocol filter decided whether to keep retrying
+    but the unfiltered list was returned, so the name ``usable`` promised
+    something the return value didn't deliver. Every caller re-filtered by
+    protocol anyway — do it once, here."""
+    from core.download_plugins.torrent import prowlarr_search_with_variants
+
+    torrent_hit = ProwlarrSearchResult(
+        guid="g", title="t", indexer_id=1, indexer_name="i",
+        protocol="torrent", download_url="http://torrent",
+    )
+    query = "Mixed Protocols"
+    fake = _FakeProwlarr({query: [torrent_hit, _usenet_result()]})
+
+    results = asyncio.run(prowlarr_search_with_variants(fake, query, "usenet"))
+
+    assert [r.protocol for r in results] == ["usenet"]

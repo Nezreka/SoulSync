@@ -192,6 +192,7 @@ def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invali
 # ── atomic cross-filesystem move (Jellyfin null-disc mitigation) ──────────────
 import errno  # noqa: E402
 import os  # noqa: E402
+import stat  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -282,6 +283,43 @@ def test_atomic_helper_completes_and_cleans_temp(tmp_path):
     assert dst.read_text() == "payload"
     assert not src.exists()
     assert not list(dstdir.glob(".*ssync-tmp"))
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o664, 0o600])
+def test_atomic_helper_keeps_the_source_permissions(tmp_path, mode):
+    # PR #1121 review: tempfile.mkstemp creates at 0600 by design and os.replace
+    # preserves that mode, so a cross-device import (docker downloads-volume ->
+    # library-volume) landed files no other user could read — Plex/Jellyfin run
+    # as a different user. The same-filesystem path renames the source and keeps
+    # its mode; the cross-device path must land on the same mode.
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    os.chmod(src, mode)
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    _atomic_cross_device_move(src, dst)
+
+    assert stat.S_IMODE(dst.stat().st_mode) == mode
+
+
+def test_atomic_helper_keeps_permissions_when_copystat_fails(tmp_path, monkeypatch):
+    # copystat also copies timestamps/xattrs; a filesystem that rejects those
+    # must not cost the file its mode and leave it 0600 (mkstemp's default).
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    os.chmod(src, 0o644)
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    monkeypatch.setattr(_fo.shutil, "copystat", lambda *_a, **_k: (_ for _ in ()).throw(
+        OSError("utime not supported")
+    ))
+    _atomic_cross_device_move(src, dst)
+
+    assert stat.S_IMODE(dst.stat().st_mode) == 0o644
 
 
 def test_atomic_helper_cleans_temp_and_keeps_source_on_failure(tmp_path, monkeypatch):
