@@ -77,6 +77,49 @@ def test_refuses_to_guess_when_two_albums_hold_the_same_filename(library):
         "Beck/Guero/01-01 - E-Pro.flac", config_manager=_Config(str(root))) is None
 
 
+def test_same_album_reachable_from_two_base_dirs_still_resolves(tmp_path):
+    """Ambiguity means two different ALBUMS, not two paths to one album.
+
+    A library is routinely reachable through several configured base dirs — a
+    transfer path plus a music path, duplicate mounts, a symlink. Each yields
+    the same album folder NAME. Comparing full paths treated that as a conflict
+    and refused a perfectly resolvable file.
+    """
+    for mount in ("mountA", "mountB"):
+        album = tmp_path / mount / "Beck" / "Beck - Guero"
+        album.mkdir(parents=True)
+        (album / "01-01 - E-Pro.flac").write_bytes(b"audio")
+
+    class _TwoMounts:
+        def get(self, key, default=None):
+            if key == "library.music_paths":
+                return [str(tmp_path / "mountA"), str(tmp_path / "mountB")]
+            return default
+
+    resolved = resolve_library_file_path(
+        "Beck/Guero/01-01 - E-Pro.flac", config_manager=_TwoMounts())
+    assert resolved is not None
+    assert resolved.endswith(os.path.join("Beck - Guero", "01-01 - E-Pro.flac"))
+
+
+def test_two_different_album_folders_are_still_refused_across_mounts(tmp_path):
+    """The safety rule survives: genuinely different album names still refuse,
+    even when they come from different base dirs."""
+    (tmp_path / "mountA" / "Beck" / "Beck - Guero").mkdir(parents=True)
+    (tmp_path / "mountA" / "Beck" / "Beck - Guero" / "01 - Intro.flac").write_bytes(b"a")
+    (tmp_path / "mountB" / "Beck" / "Beck - Odelay").mkdir(parents=True)
+    (tmp_path / "mountB" / "Beck" / "Beck - Odelay" / "01 - Intro.flac").write_bytes(b"a")
+
+    class _TwoMounts:
+        def get(self, key, default=None):
+            if key == "library.music_paths":
+                return [str(tmp_path / "mountA"), str(tmp_path / "mountB")]
+            return default
+
+    assert resolve_library_file_path(
+        "Beck/Guero/01 - Intro.flac", config_manager=_TwoMounts()) is None
+
+
 def test_does_not_reach_into_a_different_artist(library):
     """Only album folders UNDER THE REPORTED ARTIST are considered."""
     root, _ = library

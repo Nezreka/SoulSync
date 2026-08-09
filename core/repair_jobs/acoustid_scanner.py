@@ -243,16 +243,33 @@ class AcoustIDScannerJob(RepairJob):
                     log_line=f'Skipped (human-verified): {fname}', log_type='skip')
             return
 
-        # Fingerprint-collision guard: when the TOP recording's length is wildly
+        # Fingerprint-collision guard: when the match's length is wildly
         # different from the file, the fingerprint hit is a hash collision (the
         # 17-min mashup → 5-min track case), not a real match — skip BEFORE any
         # title/artist/version analysis so it can't surface as a false finding.
+        #
+        # Judged across ALL top-scoring recordings, not just `recordings[0]`.
+        # One AcoustID result carries many recordings sharing its score, in
+        # MusicBrainz order — so [0] is an arbitrary pick among equals (the same
+        # root cause as #1132). If [0] happened to be a 12-minute live version
+        # linked to the same entry, a perfectly ordinary track was skipped with
+        # no verification at all. It is only a collision when NO plausible
+        # candidate has a compatible length.
         try:
             file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
         except Exception:
             file_duration_s = 0.0
-        cand_duration_s = best_recording.get('duration') or best_recording.get('length')
-        if file_duration_s and duration_mismatches_strongly(file_duration_s, cand_duration_s):
+        _recs = fp_result['recordings']
+        _scored = [r for r in _recs if r.get('score') is not None]
+        _top = max((r['score'] for r in _scored), default=None)
+        _judge = [r for r in _scored if r['score'] >= _top] if _top is not None else _recs
+        _durations = [
+            (r.get('duration') or r.get('length')) for r in _judge
+        ]
+        _known = [d for d in _durations if d]
+        all_mismatch = bool(_known) and all(
+            duration_mismatches_strongly(file_duration_s, d) for d in _known)
+        if file_duration_s and all_mismatch:
             if context.report_progress:
                 context.report_progress(
                     log_line=(f'Skipped (duration mismatch suggests fingerprint '
@@ -328,10 +345,12 @@ class AcoustIDScannerJob(RepairJob):
         matched_title = outcome.matched_title or aid_title
         matched_artist = outcome.matched_artist or aid_artist
 
-        # Distinct candidate labels, best-scoring first, for the ambiguous copy.
+        # Distinct candidate labels for the ambiguous copy — drawn from the
+        # TIED TOP scores only (the set the ambiguity verdict was made on).
+        # Listing every recording would pad the message with lower-scored
+        # links that were never really in contention.
         _cand_labels = []
-        for _r in sorted(fp_result['recordings'],
-                         key=lambda r: r.get('score') or 0, reverse=True):
+        for _r in sorted(_judge, key=lambda r: r.get('score') or 0, reverse=True):
             _lbl = f'"{_r.get("title") or "?"}" by {_r.get("artist") or "?"}'
             if _lbl not in _cand_labels:
                 _cand_labels.append(_lbl)

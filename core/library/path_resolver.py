@@ -318,13 +318,23 @@ def _resolve_via_sibling_album_folder(
             if os.path.exists(candidate) and candidate not in matches:
                 matches.append(candidate)
 
-    if len(matches) == 1:
+    if not matches:
+        return None
+
+    # Ambiguity is about hitting two different ALBUMS, not two paths. The same
+    # library is often reachable through several configured base dirs (a
+    # transfer path plus a music path, duplicate mounts, a symlink), and every
+    # one of those yields the same album folder NAME — that is one album seen
+    # repeatedly, not a genuine conflict. Comparing full paths there refused
+    # perfectly resolvable files.
+    album_names = {os.path.basename(os.path.dirname(m)) for m in matches}
+    if len(album_names) == 1:
         logger.debug("resolved %r via sibling album folder: %s", basename, matches[0])
         return matches[0]
-    if len(matches) > 1:
-        logger.debug(
-            "sibling-album fallback found %d candidates for %r under %r — "
-            "ambiguous, refusing to guess", len(matches), basename, artist_segment)
+    logger.debug(
+        "sibling-album fallback found %d different album folders for %r under %r "
+        "(%s) — ambiguous, refusing to guess",
+        len(album_names), basename, artist_segment, sorted(album_names))
     return None
 
 

@@ -151,6 +151,80 @@ def test_ambiguous_finding_still_fires_but_withholds_the_claim():
     assert len(finding['details']['candidates']) == 2
 
 
+def test_duration_guard_does_not_skip_on_one_arbitrary_tied_recording():
+    """The collision guard read `recordings[0]`'s length — the same arbitrary
+    pick #1132 is about.
+
+    A long live version linked to the same AcoustID entry could sit at index 0
+    and make the guard skip an ordinary track outright, with no verification at
+    all. It's only a hash collision when NO plausible candidate has a
+    compatible length.
+    """
+    from types import SimpleNamespace
+    from tests.test_acoustid_scanner import (
+        AcoustIDScannerJob, JobResultStub, _make_finding_capturing_context)
+
+    job = AcoustIDScannerJob()
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Expected Title", "Expected Artist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured,
+    )
+    # index 0 is a 20-minute live cut; the real 4-minute match is behind it,
+    # tied on score.
+    fake = SimpleNamespace(fingerprint_and_lookup=lambda fpath: {
+        'best_score': 0.99,
+        'recordings': [
+            {'title': 'Wrong Track', 'artist': 'Wrong Artist',
+             'score': 0.99, 'duration': 1200},
+            {'title': 'Wrong Track', 'artist': 'Wrong Artist',
+             'score': 0.99, 'duration': 240},
+        ],
+    })
+
+    job._scan_file('/music/track.flac', '99',
+                   {'title': 'Expected Title', 'artist': 'Expected Artist',
+                    'duration_ms': 240_000},
+                   fake, context, JobResultStub(),
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+
+    assert len(captured) == 1, (
+        "the file was skipped as a fingerprint collision because recordings[0] "
+        "happened to be a long version")
+
+
+def test_duration_guard_still_catches_a_real_collision():
+    """When every plausible candidate is wildly the wrong length, that IS a
+    hash collision and the file must still be skipped."""
+    from types import SimpleNamespace
+    from tests.test_acoustid_scanner import (
+        AcoustIDScannerJob, JobResultStub, _make_finding_capturing_context)
+
+    job = AcoustIDScannerJob()
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("99", "Expected Title", "Expected Artist",
+                   "/music/track.flac", 1, "Album", None, None),
+        captured=captured,
+    )
+    fake = SimpleNamespace(fingerprint_and_lookup=lambda fpath: {
+        'best_score': 0.99,
+        'recordings': [
+            {'title': 'Long Mashup', 'artist': 'X', 'score': 0.99, 'duration': 1020},
+            {'title': 'Long Mashup', 'artist': 'X', 'score': 0.99, 'duration': 1100},
+        ],
+    })
+
+    job._scan_file('/music/track.flac', '99',
+                   {'title': 'Expected Title', 'artist': 'Expected Artist',
+                    'duration_ms': 300_000},
+                   fake, context, JobResultStub(),
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+
+    assert captured == []
+
+
 def test_retag_is_refused_for_an_ambiguous_finding():
     """The guard that stops a wrong suggestion becoming wrong data."""
     from core.repair_worker import RepairWorker
