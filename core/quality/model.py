@@ -220,8 +220,31 @@ def filter_and_rank(
         return winners
 
     if fallback_enabled:
+        # Nothing satisfied the ladder, so we take what's on offer — but the
+        # user's FORMAT preference still stands. Ranking purely by tier_score
+        # here always crowned FLAC (base 100) over MP3 (base 50), which is the
+        # exact opposite of what a "Space Saver" (MP3-only ladder) user asked
+        # for (#1130).
+        #
+        # This is reachable for a lossy ladder far more often than it looks:
+        # slskd frequently omits the bitrate attribute, and `matches_target`
+        # fails a `min_bitrate` target whenever the bitrate is unknown, so a
+        # perfectly good MP3 matches NO tier and drops into this branch. The
+        # FLAC targets already carry explicit "missing metadata" heuristics;
+        # the lossy side has none, so the fallback is where it lands.
+        #
+        # Formats the user actually named rank above formats they didn't.
+        # tier_score still orders within each group, so a profile naming both
+        # (e.g. "balanced") is unaffected.
+        preferred_formats = {t.format.lower() for t in targets if t.format}
         all_sorted = list(candidates)
-        all_sorted.sort(key=lambda c: c.audio_quality.tier_score(), reverse=True)
+        all_sorted.sort(
+            key=lambda c: (
+                c.audio_quality.format.lower() in preferred_formats,
+                c.audio_quality.tier_score(),
+            ),
+            reverse=True,
+        )
         return all_sorted
 
     return []
