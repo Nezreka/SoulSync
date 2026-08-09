@@ -6473,3 +6473,73 @@ rules in style.css. It is a DOM hook the vanilla addresses as
 stylesheet that never existed.
 
 Suite 7018/7018, lint 684/0.
+
+### S4 BLOCKED — the delete as planned WOULD break things. Three findings.
+
+Before deleting ~21,000 lines, every top-level name declared in the eight doomed
+files was cross-referenced against every SURVIVING `static/*.js` and against
+index.html's inline handlers. 556 names; **57 are called from something that
+survives.**
+
+**The inventory said 46.** It is eleven short, and the eleven are not filler.
+
+#### 1. BLOCKER — `beatport-ui.js` is not all Beatport
+
+Lines **3650-3934** — the last 285 lines of the file — are the SETTINGS page's
+media-server pickers. Eight functions, nothing to do with Beatport:
+
+| function | called from |
+|---|---|
+| `loadPlexMusicLibraries` / `selectPlexLibrary` | settings.js 1402, 2246, 4842 · index.html 4392 `onchange` |
+| `loadJellyfinUsers` / `selectJellyfinUser` | settings.js 1407, 2251, 4844 · index.html 4456 |
+| `loadJellyfinMusicLibraries` / `selectJellyfinLibrary` | settings.js 1407, 2251, 4844 · index.html 4465 |
+| `loadNavidromeMusicFolders` / `selectNavidromeMusicFolder` | settings.js 1412, 2256, 4846 · index.html 4492 |
+
+**None has another definition anywhere.** Deleting the file wholesale, as the
+plan says, removes the ability to choose a Plex library, a Jellyfin user or
+library, or a Navidrome music folder — on the SETTINGS page, for every user,
+including ones who never open Sync. That is a first-run setup flow.
+
+These 285 lines must be REHOMED (settings.js is their obvious home) in a commit
+BEFORE the deletion, on the same reasoning as the AudioDB logo rehome in the
+dashboard flip: move first, verify, then delete.
+
+#### 2. BLOCKER — `formatDuration` is declared THREE times and the winner changes
+
+- sync-spotify.js 1967 — no guard; `formatDuration(0)` is `'0:00'`, `undefined`
+  gives `'NaN:NaN'`
+- sync-services.js 10062 — `if (!durationMs) return '0:00'`
+- **wishlist-tools.js 1575 — SURVIVES** — returns `'--:--'` for falsy or ≤ 0
+
+All three are top-level `function` declarations, so the LAST script loaded wins.
+Order is sync-spotify (8372) → wishlist-tools (8376) → **sync-services (8382)**.
+Every caller today therefore gets the sync-services version.
+
+Delete both sync files and the winner silently becomes wishlist-tools's, which
+disagrees on the empty case: a missing duration renders `--:--` where it renders
+`0:00` today. Nine call sites across downloads.js, shared-helpers.js,
+stats-automations.js and wishlist-tools.js change behaviour, none of them on the
+sync page. Arguably `--:--` is the better answer — but it must be a DECISION,
+not a side effect of a deletion. This is the duplicate-global load-order trap
+the search port already hit once.
+
+#### 3. The other 47 edges
+
+Two shapes, and the plan covers only the first:
+
+- **Sync-page callees** (`updateYouTubeCardPhase`, `updatePlaylistCardUI`,
+  `rehydrateModal`, `applyProgressiveTrackRendering`, the eleven `update*Card*`
+  functions …) — reached from downloads.js and shared-helpers.js, i.e. the
+  DOWNLOAD ENGINE, which stays vanilla by design. Each needs severing or
+  rehoming; `rehydrateModal` alone is called from five surviving files
+  (api-monitor, core, downloads, init, wishlist-tools).
+- **`pages-extra.js` inline handlers** — `serverEditorBack`,
+  `_serverEditorFilter` ×4, `_serverEditorRefresh`, `exportServerPlaylistM3U`,
+  `closeServerDisambig`, `loadServerPlaylists` are wired to `onclick`/`onchange`
+  attributes in the markup the flip deletes, so those die WITH their markup —
+  but `loadServerPlaylists` is also called from downloads.js×1, which does not.
+
+**Verdict: not confident, and correctly so.** The class sweep verified the
+markup axis; this one says the call axis is not ready. The delete does not
+happen until every one of the 57 is severed, rehomed or proven dead — and the
+two blockers above are rehome-first work, not deletion work.
