@@ -16175,7 +16175,9 @@ def _sanitize_filename(filename: str) -> str:
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Windows forbids trailing dots/spaces on files and folders.
     # Artists like "Fred again.." would create mangled 8.3 short names.
-    sanitized = sanitized.rstrip('. ') or '_'
+    # A LEADING dot is just as bad the other way: Unix treats it as a hidden
+    # entry and media servers skip it (#1129, "...Baby One More Time").
+    sanitized = sanitized.strip('. ') or '_'
     # Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     # can't be used as file or folder names even with extensions.
     if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', sanitized, re.IGNORECASE):
