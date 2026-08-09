@@ -15,7 +15,7 @@ from typing import Optional
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
-from core.matching.audio_verification import evaluate, Decision
+from core.matching.audio_verification import evaluate, fingerprint_is_ambiguous, Decision
 from core.matching.acoustid_candidates import duration_mismatches_strongly
 from core.acoustid_verification import _resolve_expected_artist_aliases
 
@@ -309,25 +309,59 @@ class AcoustIDScannerJob(RepairJob):
                 )
             return
 
+        # #1132: the finding asserts "X is actually Y". Y comes from the
+        # recording that best resembles the EXPECTED title — but this code only
+        # runs when the expected title is already believed wrong, so that
+        # ranking is against noise. When the fingerprint's top-scoring
+        # recordings name different songs (an AcoustID entry with several linked
+        # recordings, all tied on score), there is no defensible Y and the
+        # reported one is effectively arbitrary: a file of "You're the
+        # Inspiration" got reported as "Saturday in the Park".
+        #
+        # The DETECTION stands either way — it only asks whether ANY candidate
+        # matched, which ties don't affect. What gets withheld is the single
+        # "is actually Y" claim, replaced by the candidate list.
+        _ambiguous = fingerprint_is_ambiguous(fp_result['recordings'])
+
         title_sim = outcome.title_sim
         artist_sim = outcome.artist_sim
         matched_title = outcome.matched_title or aid_title
         matched_artist = outcome.matched_artist or aid_artist
 
+        # Distinct candidate labels, best-scoring first, for the ambiguous copy.
+        _cand_labels = []
+        for _r in sorted(fp_result['recordings'],
+                         key=lambda r: r.get('score') or 0, reverse=True):
+            _lbl = f'"{_r.get("title") or "?"}" by {_r.get("artist") or "?"}'
+            if _lbl not in _cand_labels:
+                _cand_labels.append(_lbl)
+
         # Mismatch (FAIL) — create finding.
         if context.report_progress:
             context.report_progress(
-                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{matched_title}"',
+                log_line=(
+                    f'Mismatch: {fname} — expected "{expected["title"]}", '
+                    f'fingerprint matches {len(_cand_labels)} different recordings'
+                    if _ambiguous else
+                    f'Mismatch: {fname} — expected "{expected["title"]}", got "{matched_title}"'
+                ),
                 log_type='error'
             )
         if context.create_finding:
             _is_force = file_verif_status == 'force_imported'
             severity = 'info' if _is_force else ('warning' if best_score >= 0.90 else 'info')
-            _title = (
-                f'Force-imported (fallback): "{expected["title"]}" is actually "{matched_title}"'
-                if _is_force else
-                f'Wrong download: "{expected["title"]}" is actually "{matched_title}"'
-            )
+            if _ambiguous:
+                _title = (
+                    f'Force-imported (fallback): "{expected["title"]}" does not match this audio'
+                    if _is_force else
+                    f'Wrong download: "{expected["title"]}" does not match this audio'
+                )
+            else:
+                _title = (
+                    f'Force-imported (fallback): "{expected["title"]}" is actually "{matched_title}"'
+                    if _is_force else
+                    f'Wrong download: "{expected["title"]}" is actually "{matched_title}"'
+                )
             inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
@@ -337,6 +371,13 @@ class AcoustIDScannerJob(RepairJob):
                 file_path=fpath,
                 title=_title,
                 description=(
+                    (
+                        f'Expected "{expected["title"]}" by {expected_artist}, but the audio '
+                        f'fingerprint matches none of them. It maps equally well to '
+                        f'{len(_cand_labels)} different recordings, so SoulSync cannot say '
+                        f'which one this is: {"; ".join(_cand_labels[:5])}'
+                        f' (fingerprint: {best_score:.0%})'
+                    ) if _ambiguous else
                     f'Expected "{expected["title"]}" by {expected_artist}, '
                     f'but audio fingerprint matches "{matched_title}" by {matched_artist} '
                     f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
@@ -356,6 +397,12 @@ class AcoustIDScannerJob(RepairJob):
                     'album_title': expected.get('album_title', ''),
                     'track_number': expected.get('track_number'),
                     'force_imported': file_verif_status == 'force_imported',
+                    # #1132: True when the fingerprint's top recordings name
+                    # different songs, so `acoustid_title`/`acoustid_artist`
+                    # are one arbitrary pick among equals. Anything that would
+                    # RETAG from this finding must refuse when this is set.
+                    'ambiguous': _ambiguous,
+                    'candidates': _cand_labels[:10],
                 }
             )
             if inserted:
