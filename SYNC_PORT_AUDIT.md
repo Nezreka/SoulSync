@@ -6543,3 +6543,67 @@ Two shapes, and the plan covers only the first:
 markup axis; this one says the call axis is not ready. The delete does not
 happen until every one of the 57 is severed, rehomed or proven dead — and the
 two blockers above are rehome-first work, not deletion work.
+
+### S4 PRECONDITION 1 DONE — the Settings pickers re-homed out of beatport-ui.js
+
+`beatport-ui.js` 3648-3931 moved verbatim into `settings.js`. Eight functions —
+`loadPlexMusicLibraries` / `selectPlexLibrary`, the two Jellyfin pairs, the
+Navidrome pair — that drive the Settings page's media-server selects and were
+only in a Beatport file because somebody appended them there.
+
+**Moved, not rewritten.** The script asserted the boundaries before writing
+(first line is the section comment, all eight functions present, last line is a
+bare `}`), then round-tripped: the extracted text must appear verbatim in
+settings.js afterwards, and the moved names must appear nowhere in
+beatport-ui.js. -287 / +303 lines, the 16 extra being the header note.
+
+The block has NO dependency on the rest of beatport-ui.js — its only non-DOM
+call is `showToast`, which lives in core.js and survives. Verified by extracting
+every identifier the block calls and checking it against the declarations in the
+part of the file being kept.
+
+**Carried across unchanged: six `alert()` calls** (3721, 3725, 3794, 3798, 3865,
+3869 in the old numbering). They break the no-`alert` rule and the same block
+uses `showToast` elsewhere, so it is already inconsistent — but converting them
+inside a move makes the move unverifiable. Separate change, flagged rather than
+smuggled.
+
+### S4 PRECONDITION 2 DONE — one `formatDuration`
+
+Pinned in `shared-helpers.js`, byte-identical to `sync-services.js` 10062, which
+was proven to be the only one of the three that ever ran: all three are
+top-level declarations in classic scripts and sync-services loads last (8382 vs
+8372 and 8376). The wishlist-tools copy was therefore DEAD CODE — its `--:--`
+never reached a caller — so removing it changes nothing today, and pinning the
+survivor stops the flip from silently promoting it.
+
+Nothing on screen moves in either state: before the delete sync-services still
+wins and is identical; after it, shared-helpers wins and is identical.
+
+Whether `--:--` beats `0:00` for an unknown duration is left OPEN for Boulder —
+it is a real UX question across nine call sites on three pages, and none of them
+is the sync page.
+
+### The guard had a blind spot, and it was the one that mattered
+
+`vanilla-crossfile.test.ts` computes the edge inventory rather than hand-writing
+it, which is why it already knew about the four `load*` Settings functions. But
+it only reads `static/*.js` — so a function reached ONLY from an inline
+`onchange=` attribute was invisible to it. That is exactly how `selectPlexLibrary`
+and its three siblings escaped: index.html 4392/4456/4465/4492 are their only
+callers.
+
+A new test now scans index.html for `on*="fn("` handlers, resolves each against
+the doomed files, and fails on any that sit OUTSIDE the sync page markup —
+handlers inside it are fine, since that markup dies in the same commit.
+
+The "Settings functions squatting in beatport-ui.js" test was INVERTED rather
+than deleted: it now asserts they are in settings.js and NOT in beatport-ui.js,
+because the failure mode from here is a regression — somebody appending a
+Settings helper to a sync file again.
+
+Mutation 3/3: re-adding `selectPlexLibrary` to beatport-ui.js (the inline-handler
+bug), re-adding `loadPlexMusicLibraries` (the inventory bug), and renaming
+`loadJellyfinUsers` out of settings.js (the rehome regressing) all fail.
+
+Edge inventory: 46 -> 42. Suite 7019/7019, lint 684/0.

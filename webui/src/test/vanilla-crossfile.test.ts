@@ -53,10 +53,10 @@ const EXPECTED_EDGES = [
   'getActionButtonText <- downloads.js [sync-spotify.js]',
   'getMirroredSourceRef <- stats-automations.js [auto-sync.js]',
   'initializeSyncPage <- init.js [sync-services.js]',
-  'loadJellyfinMusicLibraries <- settings.js [beatport-ui.js]',
-  'loadJellyfinUsers <- settings.js [beatport-ui.js]',
-  'loadNavidromeMusicFolders <- settings.js [beatport-ui.js]',
-  'loadPlexMusicLibraries <- settings.js [beatport-ui.js]',
+  // The four `load*` Settings edges that used to sit here are GONE, and
+  // deliberately: their definitions were re-homed from beatport-ui.js into
+  // settings.js, which survives, so they stopped being edges. See the rehome
+  // guard below.
   'loadSyncData <- init.js [sync-spotify.js]',
   'openDownloadMissingModal <- shared-helpers.js [sync-spotify.js]',
   'openYouTubeDiscoveryModal <- core.js,stats-automations.js [sync-services.js]',
@@ -128,18 +128,82 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ).toEqual({ missing: [], added: [] });
   });
 
-  it('covers the Settings functions squatting in beatport-ui.js', () => {
-    // The specific case that exposed the hand-written list as unsound: these
-    // belong to the SETTINGS page, not to the Beatport tab the file is named for.
-    const actual = computeEdges();
+  it('keeps the Settings pickers OUT of beatport-ui.js', () => {
+    // This used to assert the opposite — that these functions sat in
+    // beatport-ui.js — because that was the reality and the point was to make
+    // the flip trip over it. They have now been re-homed into settings.js,
+    // where they always belonged: they drive the Plex / Jellyfin / Navidrome
+    // selects and have nothing to do with the Beatport tab.
+    //
+    // Inverted rather than deleted, because the failure mode is a REGRESSION:
+    // somebody appends a Settings helper to a sync file again and it quietly
+    // becomes deletable-by-association.
+    const dir = resolve(process.cwd(), 'static');
+    const settings = readFileSync(resolve(dir, 'settings.js'), 'utf8');
+    const beatport = readFileSync(resolve(dir, 'beatport-ui.js'), 'utf8');
     for (const name of [
       'loadPlexMusicLibraries',
+      'selectPlexLibrary',
       'loadJellyfinUsers',
+      'selectJellyfinUser',
       'loadJellyfinMusicLibraries',
+      'selectJellyfinLibrary',
       'loadNavidromeMusicFolders',
+      'selectNavidromeMusicFolder',
     ]) {
-      expect(actual).toContain(`${name} <- settings.js [beatport-ui.js]`);
+      expect(settings, `${name} should be defined in settings.js`).toContain(
+        `async function ${name}(`,
+      );
+      expect(beatport, `${name} must not be back in beatport-ui.js`).not.toContain(
+        `function ${name}(`,
+      );
     }
+  });
+
+  it('no inline handler in surviving markup calls into a doomed file', () => {
+    // THE BLIND SPOT THIS GUARD HAD. computeEdges only reads `static/*.js`, so
+    // a function reached ONLY from an `onclick`/`onchange` attribute was
+    // invisible to it — which is exactly how `selectPlexLibrary` and its three
+    // siblings escaped: they are called from index.html 4392/4456/4465/4492 and
+    // from nowhere else, so the inventory above never listed them and the flip
+    // would have deleted them silently.
+    //
+    // Handlers inside the SYNC PAGE are fine: that markup is deleted in the
+    // same commit as the files. Anything outside it is an edge that snaps.
+    const dir = resolve(process.cwd(), 'static');
+    const all = readdirSync(dir).filter((f) => f.endsWith('.js'));
+    const doomed = new Map<string, string>();
+    for (const file of PORT_FILES) {
+      if (!all.includes(file)) continue;
+      const source = readFileSync(resolve(dir, file), 'utf8');
+      for (const m of source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) {
+        if (!doomed.has(m[1])) doomed.set(m[1], file);
+      }
+    }
+
+    const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+    const lines = html.split('\n');
+    // The sync page's own markup, which goes when the files go.
+    const syncStart = lines.findIndex((l) => l.includes('<div class="page" id="sync-page"'));
+    const syncEnd = lines.findIndex((l) => l.includes('<div class="page" id="search-page"'));
+    expect(syncStart, 'sync-page markup not found').toBeGreaterThan(-1);
+    expect(syncEnd).toBeGreaterThan(syncStart);
+
+    const offenders: string[] = [];
+    lines.forEach((line, i) => {
+      if (i >= syncStart && i < syncEnd) return;
+      for (const m of line.matchAll(/\bon[a-z]+="\s*([A-Za-z_$][\w$]*)\s*\(/g)) {
+        const home = doomed.get(m[1]);
+        if (home) offenders.push(`${m[1]}() at index.html:${i + 1} [${home}]`);
+      }
+    });
+
+    expect(
+      offenders,
+      'An inline handler outside the sync page calls a function the flip deletes.\n' +
+        'Re-home the definition before deleting its file, or the attribute throws\n' +
+        'ReferenceError the first time a user touches that control.',
+    ).toEqual([]);
   });
 
   it('covers the Beatport slider teardown core.js drives on page-leave', () => {

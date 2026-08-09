@@ -1569,20 +1569,10 @@ async function addModalTracksToWishlist(playlistId) {
     }
 }
 
-/**
- * Format duration from milliseconds to MM:SS format
- */
-function formatDuration(durationMs) {
-    if (!durationMs || durationMs <= 0) {
-        return '--:--';
-    }
-
-    const totalSeconds = Math.floor(durationMs / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
+// formatDuration lived here too, returning '--:--' for an unknown duration.
+// It was DEAD: sync-services.js declared the same name and loaded later, so its
+// '0:00' version won for every caller in this file. The one definition now
+// lives in shared-helpers.js — see the note there.
 
 // Note: Functions from other modules (downloads.js, sync-spotify.js, sync-services.js, artists.js)
 // are already global via their function declarations and do not need window.X = X assignments.
