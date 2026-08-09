@@ -390,9 +390,25 @@ export function ServerDisambigModal({
       }}
     >
       <div className="server-disambig-modal" id="server-disambig-modal">
-        <div id="server-disambig-subtitle">
-          &ldquo;{playlistName}&rdquo; was found on {candidates.length} sources. Which one do you
-          want to compare against?
+        {/* index.html 3243-3249. The port opened straight onto the subtitle, so
+            this modal had NO TITLE and NO CLOSE BUTTON, and the subtitle
+            carried its id but not its class — meaning default size and colour
+            instead of the 12px muted line. Only the backdrop and Esc dismissed
+            it. The header is `display: flex; justify-content: space-between`
+            (61012), which is what puts the × opposite the title. */}
+        <div className="server-disambig-header">
+          <div>
+            <h3 className="server-disambig-title">Multiple Sources Found</h3>
+            <p className="server-disambig-subtitle" id="server-disambig-subtitle">
+              &ldquo;{playlistName}&rdquo; was found on {candidates.length} sources. Which one do
+              you want to compare against?
+            </p>
+          </div>
+          {/* 3248 — `onclick="closeServerDisambig()"`, the same close the
+              backdrop and Esc already call here. */}
+          <button type="button" className="server-disambig-close" onClick={onClose}>
+            ×
+          </button>
         </div>
         <div className="server-disambig-list" id="server-disambig-list">
           {candidates.map((candidate, i) => (

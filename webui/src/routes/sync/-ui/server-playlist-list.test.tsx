@@ -4,6 +4,8 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ServerDisambigModal, ServerPlaylistList } from './server-playlist-list';
@@ -25,6 +27,28 @@ const SERVER = {
     { id: '2', name: 'Deep Cuts', track_count: 12 },
   ],
 };
+
+/** Two mirrored rows for one server playlist — the state that disambiguates. */
+function stubTwoMatches(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url === '/api/server/playlists') return new Response(JSON.stringify(SERVER));
+      if (url === '/api/mirrored-playlists') {
+        return new Response(
+          JSON.stringify([
+            { id: 9, name: 'Road Trip', source: 'spotify', track_count: 40, owner: 'boulder' },
+            { id: 10, name: 'Road Trip', source: 'tidal', track_count: 38 },
+          ]),
+        );
+      }
+      if (url === '/api/mirrored-playlists/10') {
+        return new Response(JSON.stringify({ id: 10, name: 'Road Trip', source: 'tidal' }));
+      }
+      return new Response(JSON.stringify([]));
+    }),
+  );
+}
 
 beforeEach(() => {
   stubFetch();
@@ -159,6 +183,70 @@ describe('ServerPlaylistList', () => {
     expect(urls).toContain('/api/mirrored-playlists/10');
     expect(onOpenCompare.mock.calls[0][1]).toMatchObject({ id: 10, source: 'tidal' });
     expect(document.querySelector('#server-disambig-overlay')).toBeNull();
+  });
+
+  it('gives the disambiguation its header, title and close button', async () => {
+    // Found by a class sweep, not by a test: the port opened straight onto the
+    // subtitle, so this modal had NO title and NO close button, and the
+    // subtitle carried its id but not its class. Every test in this file
+    // passed — they drive it by id and by `.server-disambig-card`, and a modal
+    // with no chrome still disambiguates perfectly.
+    const onOpenCompare = vi.fn();
+    stubTwoMatches();
+    render(<ServerPlaylistList onOpenCompare={onOpenCompare} />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#server-disambig-overlay')).not.toBeNull());
+
+    const header = document.querySelector('.server-disambig-modal > .server-disambig-header');
+    expect(header, 'the header box is what puts the × opposite the title').not.toBeNull();
+    expect(header?.querySelector('h3.server-disambig-title')?.textContent).toBe(
+      'Multiple Sources Found',
+    );
+    // The id ALONE is what the port had — the class is what styles it.
+    const subtitle = document.querySelector('#server-disambig-subtitle');
+    expect(subtitle?.classList.contains('server-disambig-subtitle')).toBe(true);
+    expect(subtitle?.tagName).toBe('P');
+
+    const close = header?.querySelector('button.server-disambig-close');
+    expect(close, 'no × button at all').not.toBeNull();
+    fireEvent.click(close as Element);
+    await waitFor(() => expect(document.querySelector('#server-disambig-overlay')).toBeNull());
+  });
+
+  it('every disambiguation class it renders exists in the stylesheet', async () => {
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    stubTwoMatches();
+    render(<ServerPlaylistList onOpenCompare={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Road Trip'));
+    await waitFor(() => expect(document.querySelector('#server-disambig-overlay')).not.toBeNull());
+
+    // Harvested, not listed — the hand-written variant of this check is what
+    // let the header, title and close button go missing in the first place.
+    const emitted = new Set<string>();
+    for (const node of document.querySelectorAll(
+      '#server-disambig-overlay, #server-disambig-overlay *',
+    )) {
+      for (const c of node.classList) {
+        if (c.startsWith('server-disambig-')) emitted.add(c);
+      }
+    }
+    expect(emitted.size).toBeGreaterThan(5);
+    /**
+     * One exemption, verified rather than assumed: `.server-disambig-list` has
+     * ZERO rules in style.css. It is a DOM hook — the vanilla addresses it as
+     * `#server-disambig-list` (pages-extra.js 187) and lets
+     * `.server-disambig-modal`'s own layout position it. Reproducing the class
+     * is faithful to the markup; requiring a rule for it would be asserting a
+     * stylesheet that has never existed.
+     */
+    emitted.delete('server-disambig-list');
+    for (const c of emitted) {
+      expect(new RegExp(`\\.${c}[\\s,:{.\\[]`).test(css), `.${c} is not in static/style.css`).toBe(
+        true,
+      );
+    }
   });
 
   it('Escape and the backdrop both close the disambiguation (220-222)', async () => {

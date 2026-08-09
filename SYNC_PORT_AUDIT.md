@@ -6413,3 +6413,63 @@ consistency" would put three unstyled boxes and an invented heading on the page.
 
 Sweep re-run after the fix: **99 classes in the pane, 0 not emitted.** Suite
 7016/7016 twice, lint 684/0.
+
+### PRE-FLIP SWEEP — the whole page, and the tool that lied first
+
+Before S4 deletes the markup, every `class="…"` in the sync page region
+(index.html 2226-3320) was diffed against what `src/routes/sync` emits. The
+point of the timing: after the flip there is nothing left to diff against.
+
+**The tool reported a clean sweep twice before it was correct.** Worth
+recording, because a passing check is exactly what a broken check looks like:
+
+1. First version used `class not in port_source` — a plain substring test. Every
+   slug-derived name (`beatport-${slug}-slider-container`) reports as missing,
+   burying real answers in ~490 false positives.
+2. Second version matched template literals as regexes, substituting
+   `[A-Za-z0-9-]+` for each `${…}`. **0 missing.** It was validated against the
+   port as of 251b16421 — a state known to have 17 misses — and reported 0
+   there too. The cause: a piece that is ONLY an interpolation (`${artworkUrl}`,
+   which is text content, not a class) becomes the pattern `[A-Za-z0-9-]+`,
+   which matches every class in the file.
+3. Third version required a pattern to retain literal text — but then reported
+   `.sync-tab-button` and `.sync-content-area` missing, because
+   `` `sync-tab-button${active ? ' active' : ''}` `` became a regex demanding at
+   least one trailing character, and the interpolation is usually EMPTY.
+
+The working version models both cases: blank the interpolations and take the
+remaining tokens as literals (the conditional-suffix case), AND keep the
+substituted regex (the slug case). **Validated against the known-bad commit
+before being trusted**, which is the only reason versions 2 and 3 were caught.
+
+**Result: 266 classes, 53 not emitted.** Triaged by locating each one's
+enclosing element:
+
+- **50 are inside `#beatport-browse-content` and `#beatport-playlists-content`**
+  — the two panes carrying `.beatport-tab-content` WITHOUT `active`, so
+  `display: none` (16993), reachable only by clicking a `.beatport-tab-button`
+  inside a strip the markup itself hides with `style="display: none"` and a
+  comment saying Browse is the only view. Deliberately unported, and now
+  confirmed unreachable rather than assumed so.
+- **3 were a real bug**, in a component this port had ALREADY been caught on
+  once for the same reason.
+
+**LIVE BUG #10 — the disambiguation modal had no title and no close button.**
+`ServerDisambigModal` opened straight onto the subtitle, so
+`.server-disambig-header`, `<h3 class="server-disambig-title">Multiple Sources
+Found</h3>` and the `.server-disambig-close` × button were absent entirely, and
+the subtitle carried its id but not its class (default size and colour instead
+of the 12px muted line). Only the backdrop and Esc dismissed it.
+
+Every existing test passed: they drive the modal by id and by
+`.server-disambig-card`, and a modal with no chrome disambiguates perfectly.
+That is now three separate regressions from ONE habit — keeping the ids, which
+the JS used, and dropping the classes, which the CSS uses (compare editor, the
+slider box, this).
+
+One verified exemption in the new harvest test: `.server-disambig-list` has zero
+rules in style.css. It is a DOM hook the vanilla addresses as
+`#server-disambig-list` (pages-extra.js 187); requiring a rule would assert a
+stylesheet that never existed.
+
+Suite 7018/7018, lint 684/0.
