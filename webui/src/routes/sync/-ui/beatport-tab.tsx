@@ -64,7 +64,19 @@ export function BeatportTab() {
   }, []);
 
   return (
-    <div id="beatport-rebuild-content">
+    /**
+     * `beatport-tab-content active` — BOTH classes, and the pair is the point.
+     * `.beatport-tab-content` alone is `display: none` (style.css 16993); only
+     * `.active` turns it into the `flex-direction: column` scroll container the
+     * pane actually is (17000). The port emitted the id and neither class, so
+     * the pane laid out as a plain block instead.
+     *
+     * The `active` is STATIC here, unlike in the vanilla where it moved between
+     * three panes. Two of those panes are unreachable (see the header note) and
+     * this component only ever renders the one, so a class that never changes
+     * is the honest encoding — not state pretending to be state.
+     */
+    <div id="beatport-rebuild-content" className="beatport-tab-content active">
       <BeatportHeroSection env={env} />
 
       {/* 2846-2861. Three buttons, and none of them switches an inner view:

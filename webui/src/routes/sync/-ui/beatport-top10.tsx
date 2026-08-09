@@ -22,7 +22,7 @@
  * is no page-level placeholder left behind to keep.
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import type { BeatportRelease, BeatportTop10Track } from '../-beatport.api';
 import type { BeatportDownloadEnv } from '../-beatport.downloads';
@@ -179,19 +179,43 @@ export function BeatportTop10Lists({ env }: { env: BeatportDownloadEnv }) {
 
   if (errorMessage !== null) {
     // 1753-1754: the SAME block into both containers, and it replaces the whole
-    // container — so the list headers go with it.
+    // container — so the list headers go with it. The SECTION header above is
+    // markup, not something the error path touches, so it stays either way.
     return (
-      <div className="beatport-top10-container">
-        <Top10ListsError message={errorMessage} />
-        <Top10ListsError message={errorMessage} />
-      </div>
+      <Top10SectionFrame>
+        <div className="beatport-top10-container">
+          <Top10ListsError message={errorMessage} />
+          <Top10ListsError message={errorMessage} />
+        </div>
+      </Top10SectionFrame>
     );
   }
 
   return (
-    <div className="beatport-top10-container">
-      <TrackTop10List variant="beatport" tracks={data?.beatport ?? []} env={env} />
-      <TrackTop10List variant="hype" tracks={data?.hype ?? []} env={env} />
+    <Top10SectionFrame>
+      <div className="beatport-top10-container">
+        <TrackTop10List variant="beatport" tracks={data?.beatport ?? []} env={env} />
+        <TrackTop10List variant="hype" tracks={data?.hype ?? []} env={env} />
+      </div>
+    </Top10SectionFrame>
+  );
+}
+
+/**
+ * index.html 2868-2874. The port started at `.beatport-top10-container` and so
+ * emitted neither the section box nor its heading — which is why "🏆 Top 10
+ * Lists" was simply absent on screen. Distinct from the two `-list-header`
+ * blocks inside, which the port already had: this is the heading OVER both
+ * lists, they are the headings ON each list.
+ */
+function Top10SectionFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="beatport-top10-section">
+      <div className="beatport-top10-header">
+        <h2 className="beatport-top10-title">🏆 Top 10 Lists</h2>
+        <p className="beatport-top10-subtitle">Current trending tracks from Beatport charts</p>
+      </div>
+      {children}
     </div>
   );
 }
@@ -269,44 +293,67 @@ export function BeatportTop10Releases({ env }: { env: BeatportDownloadEnv }) {
 
   if (errorMessage !== null) {
     // 1842-1852 — its own error class and its own title, unlike the shared one
-    // the two track lists use.
+    // the two track lists use. 1843 targets the LIST, so the section frame and
+    // the container around it survive the error.
     return (
-      <div className="beatport-releases-top10-list" id="beatport-releases-top10-list">
-        <div className="beatport-releases-top10-error">
-          <h3>❌ Error Loading Releases</h3>
-          <p>{errorMessage}</p>
+      <ReleasesTop10Frame>
+        <div className="beatport-releases-top10-list" id="beatport-releases-top10-list">
+          <div className="beatport-releases-top10-error">
+            <h3>❌ Error Loading Releases</h3>
+            <p>{errorMessage}</p>
+          </div>
         </div>
-      </div>
+      </ReleasesTop10Frame>
     );
   }
 
   const releases = data ?? [];
   return (
-    <div className="beatport-releases-top10-list" id="beatport-releases-top10-list">
-      {releases.length > 0 ? (
-        <div className="beatport-releases-top10-tracks">
-          {releases.map((release, index) => (
-            <ReleaseTop10Card
-              key={index}
-              release={release}
-              index={index}
-              // 1834 wires EVERY card, with no url test — so an url-less
-              // release reaches the handler and shows its toast. This is the
-              // one list where that toast is reachable.
-              onClick={() => {
-                void openBeatportRelease(release, env);
-              }}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="beatport-releases-top10-loading">
-          <div className="beatport-releases-top10-loading-content">
-            <h4>💿 Loading Top 10 Releases...</h4>
-            <p>Fetching trending albums and EPs</p>
+    <ReleasesTop10Frame>
+      <div className="beatport-releases-top10-list" id="beatport-releases-top10-list">
+        {releases.length > 0 ? (
+          <div className="beatport-releases-top10-tracks">
+            {releases.map((release, index) => (
+              <ReleaseTop10Card
+                key={index}
+                release={release}
+                index={index}
+                // 1834 wires EVERY card, with no url test — so an url-less
+                // release reaches the handler and shows its toast. This is the
+                // one list where that toast is reachable.
+                onClick={() => {
+                  void openBeatportRelease(release, env);
+                }}
+              />
+            ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="beatport-releases-top10-loading">
+            <div className="beatport-releases-top10-loading-content">
+              <h4>💿 Loading Top 10 Releases...</h4>
+              <p>Fetching trending albums and EPs</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </ReleasesTop10Frame>
+  );
+}
+
+/**
+ * index.html 2915-2923. Three boxes the port skipped straight past: the
+ * section, its heading ("💿 Top 10 Releases" — the one Boulder reported gone),
+ * and `.beatport-releases-top10-container`, which is what caps the list at
+ * 1500px and centres it (style.css 31170).
+ */
+function ReleasesTop10Frame({ children }: { children: ReactNode }) {
+  return (
+    <div className="beatport-releases-top10-section">
+      <div className="beatport-releases-top10-header">
+        <h2 className="beatport-releases-top10-title">💿 Top 10 Releases</h2>
+        <p className="beatport-releases-top10-subtitle">Most popular albums and EPs on Beatport</p>
+      </div>
+      <div className="beatport-releases-top10-container">{children}</div>
     </div>
   );
 }

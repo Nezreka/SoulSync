@@ -147,6 +147,124 @@ describe('BeatportSection', () => {
     await waitFor(() => expect(document.querySelectorAll('.ph')).toHaveLength(8));
   });
 
+  it('frames each section in its section+header, with the vanilla copy', async () => {
+    // THE TITLES. index.html wraps each grid slider in
+    // `.beatport-{slug}-section > .beatport-{slug}-header > h2 + p` (2936,
+    // 2973, 3011, 3048) and the port rendered none of it, so every section
+    // heading was simply absent on screen. Nothing else here notices: a
+    // section with no title still loads, still pages, still downloads.
+    for (const [name, config] of Object.entries(BEATPORT_SLIDERS)) {
+      if (config.sectionHeading === null) continue;
+      const { container, unmount } = renderSection(
+        name as keyof typeof BEATPORT_SLIDERS,
+        async () => ['a'],
+        `frame-${name}`,
+      );
+      await waitFor(() => expect(container.querySelector('.card')).not.toBeNull());
+      const classes = beatportSliderClasses(config.slug);
+
+      const section = container.firstElementChild;
+      expect(section?.className, `${name}: outermost box`).toBe(classes.section);
+
+      const header = section?.firstElementChild;
+      expect(header?.className, `${name}: header box`).toBe(classes.header);
+
+      const title = header?.querySelector(`h2.${classes.title}`);
+      const subtitle = header?.querySelector(`p.${classes.subtitle}`);
+      // The TAG matters as much as the class: these are h2 in the markup and
+      // the stylesheet sizes them by class, but the page's heading outline is
+      // what a screen reader walks.
+      expect(title?.textContent, `${name}: title`).toBe(config.sectionHeading.title);
+      expect(subtitle?.textContent, `${name}: subtitle`).toBe(config.sectionHeading.subtitle);
+
+      unmount();
+      resetBeatportSectionCache();
+    }
+  });
+
+  it('gives the HERO no section frame, because the vanilla gives it none', async () => {
+    // `#beatport-rebuild-content` opens straight onto the slider container
+    // (2817-2819) and style.css has no `.beatport-rebuild-header/-title/
+    // -subtitle` rule at all. Emitting the frame "for consistency" would put
+    // three unstyled boxes and an invented heading on the page.
+    const { container } = renderSection('hero', async () => ['a'], 'hero-frame');
+    await waitFor(() => expect(container.querySelector('.card')).not.toBeNull());
+    expect(container.querySelector('.beatport-rebuild-section')).toBeNull();
+    expect(container.querySelector('.beatport-rebuild-header')).toBeNull();
+    expect(container.firstElementChild?.className).toBe('beatport-rebuild-slider-container');
+  });
+
+  it('nests the placeholder inside container > slider > track, as the vanilla does', () => {
+    // `sliderTrack.innerHTML = '<div class="beatport-{slug}-loading">…'`
+    // (beatport-ui.js 644-647 and its twins) — the block goes IN the track, and
+    // the static markup nests it there too. Rendered bare it loses the
+    // container's width and the slider's height, so a loading or failed section
+    // collapsed exactly the way the hero did.
+    const { container } = renderSection('releases', () => new Promise(() => []), 'nest-loading');
+    const classes = beatportSliderClasses('releases');
+    // Past the section frame — releases has one, so the container is the
+    // header's sibling rather than the root.
+    const outer = container.querySelector(`.${classes.section} > .${classes.container}`);
+    expect(outer).not.toBeNull();
+    const slider = outer?.firstElementChild;
+    expect(slider?.className).toBe(classes.slider);
+    const track = slider?.firstElementChild;
+    expect(track?.className).toBe(classes.track);
+    expect(track?.firstElementChild?.className).toBe(classes.loading);
+  });
+
+  it('nests the ERROR block in the same three boxes', async () => {
+    const { container } = renderSection(
+      'releases',
+      async () => {
+        throw new Error('network down');
+      },
+      'nest-error',
+      'Error Loading Releases',
+    );
+    await waitFor(() => expect(screen.getByText('❌ Error Loading Releases')).toBeInTheDocument());
+    const classes = beatportSliderClasses('releases');
+    expect(
+      container.querySelector(
+        `.${classes.container} > .${classes.slider} > .${classes.track} > .${classes.loading}`,
+      ),
+    ).not.toBeNull();
+  });
+
+  it('uses each section OWN heading level for the placeholder', () => {
+    // h2 for the hero (2824), h3 for the four grid sections (2949, 2987, 3024,
+    // 3060) — and `.beatport-*-loading-content h2` and `… h3` are sized
+    // separately, so rendering h3 everywhere styled the hero as a subheading.
+    const hero = renderSection('hero', () => new Promise(() => []), 'lvl-hero');
+    expect(hero.container.querySelector('.beatport-rebuild-loading-content > h2')).not.toBeNull();
+    expect(hero.container.querySelector('.beatport-rebuild-loading-content > h3')).toBeNull();
+    hero.unmount();
+    resetBeatportSectionCache();
+
+    const rel = renderSection('releases', () => new Promise(() => []), 'lvl-rel');
+    expect(rel.container.querySelector('.beatport-releases-loading-content > h3')).not.toBeNull();
+    expect(rel.container.querySelector('.beatport-releases-loading-content > h2')).toBeNull();
+  });
+
+  it('every class the section frame emits exists in the stylesheet', () => {
+    // The four frame classes are derived from the slug like everything else, so
+    // a wrong one is silent. Checked against the real file, and checked for the
+    // hero in the NEGATIVE — no rule exists for its frame, which is the
+    // evidence that not emitting one is right rather than merely convenient.
+    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+    for (const [name, config] of Object.entries(BEATPORT_SLIDERS)) {
+      const classes = beatportSliderClasses(config.slug);
+      const frame = [classes.section, classes.header, classes.title, classes.subtitle];
+      const wanted = config.sectionHeading !== null;
+      for (const className of frame) {
+        expect(
+          new RegExp(`\\.${className}[\\s,:{.]`).test(css),
+          `${name}: .${className} ${wanted ? 'is not in' : 'unexpectedly IS in'} static/style.css`,
+        ).toBe(wanted);
+      }
+    }
+  });
+
   it('every error-block class it can emit exists in the stylesheet', () => {
     // Same reasoning as the slider's check: a missing class renders unstyled
     // rather than failing, so it is verified against the real file.

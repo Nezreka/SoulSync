@@ -49,7 +49,24 @@ function Harness({ mode = 'push' as ExportMode, backfill = false }) {
 const text = () => screen.getByTestId('status').textContent;
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  /**
+   * NOT `shouldAdvanceTime: true`, which this used and which made
+   * "drops the status after its autoHideMs" flaky — it failed in roughly half
+   * of full-suite runs and never once in isolation.
+   *
+   * That option makes the fake clock advance with REAL time as well as with
+   * `advanceTimersByTime`. The auto-hide test asserts an exact boundary (still
+   * up at 9999ms, gone at 10000), so any real milliseconds that elapse between
+   * setting the status and advancing the clock are added on top — and under a
+   * loaded 317-file run on WSL, that is easily the one millisecond needed to
+   * fire the timer a tick early. In isolation the machine is fast enough that
+   * it never accumulates.
+   *
+   * Nothing here needs it: every wait in this file goes through
+   * `advanceTimersByTimeAsync`, which pumps microtasks itself, and the fetch
+   * stub resolves as a promise rather than on a timer.
+   */
+  vi.useFakeTimers();
   stubFetch();
 });
 

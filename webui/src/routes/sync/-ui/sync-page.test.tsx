@@ -205,11 +205,19 @@ describe('the panel map', () => {
     expect(syncModalsProps?.modals.openIdFor('listenbrainz')).toBe('mb-1');
   });
 
-  it('leaves Beatport unmounted — the sub-shell is not built yet', () => {
-    // Deliberate and documented in the component header. Asserted so that
-    // filling the panel in is a test change, not a silent one.
+  it('mounts the Beatport pane', () => {
+    // This was "leaves Beatport unmounted — the sub-shell is not built yet",
+    // whose stated purpose was that filling the panel in would be a test change
+    // rather than a silent one. It was not: it probed `.beatport-tab-content`,
+    // a class the port did not emit at all, so it kept passing for two commits
+    // after BeatportTab was wired in and only fired once that class was added.
+    //
+    // A negative assertion against a selector nothing renders passes for BOTH
+    // reasons — the thing is absent, or the probe is wrong — and cannot tell
+    // you which. So this asserts the pane by its ID, which the component has
+    // always had.
     render(<SyncPage />);
     fireEvent.click(screen.getByText('Beatport'));
-    expect(document.querySelector('.beatport-tab-content')).toBeNull();
+    expect(document.getElementById('beatport-rebuild-content')).not.toBeNull();
   });
 });

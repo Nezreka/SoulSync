@@ -442,6 +442,73 @@ describe('TrackTop10List on its own', () => {
 
 /* ── Artefacts ────────────────────────────────────────────────────────────── */
 
+describe('the two section frames', () => {
+  // Both were missing entirely, so both section headings were absent on screen
+  // while every test above stayed green — cards render, clicks work, text is
+  // right, and the heading over them simply is not there.
+  it('frames the track lists in section > header > h2 + p > container', async () => {
+    stubApi({
+      [LISTS_URL]: { success: true, beatport_top10: [{ title: 'T' }], hype_top10: [] },
+    });
+    const { container } = render(<BeatportTop10Lists env={makeEnv()} />);
+    await waitFor(() => expect(document.querySelector('.beatport-top10-card')).not.toBeNull());
+
+    const section = container.firstElementChild;
+    expect(section?.className).toBe('beatport-top10-section');
+    const header = section?.firstElementChild;
+    expect(header?.className).toBe('beatport-top10-header');
+    expect(header?.querySelector('h2.beatport-top10-title')?.textContent).toBe('🏆 Top 10 Lists');
+    expect(header?.querySelector('p.beatport-top10-subtitle')?.textContent).toBe(
+      'Current trending tracks from Beatport charts',
+    );
+    // index.html 2875: the container is the header's SIBLING, not its child.
+    expect(section?.children[1]?.className).toBe('beatport-top10-container');
+  });
+
+  it('keeps the track-list frame even when the lists fail', async () => {
+    // 1753 replaces the two list containers, not the section — so the heading
+    // survives an outage. A frame rendered only on the happy path would make
+    // the whole block vanish the moment Beatport is down.
+    stubApi({ [LISTS_URL]: { success: false, error: 'nope' } });
+    const { container } = render(<BeatportTop10Lists env={makeEnv()} />);
+    await waitFor(() => expect(document.querySelector('.beatport-top10-error')).not.toBeNull());
+    expect(container.querySelector('h2.beatport-top10-title')).not.toBeNull();
+  });
+
+  it('frames the releases list, container included', async () => {
+    stubApi({ [RELEASES_URL]: { success: true, releases: [{ title: 'R' }] } });
+    const { container } = render(<BeatportTop10Releases env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-releases-top10-card')).not.toBeNull(),
+    );
+
+    const section = container.firstElementChild;
+    expect(section?.className).toBe('beatport-releases-top10-section');
+    expect(section?.querySelector('h2.beatport-releases-top10-title')?.textContent).toBe(
+      '💿 Top 10 Releases',
+    );
+    expect(section?.querySelector('p.beatport-releases-top10-subtitle')?.textContent).toBe(
+      'Most popular albums and EPs on Beatport',
+    );
+    // The container is what caps the list at 1500px and centres it (31170); the
+    // list must sit INSIDE it, not beside it.
+    expect(
+      container.querySelector('.beatport-releases-top10-container > .beatport-releases-top10-list'),
+    ).not.toBeNull();
+  });
+
+  it('keeps the releases frame when that list fails', async () => {
+    // 1843 targets the LIST by id, so the section and container outlive it.
+    stubApi({ [RELEASES_URL]: { success: false, error: 'nope' } });
+    const { container } = render(<BeatportTop10Releases env={makeEnv()} />);
+    await waitFor(() =>
+      expect(document.querySelector('.beatport-releases-top10-error')).not.toBeNull(),
+    );
+    expect(container.querySelector('h2.beatport-releases-top10-title')).not.toBeNull();
+    expect(container.querySelector('.beatport-releases-top10-container')).not.toBeNull();
+  });
+});
+
 describe('the top-10 class names', () => {
   it('all exist in the vanilla stylesheet', () => {
     // A missing class renders unstyled rather than failing, so these are
@@ -493,6 +560,18 @@ describe('the top-10 class names', () => {
       'beatport-releases-top10-loading',
       'beatport-releases-top10-loading-content',
       'beatport-releases-top10-error',
+      // The six OUTER frame classes. Absent from this list for as long as they
+      // were absent from the components — which is the trap a hand-written
+      // required-list always has: it can only check what someone remembered.
+      'beatport-top10-section',
+      'beatport-top10-header',
+      'beatport-top10-title',
+      'beatport-top10-subtitle',
+      'beatport-releases-top10-section',
+      'beatport-releases-top10-header',
+      'beatport-releases-top10-title',
+      'beatport-releases-top10-subtitle',
+      'beatport-releases-top10-container',
     ];
     for (const className of required) {
       expect(

@@ -6351,3 +6351,65 @@ have.
 
 Mutation 2/2: dropping the wrapper (the live bug, reproduced exactly) and
 typoing the class both die. Full suite 7005/7005, lint 684/0.
+
+### LIVE BUG #9 FIXED — every section heading was gone, and the sweep that found the rest
+
+Boulder, immediately after the slider fix: *"seems all of the section titles on
+beatport page are gone?"*. They were, and the cause is the same shape as #8 one
+level up: index.html wraps each block in
+`.beatport-{slug}-section > .beatport-{slug}-header > h2.title + p.subtitle`
+(2868, 2915, 2936, 2973, 3011, 3048) and the port started INSIDE that frame
+every time.
+
+**This time the sweep came before the fix.** Rather than patch the four titles
+Boulder could see, every `class="…"` in the Beatport pane was diffed against
+what the port emits — with the slugs substituted into the template literals,
+because a plain substring search reports `beatport-${slug}-slider-container` as
+missing and buries the real answer in false positives. That gave **17 classes,
+all of them styled, none of them rendered.** Two more came out of reading the
+components against the markup, which the class diff structurally cannot see:
+
+| missing | consequence |
+|---|---|
+| 6 × `-section` + `-header` + `h2.-title` + `p.-subtitle` | every section heading absent |
+| `.beatport-releases-top10-container` | list uncapped; 31170 sets `max-width: 1500px; margin: 0 auto` |
+| `.beatport-tab-content active` on the pane | pane laid out as a block, not a flex-column scroller |
+| placeholder + error blocks not inside `container > slider > track` | loading and failed sections collapsed like the hero did |
+| `h3` for all five placeholders | the hero's is `h2` (2824); the two are sized separately |
+
+**The pane class carries a trap worth naming.** `.beatport-tab-content` alone is
+`display: none` (16993); only `.active` makes it visible (17000). Adding the
+class without the modifier would have hidden the entire tab — the same `.page`
+trap the label-detail port hit. Both, or neither.
+
+**Three tests were lying, in three different ways**, and the first two only
+surfaced because the fix touched the classes they named:
+
+1. `sync-page.test.tsx` asserted `.beatport-tab-content` was **null** to prove
+   Beatport was deliberately unwired — and its own comment said the point was
+   that filling the panel in would be "a test change, not a silent one". It was
+   silent: the port never emitted that class, so the test kept passing for two
+   commits after `BeatportTab` was wired in, and only fired once the class
+   existed. **A negative assertion against a selector nothing renders passes
+   for two different reasons and cannot tell you which.** Now asserts the pane
+   by its id, which the component has always had.
+2. The top-10 stylesheet check is a hand-written list of 46 class names. It was
+   missing exactly the nine the components were missing — a required-list can
+   only check what someone remembered to add, which is the same drift that hid
+   the slider-nav wrapper.
+3. `-sync.use-export.test.tsx` used `vi.useFakeTimers({ shouldAdvanceTime: true })`
+   while asserting an exact boundary (up at 9999ms, gone at 10000). That option
+   advances the fake clock with REAL time too, so milliseconds spent between
+   setting the status and advancing the clock count against the budget. It
+   failed in ~half of full-suite runs and never in isolation, because only a
+   loaded run is slow enough to accumulate the one millisecond needed. Nothing
+   in the file needed the option — every wait goes through
+   `advanceTimersByTimeAsync`, which pumps microtasks itself.
+
+Mutation 8/8, including the two that matter most: dropping the frame (the live
+bug) and GIVING the hero a frame it must not have — the hero has no
+`.beatport-rebuild-header/-title/-subtitle` rule anywhere, so emitting one "for
+consistency" would put three unstyled boxes and an invented heading on the page.
+
+Sweep re-run after the fix: **99 classes in the pane, 0 not emitted.** Suite
+7016/7016 twice, lint 684/0.

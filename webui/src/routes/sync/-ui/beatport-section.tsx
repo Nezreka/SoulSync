@@ -61,30 +61,73 @@ export function BeatportSection<T>({
     defaultErrorMessage,
   });
   const classes = beatportSliderClasses(config.slug);
+  const Heading = config.loadingHeadingLevel;
+
+  /**
+   * THE SECTION FRAME. index.html wraps each grid slider in
+   * `.beatport-{slug}-section > .beatport-{slug}-header > h2 + p`, then the
+   * slider container (2936, 2973, 3011, 3048). The hero has no frame at all —
+   * `#beatport-rebuild-content` opens straight onto the slider container
+   * (2817-2819) — so `sectionHeading: null` renders the body bare rather than
+   * emitting empty boxes with no stylesheet behind them.
+   */
+  const frame = (body: ReactNode) =>
+    config.sectionHeading === null ? (
+      body
+    ) : (
+      <div className={classes.section}>
+        <div className={classes.header}>
+          <h2 className={classes.title}>{config.sectionHeading.title}</h2>
+          <p className={classes.subtitle}>{config.sectionHeading.subtitle}</p>
+        </div>
+        {body}
+      </div>
+    );
+
+  /**
+   * Both the placeholder and the error block sit INSIDE the slider's three
+   * boxes, because that is literally where the vanilla puts them:
+   * `sliderTrack.innerHTML = '<div class="beatport-{slug}-loading">…'`
+   * (beatport-ui.js 644-647 and its twins), and the static placeholder is
+   * nested in the track in the markup too. Rendered bare — as the port did —
+   * they lose the container's width and the slider's height, so a loading or
+   * failed section collapsed exactly the way the hero did.
+   */
+  const inSlider = (body: ReactNode) => (
+    <div className={classes.container}>
+      <div className={classes.slider}>
+        <div className={classes.track} id={trackId}>
+          {body}
+        </div>
+      </div>
+    </div>
+  );
 
   /**
    * The section's placeholder, which in the vanilla is PAGE MARKUP rather than
    * anything a loader draws — and which the port therefore has to draw itself,
    * because the flip deletes that markup. See BeatportSliderConfig.
    */
-  const placeholder = (
+  const placeholder = inSlider(
     <div className={classes.loading}>
       <div className={classes.loadingContent}>
-        <h3>{config.loadingTitle}</h3>
+        <Heading>{config.loadingTitle}</Heading>
         <p>{config.loadingSubtitle}</p>
       </div>
-    </div>
+    </div>,
   );
 
   if (status === 'failed') {
     if (config.onFailure === 'error-block') {
-      return (
-        <div className={classes.loading}>
-          <div className={classes.loadingContent}>
-            <h3>❌ {errorTitle}</h3>
-            <p>{errorMessage}</p>
-          </div>
-        </div>
+      return frame(
+        inSlider(
+          <div className={classes.loading}>
+            <div className={classes.loadingContent}>
+              <Heading>❌ {errorTitle}</Heading>
+              <p>{errorMessage}</p>
+            </div>
+          </div>,
+        ),
       );
     }
     // 'keep-static-markup' (hero) and 'nothing' (charts, DJ) replace NOTHING in
@@ -92,7 +135,7 @@ export function BeatportSection<T>({
     // the page shipped with — permanently. That is arguably a bug, but it is
     // what happens today, and drawing nothing instead would leave a blank strip
     // once the markup is gone.
-    return placeholder;
+    return frame(placeholder);
   }
 
   // Same reasoning while loading: the section shows its own copy from the first
@@ -101,9 +144,9 @@ export function BeatportSection<T>({
   // DECLARED EQUIVALENT: `status !== 'ready'` behaves identically in every
   // state reachable today — the hook only reports 'ready' for a non-empty
   // result or for a cache entry that was non-empty when it was stored.
-  if (items.length === 0) return placeholder;
+  if (items.length === 0) return frame(placeholder);
 
-  return (
+  return frame(
     <BeatportSlider
       config={config}
       items={items}
@@ -114,6 +157,6 @@ export function BeatportSection<T>({
       prevButtonId={prevButtonId}
       nextButtonId={nextButtonId}
       indicatorsId={indicatorsId}
-    />
+    />,
   );
 }

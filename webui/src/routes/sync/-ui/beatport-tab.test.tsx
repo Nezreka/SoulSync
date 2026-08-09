@@ -99,6 +99,17 @@ describe('the pane', () => {
     ]);
   });
 
+  it('carries BOTH pane classes, since one of them is display:none', () => {
+    // `.beatport-tab-content` is `display: none` (style.css 16993) and only
+    // `.active` makes it the flex-column scroll container it is (17000). The
+    // port emitted the id and neither class, so the pane was a plain block —
+    // and half-applying this fix, with the class but not `active`, would hide
+    // the entire tab. Both, or neither.
+    const { container } = render(<BeatportTab />);
+    const pane = container.querySelector('#beatport-rebuild-content');
+    expect(pane?.className).toBe('beatport-tab-content active');
+  });
+
   it('keeps the download-bubble div, hidden, for the vanilla to paint into', () => {
     // registerBeatportDownload writes into a top-level `let` no module can
     // reach; without this div its bubbles have nowhere to render.

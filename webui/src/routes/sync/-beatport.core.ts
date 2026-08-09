@@ -120,11 +120,48 @@ export interface BeatportSliderConfig {
    */
   loadingTitle: string;
   loadingSubtitle: string;
+  /**
+   * The heading level the placeholder/error block uses. NOT cosmetic and NOT
+   * uniform: the hero's is `h2` (index.html 2824) and the four grid sections
+   * use `h3` (2949, 2987, 3024, 3060), and `.beatport-*-loading-content h2`
+   * and `… h3` are separately sized in the stylesheet. The port rendered `h3`
+   * for all five, so the hero's placeholder was styled as a subheading.
+   */
+  loadingHeadingLevel: 'h2' | 'h3';
+  /**
+   * The section's own heading, rendered above the slider inside
+   * `.beatport-{slug}-section > .beatport-{slug}-header`.
+   *
+   * `null` for the hero ALONE, and that is the vanilla's shape rather than an
+   * omission: `#beatport-rebuild-content` goes straight into the slider
+   * container with no section wrapper and no title (2817-2819), and no
+   * `.beatport-rebuild-header/-title/-subtitle` rule exists in style.css. The
+   * other four each carry one (2937, 2974, 3012, 3049).
+   */
+  sectionHeading: { title: string; subtitle: string } | null;
 }
 
 /** Every class name a slider owns, derived from its slug in one place. */
 export function beatportSliderClasses(slug: string) {
   return {
+    /**
+     * The OUTERMOST box — the section, and its heading block. index.html wraps
+     * each grid slider as
+     * `.beatport-{slug}-section > .beatport-{slug}-header > h2.title + p.subtitle`
+     * and then the slider container (2936, 2973, 3011, 3048).
+     *
+     * All four were missing from the port, which is why every section title
+     * was gone on screen: the section carries the vertical rhythm and the
+     * header carries the title and subtitle typography. Same failure as the
+     * missing slider box — a box CSS cannot find is a box that does nothing,
+     * and no behavioural test can see it.
+     *
+     * The hero uses none of these; see BeatportSliderConfig.sectionHeading.
+     */
+    section: `beatport-${slug}-section`,
+    header: `beatport-${slug}-header`,
+    title: `beatport-${slug}-title`,
+    subtitle: `beatport-${slug}-subtitle`,
     container: `beatport-${slug}-slider-container`,
     /**
      * The MIDDLE wrapper, between the container and the track — and the one
@@ -177,6 +214,8 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     marksLoadedBeforeFetch: true,
     loadingTitle: '🎯 Loading Fresh Beatport Tracks...',
     loadingSubtitle: 'Fetching the latest music from Beatport',
+    loadingHeadingLevel: 'h2',
+    sectionHeading: null,
   },
   releases: {
     slug: 'releases',
@@ -188,6 +227,11 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     marksLoadedBeforeFetch: false,
     loadingTitle: '📀 Loading New Releases...',
     loadingSubtitle: 'Fetching the latest albums and EPs',
+    loadingHeadingLevel: 'h3',
+    sectionHeading: {
+      title: '🆕 New Releases',
+      subtitle: 'Latest albums and EPs from Beatport',
+    },
   },
   hypePicks: {
     slug: 'hype-picks',
@@ -199,6 +243,11 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     marksLoadedBeforeFetch: false,
     loadingTitle: '🔥 Loading Hype Picks...',
     loadingSubtitle: 'Fetching the hottest trending tracks',
+    loadingHeadingLevel: 'h3',
+    sectionHeading: {
+      title: '🔥 Hype Picks',
+      subtitle: 'Editor selected trending tracks from Beatport',
+    },
   },
   charts: {
     slug: 'charts',
@@ -210,6 +259,11 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     marksLoadedBeforeFetch: false,
     loadingTitle: '📊 Loading Featured Charts...',
     loadingSubtitle: 'Fetching top chart collections',
+    loadingHeadingLevel: 'h3',
+    sectionHeading: {
+      title: '🔥 Featured Charts',
+      subtitle: 'Top chart collections from Beatport creators',
+    },
   },
   dj: {
     slug: 'dj',
@@ -221,6 +275,11 @@ export const BEATPORT_SLIDERS: Readonly<Record<string, BeatportSliderConfig>> = 
     marksLoadedBeforeFetch: false,
     loadingTitle: '🎧 Loading DJ Charts...',
     loadingSubtitle: 'Fetching curated DJ selections',
+    loadingHeadingLevel: 'h3',
+    sectionHeading: {
+      title: '🎧 DJ Charts',
+      subtitle: 'Curated charts from top DJs and artists',
+    },
   },
 };
 
