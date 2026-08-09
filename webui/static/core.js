@@ -514,21 +514,17 @@ function stopBeatportDiscoveryAndSyncPolling() {
 }
 
 function resetBeatportSliderInitFlags() {
-    const rebuildSlider = document.getElementById('beatport-rebuild-slider');
-    if (rebuildSlider) rebuildSlider.dataset.initialized = 'false';
-
-    const releasesSlider = document.getElementById('beatport-releases-slider');
-    if (releasesSlider) releasesSlider.dataset.initialized = 'false';
+    // The four `dataset.initialized = 'false'` writes that stood here are gone.
+    // They targeted #beatport-{rebuild,releases,charts,dj}-slider, ids the sync
+    // flip deleted along with the page — every lookup returned null, so every
+    // write was already a no-op. Removing them is behaviour-neutral and stops
+    // four dead `getElementById` calls tripping the class-as-id guard.
+    //
+    // The state resets below are KEPT: they are plain object writes, not DOM,
+    // and the slider state objects still exist in this file.
     beatportReleasesSliderState.isInitialized = false;
-
     beatportHypePicksSliderState.isInitialized = false;
-
-    const chartsSlider = document.getElementById('beatport-charts-slider');
-    if (chartsSlider) chartsSlider.dataset.initialized = 'false';
     beatportChartsSliderState.isInitialized = false;
-
-    const djSlider = document.getElementById('beatport-dj-slider');
-    if (djSlider) djSlider.dataset.initialized = 'false';
     beatportDJSliderState.isInitialized = false;
 }
 

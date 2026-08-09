@@ -6783,3 +6783,54 @@ also true of a flip that deleted both halves. Mutation 2/2.
    worse than no entry, since it trains you to ignore the list.
 
 Edges 42 -> 40. Suite 7032/7032, lint 684/0, build clean.
+
+### POST-FLIP CI — two failures, and the second is the flip's real cost
+
+**1. `npm run check` — three unformatted files.** I had been gating on
+`oxlint --type-check src` and running `oxfmt` only on files I had just edited.
+The repo's gate is `npm run check` = `oxfmt --check src && oxlint --type-check
+src`. I was running half of it, and the half that does not check formatting.
+Two of the three had been committed unformatted by me earlier in this wave
+(388ad2dcb, f9570ec02).
+
+**A trap for anyone repeating this in WSL:** `npm run check` reports ~82 extra
+files locally that CI does not. Every one is a working-tree CRLF copy of a blob
+git stores as LF; oxfmt counts CRLF as a format issue and a fresh checkout never
+sees it. I checked all 82 individually — all artefact, none genuinely
+unformatted — and left them alone. Running `npm run fix` there would have
+rewritten 82 files CI is perfectly happy with.
+
+**2. `test_get_element_by_id_never_names_a_css_class` — 48 offenders.** This is
+the one worth reading. The guard flags `getElementById('x')` where `x` is only
+ever a CSS class, because that is a lookup that silently returns null — it was
+written after the media-scan button broke exactly that way.
+
+Deleting the sync markup took those ids out of index.html while the tokens
+survive in style.css. So 48 lookups, in the three files the flip deliberately
+KEPT, became class-as-id by the guard's definition. **This is the predicted cost
+of "delete the markup, keep the JS" arriving on schedule** — the leftover files
+are inert, but the guardrails that protect the rest of the app now see them.
+
+Split by whether the file survives, because the answer differs:
+
+- **core.js (4)** — survives, so "pending deletion" does not apply. All four
+  were in `resetBeatportSliderInitFlags`, writing `dataset.initialized = 'false'`
+  to sliders the flip deleted. Every lookup already returned null, so every
+  write was already a no-op: **removed the four DOM lines, kept the four state
+  resets.** Provably behaviour-neutral, and it takes sync-page debris out of a
+  surviving file.
+- **beatport-ui.js + sync-services.js (44)** — a new `PENDING_DELETION_FILES`
+  set, skipped by this one test, with a comment tying it to the cleanup PR.
+
+NOT added to `KNOWN_CLASS_AS_ID`, whose own comment says "shrink this list;
+never grow it" — and means it: those entries are real unfixed bugs in live
+features. Burying 44 migration artefacts among them would destroy the list's
+meaning and its ratchet. The new set is self-deleting: when the cleanup PR
+removes the files, the exclusion goes inert.
+
+**The scope discipline worth recording.** The obvious move on core.js was to
+delete `resetBeatportSliderInitFlags` outright, then `cleanupBeatportContent`
+which calls it, then the init.js call, then `beatportContentState` — which
+sync-spotify.js uses. That chain ends inside the deferred cleanup, reached by
+following a CI failure rather than by deciding to go there. Removing four dead
+lines and leaving the function was the contained answer.
