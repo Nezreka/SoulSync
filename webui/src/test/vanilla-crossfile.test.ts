@@ -52,12 +52,14 @@ const EXPECTED_EDGES = [
   'generateDownloadModalHeroSection <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'getActionButtonText <- downloads.js [sync-spotify.js]',
   'getMirroredSourceRef <- stats-automations.js [auto-sync.js]',
-  'initializeSyncPage <- init.js [sync-services.js]',
   // The four `load*` Settings edges that used to sit here are GONE, and
   // deliberately: their definitions were re-homed from beatport-ui.js into
   // settings.js, which survives, so they stopped being edges. See the rehome
   // guard below.
-  'loadSyncData <- init.js [sync-spotify.js]',
+  // `initializeSyncPage <- init.js` and `loadSyncData <- init.js` were here.
+  // The flip deleted both call sites: loadPageData's `case 'sync'` (React pages
+  // never reach it) and the unconditional bootstrap call, whose every branch
+  // looked up sync markup that no longer exists.
   'openDownloadMissingModal <- shared-helpers.js [sync-spotify.js]',
   'openYouTubeDiscoveryModal <- core.js,stats-automations.js [sync-services.js]',
   'pollMirroredPipelineStatus <- stats-automations.js [auto-sync.js]',
@@ -80,6 +82,19 @@ const EXPECTED_EDGES = [
   'updateYouTubeModalButtons <- downloads.js,stats-automations.js [sync-services.js]',
 ];
 
+/**
+ * Comments are NOT calls.
+ *
+ * Without this, a comment saying "initializeSyncPage() was here" counts as a
+ * call and keeps a resolved edge in the inventory forever — which is exactly
+ * what happened when the flip removed that call and left a note in its place.
+ * An edge that cannot be retired is worse than no entry: it trains you to
+ * ignore the list.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+}
+
 function computeEdges(): string[] {
   const dir = resolve(process.cwd(), 'static');
   const all = readdirSync(dir).filter((f) => f.endsWith('.js'));
@@ -96,7 +111,7 @@ function computeEdges(): string[] {
 
   const callers = new Map<string, Set<string>>();
   for (const file of survivors) {
-    const source = readFileSync(resolve(dir, file), 'utf8');
+    const source = stripComments(readFileSync(resolve(dir, file), 'utf8'));
     for (const m of source.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
       if (!definedIn.has(m[1])) continue;
       if (!callers.has(m[1])) callers.set(m[1], new Set());
@@ -160,16 +175,16 @@ describe('calls that cross out of the files the sync port deletes', () => {
     }
   });
 
-  it('no inline handler in surviving markup calls into a doomed file', () => {
+  it('no inline handler in index.html calls into a doomed file', () => {
     // THE BLIND SPOT THIS GUARD HAD. computeEdges only reads `static/*.js`, so
     // a function reached ONLY from an `onclick`/`onchange` attribute was
     // invisible to it — which is exactly how `selectPlexLibrary` and its three
-    // siblings escaped: they are called from index.html 4392/4456/4465/4492 and
-    // from nowhere else, so the inventory above never listed them and the flip
-    // would have deleted them silently.
+    // siblings escaped: index.html 4392/4456/4465/4492 were their only callers.
     //
-    // Handlers inside the SYNC PAGE are fine: that markup is deleted in the
-    // same commit as the files. Anything outside it is an edge that snaps.
+    // This once carved out the sync page's own markup, since handlers inside it
+    // would die with it. The flip has now deleted that markup, so the carve-out
+    // is gone and the rule is simply: no handler anywhere may call into a file
+    // the port deletes.
     const dir = resolve(process.cwd(), 'static');
     const all = readdirSync(dir).filter((f) => f.endsWith('.js'));
     const doomed = new Map<string, string>();
@@ -182,16 +197,8 @@ describe('calls that cross out of the files the sync port deletes', () => {
     }
 
     const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
-    const lines = html.split('\n');
-    // The sync page's own markup, which goes when the files go.
-    const syncStart = lines.findIndex((l) => l.includes('<div class="page" id="sync-page"'));
-    const syncEnd = lines.findIndex((l) => l.includes('<div class="page" id="search-page"'));
-    expect(syncStart, 'sync-page markup not found').toBeGreaterThan(-1);
-    expect(syncEnd).toBeGreaterThan(syncStart);
-
     const offenders: string[] = [];
-    lines.forEach((line, i) => {
-      if (i >= syncStart && i < syncEnd) return;
+    html.split('\n').forEach((line, i) => {
       for (const m of line.matchAll(/\bon[a-z]+="\s*([A-Za-z_$][\w$]*)\s*\(/g)) {
         const home = doomed.get(m[1]);
         if (home) offenders.push(`${m[1]}() at index.html:${i + 1} [${home}]`);
@@ -200,7 +207,7 @@ describe('calls that cross out of the files the sync port deletes', () => {
 
     expect(
       offenders,
-      'An inline handler outside the sync page calls a function the flip deletes.\n' +
+      'An inline handler calls a function the flip deletes.\n' +
         'Re-home the definition before deleting its file, or the attribute throws\n' +
         'ReferenceError the first time a user touches that control.',
     ).toEqual([]);

@@ -6726,3 +6726,60 @@ pure deletion.
 
 Nothing is deleted. 42 edges: 7 resolved-by-deletion-of-caller, 34 needing a
 rehome or a decision, 1 done.
+
+### S4 — THE FLIP. Route + markup, and NOT the 21,000 lines.
+
+Split from the deletion deliberately. The React sync page never depended on the
+JS files going away; only the MARKUP had to go, because leaving it duplicates
+every id. So this ships the page and leaves the cleanup to its own PR — the
+part that produced every bug this wave stops blocking the part that produces the
+value.
+
+**What went:**
+- `index.html` 2226-3318, the whole `#sync-page` (1,093 lines, 314 balanced divs)
+- `index.html` 6997-7027, the Genre Browser Modal — found by the new id guard,
+  see below
+- init.js: `loadPageData`'s `case 'sync'` and the UNCONDITIONAL bootstrap
+  `initializeSyncPage()` (2885). That one ran on every page load, not just sync.
+
+**What stayed, and why it is safe:** all seven JS files. Their four
+`DOMContentLoaded` handlers were read individually — `initializeGenreBrowserModal`,
+the two ListenBrainz sub-tab binders, the Last.fm and SoulSync refresh binders —
+and every one null-guards (`if (!btn) return`). With the markup gone they attach
+nothing. The card painters do the same: `updateYouTubeCardPhase` and its four
+twins open `if (!state || !state.cardElement) return`, and that state is only
+populated by the vanilla page that no longer renders.
+
+`initializeSyncPage` had one non-sync job worth naming: `initializeLiveLogViewer()`,
+which the comment there says is the ONLY thing that restarts log polling after
+`loadPageData` stops it. It targets `#sync-log-area` — which React's sidebar now
+renders, with its own /api/logs poller (sync-sidebar.tsx). So the vanilla half
+is not merely inert, it would have been a second writer to the same textarea.
+
+**LIVE BUG #11, caught by a guard written for this commit.** There was no
+id-uniqueness test — an earlier note in this dossier referred to one that did
+not exist. Writing it turned up three ids living in BOTH index.html and React:
+`genre-browser-modal`, `genre-browser-search`, `genre-browser-genres-grid`. The
+vanilla Genre Browser Modal sits at index.html 6998, OUTSIDE `#sync-page`, so
+deleting the page markup did not take it. `getElementById` returns document
+order, so every one of beatport-ui.js's ten lookups would have addressed the
+dead copy. Deleted; its only entry point is `#browse-by-genre-btn`, which only
+React renders now.
+
+The guard asserts three things, not one: no shared ids, the vanilla markup is
+actually gone, AND React still renders those ids — because "no collisions" is
+also true of a flip that deleted both halves. Mutation 2/2.
+
+**Three test-suite failures, all the world changing correctly:**
+1. `-sync.shell.test.ts` sliced `index.html` lines 2225-3318 to diff the tab
+   table against. Those lines are gone, so five assertions matched an empty
+   string. Repointed at `__fixtures__/-vanilla-sync-markup.html`, the same
+   choice discover made: these are DIFFERENTIAL tests, and freezing the answers
+   as literals would leave them asserting the table equals itself.
+2. The edge inventory lost `loadSyncData`. Retired deliberately.
+3. `initializeSyncPage` did NOT retire — because the guard's call regex matched
+   the name inside the comment left where the call had been. **Comments are not
+   calls**; `computeEdges` now strips them. An edge that cannot be retired is
+   worse than no entry, since it trains you to ignore the list.
+
+Edges 42 -> 40. Suite 7032/7032, lint 684/0, build clean.

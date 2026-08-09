@@ -1,6 +1,7 @@
 /**
  * Differential tests for the sync shell's pure core, against the tab markup at
- * index.html 2249-2295 and the header at 2237-2241.
+ * index.html 2249-2295 and the header at 2237-2241 — now preserved in
+ * `__fixtures__/-vanilla-sync-markup.html`, since the flip deleted the original.
  */
 
 import { readFileSync } from 'node:fs';
@@ -39,8 +40,22 @@ describe('normalizeSyncTab', () => {
 });
 
 describe('the tab table matches the markup it was transcribed from', () => {
-  const HTML = readFileSync(resolve(__dirname, '../../../index.html'), 'utf8');
-  const SHELL = HTML.split('\n').slice(2225, 3318).join('\n');
+  /**
+   * The vanilla markup, kept as a FIXTURE now that the flip has deleted it from
+   * index.html. This slice used to read `index.html` lines 2225-3318 directly;
+   * once those lines went, every assertion here matched an empty string and
+   * five tests failed at once.
+   *
+   * Keeping the fixture rather than freezing the expectations as literals is
+   * the same choice discover made (`__fixtures__/-vanilla-discover.js`), and
+   * for the same reason: these are DIFFERENTIAL tests. Their value is that two
+   * independently-written things agree. Transcribing the answers into the test
+   * would leave it asserting that the table equals itself.
+   */
+  const SHELL = readFileSync(
+    resolve(__dirname, '__fixtures__/-vanilla-sync-markup.html'),
+    'utf8',
+  );
 
   it('has the same fifteen ids, in the same order', () => {
     const inMarkup = [

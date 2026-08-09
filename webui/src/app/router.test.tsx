@@ -90,17 +90,18 @@ describe('createAppRouter', () => {
   });
 
   it('routes non-migrated paths through the legacy fallback handler', async () => {
-    // /sync, because /search is React now. Any still-legacy path does.
+    // /settings, because /sync is React now (it was the example here until the
+    // sync flip, and /search before that). Any still-legacy path does.
     window.SoulSyncWebShellBridge = createShellBridge();
 
     const queryClient = createTestQueryClient();
-    const history = createMemoryHistory({ initialEntries: ['/sync'] });
+    const history = createMemoryHistory({ initialEntries: ['/settings'] });
     const router = createAppRouter({ history, queryClient });
 
     render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/sync');
+      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/settings');
     });
   });
 
@@ -144,9 +145,9 @@ describe('createAppRouter', () => {
 
   it('redirects the root route to the profile home page', async () => {
     // A LEGACY home page, so the assertion is about the redirect reaching the
-    // legacy handler — /search is React now and would render in place instead.
+    // legacy handler — sync is React now and would render in place instead.
     window.SoulSyncWebShellBridge = createShellBridge({
-      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'sync'),
+      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'settings'),
     });
 
     const queryClient = createTestQueryClient();
@@ -156,9 +157,9 @@ describe('createAppRouter', () => {
     render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/sync');
+      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/settings');
     });
 
-    expect(history.location.pathname).toBe('/sync');
+    expect(history.location.pathname).toBe('/settings');
   });
 });
