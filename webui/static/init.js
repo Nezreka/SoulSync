@@ -2884,7 +2884,13 @@ function initApp() {
     initializeMobileNavigation();
     initializeMediaPlayer();
     initExpandedPlayer();
-    initializeSyncPage();
+    // initializeSyncPage() was here. It ran on EVERY page load, not just sync,
+    // and every branch inside it looks up sync markup that no longer exists —
+    // the Beatport tab button, #beatport-clear-btn, the tab strip. Its one
+    // cross-cutting job was initializeLiveLogViewer(), which targets
+    // #sync-log-area; the React sidebar renders that textarea and drives its
+    // own /api/logs poller (sync-sidebar.tsx), so the vanilla half is now a
+    // no-op that would only race it.
     initializeWatchlist();
     if (typeof initializeSpotifyAuthCompletionListener === 'function') {
         initializeSpotifyAuthCompletionListener();
@@ -3296,10 +3302,8 @@ async function loadPageData(pageId) {
             // grid — and loadPageData only runs for legacy-kind pages.
             // loadDashboardData (and its three leaked intervals) is deleted;
             // every card hydrates itself on mount.
-            case 'sync':
-                initializeSyncPage();
-                await loadSyncData();
-                break;
+            // No 'sync' case: React owns /sync, and loadPageData only runs for
+            // legacy-kind pages, so this could never fire again.
             // No 'search' case: React owns /search — BOTH panels, enhanced and
             // basic — and loadPageData only runs for legacy-kind pages, so this
             // could never fire again. search.js, which used to bind the basic

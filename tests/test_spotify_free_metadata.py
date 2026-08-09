@@ -503,3 +503,192 @@ def test_prefer_free_inert_when_package_not_installed(monkeypatch):
     monkeypatch.setattr(SpotifyClient, '_free_installed', lambda self: False)
     assert c.search_tracks('q', limit=5, prefer_free=True) == ['ITUNES']
     c._free_meta_client.search_tracks.assert_not_called()
+
+
+# ── exact-source lookups must serve via free (the wrong-tracklist bug) ────────
+#
+# The exact-source metadata layer (core/metadata/album_tracks.py's source chain,
+# the strict discography providers) calls the entity lookups with
+# allow_fallback=False — "this Spotify id, this catalog, don't switch sources."
+# The free branches used to be gated on allow_fallback, so a 'Spotify (no auth)'
+# user got None from the spotify hop and the chain fell through to Deezer/iTunes
+# WITH THE SAME SPOTIFY ID — an id-space collision that served a completely
+# unrelated release's tracklist (Katy Perry EP → 10-track trance compilation).
+# Free IS Spotify (same catalog, same base-62 ids): it must serve regardless of
+# allow_fallback.
+
+def _entity_client(fake_free):
+    c = SpotifyClient.__new__(SpotifyClient)
+    c._free_meta_client = fake_free
+    fake_cache = type('C', (), {
+        'get_entity': lambda *a, **k: None,
+        'store_entity': lambda *a, **k: None,
+    })()
+    ctx = (
+        patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=False),
+        patch('core.spotify_client.config_manager'),
+        patch('core.spotify_client._is_globally_rate_limited', return_value=False),
+        patch('core.spotify_client.get_metadata_cache', return_value=fake_cache),
+        patch.object(_sfm, 'spotify_free_installed', return_value=True),
+    )
+    return c, ctx
+
+
+def _enter_all(ctx):
+    entered = [c.__enter__() for c in ctx]
+    cm = entered[1]
+    cm.get_spotify_config.return_value = {}
+    cm.get.side_effect = lambda k, d=None: True if k == 'metadata.spotify_free' else d
+    return entered
+
+
+def _exit_all(ctx):
+    for c in reversed(ctx):
+        c.__exit__(None, None, None)
+
+
+def test_get_album_exact_source_serves_via_free():
+    free = SpotifyFreeMetadataClient()
+    free.get_album = lambda album_id: {'id': album_id, 'name': "WOMAN'S WORLD",
+                                       'tracks': {'items': [{'name': "WOMAN'S WORLD"}]}}
+    c, ctx = _entity_client(free)
+    _enter_all(ctx)
+    try:
+        album = c.get_album('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert album is not None and album['name'] == "WOMAN'S WORLD"
+
+
+def test_get_album_tracks_exact_source_serves_via_free():
+    free = SpotifyFreeMetadataClient()
+    free.get_album_tracks = lambda album_id: {'items': [{'name': "WOMAN'S WORLD"}]}
+    c, ctx = _entity_client(free)
+    _enter_all(ctx)
+    try:
+        tracks = c.get_album_tracks('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert tracks is not None and tracks['items'][0]['name'] == "WOMAN'S WORLD"
+
+
+def test_get_album_no_free_no_auth_exact_source_still_none():
+    """Plain-spotify user with no token: exact-source lookup stays None — the
+    ungating must not conjure data when free isn't selected."""
+    free = SpotifyFreeMetadataClient()
+    free.get_album = lambda album_id: {'id': album_id, 'name': 'SHOULD NOT SERVE'}
+    c, ctx = _entity_client(free)
+    entered = _enter_all(ctx)
+    entered[1].get.side_effect = lambda k, d=None: d  # spotify_free NOT selected
+    try:
+        album = c.get_album('4iVb0hSCVvBLKeCTLlBRq6', allow_fallback=False)
+    finally:
+        _exit_all(ctx)
+    assert album is None
+
+
+# ── the vanished singles (artist discography sections) ───────────────────────
+
+def test_get_artist_albums_list_fetches_singles_and_retags_types():
+    """One upstream call serves the whole listing: the raw discography payload
+    already carries id/name/date/art/count for all three sections. The old
+    path (SpotipyFree.artist_albums) re-scraped every release individually —
+    minutes for a big artist — and only ever fetched the albums section with
+    everything typed 'album'."""
+    def _release(rid, name, year=2024, count=10):
+        return {'id': rid, 'uri': f'spotify:album:{rid}', 'name': name,
+                'date': {'year': year},
+                'coverArt': {'sources': [{'url': f'https://img/{rid}.jpg'}]},
+                'tracks': {'totalCount': count}}
+
+    discog = {
+        'albums': {'items': [{'releases': {'items': [_release('alb1', 'Album One')]}}]},
+        'singles': {'items': [{'releases': {'items': [_release('sgl1', "WOMAN'S WORLD", count=1)]}}]},
+        'compilations': {'items': []},
+    }
+    client = SpotifyFreeMetadataClient()
+    client._fetch_discography_sections = lambda artist_id: discog
+    out = client.get_artist_albums_list('artist123')
+
+    by_id = {a['id']: a for a in out}
+    assert by_id['sgl1']['album_type'] == 'single'   # the vanished single, correctly typed
+    assert by_id['alb1']['album_type'] == 'album'
+    assert by_id['sgl1']['total_tracks'] == 1
+    assert by_id['alb1']['release_date'] == '2024'
+    assert by_id['alb1']['images'][0]['url'] == 'https://img/alb1.jpg'
+
+
+def test_get_artist_albums_list_survives_upstream_failure():
+    client = SpotifyFreeMetadataClient()
+    def _boom(artist_id):
+        raise RuntimeError('scrape died')
+    client._fetch_discography_sections = _boom
+    assert client.get_artist_albums_list('artist123') == []
+
+
+# ── explicit-Spotify requests engage free without the persistent opt-in ──────
+#
+# Boulder's rule: clicking Spotify IS asking for Spotify. A user with
+# metadata source = Deezer and no working auth used to have their 'spotify'
+# searches silently served by the iTunes fallback, and artist pages had no
+# Spotify catalog at all. Interactive endpoints that explicitly target
+# spotify now set g._spotify_free_ok on the Flask request; _free_wanted
+# honors it FOR THAT REQUEST ONLY. No request context (enrichment, watchlist,
+# background threads) → unchanged opt-in behavior.
+
+def _flask_ctx(flag):
+    from flask import Flask, g
+    app = Flask(__name__)
+    ctx = app.test_request_context('/')
+    ctx.push()
+    if flag:
+        g._spotify_free_ok = True
+    return ctx
+
+
+def test_request_scoped_opt_in_engages_free_wanted(monkeypatch):
+    from core.spotify_client import SpotifyClient
+    c = SpotifyClient.__new__(SpotifyClient)
+    with patch('core.spotify_client.config_manager') as cm:
+        cm.get.side_effect = lambda k, d=None: d  # spotify_free NOT selected
+        assert c._free_wanted() is False          # outside any request
+        ctx = _flask_ctx(flag=False)
+        try:
+            assert c._free_wanted() is False      # request without the marker
+        finally:
+            ctx.pop()
+        ctx = _flask_ctx(flag=True)
+        try:
+            assert c._free_wanted() is True       # explicitly-Spotify request
+        finally:
+            ctx.pop()
+
+
+def test_request_scoped_opt_in_makes_metadata_available(monkeypatch):
+    """The whole downstream stack keys off is_spotify_metadata_available —
+    with the request marker set, the resolver hands out the client and the
+    strict discography serves via free instead of 'provider is unavailable'."""
+    from core.spotify_client import SpotifyClient
+    c = SpotifyClient.__new__(SpotifyClient)
+    ctx = _flask_ctx(flag=True)
+    try:
+        with patch.object(SpotifyClient, 'is_spotify_authenticated', return_value=False), \
+             patch('core.spotify_client.config_manager') as cm, \
+             patch.object(_sfm, 'spotify_free_installed', return_value=True):
+            cm.get.side_effect = lambda k, d=None: d  # NOT selected persistently
+            assert c.is_spotify_metadata_available() is True
+    finally:
+        ctx.pop()
+
+
+def test_endpoint_marker_only_fires_for_spotify():
+    import web_server
+    from flask import g
+    ctx = _flask_ctx(flag=False)
+    try:
+        web_server._mark_request_free_ok_for_spotify('deezer')
+        assert not getattr(g, '_spotify_free_ok', False)
+        web_server._mark_request_free_ok_for_spotify('spotify')
+        assert g._spotify_free_ok is True
+    finally:
+        ctx.pop()

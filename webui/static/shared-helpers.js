@@ -4700,3 +4700,33 @@ function cleanArtistName(artistName) {
 
     return cleaned.trim();
 }
+
+/**
+ * formatDuration — milliseconds to M:SS.
+ *
+ * THE ONE DEFINITION. There were three, all top-level `function` declarations
+ * in classic scripts, so the last script loaded silently won and the other two
+ * were dead code:
+ *
+ *   sync-spotify.js  1967  (loads 8372)  no guard  -> undefined gives 'NaN:NaN'
+ *   wishlist-tools.js 1575 (loads 8376)  '--:--'
+ *   sync-services.js 10062 (loads 8382)  '0:00'    <- the winner, and therefore
+ *                                                     the ONLY one that ever ran
+ *
+ * This is sync-services' behaviour transcribed exactly, so nothing on screen
+ * changes. It is pinned HERE, in a file that survives, because the two sync
+ * files are deleted when the sync page flips to React — and without this the
+ * survivor would have become wishlist-tools', turning every unknown duration
+ * from '0:00' into '--:--' across the downloads page, the wishlist and stats.
+ * None of those is the sync page, and none of it would have been intended.
+ *
+ * Whether '--:--' is the better answer for an unknown duration is a fair
+ * question and a separate one. Changing it here would be smuggling a behaviour
+ * change into a refactor.
+ */
+function formatDuration(durationMs) {
+    if (!durationMs) return '0:00';
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}

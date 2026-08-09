@@ -398,16 +398,22 @@ def _single_source_response(
     """Run a single-source search — bypasses the fan-out."""
     client, available = resolve_client(requested_source, deps)
 
-    # Explicit Spotify pick that the normal gate rejected (no auth, and 'Spotify
-    # Free' isn't the chosen metadata source). If the no-creds SpotipyFree package
-    # is installed, honor the deliberate selection via the free source instead of
-    # returning nothing — the explicit per-search pick is the user's consent, and
-    # this stays out of every background/fan-out path (which never reaches here).
+    # Explicit Spotify pick without working auth: honor the deliberate selection
+    # via the no-creds free source — the per-search pick is the user's consent,
+    # and this stays out of every background/fan-out path (which never reaches
+    # here). Keyed on AUTH STATE, not on resolve_client failing: the request-
+    # scoped free opt-in can make the resolver hand the client back for this
+    # request, but the actual searches run in ThreadPoolExecutor workers where
+    # the Flask request context (and thus that opt-in) is invisible — so free
+    # must ride the EXPLICIT prefer_free parameter into the workers. Relying on
+    # `not client` here once silently served the Deezer fallback under the
+    # Spotify label the moment the resolver got smarter.
     prefer_free = False
-    if not client and requested_source == 'spotify' and deps.spotify_client:
+    if requested_source == 'spotify' and deps.spotify_client:
         try:
-            if deps.spotify_client._free_installed():
-                client = deps.spotify_client
+            if (deps.spotify_client._free_installed()
+                    and not deps.spotify_client.is_spotify_authenticated()):
+                client = client or deps.spotify_client
                 prefer_free = True
         except Exception as e:
             logger.debug(f"Spotify free-fallback availability check failed: {e}")
@@ -612,18 +618,22 @@ def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> It
     yield json.dumps({'type': 'done'}) + '\n'
 
 
-def stream_metadata_source(source_name: str, query: str, client) -> Iterator[str]:
+def stream_metadata_source(source_name: str, query: str, client,
+                           prefer_free: bool = False) -> Iterator[str]:
     """Fan three search-kinds out and yield each as it lands.
 
-    Caller is responsible for resolving and validating the client.
+    Caller is responsible for resolving and validating the client, and for
+    passing prefer_free for an explicit unauthed Spotify pick — the workers
+    run outside the Flask request context, so free can only ride this
+    explicit parameter (same rule as run_enhanced_search's single-source path).
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
-            executor.submit(sources.search_kind, client, query, 'artists', source_name): 'artists',
-            executor.submit(sources.search_kind, client, query, 'albums', source_name): 'albums',
-            executor.submit(sources.search_kind, client, query, 'tracks', source_name): 'tracks',
+            executor.submit(sources.search_kind, client, query, 'artists', source_name, prefer_free): 'artists',
+            executor.submit(sources.search_kind, client, query, 'albums', source_name, prefer_free): 'albums',
+            executor.submit(sources.search_kind, client, query, 'tracks', source_name, prefer_free): 'tracks',
         }
         for future in as_completed(futures):
             kind = futures[future]

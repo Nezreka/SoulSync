@@ -65,8 +65,10 @@ describe('shellRouteManifest', () => {
     expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
     expect(getShellRouteByPageId('playlist-explorer')?.kind).toBe('react');
     expect(getShellRouteByPageId('tools')?.kind).toBe('react');
+    expect(getShellRouteByPageId('sync')?.kind).toBe('react');
     expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
       'dashboard',
+      'sync',
       'search',
       'discover',
       'playlist-explorer',
@@ -82,13 +84,18 @@ describe('shellRouteManifest', () => {
       'stats',
       'issues',
     ]);
-    // The dashboard flipped to React (the 12th and final music page).
+    // Sync was the 13th and last big music page; nothing in the music nav is
+    // legacy now. `settings` stands in as a route that genuinely still is.
     expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(false);
-    expect(legacyShellRoutes.some((route) => route.pageId === 'sync')).toBe(true);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'sync')).toBe(false);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'settings')).toBe(true);
   });
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
-    expect(resolveLegacyShellPageFromPath('/sync')).toBe('sync');
+    expect(resolveLegacyShellPageFromPath('/settings')).toBe('settings');
+    // React owns /sync now — resolving it as legacy would show the vanilla
+    // page underneath the React one.
+    expect(resolveLegacyShellPageFromPath('/sync')).toBeNull();
     // React owns /tools and /dashboard now.
     expect(resolveLegacyShellPageFromPath('/tools')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/dashboard')).toBeNull();

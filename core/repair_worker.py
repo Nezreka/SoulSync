@@ -3378,6 +3378,25 @@ class RepairWorker:
                 'library_v2_emptied_track_id': emptied_track,
             }
 
+        # #1132: an ambiguous fingerprint has no single answer — its
+        # `acoustid_title`/`acoustid_artist` are one arbitrary pick from several
+        # equally-scored recordings. Both the retag and relocate paths below
+        # WRITE those values (into the DB, and into the file's tags), which is
+        # how a wrong suggestion becomes wrong data. Deleting or re-downloading
+        # is still fine: those act on "this file is wrong", which the scan did
+        # establish.
+        if details.get('ambiguous') and fix_action in ('retag', 'relocate'):
+            cands = details.get('candidates') or []
+            return {
+                'success': False,
+                'error': (
+                    'This fingerprint matches several different recordings, so there '
+                    'is no single correct title to apply'
+                    + (' (%s)' % '; '.join(cands[:3]) if cands else '')
+                    + '. Pick the right track manually, or use Re-download / Delete.'
+                ),
+            }
+
         if fix_action == 'delete':
             # Delete file + DB record
             if file_path:

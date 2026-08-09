@@ -1127,6 +1127,13 @@ async function loadLogs() {
 }
 
 function updateLogsFromData(data) {
+    // Mirror to the React sync page. Same `ss:` seam as ss:dashboard-activity:
+    // dispatched inside the HANDLER, not at the socket binding, so both
+    // transports that feed this function — the `tool:logs` push (core.js) and
+    // the /api/logs poll below — reach React. Before the shape guard, because
+    // the React side applies the same check itself.
+    window.dispatchEvent(new CustomEvent('ss:sync-logs', { detail: data }));
+
     if (!data.logs || !Array.isArray(data.logs)) return;
     const logArea = document.getElementById('sync-log-area');
     if (!logArea) return;

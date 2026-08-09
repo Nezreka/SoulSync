@@ -1,34 +1,34 @@
 {
   "active_media_server": "plex",
   "spotify": {
-    "client_id": "SpotifyClientID",
-    "client_secret": "SpotifyClientSecret",
+    "client_id": "",
+    "client_secret": "",
     "redirect_uri": "http://127.0.0.1:8888/callback"
   },
   "tidal": {
-    "client_id": "TidalClientID",
-    "client_secret": "TidalClientSecret",
+    "client_id": "",
+    "client_secret": "",
     "redirect_uri": "http://127.0.0.1:8889/tidal/callback"
   },
   "plex": {
-    "base_url": "http://192.168.86.36:32400",
-    "token": "PLEX_API_TOKEN",
+    "base_url": "",
+    "token": "",
     "auto_detect": true
   },
   "jellyfin": {
-    "base_url": "http://localhost:8096",
-    "api_key": "JELLYFIN_API_KEY",
+    "base_url": "",
+    "api_key": "",
     "auto_detect": true
   },
   "navidrome": {
-    "base_url": "http://localhost:4533",
-    "username": "NAVIDROME_USERNAME",
-    "password": "NAVIDROME_PASSWORD",
+    "base_url": "",
+    "username": "",
+    "password": "",
     "auto_detect": true
   },
   "soulseek": {
     "slskd_url": "http://host.docker.internal:5030",
-    "api_key": "SoulseekAPIKey",
+    "api_key": "",
     "download_path": "/app/downloads",
     "transfer_path": "/app/Transfer",
     "search_timeout": 60,
@@ -71,7 +71,7 @@
     "create_backup": true
   },
   "listenbrainz": {
-    "token": "LISTENBRAINZ_TOKEN"
+    "token": ""
   },
   "features": {
     "_comment": "library_v2 is retained only for config compatibility. Library V2 is now the non-disableable native catalogue and repair engine; false is ignored with a migration warning.",

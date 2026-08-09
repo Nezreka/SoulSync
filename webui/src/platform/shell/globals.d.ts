@@ -202,6 +202,20 @@ declare global {
       contextType?: string,
     ) => void | Promise<void>;
     /**
+     * shared-helpers.js 3390 — registers a Beatport download so its bubble
+     * appears in `#beatport-downloads-section`.
+     *
+     * It writes into `beatportDownloadBubbles`, a top-level `let` in core.js
+     * (555), so no module can maintain that registry itself — the React
+     * Beatport tab must call this and must keep the section div for it to
+     * render into.
+     */
+    registerBeatportDownload?: (
+      chartName: string,
+      chartImage: string,
+      virtualPlaylistId: string,
+    ) => void;
+    /**
      * core.js — shows the modal of an already-active download process.
      *
      * `activeDownloadProcesses` is a top-level `let` in a classic script, so it
@@ -210,6 +224,52 @@ declare global {
      * down, the fetch fails and the modal the user already had would never come
      * back. Returns true when a modal was shown.
      */
+    /**
+     * THE app-wide download flow for an ACCOUNT playlist — sync-spotify.js
+     * 2193. Twelve call sites across both worlds; the Spotify and Deezer-ARL
+     * tabs hand off to it rather than reimplementing any of it.
+     *
+     * It reads the playlist out of the script-scoped `spotifyPlaylists` array,
+     * which is why an ARL playlist must be shimmed into that array first
+     * (sync-services.js 2646-2654) — see arlShimRow in -sync.accounts.ts.
+     */
+    openDownloadMissingModal?: (playlistId: string) => Promise<void> | void;
+    /**
+     * core.js — seed `spotifyPlaylists` so openDownloadMissingModal can find a
+     * playlist React rendered. That array is a top-level `let` (core.js:33), so
+     * a module cannot push to it; this is the same bridge shape as
+     * startDiscoverVirtualSync, which the discover port added for this exact
+     * trap. Idempotent by id.
+     */
+    registerSyncAccountPlaylist?: (row: {
+      id: string;
+      name?: string;
+      track_count?: number;
+      image_url?: string;
+      owner?: string;
+    }) => void;
+    /**
+     * The account sync engine's two card writers (downloads.js 4139 / 3969).
+     * The Deezer-ARL tab calls BOTH on load for any playlist the backend
+     * reports mid-sync (sync-services.js 2473-2474), which is how a sync
+     * started before the page loaded keeps painting.
+     *
+     * They write `#progress-<id>` and the card's status/action nodes directly,
+     * so the React card must render those ids and then leave them alone.
+     */
+    updateCardToSyncing?: (playlistId: string, percent: number, progress?: unknown) => void;
+    startSyncPolling?: (playlistId: string) => void;
+    /**
+     * The generic engine entry (misnamed ForTidal) that tidal/qobuz/deezer/
+     * spotify-public/itunes use — sync-services.js 1312. Unlike the YouTube
+     * one it takes options and hydrates the organize preference (1494).
+     */
+    openDownloadMissingModalForTidal?: (
+      virtualPlaylistId: string,
+      playlistName: string,
+      spotifyTracks: unknown[],
+      options?: { forcePlaylistFolder?: boolean },
+    ) => Promise<void> | void;
     /**
      * downloads.js:429 — the shared download-missing modal, YouTube-track
      * flavour. Discover's mixes, recent/seasonal/cache albums and the playlist
@@ -241,6 +301,53 @@ declare global {
     ) => void;
     removeDiscoverDownload?: (playlistId: string) => void;
     updateDiscoverDownloadBar?: () => void;
+    /**
+     * shared-helpers.js — the per-playlist quality-profile <select>. The
+     * Auto-Sync board renders it through the same `typeof === 'function'`
+     * guard the vanilla uses (auto-sync.js 1927-1929), so an absent global
+     * simply yields no select. `compact` is the third argument.
+     */
+    /**
+     * stats-automations.js 4154-4186 — the trigger-label formatter. The port
+     * reimplements it; this is consulted only for the block-definition branch
+     * it cannot reproduce. See autoSyncFormatTrigger.
+     */
+    _autoFormatTrigger?: (type: string, config: unknown) => string;
+    /**
+     * downloads.js — runs a mirrored playlist through the pipeline engine.
+     * The engine stays vanilla for this port, so Auto-Sync's 'Run now' calls
+     * across to it (auto-sync.js 2336).
+     */
+    runMirroredPlaylistPipeline?: (
+      playlistId: number,
+      playlistName: string,
+    ) => Promise<void> | void;
+    /**
+     * manual-library-match.js — the Library Match tool. Stays vanilla: its
+     * file is untouched by the sync flip (index.html header button, 2239).
+     */
+    openManualLibraryMatchTool?: () => void;
+    /** wishlist-tools.js — the Sync History modal (index.html 2240). */
+    openSyncHistoryModal?: () => void;
+    /**
+     * origin-history.js — the Download Origins modal. The sync page passes the
+     * literal 'playlist'; the modal is shared and filters on it (2241).
+     */
+    openDownloadOriginsModal?: (scope: string) => void;
+    playlistQualityProfileSelectHtml?: (
+      playlistId: string | number | undefined,
+      source: string | undefined,
+      compact?: boolean,
+    ) => string;
+    /**
+     * shared-helpers.js — fills those selects with the real profile list after
+     * the markup lands (auto-sync.js 1089-1096).
+     */
+    hydratePlaylistQualityProfileSelects?: (
+      playlistId: string | number | undefined,
+      source: string | undefined,
+      currentProfileId?: string | number | null,
+    ) => Promise<void> | void;
     hydrateDiscoverDownloadsFromSnapshot?: () => Promise<void>;
     /** core.js bridge: one discover download's process record, or null. */
     discoverDownloadProcess?: (
@@ -515,7 +622,10 @@ declare global {
      * - openToolHelpModal reads TOOL_HELP_CONTENT and drives #tool-help-modal,
      *   which sits outside the tools region in index.html
      * - openDiscoveryPoolModal is in stats-automations.js and is also opened
-     *   from the sync page's per-playlist menu
+     *   from the sync page's per-playlist menu. Its Wing It twin
+     *   (openWingItPoolModal) is sync-page-only but lives in the same file and
+     *   shares the whole fix/rematch flow, so it is adopted the same way — the
+     *   React sync tab OPENS both; the flip must not delete either.
      * - openManualLibraryMatchTool is a self-contained file also opened from
      *   the sync-history markup, so it cannot move with this page
      * - openConfigExportModal is a self-contained IIFE covering BOTH sides
@@ -527,6 +637,7 @@ declare global {
      */
     openToolHelpModal?: (toolId: string) => void;
     openDiscoveryPoolModal?: (playlistId?: string | null) => void;
+    openWingItPoolModal?: (playlistId?: string | null) => void;
     openManualLibraryMatchTool?: (prefill?: string) => void;
     openConfigExportModal?: () => void;
     openMetadataCacheModal?: () => void;
@@ -602,6 +713,18 @@ declare global {
     showLaunchPinScreen?: () => void;
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
+
+    /* ── The sync page's download-engine interface (downloads.js / core.js) ──
+     * The engine stays vanilla across the flip; the React page injects these
+     * as a typed object rather than reaching for them at each call site.
+     * `isPlaylistSyncing` and `getSyncAccountPlaylists` are ACCESSORS added for
+     * the port — `activeSyncPollers` and `spotifyPlaylists` are top-level
+     * `let`s, which create no window property at all. */
+    startPlaylistSync?: (playlistId: string) => Promise<void> | void;
+    isPlaylistSyncing?: (playlistId: string) => boolean;
+    disablePlaylistSelection?: (disabled: boolean) => void;
+    updateRefreshButtonState?: () => void;
+    getSyncAccountPlaylists?: () => { id: string | number; name?: string }[];
   }
 }
 
