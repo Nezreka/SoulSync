@@ -124,84 +124,94 @@ export function BeatportSlider<T>({
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* index.html 2832-2837: the two buttons sit inside a slider-nav
-          wrapper, which is what positions them. Rendering them bare loses the
-          layout silently — CSS has no way to complain about a missing box. */}
-      <div className={classes.nav}>
-        <button
-          type="button"
-          id={prevButtonId}
-          className={`${classes.navButton} beatport-${config.slug}-prev-btn`}
-          onClick={(event) => {
-            // 197-198: the slide itself is click-to-open, so paging must not
-            // reach it.
-            event.preventDefault();
-            event.stopPropagation();
-            goTo(currentSlide - 1);
-          }}
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          id={nextButtonId}
-          className={`${classes.navButton} beatport-${config.slug}-next-btn`}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            goTo(currentSlide + 1);
-          }}
-        >
-          ›
-        </button>
-      </div>
-
-      <div className={classes.track} id={trackId}>
-        {slides.map((slideItems, slideIndex) => {
-          const padding =
-            config.padsLastSlide && renderPlaceholder
-              ? config.cardsPerSlide - slideItems.length
-              : 0;
-          const body = slideItems.map((item, indexInSlide) =>
-            renderItem(item, slideIndex * config.cardsPerSlide + indexInSlide),
-          );
-          const padded =
-            padding > 0
-              ? [...body, ...Array.from({ length: padding }, (_, i) => renderPlaceholder?.(i))]
-              : body;
-          // One item per slide is the only shape where a per-slide attribute
-          // is meaningful, which is exactly the hero's shape.
-          const extra =
-            config.cardsPerSlide === 1 && slideItems[0] !== undefined
-              ? slideAttributes?.(slideItems[0], slideIndex)
-              : undefined;
-          return (
-            <div
-              key={slideIndex}
-              {...extra}
-              className={`${classes.slide} ${slidePosition(slideIndex, currentSlide)}`}
-              data-slide={slideIndex}
-            >
-              {config.hasGrid ? <div className={classes.grid}>{padded}</div> : padded}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className={classes.indicators} id={indicatorsId}>
-        {slides.map((_, slideIndex) => (
+      {/* THE SLIDER BOX. index.html nests container > slider > track/nav/
+          indicators for all five sliders, and this is the element with
+          `height: 500px; position: relative; overflow: hidden` (style.css
+          17059). It was missing, and the effect was total: no height, nothing
+          for the absolutely-positioned nav and indicators to anchor to, so the
+          hero rendered as nothing at all. Same trap as the nav wrapper below —
+          a missing box is invisible to CSS and to every test that asserts
+          behaviour rather than structure. */}
+      <div className={classes.slider}>
+        {/* index.html 2832-2837: the two buttons sit inside a slider-nav
+            wrapper, which is what positions them. Rendering them bare loses the
+            layout silently — CSS has no way to complain about a missing box. */}
+        <div className={classes.nav}>
           <button
             type="button"
-            key={slideIndex}
-            className={`${classes.indicator}${slideIndex === currentSlide ? ' active' : ''}`}
-            data-slide={slideIndex}
+            id={prevButtonId}
+            className={`${classes.navButton} beatport-${config.slug}-prev-btn`}
+            onClick={(event) => {
+              // 197-198: the slide itself is click-to-open, so paging must not
+              // reach it.
+              event.preventDefault();
+              event.stopPropagation();
+              goTo(currentSlide - 1);
+            }}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            id={nextButtonId}
+            className={`${classes.navButton} beatport-${config.slug}-next-btn`}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              goTo(slideIndex);
+              goTo(currentSlide + 1);
             }}
-          />
-        ))}
+          >
+            ›
+          </button>
+        </div>
+
+        <div className={classes.track} id={trackId}>
+          {slides.map((slideItems, slideIndex) => {
+            const padding =
+              config.padsLastSlide && renderPlaceholder
+                ? config.cardsPerSlide - slideItems.length
+                : 0;
+            const body = slideItems.map((item, indexInSlide) =>
+              renderItem(item, slideIndex * config.cardsPerSlide + indexInSlide),
+            );
+            const padded =
+              padding > 0
+                ? [...body, ...Array.from({ length: padding }, (_, i) => renderPlaceholder?.(i))]
+                : body;
+            // One item per slide is the only shape where a per-slide attribute
+            // is meaningful, which is exactly the hero's shape.
+            const extra =
+              config.cardsPerSlide === 1 && slideItems[0] !== undefined
+                ? slideAttributes?.(slideItems[0], slideIndex)
+                : undefined;
+            return (
+              <div
+                key={slideIndex}
+                {...extra}
+                className={`${classes.slide} ${slidePosition(slideIndex, currentSlide)}`}
+                data-slide={slideIndex}
+              >
+                {config.hasGrid ? <div className={classes.grid}>{padded}</div> : padded}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className={classes.indicators} id={indicatorsId}>
+          {slides.map((_, slideIndex) => (
+            <button
+              type="button"
+              key={slideIndex}
+              className={`${classes.indicator}${slideIndex === currentSlide ? ' active' : ''}`}
+              data-slide={slideIndex}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                goTo(slideIndex);
+              }}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

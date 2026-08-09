@@ -6292,3 +6292,62 @@ asserts it stays empty — filling it in is then a test change, not a silent one
 
 **Next: S3b-iii** — read index.html 2395+ end to end, then build the Beatport
 sub-shell. After that, S4.
+
+### LIVE BUG #8 FIXED — every slider was missing its middle box
+
+Boulder, on the first live look at the Beatport tab: *"he hero slider seems
+gone on beatport"*. It was: nothing rendered where the hero belongs.
+
+**The markup nests THREE boxes, and the port emitted two.** index.html has
+`.beatport-{slug}-slider-container > .beatport-{slug}-slider >
+track/nav/indicators` for all five sliders (2828 hero, 2942 releases, 2980 hype
+picks, 3018 charts, 3054 DJ). `beatportSliderClasses` mapped the outer
+container and every inner element — but the middle wrapper had no key at all,
+so `BeatportSlider` rendered the track, nav and indicators as direct children
+of the container.
+
+That middle element is the one that makes a slider visible:
+
+```css
+.beatport-rebuild-slider {
+    position: relative;
+    height: 500px;
+    overflow: hidden;
+    …
+}
+```
+
+No wrapper → no height → the track collapses, and the absolutely-positioned nav
+and indicators have nothing to anchor to. **All five sliders were affected**,
+not just the hero; the hero is simply the one you see first.
+
+The id (`id="beatport-{slug}-slider"`) is deliberately NOT reproduced: its only
+readers are five `getElementById` calls in beatport-ui.js, which the flip
+deletes, and no CSS rule uses it.
+
+**Why every test stayed green.** This file's 22 tests assert paging, autoplay
+delays, wrap, pause-on-hover, timer counts, per-slide attributes, the ids, and
+that each derived class exists in style.css. A slider with its boxes flattened
+passes ALL of them — it still pages, still autoplays, still renders every card.
+**Behaviour cannot see a missing box.** That is the same gap that shipped the
+compare editor unstyled two days ago, so the fix is structural on both sides:
+
+1. a test that asserts the exact nesting — parent, children, and their order —
+   for all five configs;
+2. the style.css contract test rewritten to HARVEST the classes from the
+   rendered DOM instead of listing them by hand. The hand list had already
+   drifted twice (it checked five while the component emitted seven, which is
+   how the missing slider-nav wrapper got through the first time). A list you
+   must remember to update is a list that gets forgotten.
+
+**One honest exemption in that harvest**, recorded rather than papered over:
+`beatport-{slug}-prev-btn` / `-next-btn` are JS hooks, not styles. What
+positions the buttons is `justify-content: space-between` on the `-slider-nav`
+wrapper (17223, 31795, 32186, 32551, 32923 — all five). Only releases and
+hype-picks style the directional classes at all, and only to nudge them 25px
+outward (31831, 32222); rebuild, charts and dj carry them in the markup with no
+rule anywhere. Requiring them would assert a stylesheet the vanilla does not
+have.
+
+Mutation 2/2: dropping the wrapper (the live bug, reproduced exactly) and
+typoing the class both die. Full suite 7005/7005, lint 684/0.

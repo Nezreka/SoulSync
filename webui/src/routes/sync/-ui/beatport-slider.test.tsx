@@ -285,33 +285,85 @@ describe('BeatportSlider', () => {
     expect(slideAttributes).not.toHaveBeenCalled();
   });
 
-  it('every derived class name exists in the vanilla stylesheet', () => {
+  it('nests container > slider > nav/track/indicators, for every slider', () => {
+    // THE BOX TEST, and it exists because its absence shipped a live
+    // regression: the middle `.beatport-{slug}-slider` wrapper was never
+    // rendered, and every test in this file stayed green while the hero was
+    // invisible on screen. That element is what carries `height: 500px;
+    // position: relative; overflow: hidden` (style.css 17059) — so without it
+    // the track has no height and the absolutely-positioned nav and indicators
+    // have nothing to anchor to.
+    //
+    // Behavioural assertions cannot see this. A slider with its boxes flattened
+    // still pages, still autoplays, still renders every card. Only structure
+    // catches it, so structure is what this asserts: exact parent, exact
+    // children, in the markup's order (index.html 2942, 2980, 3018, 3054).
+    for (const [name, config] of Object.entries(BEATPORT_SLIDERS)) {
+      const { container: root, unmount } = renderSlider(name as keyof typeof BEATPORT_SLIDERS);
+      const classes = beatportSliderClasses(config.slug);
+
+      const outer = root.querySelector(`.${classes.container}`);
+      expect(outer, `${name}: no .${classes.container}`).not.toBeNull();
+
+      const slider = outer?.firstElementChild;
+      expect(slider?.className, `${name}: .${classes.container}'s child`).toBe(classes.slider);
+
+      expect(
+        Array.from(slider?.children ?? []).map((child) => child.className),
+        `${name}: .${classes.slider}'s children`,
+      ).toEqual([classes.nav, classes.track, classes.indicators]);
+
+      unmount();
+    }
+  });
+
+  it('every class the component actually emits exists in the vanilla stylesheet', () => {
     // The whole point of deriving from a slug is that a typo is silent: a
     // missing class renders an unstyled slider, not an error. So check.
+    //
+    // Harvested from the RENDERED DOM rather than listed by hand. The hand list
+    // has drifted twice — it checked five while the component emitted seven,
+    // hiding the missing slider-nav wrapper — and a list that must be updated
+    // alongside the component is a list that will be forgotten again. This form
+    // cannot drift: whatever the component emits is what gets checked.
     const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
     for (const [name, config] of Object.entries(BEATPORT_SLIDERS)) {
-      const classes = beatportSliderClasses(config.slug);
-      // EVERY class the component emits, not a hand-picked subset — the first
-      // version of this test checked five and the component emitted seven, so
-      // the missing slider-nav wrapper sailed through.
-      const required = [
-        classes.container,
-        classes.track,
-        classes.slide,
-        classes.indicator,
-        classes.indicators,
-        classes.nav,
-        classes.navButton,
-      ];
-      if (config.hasGrid) required.push(classes.grid);
-      for (const className of required) {
+      const { container: root, unmount } = renderSlider(name as keyof typeof BEATPORT_SLIDERS);
+      const emitted = new Set<string>();
+      for (const node of root.querySelectorAll('[class]')) {
+        // Only the derived family — `active`, and the harness's own card
+        // classes, are not this component's contract.
+        for (const className of node.classList) {
+          if (className.startsWith('beatport-')) emitted.add(className);
+        }
+      }
+      unmount();
+
+      /**
+       * The one honest exemption. `beatport-{slug}-prev-btn` / `-next-btn` are
+       * JS HOOKS, not styles: what actually positions the two buttons is
+       * `justify-content: space-between` on the `-slider-nav` wrapper (17223,
+       * 31795, 32186, 32551, 32923 — all five). Only releases and hype-picks
+       * additionally style the directional classes, and only to nudge them
+       * 25px outward; rebuild, charts and dj carry the classes in index.html
+       * (2833-2835) with no rule anywhere. Requiring them would be asserting a
+       * stylesheet the vanilla does not have.
+       */
+      for (const suffix of ['prev-btn', 'next-btn']) {
+        emitted.delete(`beatport-${config.slug}-${suffix}`);
+      }
+
+      expect(emitted.size, `${name}: nothing rendered`).toBeGreaterThan(0);
+      for (const className of emitted) {
         expect(
           new RegExp(`\\.${className}[\\s,:{.]`).test(css),
           `${name}: .${className} is not in static/style.css`,
         ).toBe(true);
       }
       // …and the hero must NOT have a grid class, since it has no grid.
+      const classes = beatportSliderClasses(config.slug);
       if (!config.hasGrid) {
+        expect(emitted.has(classes.grid)).toBe(false);
         expect(new RegExp(`\\.${classes.grid}[\\s,:{.]`).test(css)).toBe(false);
       }
     }

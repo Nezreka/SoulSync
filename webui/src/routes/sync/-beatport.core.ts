@@ -126,6 +126,22 @@ export interface BeatportSliderConfig {
 export function beatportSliderClasses(slug: string) {
   return {
     container: `beatport-${slug}-slider-container`,
+    /**
+     * The MIDDLE wrapper, between the container and the track — and the one
+     * that makes the slider visible at all. index.html nests
+     * `.beatport-{slug}-slider-container > .beatport-{slug}-slider > track/nav/
+     * indicators` for all five sliders, and this element is what carries
+     * `height: 500px`, `position: relative` and `overflow: hidden`
+     * (style.css 17059). Without it the track has no height and the
+     * absolutely-positioned nav and indicators have nothing to anchor to, so
+     * the whole slider collapses to nothing — which is exactly how the hero
+     * "disappeared" the first time this rendered live.
+     *
+     * The vanilla also gives it `id="beatport-{slug}-slider"`. Not reproduced:
+     * the only readers are five getElementById calls in beatport-ui.js, the
+     * file the flip deletes, and no CSS rule uses the id.
+     */
+    slider: `beatport-${slug}-slider`,
     track: `beatport-${slug}-slider-track`,
     slide: `beatport-${slug}-slide`,
     indicator: `beatport-${slug}-indicator`,
