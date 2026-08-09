@@ -259,7 +259,73 @@ def resolve_library_file_path_with_diagnostic(
             candidate = os.path.join(base, *path_parts[i:])
             if os.path.exists(candidate):
                 return candidate, attempt
+
+    sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
+    if sibling:
+        return sibling, attempt
     return None, attempt
+
+
+def _resolve_via_sibling_album_folder(
+    path_parts: List[str], base_dirs: List[str]
+) -> Optional[str]:
+    """Last resort for a reported path whose ALBUM segment is wrong (#1127).
+
+    Suffix-walking can only drop leading segments, so it repairs a wrong
+    *prefix* but never a wrong *interior* segment. Navidrome's Subsonic API
+    reports a song's ``path`` synthesized as ``<AlbumArtist>/<Album>/<file>``
+    rather than the true relative path, so anyone whose folders aren't named
+    exactly ``<Album>`` gets a path that can never resolve. With the template
+    ``$albumartist/$albumartist - $album/...`` the DB holds
+    ``Beck/Guero/01-01 - E-Pro.flac`` while disk holds
+    ``Beck/Beck - Guero/01-01 - E-Pro.flac`` — same artist folder, same
+    filename, different album folder. That made Dead File Cleaner call every
+    file unreachable and Album Completeness refuse to fix anything.
+
+    So: keep the artist folder and the filename, and look one level down for
+    the file under a DIFFERENTLY-NAMED album folder.
+
+    Deliberately conservative — it returns a match only when exactly ONE album
+    folder under that artist holds a file with this basename. Callers include
+    Dead File Cleaner, which DELETES what it resolves; guessing between two
+    albums that both contain "01 - Intro.flac" would be worse than failing.
+    Cost is one ``scandir`` per (base dir, artist folder).
+    """
+    if len(path_parts) < 3:
+        return None
+    basename = path_parts[-1]
+    artist_segment = path_parts[-3]
+    if not basename or not artist_segment or artist_segment in (".", ".."):
+        return None
+
+    matches: List[str] = []
+    for base in base_dirs:
+        artist_dir = os.path.join(base, artist_segment)
+        if not os.path.isdir(artist_dir):
+            continue
+        try:
+            entries = list(os.scandir(artist_dir))
+        except OSError as e:
+            logger.debug("sibling-album scan failed for %s: %s", artist_dir, e)
+            continue
+        for entry in entries:
+            try:
+                if not entry.is_dir():
+                    continue
+            except OSError:
+                continue
+            candidate = os.path.join(entry.path, basename)
+            if os.path.exists(candidate) and candidate not in matches:
+                matches.append(candidate)
+
+    if len(matches) == 1:
+        logger.debug("resolved %r via sibling album folder: %s", basename, matches[0])
+        return matches[0]
+    if len(matches) > 1:
+        logger.debug(
+            "sibling-album fallback found %d candidates for %r under %r — "
+            "ambiguous, refusing to guess", len(matches), basename, artist_segment)
+    return None
 
 
 __all__ = [
