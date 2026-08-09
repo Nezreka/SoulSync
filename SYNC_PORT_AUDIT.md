@@ -6607,3 +6607,41 @@ bug), re-adding `loadPlexMusicLibraries` (the inventory bug), and renaming
 `loadJellyfinUsers` out of settings.js (the rehome regressing) all fail.
 
 Edge inventory: 46 -> 42. Suite 7019/7019, lint 684/0.
+
+### The rehome, actually EXERCISED — and the alerts converted
+
+Two follow-ups to the rehome, both done rather than left as suggestions.
+
+**`vanilla-settings-pickers.test.ts` runs the moved code for real.** Every other
+guard around that move is source-level: they prove the TEXT is in settings.js.
+None proved it still WORKS there — and "green tests, visibly broken feature" is
+the exact failure this port has now produced four times. So this evaluates the
+block with `new Function` (the way a classic script runs), against a real jsdom
+DOM and a stubbed fetch, and asserts the select populates, the saved pref
+pre-selects, the sentinel resolves by `value`, the container hides on both empty
+and thrown, and the POST carries `library_name`.
+
+It also pins the property the move DEPENDED on: the block is evaluated with
+nothing in scope but `document`, `fetch` and `showToast`, so a future dependency
+on a settings.js helper throws ReferenceError here instead of at a user.
+
+**The six `alert()` calls are now showToast**, matching the Navidrome path in
+the same block which already used `showToast(msg, 'error', 'set-media')`. Move
+first, edit second — deliberately two commits, so the move stayed verifiable.
+Guarded twice: behaviourally with `alert` bound to a spy that must never fire,
+and at source level for the paths the behavioural test does not drive.
+
+**Mutation 5/5 — but 4/5 on the first pass, and the survivor was my test's
+fault.** "Stop pre-selecting the saved library" survived because the fixture
+listed the pre-selected library FIRST, and a `<select>` defaults to its first
+option: the assertion passed with the matching logic deleted. Re-ordering the
+fixture so the saved pref is second killed it. The same weakness was in the
+sentinel test and was fixed with it. Worth recording as a rule: **a test for
+"the right item is selected" is worthless unless the right item is not the one
+that would be selected anyway.**
+
+Also: the `// eslint-disable-next-line rule -- explanation` form does NOT
+suppress under oxlint. It silently does nothing, which showed up as lint 686 vs
+the 684 baseline. The explanation has to go on its own line above.
+
+Suite 7029/7029, lint 684/0.

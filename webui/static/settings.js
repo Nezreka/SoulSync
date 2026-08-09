@@ -6290,9 +6290,11 @@ async function rebuildPlaylistFolders() {
 // sync page flips to React, and deleting it with these inside would break
 // media-server setup for every user, on a page that has nothing to do with sync.
 //
-// Moved unchanged, including the six `alert()` calls, which break the
-// no-alert rule and should be converted to showToast separately — a move that
-// also edits is a move you cannot verify.
+// Moved unchanged first, then the six `alert()` calls it carried were
+// converted to showToast in a follow-up — matching the Navidrome path in this
+// same block, which already used
+// `showToast(msg, 'error', 'set-media')`. The move and the edit were kept
+// apart on purpose: a move that also edits is a move you cannot verify.
 // ============================================================================
 
 // ============ Plex Music Library Selection ============
@@ -6368,11 +6370,11 @@ async function selectPlexLibrary() {
             console.log(`Plex music library switched to: ${selectedLibrary}`);
         } else {
             console.error('Failed to switch library:', data.error);
-            alert(`Failed to switch library: ${data.error}`);
+            showToast(`Failed to switch library: ${data.error}`, 'error', 'set-media');
         }
     } catch (error) {
         console.error('Error selecting Plex library:', error);
-        alert('Error selecting library. Please try again.');
+        showToast('Error selecting library. Please try again.', 'error', 'set-media');
     }
 }
 
@@ -6441,11 +6443,11 @@ async function selectJellyfinUser() {
             loadJellyfinMusicLibraries();
         } else {
             console.error('Failed to switch user:', data.error);
-            alert(`Failed to switch user: ${data.error}`);
+            showToast(`Failed to switch user: ${data.error}`, 'error', 'set-media');
         }
     } catch (error) {
         console.error('Error selecting Jellyfin user:', error);
-        alert('Error selecting user. Please try again.');
+        showToast('Error selecting user. Please try again.', 'error', 'set-media');
     }
 }
 
@@ -6512,11 +6514,11 @@ async function selectJellyfinLibrary() {
             console.log(`Jellyfin music library switched to: ${selectedLibrary}`);
         } else {
             console.error('Failed to switch library:', data.error);
-            alert(`Failed to switch library: ${data.error}`);
+            showToast(`Failed to switch library: ${data.error}`, 'error', 'set-media');
         }
     } catch (error) {
         console.error('Error selecting Jellyfin library:', error);
-        alert('Error selecting library. Please try again.');
+        showToast('Error selecting library. Please try again.', 'error', 'set-media');
     }
 }
 
