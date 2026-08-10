@@ -3092,6 +3092,47 @@ function initializeMobileNavigation() {
         closeMobileNav();
     });
 
+    // A drag inside the drawer must never count as a tap on the link under the
+    // finger. Reported as "responds to scrolling as a tap first, making it
+    // change pages on each scroll" — every attempt to scroll the nav list
+    // navigated instead. Browsers normally cancel the synthetic click once a
+    // touch moves far enough, but they don't when the gesture scrolled nothing,
+    // which is exactly the case in a drawer whose list is short or already at
+    // an edge. Track the movement ourselves and swallow the click.
+    //
+    // Capture phase so this runs BEFORE the .nav-button handlers below and the
+    // anchors' own default navigation.
+    let touchStart = null;
+    let touchDragged = false;
+    const TAP_SLOP_PX = 8;   // a tap wobbles a few px; a drag does not
+
+    sidebar.addEventListener('touchstart', (event) => {
+        touchStart = event.touches.length === 1
+            ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+            : null;
+        touchDragged = false;
+    }, { passive: true });
+
+    sidebar.addEventListener('touchmove', (event) => {
+        if (!touchStart) return;
+        // Distance, not just vertical travel. A drag across the drawer moves
+        // mostly sideways and a Y-only check waves it straight through — the
+        // click then lands on whatever was under the FINGER AT TOUCHSTART,
+        // which is how pressing one entry and dragging away still opened it.
+        const dx = event.touches[0].clientX - touchStart.x;
+        const dy = event.touches[0].clientY - touchStart.y;
+        if (Math.hypot(dx, dy) > TAP_SLOP_PX) {
+            touchDragged = true;
+        }
+    }, { passive: true });
+
+    sidebar.addEventListener('click', (event) => {
+        if (!touchDragged) return;
+        touchDragged = false;          // one click per gesture; never latch
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+
     // Close sidebar on nav button click (mobile only)
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.addEventListener('click', () => {

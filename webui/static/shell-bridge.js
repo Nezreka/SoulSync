@@ -220,8 +220,47 @@ window.SoulSyncWebShellBridge = {
     },
 };
 
+// A touch that MOVED before lifting is a scroll, not a tap. Tracked here rather
+// than in init.js because both nav paths below are document-level CAPTURE
+// listeners: capture runs outermost-first, so a guard bound to .sidebar can
+// never run before them, no matter what it does. This has to sit in front of
+// the same handlers it protects.
+const _TAP_SLOP_PX = 8;   // a tap wobbles a few px; a drag does not
+let _touchOrigin = null;
+let _touchDragged = false;
+
+document.addEventListener('touchstart', (event) => {
+    _touchOrigin = event.touches.length === 1
+        ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+        : null;
+    _touchDragged = false;
+}, { passive: true, capture: true });
+
+document.addEventListener('touchmove', (event) => {
+    if (!_touchOrigin) return;
+    // Distance, not just vertical travel: a drag across the drawer moves mostly
+    // sideways, and a Y-only check waves it straight through.
+    const dx = event.touches[0].clientX - _touchOrigin.x;
+    const dy = event.touches[0].clientY - _touchOrigin.y;
+    if (Math.hypot(dx, dy) > _TAP_SLOP_PX) _touchDragged = true;
+}, { passive: true, capture: true });
+
+function _consumeTouchDrag() {
+    if (!_touchDragged) return false;
+    _touchDragged = false;   // one suppression per gesture; never latch
+    return true;
+}
+
 function _handleShellLinkClick(event) {
     if (event.defaultPrevented || event.button !== 0 || _isModifiedLinkClick(event)) return;
+
+    // The gesture that produced this click was a scroll. Swallow it, or dragging
+    // the mobile drawer opens whichever entry the finger started on.
+    if (_consumeTouchDrag()) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
 
     const anchor = event.target?.closest?.('a[href]');
     if (!anchor || (anchor.target && anchor.target !== '_self')) return;
@@ -286,7 +325,18 @@ document.addEventListener('click', _handleShellLinkClick, true);
 
 // Fire nav on pointerdown (fires on press, 100-200ms before click) for instant sidebar response.
 // navigateToPage's early-return guard (pageId === currentPage) prevents double-navigation on click.
+//
+// MOUSE AND PEN ONLY. With a mouse, pressing is unambiguous: you don't scroll
+// by pressing, so acting on pointerdown is pure latency win. On touch it is the
+// opposite — a press is also the FIRST FRAME of a scroll, and there is no
+// movement yet to tell the two apart. Navigating here meant that dragging the
+// drawer to scroll it opened whichever entry the finger happened to land on,
+// every time. The drag guard in init.js (TAP_SLOP_PX) could never help: it
+// arbitrates the click, and the click came long after this had already
+// navigated. Touch now falls through to the normal click path, where that
+// guard sees the movement and swallows the tap.
 document.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'touch') return;
     if (event.button !== 0 || _isModifiedLinkClick(event)) return;
     const btn = event.target?.closest?.('.nav-button[data-page]');
     if (!btn) return;

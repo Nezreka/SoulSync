@@ -138,6 +138,20 @@
 
     .sidebar-header {
         text-align: right;
+        /* The header is already `position: sticky; z-index: 1`, which should put
+           it above the scrolling nav buttons (positioned, z-index auto). It
+           doesn't, and raising the z-index changes nothing — the giveaway that
+           these aren't being arbitrated in the same stacking context.
+           `backdrop-filter` promotes the header to its own compositing layer,
+           where z-index no longer decides the order, so nav items scroll over
+           it and stay clickable. Same root cause as #1040, which the opaque
+           base only half-fixed.
+
+           That opaque base is why dropping the blur here is nearly invisible:
+           the bottom of the gradient is already solid. Handled at the mobile
+           breakpoint only, so the desktop frosted look is untouched. */
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     .main-content {
@@ -171,10 +185,27 @@
         border-top-right-radius: 24px;
         border-bottom-right-radius: 24px;
         overflow-y: auto;
+        /* Without this a drag inside the open drawer chains its scroll to the
+           page underneath: the nav list itself doesn't move, so the browser
+           resolves the gesture as a tap on whatever nav link is under the
+           finger — every scroll attempt navigates. */
+        overscroll-behavior: contain;
     }
 
     .sidebar.mobile-open {
         transform: translateX(0);
+    }
+
+    /* init.js has always put this class on <body> when the drawer opens, but
+       nothing ever consumed it, so the page behind the drawer stayed live and
+       scrollable. `.main-content` is the real scroller on mobile, so locking
+       <body> alone is not enough. */
+    body.mobile-nav-open {
+        overflow: hidden;
+    }
+
+    body.mobile-nav-open .main-content {
+        overflow: hidden;
     }
 
     .page {
