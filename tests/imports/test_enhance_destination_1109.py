@@ -312,3 +312,55 @@ def test_a_superseded_copy_under_an_unreachable_root_is_found(tmp_path):
     resolved = resolve_library_file_path(
         "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3", config_manager=_Cfg())
     assert resolved == str(old), "the superseded copy must be findable to be removed"
+
+
+# ── a root is not an album folder ────────────────────────────────────────────
+#
+# The last way to reproduce the reported symptom WITH the fix in place: when the
+# recorded file sits loose in the Transfer root, that root exists, so it counted
+# as "reachable" and the upgrade was written straight back into the root.
+
+def test_an_original_loose_in_the_transfer_root_is_not_replaced_in_place(monkeypatch, tmp_path):
+    _patch_config(monkeypatch, tmp_path)
+    transfer = tmp_path / "Transfer"
+    transfer.mkdir(parents=True)
+    loose = transfer / "01 - The Show.mp3"
+    loose.write_bytes(b"the loose original")
+
+    final_path, created = paths_mod.build_final_path_for_track(
+        _enhance_context(str(loose)), {"name": "Lenka"}, ALBUM_INFO, ".flac",
+    )
+
+    assert created is True
+    assert final_path == str(
+        tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac"), (
+        "the upgrade landed back in the Transfer root — #1109's symptom")
+
+
+def test_a_real_album_folder_under_that_same_root_still_replaces_in_place(monkeypatch, tmp_path):
+    """The guard must reject only the root itself, not everything beneath it."""
+    _patch_config(monkeypatch, tmp_path)
+    album = tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka"
+    album.mkdir(parents=True)
+    (album / "01 - The Show.mp3").write_bytes(b"x")
+
+    final_path, _ = paths_mod.build_final_path_for_track(
+        _enhance_context(str(album / "01 - The Show.mp3")),
+        {"name": "Lenka"}, ALBUM_INFO, ".flac",
+    )
+
+    assert final_path == str(album / "01 - The Show.flac")
+
+
+def test_a_configured_music_path_root_is_rejected_too(monkeypatch, tmp_path):
+    music_root = tmp_path / "media"
+    music_root.mkdir()
+    loose = music_root / "01 - The Show.mp3"
+    loose.write_bytes(b"x")
+
+    cfg = _TemplateConfig(tmp_path)
+    cfg._values["library.music_paths"] = [str(music_root)]
+    monkeypatch.setattr(paths_mod, "_get_config_manager", lambda: cfg)
+    monkeypatch.setattr(paths_mod, "_get_album_tracks_for_source", lambda *a: None)
+
+    assert paths_mod._reachable_original_dir(str(loose)) is None
