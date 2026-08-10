@@ -335,6 +335,11 @@
                     </button>
                 </div>
             </div>
+            <!-- Everything below the header scrolls as ONE block. The header used to
+                 be a sticky child of the scrolling .sidebar, which put it in its own
+                 compositing layer where z-index does not arbitrate — nav items rode
+                 up and painted THROUGH it. As siblings that cannot happen. -->
+            <div class="sidebar-scroll">
 
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
@@ -590,6 +595,7 @@
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-download-name">Download Source</span>
                 </div>
+            </div>
             </div>
         </div>
 

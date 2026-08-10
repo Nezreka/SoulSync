@@ -92,8 +92,10 @@ body {
 
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
-    overflow-x: hidden;
+    /* The sidebar itself no longer scrolls — .sidebar-scroll does. The header
+       is a flex sibling of that scroller rather than a sticky child of it, so
+       nav items cannot ride up over it. See .sidebar-scroll below. */
+    overflow: hidden;
     position: relative;
 
     /* Custom scrollbar styling */
@@ -301,6 +303,29 @@ body.max-performance .sidebar::after {
     gap: 0;
 }
 
+/* Everything below the header, in one scroll box.
+
+   The header was previously `position: sticky` INSIDE the scrolling .sidebar.
+   That never held: the header paints into its own compositing layer (the
+   backdrop-filter / #1040 note below), and z-index does not arbitrate across
+   layers — so scrolled nav items painted straight through it. Raising z-index
+   changed nothing, which was the tell.
+
+   As siblings in a flex column the overlap is structurally impossible: the
+   header owns its band, this owns the rest. Also fixes the header scrolling
+   away with the content, which was the same single-scroll-box cause. */
+.sidebar-scroll {
+    flex: 1 1 auto;
+    /* Flex children default to min-height:auto and refuse to shrink below their
+       content — without this overflow-y is inert and the scroll silently falls
+       back to the sidebar. */
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
 .sidebar-header {
     min-height: 115px;
     /* Accent tint layered over an OPAQUE dark base. The old translucent-only
@@ -322,9 +347,11 @@ body.max-performance .sidebar::after {
     flex-direction: column;
     justify-content: center;
     gap: 8px;
-    position: sticky;
-    top: 0;
-    z-index: 1;
+    /* Was sticky+z-index inside the scrolling sidebar. Now a plain flex
+       sibling of .sidebar-scroll, which is what actually holds it above the
+       content — no stacking-context guesswork. flex-shrink 0 so a long nav
+       list can never squeeze the header. */
+    flex: 0 0 auto;
     overflow: hidden;
     flex-shrink: 0;
 

@@ -184,12 +184,19 @@
         border-radius: 0;
         border-top-right-radius: 24px;
         border-bottom-right-radius: 24px;
-        overflow-y: auto;
+        /* The drawer itself does not scroll — .sidebar-scroll does (base
+           rule in style.css). Leaving overflow-y:auto here would re-arm the
+           old single-scroll-box behaviour at mobile widths only. */
+        overflow: hidden;
+    }
+
+    .sidebar-scroll {
         /* Without this a drag inside the open drawer chains its scroll to the
-           page underneath: the nav list itself doesn't move, so the browser
+           page underneath: the list itself does not move, so the browser
            resolves the gesture as a tap on whatever nav link is under the
            finger — every scroll attempt navigates. */
         overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
     }
 
     .sidebar.mobile-open {
