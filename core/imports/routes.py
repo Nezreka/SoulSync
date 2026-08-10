@@ -127,8 +127,8 @@ def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[O
                 "Rejected import of %s: outside the allowed roots %s",
                 candidate, [str(r) for r in roots],
             )
-        except Exception:  # noqa: BLE001 - a logger stub must not fail a request
-            pass
+        except Exception:  # noqa: BLE001, S110 - the LOGGER is what failed here,
+            pass           # so there is nothing left to log it with.
         return None, "File is outside the allowed import folders"
     return str(candidate), ""
 

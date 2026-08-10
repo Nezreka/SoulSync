@@ -54,8 +54,8 @@ def _run_loop(ready, holder):
             try:
                 asyncio.set_event_loop(None)
                 loop.close()
-            except Exception:
-                pass
+            except Exception:  # noqa: S110 - this thread is dying and the loop
+                pass           # it would log through is the one being closed.
 
 
 def _drain_pending(loop):
@@ -73,8 +73,8 @@ def _drain_pending(loop):
         for task in pending:
             task.cancel()
         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-    except Exception:
-        pass
+    except Exception:  # noqa: S110 - best-effort teardown: the caller's own
+        pass           # CancelledError is the signal that matters, not this.
 
 
 def _get_loop():
