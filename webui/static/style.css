@@ -61512,6 +61512,23 @@ tr.tag-diff-same {
     min-width: 0;
 }
 
+/* #1128: this missing row already HAS a saved manual match — it just points at a
+   library track that isn't in the server playlist yet, so it can't pair in the
+   preview. Green (not the row's red) because nothing is wrong: the real sync
+   honours the match. Without this the row looks identical to one that was never
+   matched, and users re-match the same track on every sync. */
+.empty-slot-matched-note {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    color: rgb(29, 185, 84);
+    background: rgba(29, 185, 84, 0.12);
+    border: 1px solid rgba(29, 185, 84, 0.28);
+}
+
 /* Confidence badge on matched tracks */
 .server-track-conf {
     font-size: 9px;

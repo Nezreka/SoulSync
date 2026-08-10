@@ -21961,6 +21961,32 @@ def get_server_playlist_tracks(playlist_id):
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
+        # A durable manual match whose library track isn't in THIS playlist yet
+        # can't be applied above, so its row renders as a plain "missing" with
+        # Find & Add — indistinguishable from a track that was never matched at
+        # all. Users then re-match the same track every single sync and nothing
+        # ever tells them it already took (#1128). The match IS honoured by the
+        # real sync (services/sync_service.py resolves it, with file-path and
+        # live-Plex fallbacks); only this preview was silent about it. Flag the
+        # rows so the UI can say "already matched, not in the playlist yet".
+        try:
+            _mm_ids = set()
+            if hasattr(_db_for_overrides, "find_manual_library_matches_bulk"):
+                _src_ids = [str(s.get("source_track_id")) for s in source_tracks
+                            if isinstance(s, dict) and s.get("source_track_id")]
+                if _src_ids:
+                    _mm_ids = set(_db_for_overrides.find_manual_library_matches_bulk(
+                        _ov_profile, _src_ids, active_server) or {})
+            if _mm_ids:
+                for _row in combined:
+                    if _row.get('override'):
+                        continue   # already applied — the row shows as matched
+                    _sid = str((_row.get('source_track') or {}).get('source_track_id') or '')
+                    if _sid and _sid in _mm_ids:
+                        _row['has_manual_match'] = True
+        except Exception as _mm_err:   # noqa: BLE001 - a badge must never fail the view
+            logger.debug("manual-match flagging failed: %s", _mm_err)
+
         # Order status: the editor renders the server column in SOURCE order, so a
         # reordered-but-same-membership playlist reads "in sync" when Navidrome's real
         # order differs. Surface that (one-way: source order is truth). `server_order`

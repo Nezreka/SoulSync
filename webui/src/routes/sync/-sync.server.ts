@@ -168,6 +168,14 @@ export interface CompareTrack {
    */
   match_status: string;
   confidence?: number | null;
+  /**
+   * A durable manual match exists for this source track but could NOT be applied,
+   * because the library track it points at isn't in this playlist yet (#1128).
+   * Without this the row is a plain "missing" — identical to a track that was
+   * never matched — so users re-match the same track every sync and nothing
+   * tells them it already took. The real sync DOES honour the match.
+   */
+  has_manual_match?: boolean;
   source_track?: {
     position?: number;
     name?: string;
