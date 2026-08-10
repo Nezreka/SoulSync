@@ -219,3 +219,96 @@ class _StubConfig:
 
     def get_active_media_server(self):
         return None
+
+
+# ── the second half: retiring the superseded copy ────────────────────────────
+#
+# Landing the upgrade in the right place is only half of #1109. The old file
+# then has to go. That check ran `os.path.exists()` on the RECORDED path — the
+# media server's "/music/…" view — so it said False, the removal was skipped,
+# and the code fell through to logging "Replaced in-place" while the superseded
+# copy sat on disk beside the new one. Silent duplication, with a log line
+# claiming the opposite.
+
+def _pipeline_source() -> str:
+    from pathlib import Path
+
+    from core.imports import pipeline
+
+    return Path(pipeline.__file__).read_text(encoding="utf-8", errors="replace")
+
+
+def test_the_old_file_is_resolved_before_the_exists_check():
+    src = _pipeline_source()
+    resolve_at = src.index("resolve_library_file_path(\n                        original_enhance_path")
+    decide_at = src.index("if os.path.normpath(_old_path) != os.path.normpath(final_path)")
+    assert resolve_at < decide_at, (
+        "the recorded path must be resolved BEFORE deciding whether the old "
+        "file exists, or an unreachable original is silently left on disk")
+
+
+def test_the_decision_and_the_delete_both_use_the_resolved_path():
+    src = _pipeline_source()
+    # The guard compares the resolved path...
+    assert "if os.path.normpath(_old_path) != os.path.normpath(final_path)" in src
+    # ...and the removal acts on the same value, never the raw recorded one.
+    assert "os.remove(_old_path)" in src
+    assert "os.remove(original_enhance_path)" not in src, (
+        "deleting the RECORDED path would delete whatever happens to sit at "
+        "that location rather than the file we actually resolved")
+
+
+def test_an_in_place_upgrade_resolves_onto_itself_so_the_guard_trips(tmp_path):
+    """The data-loss case this guard exists for.
+
+    When the upgrade replaces the file in place, the old path resolves to the
+    file we just wrote. Comparing the RECORDED path would miss that whenever
+    the recorded spelling differs from the resolved one — and the delete would
+    destroy the upgrade. Resolving first makes the two paths equal, so the
+    guard catches it.
+    """
+    from core.library.path_resolver import resolve_library_file_path
+
+    album = tmp_path / "Transfer" / "Billie Eilish" / "HIT ME HARD AND SOFT"
+    album.mkdir(parents=True)
+    final_path = album / "10 BLUE.flac"
+    final_path.write_bytes(b"the upgrade")
+
+    class _Cfg:
+        def get(self, key, default=None):
+            if key == "soulseek.transfer_path":
+                return str(tmp_path / "Transfer")
+            if key == "library.music_paths":
+                return []
+            return default
+
+    # The media server's spelling of the very same file.
+    recorded = "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.flac"
+    resolved = resolve_library_file_path(recorded, config_manager=_Cfg())
+
+    assert resolved == str(final_path)
+    # …which is exactly what the pipeline's guard compares, so no delete.
+    assert os.path.normpath(resolved) == os.path.normpath(str(final_path))
+    assert final_path.exists()
+
+
+def test_a_superseded_copy_under_an_unreachable_root_is_found(tmp_path):
+    """The case that was silently skipped: old file elsewhere in the library."""
+    from core.library.path_resolver import resolve_library_file_path
+
+    album = tmp_path / "Transfer" / "Billie Eilish" / "HIT ME HARD AND SOFT"
+    album.mkdir(parents=True)
+    old = album / "10 BLUE.mp3"
+    old.write_bytes(b"the old lossy copy")
+
+    class _Cfg:
+        def get(self, key, default=None):
+            if key == "soulseek.transfer_path":
+                return str(tmp_path / "Transfer")
+            if key == "library.music_paths":
+                return []
+            return default
+
+    resolved = resolve_library_file_path(
+        "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3", config_manager=_Cfg())
+    assert resolved == str(old), "the superseded copy must be findable to be removed"

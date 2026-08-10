@@ -1219,10 +1219,28 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
             original_enhance_path = _enhance_source_info['original_file_path']
-            if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
+            # #1109 second half: the recorded path is the MEDIA SERVER's view of
+            # the library ("/music/…"), which this process usually cannot see.
+            # `os.path.exists` therefore said False, the removal was skipped, and
+            # the branch below logged "Replaced in-place" — while the superseded
+            # copy stayed on disk next to the new one. Resolve it through the
+            # same resolver the destination uses before deciding.
+            _old_path = original_enhance_path
+            if not os.path.exists(_old_path):
                 try:
-                    os.remove(original_enhance_path)
-                    old_fmt = os.path.splitext(original_enhance_path)[1]
+                    from core.library.path_resolver import resolve_library_file_path
+                    _old_path = resolve_library_file_path(
+                        original_enhance_path, config_manager=config_manager) or _old_path
+                except Exception as _resolve_err:   # noqa: BLE001 - best effort
+                    logger.debug(
+                        f"[Enhance] could not resolve the old file's path: {_resolve_err}")
+            # Compare the RESOLVED path, not the recorded one. An in-place
+            # replacement resolves to the file we just wrote; deleting that would
+            # destroy the upgrade itself.
+            if os.path.normpath(_old_path) != os.path.normpath(final_path) and os.path.exists(_old_path):
+                try:
+                    os.remove(_old_path)
+                    old_fmt = os.path.splitext(_old_path)[1]
                     new_fmt = os.path.splitext(final_path)[1]
                     logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
                 except Exception as e:
