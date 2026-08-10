@@ -7,7 +7,10 @@ import { expect, test, type Page } from '@playwright/test';
 // today; the assertions are user-visible contracts that must survive the
 // React migration unchanged.
 
-const chromeSelectors = ['#gsearch-bar', '#gsearch-aura', '#notif-bell-btn', '#helper-float-btn'];
+// The global search bar and its aura were removed from the shell (they
+// duplicated the Search page), so the chrome they left behind is the bell and
+// the helper FAB. The suppression contracts below are unchanged.
+const chromeSelectors = ['#notif-bell-btn', '#helper-float-btn'];
 
 const viewports = [
   { name: 'desktop', width: 1440, height: 900 },
@@ -93,32 +96,16 @@ for (const viewport of viewports) {
       await openDashboard(page, baseURL!);
     });
 
-    test('global search activates, shows results, and Escape dismisses', async ({ page }) => {
-      await page.route('**/api/enhanced-search', (route) =>
-        route.fulfill({ json: searchResponse }),
-      );
+    test('the retired global search bar renders nothing', async ({ page }) => {
+      // Guards the removal itself: the markup is gone, and because
+      // initGlobalSearch() bails when the elements are absent, the `/`
+      // focus-shortcut it used to bind must not swallow the keystroke either.
+      await expect(page.locator('#gsearch-bar')).toHaveCount(0);
+      await expect(page.locator('#gsearch-aura')).toHaveCount(0);
+      await expect(page.locator('#gsearch-results')).toHaveCount(0);
 
-      await page.locator('#gsearch-input').click();
-      await expect(page.locator('#gsearch-bar')).toHaveClass(/active/);
-      await expect(page.locator('#gsearch-aura')).toHaveClass(/active/);
-
-      // The source-icon row appears once the controller finishes its async
-      // init — which may re-pick the active source. Submitting before that
-      // settles loses the race: results render, then init's re-render blanks
-      // them for the newly-picked source. A real user sees the icons first.
-      await expect(page.locator('#gsearch-source-row *').first()).toBeVisible();
-
-      await page.locator('#gsearch-input').fill('characterization album');
-      await page.keyboard.press('Enter');
-
-      const results = page.locator('#gsearch-results');
-      await expect(results).toHaveClass(/visible/);
-      await expect(results).toContainText('Characterization Album');
-
-      await page.keyboard.press('Escape');
-      await expect(page.locator('#gsearch-bar')).not.toHaveClass(/active/);
-      await expect(page.locator('#gsearch-aura')).not.toHaveClass(/active/);
-      await expect(results).not.toHaveClass(/visible/);
+      await page.keyboard.press('/');
+      await expect(page.locator('#gsearch-input')).toHaveCount(0);
     });
 
     test('notification bell toggles its panel', async ({ page }) => {
@@ -168,13 +155,35 @@ for (const viewport of viewports) {
         route.fulfill({ json: albumResponse }),
       );
 
-      await page.locator('#gsearch-input').click();
-      await expect(page.locator('#gsearch-source-row *').first()).toBeVisible();
-      await page.locator('#gsearch-input').fill('characterization album');
-      await page.keyboard.press('Enter');
-      await page
-        .locator('#gsearch-results .gsearch-item', { hasText: 'Characterization Album' })
-        .click();
+      // This used to reach the modal by driving the global search bar. That bar
+      // has been removed, so the test now opens the modal through the same
+      // global entry point the album cards call. Deliberately NOT another
+      // page's UI: the contract under test is the modal-vs-chrome z-order, not
+      // how the user happened to get there. Tracks are passed in rather than
+      // fetched — the function reads spotifyTracks.length directly.
+      await page.evaluate(
+        ({ album, tracks }) =>
+          (
+            window as unknown as {
+              openDownloadMissingModalForArtistAlbum: (
+                id: string,
+                name: string,
+                tracks: unknown[],
+                album: unknown,
+                artist: unknown,
+                showLoadingOverlay?: boolean,
+              ) => Promise<void>;
+            }
+          ).openDownloadMissingModalForArtistAlbum(
+            `artist_album_${album.id}`,
+            album.name,
+            tracks,
+            album,
+            { id: 'chrome-spec-artist', name: album.artist },
+            false,
+          ),
+        { album: specAlbum, tracks: albumResponse.tracks },
+      );
 
       const modal = page.locator('.download-missing-modal');
       await expect(modal).toBeVisible();

@@ -7345,21 +7345,17 @@
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
-    <!-- Ambient glow under the global search bar. Radial gradient, brightest
-         directly under the bar, tapering out toward the window corners.
-         Purely decorative (pointer-events: none). Visibility follows the bar
-         via _gsUpdateVisibility(). -->
-    <div class="gsearch-aura" id="gsearch-aura"></div>
-    <!-- Global Search Bar — Spotlight-style search from anywhere -->
-    <div class="gsearch-bar" id="gsearch-bar">
-        <div class="gsearch-icon">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        </div>
-        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search everything…" autocomplete="off" spellcheck="false">
-        <button class="gsearch-clear" id="gsearch-clear" style="display:none" title="Clear">&times;</button>
-        <span class="gsearch-shortcut" id="gsearch-shortcut">/</span>
-    </div>
-    <div class="gsearch-results" id="gsearch-results"></div>
+    <!-- The floating global ("Search everything…") bar used to live here, above
+         the media player. Removed deliberately: it duplicated the Search page
+         and the two were easy to confuse for one another.
+
+         Nothing else needed changing to retire it. downloads.js's
+         initGlobalSearch() already bails on `if (!input || !bar || !results)
+         return;`, so the controller is never constructed and the `/`
+         focus-shortcut (bound inside that same guard) is never registered.
+         The .gsearch-* rules in style.css / mobile.css and the controller code
+         are intentionally left in place, so restoring the bar is purely a
+         matter of putting this markup back. -->
 
     {% include 'track-detail-modal.html' %}
 
