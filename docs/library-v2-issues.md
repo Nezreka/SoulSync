@@ -5384,3 +5384,85 @@ Restrisiko von A03: Der Lock ist pro Prozess. Der CAS-Check liegt direkt vor
 dem atomaren Publish und verkleinert das Cross-Process-TOCTOU-Fenster, ersetzt
 aber keinen datenbankweiten Publish-Lock. Dies ist im nächsten Architekturpass
 zu entscheiden, kein verschwiegenes „verified“.
+
+---
+
+## 32. Nezrekas Review von PR #1062 auf einer realen Großbibliothek (10. August 2026)
+
+Erster echter Fremdtest des Branches. Maßstab der Testbibliothek: **4.979
+Artists, 69.296 Alben, 307.885 Tracks, 9 GB DB**. Das ist rund eine
+Größenordnung über der bisher verwendeten Test-DB, und genau diese Skala hat
+die folgenden Befunde freigelegt. Nezrekas Gesamturteil zur Seite selbst ist
+positiv („rock solid", `schema.py`-Begründung gegen das alte Schema geprüft und
+bestätigt); die Blocker liegen in Migration und Enrichment.
+
+Quelle: <https://github.com/Nezreka/SoulSync/pull/1062#issuecomment> vom
+10. August 2026, 20:17 UTC.
+
+### 32.1 Migration bleibt auf großer DB stehen
+
+**Fehlerbild:** Der Bootstrap-Import stand 9 Minuten bei „5/7 · 71%" ohne jede
+Logausgabe. Parallel warfen *sämtliche* Enrichment-Worker sowie die Automation
+Engine durchgehend `database is locked`; danach scheiterte auch ein
+Config-Save mit „Config DB save failed after 6 attempts".
+
+Ein Neustart verschlimmerte die Lage: der zweite Start kam nicht über die
+DB-Initialisierung hinaus. Letzte Logzeile 12:05:56, danach 30 Minuten nichts.
+Dass überhaupt noch geschrieben wurde, war ausschließlich am WAL ablesbar:
+
+| Zeit | WAL | Rate |
+|---|---:|---|
+| 12:07 | 85 MB | — |
+| 12:14 | 106 MB | ~4 MB/min |
+| 12:35 | 135 MB | ~1,4 MB/min |
+
+Der Durchsatz **fällt** also, statt zu steigen; die Haupt-DB blieb konstant bei
+9.652 MB. Nach 30 Minuten Abbruch.
+
+| ID | Diagnose | Verifikationsstand | Korrekturvertrag |
+|---|---|---|---|
+| iss32-M01 | Kein zeitgesteuertes Fortschrittslog. `_progress(stage, current, total, …)` in `core/library2/bootstrap.py:618` schreibt den Fortschritt nur in die Claim-Row (Heartbeat, für die UI). Ins Log gehen ausschließlich „starting" (Zeile 615), „resuming" (612) und „completed" (679). Ein hängender Lauf ist deshalb von einem laufenden nicht unterscheidbar. | **Im Code bestätigt** | Zeitgesteuerte `logger.info`-Ausgabe im Format `41.000/307.885` mindestens alle 30 s, unabhängig davon, wie oft die aktuelle Stage einen Progress-Callback feuert. Der Timer muss auch dann feuern, wenn eine einzelne Stage lange ohne Callback läuft — sonst wird genau der beobachtete Fall wieder nicht sichtbar. |
+| iss32-M02 | Enrichment-Worker und Automation Engine konkurrieren während der Migration um den einzigen SQLite-Writer. Ergebnis ist beidseitige Blockade statt Priorisierung. | **Nicht verifiziert**, Symptom aus dem Log | Enrichment-Worker (und die Automation Engine) für die Dauer eines aktiven Bootstrap-Laufs pausieren und danach zuverlässig wieder aufnehmen — auch wenn der Lauf abbricht oder der Prozess stirbt. Die Pause darf nicht an einen In-Memory-Flag hängen, den ein Neustart verliert. |
+| iss32-M03 | Nezrekas Forderung „keep it off the startup path so the server comes up first". Der Autostart läuft bereits in einem Daemon-Thread mit 30-s-Vorlauf (`web_server.py:43371` → `_autostart_library_v2_bootstrap_import`, `web_server.py:32742`). Der beobachtete zweite Start, der „nicht über die DB-Init hinauskam", ist damit **nicht** durch die Thread-Platzierung erklärt. | **Teilweise widerlegt** — die Forderung ist strukturell erfüllt, das Symptom bleibt unerklärt | Vor jeder Codeänderung ist zu klären, *was* beim zweiten Start blockierte: der Reclaim der verwaisten Claim-Row, ein Schema-/Migrationsschritt in `core/library2/schema.py`, oder schlicht der WAL-Rückstau aus M04. Erst danach entscheiden, ob überhaupt etwas an der Startreihenfolge zu ändern ist. Eine Änderung „auf Verdacht" wäre hier falsch. |
+| iss32-M04 | Kein WAL-Checkpoint während der Migration. `wal_checkpoint` kommt im gesamten Repository **kein einziges Mal** vor. Ein 135-MB-WAL ohne Checkpoint erklärt den fallenden Durchsatz unmittelbar: jeder Reader muss den wachsenden WAL durchlaufen. | **Im Code bestätigt** (Grep über alle `*.py`) | Periodischer `PRAGMA wal_checkpoint(TRUNCATE)` bzw. `(PASSIVE)` in sicheren Abständen während des Bootstrap-Laufs. Wichtig: ein Checkpoint braucht ein Fenster ohne offene Reader — der Checkpoint darf die Migration nicht seinerseits blockieren. |
+
+### 32.2 Enrichment darf beim Wechsel auf V2 nicht regressieren
+
+Nezrekas Anforderung ist explizit und nicht verhandelbar: „i don't want to lose
+any enrichment functionality or data in the move to v2. v2 should get filled
+the same way v1 does now. every artist and album, artwork, genres, bios,
+provider ids, **all twelve workers**." Begründung: V1 kann das bereits.
+
+| ID | Diagnose | Verifikationsstand | Korrekturvertrag |
+|---|---|---|---|
+| iss32-E01 | `resync_entity_from_legacy` ist **nicht verdrahtet**. Die Funktion existiert in `core/library2/enrich.py:123` und steht im `__all__` (Zeile 143), aber der einzige weitere Fundort im Produktivcode ist eine Docstring-Erwähnung in `core/library2/native_enrich.py:7`. Aufrufstellen gibt es nur in `tests/library2/test_enrich_resync.py`. Die zwölf Worker schreiben über `_run_single_enrichment` (`web_server.py:14559`) die Legacy-Row — und nichts spiegelt das Ergebnis nach `lib2_*`. | **Im Code bestätigt** — Nezrekas Vermutung trifft zu | `resync_entity_from_legacy` nach jedem erfolgreichen `_run_single_enrichment` aufrufen, für alle drei Entity-Typen. Der Aufruf muss die Legacy-ID kennen, die der Worker gerade geschrieben hat. Der Regressionstest muss beweisen, dass ein Worker-Lauf die `lib2_*`-Row **tatsächlich** verändert — nicht nur, dass die Funktion für sich genommen funktioniert (das tut sie bereits, siehe die vorhandenen Tests). |
+| iss32-E02 | Zwei Klassen von Artists mit unterschiedlicher Enrichment-Tiefe, ohne dass die UI sie unterscheidet: Artists aus der alten Library bekommen alle zwölf Worker; in V2 nativ entstandene Artists (Featured Credits, Wishlist, Discography) haben keine Legacy-Row und bekommen nur `native_enrich` — also Provider-ID, Artwork, Genres. Beide zeigen „matched". | **Bekannt und unabhängig bestätigt**, siehe Memory `library-v2-native-artist-enrich-deadend` (RC1 lösbar, RC2 Compound-Namen teilweise nicht) | Native Artists müssen denselben Enrichment-Pfad erreichen. Zwei Wege sind denkbar und vor der Umsetzung zu entscheiden: (a) für einen nativen Artist bei Bedarf eine Legacy-Row anlegen und den bestehenden Worker-Pfad fahren, oder (b) die zwölf Worker so entkoppeln, dass sie eine `lib2`-Identität direkt bedienen. (a) ist billiger, zementiert aber die Legacy-Tabelle als Pflichtdurchgang — was direkt gegen 32.3 arbeitet. Solange die Lücke besteht, darf die UI nicht beide Zustände als „matched" ausgeben. |
+| iss32-E03 | `/api/library/artists` (`web_server.py:9889`) liest weiterhin Legacy: der Handler ruft `database.get_library_artists(...)`. Metadaten-Edits und Enrichment aus der neuen UI erscheinen dort folglich nicht. | **Im Code bestätigt** | Endpunkt auf die V2-Projektion umstellen. Vorher zu klären: welche Consumer hängen daran? Bekannt sind mindestens `tests/test_finding_artist_link_ui.py` (Finding-Artist-Verlinkung baut `/api/library/artists?search=`) und `/api/library/artists/export` (`web_server.py:30763`). Die Antwortform muss erhalten bleiben oder alle Consumer mitwandern. |
+
+### 32.3 Architekturfrage: bleiben `lib2_artists` / `lib2_albums` / `lib2_tracks` Kopien?
+
+Kein Bug, sondern eine Entscheidung, die Nezreka beantwortet haben will, bevor
+er merged. Sein Stand:
+
+- `lib2_track_artists` und `lib2_track_files` sind **unstrittig** — die
+  Legacy-`tracks` hat nur ein `artist_id` und ein `file_path`, das lässt sich
+  nicht anders abbilden.
+- `lib2_artists`, `lib2_albums`, `lib2_tracks` sehen für ihn dagegen aus wie
+  Kopien. Er ist `lib2_artists` Spalte für Spalte durchgegangen: alles hätte
+  auch als zusätzliche Spalte auf der bestehenden `artists`-Tabelle liegen
+  können.
+- Sein Ziel: **eine** Library. Alles liest und schreibt `lib2`, Legacy ist weg
+  oder read-only. Explizit unerwünscht ist der Zustand, in dem beide bleiben
+  und sich widersprechen.
+
+Zu liefern ist eine begründete Antwort, kein Code: entweder „Endzustand, und
+zwar deshalb …" oder „Übergang, und der Abbau der Legacy-Tabellen sieht so
+aus …". Zu beachten ist die Wechselwirkung mit iss32-E02(a): der billige Fix
+dort macht die Legacy-Row zum Pflichtdurchgang und damit die Antwort „Legacy
+wird read-only" schwerer haltbar. Beide Punkte gehören zusammen beantwortet.
+
+### 32.4 `mbid_mismatch_detector` — Findings werden gepruned
+
+| ID | Diagnose | Verifikationsstand | Korrekturvertrag |
+|---|---|---|---|
+| iss32-S01 | `mbid_mismatch_detector` steht in `RETIRED_JOB_IDS` (`core/repair_jobs/__init__.py:118`), aber **nicht** in `PRESERVED_RETIRED_FINDING_IDS` (ab Zeile 153). `core/repair_worker.py:570` bildet `prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS`, folglich werden seine Findings beim Worker-Start gelöscht. | **Im Code bestätigt** | Nezreka fragt ausdrücklich nur nach, ob das Absicht ist („doesn't affect me, i have none"), und verweist auf den `library_reorganize`-Kommentar direkt darüber, der dieselbe Gefahr behandelt. Zu liefern ist eine Entscheidung mit Begründung: entweder in `PRESERVED_RETIRED_FINDING_IDS` aufnehmen, oder den Kommentar so erweitern, dass die Absicht an der Stelle selbst dokumentiert ist. |

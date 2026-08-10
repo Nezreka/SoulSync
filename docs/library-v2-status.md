@@ -2980,3 +2980,61 @@ nicht einfach ausgeblendet werden.
    zurück, kann bei Namensdrift aber legitime IDs verlieren.
 2. Danach vollständige Python-Suite, vollständige WebUI-Gates, relevante
    Playwright-Live-Flows und `git diff --check` erneut ausführen.
+
+---
+
+## 50. Nezrekas Review von PR #1062 — Arbeitsliste (10. August 2026)
+
+Nezreka hat den Branch am 10. August 2026 auf seiner realen Bibliothek getestet
+(4.979 Artists / 69.296 Alben / 307.885 Tracks / 9 GB DB) und die Befunde als
+PR-Kommentar hinterlegt. Diagnosen, Verifikationsstand und Korrekturverträge
+stehen in [library-v2-issues.md §32](library-v2-issues.md). Hier steht nur der
+Status.
+
+Sein Urteil zur Seite selbst ist positiv; `schema.py` hat er gegen das alte
+Schema geprüft und für richtig befunden. Die Blocker sind Migration und
+Enrichment: „just want the migration sorted and the enrichment not to
+regress."
+
+### 50.1 Status
+
+| ID | Kurzfassung | Status |
+|---|---|---|
+| iss32-M01 | Zeitgesteuertes Fortschrittslog für den Bootstrap-Import | **Offen** — Lücke im Code bestätigt |
+| iss32-M02 | Enrichment-Worker/Automation Engine während der Migration pausieren | **Offen** — Symptom aus dem Log, Ursache nicht verifiziert |
+| iss32-M03 | Migration von der Startup-Reihenfolge entkoppeln | **Offen, aber Prämisse teilweise widerlegt** — der Autostart läuft bereits im Daemon-Thread; das Symptom des zweiten Starts ist unerklärt und zuerst zu diagnostizieren |
+| iss32-M04 | WAL-Checkpoint während der Migration | **Offen** — `wal_checkpoint` existiert nirgends im Repo |
+| iss32-E01 | `resync_entity_from_legacy` verdrahten | **Offen** — Nezrekas Vermutung im Code bestätigt, keine Aufrufstelle außerhalb der Tests |
+| iss32-E02 | Native Artists erreichen nur `native_enrich` statt aller zwölf Worker | **Offen** — deckt sich mit dem bereits bekannten Native-Artist-Enrich-Dead-End |
+| iss32-E03 | `/api/library/artists` liest weiterhin Legacy | **Offen** — im Code bestätigt (`web_server.py:9889`) |
+| iss32-T01 | Sind `lib2_artists`/`lib2_albums`/`lib2_tracks` Endzustand oder Übergang? | **Offen — Antwort, kein Code** |
+| iss32-S01 | `mbid_mismatch_detector` nicht in `PRESERVED_RETIRED_FINDING_IDS` | **Offen — Entscheidung mit Begründung** |
+
+### 50.2 Empfohlene Reihenfolge für den nächsten Chat
+
+1. **iss32-M03 zuerst diagnostizieren, nicht fixen.** Der zweite Start, der
+   nicht über die DB-Init hinauskam, ist der einzige Befund, dessen Ursache
+   noch völlig offen ist. Er kann M01/M02/M04 miterklären — oder ein eigener
+   Fehler sein. Alles andere in 32.1 auf Verdacht zu ändern, bevor das geklärt
+   ist, riskiert einen Fix am falschen Ort.
+2. **iss32-M01 und iss32-M04.** Beide sind klein, unabhängig und im Code
+   bestätigt. M01 ist zusätzlich Voraussetzung dafür, jeden weiteren Lauf
+   überhaupt beurteilen zu können — ohne Fortschrittslog ist der nächste Test
+   wieder blind.
+3. **iss32-M02**, danach ein Migrationslauf gegen eine Kopie einer möglichst
+   großen DB. Die eigene Test-DB reicht dafür nachweislich nicht; die
+   Größenordnung des Fehlerbildes hängt an Nezrekas Skala.
+4. **iss32-T01 beantworten, bevor iss32-E02 umgesetzt wird.** Die beiden hängen
+   zusammen: der billige E02-Fix (Legacy-Row für native Artists anlegen) macht
+   Legacy zum Pflichtdurchgang und widerspricht der Zielrichtung „Legacy weg
+   oder read-only".
+5. **iss32-E01**, dann **iss32-E03**, dann **iss32-E02** entlang der in T01
+   getroffenen Entscheidung.
+6. **iss32-S01** zum Schluss — eine Zeile plus Begründung.
+
+### 50.3 Was dieser Review *nicht* bemängelt hat
+
+Explizit positiv bzw. unbeanstandet: die Library-V2-Seite selbst, die
+`schema.py`-Begründung (gegen das alte Schema gegengeprüft), sowie
+`lib2_track_artists` und `lib2_track_files` als sachlich notwendige neue
+Tabellen. Diese Punkte sind nicht erneut aufzurollen.
