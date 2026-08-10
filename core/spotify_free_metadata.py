@@ -108,6 +108,27 @@ def should_block_rate_limited_resume(rate_limited: bool, metadata_available: boo
 # Normalizers (pure — unit-testable against captured fixtures)
 # --------------------------------------------------------------------------
 
+def images_largest_first(sources) -> list:
+    """Order raw web-player image sources widest-first, like the official API.
+
+    The Spotify Web API documents `images` as ordered largest to smallest, and
+    the whole codebase relies on it — every consumer takes `images[0]` for the
+    display URL (amazon_worker, artist_source_detail, auto_import_worker, ...).
+    The web player hands back the same 64/300/640 set but does NOT promise that
+    order, so passing `coverArt.sources` straight through meant a Spotify-Free
+    user could get the 64px thumbnail wherever a Premium user got 640px. Same
+    art, a quarter of the resolution, for no reason other than list order.
+
+    Entries missing width/height sort last rather than winning by accident.
+    """
+    usable = [s for s in (sources or []) if isinstance(s, dict) and s.get('url')]
+    return sorted(
+        usable,
+        key=lambda s: (s.get('width') or s.get('height') or 0),
+        reverse=True,
+    )
+
+
 def normalize_artist(raw: dict) -> dict:
     """Map a raw SpotipyFree/spotapi artist object (from ``artist()`` or an
     ``artist_search`` item's ``data``) onto the Spotify-compatible artist dict
@@ -123,15 +144,11 @@ def normalize_artist(raw: dict) -> dict:
     artist_id = raw.get('id') or (uri.split(':')[-1] if uri else '')
     name = profile.get('name') or raw.get('name') or ''
 
-    images = []
     avatar = (raw.get('visuals') or {}).get('avatarImage') or {}
-    for src in (avatar.get('sources') or []):
-        if src.get('url'):
-            images.append({
-                'url': src['url'],
-                'height': src.get('height'),
-                'width': src.get('width'),
-            })
+    images = [
+        {'url': src['url'], 'height': src.get('height'), 'width': src.get('width')}
+        for src in images_largest_first(avatar.get('sources'))
+    ]
 
     followers = (raw.get('stats') or {}).get('followers')
 
@@ -304,7 +321,7 @@ class SpotifyFreeMetadataClient:
             'name': release.get('name') or '',
             'album_type': album_type,
             'release_date': release_date,
-            'images': ((release.get('coverArt') or {}).get('sources')) or [],
+            'images': images_largest_first((release.get('coverArt') or {}).get('sources')),
             'total_tracks': ((release.get('tracks') or {}).get('totalCount')) or 0,
             'uri': release.get('uri') or f'spotify:album:{rid}',
             'external_urls': {'spotify': f'https://open.spotify.com/album/{rid}'},
