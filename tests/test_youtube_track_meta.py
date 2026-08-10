@@ -171,3 +171,16 @@ def test_music_host_must_be_the_host_not_a_substring():
 def test_bad_url_input_is_safe():
     for bad in (None, '', '   ', 123, {}, 'not a url'):
         assert not is_music_youtube_url(bad)
+
+
+def test_strip_topic_suffix_helper():
+    from core.youtube_track_meta import strip_topic_suffix
+    assert strip_topic_suffix('Example Band - Topic') == 'Example Band'
+    assert strip_topic_suffix('Fifth Artist - Topic') == 'Fifth Artist'
+    assert strip_topic_suffix('Fourth Artist  -  TOPIC') == 'Fourth Artist'
+    # No suffix — unchanged.
+    assert strip_topic_suffix('Third Artist') == 'Third Artist'
+    # Would strip to nothing: keep the original rather than invent an empty artist.
+    assert strip_topic_suffix('- Topic') == '- Topic'
+    assert strip_topic_suffix('') == ''
+    assert strip_topic_suffix(None) == ''

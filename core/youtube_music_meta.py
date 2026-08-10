@@ -40,6 +40,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
+from core.youtube_track_meta import strip_topic_suffix
 from utils.logging_config import get_logger
 
 logger = get_logger("youtube_music_meta")
@@ -65,13 +66,21 @@ def playlist_id_from_url(url: Any) -> str:
 
 
 def _artist_names(track: Mapping[str, Any]) -> List[str]:
-    """Non-empty artist names, in the API's order (primary first)."""
+    """Non-empty artist names, in the API's order (primary first).
+
+    Tracks whose artist has no canonical catalog entry come back with the raw
+    auto-generated channel name instead — ``"Example Band - Topic"``. Left alone that
+    reaches the mirror verbatim and never matches the ``Example Band`` already in the
+    library, so the suffix is stripped with the same helper the yt-dlp path
+    uses. Observed on 10 of 1995 tracks across one user's playlists.
+    """
     names = []
     for entry in track.get("artists") or []:
         if isinstance(entry, Mapping):
             name = str(entry.get("name") or "").strip()
         else:
             name = str(entry or "").strip()
+        name = strip_topic_suffix(name)
         if name and name not in names:
             names.append(name)
     return names

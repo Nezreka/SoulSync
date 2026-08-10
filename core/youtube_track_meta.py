@@ -53,6 +53,24 @@ _TOPIC_RE = re.compile(r'\s*-\s*topic\s*$', re.IGNORECASE)
 _TITLE_SPLIT_RE = re.compile(r'^\s*(?P<artist>.+?)\s+[-–—]\s+(?P<title>.+?)\s*$')
 
 
+def strip_topic_suffix(name: Any) -> str:
+    """Strip a trailing ``" - Topic"`` from an auto-generated channel name.
+
+    Shared so the yt-dlp path and the YouTube Music catalog path agree: the
+    catalog hands back the raw channel name for artists without a canonical
+    entry, so ``"Example Band - Topic"`` reaches the mirror and never matches the
+    ``Example Band`` already in the library. Returns the input stripped of the suffix,
+    or unchanged when there isn't one.
+    """
+    text = str(name or '').strip()
+    if not text:
+        return ''
+    stripped = _TOPIC_RE.sub('', text).strip()
+    # A channel literally named "- Topic" would strip to nothing; keep the
+    # original rather than inventing an empty artist.
+    return stripped or text
+
+
 def _first_music_field(entry: Mapping[str, Any]) -> str:
     """First non-empty value from yt-dlp's music-metadata fields."""
     artists = entry.get('artists')
@@ -114,8 +132,8 @@ def derive_artist_and_title(
     # 2. "<Artist> - Topic" auto-channel — the channel name IS the artist.
     channel = str(entry.get('uploader') or entry.get('channel') or '').strip()
     if _TOPIC_RE.search(channel):
-        stripped = _TOPIC_RE.sub('', channel).strip()
-        if stripped:
+        stripped = strip_topic_suffix(channel)
+        if stripped and stripped != channel:
             return stripped, title
 
     # 3. "<Artist> - <Title>" embedded in the title.
@@ -135,4 +153,4 @@ def derive_artist_and_title(
     return '', title
 
 
-__all__ = ['derive_artist_and_title', 'is_music_youtube_url']
+__all__ = ['derive_artist_and_title', 'is_music_youtube_url', 'strip_topic_suffix']

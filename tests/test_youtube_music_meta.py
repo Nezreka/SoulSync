@@ -149,3 +149,37 @@ def test_fetch_returns_none_without_a_playlist_id():
     from core.youtube_music_meta import fetch_ytmusic_playlist
     assert fetch_ytmusic_playlist("https://music.youtube.com/") is None
     assert fetch_ytmusic_playlist("") is None
+
+
+# ── "- Topic" channel names ───────────────────────────────────────────────
+# An artist with no canonical catalog entry comes back as the raw auto-channel
+# name. Left alone it reaches the mirror as "Example Band - Topic" and never matches
+# the "Example Band" already in the library. Seen on 10 of 1995 real tracks.
+
+
+def test_topic_suffix_stripped_from_catalog_artist():
+    payload = ytmusic_playlist_to_payload(
+        _raw({**ATV_TRACK, "artists": [{"name": "Example Band - Topic"}]}), URL)
+    assert payload["tracks"][0]["artists"] == ["Example Band"]
+    assert payload["tracks"][0]["raw_artist"] == "Example Band"
+
+
+def test_topic_stripping_dedupes_against_the_canonical_name():
+    # Same artist credited both ways must collapse to one name, not two.
+    payload = ytmusic_playlist_to_payload(
+        _raw({**ATV_TRACK, "artists": [{"name": "Second Artist"}, {"name": "Second Artist - Topic"}]}),
+        URL)
+    assert payload["tracks"][0]["artists"] == ["Second Artist"]
+
+
+def test_artist_named_only_topic_is_not_emptied():
+    payload = ytmusic_playlist_to_payload(
+        _raw({**ATV_TRACK, "artists": [{"name": "- Topic"}]}), URL)
+    assert payload["tracks"][0]["artists"] == ["- Topic"]
+
+
+def test_missing_video_type_is_empty_not_none():
+    # 160 of 1995 real tracks carry no videoType; it must not become "None".
+    payload = ytmusic_playlist_to_payload(
+        _raw({**ATV_TRACK, "videoType": None}), URL)
+    assert payload["tracks"][0]["video_type"] == ""
