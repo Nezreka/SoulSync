@@ -3079,6 +3079,19 @@ function initializeMobileNavigation() {
 
     overlay.addEventListener('click', closeMobileNav);
 
+    // Backstop for the overlay click above: the overlay is one element at a
+    // fixed z-index, so anything that paints over it swallows the tap and the
+    // drawer stays open. Closing on any click that lands outside the drawer
+    // doesn't care what's on top. The hamburger is excluded because its own
+    // handler already toggles — without this guard the two would fight and
+    // re-close the drawer the instant it opened.
+    document.addEventListener('click', (event) => {
+        if (!sidebar.classList.contains('mobile-open')) return;
+        if (sidebar.contains(event.target)) return;
+        if (hamburgerBtn.contains(event.target)) return;
+        closeMobileNav();
+    });
+
     // Close sidebar on nav button click (mobile only)
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3564,24 +3577,56 @@ async function loadInitialData() {
         const initialPath = window.location.pathname;
         const initialNavigationEpoch = navigationEpoch;
 
-        // Load artist bubble state first
-        await hydrateArtistBubblesFromSnapshot();
-
-        // Load search bubble state
-        await hydrateSearchBubblesFromSnapshot();
-
-        // Load discover download state
-        await hydrateDiscoverDownloadsFromSnapshot();
+        // Snapshot hydration is best-effort chrome — bubbles and the discover
+        // download bar. It must never decide whether the app navigates.
+        //
+        // `hydrateDiscoverDownloadsFromSnapshot` is published by the REACT
+        // bundle at module load (see -discover.use-download-bar.ts), unlike the
+        // two above it which live in shared-helpers.js. So when that bundle
+        // fails to arrive — blocked, 404, offline dev server — the bare call
+        // threw a ReferenceError that escaped to the catch below, skipping the
+        // navigateToPage() further down. The user got the shell with no page
+        // inside it at all. One absent feature must not cost the whole startup.
+        try {
+            await hydrateArtistBubblesFromSnapshot();
+            await hydrateSearchBubblesFromSnapshot();
+            // typeof on an undeclared identifier is safe; a bare call is not.
+            if (typeof hydrateDiscoverDownloadsFromSnapshot === 'function') {
+                await hydrateDiscoverDownloadsFromSnapshot();
+            } else {
+                console.warn('[init] discover download hydration unavailable — the React bundle did not load');
+            }
+        } catch (hydrationError) {
+            console.warn('[init] snapshot hydration failed; navigating anyway', hydrationError);
+        }
 
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         const urlPage = _getPageFromPath();
-        const targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
             ? urlPage
             : homePage;
 
-        if (window.location.pathname !== initialPath || navigationEpoch !== initialNavigationEpoch) {
+        // A real navigation during startup means abandon it — whatever the user
+        // asked for wins, and it has already activated its own page.
+        if (navigationEpoch !== initialNavigationEpoch) {
             return;
+        }
+
+        // The pathname changing is NOT the same thing. React's root route
+        // redirects "/" to the profile's home path in beforeLoad (see
+        // routes/index.tsx), which rewrites location.pathname while this async
+        // function is still mid-flight. Treating that as "the user navigated
+        // away" and returning meant showReactHost() below never ran: the URL
+        // read /dashboard while the React host was never activated, so the page
+        // was blank until you navigated by hand. Desktop wins that race and
+        // never sees it; a phone is slow enough to lose it. A redirect only
+        // answers the question startup was already asking, so adopt it.
+        if (window.location.pathname !== initialPath) {
+            const redirectedPage = _getPageFromPath();
+            if (redirectedPage && isPageAllowed(redirectedPage)) {
+                targetPage = redirectedPage;
+            }
         }
 
         if (targetPage === 'artist-detail') {
