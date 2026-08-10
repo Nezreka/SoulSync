@@ -382,8 +382,8 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
         except Exception as prune_err:  # noqa: BLE001 — housekeeping, never fatal
             try:
                 conn.rollback()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:  # noqa: BLE001, S110 - a rollback that itself fails
+                pass           # adds nothing; prune_err is logged below.
             logger.debug("mirror outbox prune skipped: %s", prune_err)
         finally:
             conn.close()

@@ -241,6 +241,79 @@ def test_retag_is_refused_for_an_ambiguous_finding():
     assert 'several different recordings' in out['error']
 
 
+# ── the version-variant false positives (the reporter's majority case) ───────
+#
+# Taken verbatim from the screenshots on #1132. `normalize` strips bracketed
+# version tags, so the variant and the original both score title 1.0 / artist
+# 1.0 against the expected title — an exact tie. With a strict `>` the winner
+# was whichever MusicBrainz listed first, and the version gate then failed on
+# it. Reversing the candidate order flipped FAIL/PASS, which is what makes it a
+# bug rather than a judgement call.
+
+VARIANT_CASES = [
+    # (expected title, artist, the variant AcoustID reported, fingerprint)
+    ("Celebrity", "Brad Paisley", "Celebrity (karaoke)", 0.99),
+    ("Want to Want Me", "Jason DeRulo", "Want to Want Me (instrumental version)", 1.0),
+]
+
+
+@pytest.mark.parametrize(("title", "artist", "variant", "fp"), VARIANT_CASES)
+def test_correct_file_is_not_flagged_because_a_variant_was_listed_first(
+        title, artist, variant, fp):
+    from core.matching.audio_verification import Decision, evaluate
+
+    recordings = [
+        {"title": variant, "artist": artist, "score": fp},
+        {"title": title, "artist": artist, "score": fp},
+    ]
+    outcome = evaluate(title, artist, recordings, fingerprint_score=fp)
+    assert outcome.decision is Decision.PASS, (
+        f"a correct file was reported as {variant!r} purely because that "
+        f"recording came first in the candidate list")
+    assert outcome.matched_title == title
+
+
+@pytest.mark.parametrize(("title", "artist", "variant", "fp"), VARIANT_CASES)
+def test_the_verdict_no_longer_depends_on_candidate_order(title, artist, variant, fp):
+    from core.matching.audio_verification import evaluate
+
+    recordings = [
+        {"title": variant, "artist": artist, "score": fp},
+        {"title": title, "artist": artist, "score": fp},
+    ]
+    first = evaluate(title, artist, recordings, fingerprint_score=fp)
+    reversed_ = evaluate(title, artist, list(reversed(recordings)), fingerprint_score=fp)
+    assert first.decision is reversed_.decision
+    assert first.matched_title == reversed_.matched_title
+
+
+def test_a_genuine_variant_is_still_caught():
+    """The gate must keep working: when the ONLY candidate is the variant,
+    the file really is the instrumental and should still be flagged."""
+    from core.matching.audio_verification import Decision, evaluate
+
+    outcome = evaluate(
+        "Celebrity", "Brad Paisley",
+        [{"title": "Celebrity (karaoke)", "artist": "Brad Paisley", "score": 0.99}],
+        fingerprint_score=0.99,
+    )
+    assert outcome.decision is Decision.FAIL
+
+
+def test_a_genuinely_different_song_is_still_caught():
+    """The Chicago case from the issue — different songs, not a variant. Still
+    a FAIL; the ambiguity guard above is what stops it naming one of them."""
+    from core.matching.audio_verification import Decision, evaluate
+
+    outcome = evaluate(
+        "Stay the Night", "Chicago",
+        [{"title": "Saturday in the Park", "artist": "Chicago", "score": 1.0},
+         {"title": "You're the Inspiration", "artist": "Chicago", "score": 1.0}],
+        fingerprint_score=1.0,
+    )
+    assert outcome.decision is Decision.FAIL
+
+
 def test_the_scanner_imports_and_uses_the_guard():
     """Pin the wiring — the pure helper is useless if the scanner drops it."""
     import inspect

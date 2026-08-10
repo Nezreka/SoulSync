@@ -121,8 +121,8 @@ def fetch_track_lyrics(
         # held across network I/O, the same class as iss29-D01, one order down.
         try:
             conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001, S110 - a rollback that itself fails
+            pass           # leaves nothing to salvage; scan_err is logged below.
         logger.debug(
             "Failed to rescan file tags after lyrics fetch for %s: %s", resolved, scan_err,
         )

@@ -143,8 +143,8 @@ def analyze_album_replaygain(
                 # file I/O is the iss29-D01 pattern one order down.
                 try:
                     conn.rollback()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception:  # noqa: BLE001, S110 - a rollback that itself
+                    pass           # fails adds nothing; scan_err is logged below.
                 logger.debug("Failed to rescan file tags after album ReplayGain write for %s: %s", path, scan_err)
         except Exception as e:  # noqa: BLE001
             stats["failed"] += 1

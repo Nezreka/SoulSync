@@ -534,11 +534,43 @@ def _reachable_original_dir(original_path: Any) -> str | None:
     except Exception as exc:  # noqa: BLE001 - resolution is best-effort
         logger.debug("[Enhance] library path resolution failed for %r: %s",
                      original_path, exc)
+    roots = _configured_root_dirs()
     for candidate in candidates:
         parent = os.path.dirname(candidate)
-        if parent and os.path.isdir(parent):
-            return parent
+        if not parent or not os.path.isdir(parent):
+            continue
+        # A ROOT is not an album folder. When the recorded file sits loose in
+        # the Transfer/download root or a library root, that root exists, so
+        # "replace in place" would drop the upgrade straight back into the root
+        # — the exact symptom #1109 was reported as. Falling through to the
+        # template files it under Artist/Album instead, and the retirement step
+        # then removes the loose original.
+        if os.path.normpath(parent) in roots:
+            logger.debug(
+                "[Enhance] original sits in a library root (%s) — filing the "
+                "upgrade by template instead of replacing in place", parent)
+            continue
+        return parent
     return None
+
+
+def _configured_root_dirs() -> set[str]:
+    """Normalized roots that must never be treated as an album folder."""
+    roots: set[str] = set()
+    try:
+        cfg = _get_config_manager()
+        raw = [cfg.get("soulseek.transfer_path", "./Transfer"),
+               cfg.get("soulseek.download_path", "./downloads")]
+        music_paths = cfg.get("library.music_paths", []) or []
+        if isinstance(music_paths, str):
+            music_paths = [music_paths]
+        raw.extend(music_paths)
+        for value in raw:
+            if isinstance(value, str) and value.strip():
+                roots.add(os.path.normpath(docker_resolve_path(value)))
+    except Exception as exc:  # noqa: BLE001 - a missing config must not block the upgrade
+        logger.debug("[Enhance] could not read the configured roots: %s", exc)
+    return roots
 
 
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):

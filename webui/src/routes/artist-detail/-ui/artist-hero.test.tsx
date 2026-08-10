@@ -429,3 +429,94 @@ describe('hero elements the vanilla globals reach for by id', () => {
     expect(document.getElementById('artist-enrichment-coverage')).toBeNull();
   });
 });
+
+/**
+ * The hero's watchlist check must not re-run on every parent render.
+ *
+ * `watchlistIdentity()` returns a fresh `{id, name}` each call and the page
+ * calls it inline in JSX, so the object's identity changes on every render —
+ * and the parent re-renders on each enrichment-stream tick. Keying the effect
+ * on the object made it re-run every time: `setWatching(null)` reset the
+ * button, the re-check flipped it back, and that pair repeated for as long as
+ * the stream ran (the reported "watched/unwatched over and over"). It also
+ * swallowed toggles, because a check that resolved after a toggle overwrote
+ * the new state with the stale one.
+ */
+describe('ArtistHero watchlist effect stability', () => {
+  const checkCalls = () =>
+    (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      (c) => String(c[0]) === '/api/watchlist/check',
+    ).length;
+
+  it('checks once across re-renders that only change the identity object', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ success: true, is_watching: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    );
+    const hero = (n: number) => (
+      <ArtistHero
+        artist={{ name: 'Aphex Twin' }}
+        discography={{}}
+        isSourceArtist={false}
+        streamCounts={undefined}
+        streamCompleted={false}
+        enrichment={undefined}
+        // A NEW object each render, exactly as the page supplies it.
+        watchlist={{ id: 'sp1', name: 'Aphex Twin' }}
+        // Something that genuinely changes, standing in for a stream tick.
+        key={undefined}
+        data-tick={n}
+      />
+    );
+    const { rerender } = render(hero(0));
+    await screen.findByText('Watching...');
+    const afterMount = checkCalls();
+
+    rerender(hero(1));
+    rerender(hero(2));
+    rerender(hero(3));
+    await Promise.resolve();
+
+    expect(checkCalls()).toBe(afterMount);
+    // And the button never fell back to its default label mid-stream.
+    expect(document.querySelector('.watchlist-text')?.textContent).toBe('Watching...');
+  });
+
+  it('re-checks when the artist actually changes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ success: true, is_watching: true }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    );
+    const hero = (id: string) => (
+      <ArtistHero
+        artist={{ name: 'A' }}
+        discography={{}}
+        isSourceArtist={false}
+        streamCounts={undefined}
+        streamCompleted={false}
+        enrichment={undefined}
+        watchlist={{ id, name: 'A' }}
+      />
+    );
+    const { rerender } = render(hero('sp1'));
+    await screen.findByText('Watching...');
+    const first = checkCalls();
+
+    rerender(hero('sp2'));
+    await screen.findByText('Watching...');
+
+    expect(checkCalls()).toBeGreaterThan(first);
+  });
+});

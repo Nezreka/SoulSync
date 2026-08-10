@@ -219,3 +219,195 @@ class _StubConfig:
 
     def get_active_media_server(self):
         return None
+
+
+# ── the second half: retiring the superseded copy ────────────────────────────
+#
+# Landing the upgrade in the right place is only half of #1109. The old file
+# then has to go. That check ran `os.path.exists()` on the RECORDED path — the
+# media server's "/music/…" view — so it said False, the removal was skipped,
+# and the code fell through to logging "Replaced in-place" while the superseded
+# copy sat on disk beside the new one. Silent duplication, with a log line
+# claiming the opposite.
+
+def _pipeline_source() -> str:
+    from pathlib import Path
+
+    from core.imports import pipeline
+
+    return Path(pipeline.__file__).read_text(encoding="utf-8", errors="replace")
+
+
+def test_an_unreachable_recorded_path_is_resolved_onto_this_process_mounts(tmp_path, monkeypatch):
+    """The resolution itself, on the helper that performs it."""
+    from core.imports import pipeline
+
+    reachable = tmp_path / "Billie Eilish" / "HIT ME HARD AND SOFT" / "10 BLUE.mp3"
+    reachable.parent.mkdir(parents=True)
+    reachable.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path",
+        lambda recorded, config_manager=None: str(reachable))
+
+    assert pipeline._resolve_enhance_original_path(
+        "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3") == str(reachable)
+
+
+def test_a_reachable_recorded_path_is_left_alone(tmp_path, monkeypatch):
+    original = tmp_path / "10 BLUE.mp3"
+    original.write_bytes(b"x")
+
+    def _must_not_run(*_a, **_kw):
+        raise AssertionError("a path this process can already see needs no resolving")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path", _must_not_run)
+
+    from core.imports import pipeline
+
+    assert pipeline._resolve_enhance_original_path(str(original)) == str(original)
+
+
+def test_a_failing_resolver_falls_back_to_the_recorded_path(monkeypatch):
+    """Resolution is best-effort: the caller's `exists()` stays the decision point."""
+    from core.imports import pipeline
+
+    def _boom(*_a, **_kw):
+        raise RuntimeError("no library roots configured")
+
+    monkeypatch.setattr(
+        "core.library.path_resolver.resolve_library_file_path", _boom)
+
+    recorded = "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3"
+    assert pipeline._resolve_enhance_original_path(recorded) == recorded
+
+
+def test_the_old_file_is_resolved_before_the_exists_check():
+    src = _pipeline_source()
+    resolve_at = src.index(
+        "original_enhance_path = _resolve_enhance_original_path(")
+    decide_at = src.index(
+        "if os.path.normpath(original_enhance_path) != os.path.normpath(final_path)")
+    assert resolve_at < decide_at, (
+        "the recorded path must be resolved BEFORE deciding whether the old "
+        "file exists, or an unreachable original is silently left on disk")
+
+
+def test_the_decision_and_the_delete_both_use_the_resolved_path():
+    src = _pipeline_source()
+    # `original_enhance_path` holds the RESOLVED path — the guard compares it...
+    assert "if os.path.normpath(original_enhance_path) != os.path.normpath(final_path)" in src
+    # ...and the removal acts on the same value, never the raw recorded one.
+    assert "os.remove(original_enhance_path)" in src
+    assert "os.remove(_recorded_enhance_path)" not in src, (
+        "deleting the RECORDED path would delete whatever happens to sit at "
+        "that location rather than the file we actually resolved")
+
+
+def test_an_in_place_upgrade_resolves_onto_itself_so_the_guard_trips(tmp_path):
+    """The data-loss case this guard exists for.
+
+    When the upgrade replaces the file in place, the old path resolves to the
+    file we just wrote. Comparing the RECORDED path would miss that whenever
+    the recorded spelling differs from the resolved one — and the delete would
+    destroy the upgrade. Resolving first makes the two paths equal, so the
+    guard catches it.
+    """
+    from core.library.path_resolver import resolve_library_file_path
+
+    album = tmp_path / "Transfer" / "Billie Eilish" / "HIT ME HARD AND SOFT"
+    album.mkdir(parents=True)
+    final_path = album / "10 BLUE.flac"
+    final_path.write_bytes(b"the upgrade")
+
+    class _Cfg:
+        def get(self, key, default=None):
+            if key == "soulseek.transfer_path":
+                return str(tmp_path / "Transfer")
+            if key == "library.music_paths":
+                return []
+            return default
+
+    # The media server's spelling of the very same file.
+    recorded = "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.flac"
+    resolved = resolve_library_file_path(recorded, config_manager=_Cfg())
+
+    assert resolved == str(final_path)
+    # …which is exactly what the pipeline's guard compares, so no delete.
+    assert os.path.normpath(resolved) == os.path.normpath(str(final_path))
+    assert final_path.exists()
+
+
+def test_a_superseded_copy_under_an_unreachable_root_is_found(tmp_path):
+    """The case that was silently skipped: old file elsewhere in the library."""
+    from core.library.path_resolver import resolve_library_file_path
+
+    album = tmp_path / "Transfer" / "Billie Eilish" / "HIT ME HARD AND SOFT"
+    album.mkdir(parents=True)
+    old = album / "10 BLUE.mp3"
+    old.write_bytes(b"the old lossy copy")
+
+    class _Cfg:
+        def get(self, key, default=None):
+            if key == "soulseek.transfer_path":
+                return str(tmp_path / "Transfer")
+            if key == "library.music_paths":
+                return []
+            return default
+
+    resolved = resolve_library_file_path(
+        "/music/Billie Eilish/HIT ME HARD AND SOFT/10 BLUE.mp3", config_manager=_Cfg())
+    assert resolved == str(old), "the superseded copy must be findable to be removed"
+
+
+# ── a root is not an album folder ────────────────────────────────────────────
+#
+# The last way to reproduce the reported symptom WITH the fix in place: when the
+# recorded file sits loose in the Transfer root, that root exists, so it counted
+# as "reachable" and the upgrade was written straight back into the root.
+
+def test_an_original_loose_in_the_transfer_root_is_not_replaced_in_place(monkeypatch, tmp_path):
+    _patch_config(monkeypatch, tmp_path)
+    transfer = tmp_path / "Transfer"
+    transfer.mkdir(parents=True)
+    loose = transfer / "01 - The Show.mp3"
+    loose.write_bytes(b"the loose original")
+
+    final_path, created = paths_mod.build_final_path_for_track(
+        _enhance_context(str(loose)), {"name": "Lenka"}, ALBUM_INFO, ".flac",
+    )
+
+    assert created is True
+    assert final_path == str(
+        tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac"), (
+        "the upgrade landed back in the Transfer root — #1109's symptom")
+
+
+def test_a_real_album_folder_under_that_same_root_still_replaces_in_place(monkeypatch, tmp_path):
+    """The guard must reject only the root itself, not everything beneath it."""
+    _patch_config(monkeypatch, tmp_path)
+    album = tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka"
+    album.mkdir(parents=True)
+    (album / "01 - The Show.mp3").write_bytes(b"x")
+
+    final_path, _ = paths_mod.build_final_path_for_track(
+        _enhance_context(str(album / "01 - The Show.mp3")),
+        {"name": "Lenka"}, ALBUM_INFO, ".flac",
+    )
+
+    assert final_path == str(album / "01 - The Show.flac")
+
+
+def test_a_configured_music_path_root_is_rejected_too(monkeypatch, tmp_path):
+    music_root = tmp_path / "media"
+    music_root.mkdir()
+    loose = music_root / "01 - The Show.mp3"
+    loose.write_bytes(b"x")
+
+    cfg = _TemplateConfig(tmp_path)
+    cfg._values["library.music_paths"] = [str(music_root)]
+    monkeypatch.setattr(paths_mod, "_get_config_manager", lambda: cfg)
+    monkeypatch.setattr(paths_mod, "_get_album_tracks_for_source", lambda *a: None)
+
+    assert paths_mod._reachable_original_dir(str(loose)) is None
