@@ -16907,6 +16907,17 @@ def parse_youtube_playlist(url):
     # youtube.com it carries the playlist owner's (#863). Decided once here from
     # the URL because the per-entry data can't distinguish the two.
     allow_channel_artist = is_music_youtube_url(url)
+
+    # A music.youtube.com playlist has a real catalog entry — artist AND album
+    # per track, and no flat-extraction page cap (#908). Try it first; it
+    # returns None on any failure so yt-dlp below stays the fallback. Never
+    # attempted for youtube.com: a video playlist has no catalog entry.
+    if allow_channel_artist:
+        from core.youtube_music_meta import fetch_ytmusic_playlist
+        ytm_playlist = fetch_ytmusic_playlist(url)
+        if ytm_playlist:
+            return ytm_playlist
+
     try:
         # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
         ydl_opts = {
