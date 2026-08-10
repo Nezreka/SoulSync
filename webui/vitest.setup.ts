@@ -12,11 +12,44 @@ import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 
 import { HttpResponse, http, server } from './src/test/msw';
 
+// Node 26 exposes a global `localStorage` slot whose value may be undefined.
+// Use jsdom's implementation where available and a spec-shaped in-memory
+// fallback otherwise. Keep one stable instance across tests in the worker.
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(String(key)) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    removeItem: (key) => {
+      values.delete(String(key));
+    },
+    setItem: (key, value) => {
+      values.set(String(key), String(value));
+    },
+  };
+}
+
+const testLocalStorage = window.localStorage ?? createMemoryStorage();
+
+function restoreLocalStorage() {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: testLocalStorage,
+  });
+}
+
+restoreLocalStorage();
+
 beforeAll(() => {
   server.listen({ onUnhandledRequest: 'error' });
 });
 
 beforeEach(() => {
+  restoreLocalStorage();
   server.use(
     http.get('/status', () =>
       HttpResponse.json({ media_server: { type: 'plex', connected: true } }),

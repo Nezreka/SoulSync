@@ -442,6 +442,7 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
     refresh_calls = []
     automation = _FakeAutomationEngine()
     runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
         resolve_album_artist_context=lambda album, source="": {"name": "Artist"},
         build_album_import_context=lambda album, track, **kwargs: {"album": album, "track": track, **kwargs},
         post_process_matched_download=lambda key, context, path: processed_contexts.append((key, context, path)),
@@ -566,6 +567,7 @@ def test_process_single_import_file_resolves_and_posts_context(tmp_path):
     _touch(audio_file)
     post_calls = []
     runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
         parse_filename_metadata=lambda filename: {"title": "Song", "artist": "Artist"},
         get_single_track_import_context=lambda title, artist, **kwargs: {
             "source": "deezer",
@@ -593,7 +595,11 @@ def test_process_single_import_file_resolves_and_posts_context(tmp_path):
 def test_process_single_import_file_rejects_malformed_manual_match(tmp_path):
     audio_file = tmp_path / "Song.flac"
     _touch(audio_file)
-    runtime = ImportRouteRuntime(post_process_matched_download=lambda *_args: None, logger=_FakeLogger())
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
 
     outcome = process_single_import_file(
         runtime,
@@ -601,6 +607,65 @@ def test_process_single_import_file_rejects_malformed_manual_match(tmp_path):
     )
 
     assert outcome == ("error", "Malformed manual match for file: Song.flac")
+
+
+@pytest.mark.parametrize("path_kind", ["outside", "traversal", "symlink"])
+def test_single_import_rejects_paths_escaping_allowed_roots(tmp_path, path_kind):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    outside = tmp_path / "outside.flac"
+    _touch(outside)
+    if path_kind == "outside":
+        supplied = outside
+    elif path_kind == "traversal":
+        supplied = staging / ".." / outside.name
+    else:
+        supplied = staging / "escape.flac"
+        supplied.symlink_to(outside)
+    calls = []
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(staging)],
+        post_process_matched_download=lambda *args: calls.append(args),
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime, {"full_path": str(supplied), "filename": supplied.name},
+    )
+
+    assert outcome[0] == "error"
+    assert "outside the allowed import folders" in outcome[1]
+    assert calls == []
+
+
+def test_album_import_rejects_forged_match_path_outside_allowed_root(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    outside = tmp_path / "outside.flac"
+    _touch(outside)
+    calls = []
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(staging)],
+        resolve_album_artist_context=lambda *_args, **_kwargs: {"name": "Artist"},
+        post_process_matched_download=lambda *args: calls.append(args),
+        is_active_media_server_ready=lambda: (True, ""),
+        logger=_FakeLogger(),
+    )
+
+    payload, status = album_process(runtime, {
+        "album": {"id": "album-1", "name": "Album"},
+        "matches": [{
+            "staging_file": {"full_path": str(outside), "filename": outside.name},
+            "track": {"name": "Track", "track_number": 1},
+        }],
+    })
+
+    assert status == 200
+    assert payload["processed"] == 0
+    assert payload["errors"] == [
+        "File is outside the allowed import folders: outside.flac",
+    ]
+    assert calls == []
 
 
 def test_singles_process_aggregates_worker_results_and_side_effects():

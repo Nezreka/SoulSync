@@ -435,6 +435,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     f"[Race Guard] Source gone but destination exists — already processed by another thread: "
                     f"{os.path.basename(existing_final)}"
                 )
+                context['_pipeline_import_succeeded'] = True
                 return
             # File was intentionally moved to quarantine by a concurrent/earlier
             # post-process call — this is a stale duplicate dispatch, not a race.
@@ -852,6 +853,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.info(f"Simple download post-processing complete: {activity_target}")
             context['_simple_download_completed'] = True
             context['_final_path'] = str(destination)
+            context['_pipeline_import_succeeded'] = True
             _persist_verification_status(context, destination)
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
@@ -1086,6 +1088,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
                 logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
+                context['_pipeline_import_succeeded'] = True
                 return
             # THE backstop for sella's incident: an upgrade/replace must NEVER
             # swap a good library file for a materially shorter one. Every path
@@ -1136,10 +1139,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         _incoming_tier = get_quality_tier_from_extension(file_path)
                         if _incoming_tier[1] < _existing_tier[1]:
                             logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
-                            try:
-                                os.remove(final_path)
-                            except Exception as e:
-                                logger.error(f"[Quality Replace] Could not remove existing file: {e}")
                         else:
                             logger.info(
                                 f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: "
@@ -1151,6 +1150,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                                 pass
                             except Exception as e:
                                 logger.error(f"[Protection] Error removing redundant file: {e}")
+                            context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
+                            if not context['_pipeline_import_succeeded']:
+                                context['_context_failure_msg'] = 'could not remove redundant import source'
                             return
                     else:
                         logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
@@ -1161,35 +1163,26 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                             logger.error(f"[Protection] Could not remove redundant file (already gone): {file_path}")
                         except Exception as e:
                             logger.error(f"[Protection] Error removing redundant file: {e}")
+                        context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
+                        if not context['_pipeline_import_succeeded']:
+                            context['_context_failure_msg'] = 'could not remove redundant import source'
                         return
                 elif is_enhance_download or force_replace:
                     if is_enhance_download:
                         logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
                     else:
                         logger.info(f"[Force] User-forced re-download — replacing existing file: {os.path.basename(final_path)}")
-                    try:
-                        os.remove(final_path)
-                    except Exception as e:
-                        logger.error(f"[Enhance] Could not remove existing file for replacement: {e}")
                 else:
                     logger.info(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
-                    try:
-                        os.remove(final_path)
-                    except FileNotFoundError:
-                        pass
             except Exception as check_error:
                 logger.error(f"[Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
-                try:
-                    if os.path.exists(final_path):
-                        os.remove(final_path)
-                except Exception as e:
-                    logger.error(f"[Protection] Failed to remove existing file for overwrite: {e}")
 
         if not os.path.exists(file_path):
             if os.path.exists(final_path):
                 logger.info(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
                 download_cover_art(album_info, os.path.dirname(final_path), context)
                 generate_lrc_file(final_path, context, artist_context, album_info)
+                context['_pipeline_import_succeeded'] = True
                 return
             expected_dir = os.path.dirname(final_path)
             expected_stem = os.path.splitext(os.path.basename(final_path))[0]
@@ -1214,6 +1207,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 context['_final_processed_path'] = found_variant
                 download_cover_art(album_info, expected_dir, context)
                 generate_lrc_file(found_variant, context, artist_context, album_info)
+                context['_pipeline_import_succeeded'] = True
                 return
             logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
@@ -1330,6 +1324,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     download_tasks[task_id]['final_file_path'] = context.get('_final_processed_path')
                     logger.info(f"[Post-Process] Marked task {task_id} as completed")
             _notify_download_completed(batch_id, task_id, success=True)
+        context['_pipeline_import_succeeded'] = True
 
     except Exception as e:
         import traceback
@@ -1340,6 +1335,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         source_exists = os.path.exists(file_path) if file_path else False
         if source_exists:
+            context.setdefault('_context_failure_msg', f'post-processing failed: {e}')
             if context_key in processed_download_ids:
                 processed_download_ids.remove(context_key)
                 logger.warning(f"Removed {context_key} from processed set - will retry on next check")

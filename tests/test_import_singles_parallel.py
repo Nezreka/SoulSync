@@ -72,7 +72,8 @@ def test_worker_returns_error_for_missing_file(tmp_path) -> None:
         'full_path': str(tmp_path / "does-not-exist.mp3"),
         'filename': 'does-not-exist.mp3',
     }
-    outcome, payload = _process_single_import_file(file_info)
+    with patch("core.imports.routes._get_staging_path", return_value=str(tmp_path)):
+        outcome, payload = _process_single_import_file(file_info)
     assert outcome == "error"
     assert "File not found" in payload
 
@@ -90,7 +91,8 @@ def test_worker_returns_error_for_malformed_manual_match(tmp_path) -> None:
         'filename': 'track.mp3',
         'manual_match': {'source': '', 'id': ''},
     }
-    outcome, payload = _process_single_import_file(file_info)
+    with patch("core.imports.routes._get_staging_path", return_value=str(tmp_path)):
+        outcome, payload = _process_single_import_file(file_info)
     assert outcome == "error"
     assert "Malformed manual match" in payload
 
@@ -111,11 +113,12 @@ def test_worker_wraps_pipeline_exception_as_error(tmp_path) -> None:
         'artist': 'Some Artist',
     }
 
-    with patch(
-        "core.imports.resolution.get_single_track_import_context",
-        side_effect=RuntimeError("metadata service down"),
-    ):
-        outcome, payload = _process_single_import_file(file_info)
+    with patch("core.imports.routes._get_staging_path", return_value=str(tmp_path)):
+        with patch(
+            "core.imports.resolution.get_single_track_import_context",
+            side_effect=RuntimeError("metadata service down"),
+        ):
+            outcome, payload = _process_single_import_file(file_info)
     assert outcome == "error"
     assert "metadata service down" in payload
 
@@ -152,13 +155,14 @@ def test_worker_returns_ok_with_resolved_title(tmp_path) -> None:
         'source': 'spotify',
     }
 
-    with patch(
-        "core.imports.resolution.get_single_track_import_context",
-        return_value=fake_resolved,
-    ):
-        with patch("web_server._post_process_matched_download") as ppm:
-            ppm.return_value = None
-            outcome, payload = _process_single_import_file(file_info)
+    with patch("core.imports.routes._get_staging_path", return_value=str(tmp_path)):
+        with patch(
+            "core.imports.resolution.get_single_track_import_context",
+            return_value=fake_resolved,
+        ):
+            with patch("web_server._post_process_matched_download") as ppm:
+                ppm.return_value = None
+                outcome, payload = _process_single_import_file(file_info)
 
     assert outcome == "ok"
     assert payload == "Resolved Title"

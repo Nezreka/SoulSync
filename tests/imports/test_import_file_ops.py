@@ -1,5 +1,6 @@
 import sys
 import types
+from pathlib import Path
 
 from core.imports.file_ops import (
     cleanup_empty_directories,
@@ -52,6 +53,23 @@ def test_safe_move_file_replaces_existing_destination(tmp_path):
 
     assert not src.exists()
     assert dst.read_text() == "new"
+
+
+def test_safe_move_failure_preserves_existing_destination_and_source(tmp_path, monkeypatch):
+    src = tmp_path / "source.flac"
+    dst = tmp_path / "track.flac"
+    src.write_bytes(b"new")
+    dst.write_bytes(b"old")
+
+    monkeypatch.setattr(_fo.os, "replace", lambda *_args: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left on device")
+    ))
+
+    with pytest.raises(OSError, match="No space"):
+        safe_move_file(src, dst)
+
+    assert src.read_bytes() == b"new"
+    assert dst.read_bytes() == b"old"
 
 
 def test_cleanup_empty_directories_removes_nested_empty_paths(tmp_path):
@@ -174,6 +192,7 @@ def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invali
 # ── atomic cross-filesystem move (Jellyfin null-disc mitigation) ──────────────
 import errno  # noqa: E402
 import os  # noqa: E402
+import stat  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -215,6 +234,45 @@ def test_cross_device_move_routes_to_atomic_and_completes(tmp_path, monkeypatch)
     assert not list(dstdir.glob(".*ssync-tmp"))   # complete file only, no leftover temp
 
 
+def test_cross_device_move_atomically_replaces_existing_destination(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_bytes(b"new payload")
+    dst = tmp_path / "lib" / "t.flac"
+    dst.parent.mkdir()
+    dst.write_bytes(b"old payload")
+    real_replace = os.replace
+
+    def fake_replace(a, b):
+        if Path(a) == src:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(a, b)
+
+    monkeypatch.setattr(_fo.os, "replace", fake_replace)
+    safe_move_file(src, dst)
+
+    assert not src.exists()
+    assert dst.read_bytes() == b"new payload"
+
+
+def test_cross_device_copy_failure_keeps_old_destination(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_bytes(b"new payload")
+    dst = tmp_path / "lib" / "t.flac"
+    dst.parent.mkdir()
+    dst.write_bytes(b"old payload")
+
+    monkeypatch.setattr(_fo.shutil, "copyfileobj", lambda *_args: (_ for _ in ()).throw(
+        OSError(errno.ENOSPC, "No space left on device")
+    ))
+
+    with pytest.raises(OSError, match="No space"):
+        _atomic_cross_device_move(src, dst)
+
+    assert src.read_bytes() == b"new payload"
+    assert dst.read_bytes() == b"old payload"
+    assert not list(dst.parent.glob(".*ssync-tmp"))
+
+
 def test_atomic_helper_completes_and_cleans_temp(tmp_path):
     src = tmp_path / "s.flac"
     src.write_text("payload")
@@ -225,6 +283,81 @@ def test_atomic_helper_completes_and_cleans_temp(tmp_path):
     assert dst.read_text() == "payload"
     assert not src.exists()
     assert not list(dstdir.glob(".*ssync-tmp"))
+
+
+def _publish(tmp_path, *, src_mode, dir_mode, cross_device=True):
+    """Move one file into a library folder of ``dir_mode`` and report its mode."""
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    os.chmod(src, src_mode)
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    os.chmod(dstdir, dir_mode)
+    dst = dstdir / "t.flac"
+
+    if cross_device:
+        _atomic_cross_device_move(src, dst)
+    else:
+        _fo.safe_move_file(src, dst)
+    return stat.S_IMODE(dst.stat().st_mode)
+
+
+@pytest.mark.parametrize("cross_device", [True, False])
+@pytest.mark.parametrize("mode", [0o644, 0o664])
+def test_move_keeps_an_already_shareable_source_mode(tmp_path, mode, cross_device):
+    # PR #1121 review: tempfile.mkstemp creates at 0600 by design and os.replace
+    # preserves that mode, so a cross-device import (docker downloads-volume ->
+    # library-volume) landed files no other user could read — Plex/Jellyfin run
+    # as a different user. An import never NARROWS a file that was already
+    # readable.
+    assert _publish(tmp_path, src_mode=mode, dir_mode=0o755,
+                    cross_device=cross_device) == mode
+
+
+@pytest.mark.parametrize("cross_device", [True, False])
+def test_move_widens_a_private_staging_mode_to_the_library_audience(
+    tmp_path, cross_device,
+):
+    """Copying the SOURCE's mode only fixes the reported bug when the download
+    client happened to write a permissive one. slskd/SABnzbd in a container
+    with umask 077 writes its downloads 0600, so inheriting that publishes a
+    library file the media server still cannot read — the exact symptom. The
+    destination DIRECTORY is the statement of who the library is for."""
+    assert _publish(tmp_path, src_mode=0o600, dir_mode=0o755,
+                    cross_device=cross_device) == 0o644
+
+
+@pytest.mark.parametrize("cross_device", [True, False])
+def test_move_follows_a_group_writable_library(tmp_path, cross_device):
+    assert _publish(tmp_path, src_mode=0o600, dir_mode=0o775,
+                    cross_device=cross_device) == 0o664
+
+
+@pytest.mark.parametrize("cross_device", [True, False])
+def test_move_does_not_widen_past_a_private_library(tmp_path, cross_device):
+    """A 0700 library says only this user gets in — nobody can traverse the
+    directory anyway, so there is nothing to widen for."""
+    assert _publish(tmp_path, src_mode=0o600, dir_mode=0o700,
+                    cross_device=cross_device) == 0o600
+
+
+def test_atomic_helper_keeps_permissions_when_copystat_fails(tmp_path, monkeypatch):
+    # copystat also copies timestamps/xattrs; a filesystem that rejects those
+    # must not cost the file its mode and leave it 0600 (mkstemp's default).
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    os.chmod(src, 0o644)
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    os.chmod(dstdir, 0o755)
+    dst = dstdir / "t.flac"
+
+    monkeypatch.setattr(_fo.shutil, "copystat", lambda *_a, **_k: (_ for _ in ()).throw(
+        OSError("utime not supported")
+    ))
+    _atomic_cross_device_move(src, dst)
+
+    assert stat.S_IMODE(dst.stat().st_mode) == 0o644
 
 
 def test_atomic_helper_cleans_temp_and_keeps_source_on_failure(tmp_path, monkeypatch):

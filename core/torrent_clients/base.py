@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Protocol, runtime_checkable
 
+from core.async_utils import run_blocking
+
 
 def normalize_client_url(raw: str) -> str:
     """Clean a user-entered WebUI URL into something ``requests`` accepts.
@@ -180,6 +182,18 @@ def fetch_torrent_payload(url: str, timeout: int = 30):
         return None, None
 
 
+async def _fetch_torrent_payload_async(url: str):
+    """Run the blocking indexer fetch without an event-loop default executor.
+
+    Python 3.14.6 can lose the cross-thread selector wakeup used while
+    ``asyncio.run()`` shuts its default executor down in a long-lived process.
+    Polling a bounded shared worker Future from the owner loop needs no foreign
+    thread to wake that loop and avoids creating an executor Runner.close()
+    must later join.
+    """
+    return await run_blocking(fetch_torrent_payload, url)
+
+
 async def add_torrent_smart(
     adapter: "TorrentClientAdapter",
     url_or_magnet: str,
@@ -197,11 +211,7 @@ async def add_torrent_smart(
     if not str(url_or_magnet or '').lower().startswith(('http://', 'https://')):
         return await adapter.add_torrent(url_or_magnet, category=category, save_path=save_path)
 
-    import asyncio
-    loop = asyncio.get_event_loop()
-    file_bytes, magnet = await loop.run_in_executor(
-        None, fetch_torrent_payload, url_or_magnet
-    )
+    file_bytes, magnet = await _fetch_torrent_payload_async(url_or_magnet)
     if magnet:
         return await adapter.add_torrent(magnet, category=category, save_path=save_path)
     if file_bytes is not None:

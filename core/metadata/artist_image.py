@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
 from core.metadata import registry as metadata_registry
@@ -257,15 +259,58 @@ def _audiodb_candidate(name: str, sid: str):
     return ('audiodb', url) if url else None
 
 
+# iss27-03: a per-source fetch is isolated by try/except already, but had no
+# time budget — a slow/rate-limited provider (iTunes' interval throttle,
+# Discogs' backoff sleep, both of which sleep for tens of seconds INSIDE the
+# worker thread) blocked the whole request past the frontend's client
+# timeout, silently discarding every source's result including ones that had
+# already succeeded. Bounding the wait means one slow source just misses this
+# round instead of taking every other source down with it.
+_CANDIDATE_GATHER_TIMEOUT_S = 10
+
+# The fan-out runs on ONE process-wide pool, not a fresh executor per call.
+# Per call, `max_workers=len(sources)` looks bounded — the priority chain is
+# single digits — but nothing capped threads ACROSS calls: the gather returns
+# after its wall-clock budget while the stragglers keep sleeping inside their
+# providers' rate-limit backoff (tens of seconds), so every picker open added
+# a full set of live threads on top of the last one's. A shared pool trades
+# that for a real ceiling; sized well above one chain so an ordinary picker
+# open still starts every source at once, and a source that does queue behind
+# a busy moment loses only this round, exactly like one that times out.
+_CANDIDATE_POOL_MAX_WORKERS = 16
+_candidate_pool_lock = threading.Lock()
+_candidate_pool_instance = None
+
+
+def _candidate_pool():
+    """The shared, lazily-built executor for candidate fan-out."""
+    global _candidate_pool_instance
+    if _candidate_pool_instance is None:
+        with _candidate_pool_lock:
+            if _candidate_pool_instance is None:
+                _candidate_pool_instance = ThreadPoolExecutor(
+                    max_workers=_CANDIDATE_POOL_MAX_WORKERS,
+                    thread_name_prefix="soulsync-art-candidate",
+                )
+    return _candidate_pool_instance
+
+
 def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] = None) -> list:
     """One candidate photo per CONNECTED metadata source, for the artist
     image picker (mirrors ``gather_album_art_candidates``).
 
     For each source in the configured priority chain: use the artist's stored
     per-source id when the library row has one (exact), otherwise search the
-    source by name and take its top hit's image. Sources fan out concurrently;
-    a failing source contributes nothing. Returns ``[{source, url}, ...]``
-    deduped by URL, in chain order.
+    source by name and take its top hit's image. Sources fan out concurrently
+    under a shared time budget (``_CANDIDATE_GATHER_TIMEOUT_S``) — a failing
+    OR merely slow source contributes nothing rather than blocking the rest.
+    Returns ``[{source, url}, ...]`` deduped by URL, in chain order.
+
+    MusicBrainz is excluded from the generic by-name search (unreliable —
+    see ``_CANDIDATE_SKIP_SOURCES``), but its EXACT url-relations lookup
+    (``_image_from_musicbrainz_relations``) is added as its own candidate
+    whenever the artist's MBID is known, so a provider the picker already
+    presents as "connected" actually gets asked.
     """
     name = (artist_name or '').strip()
     ids = source_ids or {}
@@ -273,9 +318,15 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
                if s not in _CANDIDATE_SKIP_SOURCES]
     if 'audiodb' not in sources:
         sources.append('audiodb')       # the docstring always promised it
+    mbid = str(ids.get('musicbrainz_artist_id') or '').strip()
+    if mbid:
+        sources.append('musicbrainz')   # exact-id lookup, not the excluded by-name path
 
     def _one(source: str):
         try:
+            if source == 'musicbrainz':
+                url = _image_from_musicbrainz_relations(mbid)
+                return ('musicbrainz', url) if url else None
             sid = str(ids.get(_SOURCE_ID_COLUMNS.get(source, '')) or '').strip()
             if source == 'audiodb':
                 return _audiodb_candidate(name, sid)
@@ -316,9 +367,37 @@ def gather_artist_image_candidates(artist_name: str, source_ids: Optional[dict] 
             logger.debug("artist image candidate failed for %s: %s", source, exc)
             return None
 
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(len(sources), 6) or 1) as pool:
-        results = list(pool.map(_one, sources))
+    from concurrent.futures import wait as _wait_futures
+
+    pool = _candidate_pool()
+    future_by_source = {
+        source: pool.submit(_one, source)
+        for source in sources
+    }
+    done, not_done = _wait_futures(
+        future_by_source.values(),
+        timeout=_CANDIDATE_GATHER_TIMEOUT_S,
+    )
+    results = []
+    # Futures complete in timing order, but duplicate URLs must be resolved in
+    # configured provider order. Iterating ``done`` (a set) made a faster
+    # fallback source nondeterministically steal the preferred source's card.
+    for source, future in future_by_source.items():
+        if future not in done:
+            continue
+        try:
+            results.append(future.result())
+        except Exception as exc:
+            logger.debug("artist image candidate failed for %s: %s", source, exc)
+    for source, future in future_by_source.items():
+        if future not in not_done:
+            continue
+        # Still running past the budget — leave it be (threads can't be
+        # killed) rather than block the response on it; it just misses
+        # this round's candidate list. The pool is shared and long-lived, so
+        # the straggler releases its worker when its own HTTP call returns
+        # and nothing is shut down under it.
+        logger.debug("artist image candidate timed out for %s", source)
 
     candidates, seen = [], set()
     for entry in results:

@@ -573,7 +573,10 @@ def match_files_to_tracks(
     - ``matches``: list of ``{'track': dict, 'file': str, 'confidence': float}``;
       exact-id matches additionally carry ``'match_type'``.
     - ``unmatched_files``: files left over after every track found its
-      best (or none).
+      best (or none) — quality-dedup losers included.
+    - ``duplicate_files``: the dedup-loser subset of ``unmatched_files``,
+      so a caller can distinguish "a lower-quality copy of a track that
+      imported" from "a song nothing claimed".
 
     Each file matches at most one track. Each track matches at most one
     file. Pure function — no side effects, no I/O, no metadata client.
@@ -677,9 +680,19 @@ def match_files_to_tracks(
     # Final unmatched list: every file that didn't get used in any
     # phase. Includes quality-dedup losers (lower-quality copies of
     # files we already matched) so the caller can see the full picture.
+    # `duplicate_files` names that subset, because the two halves mean
+    # opposite things to an importer: a dedup loser is the expected
+    # outcome of a healthy album, while an unclaimed file is a song
+    # nobody imported. Callers that cannot tell them apart either mark
+    # healthy albums 'partial' or silently abandon real songs.
+    deduped_set = set(deduped)
     return {
         'matches': matches,
         'unmatched_files': [f for f in audio_files if f not in used_files],
+        'duplicate_files': [
+            f for f in remaining_files
+            if f not in deduped_set and f not in used_files
+        ],
     }
 
 

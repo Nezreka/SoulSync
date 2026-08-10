@@ -35,6 +35,7 @@ import requests as http_requests
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.async_utils import run_blocking
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
@@ -435,9 +436,7 @@ class HiFiClient(DownloadSourcePlugin):
 
     async def check_connection(self) -> bool:
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self.is_available)
+            return await run_blocking(self.is_available)
         except Exception as e:
             logger.error(f"HiFi connection check failed: {e}")
             return False
@@ -923,11 +922,8 @@ class HiFiClient(DownloadSourcePlugin):
 
     async def search(self, query: str, timeout: int = None,
                      progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
-        import asyncio
-
         try:
-            loop = asyncio.get_event_loop()
-            tracks = await loop.run_in_executor(None, lambda: self.search_raw(query))
+            tracks = await run_blocking(self.search_raw, query)
 
             quality_key = quality_tier_for_source('hifi', default='lossless')
             q_info = HLS_QUALITY_MAP.get(quality_key, HLS_QUALITY_MAP['lossless'])

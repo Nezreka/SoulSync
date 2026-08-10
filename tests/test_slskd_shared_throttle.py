@@ -125,4 +125,4 @@ def test_music_min_delay_knob_spaces_shared_reservations(monkeypatch):
     music = SimpleNamespace(search_min_delay_seconds=5.0)
     asyncio.run(SoulseekClient._wait_for_rate_limit(music))    # first: no wait
     asyncio.run(SoulseekClient._wait_for_rate_limit(music))    # second: min-delay applies
-    assert slept and slept[-1] >= 4.5
+    assert slept and max(slept) >= 4.5
