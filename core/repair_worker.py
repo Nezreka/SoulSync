@@ -939,6 +939,22 @@ class RepairWorker:
 
             items = []
             for row in cursor.fetchall():
+                # One unreadable details_json must not cost the whole page. This
+                # loop used to json.loads() straight into the dict, so a single
+                # malformed row raised and the outer handler returned an EMPTY
+                # page — the user saw "All Clear" over findings that were really
+                # there, or an error they could neither read nor act on. Degrade
+                # the one row instead, and say which id was bad.
+                try:
+                    details = json.loads(row[10]) if row[10] else {}
+                    if not isinstance(details, dict):
+                        raise ValueError(f"details_json is {type(details).__name__}, not an object")
+                except Exception as exc:  # noqa: BLE001 - one row, not the page
+                    logger.warning(
+                        "Finding %s has unreadable details_json (%s); showing it without details",
+                        row[0], exc)
+                    details = {'_details_error': str(exc)}
+
                 items.append({
                     'id': row[0],
                     'job_id': row[1],
@@ -950,7 +966,7 @@ class RepairWorker:
                     'file_path': row[7],
                     'title': row[8],
                     'description': row[9],
-                    'details': json.loads(row[10]) if row[10] else {},
+                    'details': details,
                     'user_action': row[11],
                     'resolved_at': row[12],
                     'created_at': row[13],

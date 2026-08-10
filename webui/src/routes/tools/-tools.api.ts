@@ -165,7 +165,20 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   params.set('limit', String(query.limit));
 
   const response = await fetch(`/api/repair/findings?${params}`);
-  if (!response.ok) throw new Error('Failed to fetch findings');
+  if (!response.ok) {
+    // Carry the server's own message. The endpoint returns {error: "..."} on a
+    // 500, and discarding it left users staring at a bare "Error loading
+    // findings" with no way to tell us what broke — unfixable from their side
+    // and undiagnosable from ours.
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body?.error) detail = body.error;
+    } catch {
+      /* non-JSON body — the status is all we have */
+    }
+    throw new Error(detail);
+  }
   const data = (await response.json()) as Partial<RepairFindingsPage>;
   return { items: data.items || [], total: data.total || 0, page: data.page || 0 };
 }

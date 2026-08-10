@@ -125,7 +125,7 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
    * highlight and the prev/next arithmetic must follow the server, not the ask.
    */
   const [serverPage, setServerPage] = useState(0);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [counts, setCounts] = useState<Awaited<ReturnType<typeof fetchFindingCounts>> | null>(null);
   const [cacheHealth, setCacheHealth] = useState<CacheHealthStats | null>(null);
 
@@ -176,7 +176,7 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
         page,
         limit: pageSize,
       });
-      setLoadError(false);
+      setLoadError(null);
       setSelected(new Set());
       setBusyFix(new Set());
       setTotal(data.total);
@@ -203,8 +203,8 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
         }
       }
       setItems(data.items);
-    } catch {
-      setLoadError(true);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error));
     }
   }, [jobFilter, page, pageSize, severityFilter, statusFilter]);
 
@@ -827,8 +827,11 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
       ) : null}
 
       <div className="repair-findings-list" id="repair-findings-list">
-        {loadError ? (
-          <div className="repair-empty">Error loading findings</div>
+        {loadError !== null ? (
+          <div className="repair-empty">
+            Error loading findings
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>{loadError}</div>
+          </div>
         ) : items === null ? (
           <div className="repair-loading">Loading findings...</div>
         ) : items.length === 0 ? (
