@@ -557,7 +557,25 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     if source == "spotify":
         try:
             spotify = get_spotify_client(client_factory=spotify_client_factory)
-            if not spotify or not spotify.is_spotify_authenticated():
+            if not spotify:
+                return _default
+            # Availability, NOT auth: a user who picked Spotify Free
+            # (metadata.spotify_free) has no credentials by design, so
+            # is_spotify_authenticated() is False for them forever. Gating on it
+            # here silently demoted their configured source to the default —
+            # every caller then ran on Deezer while the UI still said Spotify,
+            # and watchlist scans for artists the fallback can't resolve found
+            # nothing. is_spotify_metadata_available() accepts real auth OR the
+            # no-creds source, which is what the other availability gates
+            # already use (see spotify_client's docstring on that method).
+            #
+            # Fall back to the auth probe when the object doesn't carry the
+            # availability one: a client shape we don't recognise must keep its
+            # old meaning, never be read as "Spotify is unavailable".
+            probe = getattr(spotify, "is_spotify_metadata_available", None)
+            if probe is None:
+                probe = spotify.is_spotify_authenticated
+            if not probe():
                 return _default
         except Exception:
             return _default

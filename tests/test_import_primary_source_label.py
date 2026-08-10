@@ -31,6 +31,12 @@ class _UnauthedSpotify:
 def _patch_cfg(monkeypatch, cfg, *, client=None):
     monkeypatch.setattr(registry, "_get_config_value", lambda k, d=None: cfg.get(k, d))
     monkeypatch.setattr(registry, "get_spotify_client", lambda client_factory=None: client)
+    # Boot phase stays True in a test process until something imports web_server,
+    # and get_primary_source() returns the configured source untouched during
+    # boot (it must not block on network I/O at import time). Without pinning it
+    # the downgrade assertions below pass or fail purely on collection order.
+    # Same trap, same pin as tests/test_spotify_free_status.py.
+    monkeypatch.setattr("core.boot_phase.is_boot_phase", lambda: False)
 
 
 # --- get_primary_source_label seam -------------------------------------------
