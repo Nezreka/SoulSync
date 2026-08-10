@@ -5,6 +5,49 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
+    <!-- On-screen error console for devices with no devtools (phones/tablets).
+         OFF unless the URL carries ?debug=1, so users never see it. Must stay the
+         FIRST script in <head> — anything loaded before it can fail unseen. -->
+    <script>
+        (function () {
+            if (!/[?&]debug=1(&|$)/.test(location.search)) return;
+            var box, lines = [];
+            function panel() {
+                if (box) return box;
+                box = document.createElement('div');
+                box.setAttribute('style', 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;'
+                    + 'max-height:45vh;overflow:auto;background:#180000;color:#ffb4b4;'
+                    + 'font:11px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:8px 10px;'
+                    + 'border-top:2px solid #ff5555;white-space:pre-wrap;word-break:break-word');
+                (document.body || document.documentElement).appendChild(box);
+                return box;
+            }
+            function log(label, detail) {
+                lines.push('[' + label + '] ' + detail);
+                var el = panel();
+                el.textContent = lines.join('\n\n');
+                el.scrollTop = el.scrollHeight;
+            }
+            window.addEventListener('error', function (e) {
+                // Resource failures (script/img/css) surface with no `.error`.
+                if (e.target && e.target !== window && e.target.src) {
+                    log('failed to load', e.target.src);
+                    return;
+                }
+                log('error', (e.message || 'unknown') + '\n' + (e.filename || '') + ':' + (e.lineno || 0)
+                    + (e.error && e.error.stack ? '\n' + e.error.stack : ''));
+            }, true);
+            window.addEventListener('unhandledrejection', function (e) {
+                var r = e.reason;
+                log('promise', (r && (r.stack || r.message)) || String(r));
+            });
+            var realError = console.error;
+            console.error = function () {
+                try { log('console.error', Array.prototype.join.call(arguments, ' ')); } catch (_) { /* never recurse */ }
+                return realError.apply(console, arguments);
+            };
+        })();
+    </script>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json', v=static_v) }}">
     <meta name="theme-color" content="{{ initial_accent_color }}">
@@ -6660,7 +6703,9 @@
                 <!-- Left: album art + track info -->
                 <div class="np-left">
                     <div class="np-album-art-container" id="np-album-art-container" title="Click for visualizer">
-                        <img class="np-album-art hidden" id="np-album-art" src="" alt="Album Art">
+                        <!-- No src= until the player sets one: an empty src makes the
+                             browser re-request the PAGE itself on every load. -->
+                        <img class="np-album-art hidden" id="np-album-art" alt="Album Art">
                         <div class="np-album-art-placeholder" id="np-album-art-placeholder">
                             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/>
