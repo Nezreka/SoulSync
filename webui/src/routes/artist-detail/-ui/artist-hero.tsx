@@ -149,18 +149,29 @@ export function ArtistHero({
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
   const hasReleases = totalReleaseCount(discography) > 0;
 
-  /** The watchlist is keyed on the CANONICAL Spotify identity where one exists. */
+  /** The watchlist is keyed on the CANONICAL Spotify identity where one exists.
+   *
+   *  Depends on the ID, not the `watchlist` OBJECT. `watchlistIdentity()` builds
+   *  a fresh `{id, name}` on every call and the page calls it inline in JSX, so
+   *  the object's identity changes on every parent render — and the parent
+   *  re-renders on every enrichment-stream tick. Keying the effect on the object
+   *  re-ran this on each of those: `setWatching(null)` reset the button to its
+   *  default label, the re-check flipped it back, and the pair repeated for as
+   *  long as the stream ran. That's the "watched/unwatched over and over"
+   *  flapping, and it also swallowed toggles — an in-flight check that resolved
+   *  after a toggle overwrote the new state with the old one. */
+  const watchlistId = watchlist?.id ?? null;
   useEffect(() => {
     setWatching(null);
-    if (!watchlist) return;
+    if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlist.id).then((state) => {
+    void checkWatchlistRequest(watchlistId).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlist]);
+  }, [watchlistId]);
 
   const toggleWatchlist = async () => {
     if (!watchlist || watchlistBusy) return;
