@@ -16854,9 +16854,35 @@ def _youtube_cookie_opts():
         mode = config_manager.get('youtube.cookies_browser', '')
         path = config_manager.get('youtube.cookies_file', '')
         exists = bool(path) and os.path.exists(path)
+        if path and not exists:
+            # Silently degrading to anonymous here looks identical to "YouTube
+            # is rate-limiting us": private playlists come back empty or short
+            # and every track resolves badly. Say so once, out loud.
+            logger.warning(
+                "[YouTube] Configured cookies file does not exist: %s — continuing "
+                "anonymously. Private playlists (Liked Music, list=LM) will be "
+                "incomplete or invisible. Re-paste cookies in Settings → YouTube.",
+                path,
+            )
         return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
         return {}
+
+
+def _ytmusic_auth_headers():
+    """ytmusicapi browser-auth headers from the same pasted cookies.txt, or None.
+
+    ytmusicapi can't take a cookie FILE, so the jar is projected into the header
+    form it wants. Only PASTE_MODE can feed it: `cookiesfrombrowser` is yt-dlp's
+    own browser-store reader and there's no cookie file to read in that case.
+    None means anonymous — public playlists still resolve."""
+    from core.youtube_cookies import PASTE_MODE, ytmusic_auth_from_cookiefile
+    try:
+        if str(config_manager.get('youtube.cookies_browser', '') or '').strip() != PASTE_MODE:
+            return None
+        return ytmusic_auth_from_cookiefile(config_manager.get('youtube.cookies_file', ''))
+    except Exception:  # noqa: S110 - auth is best-effort; anonymous still works
+        return None
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
@@ -16914,7 +16940,7 @@ def parse_youtube_playlist(url):
     # attempted for youtube.com: a video playlist has no catalog entry.
     if allow_channel_artist:
         from core.youtube_music_meta import fetch_ytmusic_playlist
-        ytm_playlist = fetch_ytmusic_playlist(url)
+        ytm_playlist = fetch_ytmusic_playlist(url, _ytmusic_auth_headers())
         if ytm_playlist:
             return ytm_playlist
 

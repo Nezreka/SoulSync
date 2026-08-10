@@ -130,3 +130,93 @@ def test_resolve_cookie_opts_custom_missing_file_is_anonymous(monkeypatch):
     monkeypatch.setattr('config.settings.config_manager.get',
                         lambda k, d=None: cfg.get(k, d))
     assert yt._resolve_cookie_opts() == {}            # not a broken cookiefile arg
+
+
+# ── ytmusicapi browser auth ───────────────────────────────────────────────
+# ytmusicapi wants HEADERS, not a cookie file, so the same pasted cookies.txt
+# is projected into them. Without this, only public playlists resolve — Liked
+# Music (list=LM) is always private.
+
+from core.youtube_cookies import (  # noqa: E402
+    parse_netscape_cookies,
+    ytmusic_auth_from_cookiefile,
+    ytmusic_auth_headers,
+)
+
+# Real export shape. The domain is a non-YouTube Google property on purpose —
+# see test_cookies_are_parsed_regardless_of_domain.
+_JAR = (
+    "# Netscape HTTP Cookie File\n"
+    ".google.de\tTRUE\t/\tTRUE\t1799999999\t__Secure-3PAPISID\tsecret-sapisid\n"
+    ".google.de\tTRUE\t/\tTRUE\t1799999999\tSID\tsid-value\n"
+    ".google.de\tTRUE\t/\tTRUE\t1799999999\tHSID\thsid-value\n"
+)
+
+
+def test_cookies_are_parsed_regardless_of_domain():
+    # The auth cookies are Google-wide; an export taken on google.de signs a
+    # music.youtube.com request fine. Filtering on "youtube" in the domain
+    # yields zero cookies for such a jar and reads as "not logged in".
+    cookies = parse_netscape_cookies(_JAR)
+    assert cookies["__Secure-3PAPISID"] == "secret-sapisid"
+    assert cookies["SID"] == "sid-value"
+
+
+def test_parse_skips_comments_and_short_rows():
+    assert parse_netscape_cookies("# just a header\n") == {}
+    assert parse_netscape_cookies(".x\tTRUE\t/\tTRUE\t1\tNAME\n") == {}  # 6 fields, no value
+    assert parse_netscape_cookies(None) == {}
+    assert parse_netscape_cookies(12345) == {}
+
+
+def test_later_duplicate_row_wins():
+    jar = _JAR + ".youtube.com\tTRUE\t/\tTRUE\t1799999999\tSID\tnewer-sid\n"
+    assert parse_netscape_cookies(jar)["SID"] == "newer-sid"
+
+
+def test_auth_headers_are_reproducible_for_a_fixed_timestamp():
+    import hashlib
+    headers = ytmusic_auth_headers(parse_netscape_cookies(_JAR), timestamp=1_700_000_000)
+    expected = hashlib.sha1(
+        b"1700000000 secret-sapisid https://music.youtube.com").hexdigest()
+    assert headers["Authorization"] == f"SAPISIDHASH 1700000000_{expected}"
+    assert headers["Origin"] == "https://music.youtube.com"
+
+
+def test_auth_headers_drop_non_essential_cookies():
+    # A browser export can be 90 KB+; YouTube 413s on headers that large.
+    jar = _JAR + ".google.de\tTRUE\t/\tTRUE\t1799999999\tNID\tbulky-unrelated-value\n"
+    cookie = ytmusic_auth_headers(parse_netscape_cookies(jar))["Cookie"]
+    assert "__Secure-3PAPISID=secret-sapisid" in cookie
+    assert "bulky-unrelated-value" not in cookie
+
+
+def test_sapisid_aliases_are_accepted_in_priority_order():
+    for name in ("__Secure-3PAPISID", "__Secure-1PAPISID", "SAPISID"):
+        headers = ytmusic_auth_headers({name: "v"}, timestamp=1)
+        assert headers is not None
+        assert "SAPISIDHASH" in headers["Authorization"]
+
+
+def test_no_sapisid_means_no_auth():
+    # A logged-out export must go anonymous, not send a bogus signature.
+    assert ytmusic_auth_headers({"PREF": "x", "YSC": "y"}) is None
+    assert ytmusic_auth_headers({}) is None
+    assert ytmusic_auth_headers(None) is None
+
+
+def test_auth_from_missing_or_bad_file_is_none(tmp_path):
+    assert ytmusic_auth_from_cookiefile(str(tmp_path / "nope.txt")) is None
+    assert ytmusic_auth_from_cookiefile("") is None
+    assert ytmusic_auth_from_cookiefile(None) is None
+    empty = tmp_path / "empty.txt"
+    empty.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    assert ytmusic_auth_from_cookiefile(str(empty)) is None
+
+
+def test_auth_from_real_file_round_trips(tmp_path):
+    path = tmp_path / "cookies.txt"
+    path.write_text(_JAR, encoding="utf-8")
+    headers = ytmusic_auth_from_cookiefile(str(path))
+    assert headers is not None
+    assert "SAPISIDHASH" in headers["Authorization"]
