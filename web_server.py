@@ -16902,7 +16902,11 @@ def parse_youtube_playlist(url):
     Uses flat playlist extraction to avoid rate limits and get all tracks
     Returns a list of track dictionaries compatible with our Track structure
     """
-    from core.youtube_track_meta import derive_artist_and_title
+    from core.youtube_track_meta import derive_artist_and_title, is_music_youtube_url
+    # On music.youtube.com each flat entry carries the ARTIST's channel; on
+    # youtube.com it carries the playlist owner's (#863). Decided once here from
+    # the URL because the per-entry data can't distinguish the two.
+    allow_channel_artist = is_music_youtube_url(url)
     try:
         # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
         ydl_opts = {
@@ -16950,7 +16954,8 @@ def parse_youtube_playlist(url):
                 # instead of blindly using `uploader`, which on a playlist is the
                 # OWNER, not the track artist (#863: every track became "Wing It"
                 # / "Unknown Artist"). Returns ('' , title) when nothing reliable.
-                derived_artist, derived_title = derive_artist_and_title(entry)
+                derived_artist, derived_title = derive_artist_and_title(
+                    entry, allow_channel_artist=allow_channel_artist)
 
                 # Clean the track title and artist using our cleaning functions.
                 if derived_artist:
@@ -16973,13 +16978,17 @@ def parse_youtube_playlist(url):
                 
                 tracks.append(track_data)
 
-            # NOTE: current yt-dlp flat extraction returns ONLY the title per entry
-            # (no uploader/artist), so tracks whose title isn't "Artist - Title"
-            # land here as "Unknown Artist". The per-video artist recovery does NOT
-            # run here — it would block this request for minutes on a big playlist
-            # and risk the 120s worker timeout. It runs in the async discovery
-            # worker instead (which already iterates every track with a progress
-            # bar). See run_youtube_discovery_worker / recover_youtube_artist (#863).
+            # NOTE: on youtube.com, flat extraction gives no trustworthy per-entry
+            # artist (the channel is the playlist owner), so tracks whose title
+            # isn't "Artist - Title" land here as "Unknown Artist". The per-video
+            # artist recovery does NOT run here — it would block this request for
+            # minutes on a big playlist and risk the 120s worker timeout. It runs
+            # in the async discovery worker instead (which already iterates every
+            # track with a progress bar). See run_youtube_discovery_worker /
+            # recover_youtube_artist (#863).
+            #
+            # music.youtube.com does NOT have that problem: its entries carry a
+            # per-track channel, so `allow_channel_artist` resolves them inline.
 
             # Create playlist object matching GUI structure
             playlist_data = {
