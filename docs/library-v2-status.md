@@ -3131,3 +3131,108 @@ Explizit positiv bzw. unbeanstandet: die Library-V2-Seite selbst, die
 `schema.py`-Begründung (gegen das alte Schema gegengeprüft), sowie
 `lib2_track_artists` und `lib2_track_files` als sachlich notwendige neue
 Tabellen. Diese Punkte sind nicht erneut aufzurollen.
+
+### 50.4 Übergabe — was nach dem 11. August 2026 offen ist
+
+Alle neun Punkte aus Nezrekas Review sind erledigt und in `57d238ea5` gepusht.
+Was hier steht, ist der Rest — sortiert nach Verbindlichkeit, nicht nach Größe.
+
+#### 50.4.1 Zugesagt und **nicht** gebaut
+
+**Der Divergenz-Check fehlt.** [issues §32.3.1](library-v2-issues.md) gibt
+Nezreka drei Zusagen; Zusage 2 lautet, dass die Abweichung zwischen Legacy und
+lib2 in den gespiegelten Feldern eine *Kennzahl* im vorhandenen read-only
+Integritätsreport wird (Erwartungswert 0, jeder andere Wert ein Bug mit
+Zeilennummern). `core/library2/integrity_reconciler.py` hat Divergenz-Checks
+für Datei-Indizes (`index_divergence`), aber **keinen** für Enrichment-Felder.
+Das ist die unmittelbare Antwort auf seinen Satz „both sticking around and
+disagreeing with each other" und steht als Versprechen in einem committeten
+Dokument. Ungefähr 60 Zeilen. **Zuerst machen.**
+
+#### 50.4.2 Zwei Fehler in `native_enrichment_sweep`, gefunden und behoben
+
+Beide beim Nachprüfen der eigenen Arbeit gefunden, nicht durch einen Test:
+
+- **`default_enabled = False`** — ein Kategorienfehler. Die übrigen Jobs des
+  Pakets sind Opt-in-Diagnosen; wenn sie nie laufen, ist nichts kaputt. Dieser
+  ersetzt zwölf *dauerhaft laufende* Worker. Ausgeliefert im Zustand „aus"
+  beantwortet er „v2 should get filled the same way v1 does now" mit einem
+  Schalter, den niemand umlegt — die gemeldete Regression wäre schlicht
+  geblieben. Jetzt `True`, mit Begründung am Feld.
+- **`result.fixed += 1`** statt `result.auto_fixed`. `JobResult` ist eine
+  schlichte Dataclass: die Zuweisung legt stillschweigend ein Attribut an, das
+  niemand liest. `RepairWorker` summiert und loggt ausschließlich
+  `auto_fixed` — der Job hätte also korrekt angereichert und bei **jedem** Lauf
+  null gemeldet, also ausgesehen wie ein Job ohne Arbeit. Kein anderer Job im
+  Repo benutzt `fixed`; der Name war erfunden.
+
+Abgesichert durch `tests/repair_jobs/test_job_result_fields.py`: ein statischer
+Guard über alle Job-Dateien, der jede Zuweisung an ein nicht existierendes
+`JobResult`-Feld meldet. Eine Verhaltensprüfung hätte jeden Job ausführen
+müssen, um dasselbe zu leisten.
+
+#### 50.4.3 Gebaut, aber ohne Oberfläche
+
+`enrichment_depth` (`full` | `native`) steht im Artist-Read. Nezrekas
+Beschwerde war „both show as matched so you can't tell them apart" — die API
+sagt es jetzt, die UI zeigt es weiterhin nicht. Kleine Frontend-Änderung.
+
+#### 50.4.4 Legacy-Löschung: Bereitschaftsmessung vom 11. August 2026
+
+Der Nutzer hat freigegeben, Legacy-Code zu entfernen, *sobald* sicher ist, dass
+alles umgestellt ist. Das ist es nicht. Produktivcode, ohne `tests/`:
+
+| | Anzahl |
+|---|---:|
+| Lesestellen auf `artists`/`albums`/`tracks` | **656** |
+| Schreibstellen | **238** |
+| beteiligte Dateien | **65** |
+
+Entscheidend sind nicht die Zahlen, sondern **wer** noch schreibt: der
+Media-Server-Scan (`database/music_database.py:7060/7238/7521`) ist der
+einzige Weg, auf dem überhaupt Zeilen entstehen, und die 16 Enrichment-Worker
+haben zusammen 334 Legacy-Statements und **null** lib2-Bezüge. Eine Löschung
+heute nimmt der App die Datenaufnahme. Die Reihenfolge ist erzwungen:
+Produzenten → Leser → löschen.
+
+**Auch der eine Kandidat, der als tot galt, ist es nicht mehr.** Der PR-Kommentar
+vom 5. August nennt die alte Library-React-Schicht importlos. Nachgemessen am
+11. August (Tests nicht mitgezählt): `-library.types` 3 Importe,
+`-library.export` und `-library.watch-all` je 2, `-library.api` und
+`-library.helpers` je 1. Nur `-library.live` ist wirklich importlos.
+Vermutlich Folge des Upstream-Syncs. **Vor dem Löschen erneut messen, nicht dem
+alten Kommentar glauben.**
+
+*Vorschlag, noch nicht gebaut:* eine **Ratsche** — ein Test, der die Zahl der
+Legacy-Schreibstellen zählt und fehlschlägt, sobald sie wächst. Damit kann
+während Stufe 2 nichts zurückrutschen und die Zahl wird zum Fortschrittsbalken
+(238 heute → 0 am Ende von Stufe 3). Offene Designfrage: nur Schreibstellen
+ratschen, oder Lesen und Schreiben getrennt.
+
+#### 50.4.5 PR-Hygiene, aus dem eigenen Kommentar vom 5. August
+
+- Die `docs/`-Notizen sollten laut eigenem PR-Kommentar gar nicht in diesem PR
+  sein („those are my notes, not project documentation"). Commit `57d238ea5`
+  enthält ~300 Zeilen davon. Vor dem Merge entweder herausnehmen oder die
+  Meinungsänderung aussprechen — nicht stillschweigend lassen.
+- `library-v2-page.tsx` mit 10,6k Zeilen ist noch nicht in Module zerlegt.
+- Der Antworttext an Nezreka für den PR ist noch nicht geschrieben. Die drei
+  Punkte, die für ihn den Unterschied machen: (1) es hing nicht, es war
+  quadratisch — iss32-M08; (2) seine „keep it off the startup path"-Forderung
+  war richtig, nur an anderer Stelle als zuerst vermutet; (3) die Messwerte bei
+  *seiner* Skala, nicht bei unserer.
+
+#### 50.4.6 Stufe 2 und danach
+
+- 16 Enrichment-Worker + Media-Server-Scan auf lib2 (eigener PR — dort liegt
+  der Ingest-Pfad)
+- Sieben Repair-Jobs mit Legacy-Resten: `comma_artist_splitter` 0/7,
+  `genre_cleanup` 0/3, `live_commentary_cleaner` 0/3, `track_number_repair`
+  3/11, `album_tag_consistency` 3/8, `metadata_gap_filler` 2/4,
+  `missing_cover_art` 4/4
+- Provider-Bios für rein native Artists — löst sich mit Last.fm/Genius/Discogs
+  von selbst auf
+- Danach Stufe 3 (Legacy read-only, Spiegel und Trigger fallen weg) und
+  Stufe 4 (Tabellen droppen)
+- `iss32-M06` bleibt bewusst teilweise offen: die unbegrenzte Arbeit ist aus
+  `_initialize_database` heraus, die eine große Transaktion bleibt

@@ -78,7 +78,14 @@ class NativeEnrichmentSweepJob(RepairJob):
         'backlog is worked off across several runs rather than in one long burst.'
     )
     icon = 'repair-icon-enrichment'
-    default_enabled = False
+    # ON by default, unlike every other job in this package — and the exception
+    # is the point. The other jobs are opt-in diagnostics; nothing is broken if
+    # they never run. This one is the native replacement for twelve metadata
+    # workers that run continuously against the legacy tables. Shipping it off
+    # would mean answering "v2 should get filled the same way v1 does now" with
+    # a switch in the off position, i.e. leaving the reported regression in
+    # place behind a setting nobody knows to flip (iss32-E02).
+    default_enabled = True
     default_interval_hours = 24
     default_settings = {
         'batch_size': DEFAULT_BATCH,
@@ -141,7 +148,7 @@ class NativeEnrichmentSweepJob(RepairJob):
                     resolved = {}
                 result.scanned += 1
                 if resolved:
-                    result.fixed += 1
+                    result.auto_fixed += 1
                     if context.report_progress:
                         context.report_progress(
                             scanned=i + 1, total=total,
@@ -157,7 +164,7 @@ class NativeEnrichmentSweepJob(RepairJob):
         if context.report_progress:
             context.report_progress(
                 scanned=total, total=total, phase='Complete',
-                log_line=(f'{result.fixed} of {total} native artist(s) resolved'
+                log_line=(f'{result.auto_fixed} of {total} native artist(s) resolved'
                           if total else 'No native artists needed enrichment'),
                 log_type='success')
         return result

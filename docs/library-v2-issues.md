@@ -5600,3 +5600,26 @@ disagreeing with each other":
 | ID | Diagnose | Verifikationsstand | Korrekturvertrag |
 |---|---|---|---|
 | iss32-S01 | `mbid_mismatch_detector` steht in `RETIRED_JOB_IDS` (`core/repair_jobs/__init__.py:118`), aber **nicht** in `PRESERVED_RETIRED_FINDING_IDS` (ab Zeile 153). `core/repair_worker.py:570` bildet `prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS`, folglich werden seine Findings beim Worker-Start gelöscht. | **Im Code bestätigt — und der Befund reicht weiter als die Frage** | Die Nachprüfung ergibt drei Dinge, die die Antwort verschieben: (1) `core/repair_jobs/mbid_mismatch_detector.py` existiert **auf `main`** und ist auf diesem Branch **gelöscht**; (2) der zugehörige Fix-Handler in `core/repair_worker.py` ist mitgelöscht — im ganzen Repo kommt `mbid_mismatch` nur noch als String in `RETIRED_JOB_IDS` vor; (3) **kein** nativer Job ersetzt ihn: eingebettete MusicBrainz-Recording-IDs werden nirgends mehr gegen die MB-API geprüft. Damit greift genau die Begründung, die der `library_reorganize`-Kommentar zwei Zeilen darüber gibt. Der Job stammt zudem von Nezreka selbst (`87b39634a`, 16. März 2026). Nur in `PRESERVED_RETIRED_FINDING_IDS` aufzunehmen, würde Findings erhalten, die mangels Handler niemand mehr beheben kann. Zu entscheiden ist deshalb zwischen „als nativen V2-Job zurückholen" und „bewusst ersatzlos streichen, und das Nezreka so sagen". |
+
+### 32.5 Nachträge aus der Umsetzung (11. August 2026)
+
+Zwei Befunde, die erst beim Nachprüfen der eigenen Arbeit auftauchten, und ein
+generisches Muster, das über diesen PR hinaus gilt.
+
+| ID | Diagnose | Verifikationsstand | Korrekturvertrag |
+|---|---|---|---|
+| iss32-E02a | `native_enrichment_sweep` wurde mit `default_enabled = False` ausgeliefert — dem Muster der übrigen Repair-Jobs folgend. Die sind Opt-in-Diagnosen; dieser ersetzt zwölf *dauerhaft laufende* Worker. Im Zustand „aus" beantwortet er Nezrekas Anforderung mit einem Schalter, den niemand umlegt, und die gemeldete Regression bleibt schlicht bestehen. | **Behoben** | `default_enabled = True`, mit der Begründung direkt am Feld, damit die Abweichung vom Paketmuster nicht als Versehen zurückgedreht wird. |
+| iss32-E02b | Derselbe Job schrieb `result.fixed += 1`. `JobResult` (`core/repair_jobs/base.py:107`) ist eine schlichte Dataclass mit `scanned`/`findings_created`/`findings_skipped_dedup`/`auto_fixed`/`errors`/`skipped`. Die Zuweisung legt still ein Attribut an, das niemand liest; `RepairWorker` summiert und loggt ausschließlich `auto_fixed`. Der Job hätte also korrekt gearbeitet und bei **jedem** Lauf null gemeldet — ununterscheidbar von einem Job ohne Arbeit. | **Behoben** | `result.auto_fixed`. Zusätzlich `tests/repair_jobs/test_job_result_fields.py`: statischer Guard über alle Job-Dateien, der jede Zuweisung an ein nicht existierendes `JobResult`-Feld meldet. Eine Dataclass ohne `slots` kann diesen Fehler nicht selbst melden, und eine Verhaltensprüfung müsste jeden Job ausführen. |
+| iss32-T01a | Zusage 2 aus §32.3.1 — Divergenz zwischen Legacy und lib2 als Kennzahl im Integritätsreport — ist **nicht umgesetzt**. `core/library2/integrity_reconciler.py` prüft Datei-Index-Divergenz (`index_divergence`), nicht die gespiegelten Enrichment-Felder. | **Offen** | Check über die Felder, die `resync_*_from_legacy` spiegelt, Erwartungswert 0. Das ist die direkte Antwort auf „both sticking around and disagreeing with each other" und derzeit ein uneingelöstes Versprechen in einem committeten Dokument. |
+
+**Generisches Muster für künftige Arbeit an partiellen Indizes** (aus
+iss32-M08): SQLite darf einen partiellen Index nur verwenden, wenn die
+WHERE-Klausel der Abfrage die des Index *beweisbar* impliziert. Aus
+`spalte = ?` kann es `spalte IS NOT NULL` folgern (Gleichheit mit NULL ist nie
+wahr), aber niemals `spalte <> ''`. Ein Index-Prädikat mit `<> ''` macht also
+jede Parameter-Abfrage zum Full Table Scan, ohne dass irgendetwas warnt. Der
+Nachweis ist `EXPLAIN QUERY PLAN` gegen eine *große* DB — bei kleinen Tabellen
+ist ein Scan schnell und jeder Test grün. Zwei Query-Plan-Tests in
+`tests/library2/test_migration_hardening.py` halten das für `lib2_recordings`
+fest, einer davon pinnt bewusst, *dass* die naive Form die Falle ist, damit die
+„redundanten" Prädikate nicht wegoptimiert werden.
