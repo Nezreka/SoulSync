@@ -65810,6 +65810,200 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     flex: none;
 }
 
+/* ── The Alerts band (data-card="alerts") — the exception surface. Not
+   rendered at all while healthy; amber/red hairline rows when a core
+   connection needs a human. ── */
+.dash-alerts {
+    grid-column: 1 / -1;
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: rgba(251, 191, 36, 0.05);
+    border-color: rgba(251, 191, 36, 0.25);
+    border-top-color: rgba(251, 191, 36, 0.35);
+}
+.dash-alerts:hover {
+    /* The dissolve-hover reads wrong on a warning — alerts hold their frame. */
+    background: rgba(251, 191, 36, 0.05);
+    border-color: rgba(251, 191, 36, 0.25);
+    border-top-color: rgba(251, 191, 36, 0.35);
+}
+.dash-alert {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+}
+.dash-alert-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #fbbf24;
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+    animation: dashAlertPulse 1.8s ease-in-out infinite;
+}
+.dash-alert--error .dash-alert-dot {
+    background: #f87171;
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+}
+@keyframes dashAlertPulse {
+    50% { opacity: 0.45; }
+}
+.dash-alert-label {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+.dash-alert-detail {
+    color: rgba(255, 255, 255, 0.6);
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dash-alert-action {
+    flex-shrink: 0;
+    padding: 4px 11px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+}
+.dash-alert-action:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+}
+
+/* ── The Listen band (data-card="listen") — the payoff row. Boxless like
+   the rails; the hero carries the accent. ── */
+.dash-card[data-card="listen"] {
+    grid-column: 1 / -1;
+}
+.listen-band {
+    display: grid;
+    grid-template-columns: minmax(340px, 1.6fr) minmax(240px, 1fr);
+    gap: 14px;
+}
+.listen-hero {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    text-align: left;
+    padding: 18px 22px;
+    border-radius: 16px;
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    background:
+        radial-gradient(120% 180% at 0% 0%, rgba(var(--accent-rgb), 0.22) 0%, rgba(var(--accent-rgb), 0.06) 55%, transparent 100%),
+        linear-gradient(165deg, rgba(14, 14, 18, 0.96), rgba(7, 7, 10, 0.99));
+    color: #fff;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease;
+}
+.listen-hero:hover {
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 8px 30px rgba(var(--accent-rgb), 0.18);
+}
+.listen-hero:hover .listen-hero-play {
+    background: rgba(var(--accent-rgb), 0.9);
+    transform: scale(1.08);
+}
+.listen-hero-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.14);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+}
+.listen-hero-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.listen-hero-text strong {
+    font-size: 15.5px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+.listen-hero-text span {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    line-height: 1.45;
+}
+.listen-hero-play {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    padding-left: 3px;
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+    transition: background 0.18s ease, transform 0.18s ease;
+}
+.listen-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    text-align: left;
+    padding: 16px 20px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(165deg, rgba(16, 16, 20, 0.94), rgba(8, 8, 12, 0.98));
+    color: #fff;
+    cursor: pointer;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+.listen-tile:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: linear-gradient(165deg, rgba(20, 20, 25, 0.95), rgba(10, 10, 14, 0.99));
+}
+.listen-tile:hover .listen-tile-arrow {
+    transform: translateX(4px);
+    color: #fff;
+}
+.listen-tile-title {
+    font-size: 13.5px;
+    font-weight: 700;
+}
+.listen-tile-sub {
+    font-size: 11.5px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.45;
+    padding-right: 28px;
+}
+.listen-tile-arrow {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.35);
+    transition: transform 0.18s ease, color 0.18s ease;
+}
+@media (max-width: 767px) {
+    .listen-band {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ── The Sync band (data-card="sync") — Auto Sync + Recent Syncs merged:
    one full-width section, one row per playlist. Art carries the color,
    columns carry the story: schedule → last result → ownership → next. ── */

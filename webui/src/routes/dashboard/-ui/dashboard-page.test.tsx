@@ -40,16 +40,17 @@ describe('the page shell', () => {
 
     const grid = root.querySelector('.dash-grid')!;
     expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
-      // 3.2.0 calm grid: the ContentBand renders NOTHING here (its fetches
-      // fail under the test's dead fetch mock). The Library strip LEADS
-      // (whose collection this is, then what's new in it), then the Sync
-      // band — Auto Sync + Recent Syncs merged into one full-width section.
-      // Everything else is rehomed: the Services card retired (status +
-      // Test on the sidebar rows), the enrichment equalizer retired
-      // (redundant with the header worker orbs; rate graphs open from the
-      // Manage Workers modal), System Stats went to the notification tray,
-      // Recent Activity to the tray, Quick Actions back to the sidebar.
+      // The calm grid: the AlertsBand renders NOTHING while healthy (and
+      // under the test's dead fetch mock — no payload, no false alarms);
+      // the ContentBand renders nothing until a feed has rows. The Library
+      // strip LEADS, the Listen band is the payoff row (Library Radio +
+      // Mixes doorway), then the Sync band — Auto Sync + Recent Syncs
+      // merged. Everything else is rehomed: Services card retired (status
+      // + Test on the sidebar rows), enrichment equalizer retired (orbs +
+      // Manage Workers modal), System Stats in the notification tray,
+      // Recent Activity in the tray, Quick Actions back in the sidebar.
       'library',
+      'listen',
       'sync',
       'active-downloads',
     ]);

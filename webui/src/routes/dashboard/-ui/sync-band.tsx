@@ -149,6 +149,62 @@ function useSyncBand() {
     [loadAll],
   );
 
+  /** Sync again — a manual row re-triggered from its history entry's cached
+   *  track list (GET /api/sync/history/<id> is documented "for re-trigger")
+   *  through the same /api/sync/start the sync page uses. The snapshot is
+   *  the tracks AS OF that run — honest for "retry this sync"; a playlist
+   *  that changed upstream still wants the sync page (or a schedule). */
+  const syncAgain = useCallback(
+    async (row: SyncBandRow) => {
+      const id = row.last?.id;
+      if (id === undefined) return;
+      setBusyId(`resync-${id}`);
+      try {
+        const res = await fetch(`/api/sync/history/${id}`);
+        const data = (await res.json()) as {
+          success?: boolean;
+          entry?: {
+            playlist_id?: string;
+            playlist_name?: string;
+            thumb_url?: string;
+            tracks?: unknown[];
+          };
+        };
+        const entry = data.success ? data.entry : null;
+        const tracks = entry?.tracks;
+        if (!entry || !Array.isArray(tracks) || tracks.length === 0) {
+          window.showToast?.('No cached tracks for that run', 'error');
+          return;
+        }
+        const startRes = await fetch('/api/sync/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            playlist_id: entry.playlist_id || `history_${id}`,
+            playlist_name: entry.playlist_name || row.name,
+            tracks,
+            image_url: entry.thumb_url || '',
+            sync_mode: '', // empty = the Settings default, like the sync page
+          }),
+        });
+        const started = (await startRes.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+        };
+        if (!started.success) throw new Error(started.error || 'failed');
+        window.showToast?.(`Sync started for "${row.name}"`, 'success');
+      } catch {
+        window.showToast?.(`Could not resync ${row.name}`, 'error');
+      } finally {
+        if (mountedRef.current) setBusyId(null);
+        setTimeout(() => {
+          if (mountedRef.current) loadAll();
+        }, 1500);
+      }
+    },
+    [loadAll],
+  );
+
   /** Listen — the playlist resolved against the LIBRARY server-side. */
   const listen = useCallback(async (id: number | string, name: string) => {
     try {
@@ -206,7 +262,18 @@ function useSyncBand() {
     [],
   );
 
-  return { seamPhase, entries, rows, busyId, fadingIds, runNow, listen, removeEntry, loadAll };
+  return {
+    seamPhase,
+    entries,
+    rows,
+    busyId,
+    fadingIds,
+    runNow,
+    syncAgain,
+    listen,
+    removeEntry,
+    loadAll,
+  };
 }
 
 function openBoard(reload: () => void) {
@@ -248,6 +315,7 @@ function Row({
   busy,
   fading,
   onRun,
+  onSyncAgain,
   onListen,
   onRemove,
 }: {
@@ -255,6 +323,7 @@ function Row({
   busy: boolean;
   fading: boolean;
   onRun: (row: SyncBandRow) => void;
+  onSyncAgain: (row: SyncBandRow) => void;
   onListen: (id: number | string, name: string) => void;
   onRemove: (id: number | string) => void;
 }) {
@@ -366,6 +435,17 @@ function Row({
             {busy ? '…' : 'Run'}
           </button>
         ) : null}
+        {row.kind === 'manual' && lastId !== undefined && row.last?.typeLabel !== 'album' ? (
+          <button
+            type="button"
+            className="syncband-btn"
+            disabled={busy}
+            title="Sync this playlist again from its last track list"
+            onClick={() => onSyncAgain(row)}
+          >
+            {busy ? '…' : 'Sync'}
+          </button>
+        ) : null}
         {lastId !== undefined ? (
           <button
             type="button"
@@ -392,8 +472,18 @@ function Row({
 }
 
 export function SyncBand() {
-  const { seamPhase, entries, rows, busyId, fadingIds, runNow, listen, removeEntry, loadAll } =
-    useSyncBand();
+  const {
+    seamPhase,
+    entries,
+    rows,
+    busyId,
+    fadingIds,
+    runNow,
+    syncAgain,
+    listen,
+    removeEntry,
+    loadAll,
+  } = useSyncBand();
 
   const scheduled = rows.filter((r) => r.schedule?.enabled).length;
   const [activeSyncs, setActiveSyncs] = useState(0);
@@ -438,9 +528,14 @@ export function SyncBand() {
               <Row
                 key={row.rowKey}
                 row={row}
-                busy={busyId !== null && busyId === row.schedule?.automationId}
+                busy={
+                  busyId !== null &&
+                  (busyId === row.schedule?.automationId ||
+                    (row.last?.id !== undefined && busyId === `resync-${row.last.id}`))
+                }
                 fading={row.last?.id !== undefined && fadingIds.has(row.last.id)}
                 onRun={(r) => void runNow(r)}
+                onSyncAgain={(r) => void syncAgain(r)}
                 onListen={(id, name) => void listen(id, name)}
                 onRemove={(id) => void removeEntry(id)}
               />
