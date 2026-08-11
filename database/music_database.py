@@ -486,6 +486,16 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN file TEXT")
             except sqlite3.OperationalError:
                 pass    # already there
+            # Channel / thread / avatar envelope tags. Without these the
+            # archive flattened every message into #general on reload: the
+            # push loop archived DECODED dicts, and decoding is exactly the
+            # step that strips the envelope, so the tags existed nowhere
+            # the frontend could reach. Same tolerant-ALTER pattern.
+            for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER'):
+                try:
+                    cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
+                except sqlite3.OperationalError:
+                    pass    # already there
 
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
@@ -10905,7 +10915,18 @@ class MusicDatabase:
                 fil_json = json.dumps({'n': str(fil.get('n'))[:200],
                                        's': fil.get('s') if isinstance(fil.get('s'), int) else None,
                                        'm': str(fil.get('m') or '')[:80]})
-            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json))
+            _chan = m.get('chan')
+            _th = m.get('th')
+            _tn = m.get('tn')
+            try:
+                _av = int(m.get('av')) if m.get('av') is not None else None
+            except (TypeError, ValueError):
+                _av = None
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json,
+                         str(_chan)[:24] if _chan else None,
+                         str(_th)[:160] if _th else None,
+                         str(_tn)[:80] if _tn else None,
+                         _av))
         if not rows:
             return 0
         try:
@@ -10913,8 +10934,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -11081,7 +11102,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -11102,6 +11123,22 @@ class MusicDatabase:
                             r[k] = None
                     if not r.get(k):
                         r.pop(k, None)
+                # Envelope tags back under their WIRE names — the frontend
+                # reads m.chan / m.th / m.tn / m.av, matching the live push.
+                if r.get('chan'):
+                    pass  # already the right key
+                else:
+                    r.pop('chan', None)
+                if r.get('thread'):
+                    r['th'] = r.pop('thread')
+                else:
+                    r.pop('thread', None)
+                if r.get('thread_name'):
+                    r['tn'] = r.pop('thread_name')
+                else:
+                    r.pop('thread_name', None)
+                if not r.get('av'):
+                    r.pop('av', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)

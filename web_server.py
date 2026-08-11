@@ -40993,6 +40993,27 @@ def _emit_chat_push_loop():
                             _f = chat_codec.file_of(dec)
                             if _f:
                                 out['file'] = _f
+                            # Channel / thread / avatar envelope tags — the
+                            # SAME set api/chat's unwrap attaches. Dropping
+                            # them here was the channels bug: every LIVE
+                            # message arrived untagged, filed into #general,
+                            # and was archived stripped, so the tag was gone
+                            # for good on reload too.
+                            _c = dec.get('c')
+                            if isinstance(_c, str) and _c.strip():
+                                out['chan'] = _c.strip()[:24]
+                            _th2 = dec.get('th')
+                            if isinstance(_th2, str) and _th2.strip():
+                                out['th'] = _th2.strip()[:160]
+                                _tn2 = dec.get('tn')
+                                if isinstance(_tn2, str) and _tn2.strip():
+                                    out['tn'] = _tn2.strip()[:80]
+                            try:
+                                _av2 = int(dec.get('av'))
+                                if 1 <= _av2 <= 100:
+                                    out['av'] = _av2
+                            except (TypeError, ValueError):
+                                pass
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
