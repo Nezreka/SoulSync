@@ -67173,6 +67173,44 @@ body.max-performance .dash-card::after {
     margin-top: 0;
 }
 
+/* The orb field — the enrichment rate equalizer as ambient status art:
+   fixed dead-center of the viewport BEHIND the page (Boulder's idea, Aug 11).
+   It renders the UNSCOPED orb look (avatar + glow + status pill — the
+   equalizer-bar geometry only exists under the old data-card="enrichment"
+   scope), dimmed and pointer-inert. The header and grid stack above it;
+   the page-shell's translucent background sits BELOW it, so the orbs light
+   the shell from within. */
+.dash-orb-field {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(960px, 88vw);
+    z-index: 0;
+    opacity: 0.5;
+    pointer-events: none;
+}
+.dash-orb-field .rate-monitor-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 30px 40px;
+}
+.dashboard-container .dashboard-header,
+.dashboard-container .dash-grid {
+    position: relative;
+    z-index: 1;
+}
+/* Pure decoration now — the perf modes drop it entirely, and phones skip
+   it (the stacked full-width cards would cover all but the edges). */
+body.reduce-effects .dash-orb-field,
+body.max-performance .dash-orb-field {
+    display: none;
+}
+@media (max-width: 767px) {
+    .dash-orb-field {
+        display: none;
+    }
+}
+
 /* Stats card — 2x3 grid of compact metric chips. Override the default
    stats-grid-dashboard which uses wider, taller cards. */
 .dash-card[data-card="stats"] .stats-grid-dashboard {
