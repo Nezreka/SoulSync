@@ -189,29 +189,64 @@ class TestOutrightColumnWrites:
 
 
 class TestTheMirrorHandover:
-    def test_a_migrated_service_is_no_longer_mirrored_from_legacy(self):
-        """Its worker writes lib2 now. Mirroring legacy on top would push a stale
-        value over the fresh one on the next drain."""
+    """Once a worker writes lib2, legacy stops being the authority for its fields.
+
+    The mirror does not stop carrying them, though. Dropping them would lose a
+    legacy value the lib2 twin never received on a row the ledger already calls
+    matched — nothing would ever carry it across afterwards. So a migrated service
+    is mirrored backfill-only: it fills what lib2 lacks and never overwrites what
+    the worker wrote.
+    """
+
+    def test_its_columns_stay_declared(self):
         from core.library2.enrich import MIGRATED_SERVICES, enrichment_columns
 
         assert "lastfm" in MIGRATED_SERVICES
-        assert not [c for c in enrichment_columns("artist") if c.startswith("lastfm_")]
-        assert not [c for c in enrichment_columns("album") if c.startswith("lastfm_")]
-        assert not [c for c in enrichment_columns("track") if c.startswith("lastfm_")]
+        assert [c for c in enrichment_columns("artist") if c.startswith("lastfm_")]
 
-    def test_a_migrated_services_id_is_not_mirrored_either(self, conn):
-        from core.library2.enrich import _provider_ids
+    def test_its_scalars_move_to_backfill_only(self):
+        from core.library2.enrich import (
+            MIRROR_SPECS, active_scalars, handover_scalars,
+        )
 
-        row = {"lastfm_url": "http://legacy", "spotify_artist_id": "sp-1"}
-        ids = _provider_ids(row, "artist")
+        spec = MIRROR_SPECS["track"]
+        assert "genius_lyrics" in {field[1] for field in handover_scalars(spec)}
+        assert "genius_lyrics" not in {field[1] for field in active_scalars(spec)}
 
-        assert "lastfm" not in ids
-        assert ids["spotify"] == "sp-1"
+    def test_a_key_lib2_already_has_is_left_alone(self, conn):
+        """The hazard the handover exists for: the drain must not push a stale
+        legacy value over the worker's fresh native one."""
+        from core.library2.enrich import _merge_json_column
 
-    def test_the_trigger_stops_watching_its_columns(self):
-        """Otherwise every legacy Last.fm write still queues a row the drain has
-        nothing to do for."""
+        write_provider_enrichment(
+            conn, entity_type="artist", entity_id=1, service="lastfm",
+            payload={"bio": "fresh"})
+
+        _merge_json_column(conn, "lib2_artists", 1, "enrichment",
+                           {"lastfm": {"bio": "stale", "listeners": 5}})
+
+        payload = json.loads(_row(conn, "lib2_artists")["enrichment"])["lastfm"]
+        assert payload["bio"] == "fresh"
+        assert payload["listeners"] == 5, "a key lib2 lacks still arrives"
+
+    def test_an_unmigrated_service_still_overwrites(self, conn):
+        """Legacy stays authoritative where it is still the only writer, or a
+        corrected value could never reach lib2."""
+        from core.library2.enrich import _merge_json_column
+
+        write_provider_enrichment(
+            conn, entity_type="artist", entity_id=1, service="deezer",
+            provider_id="dz-old")
+
+        _merge_json_column(conn, "lib2_artists", 1, "external_ids",
+                           {"deezer": "dz-new"})
+
+        assert json.loads(
+            _row(conn, "lib2_artists")["external_ids"])["deezer"] == "dz-new"
+
+    def test_the_trigger_still_watches_its_columns(self):
+        """The resync reads them (to backfill), so the trigger has to fire on them
+        — a column read but unwatched is the silent half of the declaration pair."""
         from core.library2.legacy_mirror import watched_columns
 
-        for table in ("artists", "albums", "tracks"):
-            assert not [c for c in watched_columns(table) if c.startswith("lastfm_")]
+        assert [c for c in watched_columns("artists") if c.startswith("lastfm_")]

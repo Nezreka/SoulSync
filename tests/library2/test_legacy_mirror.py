@@ -171,23 +171,27 @@ class TestDrainAppliesToLib2:
         assert row["summary"] == "A Bristol act."
         assert row["style"] == "trip hop"
 
-    def test_a_migrated_services_legacy_write_is_not_mirrored(self, mirrored_db):
-        """Last.fm's worker writes lib2 directly now, so its legacy columns must
-        neither queue a row nor be copied — the drain would push a stale value
-        over the fresh native one."""
+    def test_a_migrated_services_write_only_fills_a_gap(self, mirrored_db):
+        """Last.fm's worker writes lib2 directly now, so legacy may fill an empty
+        lib2 field and may never replace one the worker set — otherwise the drain
+        pushes a stale value over the fresh native one."""
         conn = _conn(mirrored_db)
         try:
             conn.execute(
+                "UPDATE lib2_artists SET enrichment=? WHERE legacy_artist_id=1",
+                (json.dumps({"lastfm": {"bio": "Fresh, written natively."}}),))
+            conn.execute(
                 "UPDATE artists SET lastfm_bio=?, lastfm_listeners=? WHERE id=1",
-                ("Stale.", 1))
+                ("Stale.", 90210))
             conn.commit()
-            assert pending_count(conn) == 0
         finally:
             conn.close()
 
         drain(mirrored_db)
 
-        assert "lastfm" not in json.loads(_lib2_artist(mirrored_db)["enrichment"])
+        payload = json.loads(_lib2_artist(mirrored_db)["enrichment"])["lastfm"]
+        assert payload["bio"] == "Fresh, written natively."
+        assert payload["listeners"] == 90210, "a key lib2 lacked still arrives"
 
     def test_album_and_track_writes_are_mirrored_too(self, mirrored_db):
         conn = _conn(mirrored_db)

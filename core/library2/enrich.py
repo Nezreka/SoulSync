@@ -56,7 +56,7 @@ def _provider_ids(legacy_row: Any, entity_type: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for service, _label, id_columns in SERVICES:
         column = id_columns.get(entity_type)
-        if not column or _migrated(service):
+        if not column:
             continue
         value = _row_get(legacy_row, column)
         if value not in (None, ""):
@@ -74,6 +74,11 @@ def _merge_json_column(conn, table: str, entity_id: int, column: str,
     value, so legacy is the fresher source by construction — keeping the old
     value would mean a corrected provider id could never reach lib2. Keys the
     legacy row has nothing for are left untouched either way.
+
+    The exception is a service whose worker has migrated: it writes lib2 itself, so
+    legacy is no longer the fresher source for it and the merge fills only what
+    lib2 lacks. Per key, not per bucket — a Last.fm bucket the worker populated
+    with a bio can still receive a listener count legacy has and lib2 does not.
     """
     if not incoming:
         return
@@ -87,11 +92,15 @@ def _merge_json_column(conn, table: str, entity_id: int, column: str,
         current = {}
     merged = dict(current)
     for key, value in incoming.items():
+        backfill_only = _migrated(key)
         if isinstance(value, dict):
             bucket = dict(merged.get(key) or {}) if isinstance(merged.get(key), dict) else {}
-            bucket.update(value)
+            for sub_key, sub_value in value.items():
+                if backfill_only and not _is_absent(bucket.get(sub_key)):
+                    continue
+                bucket[sub_key] = sub_value
             merged[key] = bucket
-        else:
+        elif not (backfill_only and not _is_absent(merged.get(key))):
             merged[key] = value
     if merged != current:
         conn.execute(
@@ -179,7 +188,7 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 # This set is therefore the stage-2 progress marker: it grows by one entry per
 # migrated worker, and when it holds every service the mirror has no work left.
 MIGRATED_SERVICES: frozenset = frozenset({
-    "lastfm", "genius", "discogs", "bandcamp",
+    "lastfm", "genius", "discogs", "bandcamp", "audiodb", "similar_artists",
 })
 
 
@@ -191,28 +200,66 @@ def _migrated_prefixes() -> tuple:
     return tuple(f"{service}_" for service in MIGRATED_SERVICES)
 
 
-def active_scalars(spec: "MirrorSpec") -> tuple:
-    """The spec's scalar fields, minus those a migrated worker now owns.
+# Shared scalar columns whose only legacy writer is one particular service.
+#
+# Prefix matching finds ``genius_lyrics``. It cannot find these: ``artists.style``
+# carries no service in its name, yet AudioDB's worker is the only thing that ever
+# wrote it (``mood``, ``label`` and ``banner_url`` likewise; ``albums.label`` is
+# deliberately absent because five other workers write that one). Without the
+# declaration these columns would keep overwriting their own worker's fresh native
+# value from a stale legacy row.
+_SCALAR_OWNERS: Dict[str, Dict[str, str]] = {
+    "artist": {"style": "audiodb", "mood": "audiodb", "label": "audiodb",
+               "banner_url": "audiodb"},
+    "album": {"style": "audiodb", "mood": "audiodb"},
+    "track": {"style": "audiodb", "mood": "audiodb"},
+}
 
-    Some provider payload lands in a real column rather than the enrichment
-    bucket — ``tracks.genius_lyrics`` is the case that found this. Leaving such a
-    column mirrored after its worker moved would let the drain push a stale legacy
-    value over the fresh native one, which is the exact hazard
-    ``MIGRATED_SERVICES`` exists to prevent. Matched by column prefix, the same
-    rule ``legacy_mirror.watched_columns`` uses, so the trigger and the resync
-    cannot disagree — and ``test_mirror_declaration`` proves they do not.
+
+def _scalar_owner(entity_type: str, field: tuple) -> Optional[str]:
+    """Which service owns one scalar field, by declaration or by column prefix."""
+    declared = (_SCALAR_OWNERS.get(entity_type) or {}).get(str(field[0]))
+    if declared:
+        return declared
+    legacy_column = str(field[1])
+    for service in MIGRATED_SERVICES:
+        if legacy_column.startswith(f"{service}_"):
+            return service
+    return None
+
+
+def handed_over(spec: "MirrorSpec", field: tuple) -> bool:
+    """Whether a migrated worker owns this scalar, so the mirror only backfills it.
+
+    Dropping the field instead would close the stale-overwrite hazard and open a
+    quieter one: a legacy value the lib2 twin never received, on a row the ledger
+    already calls ``matched`` so the worker will not re-fetch it, would simply be
+    gone. Backfill settles both — an empty lib2 field is still filled, a field the
+    worker has written is never overwritten.
     """
-    prefixes = _migrated_prefixes()
-    return tuple(
-        field for field in spec.scalars if not str(field[1]).startswith(prefixes))
+    owner = _scalar_owner(spec.entity_type, field)
+    return bool(owner and _migrated(owner))
+
+
+def active_scalars(spec: "MirrorSpec") -> tuple:
+    """Scalar fields where legacy is still authoritative and overwrites lib2."""
+    return tuple(field for field in spec.scalars if not handed_over(spec, field))
+
+
+def handover_scalars(spec: "MirrorSpec") -> tuple:
+    """Scalar fields a migrated worker owns — mirrored into an empty field only."""
+    return tuple(field for field in spec.scalars if handed_over(spec, field))
 
 
 def enrichment_columns(entity_type: str) -> Tuple[str, ...]:
-    """Every legacy column the enrichment bucket reads for one entity type."""
+    """Every legacy column the enrichment bucket reads for one entity type.
+
+    Includes migrated services: their payload still crosses, backfill-only, so the
+    trigger has to keep watching the columns and the audit has to keep seeing them.
+    """
     return tuple(sorted({
         str(column)
-        for source, sources in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items()
-        if not _migrated(source)
+        for _source, sources in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items()
         for column in sources.values()
     }))
 
@@ -229,8 +276,6 @@ def _enrichment_payload(entity_type: str, legacy_row: Any) -> Dict[str, Dict[str
     """
     out: Dict[str, Dict[str, Any]] = {}
     for source, fields in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items():
-        if _migrated(source):
-            continue
         cleaned = {}
         for key, column in fields.items():
             raw = _row_get(legacy_row, str(column))
@@ -363,13 +408,20 @@ def _id_value(legacy_row: Any, legacy_columns: Tuple[str, ...]) -> Optional[str]
 
 
 def _apply_mirror(conn, spec: MirrorSpec, entity_id: int, legacy_row: Any) -> bool:
+    # Two assignment forms, and the argument order matters: legacy wins where it is
+    # still the only writer (COALESCE(?, col)), lib2 wins where the worker has
+    # moved and legacy may only fill a gap (COALESCE(col, ?)).
+    fields = (*active_scalars(spec), *handover_scalars(spec))
     assignments = ", ".join(
         f"{field[0]}=COALESCE(?, {field[0]})" for field in active_scalars(spec))
+    handover = ", ".join(
+        f"{field[0]}=COALESCE(NULLIF({field[0]},''), ?)"
+        for field in handover_scalars(spec))
     conn.execute(
-        f"UPDATE {spec.lib2_table} SET {assignments}, "
-        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (*(_scalar_value(legacy_row, field) for field in active_scalars(spec)),
-         entity_id),
+        f"UPDATE {spec.lib2_table} SET "
+        + ", ".join(part for part in (assignments, handover) if part)
+        + ", updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (*(_scalar_value(legacy_row, field) for field in fields), entity_id),
     )
     for column, builder in spec.json_columns:
         _merge_json_column(conn, spec.lib2_table, entity_id, column,
@@ -465,13 +517,20 @@ def _json_divergence(column: str, incoming: Dict[str, Any],
         current = {}
     out: Dict[str, Dict[str, Any]] = {}
     for key, value in incoming.items():
+        # A migrated service's key is only mirrored into a gap, so a difference
+        # where lib2 already has a value is the intended outcome, not a defect.
+        backfill_only = _migrated(key)
         if isinstance(value, dict):
             bucket = current.get(key)
             bucket = bucket if isinstance(bucket, dict) else {}
             for sub_key, sub_value in value.items():
+                if backfill_only and not _is_absent(bucket.get(sub_key)):
+                    continue
                 if not _same_value(sub_value, bucket.get(sub_key)):
                     out[f"{column}.{key}.{sub_key}"] = {
                         "legacy": sub_value, "lib2": bucket.get(sub_key)}
+        elif backfill_only and not _is_absent(current.get(key)):
+            continue
         elif not _same_value(value, current.get(key)):
             out[f"{column}.{key}"] = {"legacy": value, "lib2": current.get(key)}
     return out
@@ -487,11 +546,15 @@ def mirror_divergence(spec: MirrorSpec, legacy_row: Any,
     An empty result is the expected state (docs §32.3.1, promise 2).
     """
     out: Dict[str, Dict[str, Any]] = {}
-    for field in active_scalars(spec):
+    for field in (*active_scalars(spec), *handover_scalars(spec)):
         expected = _scalar_value(legacy_row, field)
         if _is_absent(expected):
             continue
         actual = _row_get(lib2_row, field[0])
+        if handed_over(spec, field) and not _is_absent(actual):
+            # Backfill-only: the mirror will not touch this, so reporting it would
+            # put a row into the metric no sweep can ever clear.
+            continue
         if not _same_value(expected, actual):
             out[field[0]] = {"legacy": expected, "lib2": actual}
     for column, legacy_columns in spec.id_columns:
@@ -618,6 +681,8 @@ def mirror_check_ran(conn) -> bool:
 __all__ = [
     "MIGRATED_SERVICES",
     "active_scalars",
+    "handed_over",
+    "handover_scalars",
     "MIRROR_SPECS",
     "MirrorObservation",
     "MirrorSpec",

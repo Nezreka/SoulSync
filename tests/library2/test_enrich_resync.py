@@ -65,9 +65,13 @@ def test_resync_artist_overwrites_from_legacy_row(conn):
     assert row["image_url"] == "http://img"
     assert json.loads(row["genres"]) == ["synthwave", "phonk"]
     assert row["summary"] == "fresh bio"
-    assert row["style"] == "fresh style"
+    # style/mood/label/banner_url are AudioDB's own fields despite their generic
+    # names, and its worker writes lib2 directly now, so legacy fills a gap here
+    # rather than overwriting (`enrich.handed_over`). The two lib2 already had keep
+    # their values; the two it lacked arrive.
+    assert row["style"] == "old style"
+    assert row["label"] == "old label"
     assert row["mood"] == "moody"
-    assert row["label"] == "fresh label"
     assert row["banner_url"] == "http://banner"
 
 
@@ -153,10 +157,11 @@ def test_resync_track_overwrites_from_legacy_row(conn):
     assert row["bpm"] == 104.0
     assert row["explicit"] == 0
     assert row["copyright"] == "(C) 2016 OVO"
-    # `genius_lyrics` is deliberately absent: the Genius worker writes lib2
-    # directly now, so its columns left the mirror (`enrich.MIGRATED_SERVICES`)
-    # and copying legacy on top would push a stale value over a fresh one.
-    assert row["genius_lyrics"] is None
+    # `genius_lyrics` arrives, but by backfill rather than overwrite: the Genius
+    # worker writes lib2 directly now (`enrich.MIGRATED_SERVICES`), so legacy may
+    # fill an empty field — which this one is — and may never replace a value the
+    # worker put there. See tests/library2/test_mirror_handover_backfill.py.
+    assert row["genius_lyrics"] == "some lyrics"
     assert row["style"] == "Pop Rap"
     assert row["mood"] == "Chill"
 

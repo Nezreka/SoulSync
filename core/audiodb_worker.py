@@ -13,6 +13,23 @@ from core.worker_utils import accept_artist_match, interruptible_sleep
 logger = get_logger("audiodb_worker")
 
 
+def _parent_artist_id(conn, entity_type: str, entity_id) -> Optional[int]:
+    """The lib2 artist that owns an album or track.
+
+    A track's artist is two joins away in lib2 — track → album → primary artist —
+    where legacy carried ``tracks.artist_id`` on the row itself.
+    """
+    sql = {
+        'album': "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+        'track': ("SELECT al.primary_artist_id FROM lib2_tracks t "
+                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
+    }.get(entity_type)
+    if not sql:
+        return None
+    row = conn.execute(sql, (entity_id,)).fetchone()
+    return row[0] if row else None
+
+
 class AudioDBWorker:
     """Background worker for enriching library artists, albums, and tracks with AudioDB metadata"""
 
@@ -155,105 +172,39 @@ class AudioDBWorker:
 
         logger.info("AudioDB worker thread finished")
 
+    # AudioDB retries 'error' alongside 'not_found'. Issue #553 marks transient
+    # AudioDB outages (timeouts, 500s) instead of leaving the row NULL, and without
+    # this those rows would stay errored forever.
+    _RETRY_STATUSES = ('error', 'not_found')
+
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process from priority queue (artists → albums → tracks)"""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker
+        uses (docs §32.3.1 stage 2). An album/track item also carries its parent
+        artist's AudioDB id, which ``_verify_artist_id`` compares the result
+        against.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.library2.worker_support import stored_provider_id
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('audiodb')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'audiodb', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE audiodb_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.audiodb_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.audiodb_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
-
-            # Priority 4: Retry 'not_found' OR 'error' artists after retry_days.
-            # 'error' status covers transient AudioDB outages (timeouts, 500s)
-            # that the issue-#553 fix marks rather than leaving NULL — without
-            # this retry path those rows would stay errored forever.
-            retry_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE audiodb_match_status IN ('not_found', 'error') AND audiodb_last_attempted < ?
-                ORDER BY audiodb_last_attempted ASC
-                LIMIT 1
-            """, (retry_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry 'not_found' OR 'error' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.audiodb_match_status IN ('not_found', 'error') AND a.audiodb_last_attempted < ?
-                ORDER BY a.audiodb_last_attempted ASC
-                LIMIT 1
-            """, (retry_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
-
-            # Priority 6: Retry 'not_found' OR 'error' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.audiodb_id AS artist_audiodb_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.audiodb_match_status IN ('not_found', 'error') AND t.audiodb_last_attempted < ?
-                ORDER BY t.audiodb_last_attempted ASC
-                LIMIT 1
-            """, (retry_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_audiodb_id': row[3]}
-
-            return None
+            item = next_pending(
+                conn, 'audiodb',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('audiodb') or None,
+                retry_statuses=self._RETRY_STATUSES,
+            )
+            if item and item['type'] in ('album', 'track'):
+                parent = _parent_artist_id(conn, item['type'], item['id'])
+                if parent is not None:
+                    item['artist_audiodb_id'] = stored_provider_id(
+                        conn, 'artist', parent, 'audiodb')
+            return item
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -310,26 +261,20 @@ class AudioDBWorker:
         return True
 
     def _correct_artist_audiodb_id(self, item: Dict[str, Any], correct_audiodb_id: str):
-        """Correct the parent artist's audiodb_id based on a more specific album/track match"""
+        """Correct the parent artist's AudioDB id from a more specific album/track
+        match. The name guard in ``_verify_artist_id`` has already run."""
         conn = None
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+            from core.library2.provider_writes import write_provider_enrichment
 
-            # Find the artist_id from the album/track
-            table = 'albums' if item['type'] == 'album' else 'tracks'
-            cursor.execute(f"SELECT artist_id FROM {table} WHERE id = ?", (item['id'],))
-            row = cursor.fetchone()
-            if not row:
+            conn = self.db._get_connection()
+            artist_id = _parent_artist_id(conn, item['type'], item['id'])
+            if artist_id is None:
                 return
 
-            artist_id = row[0]
-            cursor.execute("""
-                UPDATE artists SET
-                    audiodb_id = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (correct_audiodb_id, artist_id))
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='audiodb', provider_id=correct_audiodb_id)
             conn.commit()
 
             logger.info(f"Corrected artist #{artist_id} AudioDB ID to {correct_audiodb_id}")
@@ -350,18 +295,17 @@ class AudioDBWorker:
         return similarity >= self.name_similarity_threshold
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has an audiodb_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The AudioDB id already stored for this entity, if any.
+
+        Set by a manual match or an earlier run; honoring it is what keeps a manual
+        match from being searched over (issue #501).
+        """
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT audiodb_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'audiodb')
         except Exception:
             return None
         finally:
@@ -491,163 +435,89 @@ class AudioDBWorker:
 
     def _update_artist(self, artist_id: int, data: Dict[str, Any]):
         """Store AudioDB metadata for an artist using generic column names"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Update AudioDB tracking + generic metadata columns
-            cursor.execute("""
-                UPDATE artists SET
-                    audiodb_id = ?,
-                    audiodb_match_status = 'matched',
-                    audiodb_last_attempted = CURRENT_TIMESTAMP,
-                    style = ?,
-                    mood = ?,
-                    label = ?,
-                    banner_url = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                data.get('idArtist'),
-                data.get('strStyle'),
-                data.get('strMood'),
-                data.get('strLabel'),
-                data.get('strArtistBanner'),
-                artist_id
-            ))
-
-            # Backfill thumb_url if artist has no image
-            thumb_url = data.get('strArtistThumb')
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, artist_id))
-
-            # Backfill genres if artist has none
-            genre = data.get('strGenre')
-            if genre:
-                from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
-                _filtered = filter_genres([genre], _cfg)
-                if _filtered:
-                    cursor.execute("""
-                        UPDATE artists SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps(_filtered), artist_id))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with AudioDB data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        self._write('artist', artist_id, data.get('idArtist'), data, {
+            'style': data.get('strStyle'),
+            'mood': data.get('strMood'),
+            'label': data.get('strLabel'),
+            'banner_url': data.get('strArtistBanner'),
+        }, image=data.get('strArtistThumb'))
 
     def _update_album(self, album_id: int, data: Dict[str, Any]):
         """Store AudioDB metadata for an album using generic column names"""
+        self._write('album', album_id, data.get('idAlbum'), data, {
+            'style': data.get('strStyle'),
+            'mood': data.get('strMood'),
+        }, image=data.get('strAlbumThumb'))
+
+    def _update_track(self, track_id: int, data: Dict[str, Any]):
+        """Store AudioDB metadata for a track using generic column names"""
+        # Tracks carry no artwork or genre columns of their own.
+        self._write('track', track_id, data.get('idTrack'), data, {
+            'style': data.get('strStyle'),
+            'mood': data.get('strMood'),
+        })
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               data: Dict[str, Any], columns: Dict[str, Any],
+               image: Optional[str] = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        ``columns`` are written outright: style/mood/label/banner_url carry no
+        service in their names, but AudioDB is their only writer, so a fresh fetch
+        is the newer truth. Artwork and genres are backfilled instead — they are
+        shared with better sources and with the user's own choice.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
-            cursor.execute("""
-                UPDATE albums SET
-                    audiodb_id = ?,
-                    audiodb_match_status = 'matched',
-                    audiodb_last_attempted = CURRENT_TIMESTAMP,
-                    style = ?,
-                    mood = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                data.get('idAlbum'),
-                data.get('strStyle'),
-                data.get('strMood'),
-                album_id
-            ))
-
-            # Backfill thumb_url if album has no image
-            thumb_url = data.get('strAlbumThumb')
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, album_id))
-
-            # Backfill genres if album has none
+            backfill = {}
+            if image:
+                backfill['image_url'] = image
             genre = data.get('strGenre')
-            if genre:
+            if genre and entity_type != 'track':
                 from core.genre_filter import filter_genres
                 from config.settings import config_manager as _cfg
                 _filtered = filter_genres([genre], _cfg)
                 if _filtered:
-                    cursor.execute("""
-                        UPDATE albums SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps(_filtered), album_id))
+                    backfill['genres'] = json.dumps(_filtered)
 
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='audiodb',
+                provider_id=provider_id,
+                columns=columns,
+                backfill=backfill or None,
+            )
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='audiodb', status='matched')
             conn.commit()
 
         except Exception as e:
-            logger.error(f"Error updating album #{album_id} with AudioDB data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_track(self, track_id: int, data: Dict[str, Any]):
-        """Store AudioDB metadata for a track using generic column names"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    audiodb_id = ?,
-                    audiodb_match_status = 'matched',
-                    audiodb_last_attempted = CURRENT_TIMESTAMP,
-                    style = ?,
-                    mood = ?
-                WHERE id = ?
-            """, (
-                data.get('idTrack'),
-                data.get('strStyle'),
-                data.get('strMood'),
-                track_id
-            ))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating track #{track_id} with AudioDB data: {e}")
+            logger.error(
+                f"Error updating {entity_type} #{entity_id} with AudioDB data: {e}")
             raise
         finally:
             if conn:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an entity (artist, album, or track) with a match status"""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `audiodb_match_status`/`_last_attempted` column pair.
+        Both `not_found` and `error` become due again after the retry window here —
+        see `_RETRY_STATUSES`.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    audiodb_match_status = ?,
-                    audiodb_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='audiodb', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -656,23 +526,14 @@ class AudioDBWorker:
                 conn.close()
 
     def _count_pending_items(self) -> int:
-        """Count how many items still need processing across all entity types"""
+        """Count how many items still need processing"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE audiodb_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE audiodb_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE audiodb_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-
-            row = cursor.fetchone()
-            return row[0] if row else 0
-
+            return pending_count(conn, 'audiodb', retry_after_days=self.retry_days,
+                                 retry_statuses=self._RETRY_STATUSES)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -684,61 +545,10 @@ class AudioDBWorker:
         """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            progress = {}
-
-            # Artists progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN audiodb_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM artists
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['artists'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Albums progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN audiodb_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM albums
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['albums'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Tracks progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN audiodb_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM tracks
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['tracks'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            return progress
-
+            return progress_breakdown(conn, 'audiodb')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

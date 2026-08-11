@@ -9,12 +9,10 @@ Nezreka's bar is "i don't want to lose any enrichment functionality or data in
 the move to v2", so this belongs before the legacy tables are deleted, not after.
 
 Every provider with a per-service payload has since migrated (docs §32.3.1 stage
-2), so the mirror has nothing left to carry in this bucket. The mechanism tests
-below therefore turn the handover off deliberately (``mirror_owns_payload``): they
-exist to prove declaration → resync → divergence still works for whichever
-provider is declared next, and pinning them to a provider name that is about to
-migrate is how a guard quietly stops guarding. The handover tests keep the real
-set.
+2), which changes the direction a value may travel — backfill only — but not
+whether the mirror carries it. An empty lib2 bucket still gets filled, so the tests
+below read the same as they did before the handover; what the handover adds is that
+a key the worker already wrote is left alone.
 """
 
 from __future__ import annotations
@@ -26,17 +24,6 @@ import pytest
 
 from core.library2.enrich import resync_entity_from_legacy
 from core.library2.schema import ensure_library_v2_schema
-
-
-@pytest.fixture
-def mirror_owns_payload(monkeypatch):
-    """The world before the handover: legacy is the sole writer of the payload.
-
-    Tests the copying mechanism rather than any live provider's migration state.
-    """
-    import core.library2.enrich as enrich
-
-    monkeypatch.setattr(enrich, "MIGRATED_SERVICES", frozenset())
 
 
 @pytest.fixture
@@ -125,7 +112,7 @@ class TestTheColumnExists:
 
 
 class TestAlbumPayload:
-    def test_discogs_and_bandcamp_all_arrive(self, conn, mirror_owns_payload):
+    def test_discogs_and_bandcamp_all_arrive(self, conn):
         lib2_id, legacy_id = _album(
             conn, discogs_genres='["Electronic"]', discogs_styles='["Trip Hop"]',
             discogs_label="Virgin", discogs_catno="CDV 2883",
@@ -152,7 +139,7 @@ class TestAlbumPayload:
             "SELECT release_date FROM lib2_albums WHERE id=?", (lib2_id,)
         ).fetchone()["release_date"] == "1998-04-20"
 
-    def test_a_provider_that_wrote_nothing_leaves_no_empty_bucket(self, conn, mirror_owns_payload):
+    def test_a_provider_that_wrote_nothing_leaves_no_empty_bucket(self, conn):
         lib2_id, legacy_id = _album(conn, discogs_label="Virgin")
 
         resync_entity_from_legacy(conn, "album", lib2_id, legacy_id)
@@ -162,25 +149,30 @@ class TestAlbumPayload:
         ).fetchone()["enrichment"])
         assert set(payload) == {"discogs"}
 
-    def test_a_migrated_services_legacy_columns_no_longer_arrive(self, conn):
-        """Every payload provider writes lib2 itself now. Mirroring their legacy
-        columns on top would push a stale value over the fresh native one on the
-        next drain — and the metric would report the worker's own output as a
-        defect."""
+    def test_a_migrated_services_columns_arrive_but_never_overwrite(self, conn):
+        """Every payload provider writes lib2 itself now, so legacy may fill a gap
+        and may never replace what the worker wrote — the stale-overwrite hazard on
+        one side, the never-carried-across loss on the other."""
         lib2_id, legacy_id = _album(
             conn, lastfm_listeners=90210, lastfm_wiki="A landmark record.",
-            discogs_label="Virgin", bandcamp_label="Self-released")
+            discogs_label="Virgin")
+        conn.execute(
+            "UPDATE lib2_albums SET enrichment=? WHERE id=?",
+            (json.dumps({"lastfm": {"wiki": "Written natively."}}), lib2_id))
+        conn.commit()
 
         resync_entity_from_legacy(conn, "album", lib2_id, legacy_id)
 
         payload = json.loads(conn.execute(
             "SELECT enrichment FROM lib2_albums WHERE id=?", (lib2_id,)
         ).fetchone()["enrichment"])
-        assert payload == {}
+        assert payload["lastfm"]["wiki"] == "Written natively."
+        assert payload["lastfm"]["listeners"] == 90210
+        assert payload["discogs"]["label"] == "Virgin"
 
 
 class TestTrackPayload:
-    def test_bandcamp_payload_arrives(self, conn, mirror_owns_payload):
+    def test_bandcamp_payload_arrives(self, conn):
         lib2_id, legacy_id = _track(
             conn, bandcamp_tags='["b"]', bandcamp_label="Label")
 
@@ -191,20 +183,23 @@ class TestTrackPayload:
         ).fetchone()["enrichment"])
         assert payload["bandcamp"] == {"tags": ["b"], "label": "Label"}
 
-    def test_a_migrated_services_track_columns_no_longer_arrive(self, conn):
+    def test_a_migrated_services_scalar_column_is_backfilled_not_overwritten(self, conn):
         """Genius owns both its enrichment payload and ``tracks.genius_lyrics``
         now — a scalar column, which is why the handover has to cover those too."""
         lib2_id, legacy_id = _track(
-            conn, genius_description="Stale.", genius_lyrics="Stale words.",
-            bandcamp_label="Label")
+            conn, genius_description="Stale.", genius_lyrics="Stale words.")
+        conn.execute("UPDATE lib2_tracks SET genius_lyrics='Fresh words.' WHERE id=?",
+                     (lib2_id,))
+        conn.commit()
 
         resync_entity_from_legacy(conn, "track", lib2_id, legacy_id)
 
         row = conn.execute(
             "SELECT enrichment, genius_lyrics FROM lib2_tracks WHERE id=?",
             (lib2_id,)).fetchone()
-        assert json.loads(row["enrichment"]) == {}
-        assert row["genius_lyrics"] is None
+        assert row["genius_lyrics"] == "Fresh words."
+        assert json.loads(row["enrichment"])["genius"]["description"] == "Stale.", (
+            "a key lib2 lacked still arrives")
 
     def test_disc_number_reaches_its_own_column(self, conn):
         lib2_id, legacy_id = _track(conn, disc_number=2)
@@ -217,14 +212,16 @@ class TestTrackPayload:
 
 
 class TestTheAuditSeesTheNewFields:
-    def test_an_unmirrored_album_payload_is_a_divergence(self, conn, mirror_owns_payload):
-        """The whole point of declaring them: the metric can now see them."""
+    def test_an_unmirrored_album_payload_is_a_divergence(self, conn):
+        """The whole point of declaring them: the metric can now see them.
+
+        Stated as the gap case — legacy has a payload the lib2 row does not — which
+        is the only disagreement the metric can still report for a migrated
+        provider, and the only one a sweep could actually fix.
+        """
         from core.library2.integrity_reconciler import _Collector, _mirror_divergence_findings
 
-        lib2_id, legacy_id = _album(conn, discogs_label="Virgin")
-        resync_entity_from_legacy(conn, "album", lib2_id, legacy_id)
-        conn.execute("UPDATE albums SET discogs_label='4AD' WHERE id=?", (legacy_id,))
-        conn.commit()
+        _album(conn, discogs_label="Virgin")
 
         collector = _Collector(10)
         _mirror_divergence_findings(collector, conn)
@@ -232,3 +229,20 @@ class TestTheAuditSeesTheNewFields:
         finding = next(item for item in collector.items
                        if item.code == "lib2_mirror_divergence")
         assert finding.details["fields"] == ["enrichment.discogs.label"]
+
+    def test_a_payload_the_worker_already_wrote_is_not_a_divergence(self, conn):
+        """The sweep will not overwrite it, so reporting it would put a row into
+        the metric nothing can ever clear."""
+        from core.library2.integrity_reconciler import _Collector, _mirror_divergence_findings
+
+        lib2_id, _legacy_id = _album(conn, discogs_label="Virgin")
+        conn.execute(
+            "UPDATE lib2_albums SET enrichment=? WHERE id=?",
+            (json.dumps({"discogs": {"label": "4AD"}}), lib2_id))
+        conn.commit()
+
+        collector = _Collector(10)
+        _mirror_divergence_findings(collector, conn)
+
+        assert not [item for item in collector.items
+                    if item.code == "lib2_mirror_divergence"]

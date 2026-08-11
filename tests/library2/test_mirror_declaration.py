@@ -24,19 +24,22 @@ from core.library2.legacy_mirror import _WATCHED_COLUMNS, watched_columns
 
 
 def _mirrored_columns(legacy_table: str) -> set:
-    """Every legacy column the resync reads for one table."""
-    from core.library2.enrich import MIGRATED_SERVICES, enrichment_columns
+    """Every legacy column the resync reads for one table.
+
+    Includes a migrated service's columns. They are mirrored backfill-only rather
+    than dropped (``enrich.handed_over``), so the resync still reads them and the
+    trigger still has to watch them.
+    """
+    from core.library2.enrich import enrichment_columns
     from core.library2.match_status import SERVICES
 
-    from core.library2.enrich import active_scalars
-
     spec = next(s for s in MIRROR_SPECS.values() if s.legacy_table == legacy_table)
-    columns = {field[1] for field in active_scalars(spec)}
+    columns = {field[1] for field in spec.scalars}
     for _lib2_column, legacy_columns in spec.id_columns:
         columns.update(legacy_columns)
-    for service, _label, id_columns in SERVICES:
+    for _service, _label, id_columns in SERVICES:
         column = id_columns.get(spec.entity_type)
-        if column and service not in MIGRATED_SERVICES:
+        if column:
             columns.add(column)
     columns.update(enrichment_columns(spec.entity_type))
     return columns
@@ -71,41 +74,38 @@ def test_the_provider_payload_is_declared_for_every_entity_type():
     own inventory for the two tests above to see it — for all three entity types,
     not just artists (docs §50.4.4.3).
 
-    Stated as the invariant rather than as spot-checks on particular columns,
-    because the columns are supposed to disappear one provider at a time: a source
-    is declared exactly while it has NOT migrated. Naming ``discogs_bio`` here
-    would mean this test had to be edited every time a worker moved, which is how a
-    guard stops guarding.
+    A migrated service stays in the inventory: what changes on migration is the
+    direction the value may travel (backfill only), not whether the mirror touches
+    the column at all, and the trigger/audit pair has to keep seeing it either way.
     """
-    from core.library2.enrich import (
-        _ENRICHMENT_PAYLOAD, MIGRATED_SERVICES, enrichment_columns,
-    )
+    from core.library2.enrich import _ENRICHMENT_PAYLOAD, enrichment_columns
 
     for entity, sources in _ENRICHMENT_PAYLOAD.items():
         declared = set(enrichment_columns(entity))
         for source, fields in sources.items():
             columns = {str(column) for column in fields.values()}
-            if source in MIGRATED_SERVICES:
-                # Its worker writes lib2 now. Mirroring legacy on top would push a
-                # stale value over the fresh native one on the next drain.
-                assert not (columns & declared), (entity, source)
-            else:
-                assert columns <= declared, (entity, source)
+            assert columns <= declared, (entity, source)
 
 
-def test_the_enrichment_bucket_has_no_mirroring_left_to_do():
-    """Every provider with a per-service enrichment payload now writes lib2
-    directly, so this half of the mirror is finished (docs §32.3.1 stage 2).
+def test_a_migrated_service_is_mirrored_backfill_only():
+    """The handover, stated as the invariant rather than per provider.
 
-    The mirror is not finished — the scalar columns and provider ids the remaining
-    workers write are still carried across. This pins which half is done, and will
-    fail the moment a payload provider is added back without its worker, which
-    would silently reintroduce the stale-overwrite hazard.
+    Both halves matter and they pull against each other. Overwrite semantics for a
+    field its own worker now writes would let the drain push a stale legacy value
+    over the fresh native one. Dropping the field instead would lose a legacy value
+    lib2 never received on a row the ledger already calls matched, which no
+    mechanism would ever carry across afterwards.
     """
     from core.library2.enrich import (
-        _ENRICHMENT_PAYLOAD, MIGRATED_SERVICES, enrichment_columns,
+        MIGRATED_SERVICES, active_scalars, handover_scalars,
     )
 
-    for entity, sources in _ENRICHMENT_PAYLOAD.items():
-        assert set(sources) <= MIGRATED_SERVICES, entity
-        assert enrichment_columns(entity) == (), entity
+    for spec in MIRROR_SPECS.values():
+        overwritten = {field[1] for field in active_scalars(spec)}
+        backfilled = {field[1] for field in handover_scalars(spec)}
+        assert not (overwritten & backfilled), spec.entity_type
+        assert overwritten | backfilled == {field[1] for field in spec.scalars}, (
+            spec.entity_type)
+        for service in MIGRATED_SERVICES:
+            assert not [c for c in overwritten if c.startswith(f"{service}_")], (
+                spec.entity_type, service)

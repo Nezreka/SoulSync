@@ -97,20 +97,19 @@ _ENTITY_FOR_TABLE = {"artists": "artist", "albums": "album", "tracks": "track"}
 
 
 def watched_columns(table: str) -> Tuple[str, ...]:
-    """The columns whose change should queue a mirror, minus migrated services.
+    """The columns whose change should queue a mirror.
 
-    A service whose worker now writes lib2 directly is no longer mirrored
-    (``enrich.MIGRATED_SERVICES``), so watching its columns would queue rows the
-    drain has nothing to do for — and legacy still writes them until its worker's
-    old code path is gone.
+    Everything the resync reads, including a migrated service's columns. Those are
+    mirrored backfill-only rather than dropped (``enrich.handed_over``), so the
+    resync still has work to do for them — filling a lib2 field that is empty — and
+    a column the resync reads but the trigger ignores is the silent half of the
+    pair ``test_mirror_declaration`` guards against.
+
+    In practice a migrated service no longer writes legacy at all, so its entries
+    here cost nothing: the trigger simply never fires on them, and the backlog
+    sweep is what enqueues those rows.
     """
-    from core.library2.enrich import MIGRATED_SERVICES
-
-    prefixes = tuple(f"{service}_" for service in MIGRATED_SERVICES)
-    return tuple(
-        column for column in _WATCHED_COLUMNS.get(table, ())
-        if not column.startswith(prefixes)
-    )
+    return tuple(_WATCHED_COLUMNS.get(table, ()))
 
 _LIB2_TABLE = {
     "artist": ("lib2_artists", "legacy_artist_id"),
