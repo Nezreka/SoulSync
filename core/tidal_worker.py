@@ -7,10 +7,27 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.tidal_client import TidalClient
-from core.worker_utils import accept_artist_match, idle_backoff_seconds, interruptible_sleep
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.worker_utils import idle_backoff_seconds, interruptible_sleep
+from core.library2.worker_support import accept_artist_match, honor_stored_match
 
 logger = get_logger("tidal_worker")
+
+def _parent_artist_id(conn, entity_type: str, entity_id) -> Optional[int]:
+    """The lib2 artist that owns an album or track.
+
+    A track's artist is two joins away in lib2 — track → album → primary artist —
+    where legacy carried ``tracks.artist_id`` on the row itself.
+    """
+    sql = {
+        'album': "SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+        'track': ("SELECT al.primary_artist_id FROM lib2_tracks t "
+                  "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?"),
+    }.get(entity_type)
+    if not sql:
+        return None
+    row = conn.execute(sql, (entity_id,)).fetchone()
+    return row[0] if row else None
+
 
 
 def _parse_duration_to_ms(duration) -> Optional[int]:
@@ -197,101 +214,26 @@ class TidalWorker:
         logger.info("Tidal worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
-        """Get next item to process from priority queue (artists -> albums -> tracks)"""
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker uses
+        (docs §32.3.1 stage 2). ``include_parent_id`` puts the parent artist's
+        Tidal id on an album or track item, which ``_verify_artist_id`` compares
+        the result against.
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('tidal')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'tidal', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE tidal_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.tidal_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.tidal_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
-
-            # Priority 4: Retry 'not_found' artists
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE tidal_match_status = 'not_found' AND tidal_last_attempted < ?
-                ORDER BY tidal_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry 'not_found' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.tidal_match_status = 'not_found' AND a.tidal_last_attempted < ?
-                ORDER BY a.tidal_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
-
-            # Priority 6: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.tidal_id AS artist_tidal_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.tidal_match_status = 'not_found' AND t.tidal_last_attempted < ?
-                ORDER BY t.tidal_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_tidal_id': row[3]}
-
-            return None
+            return next_pending(
+                conn, 'tidal',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('tidal') or None,
+                include_parent_id=True,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -350,25 +292,20 @@ class TidalWorker:
         return True
 
     def _correct_artist_tidal_id(self, item: Dict[str, Any], correct_tidal_id: str):
-        """Correct the parent artist's tidal_id based on a more specific album/track match"""
+        """Correct the parent artist's Tidal id from a more specific album/track
+        match. The name guard in ``_verify_artist_id`` has already run."""
         conn = None
         try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+            from core.library2.provider_writes import write_provider_enrichment
 
-            table = 'albums' if item['type'] == 'album' else 'tracks'
-            cursor.execute(f"SELECT artist_id FROM {table} WHERE id = ?", (item['id'],))
-            row = cursor.fetchone()
-            if not row:
+            conn = self.db._get_connection()
+            artist_id = _parent_artist_id(conn, item['type'], item['id'])
+            if artist_id is None:
                 return
 
-            artist_id = row[0]
-            cursor.execute("""
-                UPDATE artists SET
-                    tidal_id = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (correct_tidal_id, artist_id))
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='tidal', provider_id=correct_tidal_id)
             conn.commit()
 
             logger.info(f"Corrected artist #{artist_id} Tidal ID to {correct_tidal_id}")
@@ -410,18 +347,13 @@ class TidalWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a tidal_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The Tidal id already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT tidal_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'tidal')
         except Exception:
             return None
         finally:
@@ -441,9 +373,13 @@ class TidalWorker:
         if result:
             result_name = result.get('name', '')
             tidal_artist_id = result.get('id')
-            ok, reason = accept_artist_match(
-                self.db, 'tidal_id', tidal_artist_id, artist_id, artist_name, result_name,
-            )
+            conn = self.db._get_connection()
+            try:
+                ok, reason = accept_artist_match(
+                    conn, 'tidal', tidal_artist_id, artist_id, artist_name, result_name,
+                )
+            finally:
+                conn.close()
             if not ok:
                 self._mark_status('artist', artist_id, 'not_found')
                 self.stats['not_found'] += 1
@@ -485,10 +421,10 @@ class TidalWorker:
         # status='matched' without refreshing metadata. Now goes
         # through the full refresh path via the stored ID.
         if honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='tidal_id',
-            client_fetch_fn=self.client.get_album,
-            on_match_fn=self._refresh_album_via_stored_id,
+            self.db, entity_type='album', entity_id=album_id,
+            service='tidal',
+            fetch=self.client.get_album,
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='Tidal',
         ):
             self.stats['matched'] += 1
@@ -540,10 +476,10 @@ class TidalWorker:
         """Process a track: search Tidal, verify, fetch full details, store metadata"""
         # Issue #501: honor manual matches.
         if honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='tidal_id',
-            client_fetch_fn=self.client.get_track,
-            on_match_fn=self._refresh_track_via_stored_id,
+            self.db, entity_type='track', entity_id=track_id,
+            service='tidal',
+            fetch=self.client.get_track,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='Tidal',
         ):
             self.stats['matched'] += 1
@@ -591,272 +527,144 @@ class TidalWorker:
             self.stats['not_found'] += 1
             logger.debug(f"No match for track '{track_name}'")
 
-    def _update_artist(self, artist_id: int, data: Dict[str, Any], full_data: Optional[Dict[str, Any]] = None):
+    @staticmethod
+    def _text(value) -> Optional[str]:
+        """Label and copyright arrive as a string or as a JSON:API named object."""
+        if isinstance(value, dict):
+            value = value.get('name') or value.get('text')
+        return str(value) if value not in (None, '') else None
+
+    @staticmethod
+    def _artist_image(data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Tidal exposes artwork four different ways depending on the endpoint:
+        a sized ``picture`` array, a bare ``picture`` string, JSON:API
+        ``imageLinks``, or ``image``. Largest first where there is a choice."""
+        if full_data:
+            pictures = full_data.get('picture', [])
+            if isinstance(pictures, list) and pictures:
+                for size in ('1080x1080', '750x750', '480x480', '320x320'):
+                    for pic in pictures:
+                        if isinstance(pic, dict) and size in pic.get('url', ''):
+                            return pic['url']
+                first = pictures[0]
+                return first.get('url') if isinstance(first, dict) else str(first)
+            if isinstance(pictures, str) and pictures:
+                return pictures
+            for link in full_data.get('imageLinks', []) or []:
+                if isinstance(link, dict) and link.get('href'):
+                    return link['href']
+        candidate = data.get('picture') or data.get('image') or ''
+        if isinstance(candidate, list) and candidate:
+            first = candidate[0]
+            return first.get('url') if isinstance(first, dict) else str(first)
+        return candidate or None
+
+    @staticmethod
+    def _album_image(data: Dict[str, Any]) -> Optional[str]:
+        cover = data.get('cover') or data.get('image') or ''
+        if isinstance(cover, list) and cover:
+            first = cover[0]
+            return first.get('url') if isinstance(first, dict) else str(first)
+        if isinstance(cover, str) and cover:
+            return cover
+        for link in data.get('imageLinks', []) or []:
+            if isinstance(link, dict) and link.get('href'):
+                return link['href']
+        return None
+
+    def _update_artist(self, artist_id: int, data: Dict[str, Any],
+                       full_data: Optional[Dict[str, Any]] = None):
         """Store Tidal metadata for an artist"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+        self._write('artist', artist_id, data.get('id'),
+                    backfill={'image_url': self._artist_image(data, full_data)})
 
-            cursor.execute("""
-                UPDATE artists SET
-                    tidal_id = ?,
-                    tidal_match_status = 'matched',
-                    tidal_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(data.get('id')),
-                artist_id
-            ))
-            conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                thumb_url = None
-                if full_data:
-                    # V2 detail may have picture array or picture URL
-                    pictures = full_data.get('picture', [])
-                    if isinstance(pictures, list) and pictures:
-                        # Pick largest available
-                        for size in ['1080x1080', '750x750', '480x480', '320x320']:
-                            for pic in pictures:
-                                if isinstance(pic, dict) and size in pic.get('url', ''):
-                                    thumb_url = pic['url']
-                                    break
-                            if thumb_url:
-                                break
-                        if not thumb_url and isinstance(pictures[0], dict):
-                            thumb_url = pictures[0].get('url')
-                        elif not thumb_url and isinstance(pictures[0], str):
-                            thumb_url = pictures[0]
-                    elif isinstance(pictures, str):
-                        thumb_url = pictures
-                    # Also check imageLinks (JSON:API attributes are flattened to top level)
-                    if not thumb_url:
-                        pic_links = full_data.get('imageLinks', [])
-                        if pic_links:
-                            for pl in pic_links:
-                                if isinstance(pl, dict):
-                                    thumb_url = pl.get('href', '')
-                                    break
-
-                if not thumb_url:
-                    thumb_url = data.get('picture', data.get('image', ''))
-                    if isinstance(thumb_url, list) and thumb_url:
-                        thumb_url = thumb_url[0].get('url', '') if isinstance(thumb_url[0], dict) else str(thumb_url[0])
-
-                if thumb_url:
-                    cursor.execute("""
-                        UPDATE artists SET thumb_url = ?
-                        WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                    """, (thumb_url, artist_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for artist #{artist_id} (match preserved): {e}")
-
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with Tidal data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_album(self, album_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
+    def _update_album(self, album_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
         """Store Tidal metadata for an album"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
+        data = full_data or search_data
+        backfill = {'image_url': self._album_image(data),
+                    'label': self._text(data.get('label')),
+                    'upc': str(data.get('upc') or data.get('barcodeId') or '') or None}
+        explicit = data.get('explicit')
+        if explicit is not None:
+            backfill['explicit'] = 1 if explicit else 0
+        num_tracks = data.get('numberOfTracks', data.get('numberOfItems'))
+        if isinstance(num_tracks, int) and num_tracks > 0:
+            backfill['track_count'] = num_tracks
+        # `duration` and `copyright` have no album-level column in lib2 (tracks
+        # carry both; albums never did). The payload keeps them without inventing a
+        # column.
+        payload = {'duration_ms': _parse_duration_to_ms(data.get('duration')),
+                   'copyright': self._text(data.get('copyright'))}
+        self._write('album', album_id, search_data.get('id'),
+                    backfill=backfill, payload=payload)
 
-            data = full_data or search_data
-
-            cursor.execute("""
-                UPDATE albums SET
-                    tidal_id = ?,
-                    tidal_match_status = 'matched',
-                    tidal_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                album_id
-            ))
-            conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                # Backfill label (can be string or dict with 'name' key in JSON:API)
-                label = data.get('label')
-                if isinstance(label, dict):
-                    label = label.get('name', '')
-                if label:
-                    cursor.execute("""
-                        UPDATE albums SET label = ?
-                        WHERE id = ? AND (label IS NULL OR label = '')
-                    """, (str(label), album_id))
-
-                # Backfill explicit flag
-                explicit = data.get('explicit')
-                if explicit is not None:
-                    cursor.execute("""
-                        UPDATE albums SET explicit = ?
-                        WHERE id = ? AND explicit IS NULL
-                    """, (1 if explicit else 0, album_id))
-
-                # Backfill UPC
-                upc = data.get('upc', data.get('barcodeId', ''))
-                if upc:
-                    cursor.execute("""
-                        UPDATE albums SET upc = ?
-                        WHERE id = ? AND (upc IS NULL OR upc = '')
-                    """, (str(upc), album_id))
-
-                # Backfill track_count
-                num_tracks = data.get('numberOfTracks', data.get('numberOfItems'))
-                if num_tracks and isinstance(num_tracks, int) and num_tracks > 0:
-                    cursor.execute("""
-                        UPDATE albums SET track_count = ?
-                        WHERE id = ? AND track_count IS NULL
-                    """, (num_tracks, album_id))
-
-                # Backfill duration (Tidal returns seconds or ISO-8601, DB stores milliseconds)
-                duration_ms = _parse_duration_to_ms(data.get('duration'))
-                if duration_ms:
-                    cursor.execute("""
-                        UPDATE albums SET duration = ?
-                        WHERE id = ? AND duration IS NULL
-                    """, (duration_ms, album_id))
-
-                # Backfill copyright (can be string or dict with 'text' key in JSON:API)
-                copyright_text = data.get('copyright')
-                if isinstance(copyright_text, dict):
-                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
-                if copyright_text and isinstance(copyright_text, str):
-                    cursor.execute("""
-                        UPDATE albums SET copyright = ?
-                        WHERE id = ? AND (copyright IS NULL OR copyright = '')
-                    """, (copyright_text, album_id))
-
-                # Backfill thumb_url
-                thumb_url = None
-                cover = data.get('cover', data.get('image', ''))
-                if isinstance(cover, list) and cover:
-                    thumb_url = cover[0].get('url', '') if isinstance(cover[0], dict) else str(cover[0])
-                elif isinstance(cover, str) and cover:
-                    thumb_url = cover
-                # JSON:API imageLinks (attributes are flattened to top level)
-                if not thumb_url:
-                    img_links = data.get('imageLinks', [])
-                    if img_links:
-                        for il in img_links:
-                            if isinstance(il, dict):
-                                thumb_url = il.get('href', '')
-                                break
-                if thumb_url:
-                    cursor.execute("""
-                        UPDATE albums SET thumb_url = ?
-                        WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                    """, (thumb_url, album_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for album #{album_id} (match preserved): {e}")
-
-        except Exception as e:
-            logger.error(f"Error updating album #{album_id} with Tidal data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_track(self, track_id: int, search_data: Dict[str, Any], full_data: Optional[Dict[str, Any]]):
+    def _update_track(self, track_id: int, search_data: Dict[str, Any],
+                      full_data: Optional[Dict[str, Any]]):
         """Store Tidal metadata for a track"""
+        data = full_data or search_data
+        backfill = {'copyright': self._text(data.get('copyright')),
+                    'duration': _parse_duration_to_ms(data.get('duration'))}
+        explicit = data.get('explicit')
+        if explicit is not None:
+            backfill['explicit'] = 1 if explicit else 0
+        isrc = data.get('isrc')
+        if isinstance(isrc, dict):
+            isrc = isrc.get('value') or isrc.get('id')
+        if isinstance(isrc, str) and isrc:
+            backfill['isrc'] = isrc
+        self._write('track', track_id, search_data.get('id'), backfill=backfill)
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               backfill: Optional[Dict[str, Any]] = None,
+               payload: Optional[Dict[str, Any]] = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside Tidal's own id is backfill — artwork, label, genres and
+        the rest are shared with better sources and with the user's own choice. The
+        old code committed the id first and then backfilled in a second transaction
+        so a bad value could not lose the match; write_provider_enrichment simply
+        skips an empty value, which needs no second commit.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            data = full_data or search_data
-
-            cursor.execute("""
-                UPDATE tracks SET
-                    tidal_id = ?,
-                    tidal_match_status = 'matched',
-                    tidal_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (
-                str(search_data.get('id')),
-                track_id
-            ))
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='tidal',
+                payload=payload,
+                provider_id=str(provider_id) if provider_id else None,
+                backfill={k: v for k, v in (backfill or {}).items() if v is not None}
+                or None,
+            )
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='tidal', status='matched')
             conn.commit()
-
-            # Backfill optional metadata (failures here won't lose the match)
-            try:
-                explicit = data.get('explicit')
-                if explicit is not None:
-                    cursor.execute("""
-                        UPDATE tracks SET explicit = ?
-                        WHERE id = ? AND explicit IS NULL
-                    """, (1 if explicit else 0, track_id))
-
-                isrc = data.get('isrc')
-                if isinstance(isrc, dict):
-                    isrc = isrc.get('value', isrc.get('id', ''))
-                if isrc and isinstance(isrc, str):
-                    cursor.execute("""
-                        UPDATE tracks SET isrc = ?
-                        WHERE id = ? AND (isrc IS NULL OR isrc = '')
-                    """, (isrc, track_id))
-
-                duration_ms = _parse_duration_to_ms(data.get('duration'))
-                if duration_ms:
-                    cursor.execute("""
-                        UPDATE tracks SET duration = ?
-                        WHERE id = ? AND duration IS NULL
-                    """, (duration_ms, track_id))
-
-                copyright_text = data.get('copyright')
-                if isinstance(copyright_text, dict):
-                    copyright_text = copyright_text.get('text', copyright_text.get('name', ''))
-                if copyright_text and isinstance(copyright_text, str):
-                    cursor.execute("""
-                        UPDATE tracks SET copyright = ?
-                        WHERE id = ? AND (copyright IS NULL OR copyright = '')
-                    """, (copyright_text, track_id))
-
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"Backfill failed for track #{track_id} (match preserved): {e}")
-
         except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Tidal data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with Tidal data: {e}")
             raise
         finally:
             if conn:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        """Mark an entity with a match status"""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `tidal_match_status`/`_last_attempted` column pair.
+        `not_found` becomes due again after the retry window; `error` does not, so a
+        provider outage cannot turn into an infinite retry loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    tidal_match_status = ?,
-                    tidal_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='tidal', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -865,23 +673,12 @@ class TidalWorker:
                 conn.close()
 
     def _count_pending_items(self) -> int:
-        """Count how many items still need processing"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE tidal_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE tidal_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE tidal_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-
-            row = cursor.fetchone()
-            return row[0] if row else 0
-
+            return pending_count(conn, 'tidal', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -890,61 +687,12 @@ class TidalWorker:
                 conn.close()
 
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
-        """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            progress = {}
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN tidal_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM artists
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['artists'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN tidal_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM albums
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['albums'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN tidal_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM tracks
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['tracks'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            return progress
-
+            return progress_breakdown(conn, 'tidal')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

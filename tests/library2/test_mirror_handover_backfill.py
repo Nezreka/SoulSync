@@ -115,6 +115,19 @@ def _row(conn, table, entity_id):
 
 
 @pytest.fixture
+def nothing_migrated(monkeypatch):
+    """The mirror before any handover, so the overwrite path stays under test.
+
+    Needed because every provider the mirror knows about has since migrated; without
+    this the overwrite branch would have no live example and would quietly stop being
+    exercised.
+    """
+    import core.library2.enrich as enrich
+
+    monkeypatch.setattr(enrich, "MIGRATED_SERVICES", frozenset())
+
+
+@pytest.fixture
 def audiodb_has_migrated(monkeypatch):
     """Declares AudioDB migrated for the duration of a test.
 
@@ -174,7 +187,8 @@ class TestAMigratedServicesScalarColumn:
         assert json.loads(_row(conn, "lib2_artists", lib2_id)["aliases"]) == [
             "\u6fa4\u91ce\u5f18\u4e4b"]
 
-    def test_an_unmigrated_services_column_still_overwrites(self, conn):
+    def test_an_unmigrated_services_column_still_overwrites(self, conn,
+                                                            nothing_migrated):
         """Legacy remains authoritative wherever legacy is still the only writer —
         otherwise a corrected value could never reach lib2."""
         lib2_id, legacy_id = _artist(
@@ -238,7 +252,15 @@ class TestAMigratedServicesJsonPayload:
 
         assert _row(conn, "lib2_artists", lib2_id)["spotify_id"] == "sp-1"
 
-    def test_an_unmigrated_provider_id_still_replaces(self, conn):
+    def test_an_unmigrated_provider_id_still_replaces(self, conn, nothing_migrated):
+        """Legacy stays authoritative wherever legacy is still the only writer, or a
+        corrected provider id could never reach lib2.
+
+        Every provider in ``match_status.SERVICES`` has now migrated, so there is no
+        live example left to point at — the fixture puts the mirror back in its
+        pre-handover state to keep the overwrite path under test for whatever is
+        declared next.
+        """
         lib2_id, legacy_id = _artist(
             conn, deezer_id="dz-new",
             lib2={"external_ids": json.dumps({"deezer": "dz-old"})})

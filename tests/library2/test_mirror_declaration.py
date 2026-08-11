@@ -109,3 +109,21 @@ def test_a_migrated_service_is_mirrored_backfill_only():
         for service in MIGRATED_SERVICES:
             assert not [c for c in overwritten if c.startswith(f"{service}_")], (
                 spec.entity_type, service)
+
+
+def test_every_provider_the_mirror_knows_has_migrated():
+    """The stage-2 finish line for the mirror's provider half (docs §32.3.1).
+
+    Every source in ``match_status.SERVICES`` now writes lib2 directly, so the mirror
+    carries provider ids and payloads backfill-only — it fills a gap and never
+    overwrites. What it still carries with authority is the shared prose and artwork
+    the media-server scan and the importer write, which is a different pipeline.
+
+    This fails if a provider is added to SERVICES without its worker, which would
+    silently reintroduce the stale-overwrite hazard for that provider.
+    """
+    from core.library2.enrich import MIGRATED_SERVICES
+    from core.library2.match_status import SERVICES
+
+    unmigrated = {service for service, _label, _ids in SERVICES} - MIGRATED_SERVICES
+    assert not unmigrated, sorted(unmigrated)

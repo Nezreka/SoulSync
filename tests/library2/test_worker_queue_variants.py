@@ -123,6 +123,84 @@ class TestTheProviderMatchedUniverse:
         assert item is not None and item["id"] == artist
 
 
+class TestTheParentsProviderIdOnAChildItem:
+    """Five workers verify a child match against the parent artist's own provider
+    id — a track our library credits to one artist but which lives on another
+    artist's album would otherwise stamp the wrong id onto our artist. Each of them
+    had its own two-query dance for it; one option here replaces five copies."""
+
+    def test_an_album_carries_its_artists_id(self, conn):
+        artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
+
+        item = next_pending(conn, "qobuz", entity_types=("album",),
+                            include_parent_id=True)
+
+        assert item["id"] == album
+        assert item["artist_qobuz_id"] == "qb-artist"
+
+    def test_a_track_reaches_through_its_album(self, conn):
+        """A track's artist is two joins away in lib2 — track → album → primary
+        artist — where legacy carried tracks.artist_id on the row itself."""
+        artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')",
+            (album,)).lastrowid
+
+        item = next_pending(conn, "qobuz", entity_types=("track",),
+                            include_parent_id=True)
+
+        assert item["id"] == track
+        assert item["artist_qobuz_id"] == "qb-artist"
+
+    def test_an_unmatched_parent_yields_none_for_the_key(self, conn):
+        """Present but empty, so the caller's `if not parent_id: return True` guard
+        reads the same as it did on legacy."""
+        artist = _artist(conn, "Rone")
+        conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,))
+
+        item = next_pending(conn, "qobuz", entity_types=("album",),
+                            include_parent_id=True)
+
+        assert item["artist_qobuz_id"] is None
+
+    def test_a_promoted_column_counts(self, conn):
+        artist = _artist(conn, "Rone", spotify_id="sp-artist")
+        conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,))
+
+        item = next_pending(conn, "spotify", entity_types=("album",),
+                            include_parent_id=True)
+
+        assert item["artist_spotify_id"] == "sp-artist"
+
+    def test_an_artist_item_gets_no_such_key(self, conn):
+        _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
+
+        item = next_pending(conn, "qobuz", entity_types=("artist",),
+                            include_parent_id=True)
+
+        assert "artist_qobuz_id" not in item
+
+    def test_it_is_off_by_default(self, conn):
+        artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
+        conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist,))
+
+        item = next_pending(conn, "qobuz", entity_types=("album",))
+
+        assert "artist_qobuz_id" not in item
+
+
 class TestTheStatusBreakdown:
     def test_every_outcome_is_tallied(self, conn):
         matched = _artist(conn, "A", spotify_id="sp-1")

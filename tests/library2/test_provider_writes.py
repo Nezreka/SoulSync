@@ -229,9 +229,17 @@ class TestTheMirrorHandover:
         assert payload["bio"] == "fresh"
         assert payload["listeners"] == 5, "a key lib2 lacks still arrives"
 
-    def test_an_unmigrated_service_still_overwrites(self, conn):
+    def test_an_unmigrated_service_still_overwrites(self, conn, monkeypatch):
         """Legacy stays authoritative where it is still the only writer, or a
-        corrected value could never reach lib2."""
+        corrected value could never reach lib2.
+
+        Every provider the mirror knows about has since migrated, so the handover is
+        switched off here to keep the overwrite branch exercised rather than letting
+        it rot.
+        """
+        import core.library2.enrich as enrich
+
+        monkeypatch.setattr(enrich, "MIGRATED_SERVICES", frozenset())
         from core.library2.enrich import _merge_json_column
 
         write_provider_enrichment(

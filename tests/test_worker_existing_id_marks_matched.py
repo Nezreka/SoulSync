@@ -296,19 +296,16 @@ class TestLastFMWorkerMarksMatched:
 
 class TestTidalWorkerMarksMatched:
     def test_existing_tidal_id_triggers_matched_status(self, db):
+        """Finding an existing id must record the attempt, or the worker re-selects
+        that row on every loop. The status lives in the provider-attempt ledger now
+        instead of ``artists.tidal_match_status``."""
         from core import tidal_worker as tw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, tidal_id) VALUES (?, ?, ?)",
-                ("art_td", "A", "tidal-123"),
-            )
-            artist_id = "art_td"
-            cur.execute(
-                "UPDATE artists SET tidal_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", ('{"tidal": "tidal-xyz"}',)).lastrowid
             conn.commit()
 
         fake_client = MagicMock()
@@ -316,24 +313,22 @@ class TestTidalWorkerMarksMatched:
         worker._process_artist(artist_id, "A")
 
         fake_client.search_artist.assert_not_called()
-        assert _read_status(db, "artists", "tidal_match_status", artist_id) == "matched"
-
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["tidal"]["status"] == "matched"
 
 class TestQobuzWorkerMarksMatched:
     def test_existing_qobuz_id_triggers_matched_status(self, db):
+        """Finding an existing id must record the attempt, or the worker re-selects
+        that row on every loop. The status lives in the provider-attempt ledger now
+        instead of ``artists.qobuz_match_status``."""
         from core import qobuz_worker as qw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, qobuz_id) VALUES (?, ?, ?)",
-                ("art_qz", "A", "qobuz-xyz"),
-            )
-            artist_id = "art_qz"
-            cur.execute(
-                "UPDATE artists SET qobuz_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", ('{"qobuz": "qobuz-xyz"}',)).lastrowid
             conn.commit()
 
         fake_client = MagicMock()
@@ -341,8 +336,9 @@ class TestQobuzWorkerMarksMatched:
         worker._process_artist(artist_id, "A")
 
         fake_client.search_artist.assert_not_called()
-        assert _read_status(db, "artists", "qobuz_match_status", artist_id) == "matched"
-
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["qobuz"]["status"] == "matched"
 
 class TestMusicBrainzWorkerMarksMatched:
     def test_existing_mbid_triggers_matched_status_via_service(self, db):

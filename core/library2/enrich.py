@@ -189,7 +189,8 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 # migrated worker, and when it holds every service the mirror has no work left.
 MIGRATED_SERVICES: frozenset = frozenset({
     "lastfm", "genius", "discogs", "bandcamp", "audiodb", "similar_artists",
-    "amazon", "jiosaavn", "musicbrainz", "spotify", "itunes",
+    "amazon", "jiosaavn", "musicbrainz", "spotify", "itunes", "qobuz", "tidal",
+    "deezer",
 })
 
 

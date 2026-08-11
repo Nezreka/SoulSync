@@ -133,16 +133,19 @@ def test_queued_row_is_pending_not_divergent(conn):
     assert report.observed["mirror_checked"] == 0
 
 
-def test_provider_ids_and_prose_diverge_per_key(conn):
-    """A migrated service is deliberately absent: its worker writes lib2 directly,
-    so its fields are mirrored backfill-only and a legacy value that differs from a
-    populated lib2 one is the intended outcome rather than a defect. What is still
-    reported is the shared prose, and any provider id from a worker still on legacy.
+def test_provider_ids_and_prose_diverge_per_key(conn, monkeypatch):
+    """Two field kinds in one finding: a scalar column and a JSON key.
 
-    Deezer stands in for the latter because Spotify has migrated — and Spotify is
-    also why this test matters: its id lives in a promoted column AND in
-    external_ids, and only the JSON half had the handover at first.
+    The handover is switched off for the provider id, because every provider the
+    mirror knows about has migrated and their ids are backfill-only now — a legacy
+    value differing from a populated lib2 one is the intended outcome there, not a
+    defect. That direction is covered in test_mirror_handover_backfill; what this
+    pins is that the metric reports both kinds, per key, when legacy IS the
+    authority.
     """
+    import core.library2.enrich as enrich
+
+    monkeypatch.setattr(enrich, "MIGRATED_SERVICES", frozenset())
     _, legacy_id = _mirrored_artist(conn, deezer_id="dz-1", summary="old bio")
     conn.execute(
         "UPDATE artists SET deezer_id='dz-2', summary='new bio' WHERE id=?",

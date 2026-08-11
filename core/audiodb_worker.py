@@ -182,29 +182,23 @@ class AudioDBWorker:
 
         Priority, retry window and the pinned-group override all live in
         ``core.library2.worker_queue`` — the same rules every enrichment worker
-        uses (docs §32.3.1 stage 2). An album/track item also carries its parent
-        artist's AudioDB id, which ``_verify_artist_id`` compares the result
-        against.
+        uses (docs §32.3.1 stage 2). ``include_parent_id`` puts the parent artist's
+        AudioDB id on an album or track item, which ``_verify_artist_id`` compares
+        the result against.
         """
         conn = None
         try:
             from core.library2.worker_queue import next_pending
-            from core.library2.worker_support import stored_provider_id
             from core.worker_utils import read_enrichment_priority
 
             conn = self.db._get_connection()
-            item = next_pending(
+            return next_pending(
                 conn, 'audiodb',
                 retry_after_days=self.retry_days,
                 pinned=read_enrichment_priority('audiodb') or None,
                 retry_statuses=self._RETRY_STATUSES,
+                include_parent_id=True,
             )
-            if item and item['type'] in ('album', 'track'):
-                parent = _parent_artist_id(conn, item['type'], item['id'])
-                if parent is not None:
-                    item['artist_audiodb_id'] = stored_provider_id(
-                        conn, 'artist', parent, 'audiodb')
-            return item
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")

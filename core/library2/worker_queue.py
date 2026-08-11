@@ -23,23 +23,48 @@ from core.library2.provider_attempts import DEFAULT_RETRY_AFTER_DAYS
 ENTITY_ORDER = ("artist", "album", "track")
 
 # name/title plus the artist name the provider query needs, per entity type.
-_SOURCES: Dict[str, str] = {
-    "artist": """
-        SELECT e.id AS id, e.name AS name, NULL AS artist_name
-          FROM lib2_artists e
-    """,
-    "album": """
-        SELECT e.id AS id, e.title AS name, ar.name AS artist_name
-          FROM lib2_albums e
-          JOIN lib2_artists ar ON ar.id = e.primary_artist_id
-    """,
-    "track": """
-        SELECT e.id AS id, e.title AS name, ar.name AS artist_name
-          FROM lib2_tracks e
-          JOIN lib2_albums al ON al.id = e.album_id
-          JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-    """,
-}
+def _provider_id_sql(alias: str, service: str) -> str:
+    """The stored id for one service, column or JSON, as a SQL expression.
+
+    ``json_extract`` rather than a LIKE: an id is a value, and matching it as a
+    substring of the whole object would collide across services.
+    """
+    if service in ("spotify", "musicbrainz"):
+        column = f"{alias}.{service}_id" if service == "spotify" else f"{alias}.musicbrainz_id"
+        return (f"COALESCE(NULLIF({column},''), "
+                f"json_extract({alias}.external_ids, '$.{service}'))")
+    return f"json_extract({alias}.external_ids, '$.{service}')"
+
+
+# The parent artist row a child item hangs off, so a child can be handed its
+# artist's provider id. A track reaches it through its album — lib2 has no
+# tracks.artist_id the way legacy did.
+_PARENT_ALIAS = {"artist": None, "album": "ar", "track": "ar"}
+
+
+def _sources(service: str) -> Dict[str, str]:
+    """The per-entity SELECT, optionally carrying the parent artist's provider id."""
+    parent = _provider_id_sql("ar", service)
+    return {
+        "artist": """
+            SELECT e.id AS id, e.name AS name, NULL AS artist_name,
+                   NULL AS parent_provider_id
+              FROM lib2_artists e
+        """,
+        "album": f"""
+            SELECT e.id AS id, e.title AS name, ar.name AS artist_name,
+                   {parent} AS parent_provider_id
+              FROM lib2_albums e
+              JOIN lib2_artists ar ON ar.id = e.primary_artist_id
+        """,
+        "track": f"""
+            SELECT e.id AS id, e.title AS name, ar.name AS artist_name,
+                   {parent} AS parent_provider_id
+              FROM lib2_tracks e
+              JOIN lib2_albums al ON al.id = e.album_id
+              JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+        """,
+    }
 _TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}
 _RETRYABLE = ("not_found",)
 _STATUSES = frozenset({"matched", "not_found", "error", "skipped"})
@@ -64,11 +89,12 @@ def _retryable_sql(retry_statuses: tuple) -> str:
 
 
 def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
-                 require_provider_id: bool = False) -> str:
+                 require_provider_id: bool = False,
+                 service: str = "spotify") -> str:
     """Unattempted first, then expired retryable failures, oldest attempt first."""
     universe = f"AND ({_HAS_PROVIDER_ID})" if require_provider_id else ""
     return f"""
-        {_SOURCES[entity_type]}
+        {_sources(service)[entity_type]}
           LEFT JOIN lib2_provider_attempts a
                  ON a.entity_type = :entity AND a.entity_id = e.id
                 AND a.service = :service
@@ -83,8 +109,10 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
 def _fetch(conn, entity_type: str, service: str, retry_after_days: int,
            retry_statuses: tuple = _RETRYABLE,
            require_provider_id: bool = False) -> Optional[Any]:
+    key = str(service).strip().lower()
     return conn.execute(
-        _pending_sql(entity_type, retry_statuses, require_provider_id) + " LIMIT 1",
+        _pending_sql(entity_type, retry_statuses, require_provider_id, key)
+        + " LIMIT 1",
         {"entity": entity_type, "service": str(service).strip().lower(),
          "window": f"-{max(0, int(retry_after_days))} days"},
     ).fetchone()
@@ -98,6 +126,7 @@ def next_pending(
     entity_types: tuple = ENTITY_ORDER,
     retry_statuses: tuple = _RETRYABLE,
     require_provider_id: bool = False,
+    include_parent_id: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """The next item this provider should look at, or None when nothing is due.
 
@@ -111,6 +140,13 @@ def next_pending(
     the case. ``require_provider_id`` narrows the universe to entities already
     matched to a metadata source, for work that is keyed by that id and has
     nothing to do without one.
+
+    ``include_parent_id`` adds ``artist_<service>_id`` to an album or track item.
+    Five workers compare a child's result against that id, because a track our
+    library credits to one artist but which lives on another artist's album would
+    otherwise stamp the wrong id onto our artist. It is None when the parent is
+    unmatched, so the callers' ``if not parent_id: return True`` guard reads the same
+    as it did on legacy.
     """
     overrides = dict(type_overrides or {})
     order = list(entity_types)
@@ -129,6 +165,9 @@ def next_pending(
         }
         if row["artist_name"] is not None:
             item["artist"] = row["artist_name"]
+        if include_parent_id and entity_type != "artist":
+            item[f"artist_{str(service).strip().lower()}_id"] = (
+                row["parent_provider_id"])
         return item
     return None
 
@@ -143,7 +182,8 @@ def pending_count(conn, service: str, *,
     for entity_type in entity_types:
         total += int(conn.execute(
             "SELECT COUNT(*) FROM ("
-            + _pending_sql(entity_type, retry_statuses, require_provider_id) + ")",
+            + _pending_sql(entity_type, retry_statuses, require_provider_id,
+                           str(service).strip().lower()) + ")",
             {"entity": entity_type, "service": str(service).strip().lower(),
              "window": f"-{max(0, int(retry_after_days))} days"},
         ).fetchone()[0])
@@ -235,19 +275,6 @@ _CHILD = {
         "extra": ("track_number",),
     },
 }
-
-
-def _provider_id_sql(alias: str, service: str) -> str:
-    """The stored id for one service, column or JSON, as a SQL expression.
-
-    ``json_extract`` rather than a LIKE: an id is a value, and matching it as a
-    substring of the whole object would collide across services.
-    """
-    if service in ("spotify", "musicbrainz"):
-        column = f"{alias}.{service}_id" if service == "spotify" else f"{alias}.musicbrainz_id"
-        return (f"COALESCE(NULLIF({column},''), "
-                f"json_extract({alias}.external_ids, '$.{service}'))")
-    return f"json_extract({alias}.external_ids, '$.{service}')"
 
 
 def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
