@@ -20,29 +20,29 @@ declaration is invisible to the metric as well. That is how
 from __future__ import annotations
 
 from core.library2.enrich import MIRROR_SPECS
-from core.library2.legacy_mirror import _WATCHED_COLUMNS
+from core.library2.legacy_mirror import _WATCHED_COLUMNS, watched_columns
 
 
 def _mirrored_columns(legacy_table: str) -> set:
     """Every legacy column the resync reads for one table."""
-    from core.library2.enrich import enrichment_columns
+    from core.library2.enrich import MIGRATED_SERVICES, enrichment_columns
     from core.library2.match_status import SERVICES
 
     spec = next(s for s in MIRROR_SPECS.values() if s.legacy_table == legacy_table)
     columns = {field[1] for field in spec.scalars}
     for _lib2_column, legacy_columns in spec.id_columns:
         columns.update(legacy_columns)
-    for _service, _label, id_columns in SERVICES:
+    for service, _label, id_columns in SERVICES:
         column = id_columns.get(spec.entity_type)
-        if column:
+        if column and service not in MIGRATED_SERVICES:
             columns.add(column)
     columns.update(enrichment_columns(spec.entity_type))
     return columns
 
 
 def test_every_watched_column_is_actually_mirrored():
-    for legacy_table, watched in _WATCHED_COLUMNS.items():
-        unmirrored = set(watched) - _mirrored_columns(legacy_table)
+    for legacy_table in _WATCHED_COLUMNS:
+        unmirrored = set(watched_columns(legacy_table)) - _mirrored_columns(legacy_table)
         assert not unmirrored, (
             f"{legacy_table}: the trigger queues a row when {sorted(unmirrored)} "
             f"changes, but the resync copies nothing for it. The queue churns "
@@ -52,7 +52,7 @@ def test_every_watched_column_is_actually_mirrored():
 
 def test_every_mirrored_column_is_actually_watched():
     for legacy_table in _WATCHED_COLUMNS:
-        watched = set(_WATCHED_COLUMNS[legacy_table])
+        watched = set(watched_columns(legacy_table))
         unwatched = _mirrored_columns(legacy_table) - watched
         assert not unwatched, (
             f"{legacy_table}: the resync copies {sorted(unwatched)}, but the "
@@ -68,8 +68,12 @@ def test_the_provider_payload_is_declared_for_every_entity_type():
     columns without naming them in ``scalars`` or ``id_columns``, so it needs its
     own inventory for the two tests above to see it — for all three entity types,
     not just artists (docs §50.4.4.3)."""
-    from core.library2.enrich import enrichment_columns
+    from core.library2.enrich import MIGRATED_SERVICES, enrichment_columns
 
-    assert "lastfm_playcount" in enrichment_columns("artist")
+    assert "discogs_bio" in enrichment_columns("artist")
     assert "discogs_catno" in enrichment_columns("album")
     assert "genius_description" in enrichment_columns("track")
+    # A migrated service drops out of the declaration entirely: its worker writes
+    # lib2, so mirroring legacy on top would push a stale value over a fresh one.
+    assert "lastfm" in MIGRATED_SERVICES
+    assert not [c for c in enrichment_columns("album") if c.startswith("lastfm_")]

@@ -106,11 +106,9 @@ class TestTheColumnExists:
 
 
 class TestAlbumPayload:
-    def test_lastfm_discogs_and_bandcamp_all_arrive(self, conn):
+    def test_discogs_and_bandcamp_all_arrive(self, conn):
         lib2_id, legacy_id = _album(
-            conn, lastfm_listeners=90210, lastfm_playcount=4242,
-            lastfm_tags='["trip hop","1998"]', lastfm_wiki="A landmark record.",
-            discogs_genres='["Electronic"]', discogs_styles='["Trip Hop"]',
+            conn, discogs_genres='["Electronic"]', discogs_styles='["Trip Hop"]',
             discogs_label="Virgin", discogs_catno="CDV 2883",
             discogs_country="UK", discogs_rating=4.6, discogs_rating_count=1200,
             bandcamp_tags='["bristol"]', bandcamp_label="Self-released")
@@ -120,10 +118,6 @@ class TestAlbumPayload:
         payload = json.loads(conn.execute(
             "SELECT enrichment FROM lib2_albums WHERE id=?", (lib2_id,)
         ).fetchone()["enrichment"])
-        assert payload["lastfm"] == {
-            "listeners": 90210, "playcount": 4242,
-            "tags": ["trip hop", "1998"], "wiki": "A landmark record.",
-        }
         assert payload["discogs"]["label"] == "Virgin"
         assert payload["discogs"]["catno"] == "CDV 2883"
         assert payload["discogs"]["rating"] == 4.6
@@ -140,21 +134,34 @@ class TestAlbumPayload:
         ).fetchone()["release_date"] == "1998-04-20"
 
     def test_a_provider_that_wrote_nothing_leaves_no_empty_bucket(self, conn):
-        lib2_id, legacy_id = _album(conn, lastfm_listeners=1)
+        lib2_id, legacy_id = _album(conn, discogs_label="Virgin")
 
         resync_entity_from_legacy(conn, "album", lib2_id, legacy_id)
 
         payload = json.loads(conn.execute(
             "SELECT enrichment FROM lib2_albums WHERE id=?", (lib2_id,)
         ).fetchone()["enrichment"])
-        assert set(payload) == {"lastfm"}
+        assert set(payload) == {"discogs"}
+
+    def test_a_migrated_services_legacy_columns_no_longer_arrive(self, conn):
+        """Last.fm's worker writes lib2 itself now. Mirroring its legacy columns
+        on top would push a stale value over the fresh native one."""
+        lib2_id, legacy_id = _album(
+            conn, lastfm_listeners=90210, lastfm_wiki="A landmark record.",
+            discogs_label="Virgin")
+
+        resync_entity_from_legacy(conn, "album", lib2_id, legacy_id)
+
+        payload = json.loads(conn.execute(
+            "SELECT enrichment FROM lib2_albums WHERE id=?", (lib2_id,)
+        ).fetchone()["enrichment"])
+        assert set(payload) == {"discogs"}
 
 
 class TestTrackPayload:
-    def test_lastfm_genius_and_bandcamp_all_arrive(self, conn):
+    def test_genius_and_bandcamp_all_arrive(self, conn):
         lib2_id, legacy_id = _track(
-            conn, lastfm_listeners=5, lastfm_playcount=6, lastfm_tags='["a"]',
-            genius_description="About the song.", genius_url="http://genius/x",
+            conn, genius_description="About the song.", genius_url="http://genius/x",
             bandcamp_tags='["b"]', bandcamp_label="Label")
 
         resync_entity_from_legacy(conn, "track", lib2_id, legacy_id)
@@ -162,7 +169,6 @@ class TestTrackPayload:
         payload = json.loads(conn.execute(
             "SELECT enrichment FROM lib2_tracks WHERE id=?", (lib2_id,)
         ).fetchone()["enrichment"])
-        assert payload["lastfm"] == {"listeners": 5, "playcount": 6, "tags": ["a"]}
         assert payload["genius"] == {
             "description": "About the song.", "url": "http://genius/x"}
         assert payload["bandcamp"] == {"tags": ["b"], "label": "Label"}

@@ -95,6 +95,23 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
 
 _ENTITY_FOR_TABLE = {"artists": "artist", "albums": "album", "tracks": "track"}
 
+
+def watched_columns(table: str) -> Tuple[str, ...]:
+    """The columns whose change should queue a mirror, minus migrated services.
+
+    A service whose worker now writes lib2 directly is no longer mirrored
+    (``enrich.MIGRATED_SERVICES``), so watching its columns would queue rows the
+    drain has nothing to do for — and legacy still writes them until its worker's
+    old code path is gone.
+    """
+    from core.library2.enrich import MIGRATED_SERVICES
+
+    prefixes = tuple(f"{service}_" for service in MIGRATED_SERVICES)
+    return tuple(
+        column for column in _WATCHED_COLUMNS.get(table, ())
+        if not column.startswith(prefixes)
+    )
+
 _LIB2_TABLE = {
     "artist": ("lib2_artists", "legacy_artist_id"),
     "album": ("lib2_albums", "legacy_album_id"),
@@ -138,7 +155,8 @@ def ensure_legacy_mirror_schema(cursor: Any) -> None:
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lib2_legacy_dirty_queued "
         "ON lib2_legacy_dirty(queued_at)")
-    for table, columns in _WATCHED_COLUMNS.items():
+    for table in _WATCHED_COLUMNS:
+        columns = watched_columns(table)
         present = _existing_columns(cursor, table)
         if "id" not in present:
             continue  # legacy table absent (sqlite-only harness)

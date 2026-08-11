@@ -56,7 +56,7 @@ def _provider_ids(legacy_row: Any, entity_type: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for service, _label, id_columns in SERVICES:
         column = id_columns.get(entity_type)
-        if not column:
+        if not column or _migrated(service):
             continue
         value = _row_get(legacy_row, column)
         if value not in (None, ""):
@@ -167,11 +167,30 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 }
 
 
+# Services whose producer already writes lib2 directly (docs §32.3.1 stage 2).
+#
+# They leave the mirror in the same change that moves their worker, and that is
+# not tidiness — it is required. Promise 1 is that the mirror runs one way only,
+# which is safe exactly while legacy is the sole writer of those fields. The
+# moment a worker writes lib2, a stale legacy value would be pushed back over the
+# fresh native one on the next drain, and the divergence metric would report the
+# worker's own correct output as a defect.
+#
+# This set is therefore the stage-2 progress marker: it grows by one entry per
+# migrated worker, and when it holds every service the mirror has no work left.
+MIGRATED_SERVICES: frozenset = frozenset({"lastfm"})
+
+
+def _migrated(service: str) -> bool:
+    return str(service).strip().lower() in MIGRATED_SERVICES
+
+
 def enrichment_columns(entity_type: str) -> Tuple[str, ...]:
     """Every legacy column the enrichment bucket reads for one entity type."""
     return tuple(sorted({
         str(column)
-        for sources in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).values()
+        for source, sources in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items()
+        if not _migrated(source)
         for column in sources.values()
     }))
 
@@ -188,6 +207,8 @@ def _enrichment_payload(entity_type: str, legacy_row: Any) -> Dict[str, Dict[str
     """
     out: Dict[str, Dict[str, Any]] = {}
     for source, fields in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items():
+        if _migrated(source):
+            continue
         cleaned = {}
         for key, column in fields.items():
             raw = _row_get(legacy_row, str(column))

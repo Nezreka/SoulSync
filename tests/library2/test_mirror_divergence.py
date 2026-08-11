@@ -32,7 +32,8 @@ def conn(tmp_path):
             id INTEGER PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT,
             summary TEXT, style TEXT, mood TEXT, label TEXT, banner_url TEXT,
             aliases TEXT, spotify_artist_id TEXT, musicbrainz_id TEXT,
-            lastfm_bio TEXT, lastfm_listeners INTEGER, lastfm_tags TEXT
+            lastfm_bio TEXT, lastfm_listeners INTEGER, lastfm_tags TEXT,
+            discogs_bio TEXT
         );
         CREATE TABLE albums(
             id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, genres TEXT,
@@ -132,10 +133,13 @@ def test_queued_row_is_pending_not_divergent(conn):
 
 
 def test_provider_ids_and_bios_diverge_per_key(conn):
+    """Last.fm is deliberately absent here: its worker writes lib2 directly now,
+    so it left the mirror (``enrich.MIGRATED_SERVICES``) and a legacy Last.fm
+    column is no longer something lib2 is expected to match."""
     _, legacy_id = _mirrored_artist(conn, spotify_artist_id="sp-1",
-                                    lastfm_bio="old bio")
+                                    discogs_bio="old bio")
     conn.execute(
-        "UPDATE artists SET spotify_artist_id='sp-2', lastfm_bio='new bio' WHERE id=?",
+        "UPDATE artists SET spotify_artist_id='sp-2', discogs_bio='new bio' WHERE id=?",
         (legacy_id,),
     )
     conn.execute("DELETE FROM lib2_legacy_dirty")
@@ -145,7 +149,7 @@ def test_provider_ids_and_bios_diverge_per_key(conn):
 
     finding = next(iter(_divergences(report)))
     assert finding.details["fields"] == [
-        "enrichment.lastfm.bio", "external_ids.spotify", "spotify_id",
+        "enrichment.discogs.bio", "external_ids.spotify", "spotify_id",
     ]
 
 

@@ -195,17 +195,34 @@ class TestGetExistingIdColumnMapping:
             conn.commit()
         return "art_x", "alb_x", "trk_x"
 
-    def test_lastfm_worker_reads_lastfm_url_for_all_entity_types(self, db):
-        # Import lazily so test collection doesn't fail if config_manager is unavailable.
+    def test_lastfm_worker_reads_its_url_from_lib2_external_ids(self, db):
+        """Last.fm has moved to Library v2 (docs §32.3.1 stage 2), so its
+        existence check reads ``lib2_*.external_ids`` rather than the legacy
+        ``lastfm_url`` column. The behaviour being pinned is unchanged: the check
+        must actually find the id, or every row is re-processed forever."""
+        import json
+
         from core import lastfm_worker as lw
 
-        artist_id, album_id, track_id = self._insert_tree(db)
+        ids = json.dumps({"lastfm": "https://last.fm/a"})
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)", (ids,)).lastrowid
+            album_id = cur.execute(
+                "INSERT INTO lib2_albums(primary_artist_id,title,album_type,external_ids) "
+                "VALUES(?,'Album','album',?)", (artist_id, ids)).lastrowid
+            track_id = cur.execute(
+                "INSERT INTO lib2_tracks(album_id,title,external_ids) "
+                "VALUES(?,'Track',?)", (album_id, ids)).lastrowid
+            conn.commit()
 
         with patch.object(lw.LastFMWorker, "_init_client", return_value=None):
             worker = lw.LastFMWorker(db)
             assert worker._get_existing_id("artist", artist_id) == "https://last.fm/a"
-            assert worker._get_existing_id("album", album_id) == "https://last.fm/album"
-            assert worker._get_existing_id("track", track_id) == "https://last.fm/track"
+            assert worker._get_existing_id("album", album_id) == "https://last.fm/a"
+            assert worker._get_existing_id("track", track_id) == "https://last.fm/a"
 
     def test_musicbrainz_worker_reads_correct_column_per_entity(self, db):
         from core import musicbrainz_worker as mbw
@@ -233,20 +250,20 @@ def _read_status(db, table: str, column: str, row_id: int):
 
 class TestLastFMWorkerMarksMatched:
     def test_existing_url_triggers_matched_status(self, db):
+        """Same guarantee as before, in the new home: finding an existing id must
+        record the attempt, or the worker re-selects that row on every loop. The
+        status now lives in the provider-attempt ledger instead of
+        ``artists.lastfm_match_status``."""
+        import json
+
         from core import lastfm_worker as lw
+        from core.library2.provider_attempts import attempt_state
 
         with db._get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, lastfm_url) VALUES (?, ?, ?)",
-                ("art_lf", "A", "https://last.fm/a"),
-            )
-            artist_id = "art_lf"
-            # Explicitly null out status to simulate legacy row
-            cur.execute(
-                "UPDATE artists SET lastfm_match_status = NULL WHERE id = ?",
-                (artist_id,),
-            )
+            artist_id = conn.execute(
+                "INSERT INTO lib2_artists(name, sort_name, external_ids) "
+                "VALUES('A','A',?)",
+                (json.dumps({"lastfm": "https://last.fm/a"}),)).lastrowid
             conn.commit()
 
         with patch.object(lw.LastFMWorker, "_init_client", return_value=None):
@@ -256,7 +273,9 @@ class TestLastFMWorkerMarksMatched:
             # Client must NOT be called because we short-circuited.
             worker.client.get_artist_info.assert_not_called()
 
-        assert _read_status(db, "artists", "lastfm_match_status", artist_id) == "matched"
+        with db._get_connection() as conn:
+            state = attempt_state(conn, entity_type="artist", entity_id=artist_id)
+        assert state["lastfm"]["status"] == "matched"
 
 
 class TestTidalWorkerMarksMatched:
