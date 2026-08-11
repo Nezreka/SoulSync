@@ -196,10 +196,13 @@ describe('findings', () => {
   });
 
   it('throws when findings or counts are unavailable', async () => {
+    // Findings carry the server's own message since the MBID-detector fix
+    // ("errors say why"): {error} when the body has one, the bare status
+    // when it does not — never the old generic string.
+    jsonOnce({ error: 'db is locked' }, false, 500);
+    await expect(fetchRepairFindings({ page: 0, limit: 30 })).rejects.toThrow('db is locked');
     jsonOnce({}, false, 500);
-    await expect(fetchRepairFindings({ page: 0, limit: 30 })).rejects.toThrow(
-      'Failed to fetch findings',
-    );
+    await expect(fetchRepairFindings({ page: 0, limit: 30 })).rejects.toThrow('HTTP 500');
     jsonOnce({}, false, 500);
     await expect(fetchFindingCounts()).rejects.toThrow('Failed to fetch counts');
   });
