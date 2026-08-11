@@ -39398,138 +39398,69 @@ div.artist-hero-badge {
     margin-bottom: 0;
 }
 
-/* Enhanced Search Bar — clean, minimal */
+/* Enhanced Search Bar — the hero pill. One confident rounded field, the way
+   Spotify/Apple lead their search surfaces; the id-lookup row hangs beneath it
+   as a quiet utility line instead of a second boxed input. */
 .enhanced-search-bar-container {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    padding: 8px 8px 8px 0;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    transition: all 0.3s ease;
+    background: transparent; border: none; border-radius: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 6px; align-items: stretch;
 }
-
-.enhanced-search-bar-container:focus-within {
-    border-color: rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-}
-
+.enhanced-search-bar-container:focus-within { border-color: transparent; background: transparent; }
 .enhanced-search-wrapper {
-    flex-grow: 1;
-    position: relative;
-    display: flex;
-    align-items: center;
-    background: transparent;
-    border-radius: 12px;
-    border: none;
-    padding: 0 16px;
-    transition: all 0.3s ease;
+    position: relative; display: flex; align-items: center;
+    background: #202024; border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    padding: 0 10px 0 22px; min-height: 54px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
-
+.enhanced-search-wrapper:hover { background: #26262b; border-color: rgba(255, 255, 255, 0.14); }
 .enhanced-search-wrapper:focus-within {
-    border-color: transparent;
-    box-shadow: none;
+    background: #26262b; border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(var(--accent-rgb), 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-
-.enhanced-search-icon {
-    font-size: 18px;
-    margin-right: 10px;
-    opacity: 0.6;
-    animation: none;
-}
-
+.enhanced-search-icon { font-size: 18px; margin-right: 12px; opacity: 0.55; animation: none; transition: opacity 0.2s ease; }
+.enhanced-search-wrapper:focus-within .enhanced-search-icon { opacity: 0.9; }
 @keyframes sparkle {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.1); }
 }
-
 #enhanced-search-input {
-    flex-grow: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 15px;
-    color: #ffffff;
-    padding: 10px 0;
+    flex-grow: 1; background: transparent; border: none; outline: none;
+    font-family: 'Segoe UI', sans-serif; font-size: 16px; font-weight: 500;
+    color: #ffffff; padding: 14px 0;
 }
-
-#enhanced-search-input::placeholder {
-    color: rgba(255, 255, 255, 0.35);
-}
-
+#enhanced-search-input::placeholder { color: rgba(255, 255, 255, 0.38); font-weight: 400; }
 .enhanced-cancel-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: none;
-    border-radius: 6px;
-    padding: 6px 12px;
-    color: rgba(255, 255, 255, 0.7);
-    cursor: pointer;
-    font-size: 14px;
+    background: rgba(255, 255, 255, 0.08); border: none; border-radius: 50%;
+    width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+    color: rgba(255, 255, 255, 0.7); cursor: pointer; font-size: 14px; flex-shrink: 0;
     transition: all 0.2s ease;
 }
+.enhanced-cancel-btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
 
-.enhanced-cancel-btn:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #fff;
-}
-
-/* Link / ID lookup row (#775) — paste a provider link/ID under the search bar */
+/* Link / ID lookup row (#775) — a quiet utility line under the hero pill. */
 .enh-id-lookup {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 4px 8px 4px 14px;
-    transition: all 0.3s ease;
+    display: flex; align-items: center; gap: 8px; margin-top: 2px;
+    background: transparent; border: none; border-radius: 10px;
+    padding: 0 8px 0 22px; transition: background 0.2s ease;
 }
-
-.enh-id-lookup:focus-within {
-    border-color: rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.enh-id-lookup-icon {
-    font-size: 15px;
-    opacity: 0.55;
-}
-
+.enh-id-lookup:focus-within { background: rgba(255, 255, 255, 0.03); }
+.enh-id-lookup-icon { font-size: 13px; opacity: 0.4; }
 .enh-id-input {
-    flex-grow: 1;
-    background: transparent;
-    border: none;
-    outline: none;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    color: #ffffff;
-    padding: 8px 0;
+    flex-grow: 1; background: transparent; border: none; outline: none;
+    font-family: 'Segoe UI', sans-serif; font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.75); padding: 8px 0;
 }
-
-.enh-id-input::placeholder {
-    color: rgba(255, 255, 255, 0.35);
-}
-
+.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.28); }
 .enh-id-btn {
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.08);
-    border: none;
-    border-radius: 8px;
-    padding: 7px 14px;
-    color: rgba(255, 255, 255, 0.8);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    flex-shrink: 0; background: rgba(var(--accent-rgb), 0.14);
+    border: 1px solid rgba(var(--accent-rgb), 0.25); border-radius: 999px;
+    padding: 5px 14px; color: rgb(var(--accent-light-rgb)); cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: all 0.2s ease;
 }
-
-.enh-id-btn:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #fff;
-}
+.enh-id-btn:hover { background: rgba(var(--accent-rgb), 0.26); }
 
 /* Enhanced Search Status */
 .enhanced-search-status {
@@ -39920,83 +39851,42 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
 .enh-source-tab.enh-tab-bandcamp.active { background: rgba(29, 160, 195, 0.2); color: #1da0c3; }
 
-/* ── Source picker icon row (replaces dropdown + post-search tabs) ── */
+/* ── Source picker — a boxless rail of brand pills; the pills carry the
+   color, the way Spotify's filter chips sit bare on the page. ── */
 .enh-source-row {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: visible;
-    gap: 10px;
-    padding: 12px 14px;
-    margin: 10px 0 14px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-    /* Frosted-glass panel that holds the icons together visually. */
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 14px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 10px rgba(0, 0, 0, 0.15);
-    /* Don't compress when the parent flex container is tight. */
+    display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: visible;
+    gap: 8px; padding: 6px 2px 10px; margin: 8px 0 10px;
+    scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    background: transparent; border: none; border-radius: 0; box-shadow: none;
     flex-shrink: 0;
 }
-.enh-source-row::-webkit-scrollbar { height: 6px; }
+.enh-source-row::-webkit-scrollbar { height: 5px; }
 .enh-source-row::-webkit-scrollbar-track { background: transparent; }
-.enh-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
-
+.enh-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
 .enh-source-icon {
-    position: relative;
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-width: 90px;
-    padding: 12px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
-    color: rgba(255, 255, 255, 0.65);
-    cursor: pointer;
+    position: relative; display: inline-flex; flex-direction: row;
+    align-items: center; justify-content: center; gap: 8px; min-width: 0;
+    padding: 9px 16px 9px 12px; border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 999px; background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.68); cursor: pointer;
     transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease,
                 color 0.18s ease, box-shadow 0.18s ease;
-    font-family: inherit;
-    font-size: 11.5px;
-    font-weight: 600;
-    white-space: nowrap;
-    flex-shrink: 0;
+    font-family: inherit; font-size: 12.5px; font-weight: 600;
+    white-space: nowrap; flex-shrink: 0;
 }
 .enh-source-icon:hover {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.18);
-    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.09); color: #fff;
+    border-color: rgba(255, 255, 255, 0.2); transform: translateY(-1px);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 .enh-source-icon:active { transform: translateY(0) scale(0.97); }
-
 .enh-source-icon-glyph {
-    font-size: 26px;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
+    font-size: 18px; line-height: 1; display: inline-flex; align-items: center;
+    justify-content: center; width: 22px; height: 22px;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
 }
-.enh-source-icon-glyph img {
-    width: 30px;
-    height: 30px;
-    object-fit: contain;
-    display: block;
-}
-.enh-source-icon-label {
-    font-size: 11.5px;
-    letter-spacing: 0.02em;
-    font-weight: 600;
-}
+.enh-source-icon-glyph img { width: 22px; height: 22px; object-fit: contain; display: block; }
+.enh-source-icon-label { font-size: 12.5px; letter-spacing: 0.01em; font-weight: 600; }
 .enh-source-icon.active .enh-source-icon-label { font-weight: 700; }
 
 /* Active state — brand-coloured gradient + outer glow. Each source gets its
@@ -40327,47 +40217,21 @@ div.artist-hero-badge {
 }
 
 .enh-section-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0;
-    margin-bottom: 12px;
-    border-bottom: none;
-    position: relative;
+    display: flex; align-items: baseline; gap: 10px; padding: 0;
+    margin-bottom: 16px; border-bottom: none; position: relative;
 }
-
-.enh-section-header::after {
-    display: none;
-}
-
-.enh-section-icon {
-    display: none;
-}
-
+.enh-section-header::after { display: none; }
+.enh-section-icon { display: none; }
 .enh-section-title {
-    flex-grow: 1;
-    font-size: 12px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.45);
-    margin: 0;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    flex-grow: 1; font-size: 21px; font-weight: 800; color: #ffffff; margin: 0;
+    text-transform: none; letter-spacing: -0.02em;
 }
-
 .enh-section-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 7px;
-    background: rgba(255, 255, 255, 0.06);
-    border: none;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.4);
-    box-shadow: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 22px; padding: 0 8px;
+    background: rgba(255, 255, 255, 0.07); border: none; border-radius: 11px;
+    font-size: 11.5px; font-weight: 700; color: rgba(255, 255, 255, 0.5);
+    box-shadow: none; font-variant-numeric: tabular-nums;
 }
 
 /* ========================================= */
@@ -40419,150 +40283,66 @@ div.artist-hero-badge {
     }
 }
 
-/* Artist cards — full-bleed photo style matching library page */
+/* Artist cards — Spotify-style circle tiles: a quiet tile that raises on
+   hover, a circular portrait with its own shadow, name + meta beneath. */
 .enh-compact-item.artist-card {
-    background: rgba(18, 18, 18, 1);
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    padding: 0;
-    cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: block;
-    position: relative;
-    overflow: hidden;
-    width: 160px;
-    height: 195px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-    flex-shrink: 0;
+    background: transparent; border-radius: 12px; border: 1px solid transparent;
+    padding: 16px 16px 18px; cursor: pointer;
+    transition: background 0.25s ease, border-color 0.25s ease;
+    display: block; position: relative; overflow: hidden;
+    width: 176px; height: auto; box-shadow: none; flex-shrink: 0;
 }
-
-.enh-compact-item.artist-card::before {
-    display: none;
-}
-
-.enh-compact-item.artist-card.has-dynamic-glow::before {
-    display: none;
-}
-
-/* Gradient overlay for text readability */
-.enh-compact-item.artist-card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(0deg,
-            rgba(0, 0, 0, 0.85) 0%,
-            rgba(0, 0, 0, 0.4) 35%,
-            transparent 60%);
-    pointer-events: none;
-    z-index: 1;
-}
-
+.enh-compact-item.artist-card::before { display: none; }
+.enh-compact-item.artist-card.has-dynamic-glow::before { display: none; }
+.enh-compact-item.artist-card::after { display: none; }
 .enh-compact-item.artist-card:hover {
-    transform: translateY(-5px) scale(1.02);
-    border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
-                0 0 24px rgba(var(--accent-rgb), 0.12);
-    z-index: 10;
+    transform: none; background: rgba(255, 255, 255, 0.055);
+    border-color: rgba(255, 255, 255, 0.05); box-shadow: none; z-index: 10;
 }
-
-.enh-compact-item.artist-card:hover::after {
-    background: linear-gradient(0deg,
-            rgba(0, 0, 0, 0.9) 0%,
-            rgba(0, 0, 0, 0.3) 40%,
-            transparent 65%);
-}
-
+.enh-compact-item.artist-card:hover::after { display: none; }
 .enh-compact-item.artist-card.has-dynamic-glow:hover {
-    border-color: color-mix(in srgb, var(--glow-color-1) 30%, transparent);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
-                0 0 24px color-mix(in srgb, var(--glow-color-1) 15%, transparent);
+    border-color: color-mix(in srgb, var(--glow-color-1) 18%, transparent);
+    box-shadow: 0 0 28px color-mix(in srgb, var(--glow-color-1) 10%, transparent);
 }
-
-/* Artist image — fills entire card */
 .enh-item-image.artist-image {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-    object-fit: cover;
-    border: none;
-    margin: 0;
-    box-shadow: none;
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 0;
-    flex-shrink: 0;
+    position: static; inset: auto; width: 144px; height: 144px;
+    border-radius: 50%; object-fit: cover; border: none;
+    margin: 0 auto 14px; display: block;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+    z-index: 0; flex-shrink: 0;
 }
-
 .enh-compact-item.artist-card:hover .enh-item-image.artist-image {
-    transform: scale(1.06);
-    box-shadow: none;
+    transform: scale(1.04); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
-
 .enh-compact-item.artist-card.has-dynamic-glow:hover .enh-item-image.artist-image {
-    transform: scale(1.06);
+    transform: scale(1.04);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55),
+        0 0 24px color-mix(in srgb, var(--glow-color-1) 22%, transparent);
 }
-
 .enh-item-image-placeholder.artist-placeholder {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    border-radius: 0;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 1) 0%, rgba(20, 20, 20, 1) 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-    color: rgba(255, 255, 255, 0.3);
-    border: none;
-    margin: 0;
-    box-shadow: none;
-    z-index: 0;
-    flex-shrink: 0;
+    position: static; inset: auto; width: 144px; height: 144px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #26262b 0%, #1a1a1e 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 44px; color: rgba(255, 255, 255, 0.3); border: none;
+    margin: 0 auto 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 0; flex-shrink: 0;
 }
-
-/* Info pinned to bottom over gradient */
 .enh-compact-item.artist-card .enh-item-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 14px;
-    z-index: 2;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    text-align: left;
-    min-width: 0;
-    max-width: none;
+    position: static; padding: 0 2px; z-index: 2;
+    display: flex; flex-direction: column; gap: 3px; text-align: left;
+    min-width: 0; max-width: none;
 }
-
 .enh-compact-item.artist-card .enh-item-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: #ffffff;
-    margin: 0;
-    line-height: 1.25;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: block;
-    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+    font-size: 15px; font-weight: 700; color: #ffffff; margin: 0;
+    line-height: 1.3; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; display: block; text-shadow: none;
 }
-
 .enh-compact-item.artist-card .enh-item-meta {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.55);
-    display: block;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    font-size: 12.5px; color: rgba(255, 255, 255, 0.5); display: block; text-shadow: none;
 }
-
-.enh-compact-item.artist-card .enh-item-badge {
-    display: none;
-}
+.enh-compact-item.artist-card .enh-item-badge { display: none; }
 
 /* In Library badge on search results */
 .enh-item-lib-badge {
@@ -40669,128 +40449,61 @@ div.artist-hero-badge {
     }
 }
 
-/* Album cards — discover-style */
+/* Album cards — Spotify browse tiles: padded panel, rounded cover with its
+   own shadow, title + meta BELOW the art instead of stamped over it. */
 .enh-compact-item.album-card {
-    display: flex;
-    flex-direction: column;
-    padding: 0;
-    background: #1a1a1a;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    border: none;
-    backdrop-filter: none;
-    position: relative;
-    overflow: hidden;
-    flex-shrink: 0;
-    width: 170px;
+    display: flex; flex-direction: column; padding: 14px;
+    background: #17171b; border-radius: 12px; cursor: pointer;
+    transition: background 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    border: none; backdrop-filter: none; position: relative; overflow: hidden;
+    flex-shrink: 0; width: 184px;
 }
-
-.enh-compact-item.album-card::before {
-    display: none;
-}
-
-.enh-compact-item.album-card.has-dynamic-glow::before {
-    display: none;
-}
-
+.enh-compact-item.album-card::before { display: none; }
+.enh-compact-item.album-card.has-dynamic-glow::before { display: none; }
 .enh-compact-item.album-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    transform: translateY(-3px); background: #232329;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
-
 .enh-compact-item.album-card.has-dynamic-glow:hover {
-    box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.5),
-        0 0 16px color-mix(in srgb, var(--glow-color-1) 12%, transparent);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45),
+        0 0 18px color-mix(in srgb, var(--glow-color-1) 12%, transparent);
 }
-
-.enh-compact-item.album-card:hover::before {
-    display: none;
-}
-
+.enh-compact-item.album-card:hover::before { display: none; }
 .enh-item-image.album-cover {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 0;
-    object-fit: cover;
-    margin-bottom: 0;
-    box-shadow: none;
-    transition: none;
-    position: relative;
-    z-index: 1;
+    width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover;
+    margin-bottom: 0; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+    transition: none; position: relative; z-index: 1;
 }
-
 .enh-compact-item.album-card:hover .enh-item-image.album-cover {
-    transform: none;
-    box-shadow: none;
-    opacity: 1;
+    transform: none; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55); opacity: 1;
 }
-
 .enh-compact-item.album-card.has-dynamic-glow:hover .enh-item-image.album-cover {
-    box-shadow: none;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
 }
-
 .enh-item-image-placeholder.album-placeholder {
-    width: 100%;
-    aspect-ratio: 1;
-    border-radius: 0;
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 40px;
-    margin-bottom: 0;
-    box-shadow: none;
-    position: relative;
-    z-index: 1;
+    width: 100%; aspect-ratio: 1; border-radius: 8px;
+    background: linear-gradient(135deg, #222227 0%, #17171b 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px; margin-bottom: 0;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+    position: relative; z-index: 1;
 }
-
-.enh-compact-item.album-card .enh-item-info {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 10px 12px 12px;
-    z-index: 3;
-}
-
-/* Gradient overlay for text readability on enhanced search album cards */
-.enh-compact-item.album-card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.9) 0%,
-        rgba(0, 0, 0, 0.5) 30%,
-        transparent 60%);
-    pointer-events: none;
-    z-index: 2;
-}
-
+.enh-compact-item.album-card .enh-item-info { position: static; padding: 12px 2px 2px; z-index: 3; }
+/* No overlay gradient — the text lives on the tile now, not on the art. */
+.enh-compact-item.album-card::after { display: none; }
 .enh-compact-item.album-card .enh-item-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0 0 2px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.3;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+    font-size: 14px; font-weight: 700; color: #fff; margin: 0 0 3px 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1.3; text-shadow: none;
 }
-
 .enh-compact-item.album-card .enh-item-meta {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.6);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.3;
-    margin: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-    z-index: 1;
+    font-size: 12px; color: rgba(255, 255, 255, 0.5);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    line-height: 1.3; margin: 0; text-shadow: none; z-index: 1;
 }
+/* Ownership badge sits on the ART's corner, inside the tile padding. */
+.enh-compact-item.album-card .enh-item-lib-badge,
+.enh-compact-item.album-card .enh-item-wishlist-badge { top: 22px; left: 22px; }
 
 /* ========================================= */
 /* TRACK ITEMS                              */
@@ -40803,156 +40516,88 @@ div.artist-hero-badge {
 }
 
 .enh-compact-item.track-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 12px;
-    background: transparent;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    border: none;
-    min-width: 0;
-    overflow: hidden;
-    position: relative;
+    display: flex; align-items: center; gap: 14px; padding: 9px 14px;
+    background: transparent; border-radius: 10px; cursor: pointer;
+    transition: background 0.15s ease; border: none; min-width: 0;
+    overflow: hidden; position: relative;
 }
-
-.enh-compact-item.track-item::before {
-    display: none;
-}
-
-.enh-compact-item.track-item.has-dynamic-glow::before {
-    display: none;
-}
-
+.enh-compact-item.track-item::before { display: none; }
+.enh-compact-item.track-item.has-dynamic-glow::before { display: none; }
 .enh-compact-item.track-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: transparent;
-    transform: none;
-    box-shadow: none;
+    background: rgba(255, 255, 255, 0.07); border-color: transparent;
+    transform: none; box-shadow: none;
 }
-
 .enh-compact-item.track-item.has-dynamic-glow:hover {
-    background: color-mix(in srgb, var(--glow-color-1) 6%, transparent);
-    border-color: transparent;
-    box-shadow: none;
+    background: color-mix(in srgb, var(--glow-color-1) 7%, transparent);
+    border-color: transparent; box-shadow: none;
 }
-
-.enh-compact-item.track-item:hover::before {
-    display: none;
-}
-
+.enh-compact-item.track-item:hover::before { display: none; }
 .enh-item-image.track-cover {
-    width: 40px;
-    height: 40px;
-    border-radius: 4px;
-    object-fit: cover;
-    flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-    transition: all 0.15s ease;
-    position: relative;
-    z-index: 1;
+    width: 44px; height: 44px; border-radius: 6px; object-fit: cover;
+    flex-shrink: 0; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    transition: box-shadow 0.15s ease; position: relative; z-index: 1;
 }
-
 .enh-compact-item.track-item:hover .enh-item-image.track-cover {
-    transform: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    transform: none; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
 }
-
 .enh-compact-item.track-item.has-dynamic-glow:hover .enh-item-image.track-cover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
 }
-
 .enh-item-image-placeholder.track-placeholder {
-    width: 40px;
-    height: 40px;
-    border-radius: 4px;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.05);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    box-shadow: none;
-    transition: all 0.15s ease;
-    position: relative;
-    z-index: 1;
+    width: 44px; height: 44px; border-radius: 6px; flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05); display: flex;
+    align-items: center; justify-content: center; font-size: 18px;
+    box-shadow: none; transition: none; position: relative; z-index: 1;
 }
-
-.enh-item-info {
-    flex-grow: 1;
-    min-width: 0;
-    position: relative;
-    z-index: 1;
-}
-
+.enh-item-info { flex-grow: 1; min-width: 0; position: relative; z-index: 1; }
 .enh-compact-item.track-item .enh-item-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 15px; font-weight: 500; color: #ffffff; margin-bottom: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     letter-spacing: -0.1px;
 }
-
 .enh-compact-item.track-item .enh-item-meta {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 12.5px; color: rgba(255, 255, 255, 0.45);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-
 .enh-item-duration {
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.35);
-    flex-shrink: 0;
-    margin-left: 8px;
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    z-index: 1;
-    font-variant-numeric: tabular-nums;
+    font-size: 12.5px; font-weight: 500; color: rgba(255, 255, 255, 0.38);
+    flex-shrink: 0; margin-left: 8px; position: relative; display: flex;
+    align-items: center; gap: 10px; z-index: 1; font-variant-numeric: tabular-nums;
 }
-
-/* Play button on hover */
+/* Round accent play button on hover — the Spotify affordance. */
 .enh-item-play-btn {
-    opacity: 0;
-    padding: 5px 12px;
-    background: rgba(255, 255, 255, 0.12);
-    color: #ffffff;
-    border: none;
-    border-radius: 14px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    box-shadow: none;
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 10;
-    backdrop-filter: blur(8px);
+    opacity: 0; width: 34px; height: 34px; padding: 0 0 0 2px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgb(var(--accent-rgb)); color: #ffffff; border: none;
+    border-radius: 50%; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    z-index: 10; backdrop-filter: none;
 }
-
-.enh-compact-item.track-item:hover .enh-item-play-btn {
-    opacity: 1;
-    transform: translateY(-50%);
-}
-
+.enh-compact-item.track-item:hover .enh-item-play-btn { opacity: 1; transform: translateY(-50%); }
 .enh-item-play-btn:hover {
-    background: rgba(var(--accent-rgb), 0.8);
-    box-shadow: none;
-    transform: translateY(-50%) scale(1.05);
+    background: rgb(var(--accent-light-rgb, var(--accent-rgb)));
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.5);
+    transform: translateY(-50%) scale(1.08);
 }
+.enh-item-play-btn:active { transform: translateY(-50%) scale(0.95); }
 
-.enh-item-play-btn:active {
-    transform: translateY(-50%) scale(0.95);
+/* ── Makeover finishing layer ── */
+.enhanced-loading,
+.enhanced-empty { padding: 56px 20px; }
+.enhanced-loading .spinner { border-top-color: rgb(var(--accent-rgb)); }
+.enhanced-empty p { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.75); margin: 0; }
+/* Page header sized like a destination, scoped to the search page only. */
+.downloads-main-panel:has(#enh-source-row) .downloads-title { font-size: 28px; letter-spacing: -0.03em; }
+.downloads-main-panel:has(#enh-source-row) .downloads-subtitle { color: rgba(255, 255, 255, 0.45); }
+/* Tile sizes step down on phones. */
+@media (max-width: 600px) {
+    .enh-compact-item.artist-card { width: 138px; padding: 12px 12px 14px; }
+    .enh-item-image.artist-image,
+    .enh-item-image-placeholder.artist-placeholder { width: 110px; height: 110px; }
+    .enh-compact-item.album-card { width: 150px; padding: 10px; }
+    .enh-section-title { font-size: 18px; }
 }
 
 /* ========================================= */
