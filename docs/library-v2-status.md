@@ -3389,3 +3389,90 @@ verschwindet, nicht wenn nur ein Aufrufer wechselt.
   Stufe 4 (Tabellen droppen)
 - `iss32-M06` bleibt bewusst teilweise offen: die unbegrenzte Arbeit ist aus
   `_initialize_database` heraus, die eine große Transaktion bleibt
+
+#### 50.4.4.6 Neun Worker draußen — plus zwei Löcher in der Übergabe selbst
+
+Stand jetzt: **544/194** (Start der Stufe 2: 647/239). Neun Worker halten kein
+einziges Legacy-Statement mehr, je an der Datei festgenagelt: `lastfm`, `genius`,
+`discogs`, `bandcamp`, `audiodb`, `similar_artists`, `amazon`, `jiosaavn`,
+`musicbrainz` (samt `musicbrainz_service`, dessen vier Schreibmethoden nur von
+diesem Worker aufgerufen werden).
+
+**Die geteilte Hälfte von zwölf Umstellungen zuerst.** Vier Helfer in
+`core/worker_utils.py` und `core/enrichment/manual_match_honoring.py` trugen das
+Legacy-SQL, durch das zwölf Worker griffen. `core/library2/worker_support.py` hält
+jetzt die lib2-Fassungen: das Artist-Match-Gate, die Owned-Katalog-Titel, den
+`expected_track_count`-Cache und den Stored-Id-Schnellpfad (#501).
+
+Drei Dinge brauchte das Gate, die seine Legacy-Form nicht brauchte:
+
+- lib2 hält Provider-Ids an **zwei** Stellen — promovierte Spalte für
+  Spotify/MusicBrainz, `external_ids` für alle anderen. Eine Prüfung, die nur
+  eine davon liest, lässt eine verschmierte Id genau dort durch, wo es am
+  meisten weh tut.
+- Die Prüfung gilt **je Service**: numerische Ids wiederholen sich über
+  Kataloge, und Deezer 12345 als Discogs 12345 zu behandeln verwirft gute
+  Treffer für eine Kollision, die keine ist.
+- `owned_album_titles` schließt jetzt `origin='discography'` aus und zählt
+  Feature-Credits über `lib2_album_artists` mit — lib2 hält Provider-only-Alben,
+  die Legacy nie hatte, und verzeichnet einen Compilation-Auftritt über die
+  Junction statt über `primary_artist_id`.
+
+`honor_stored_match` nimmt die Datenbank statt einer Verbindung, anders als seine
+Nachbarn: der Id-Lesevorgang wird **vor** dem Provider-Aufruf geschlossen. Eine
+Verbindung über einen Provider-Aufruf offen zu halten ist genau der Mechanismus
+des schlimmsten Produktionsfehlers dieses Projekts.
+
+**Loch 1 in der Übergabe: Präfix-Abgleich reicht nicht.** AudioDB schreibt
+`style`, `mood`, `label`, `banner_url` — geteilte Spaltennamen ohne Service darin,
+während AudioDB ihr einziger Legacy-Schreiber ist (`albums.label` ist bewusst
+ausgenommen, dort schreiben fünf andere Worker). Der Präfix-Abgleich konnte sie
+nicht sehen, der Spiegel hätte über jeden frischen nativen Schreibvorgang einen
+alten Legacy-Wert gedrückt — über den Backlog-Sweep, also aktiv.
+`_SCALAR_OWNERS` deklariert sie, mit einem Test, dass jede deklarierte Spalte
+existiert: ein Tippfehler dort würde nichts ausnehmen und das Loch offen lassen.
+
+**Loch 2, das größere: Weglassen war die falsche Antwort.** Ein Feld aus dem
+Spiegel zu entfernen schließt die Stale-Overwrite-Gefahr und öffnet eine
+leisere. Eine Legacy-Zeile, in die AudioDB vor zwei Jahren `style='trip hop'`
+schrieb, deren lib2-Zwilling ihn nie erhielt und deren Versuchs-Ledger
+`matched` sagt — der Worker holt sie also nicht neu. Feld weg, Wert weg, und
+nichts trägt ihn je hinüber. Nezrekas Maßstab für den ganzen Umzug ist „i don't
+want to lose any enrichment functionality or data"; das ist kein akzeptabler
+Tausch.
+
+**Backfill löst beide Seiten.** Die Felder eines migrierten Services kreuzen
+weiter, aber nur in ein *leeres* lib2-Feld: `COALESCE(NULLIF(NULLIF(col,''),'[]'),
+?, col)` für Skalare, **je Schlüssel** statt je Bucket für das JSON-Payload — ein
+Last.fm-Bucket, den der Worker mit einer Bio gefüllt hat, kann weiterhin einen
+Listener-Count aufnehmen, den Legacy hat und lib2 nicht. Und es hält die
+Divergenz-Kennzahl ehrlich: die einzige Abweichung, die sie für so ein Feld noch
+melden kann, ist „lib2 leer, Legacy hat Daten" — genau die, die der Sweep
+tatsächlich beheben kann. Der Erwartungswert 0 bleibt erreichbar.
+
+Zwei Fehler in dieser SQL fand erst der Test, der `aliases` dazunahm:
+`NULLIF(col,'')` behandelt `'[]'` nicht als leer, und eine JSON-Array-Spalte
+steht auf `'[]'`, nicht NULL — der Backfill wäre für `aliases` und `genres` nie
+gelaufen. Und mit beiden Seiten leer kollabierte der Ausdruck zu NULL und lief in
+die NOT-NULL-Bedingung.
+
+**Zwei Queue-Formen, die die ersten Worker nicht brauchten.** `retry_statuses`
+(Similar Artists und AudioDB und JioSaavn wiederholen `error`, aus je eigenem
+guten Grund; die Provider-Worker dürfen es nicht, sonst wird ein Ausfall zur
+Endlosschleife) und `require_provider_id` (Similar Artists arbeitet nur an
+Artists, die schon einer Quelle zugeordnet sind — die Similars werden über diese
+Id verschlüsselt). Dazu `status_counts`, das über **dieselbe** Population zählt,
+aus der die Queue zieht: eine Bilanz über eine breitere Menge zeigt einen
+Prozentwert, der nie 100 erreicht.
+
+**Nicht umgestellt, und keine Nachlässigkeit:** `listening_stats_worker`
+bildet die Wiedergabe-Historie des Medienservers auf Bibliothekszeilen ab und
+behandelt dabei die Server-Id als `tracks.id` — was nur funktioniert, weil der
+Legacy-Scan den ratingKey als Primärschlüssel ablegt. lib2 hat überhaupt keine
+Server-Id-Spalte. Dieser Worker hängt damit an der Medienserver-Frage, die für
+Nezreka geparkt ist, und ist kein mechanischer Port.
+
+**Rest, nach Größe:** `repair_worker` 42, `itunes` 35, `spotify` 35, `qobuz` 33,
+`tidal` 32, `deezer` 30, `soulid` 17, `listening_stats` 11 (blockiert).
+`core/worker_utils.py` hält noch 9 Stellen — die Legacy-Helfer, die nur noch
+diese fünf Provider-Worker und `soulid` benutzen; mit ihnen fallen sie weg.
