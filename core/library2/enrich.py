@@ -189,7 +189,7 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 # migrated worker, and when it holds every service the mirror has no work left.
 MIGRATED_SERVICES: frozenset = frozenset({
     "lastfm", "genius", "discogs", "bandcamp", "audiodb", "similar_artists",
-    "amazon", "jiosaavn", "musicbrainz",
+    "amazon", "jiosaavn", "musicbrainz", "spotify", "itunes",
 })
 
 
@@ -215,6 +215,26 @@ _SCALAR_OWNERS: Dict[str, Dict[str, str]] = {
     "album": {"style": "audiodb", "mood": "audiodb"},
     "track": {"style": "audiodb", "mood": "audiodb"},
 }
+
+
+# The promoted id columns, and which service owns each. ``isrc`` is deliberately
+# absent: it is provider-neutral and several sources write it.
+_ID_COLUMN_OWNERS: Dict[str, str] = {
+    "spotify_id": "spotify",
+    "musicbrainz_id": "musicbrainz",
+}
+
+
+def id_column_handed_over(column: str) -> bool:
+    """Whether a migrated worker owns this promoted id column.
+
+    The third place the handover has to reach, after the scalars and the JSON
+    payload. lib2 stores Spotify and MusicBrainz ids twice — a promoted column the
+    read paths join on, plus ``external_ids`` — and mirroring the column outright
+    after its worker moved would push a stale legacy id over the fresh native one.
+    """
+    owner = _ID_COLUMN_OWNERS.get(str(column))
+    return bool(owner and _migrated(owner))
 
 
 def _scalar_owner(entity_type: str, field: tuple) -> Optional[str]:
@@ -454,6 +474,12 @@ def _sync_dedicated_id_columns(conn, table: str, entity_id: int, legacy_row: Any
         value = _id_value(legacy_row, tuple(legacy_columns))
         if value is None:
             continue
+        if id_column_handed_over(column):
+            # Backfill only: its worker writes this column now.
+            conn.execute(
+                f"UPDATE {table} SET {column}=? WHERE id=? "
+                f"AND COALESCE({column},'')=''", (value, entity_id))
+            continue
         conn.execute(
             f"UPDATE {table} SET {column}=? WHERE id=? AND COALESCE({column},'')<>?",
             (value, entity_id, value))
@@ -569,6 +595,9 @@ def mirror_divergence(spec: MirrorSpec, legacy_row: Any,
         if expected is None:
             continue
         actual = _row_get(lib2_row, column)
+        if id_column_handed_over(column) and not _is_absent(actual):
+            # Backfill-only, so a difference here is the intended outcome.
+            continue
         if str(actual or "").strip() != expected:
             out[column] = {"legacy": expected, "lib2": actual}
     for column, builder in spec.json_columns:
@@ -690,6 +719,7 @@ __all__ = [
     "active_scalars",
     "handed_over",
     "handover_scalars",
+    "id_column_handed_over",
     "MIRROR_SPECS",
     "MirrorObservation",
     "MirrorSpec",

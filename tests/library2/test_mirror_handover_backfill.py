@@ -218,6 +218,26 @@ class TestAMigratedServicesJsonPayload:
         assert ids["genius"] == "999", "the worker's own id wins"
         assert ids["discogs"] == "222", "an id lib2 lacks still arrives"
 
+    def test_a_promoted_id_column_is_backfill_only_too(self, conn):
+        """The third place the handover has to reach. lib2 stores Spotify and
+        MusicBrainz twice — a promoted column the read paths join on, plus
+        external_ids — and the column was still being mirrored outright, so the drain
+        would have pushed a stale legacy id over the worker's fresh one."""
+        lib2_id, legacy_id = _artist(
+            conn, spotify_artist_id="sp-stale",
+            lib2={"spotify_id": "sp-fresh"})
+
+        resync_entity_from_legacy(conn, "artist", lib2_id, legacy_id)
+
+        assert _row(conn, "lib2_artists", lib2_id)["spotify_id"] == "sp-fresh"
+
+    def test_an_empty_promoted_id_column_is_still_filled(self, conn):
+        lib2_id, legacy_id = _artist(conn, spotify_artist_id="sp-1")
+
+        resync_entity_from_legacy(conn, "artist", lib2_id, legacy_id)
+
+        assert _row(conn, "lib2_artists", lib2_id)["spotify_id"] == "sp-1"
+
     def test_an_unmigrated_provider_id_still_replaces(self, conn):
         lib2_id, legacy_id = _artist(
             conn, deezer_id="dz-new",
@@ -255,6 +275,20 @@ class TestTheMetricStaysReachable:
             _row(conn, "tracks", legacy_id), _row(conn, "lib2_tracks", lib2_id))
 
         assert fields["genius_lyrics"]["legacy"] == "the old words"
+
+    def test_a_promoted_id_column_the_worker_owns_is_not_reported(self, conn):
+        lib2_id, legacy_id = _artist(
+            conn, spotify_artist_id="sp-stale", lib2={"spotify_id": "sp-fresh"})
+
+        fields = mirror_divergence(
+            MIRROR_SPECS["artist"],
+            _row(conn, "artists", legacy_id), _row(conn, "lib2_artists", lib2_id))
+
+        assert "spotify_id" not in fields
+        # external_ids IS still reported here, and correctly: lib2's JSON is empty,
+        # so that half is a gap the sweep can fill rather than a value it would
+        # overwrite.
+        assert fields["external_ids.spotify"]["lib2"] is None
 
     def test_a_migrated_payload_key_lib2_already_has_is_not_reported(self, conn):
         lib2_id, legacy_id = _artist(

@@ -32,6 +32,7 @@ def conn(tmp_path):
             id INTEGER PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT,
             summary TEXT, style TEXT, mood TEXT, label TEXT, banner_url TEXT,
             aliases TEXT, spotify_artist_id TEXT, musicbrainz_id TEXT,
+            deezer_id TEXT,
             lastfm_bio TEXT, lastfm_listeners INTEGER, lastfm_tags TEXT,
             discogs_bio TEXT
         );
@@ -133,15 +134,18 @@ def test_queued_row_is_pending_not_divergent(conn):
 
 
 def test_provider_ids_and_prose_diverge_per_key(conn):
-    """Every per-service payload provider is deliberately absent here: their
-    workers write lib2 directly now, so they left the mirror
-    (``enrich.MIGRATED_SERVICES``) and a legacy column of theirs is no longer
-    something lib2 is expected to match. What remains is the shared prose and the
-    provider ids the workers still on legacy write."""
-    _, legacy_id = _mirrored_artist(conn, spotify_artist_id="sp-1",
-                                    summary="old bio")
+    """A migrated service is deliberately absent: its worker writes lib2 directly,
+    so its fields are mirrored backfill-only and a legacy value that differs from a
+    populated lib2 one is the intended outcome rather than a defect. What is still
+    reported is the shared prose, and any provider id from a worker still on legacy.
+
+    Deezer stands in for the latter because Spotify has migrated — and Spotify is
+    also why this test matters: its id lives in a promoted column AND in
+    external_ids, and only the JSON half had the handover at first.
+    """
+    _, legacy_id = _mirrored_artist(conn, deezer_id="dz-1", summary="old bio")
     conn.execute(
-        "UPDATE artists SET spotify_artist_id='sp-2', summary='new bio' WHERE id=?",
+        "UPDATE artists SET deezer_id='dz-2', summary='new bio' WHERE id=?",
         (legacy_id,),
     )
     conn.execute("DELETE FROM lib2_legacy_dirty")
@@ -150,9 +154,7 @@ def test_provider_ids_and_prose_diverge_per_key(conn):
     report = build_integrity_report(conn)
 
     finding = next(iter(_divergences(report)))
-    assert finding.details["fields"] == [
-        "external_ids.spotify", "spotify_id", "summary",
-    ]
+    assert finding.details["fields"] == ["external_ids.deezer", "summary"]
 
 
 def test_native_row_without_legacy_link_is_not_compared(conn):

@@ -142,8 +142,28 @@ class TestDrainAppliesToLib2:
         external = json.loads(row["external_ids"])
         assert external.get("deezer") == "dz-1"
         assert external.get("tidal") == "td-1"
-        # The promoted column has to move too — read paths join on it.
-        assert row["spotify_id"] == "sp-new"
+        # Spotify is deliberately not asserted here: its worker writes lib2 natively
+        # now, so its promoted column is backfill-only and the id this fixture
+        # already carries wins. That direction has its own test below.
+        assert row["spotify_id"] == "sp1"
+
+    def test_a_migrated_services_promoted_id_column_is_not_overwritten(self, mirrored_db):
+        """lib2 keeps Spotify's id twice — a promoted column plus external_ids — and
+        only the JSON half had the handover at first, so the drain would still have
+        pushed a stale legacy id over the worker's fresh one."""
+        conn = _conn(mirrored_db)
+        try:
+            conn.execute(
+                "UPDATE lib2_artists SET spotify_id='sp-fresh' WHERE legacy_artist_id=1")
+            conn.execute(
+                "UPDATE artists SET spotify_artist_id='sp-stale' WHERE id=1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        drain(mirrored_db)
+
+        assert _lib2_artist(mirrored_db)["spotify_id"] == "sp-fresh"
 
     def test_prose_reaches_lib2(self, mirrored_db):
         """The "bios" half of iss32-E01: a mirrored artist used to keep lib2's

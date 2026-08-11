@@ -207,5 +207,180 @@ def progress_breakdown(conn, service: str, *,
     return out
 
 
-__all__ = ["ENTITY_ORDER", "next_pending", "pending_count", "progress_breakdown",
+# --- Batch-first selection -------------------------------------------------
+#
+# Spotify and iTunes both have "every album by this artist" and "every track on
+# this album" endpoints, and both build their queue around them: a matched artist
+# with unattempted albums is worth ONE call for the whole set, where the individual
+# path spends one per album. Falling back to individual lookups only when the parent
+# is itself unmatched is what keeps the daily API budget survivable on a large
+# library.
+#
+# That is a different shape from next_pending — it selects a *parent* and then works
+# on its children — so it is its own function rather than a flag on that one.
+
+_CHILD = {
+    "album": {
+        "table": "lib2_albums",
+        "title": "title",
+        "parent_type": "artist",
+        "parent_join": "e.primary_artist_id = :parent",
+        "extra": (),
+    },
+    "track": {
+        "table": "lib2_tracks",
+        "title": "title",
+        "parent_type": "album",
+        "parent_join": "e.album_id = :parent",
+        "extra": ("track_number",),
+    },
+}
+
+
+def _provider_id_sql(alias: str, service: str) -> str:
+    """The stored id for one service, column or JSON, as a SQL expression.
+
+    ``json_extract`` rather than a LIKE: an id is a value, and matching it as a
+    substring of the whole object would collide across services.
+    """
+    if service in ("spotify", "musicbrainz"):
+        column = f"{alias}.{service}_id" if service == "spotify" else f"{alias}.musicbrainz_id"
+        return (f"COALESCE(NULLIF({column},''), "
+                f"json_extract({alias}.external_ids, '$.{service}'))")
+    return f"json_extract({alias}.external_ids, '$.{service}')"
+
+
+def _batch_parent(conn, service: str, child: str) -> Optional[Any]:
+    """A settled parent, holding a provider id, with at least one child due."""
+    spec = _CHILD[child]
+    parent_table = _TABLES[spec["parent_type"]]
+    parent_id_sql = _provider_id_sql("p", service)
+    if spec["parent_type"] == "artist":
+        select = "p.id AS parent_id, p.name AS parent_name, NULL AS grandparent_name"
+        child_link = "c.primary_artist_id = p.id"
+    else:
+        select = ("p.id AS parent_id, p.title AS parent_name, "
+                  "ar.name AS grandparent_name")
+        child_link = "c.album_id = p.id"
+    grandparent = (
+        "JOIN lib2_artists ar ON ar.id = p.primary_artist_id"
+        if spec["parent_type"] == "album" else "")
+    return conn.execute(
+        f"""
+        SELECT {select}, {parent_id_sql} AS provider_id
+          FROM {parent_table} p
+          {grandparent}
+          JOIN lib2_provider_attempts a
+                ON a.entity_type = :parent_type AND a.entity_id = p.id
+               AND a.service = :service AND a.status = 'matched'
+         WHERE COALESCE({parent_id_sql}, '') <> ''
+           AND EXISTS (
+               SELECT 1 FROM {spec["table"]} c
+                 LEFT JOIN lib2_provider_attempts ca
+                        ON ca.entity_type = :child_type AND ca.entity_id = c.id
+                       AND ca.service = :service
+                WHERE {child_link} AND ca.entity_id IS NULL)
+         ORDER BY p.id LIMIT 1
+        """,
+        {"parent_type": spec["parent_type"], "child_type": child,
+         "service": str(service).strip().lower()},
+    ).fetchone()
+
+
+def next_batch_pending(conn, service: str, *,
+                       retry_after_days: int = DEFAULT_RETRY_AFTER_DAYS,
+                       pinned: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The next item for a provider that fetches children in bulk.
+
+    Order: a pinned group first, then unattempted artists, then an album batch, a
+    track batch, and finally the individual fallbacks for children whose own parent
+    never matched — which is the only case where a per-child lookup is unavoidable.
+    Retries reuse the individual shapes.
+
+    The returned dicts are exactly what the Spotify and iTunes workers already
+    consume, including the service-prefixed id key (``spotify_artist_id`` /
+    ``itunes_artist_id``), so their process methods are untouched.
+    """
+    key = str(service).strip().lower()
+    overrides = {"album": "album_individual", "track": "track_individual"}
+
+    if pinned:
+        item = next_pending(conn, key, retry_after_days=retry_after_days,
+                            entity_types=(pinned,), type_overrides=overrides)
+        if item:
+            return item
+
+    artist = next_pending(conn, key, retry_after_days=retry_after_days,
+                          entity_types=("artist",))
+    if artist:
+        return artist
+
+    row = _batch_parent(conn, key, "album")
+    if row is not None:
+        return {
+            "type": "album_batch",
+            "artist_id": row["parent_id"],
+            "artist_name": row["parent_name"],
+            f"{key}_artist_id": row["provider_id"],
+            "name": f"Albums for {row['parent_name']}",
+        }
+
+    row = _batch_parent(conn, key, "track")
+    if row is not None:
+        return {
+            "type": "track_batch",
+            "album_id": row["parent_id"],
+            "album_name": row["parent_name"],
+            f"{key}_album_id": row["provider_id"],
+            "artist_name": row["grandparent_name"],
+            "name": f"Tracks on {row['parent_name']}",
+        }
+
+    return next_pending(conn, key, retry_after_days=retry_after_days,
+                        entity_types=("album", "track"),
+                        type_overrides=overrides)
+
+
+def pending_children(conn, service: str, parent_type: str, parent_id: Any, *,
+                     child: str) -> list:
+    """The children of one parent that this provider has not looked at yet."""
+    spec = _CHILD[child]
+    columns = ", ".join(("e.id", f"e.{spec['title']}", *(
+        f"e.{extra}" for extra in spec["extra"])))
+    rows = conn.execute(
+        f"""
+        SELECT {columns}
+          FROM {spec["table"]} e
+          LEFT JOIN lib2_provider_attempts a
+                 ON a.entity_type = :child_type AND a.entity_id = e.id
+                AND a.service = :service
+         WHERE {spec["parent_join"]} AND a.entity_id IS NULL
+         ORDER BY e.id
+        """,
+        {"child_type": child, "service": str(service).strip().lower(),
+         "parent": parent_id},
+    ).fetchall()
+    keys = ("id", "title", *spec["extra"])
+    return [dict(zip(keys, row, strict=False)) for row in rows]
+
+
+def record_children(conn, service: str, parent_type: str, parent_id: Any,
+                    status: str, *, child: str) -> int:
+    """Record one outcome for every child of a parent that is still unattempted.
+
+    A bulk call that failed is a single outcome for the whole set. Children the
+    provider has already settled are left alone — the batch was never about them.
+    Returns how many were recorded.
+    """
+    from core.library2.provider_attempts import record_attempt
+
+    children = pending_children(conn, service, parent_type, parent_id, child=child)
+    for entry in children:
+        record_attempt(conn, entity_type=child, entity_id=entry["id"],
+                       service=service, status=status)
+    return len(children)
+
+
+__all__ = ["ENTITY_ORDER", "next_batch_pending", "next_pending", "pending_children",
+           "pending_count", "progress_breakdown", "record_children",
            "status_counts"]
