@@ -183,17 +183,15 @@ function ServiceCard({
   );
 }
 
-export function ServiceStatusCard() {
+export function ServiceStatusCard({ embedded = false }: { embedded?: boolean } = {}) {
   const { ready, meta, server, soulseek, metaTitle, dlTitle, testService, chips } =
     useServiceCards();
 
-  return (
-    <article className="dash-card" data-card="services">
-      <header className="dash-card__head">
-        <h3 className="dash-card__title">Service Status</h3>
-        <p className="dash-card__sub">Connection health for every service SoulSync uses.</p>
-      </header>
-      <div className="dash-card__body">
+  // `embedded` renders only the body — the merged Services card supplies the
+  // article + header. The standalone shape is kept for the artefact tests,
+  // which pin it against the vanilla fixture.
+  const body = (
+    <>
         <div className="service-status-grid">
           <ServiceCard
             cardId="metadata-source-service-card"
@@ -276,7 +274,16 @@ export function ServiceStatusCard() {
             ))}
           </div>
         </div>
-      </div>
+    </>
+  );
+  if (embedded) return body;
+  return (
+    <article className="dash-card" data-card="services">
+      <header className="dash-card__head">
+        <h3 className="dash-card__title">Service Status</h3>
+        <p className="dash-card__sub">Connection health for every service SoulSync uses.</p>
+      </header>
+      <div className="dash-card__body">{body}</div>
     </article>
   );
 }

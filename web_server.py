@@ -9348,6 +9348,19 @@ def delete_download_origins():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/library/recently-added')
+def get_recently_added_albums():
+    """The dashboard rail: newest albums to land, folded from library_history
+    with art backfilled from the library (see the db method's docstring)."""
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 20))))
+        db = get_database()
+        return jsonify({'success': True, 'albums': db.get_recently_added_albums(limit=limit)})
+    except Exception as e:
+        logger.error(f"Error getting recently added albums: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -29728,6 +29741,25 @@ def get_watchlist_count():
         })
     except Exception as e:
         logger.error(f"Error getting watchlist count: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/recent-releases', methods=['GET'])
+def get_watchlist_recent_releases():
+    """Newest releases across the whole watchlist, flat (the dashboard rail).
+
+    recent_releases was only ever queried per-artist before this; the dashboard
+    wants one newest-first list. Rows come straight off the table the watchlist
+    scan already fills — no provider calls, so this is cheap enough for a
+    dashboard mount fetch.
+    """
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 20))))
+        database = get_database()
+        releases = database.get_watchlist_recent_releases(
+            limit=limit, profile_id=get_current_profile_id())
+        return jsonify({"success": True, "releases": releases})
+    except Exception as e:
+        logger.error(f"Error getting watchlist recent releases: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/artists', methods=['GET'])

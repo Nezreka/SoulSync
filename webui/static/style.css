@@ -65673,6 +65673,161 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
    per-card accent hue tints.
    ========================================================================== */
 
+/* ── Dashboard content band ──────────────────────────────────────────────
+   Two horizontal album-art rails (Recently Added / Fresh Releases) above the
+   ops grid. Cards are the discover page's .ya-card, sized down a step so
+   twenty of them read as a strip rather than a wall; the strip scrolls
+   sideways on its own axis and never widens the page. */
+/* The rails sit INSIDE .dash-grid as dash-cards, sharing the ops cards'
+   container chrome. Video-dashboard proportions: each rail takes 2 of the
+   3 columns with a companion ops card (downloads / syncs) in the third.
+   On the 2-col laptop bento the rail keeps both columns and the companion
+   drops below — a rail squeezed to one column would show ~1.5 covers. */
+.dash-card--rail {
+    grid-column: 1 / -1; /* one full-width band */
+    min-width: 0; /* let the strip scroll instead of widening the track */
+}
+
+/* The band's tab switcher — quiet text tabs, accent underline on the
+   active one, matching the app's existing tab language rather than
+   inventing pills. */
+/* The stats STRIP — six numbers in one slim full-width card, subtitles
+   demoted to tooltips. Replaces the box-of-boxes System Stats card. */
+.dash-card--tiles {
+    grid-column: 1 / -1;
+    padding: 14px 24px;
+}
+.stats-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 36px;
+    justify-content: space-between;
+}
+.stat-tile {
+    min-width: 0;
+}
+.stat-tile .stat-card-value {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+    margin: 0;
+}
+.stat-tile .stat-card-title {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin: 2px 0 0;
+}
+
+/* Divider between the two halves of the merged Services card. */
+/* Phone widths: the tab row wraps (two 18px tabs + a subtitle overflow
+   ~375px otherwise), tiles and covers size down a step. The rail itself
+   already scrolls on its own axis at every width. */
+@media (max-width: 699px) {
+    .dash-rail-head {
+        flex-wrap: wrap;
+        gap: 2px 12px;
+    }
+    .dash-band-tab {
+        font-size: 16px;
+    }
+    .dash-card--tiles {
+        padding: 12px 16px;
+    }
+    .stats-strip {
+        gap: 10px 18px;
+    }
+    .stat-tile .stat-card-value {
+        font-size: 18px;
+    }
+    .dash-rail .dash-rail-card {
+        width: 126px;
+    }
+}
+
+.dash-merged-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.07);
+    margin: 16px 0;
+}
+
+.dash-band-tabs {
+    display: flex;
+    gap: 18px;
+}
+.dash-band-tab {
+    background: none;
+    border: none;
+    padding: 0 0 4px;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.38);
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s;
+}
+.dash-band-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+}
+.dash-band-tab.active {
+    color: #fff;
+    border-bottom-color: var(--accent-color, #a97bff);
+}
+.dash-rail-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.dash-rail-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+.dash-rail-subtitle {
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+.dash-rail {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 10px;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+.dash-rail .dash-rail-card {
+    width: 150px;
+}
+.dash-rail-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dash-rail-caption {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.62);
+    color: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
 .dash-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

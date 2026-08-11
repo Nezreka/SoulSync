@@ -11999,6 +11999,40 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
 
+    def get_watchlist_recent_releases(self, limit: int = 20, profile_id: int = 1) -> list:
+        """Newest releases discovered across the WHOLE watchlist, flat.
+
+        ``recent_releases`` is populated by the watchlist scan and until now was
+        only ever read per-artist (the watchlist artist detail's six-release
+        strip). The dashboard's "Fresh from your artists" rail needs the same
+        rows newest-first across every watched artist, with the artist's name
+        and provider ids joined on so a card can say who it's from and link to
+        their page.
+
+        Ordered by release_date (what the user cares about), tie-broken by
+        added_date so two same-day releases keep a stable order.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT rr.album_name, rr.release_date, rr.album_cover_url,
+                           rr.track_count, rr.source,
+                           rr.album_spotify_id, rr.album_itunes_id,
+                           rr.album_deezer_id,
+                           wa.artist_name, wa.spotify_artist_id,
+                           wa.itunes_artist_id, wa.deezer_artist_id
+                    FROM recent_releases rr
+                    JOIN watchlist_artists wa ON rr.watchlist_artist_id = wa.id
+                    WHERE wa.profile_id = ?
+                    ORDER BY rr.release_date DESC, rr.added_date DESC
+                    LIMIT ?
+                """, (profile_id, limit))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting watchlist recent releases: {e}")
+            return []
+
     def update_watchlist_artist_image(self, artist_id: str, image_url: str) -> bool:
         """Update the image URL for a watchlist artist (checks linked provider IDs)"""
         try:
@@ -16224,6 +16258,117 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error querying library history: {e}")
             return [], 0
+
+    def get_recently_added_albums(self, limit: int = 20) -> list[dict]:
+        """The dashboard's Recently Added rail: newest N ALBUMS to land, folded
+        out of the per-track ``library_history`` rows.
+
+        Fold key is (artist, album) case-insensitively; a row with no album
+        falls back to its track title, so a landed single is its own card
+        rather than invisible. The newest row per key supplies the timestamp,
+        quality, source and the play target (title + file_path); every later
+        row only bumps the track count.
+
+        Art: most history rows carry no thumb_url (the importer records the
+        landing before art exists), so empty covers are backfilled from the
+        albums table — the album DID land in the library, which is where its
+        art eventually lives — then from the artist's thumb as a last resort.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM library_history ORDER BY created_at DESC LIMIT 200")
+                rows = [dict(r) for r in cursor.fetchall()]
+
+                cards: list[dict] = []
+                by_key: dict[str, dict] = {}
+                for row in rows:
+                    artist = (row.get('artist_name') or '').strip()
+                    album = (row.get('album_name') or '').strip() or (row.get('title') or '').strip()
+                    if not artist and not album:
+                        continue
+                    key = f"{artist.lower()}::{album.lower()}"
+                    existing = by_key.get(key)
+                    if existing is not None:
+                        existing['track_count'] += 1
+                        if not existing['thumb_url'] and row.get('thumb_url'):
+                            existing['thumb_url'] = row['thumb_url']
+                        continue
+                    if len(cards) >= limit:
+                        continue  # keep counting tracks for cards already kept
+                    card = {
+                        'artist_name': artist,
+                        'album_name': album,
+                        'thumb_url': row.get('thumb_url') or '',
+                        'added_at': row.get('created_at') or '',
+                        'track_count': 1,
+                        'quality': (row.get('quality') or '').upper(),
+                        'download_source': row.get('download_source') or '',
+                        'event_type': row.get('event_type') or '',
+                        'play_title': row.get('title') or '',
+                        'play_file_path': row.get('file_path') or '',
+                    }
+                    by_key[key] = card
+                    cards.append(card)
+
+                for card in cards:
+                    if card['thumb_url']:
+                        continue
+                    try:
+                        cursor.execute(
+                            """
+                            SELECT al.thumb_url, ar.thumb_url
+                            FROM albums al JOIN artists ar ON al.artist_id = ar.id
+                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                            LIMIT 1
+                            """,
+                            (card['artist_name'], card['album_name']))
+                        hit = cursor.fetchone()
+                        if hit:
+                            card['thumb_url'] = hit[0] or hit[1] or ''
+                    except Exception as e:
+                        logger.debug("recently-added art backfill failed: %s", e)
+
+                # Every card also carries the ARTIST's art: history thumb URLs
+                # can be stale or server-authed and die in the browser, so the
+                # frontend needs a second image to fall to before the
+                # placeholder — not just a second choice server-side.
+                def _artist_art(name):
+                    """Exact name first, then the primary artist: history rows"""
+                    # often carry 'A feat. B' / 'A, B' while the library row is
+                    # just 'A' — without the retry those cards stay artless.
+                    candidates = [name]
+                    lowered = name.lower()
+                    for sep in (' feat.', ' feat ', ' ft.', ' ft ', ' featuring ', ',', ';', ' & ', ' x '):
+                        idx = lowered.find(sep)
+                        if idx > 0:
+                            candidates.append(name[:idx])
+                    for candidate in candidates:
+                        cursor.execute(
+                            "SELECT thumb_url FROM artists"
+                            " WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))"
+                            " AND thumb_url IS NOT NULL AND thumb_url != '' LIMIT 1",
+                            (candidate,))
+                        hit = cursor.fetchone()
+                        if hit and hit[0]:
+                            return hit[0]
+                    return ''
+
+                for card in cards:
+                    try:
+                        card['artist_thumb_url'] = _artist_art(card['artist_name'])
+                        if not card['thumb_url']:
+                            card['thumb_url'] = card['artist_thumb_url']
+                    except Exception as e:
+                        card['artist_thumb_url'] = ''
+                        logger.debug("recently-added artist art lookup failed: %s", e)
+
+                return cards
+        except Exception as e:
+            logger.error(f"Error getting recently added albums: {e}")
+            return []
 
     def get_library_history_unverified(self) -> list[dict]:
         """Return every library_history row that still needs human confirmation.

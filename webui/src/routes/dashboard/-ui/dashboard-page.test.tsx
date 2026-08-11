@@ -40,14 +40,16 @@ describe('the page shell', () => {
 
     const grid = root.querySelector('.dash-grid')!;
     expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
-      'services',
+      // 3.2.0 calm grid: the ContentBand renders NOTHING here (its fetches
+      // fail under the test's dead fetch mock). Stats is a full-width tile
+      // strip; Services now CONTAINS the old enrichment equalizer; Recent
+      // Activity (tray owns it) and Quick Actions (sidebar duplicate) are
+      // deliberately gone.
       'stats',
+      'services',
       'library',
       'syncs',
-      'tools',
-      'activity',
       'active-downloads',
-      'enrichment',
     ]);
 
     // worker-orbs' anchor selector must resolve against this tree.

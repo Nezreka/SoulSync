@@ -20,12 +20,10 @@
 import { useEffect } from 'react';
 
 import { ActiveDownloadsShell } from './active-downloads-shell';
-import { ActivityFeedCard } from './activity-feed';
+import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
-import { QuickActionsCard } from './quick-actions';
-import { RateMonitorCard } from './rate-equalizer';
-import { ServiceStatusCard } from './service-cards';
+import { ServicesCard } from './services-merged';
 import { SyncsCard } from './syncs-card';
 import { SystemStatsCard } from './system-stats';
 
@@ -38,14 +36,19 @@ export function DashboardPage() {
     <div className="page-shell dashboard-container" id="dashboard-page">
       <DashboardHeader />
       <div className="dash-grid">
-        <ServiceStatusCard />
+        {/* ONE full-width content band: Recently Added | Fresh Releases behind
+            a tab switcher. Renders nothing until a feed has rows, so a fresh
+            install sees the ops grid it always saw. */}
+        <ContentBand />
+        {/* One quiet full-width strip of numbers, then the ops row. Recent
+            Activity (the tray owns it) and Quick Actions (the sidebar again,
+            as buttons) are gone; Service Status and the rate equalizer are
+            ONE Services card. */}
         <SystemStatsCard />
+        <ServicesCard />
         <LibraryCard />
         <SyncsCard />
-        <QuickActionsCard />
-        <ActivityFeedCard />
         <ActiveDownloadsShell />
-        <RateMonitorCard />
       </div>
     </div>
   );

@@ -6,7 +6,6 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { compareTrees, extractDashArticle, parseVanilla } from './dash-artefact';
 import { SystemStatsCard } from './system-stats';
 
 const fetchMock = vi.fn((..._args: unknown[]) => Promise.reject(new Error('down')));
@@ -37,13 +36,31 @@ function fireStats(payload: Record<string, unknown>) {
   });
 }
 
-describe('the artefact differential', () => {
-  it('renders the vanilla stats card 1:1 in its initial state', async () => {
-    const vanilla = parseVanilla(
-      extractDashArticle('<article class="dash-card" data-card="stats">'),
-    );
+describe('the strip shape', () => {
+  // The 1:1 vanilla artefact differential retired with the box-of-boxes
+  // card: 3.2.0 deliberately re-renders these six stats as a slim
+  // full-width STRIP (number + label, subtitles as tooltips). What must
+  // survive the redesign is pinned instead: the six tile ids (the helper
+  // tour targets them), the value/subtitle classes (the payload tests and
+  // the tour tooltips read them), and the full-span card class.
+  it('keeps the six tile ids and the tour-visible classes', async () => {
     const view = await mountCard();
-    compareTrees(vanilla, view.container.firstElementChild!, 'stats');
+    const root = view.container.firstElementChild!;
+    expect(root.getAttribute('data-card')).toBe('stats');
+    expect(root.className).toContain('dash-card--tiles');
+    for (const id of [
+      'active-downloads-card',
+      'finished-downloads-card',
+      'download-speed-card',
+      'active-syncs-card',
+      'uptime-card',
+      'memory-card',
+    ]) {
+      const tile = view.container.querySelector(`#${id}`)!;
+      expect(tile, id).toBeTruthy();
+      expect(tile.querySelector('.stat-card-value'), id).toBeTruthy();
+      expect(tile.querySelector('.stat-card-subtitle'), id).toBeTruthy();
+    }
   });
 });
 

@@ -263,28 +263,34 @@ function EqBar({ svc, view }: { svc: string; view: EqBarView | null }) {
   );
 }
 
-export function RateMonitorCard() {
+export function RateMonitorCard({ embedded = false }: { embedded?: boolean } = {}) {
   const { views, seen, jiosaavnEnabled } = useRateMonitor();
   const services = visibleRateGaugeServices(jiosaavnEnabled);
 
+  // The grid is the SAME node either way; only the wrapper differs. Embedded
+  // adds a #rate-monitor-section div (the vanilla geometry hook the article
+  // used to carry); standalone keeps the exact vanilla-artefact tree, grid
+  // directly under dash-card__body.
+  const grid = (
+    <div
+      // The vanilla grid gains the --equalizer modifier on its first
+      // render pass; before any frame it is the bare class from the markup.
+      className={seen ? 'rate-monitor-grid rate-monitor-grid--equalizer' : 'rate-monitor-grid'}
+      id="rate-monitor-grid"
+    >
+      {seen
+        ? services.map((svc) => <EqBar key={svc} svc={svc} view={views[svc] ?? null} />)
+        : null}
+    </div>
+  );
+  if (embedded) return <div id="rate-monitor-section">{grid}</div>;
   return (
     <article className="dash-card dash-card--full" id="rate-monitor-section" data-card="enrichment">
       <header className="dash-card__head">
         <h3 className="dash-card__title">Enrichment Services</h3>
         <p className="dash-card__sub">API rate monitoring across providers.</p>
       </header>
-      <div className="dash-card__body">
-        <div
-          // The vanilla grid gains the --equalizer modifier on its first
-          // render pass; before any frame it is the bare class from the markup.
-          className={seen ? 'rate-monitor-grid rate-monitor-grid--equalizer' : 'rate-monitor-grid'}
-          id="rate-monitor-grid"
-        >
-          {seen
-            ? services.map((svc) => <EqBar key={svc} svc={svc} view={views[svc] ?? null} />)
-            : null}
-        </div>
-      </div>
+      <div className="dash-card__body">{grid}</div>
     </article>
   );
 }
