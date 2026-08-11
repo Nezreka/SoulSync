@@ -308,7 +308,7 @@ def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
-        "core.repair_jobs.native_p3._check_single_track",
+        "core.repair_jobs.track_number_repair._check_single_track",
         lambda _path, _name, tracks, _similarity: captured.append(tracks) or None,
     )
     context = JobContext(
@@ -690,8 +690,14 @@ def test_acoustid_scanner_flags_v2_only_mismatch_with_subject(
 
 
 def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, monkeypatch):
-    """Runs on the migrated schema on purpose: the native rows are padded to the
-    width of a legacy SELECT whose optional provider-ID columns only exist there."""
+    """§26 pinned that native rows were padded to the width of a legacy SELECT
+    whose optional provider-ID columns only exist on a migrated schema — an
+    IndexError waiting on the narrow end of that range.
+
+    The legacy SELECT is gone (the native scan is now the only scan), so the whole
+    padding hazard is structurally impossible rather than merely handled. What is
+    still worth pinning is the coverage it was protecting: a v2-only album is
+    flagged, with its real artist id rather than a padded empty slot."""
     from core.repair_jobs.missing_cover_art import MissingCoverArtJob
 
     legacy_db = migrated_legacy_db
@@ -714,12 +720,19 @@ def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, mon
     monkeypatch.setattr(
         "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
     )
+    # The native scan's provider seam is the typed adapter, not the old per-source
+    # methods — those belonged to the legacy projection that has since been folded
+    # away.
+    from core.library2.provider_adapters import ArtworkProviderResult
+
     monkeypatch.setattr(
-        MissingCoverArtJob, "_try_source",
-        lambda self, *args, **kwargs: "http://found-art",
-    )
-    monkeypatch.setattr(
-        MissingCoverArtJob, "_find_artist_art", lambda self, *args, **kwargs: None
+        "core.library2.provider_adapters.fetch_artwork_url",
+        lambda kind, **kwargs: (
+            ArtworkProviderResult(kind="album", url="http://found-art",
+                                  source="spotify",
+                                  provider_entity_id="sp-v2-album")
+            if kind == "album" else None
+        ),
     )
     findings = []
     context = JobContext(
@@ -737,21 +750,28 @@ def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, mon
     assert native[0]["entity_type"] == "album"
     assert native[0]["details"]["library_v2"]["album_id"] == album_id
     assert native[0]["details"]["found_artwork_url"] == "http://found-art"
-    # A native album has no legacy artist row; the padded slot must read as that
-    # and not shift the per-source album IDs behind it out of range.
-    assert native[0]["details"]["artist_id"] is None
-    assert native[0]["details"]["spotify_album_id"] == "sp-v2-album"
-    # The legacy albums are still scanned — the migrated schema resolves.
-    assert any(f["entity_id"] == "10" for f in findings)
+    # The native row carries a real artist, where the padded legacy slot could only
+    # ever read as absent.
+    assert native[0]["details"]["artist_id"] == artist_id
+    # The album's Spotify id reaches the finding as a namespaced provider id rather
+    # than through the fixed set of per-source columns the legacy SELECT had to pad
+    # out — which is what made the padding fragile in the first place.
+    assert native[0]["details"]["provider_ids"]["album"]["spotify"] == "sp-v2-album"
+    # Every finding names a native subject now; there is no legacy half left to scan.
+    assert all(str(f["entity_id"]).startswith("lib2:") for f in findings)
 
 
 def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
     legacy_db, tmp_path, monkeypatch
 ):
-    """The other end of the padding range: zero optional provider-ID columns.
+    """The other end of what used to be the padding range: zero optional
+    provider-ID columns.
 
-    A legacy schema old enough to lack ``albums.spotify_album_id`` makes the
-    legacy SELECT fail — which must cost an error, not the native coverage.
+    A legacy schema old enough to lack ``albums.spotify_album_id`` used to make the
+    legacy SELECT fail, and the point was that the failure cost an error rather than
+    the native coverage. With no legacy SELECT there is nothing left to fail, so the
+    scan is now simply clean on such a schema — which is the outcome that half of the
+    test was defending.
     """
     from core.repair_jobs.missing_cover_art import MissingCoverArtJob
 
@@ -774,12 +794,19 @@ def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
     monkeypatch.setattr(
         "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
     )
+    # The native scan's provider seam is the typed adapter, not the old per-source
+    # methods — those belonged to the legacy projection that has since been folded
+    # away.
+    from core.library2.provider_adapters import ArtworkProviderResult
+
     monkeypatch.setattr(
-        MissingCoverArtJob, "_try_source",
-        lambda self, *args, **kwargs: "http://found-art",
-    )
-    monkeypatch.setattr(
-        MissingCoverArtJob, "_find_artist_art", lambda self, *args, **kwargs: None
+        "core.library2.provider_adapters.fetch_artwork_url",
+        lambda kind, **kwargs: (
+            ArtworkProviderResult(kind="album", url="http://found-art",
+                                  source="spotify",
+                                  provider_entity_id="sp-v2-album")
+            if kind == "album" else None
+        ),
     )
     findings = []
     context = JobContext(
@@ -791,7 +818,7 @@ def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
 
     result = MissingCoverArtJob().scan(context)
 
-    assert result.errors == 1  # the legacy SELECT, not the native walk
+    assert result.errors == 0  # nothing reads the legacy schema any more
     assert f"lib2:{album_id}" in [f["entity_id"] for f in findings]
 
 
@@ -949,7 +976,7 @@ def test_fake_lossless_scanner_covers_v2_only_file(legacy_db, tmp_path, monkeypa
 def test_metadata_gap_scanner_covers_v2_only_track(
     migrated_legacy_db, tmp_path, monkeypatch
 ):
-    """Migrated schema on purpose — see the cover-art scanner test above."""
+    """Migrated schema on purpose — see the cover-art scanner test above."""  # noqa: D401
     from types import SimpleNamespace
 
     from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
@@ -985,20 +1012,21 @@ def test_metadata_gap_scanner_covers_v2_only_track(
     assert len(native) == 1
     assert native[0]["details"]["found_fields"]["musicbrainz_recording_id"] == "mb-999"
     assert native[0]["details"]["library_v2"]["track_id"] == track_id
-    # A native track has no legacy artist row; the padded slot must read as that
-    # and not shift the per-source track IDs behind it out of range.
-    assert native[0]["details"]["artist_id"] is None
-    assert native[0]["details"]["track_ids"] == {
-        "spotify": None, "itunes": None, "deezer": None,
-    }
-    # The legacy tracks are still scanned — the migrated schema resolves.
-    assert any(f["entity_id"] == "100" for f in findings)
+    # The native row carries a real artist, where the padded legacy slot could only
+    # ever read as absent.
+    assert native[0]["details"]["artist_id"] is not None
+    # The native subject reports only the ids it actually has, where the padded
+    # legacy row carried a fixed-width dict of Nones.
+    assert native[0]["details"]["track_ids"] == {}
+    # Every finding names a native subject now; there is no legacy half left to scan.
+    assert all(str(f["entity_id"]).startswith("lib2:") for f in findings)
 
 
 def test_metadata_gap_scanner_covers_v2_track_on_unmigrated_legacy_schema(
     legacy_db, tmp_path, monkeypatch
 ):
-    """Zero optional provider-ID columns — see the cover-art counterpart."""
+    """Zero optional provider-ID columns — see the cover-art counterpart. With the
+    legacy SELECT gone there is nothing left to fail on such a schema."""
     from types import SimpleNamespace
 
     from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
@@ -1028,7 +1056,7 @@ def test_metadata_gap_scanner_covers_v2_track_on_unmigrated_legacy_schema(
 
     result = MetadataGapFillerJob().scan(context)
 
-    assert result.errors == 1  # the legacy SELECT, not the native walk
+    assert result.errors == 0  # nothing reads the legacy schema any more
     assert f"lib2:{track_id}" in [f["entity_id"] for f in findings]
 
 
@@ -1158,7 +1186,14 @@ def test_tag_consistency_scanner_covers_v2_only_album(legacy_db, tmp_path, monke
     assert "album" in fields
 
 
-def test_track_number_repair_visits_v2_only_folders(legacy_db, tmp_path, monkeypatch):
+def test_track_number_repair_reaches_v2_only_files(legacy_db, tmp_path, monkeypatch):
+    """A v2-only file must be inspected.
+
+    The check used to be "the scan walks the folder the file sits in", because the
+    scan enumerated directories. The native scan enumerates file subjects instead —
+    the folder is now incidental — so the guarantee is stated against the file, which
+    is what it was always about.
+    """
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)
@@ -1169,12 +1204,14 @@ def test_track_number_repair_visits_v2_only_folders(legacy_db, tmp_path, monkeyp
     _add_v2_only_file(legacy_db, audio, title="Song")
     transfer = tmp_path / "transfer"
     transfer.mkdir()
-    visited = []
+    inspected = []
     monkeypatch.setattr(
-        TrackNumberRepairJob, "_repair_album",
-        lambda self, folder, filenames, *args, **kwargs: (
-            visited.append((folder, tuple(sorted(filenames)))) or JobResult()
-        ),
+        "core.library2.completeness.resolve_tracklist",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "core.repair_jobs.track_number_repair._check_single_track",
+        lambda path, name, _tracks, _similarity: inspected.append((path, name)) or None,
     )
     context = JobContext(
         db=legacy_db,
@@ -1184,7 +1221,7 @@ def test_track_number_repair_visits_v2_only_folders(legacy_db, tmp_path, monkeyp
 
     TrackNumberRepairJob().scan(context)
 
-    assert (str(music), ("01 - Song.flac",)) in visited
+    assert (str(audio), "01 - Song.flac") in inspected
 
 
 def test_every_registered_job_declares_v2_effects():
