@@ -17,7 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.repair_jobs.native_p3 import _api_tracks_for_subject, _edition_tracklists
+from core.repair_jobs.track_number_repair import (
+    _api_tracks_for_subject,
+    _edition_tracklists,
+)
 
 
 # --------------------------------------------------------------------------

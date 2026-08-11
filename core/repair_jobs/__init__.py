@@ -226,8 +226,6 @@ _JOB_MODULES = [
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.library_reorganize',
     'core.repair_jobs.path_drift_reconcile',
-    # Overrides mature job identities with P3-native catalogue boundaries.
-    'core.repair_jobs.native_p3',
 ]
 
 

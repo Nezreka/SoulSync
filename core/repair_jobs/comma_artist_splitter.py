@@ -98,56 +98,61 @@ class CommaArtistSplitterJob(RepairJob):
     default_interval_hours = 168  # Weekly
     auto_fix = False
 
+    # A native artist "holds" a file when it is credited on the track or is the
+    # primary artist of the track's album — the two ways the importer records a
+    # comma-joined tag string. ``{artist}`` is the artist-id expression, so the same
+    # clause serves the correlated per-artist count and the sample query.
+    _FILES_FOR_ARTIST = """
+        FROM lib2_track_files f
+        JOIN lib2_tracks t ON t.id = f.track_id
+        LEFT JOIN lib2_albums al ON al.id = t.album_id
+       WHERE COALESCE(f.file_state,'active')='active'
+         AND f.path IS NOT NULL AND f.path <> ''
+         AND (al.primary_artist_id = {artist}
+              OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                          WHERE ta.track_id = t.id AND ta.artist_id = {artist}))
+    """
+
+    @classmethod
+    def _files_clause(cls, artist: str) -> str:
+        return cls._FILES_FOR_ARTIST.format(artist=artist)
+
     def estimate_scope(self, context: JobContext) -> int:
+        correlated = self._files_clause("ar.id")
         try:
             conn = context.db._get_connection()
             try:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT COUNT(DISTINCT ar.id)
-                    FROM artists ar
-                    JOIN tracks t ON t.artist_id = ar.id
-                    WHERE ar.name LIKE '%,%'
-                      AND t.file_path IS NOT NULL AND t.file_path != ''
-                """)
-                return cursor.fetchone()[0]
+                return int(conn.execute(
+                    f"""SELECT COUNT(*) FROM lib2_artists ar
+                         WHERE ar.name LIKE '%,%'
+                           AND (SELECT COUNT(*) {correlated}) > 0"""
+                ).fetchone()[0])
             finally:
                 conn.close()
-        except Exception:
+        except Exception:  # noqa: BLE001 — scope estimates never fail a run
             return 0
 
-    # --- catalogue boundary -------------------------------------------------
-    # ``_comma_artist_rows``/``_finding_identity``/``_library_artist_id``/
-    # ``_sample_tracks`` are the four places this job touched the catalogue.
-    # The native subclass in core.repair_jobs.native_p3 overrides all four; the
-    # legacy bodies stay for the rollback window.
-
     def _comma_artist_rows(self, context: JobContext) -> list:
-        """``(artist_id, name, thumb_url, file_count)``, biggest offenders first
-        so the per-scan cap keeps the most valuable rows. ``LIMIT+1`` detects
-        the cap."""
-        conn = None
+        correlated = self._files_clause("ar.id")
+        conn = context.db._get_connection()
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT ar.id, ar.name, ar.thumb_url, COUNT(t.id) AS n
-                FROM artists ar
-                JOIN tracks t ON t.artist_id = ar.id
-                WHERE ar.name LIKE '%,%'
-                  AND t.file_path IS NOT NULL AND t.file_path != ''
-                GROUP BY ar.id, ar.name, ar.thumb_url
-                ORDER BY n DESC
-                LIMIT {SCAN_ARTIST_LIMIT + 1}
-            """)
-            return cursor.fetchall()
+            return list(conn.execute(
+                f"""SELECT ar.id, ar.name, ar.image_url,
+                           (SELECT COUNT(*) {correlated}) AS n
+                      FROM lib2_artists ar
+                     WHERE ar.name LIKE '%,%'
+                       AND (SELECT COUNT(*) {correlated}) > 0
+                  ORDER BY n DESC
+                     LIMIT {SCAN_ARTIST_LIMIT + 1}"""
+            ).fetchall())
         finally:
-            if conn:
-                conn.close()
+            conn.close()
 
     def _finding_identity(self, artist_id) -> tuple:
-        """``(entity_id, extra_details)`` for one flagged artist."""
-        return str(artist_id), {}
+        return f"lib2:{artist_id}", {
+            "library_v2_native": True,
+            "library_v2": {"artist_ids": [int(artist_id)]},
+        }
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -368,13 +373,13 @@ class CommaArtistSplitterJob(RepairJob):
         conn = None
         try:
             conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id FROM artists WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1",
-                (name,))
-            row = cursor.fetchone()
+            row = conn.execute(
+                "SELECT id FROM lib2_artists WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) "
+                "ORDER BY id LIMIT 1",
+                (name,),
+            ).fetchone()
             return row[0] if row else None
-        except Exception:
+        except Exception:  # noqa: BLE001
             return None
         finally:
             if conn:
@@ -384,19 +389,19 @@ class CommaArtistSplitterJob(RepairJob):
         conn = None
         try:
             conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT t.title, t.file_path, al.title
-                FROM tracks t
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.artist_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
-                ORDER BY al.title, t.track_number
-                LIMIT {TRACK_SAMPLE_LIMIT}
-            """, (artist_id,))
-            return [{'title': r[0], 'file_path': r[1], 'album': r[2] or ''}
-                    for r in cursor.fetchall()]
-        except Exception:
+            rows = conn.execute(
+                f"""SELECT t.title, f.path, al.title
+                    {self._files_clause('?')}
+                 ORDER BY al.title, COALESCE(t.disc_number,1),
+                          COALESCE(t.track_number, 2147483647)
+                    LIMIT {TRACK_SAMPLE_LIMIT}""",
+                (artist_id, artist_id),
+            ).fetchall()
+            return [{"title": r[0], "file_path": r[1], "album": r[2] or ""}
+                    for r in rows]
+        except Exception:  # noqa: BLE001
             return []
         finally:
             if conn:
                 conn.close()
+

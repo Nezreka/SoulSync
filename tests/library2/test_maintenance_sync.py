@@ -280,7 +280,7 @@ def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
 def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
     legacy_db, tmp_path, monkeypatch
 ):
-    from core.repair_jobs.native_p3 import NativeTrackNumberRepairJob
+    from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)
     audio = tmp_path / "01 - Owned.flac"
@@ -315,7 +315,7 @@ def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
         db=legacy_db, transfer_folder=str(tmp_path), config_manager=_Config(True),
     )
 
-    NativeTrackNumberRepairJob().scan(context)
+    TrackNumberRepairJob().scan(context)
 
     assert captured
     canonical_ids = {row["lib2_track_id"] for row in captured[0]}

@@ -70,38 +70,35 @@ class GenreCleanupJob(RepairJob):
     auto_fix = False
 
     # --- catalogue boundary -------------------------------------------------
-    # Overridden by the native subclass (core.repair_jobs.native_p3); the base
-    # implementation is the legacy projection kept for the rollback window.
+    # Library v2 only. T-11: this used to read artists/albums, which after the P3
+    # cutover is a shrinking legacy projection — 9 of 273 albums in the user's real
+    # library. The removal-only semantics (#1057) are untouched by that; only the row
+    # source and the finding identity ever differed.
 
     def _genre_rows(self, context: JobContext) -> list:
-        """``(kind, entity_id, name, genres, entity_thumb, album_thumb,
-        artist_id, artist_name, artist_thumb)`` for every scannable row."""
-        rows = []
-        conn = None
+        conn = context.db._get_connection()
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            # ar.id doubles as the clickable-card id.
-            cursor.execute("""
-                SELECT 'artist', ar.id, ar.name, ar.genres, ar.thumb_url, NULL, ar.id, ar.name, ar.thumb_url
-                FROM artists ar
-            """)
-            rows.extend(cursor.fetchall())
-            # Albums (+ their artist for the finding card).
-            cursor.execute("""
-                SELECT 'album', al.id, al.title, al.genres, al.thumb_url, al.thumb_url, ar.id, ar.name, ar.thumb_url
-                FROM albums al
-                LEFT JOIN artists ar ON ar.id = al.artist_id
-            """)
-            rows.extend(cursor.fetchall())
+            rows = list(conn.execute(
+                """SELECT 'artist', ar.id, ar.name, ar.genres, ar.image_url,
+                          NULL, ar.id, ar.name, ar.image_url
+                     FROM lib2_artists ar"""
+            ).fetchall())
+            rows.extend(conn.execute(
+                """SELECT 'album', al.id, al.title, al.genres, al.image_url,
+                          al.image_url, ar.id, ar.name, ar.image_url
+                     FROM lib2_albums al
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id"""
+            ).fetchall())
+            return rows
         finally:
-            if conn:
-                conn.close()
-        return rows
+            conn.close()
 
     def _finding_identity(self, kind: str, entity_id) -> tuple:
-        """``(entity_id, extra_details)`` for one scanned row."""
-        return str(entity_id), {}
+        key = "artist_ids" if kind == "artist" else "album_ids"
+        return f"lib2:{entity_id}", {
+            "library_v2_native": True,
+            "library_v2": {key: [int(entity_id)]},
+        }
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()

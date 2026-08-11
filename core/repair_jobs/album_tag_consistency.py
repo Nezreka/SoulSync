@@ -8,6 +8,8 @@ normalizing all tracks to the canonical (majority) value.
 
 import json
 import os
+from typing import Dict
+from core.library2.maintenance_subjects import active_file_subjects
 from collections import Counter
 
 from mutagen import File as MutagenFile
@@ -175,224 +177,25 @@ class AlbumTagConsistencyJob(RepairJob):
             merged.update(cfg)
         return merged
 
+    def estimate_scope(self, context: JobContext) -> int:
+        try:
+            counts: Dict[int, int] = {}
+            for subject in active_file_subjects(context.db, context.config_manager):
+                counts[int(subject["album_id"])] = counts.get(int(subject["album_id"]), 0) + 1
+            return sum(1 for count in counts.values() if count >= 2)
+        except Exception:
+            return 0
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         settings = self._get_settings(context)
-        check_album = settings.get('check_album_name', True)
-        check_artist = settings.get('check_album_artist', True)
-        check_mbid = settings.get('check_mb_release_id', True)
-
-        if not any([check_album, check_artist, check_mbid]):
-            return result
-
-        scope_artist = get_scope_artist(context)
-        scope_clause = "AND lower(ar.name) = lower(?)" if scope_artist else ""
-        scope_params = (scope_artist,) if scope_artist else ()
-
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-
-            # Get all albums with 2+ tracks that have file paths
-            cursor.execute(f"""
-                SELECT al.id, al.title, ar.name as artist_name,
-                       COUNT(t.id) as track_count
-                FROM albums al
-                JOIN artists ar ON ar.id = al.artist_id
-                JOIN tracks t ON t.album_id = al.id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  {scope_clause}
-                GROUP BY al.id
-                HAVING COUNT(t.id) >= 2
-                ORDER BY ar.name, al.title
-            """, scope_params)
-            albums = cursor.fetchall()
-            total = len(albums)
-
-            # Eligibility breakdown — users compare the scanned count to their
-            # server's album count ("only scans 1300 of my 4000 albums") and
-            # read the gap as a truncation bug. Say up front what was excluded
-            # and why instead of reporting a bare, smaller number.
-            total_albums = single_track = missing_paths = no_artist = 0
-            try:
-                cursor.execute("""
-                    SELECT COUNT(*) AS total_albums,
-                           SUM(CASE WHEN track_total < 2 THEN 1 ELSE 0 END) AS single_track,
-                           SUM(CASE WHEN track_total >= 2 AND with_path < 2 THEN 1 ELSE 0 END) AS missing_paths
-                    FROM (
-                        SELECT al.id,
-                               COUNT(t.id) AS track_total,
-                               SUM(CASE WHEN t.file_path IS NOT NULL AND t.file_path != ''
-                                        THEN 1 ELSE 0 END) AS with_path
-                        FROM albums al
-                        LEFT JOIN tracks t ON t.album_id = al.id
-                        GROUP BY al.id
-                    )
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total_albums = row['total_albums'] or 0
-                    single_track = row['single_track'] or 0
-                    missing_paths = row['missing_paths'] or 0
-                cursor.execute("""
-                    SELECT COUNT(*) FROM albums al
-                    LEFT JOIN artists ar ON ar.id = al.artist_id
-                    WHERE ar.id IS NULL
-                """)
-                no_artist = cursor.fetchone()[0] or 0
-            except Exception as e:
-                logger.debug("eligibility breakdown query failed: %s", e)
-
-            if context.report_progress:
-                context.report_progress(
-                    phase=f'Scanning {total} of {total_albums} albums for tag consistency...',
-                    total=total,
-                )
-                if total_albums > total:
-                    reasons = []
-                    if single_track:
-                        reasons.append(f'{single_track} single-track')
-                    if missing_paths:
-                        reasons.append(f'{missing_paths} without stored file paths (re-run a library scan to populate)')
-                    if no_artist:
-                        reasons.append(f'{no_artist} without an artist link')
-                    context.report_progress(
-                        log_line=(
-                            f'{total_albums} albums in the database, {total} eligible '
-                            f'(need 2+ tracks with file paths)'
-                            + (f' — excluded: {", ".join(reasons)}' if reasons else '')
-                        ),
-                        log_type='info',
-                    )
-
-            # Albums that were eligible but had <2 files actually readable from
-            # SoulSync's filesystem — a scanned album silently producing no
-            # finding is indistinguishable from a healthy one to the user, so
-            # count these and say so at the end (Docker mount mismatch is the
-            # usual cause: the server's "/music/..." path isn't mounted here).
-            unreadable_albums = 0
-
-            for idx, album_row in enumerate(albums):
-                if context.check_stop():
-                    break
-                if idx % 10 == 0 and context.wait_if_paused():
-                    break
-
-                album_id = album_row['id']
-                album_title = album_row['title']
-                artist_name = album_row['artist_name']
-                result.scanned += 1
-
-                if context.report_progress and idx % 20 == 0:
-                    context.report_progress(
-                        scanned=idx + 1, total=total,
-                        phase=f'Scanning {idx + 1} / {total}',
-                        log_line=f'{artist_name} — {album_title}',
-                        log_type='info'
-                    )
-
-                # Get all tracks in this album with file paths
-                cursor.execute("""
-                    SELECT id, title, file_path FROM tracks
-                    WHERE album_id = ? AND file_path IS NOT NULL AND file_path != ''
-                """, (album_id,))
-                tracks = cursor.fetchall()
-
-                if len(tracks) < 2:
-                    continue
-
-                # Read tags from each file
-                tag_data = []
-                for track in tracks:
-                    file_path = track['file_path']
-                    # Resolve path
-                    resolved = self._resolve_path(file_path, context)
-                    if not resolved or not os.path.exists(resolved):
-                        continue
-
-                    try:
-                        audio = MutagenFile(resolved, easy=False)
-                        if audio is None:
-                            continue
-                        tag_data.append({
-                            'track_id': track['id'],
-                            'track_title': track['title'],
-                            'file_path': file_path,
-                            'resolved_path': resolved,
-                            'album_tag': _read_tag(audio, 'album'),
-                            'albumartist_tag': _read_tag(audio, 'albumartist'),
-                            'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
-                        })
-                    except Exception:
-                        continue
-
-                if len(tag_data) < 2:
-                    # Eligible on paper (2+ tracks with paths) but the files
-                    # themselves weren't readable/parseable from here.
-                    unreadable_albums += 1
-                    continue
-
-                inconsistencies = _detect_inconsistencies(
-                    tag_data, check_album, check_artist, check_mbid)
-
-                if inconsistencies:
-                    fields_affected = ', '.join(i['field'] for i in inconsistencies)
-                    total_outliers = sum(i['outlier_count'] for i in inconsistencies)
-
-                    # Build description with specifics
-                    desc_parts = []
-                    for inc in inconsistencies:
-                        variants_str = ' vs '.join(f'"{v}"' for v in inc['variants'][:3])
-                        desc_parts.append(f"{inc['field']}: {variants_str}")
-
-                    inserted = context.create_finding(
-                        job_id=self.job_id,
-                        finding_type='album_tag_inconsistency',
-                        severity='warning',
-                        entity_type='album',
-                        entity_id=str(album_id),
-                        file_path=None,
-                        title=f'Inconsistent tags: {album_title} by {artist_name}',
-                        description=f'{total_outliers} track(s) have mismatched {fields_affected}. ' + '; '.join(desc_parts),
-                        details={
-                            'album_id': album_id,
-                            'album_title': album_title,
-                            'artist_name': artist_name,
-                            'inconsistencies': inconsistencies,
-                            'track_count': len(tag_data),
-                            'tracks': [{'id': t['track_id'], 'title': t['track_title'],
-                                        'file_path': t['file_path']} for t in tag_data],
-                        }
-                    )
-                    if inserted:
-                        result.findings_created += 1
-                    else:
-                        result.findings_skipped_dedup += 1
-
-                    if context.report_progress:
-                        context.report_progress(
-                            log_line=f'Found: {album_title} — {fields_affected}',
-                            log_type='warning'
-                        )
-
-            if unreadable_albums and context.report_progress:
-                context.report_progress(
-                    log_line=(
-                        f'{unreadable_albums} album(s) skipped: their audio files '
-                        f'could not be read from SoulSync\'s filesystem — if your '
-                        f'media server runs elsewhere (e.g. Docker), mount the music '
-                        f'folder here at the same path the server reports'
-                    ),
-                    log_type='warning',
-                )
-
-            conn.close()
-
-        except Exception as e:
-            logger.error(f"Album tag consistency scan error: {e}")
-            result.errors += 1
-
-        self._scan_native_albums(context, result, check_album, check_artist, check_mbid)
+        check_album = settings.get("check_album_name", True)
+        check_artist = settings.get("check_album_artist", True)
+        check_mbid = settings.get("check_mb_release_id", True)
+        if any((check_album, check_artist, check_mbid)):
+            self._scan_native_albums(
+                context, result, check_album, check_artist, check_mbid,
+            )
         return result
 
     def _scan_native_albums(self, context: JobContext, result: JobResult,
@@ -412,14 +215,39 @@ class AlbumTagConsistencyJob(RepairJob):
             result.errors += 1
             return
 
+        # The skip breakdown, ported from the legacy projection this replaced.
+        # It is not decoration: an album with two tracks and no stored file paths is
+        # the Navidrome-shaped gap, and without the breakdown "Scanned: 1" against a
+        # three-album library reads as a broken scan rather than as two deliberate
+        # exclusions.
         scope_artist = get_scope_artist(context)
+        eligible, single_track, no_paths = [], 0, 0
         for album_id, subjects in albums.items():
-            if context.check_stop() or context.wait_if_paused():
-                return
-            if len(subjects) < 2:
-                continue
             if scope_artist and (subjects[0].get('artist_name') or '').lower() != scope_artist.lower():
                 continue
+            if len(subjects) < 2:
+                single_track += 1
+            elif not [s for s in subjects if str(s.get('path') or '').strip()]:
+                no_paths += 1
+            else:
+                eligible.append((album_id, subjects))
+        total = len(eligible) + single_track + no_paths
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Checking {len(eligible)} of {total} albums...',
+                total=len(eligible),
+                log_line=(
+                    f'{total} albums in the database — {len(eligible)} eligible, '
+                    f'{single_track} single-track, {no_paths} without stored file paths'
+                ),
+                log_type='info')
+        if context.update_progress:
+            context.update_progress(0, len(eligible))
+
+        unreadable = 0
+        for album_id, subjects in eligible:
+            if context.check_stop() or context.wait_if_paused():
+                return
             result.scanned += 1
 
             tag_data = []
@@ -446,6 +274,10 @@ class AlbumTagConsistencyJob(RepairJob):
                     continue
 
             if len(tag_data) < 2:
+                # Eligible on paper, but the files are not there to read. Counted and
+                # reported rather than silently skipped — this is what tells a user
+                # their paths have drifted.
+                unreadable += 1
                 continue
 
             inconsistencies = _detect_inconsistencies(
@@ -496,6 +328,12 @@ class AlbumTagConsistencyJob(RepairJob):
                 result.findings_created += 1
             else:
                 result.findings_skipped_dedup += 1
+
+        if unreadable and context.report_progress:
+            context.report_progress(
+                log_line=(f'{unreadable} album(s) skipped because their files '
+                          f'could not be read'),
+                log_type='warning')
 
     def _resolve_path(self, file_path, context):
         """Resolve a DB file path to an actual filesystem path."""

@@ -42,30 +42,23 @@ def test_worker_job_info_does_not_expose_internal_data_basis(monkeypatch):
     assert 'data_basis' not in worker.get_all_job_info()[0]
 
 
-def test_catalogue_jobs_that_declare_lib2_are_served_by_a_native_class():
+def test_catalogue_jobs_that_declare_lib2_scan_only_lib2():
     """T-11 — ``JOB_DATA_BASIS`` was a promise nothing checked.
 
-    ``register_job`` enforces that a declaration EXISTS, never that the code
-    honours it: ``genre_cleanup`` and ``comma_artist_splitter`` claimed 'lib2'
-    while scanning ``artists``/``albums``/``tracks``. This pins the set of
-    identities whose registered implementation is the native override, so a
-    later refactor that drops one fails here instead of silently shipping a
-    job that sees ~5% of the catalogue.
-    """
-    jobs = get_all_jobs()
-    native = {
-        job_id for job_id, cls in jobs.items()
-        if cls.__module__ == 'core.repair_jobs.native_p3'
-    }
+    ``register_job`` enforces that a declaration EXISTS, never that the code honours
+    it: ``genre_cleanup`` and ``comma_artist_splitter`` claimed 'lib2' while scanning
+    ``artists``/``albums``/``tracks``, which meant seeing ~5% of the catalogue.
 
-    assert native == {
-        'track_number_repair',
-        'acoustid_scanner',
-        'album_tag_consistency',
-        'metadata_gap_filler',
-        'missing_cover_art',
-        'live_commentary_cleaner',
-        'genre_cleanup',
-        'comma_artist_splitter',
-    }
-    assert all(JOB_DATA_BASIS[job_id] == 'lib2' for job_id in native)
+    The guard used to be "the registered class comes from ``native_p3``". That module
+    is gone — its implementations were folded back into the jobs themselves, so each
+    identity has one scan again instead of a live one and a dead legacy fork. The
+    check that replaces it is stronger and lives in
+    ``tests/repair/test_catalogue_jobs_are_native.py``: those modules hold no legacy
+    SQL at all. Here we keep the identity list and its declaration.
+    """
+    from tests.repair.test_catalogue_jobs_are_native import CATALOGUE_JOBS
+
+    jobs = get_all_jobs()
+
+    assert CATALOGUE_JOBS <= set(jobs)
+    assert all(JOB_DATA_BASIS[job_id] == 'lib2' for job_id in CATALOGUE_JOBS)

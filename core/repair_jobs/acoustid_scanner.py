@@ -9,8 +9,10 @@ actual files on disk. Creates actionable findings that can be fixed:
 
 import os
 import re
+from core.library2.maintenance_subjects import active_file_subjects
+from core.library2.maintenance_subjects import subject_details
 from difflib import SequenceMatcher
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -467,210 +469,69 @@ class AcoustIDScannerJob(RepairJob):
             else:
                 result.findings_skipped_dedup += 1
 
-    def _persist_status(self, context, track_id, fpath, db_path, status, write_tag,
-                        expected=None):
-        """Persist a verification status to the file tag (durable, travels with
-        the file), the tracks row (UI cache) and any library_history rows for
-        this file (feeds the Unverified review queue on the Downloads page).
-        ``db_path`` is the unresolved DB-side path — history rows may store
-        either form, so both are matched.
-
-        Files SoulSync never downloaded have no history row at all — for an
-        'unverified' outcome one is inserted (download_source 'acoustid_scan')
-        so EVERY scan-flagged file lands in the review queue, not just past
-        downloads. Re-scans then match this row via file_path (no duplicates).
-        """
+    def _persist_status(
+        self, context, track_id, fpath, db_path, status, write_tag, expected=None,
+    ):
         if not status:
             return
         if write_tag:
             try:
                 from core.tag_writer import write_verification_status
+
                 write_verification_status(fpath, status)
-            except Exception as e:
-                logger.debug("verification tag write failed for %s: %s", fpath, e)
-        conn = None
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("verification tag write failed for %s: %s", fpath, exc)
+        file_id = int((expected or {}).get("lib2_file_id") or 0)
+        if not file_id:
+            return
+        conn = context.db._get_connection()
         try:
-            conn = context.db._get_connection()
-            cur = conn.cursor()
-            lib2_file_id = (expected or {}).get('lib2_file_id')
-            if lib2_file_id:
-                # Native Library-v2 subject: the verification fact lives on the
-                # file row itself; there is no legacy ``tracks`` row to update.
-                cur.execute(
-                    "UPDATE lib2_track_files SET verification_status = ?, "
-                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (status, lib2_file_id))
-            else:
-                cur.execute(
-                    "UPDATE tracks SET verification_status = ? WHERE id = ?",
-                    (status, track_id))
-            exp = expected or {}
-            # Find the canonical history row for this file. The stored path is frozen at
-            # import time while the file has since moved (media-server import / reorganize),
-            # so an exact-path match alone misses it — then the status never lands and a
-            # duplicate row gets inserted every scan (#934). Match exact path first, then
-            # filename guarded by title, and HEAL the row's path so future scans match cleanly.
-            try:
-                from core.downloads.history_match import pick_history_row, like_filename_filter
-                current = fpath or db_path
-                basename = os.path.basename(current) if current else ''
-                clauses, params = [], []
-                for p in {p for p in (fpath, db_path) if p}:
-                    clauses.append("file_path = ?")
-                    params.append(p)
-                if basename:
-                    clauses.append("file_path LIKE ? ESCAPE '\\'")
-                    params.append(like_filename_filter(basename))
-                row_id = None
-                if clauses:
-                    cur.execute(
-                        "SELECT id, file_path, title, download_source FROM library_history WHERE "
-                        + " OR ".join(clauses),
-                        params)
-                    row_id = pick_history_row(
-                        cur.fetchall(),
-                        current_paths=(fpath, db_path),
-                        basename=basename, title=exp.get('title') or '')
-                if row_id is not None:
-                    cur.execute(
-                        "UPDATE library_history SET verification_status = ?, file_path = ? WHERE id = ?",
-                        (status, current, row_id))
-                    # Drop synthetic scan-created duplicates for this exact file (the #934
-                    # leftovers). Exact path → collision-free; never touches a real download row.
-                    cur.execute(
-                        "DELETE FROM library_history WHERE id != ? AND download_source = 'acoustid_scan' "
-                        "AND file_path = ?",
-                        (row_id, current))
-                elif status == 'unverified':
-                    cur.execute(
-                        """INSERT INTO library_history
-                           (event_type, title, artist_name, album_name, file_path,
-                            thumb_url, download_source, verification_status)
-                           VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
-                        (exp.get('title') or os.path.basename(fpath),
-                         exp.get('artist') or None,
-                         exp.get('album_title') or None,
-                         db_path or fpath,
-                         exp.get('album_thumb_url') or None,
-                         status))
-            except Exception as history_exc:
-                # The review-queue projection must never lose the status write
-                # itself (native V2 installs may have no library_history table).
-                logger.debug("history projection failed for %s: %s", track_id, history_exc)
-            getattr(conn, 'commit', lambda: None)()
-            if context.report_change:
-                context.report_change(
-                    finding_type='acoustid_verification',
-                    action='verification_status_updated',
-                    entity_type='track',
-                    entity_id=track_id,
-                    file_path=db_path or fpath,
-                    details={'verification_status': status},
-                )
-        except Exception as e:
-            logger.debug("verification_status persist failed for %s: %s", track_id, e)
+            conn.execute(
+                "UPDATE lib2_track_files SET verification_status=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status, file_id),
+            )
+            conn.commit()
         finally:
-            if conn:
-                conn.close()
+            conn.close()
+        if context.report_change:
+            context.report_change(
+                finding_type="acoustid_verification",
+                action="verification_status_updated",
+                entity_type="track",
+                entity_id=track_id,
+                file_path=db_path or fpath,
+                details={
+                    **subject_details((expected or {}).get("lib2_subject") or {}),
+                    "verification_status": status,
+                },
+            )
 
     def _load_db_tracks(self, context: JobContext) -> dict:
-        """Load all tracks from DB keyed by track ID."""
-        tracks = {}
-        conn = None
+        tracks: Dict[str, Dict[str, Any]] = {}
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            # Discord report (Skowl): compilation albums like "High Tea
-            # Music: Vol 1" have a different artist per track but the
-            # `tracks.artist_id` foreign key points at the ALBUM artist
-            # (curator / label-name applied to every track). AcoustID
-            # returns the actual per-track artist → 12% similarity →
-            # Wrong Song flag. Fix: prefer `tracks.track_artist` (the
-            # per-track artist, populated by every server-scan + auto-
-            # import path when different from album artist) and fall
-            # back to the album artist only when the per-track column
-            # is NULL or empty (legacy rows / single-artist albums).
-            # Load `track_artist` (raw, may be empty) AND `album_artist`
-            # separately so `_scan_file` can tell the difference between
-            # 'DB has a curated per-track value' and 'DB fell back to
-            # album artist'. The COALESCE'd `artist` field is kept as a
-            # convenience for the existing `expected['artist']` consumers
-            # that want a single resolved value, but the resolution
-            # priority that actually drives the comparison is reproduced
-            # in `_scan_file`: track_artist → file tag → album_artist.
-            cursor.execute("""
-                SELECT t.id, t.title,
-                       COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
-                       t.file_path, t.track_number,
-                       al.title AS album_title, al.thumb_url, ar.thumb_url,
-                       NULLIF(t.track_artist, '') AS track_artist,
-                       ar.name AS album_artist,
-                       t.duration,
-                       ar.id AS artist_row_id
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  AND t.title IS NOT NULL AND t.title != ''
-            """)
-            for row in cursor.fetchall():
-                track_id = row[0]
-                if track_id is None:
-                    logger.warning(
-                        "Skipping track row with null ID while loading AcoustID scan candidates: %s",
-                        row[3] or "<unknown file>",
-                    )
-                    continue
-                track_id = str(track_id)
-                tracks[track_id] = {
-                    'title': row[1] or '',
-                    'artist': row[2] or '',
-                    'file_path': row[3] or '',
-                    'track_number': row[4],
-                    'album_title': row[5] or '',
-                    'album_thumb_url': row[6] or None,
-                    'artist_thumb_url': row[7] or None,
-                    'track_artist': row[8] or '',  # raw (may be empty)
-                    'album_artist': row[9] or '',
-                    # Duration in MS (DB stores ms). Used by the
-                    # duration-mismatch guard to spot fingerprint
-                    # collisions where the matched recording is a
-                    # totally different length.
-                    'duration_ms': row[10] or 0,
-                    'artist_id': row[11],
-                }
-        except Exception as e:
-            logger.error("Error loading tracks from DB: %s", e)
-        finally:
-            if conn:
-                conn.close()
-
-        # Native Library-v2 coverage: active files whose track has no legacy
-        # backref never appear in the ``tracks`` query above. Fingerprinting is
-        # expensive, so only the primary file of each uncovered track is added.
-        try:
-            from core.library2.maintenance_subjects import active_file_subjects
-
             for subject in active_file_subjects(context.db, context.config_manager):
                 key = f"lib2:{subject['track_id']}"
-                if key in tracks and not subject.get('is_primary'):
+                current = tracks.get(key)
+                if current is not None and not subject.get("is_primary"):
                     continue
                 tracks[key] = {
-                    'title': subject['title'] or '',
-                    'artist': subject['artist_name'] or '',
-                    'file_path': str(subject['path']),
-                    'track_number': subject.get('track_number'),
-                    'album_title': subject.get('album_title') or '',
-                    'album_thumb_url': subject.get('album_image'),
-                    'artist_thumb_url': subject.get('artist_image'),
-                    'track_artist': subject['artist_name'] or '',
-                    'album_artist': '',
-                    'duration_ms': subject.get('duration') or 0,
-                    'lib2_file_id': subject['file_id'],
-                    'lib2_subject': subject,
+                    "title": subject.get("title") or "",
+                    "artist": subject.get("artist_name") or "",
+                    "file_path": str(subject["path"]),
+                    "track_number": subject.get("track_number"),
+                    "album_title": subject.get("album_title") or "",
+                    "album_thumb_url": subject.get("album_image"),
+                    "artist_thumb_url": subject.get("artist_image"),
+                    "artist_id": subject.get("artist_id"),
+                    "track_artist": subject.get("artist_name") or "",
+                    "album_artist": subject.get("artist_name") or "",
+                    "duration_ms": subject.get("duration") or 0,
+                    "lib2_file_id": int(subject["file_id"]),
+                    "lib2_subject": subject,
                 }
-        except Exception as e:
-            logger.warning("V2 subject enumeration failed: %s", e)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Native AcoustID subject enumeration failed: %s", exc)
         return tracks
 
     def _resolve_path(self, file_path, context):
@@ -704,18 +565,12 @@ class AcoustIDScannerJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                  AND title IS NOT NULL AND title != ''
-            """)
-            return cursor.fetchone()[0]
+            return len({
+                int(subject["track_id"])
+                for subject in active_file_subjects(context.db, context.config_manager)
+                if subject.get("is_primary")
+            })
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()
+

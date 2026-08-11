@@ -8,6 +8,11 @@ and repair each file.
 
 import os
 import re
+from core.library2.provider_ids import parse_external_ids
+from core.repair_jobs.base import get_scope_artist
+from core.library2.maintenance_subjects import active_file_subjects
+from core.library2.maintenance_subjects import subject_details
+from core.library2.maintenance_subjects import count_active_files
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -68,131 +73,234 @@ class TrackNumberRepairJob(RepairJob):
     auto_fix = True
 
     def scan(self, context: JobContext) -> JobResult:
+        from core.library2.paths import resolve_lib2_path
+
         result = JobResult()
         settings = self._get_settings(context)
-        anomaly_threshold = settings.get('anomaly_threshold', 3)
-        title_similarity = settings.get('title_similarity', 0.80)
-        dry_run = settings.get('dry_run', True)
+        similarity = float(settings.get("title_similarity", 0.80))
+        dry_run = bool(settings.get("dry_run", True))
+        scope_artist = get_scope_artist(context)
+        scope_key = scope_artist.casefold() if scope_artist else None
+        subjects = [
+            row for row in active_file_subjects(context.db, context.config_manager)
+            if not scope_key or str(row.get("artist_name") or "").casefold() == scope_key
+        ]
+        by_album: Dict[int, list[Dict[str, Any]]] = {}
+        for subject in subjects:
+            by_album.setdefault(int(subject["album_id"]), []).append(subject)
+        total = len(subjects)
 
-        # Thread-local state to avoid race conditions with concurrent scan_folders()
-        scan_state = {
-            'album_tracks_cache': {},
-            'title_similarity': title_similarity,
-            'dry_run': dry_run,
-        }
-
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
-
-        # Collect album folders (directories containing audio files)
-        album_folders: Dict[str, List[str]] = {}
-        if os.path.isdir(transfer):
-            for root, dirs, files in os.walk(transfer):
-                skip_deleted_quarantine(root, dirs, transfer)
-                if context.check_stop():
-                    return result
-                for fname in files:
-                    ext = os.path.splitext(fname)[1].lower()
-                    if ext in AUDIO_EXTENSIONS:
-                        album_folders.setdefault(root, []).append(fname)
-
-        # Native Library-v2 coverage: folders of active V2 files that live
-        # outside the transfer walk (deduped against the walked folders).
+        # Files are the mutation subjects, never the canonical tracklist.
+        # Materialize/cache the complete edition list first, then read every
+        # track row for the album so missing files still contribute to totals
+        # and multi-disc numbering heuristics.
+        canonical_by_album: Dict[int, list[Dict[str, Any]]] = {}
+        # dd28-18: lib2_albums is the release GROUP; the concrete numbering
+        # lives per edition in lib2_release_tracks. Keep both views.
+        edition_tracks_by_album: Dict[int, Dict[int, list[Dict[str, Any]]]] = {}
+        edition_of_track: Dict[int, list[int]] = {}
+        conn = context.db._get_connection()
         try:
-            from core.library2.maintenance_subjects import active_file_subjects
-            from core.library2.paths import resolve_lib2_path
+            from core.library2.completeness import resolve_tracklist
 
-            transfer_norm = os.path.normcase(os.path.normpath(transfer)) + os.sep
-            walked = {os.path.normcase(os.path.normpath(f)) for f in album_folders}
-            for subject in active_file_subjects(
-                context.db, context.config_manager,
-            ):
-                raw = str(subject['path'])
-                resolved = raw if os.path.isfile(raw) else resolve_lib2_path(
-                    raw, config_manager=context.config_manager)
-                if not resolved or not os.path.isfile(resolved):
-                    continue
-                if os.path.splitext(resolved)[1].lower() not in AUDIO_EXTENSIONS:
-                    continue
-                folder = os.path.dirname(resolved)
-                folder_norm = os.path.normcase(os.path.normpath(folder))
-                if folder_norm in walked or folder_norm.startswith(transfer_norm):
-                    continue
-                fname = os.path.basename(resolved)
-                bucket = album_folders.setdefault(folder, [])
-                if fname not in bucket:
-                    bucket.append(fname)
-        except Exception as e:
-            logger.warning("V2 subject enumeration failed: %s", e)
-            result.errors += 1
-
-        # Restore pre-import coverage for configured library roots as well as
-        # transfer. Track tags and folder grouping are sufficient for this job.
-        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-        for resolved in filesystem_audio_files(
-            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
-        ):
-            folder = os.path.dirname(resolved)
-            name = os.path.basename(resolved)
-            bucket = album_folders.setdefault(folder, [])
-            if name not in bucket:
-                bucket.append(name)
-
-        total = sum(len(fnames) for fnames in album_folders.values())
-        if context.update_progress:
-            context.update_progress(0, total)
-        if context.report_progress:
-            context.report_progress(
-                phase=f'Scanning {len(album_folders)} album folders ({total} files)...',
-                total=total
-            )
-
-        for folder_path, filenames in album_folders.items():
-            if context.check_stop():
-                return result
-            if context.wait_if_paused():
-                return result
-
-            folder_name = os.path.basename(folder_path)
-            if context.report_progress:
-                context.report_progress(
-                    scanned=result.scanned, total=total,
-                    phase=f'Checking {result.scanned} / {total}',
-                    log_line=f'Album: {folder_name} ({len(filenames)} tracks)',
-                    log_type='info'
-                )
-
-            try:
-                folder_result = self._repair_album(
-                    folder_path, filenames, anomaly_threshold, context, scan_state
-                )
-                result.scanned += folder_result.scanned
-                result.auto_fixed += folder_result.auto_fixed
-                result.skipped += folder_result.skipped
-                result.errors += folder_result.errors
-                result.findings_created += folder_result.findings_created
-                if folder_result.findings_created > 0 and context.report_progress:
-                    context.report_progress(
-                        log_line=f'Found {folder_result.findings_created} issues in {folder_name}',
-                        log_type='skip'
+            for album_id in by_album:
+                try:
+                    resolve_tracklist(context.config_manager, conn, album_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "Canonical tracklist resolution failed for album %s: %s",
+                        album_id, exc,
                     )
-            except Exception as e:
-                logger.error("Error processing album folder %s: %s", folder_path, e, exc_info=True)
-                result.errors += 1
+                canonical_by_album[album_id] = [dict(row) for row in conn.execute(
+                    """SELECT id AS lib2_track_id, title AS name,
+                              track_number, COALESCE(disc_number, 1) AS disc_number
+                         FROM lib2_tracks WHERE album_id=?
+                     ORDER BY COALESCE(disc_number, 1), track_number, id""",
+                    (album_id,),
+                ).fetchall()]
+                edition_tracks, track_edition = _edition_tracklists(conn, album_id)
+                if edition_tracks:
+                    edition_tracks_by_album[album_id] = edition_tracks
+                    edition_of_track.update(track_edition)
+        finally:
+            conn.close()
 
-            if context.update_progress:
-                context.update_progress(result.scanned, total)
+        for album_id, album_subjects in by_album.items():
+            group_tracks = [
+                row for row in canonical_by_album.get(album_id, [])
+                if row.get("track_number") is not None
+            ]
+            editions = edition_tracks_by_album.get(album_id) or {}
+            if not group_tracks:
+                result.skipped += len(album_subjects)
+                continue
+            for subject in album_subjects:
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                result.scanned += 1
+                # dd28-18: with a standard + deluxe pressing in one release
+                # group, the union of both tracklists made disc_total count e.g.
+                # 28 instead of 12, so ``N/28`` was written into every file —
+                # and duplicate titles across editions let the title matcher
+                # pick an arbitrary edition's track number. With dry_run False
+                # that also renamed files: deterministic, unreviewed corruption
+                # over a whole class of albums. Judge each file against ITS
+                # edition, and refuse to guess when the edition is ambiguous.
+                api_tracks = _api_tracks_for_subject(
+                    subject, group_tracks, editions, edition_of_track,
+                )
+                if not api_tracks:
+                    result.skipped += 1
+                    continue
+                raw_path = str(subject.get("path") or "")
+                resolved = raw_path if os.path.isfile(raw_path) else resolve_lib2_path(
+                    raw_path, config_manager=context.config_manager,
+                )
+                if not resolved or not os.path.isfile(resolved):
+                    result.skipped += 1
+                    continue
+                try:
+                    finding = _check_single_track(
+                        resolved, os.path.basename(resolved), api_tracks, similarity,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Track-number inspection failed for %s: %s", raw_path, exc)
+                    result.errors += 1
+                    continue
+                if not finding:
+                    result.skipped += 1
+                    continue
+                details = dict(finding["details"])
+                details.update(subject_details(subject))
+                details.update({
+                    "track_id": f"lib2:{subject['track_id']}",
+                    "file_id": int(subject["file_id"]),
+                    "title": subject.get("title"),
+                    "artist": subject.get("artist_name"),
+                    "artist_id": subject.get("artist_id"),
+                    "album": subject.get("album_title"),
+                    "album_thumb_url": subject.get("album_image"),
+                    "artist_thumb_url": subject.get("artist_image"),
+                })
+                if dry_run:
+                    if context.create_finding:
+                        inserted = context.create_finding(
+                            job_id=self.job_id,
+                            finding_type="track_number_mismatch",
+                            severity="warning",
+                            entity_type="track",
+                            entity_id=f"lib2:{subject['track_id']}",
+                            file_path=raw_path,
+                            title=f"Track number mismatch: {subject.get('title') or 'Unknown'}",
+                            description=finding["description"],
+                            details=details,
+                        )
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
+                    continue
 
+                try:
+                    if not details.get("tag_ok", False):
+                        # iss29-E07: the rename is only correct if the tag write
+                        # actually landed. `save_audio_file` returns False when
+                        # its integrity check aborts the swap — the original is
+                        # left untouched and the tags are NOT written. Renaming
+                        # anyway produced a file called `07 - Song.flac` still
+                        # carrying TRCK 3, and `fix_finding` then resolved the
+                        # finding, so the scanner would never look at it again.
+                        if not _fix_track_number_tag(
+                            resolved,
+                            int(details["correct_track_num"]),
+                            int(details.get("total_tracks") or 0),
+                        ):
+                            logger.warning(
+                                "Track-number tag write aborted for %s — leaving the "
+                                "filename alone so the finding stays actionable",
+                                resolved,
+                            )
+                            result.errors += 1
+                            continue
+                    new_path = None
+                    new_filename = details.get("new_filename")
+                    if new_filename:
+                        # iss29-E08: distinguish "already named correctly" from
+                        # "refused to rename". Both used to arrive as None and
+                        # both were then counted as auto_fixed, so a collision
+                        # with an existing destination resolved the finding for
+                        # a file that still had the wrong name.
+                        from core.repair_jobs.track_number_repair import (
+                            rename_to_basename_result,
+                        )
+
+                        new_path, rename_error = rename_to_basename_result(
+                            resolved,
+                            os.path.basename(resolved),
+                            os.path.splitext(str(new_filename))[0],
+                        )
+                        if rename_error:
+                            logger.warning(
+                                "Track-number rename refused for %s: %s", resolved,
+                                rename_error,
+                            )
+                            result.errors += 1
+                            continue
+                    if new_path:
+                        # dd28-29: the rename already happened on disk. If the
+                        # separate DB write fails there is no rollback, so the
+                        # catalog keeps pointing at a path that no longer exists
+                        # and ``report_change`` is skipped too — nothing left to
+                        # reconcile it. Put the file back instead, so disk and
+                        # catalog stay in the one consistent state we still have.
+                        conn = context.db._get_connection()
+                        try:
+                            conn.execute(
+                                "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE id=?",
+                                (new_path, int(subject["file_id"])),
+                            )
+                            conn.commit()
+                        except Exception:
+                            try:
+                                os.replace(new_path, resolved)
+                                # iss29-E09: the rename carried the .lrc along,
+                                # so the rollback has to bring it back too —
+                                # otherwise the audio returns to its old name
+                                # and the lyrics stay orphaned at the new one,
+                                # where nothing looks for them.
+                                _restore_sidecar(new_path, resolved)
+                                logger.warning(
+                                    "Rolled back rename of %s: catalog update failed",
+                                    new_path,
+                                )
+                            except OSError as undo_exc:
+                                logger.error(
+                                    "Rename of %s could not be rolled back after a "
+                                    "failed catalog update: %s", new_path, undo_exc,
+                                )
+                            raise
+                        finally:
+                            conn.close()
+                    result.auto_fixed += 1
+                    if context.report_change:
+                        context.report_change(
+                            finding_type="track_number_mismatch",
+                            action="fixed_track_number",
+                            entity_type="track",
+                            entity_id=f"lib2:{subject['track_id']}",
+                            file_path=new_path or raw_path,
+                            details=details,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Native track-number repair failed for %s: %s", raw_path, exc)
+                    result.errors += 1
+                if context.update_progress:
+                    context.update_progress(result.scanned, total)
         return result
 
     def estimate_scope(self, context: JobContext) -> int:
-        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-        return len(filesystem_audio_files(
-            context, include_indexed=True, extensions=AUDIO_EXTENSIONS,
-        ))
+        return count_active_files(context.db, context.config_manager)
 
     def _get_settings(self, context: JobContext) -> dict:
         """Read job settings from config, falling back to defaults."""
@@ -1119,13 +1227,18 @@ def _rename_to_basename(file_path: str, filename: str, new_basename: str) -> Opt
 
 
 def _update_db_file_path(db, old_path: str, new_path: str):
-    """Update file_path in tracks table if this track is tracked."""
+    """Follow a renamed file in ``lib2_track_files``.
+
+    The path is the file row's identity, so a rename on disk that is not recorded
+    here leaves the catalogue pointing at a file that no longer exists.
+    """
     conn = None
     try:
         conn = db._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE file_path = ?",
+            "UPDATE lib2_track_files SET path = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE path = ?",
             (new_path, old_path)
         )
         if cursor.rowcount > 0:
@@ -1140,38 +1253,78 @@ def _update_db_file_path(db, old_path: str, new_path: str):
             conn.close()
 
 
+def _album_row_for_files(conn, file_track_data) -> Any:
+    """The lib2 album a folder's files belong to, or None.
+
+    Tries every file path exactly, then falls back to a suffix match on the first
+    one. The fallback is not cosmetic: a library indexed on one machine and scanned
+    from another has the same files under different absolute prefixes
+    (``/mnt/musicBackup/...`` vs ``H:\\Music\\...``), and without it the folder
+    scan silently loses every enrichment the catalogue could have contributed.
+    """
+    sql = """
+        SELECT al.id, al.title, al.image_url, al.external_ids, al.spotify_id,
+               al.musicbrainz_id, ar.id AS artist_id, ar.name AS artist_name,
+               ar.image_url AS artist_image
+          FROM lib2_track_files f
+          JOIN lib2_tracks t ON t.id = f.track_id
+          JOIN lib2_albums al ON al.id = t.album_id
+          LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+         WHERE f.path %s
+         LIMIT 1
+    """
+    for fpath, *_rest in file_track_data:
+        row = conn.execute(sql % "= ?", (fpath,)).fetchone()
+        if row:
+            return row
+    if file_track_data:
+        parts = str(file_track_data[0][0]).replace('\\', '/').split('/')
+        if len(parts) >= 2:
+            suffix = '/'.join(parts[-2:])
+            row = conn.execute(sql % "LIKE ?", (f'%{suffix}',)).fetchone()
+            if row:
+                return row
+    return None
+
+
 def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any, Any]],
                               context: JobContext) -> Optional[Tuple[str, str]]:
     """Return the album's pinned canonical ``(source, album_id)`` or None.
 
     #765: when the album this folder's files belong to has a canonical release
-    pinned (best-fit to the files), Track Number Repair uses it first so it
-    agrees with the Reorganizer. Resolves by matching a file path to its DB
-    track row. None when no DB, no match, columns absent, or unresolved."""
+    pinned (best-fit to the files), Track Number Repair uses it first so it agrees
+    with the Reorganizer.
+
+    lib2 records that pin as the album's DEFAULT release edition rather than a
+    ``canonical_source``/``canonical_album_id`` column pair — same idea, one level
+    down: the release group is the album, the edition is the concrete release the
+    files were matched to. Its provider id is what the tracklist fetch needs.
+    """
     if not context.db:
         return None
     conn = None
     try:
         conn = context.db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(albums)")
-        cols = {row[1] for row in cursor.fetchall()}
-        if 'canonical_source' not in cols or 'canonical_album_id' not in cols:
+        album = _album_row_for_files(conn, file_track_data)
+        if album is None:
             return None
-        for fpath, *_rest in file_track_data:
-            cursor.execute(
-                """
-                SELECT al.canonical_source, al.canonical_album_id
-                FROM tracks t
-                JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path = ?
-                LIMIT 1
-                """,
-                (fpath,),
-            )
-            row = cursor.fetchone()
-            if row and row[0] and row[1]:
-                return (str(row[0]), str(row[1]))
+        edition = conn.execute(
+            "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_release_editions "
+            "WHERE release_group_id = ? AND is_default = 1 LIMIT 1",
+            (album["id"],),
+        ).fetchone()
+        if edition is None:
+            return None
+        ids = parse_external_ids(edition["external_ids"])
+        if edition["spotify_id"]:
+            ids["spotify"] = str(edition["spotify_id"])
+        if edition["musicbrainz_id"]:
+            ids["musicbrainz"] = str(edition["musicbrainz_id"])
+        for source, _column in _SOURCE_ALBUM_ID_COLUMNS:
+            if ids.get(source):
+                return (source, str(ids[source]))
+        if ids.get("musicbrainz"):
+            return ("musicbrainz", str(ids["musicbrainz"]))
     except Exception as e:
         logger.debug("Error looking up canonical from DB: %s", e)
     finally:
@@ -1182,124 +1335,60 @@ def _lookup_canonical_from_db(file_track_data: List[Tuple[str, str, Any, Any]],
 
 def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any, Any]],
                               context: JobContext) -> Dict[str, Optional[str]]:
-    """Look up album IDs from the database using file paths.
+    """Provider album ids the catalogue already knows for this folder.
 
-    Checks if any of the files in this folder are tracked in the DB, and if so,
-    returns a mapping of metadata source -> album ID.
-    This avoids expensive file tag reads and API calls when the DB already knows.
+    Saves the expensive tag reads and API calls when lib2 can answer. Reads both
+    places lib2 keeps ids: the promoted Spotify/MusicBrainz columns and
+    ``external_ids``.
     """
     if not context.db:
         return {}
-
     conn = None
     try:
         conn = context.db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(albums)")
-        album_columns = {row[1] for row in cursor.fetchall()}
-
-        selected_sources = [
-            (source, column)
-            for source, column in _SOURCE_ALBUM_ID_COLUMNS
-            if column in album_columns
-        ]
-        if not selected_sources:
+        album = _album_row_for_files(conn, file_track_data)
+        if album is None:
             return {}
-
-        # Try each file path until we find one tracked in the DB
-        for fpath, *_rest in file_track_data:
-            select_cols = ", ".join(f"al.{column}" for _source, column in selected_sources)
-            cursor.execute(f"""
-                SELECT {select_cols}
-                FROM tracks t
-                JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path = ?
-                LIMIT 1
-            """, (fpath,))
-            row = cursor.fetchone()
-            if row:
-                return {
-                    source: str(row[idx])
-                    for idx, (source, _column) in enumerate(selected_sources)
-                    if row[idx]
-                }
-
+        ids = parse_external_ids(album["external_ids"])
+        if album["spotify_id"]:
+            ids["spotify"] = str(album["spotify_id"])
+        if album["musicbrainz_id"]:
+            ids["musicbrainz"] = str(album["musicbrainz_id"])
+        return {
+            source: str(ids[source])
+            for source, _column in _SOURCE_ALBUM_ID_COLUMNS
+            if ids.get(source)
+        }
     except Exception as e:
         logger.debug("Error looking up album IDs from DB: %s", e)
+        return {}
     finally:
         if conn:
             conn.close()
 
-    return {}
-
 
 def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
                              context: JobContext) -> Dict[str, Optional[str]]:
-    """Look up album/artist thumb URLs and names from DB for enriched finding details.
-
-    Uses suffix-based matching since DB paths may differ from local paths
-    (e.g., /mnt/musicBackup/... vs H:\\Music\\...).
-    """
+    """Album/artist artwork and names for an enriched finding card."""
     result = {'album_thumb_url': None, 'artist_thumb_url': None,
               'album_title': None, 'artist_name': None, 'artist_id': None}
     if not context.db:
         return result
-
     conn = None
     try:
         conn = context.db._get_connection()
-        cursor = conn.cursor()
-
-        # First try exact path match (fast)
-        for fpath, *_rest in file_track_data:
-            cursor.execute("""
-                SELECT al.thumb_url, ar.thumb_url, al.title, ar.name, ar.id
-                FROM tracks t
-                LEFT JOIN albums al ON al.id = t.album_id
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                WHERE t.file_path = ?
-                LIMIT 1
-            """, (fpath,))
-            row = cursor.fetchone()
-            if row:
-                result['album_thumb_url'] = row[0] or None
-                result['artist_thumb_url'] = row[1] or None
-                result['album_title'] = row[2] or None
-                result['artist_name'] = row[3] or None
-                result['artist_id'] = row[4]
-                return result
-
-        # Fallback: suffix-based matching (handles cross-environment path mismatches)
-        # Build suffix from the first file path (artist/album/filename)
-        if file_track_data:
-            fpath = file_track_data[0][0]
-            parts = fpath.replace('\\', '/').split('/')
-            # Try matching on last 2 components (album/filename) — most specific without artist
-            if len(parts) >= 2:
-                suffix = '/'.join(parts[-2:])
-                # Use LIKE with the suffix for cross-platform matching
-                cursor.execute("""
-                    SELECT al.thumb_url, ar.thumb_url, al.title, ar.name, ar.id
-                    FROM tracks t
-                    LEFT JOIN albums al ON al.id = t.album_id
-                    LEFT JOIN artists ar ON ar.id = t.artist_id
-                    WHERE t.file_path LIKE ?
-                    LIMIT 1
-                """, (f'%{suffix}',))
-                row = cursor.fetchone()
-                if row:
-                    result['album_thumb_url'] = row[0] or None
-                    result['artist_thumb_url'] = row[1] or None
-                    result['album_title'] = row[2] or None
-                    result['artist_name'] = row[3] or None
-                    result['artist_id'] = row[4]
-
+        album = _album_row_for_files(conn, file_track_data)
+        if album is not None:
+            result['album_thumb_url'] = album["image_url"] or None
+            result['artist_thumb_url'] = album["artist_image"] or None
+            result['album_title'] = album["title"] or None
+            result['artist_name'] = album["artist_name"] or None
+            result['artist_id'] = album["artist_id"]
     except Exception as e:
         logger.debug("Error looking up album/artist art from DB: %s", e)
     finally:
         if conn:
             conn.close()
-
     return result
 
 
@@ -1501,3 +1590,97 @@ def _get_musicbrainz_id_via_audiodb(artist_name: str, album_name: str,
     except Exception as e:
         logger.debug("AudioDB lookup failed for '%s - %s': %s", artist_name, album_name, e)
     return None
+
+
+_CARRIED_SIDECAR_EXTS = ('.lrc',)
+
+
+def _restore_sidecar(moved_audio: str, original_audio: str) -> None:
+    """Undo the sidecar half of a renamed track.
+
+    ``_rename_to_basename`` renames the ``.lrc`` alongside the audio, but the
+    dd28-29 rollback only put the audio back — leaving the lyrics stranded under
+    the new stem, where nothing looks for them, and the track showing no lyrics
+    despite the file being right there. Best-effort: a rollback must never raise
+    a second failure on top of the first.
+    """
+    moved_stem = os.path.splitext(moved_audio)[0]
+    original_stem = os.path.splitext(original_audio)[0]
+    for ext in _CARRIED_SIDECAR_EXTS:
+        moved_sidecar = moved_stem + ext
+        original_sidecar = original_stem + ext
+        if not os.path.isfile(moved_sidecar) or os.path.exists(original_sidecar):
+            continue
+        try:
+            os.replace(moved_sidecar, original_sidecar)
+        except OSError as exc:  # noqa: BLE001
+            logger.warning(
+                "Could not roll back sidecar %s → %s: %s",
+                moved_sidecar, original_sidecar, exc,
+            )
+
+
+def _edition_tracklists(
+    conn: Any, album_id: int,
+) -> tuple[Dict[int, list[Dict[str, Any]]], Dict[int, list[int]]]:
+    """Per-edition tracklists for one release group, plus a track→editions map.
+
+    dd28-18: ``lib2_albums`` is the release *group*; the concrete numbering of a
+    given pressing lives in ``lib2_release_tracks``. Returns ``({}, {})`` when
+    the album has no edition rows yet, so callers fall back to the group view
+    (which is correct for a single-edition album).
+    """
+    rows = conn.execute(
+        """SELECT rt.release_edition_id AS edition_id,
+                  rt.track_id AS lib2_track_id,
+                  COALESCE(rt.title_override, t.title) AS name,
+                  rt.track_number,
+                  COALESCE(rt.disc_number, 1) AS disc_number
+             FROM lib2_release_tracks rt
+             JOIN lib2_release_editions e ON e.id = rt.release_edition_id
+             LEFT JOIN lib2_tracks t ON t.id = rt.track_id
+            WHERE e.release_group_id = ? AND rt.track_id IS NOT NULL
+            ORDER BY rt.release_edition_id, COALESCE(rt.disc_number, 1),
+                     rt.track_number, rt.id""",
+        (int(album_id),),
+    ).fetchall()
+    by_edition: Dict[int, list[Dict[str, Any]]] = {}
+    of_track: Dict[int, list[int]] = {}
+    for row in rows:
+        entry = dict(row)
+        edition_id = int(entry.pop("edition_id"))
+        if entry.get("track_number") is None:
+            continue
+        by_edition.setdefault(edition_id, []).append(entry)
+        of_track.setdefault(int(entry["lib2_track_id"]), []).append(edition_id)
+    return by_edition, of_track
+
+
+def _api_tracks_for_subject(
+    subject: Dict[str, Any],
+    group_tracks: list[Dict[str, Any]],
+    editions: Dict[int, list[Dict[str, Any]]],
+    edition_of_track: Dict[int, list[int]],
+) -> list[Dict[str, Any]]:
+    """The tracklist a single file must be judged against (dd28-18).
+
+    With one edition (or none recorded) the release group's own list is the
+    right answer and behaviour is unchanged. With several, the file is judged
+    against the edition it actually belongs to — and if that cannot be
+    determined unambiguously, against nothing at all: writing a plausible-
+    looking wrong track number is worse than reporting no finding.
+    """
+    if len(editions) <= 1:
+        return group_tracks
+    try:
+        track_id = int(subject["track_id"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    owning = edition_of_track.get(track_id) or []
+    if len(owning) != 1:
+        logger.debug(
+            "Skipping track %s: it maps to %d editions of a multi-edition release",
+            track_id, len(owning),
+        )
+        return []
+    return editions.get(owning[0]) or []

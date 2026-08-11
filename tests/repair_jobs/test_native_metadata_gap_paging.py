@@ -2,7 +2,7 @@ import sqlite3
 from types import SimpleNamespace
 
 from core.repair_jobs.base import JobContext
-from core.repair_jobs.native_p3 import NativeMetadataGapFillerJob
+from core.repair_jobs.metadata_gap_filler import MetadataGapFillerJob
 
 
 def test_metadata_gap_filler_reaches_subjects_after_500(monkeypatch):
@@ -17,7 +17,7 @@ def test_metadata_gap_filler_reaches_subjects_after_500(monkeypatch):
         for track_id in range(1, 1002)
     ]
     monkeypatch.setattr(
-        "core.repair_jobs.native_p3.active_file_subjects",
+        "core.repair_jobs.metadata_gap_filler.active_file_subjects",
         lambda _db, _config: subjects,
     )
     progress = []
@@ -32,7 +32,7 @@ def test_metadata_gap_filler_reaches_subjects_after_500(monkeypatch):
         config_manager=SimpleNamespace(get=lambda _key, default=None: default),
         update_progress=lambda done, total: progress.append((done, total)),
     )
-    job = NativeMetadataGapFillerJob()
+    job = MetadataGapFillerJob()
 
     results = [job.scan(context) for _ in range(3)]
 
