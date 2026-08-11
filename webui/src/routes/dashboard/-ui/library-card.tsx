@@ -264,7 +264,7 @@ function SettingsLink() {
   return (
     <span
       className="link"
-      onClick={() => void window.SoulSyncWebRouter?.navigateToPage('settings')}
+      onClick={() => void window.navigateToPage?.('settings')}
     >
       Settings
     </span>

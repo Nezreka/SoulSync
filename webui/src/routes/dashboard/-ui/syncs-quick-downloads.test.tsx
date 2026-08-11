@@ -33,7 +33,7 @@ afterEach(() => {
   delete window.showLoginScreen;
   delete window.showLaunchPinScreen;
   delete window.openAutoSyncScheduleModal;
-  delete window.SoulSyncWebRouter;
+  delete window.navigateToPage;
   delete window.checkForActiveProcesses;
   delete window.updateDashboardDownloads;
 });
@@ -179,7 +179,7 @@ describe('Quick Actions', () => {
     const openAutoSyncScheduleModal = vi.fn();
     const navigateToPage = vi.fn(() => Promise.resolve(true));
     window.openAutoSyncScheduleModal = openAutoSyncScheduleModal;
-    window.SoulSyncWebRouter = { navigateToPage } as never;
+    window.navigateToPage = navigateToPage as never;
     const view = await mount(<QuickActionsCard />);
     fireEvent.click(view.container.querySelector('.qa-tile--sync')!);
     fireEvent.click(view.container.querySelector('.qa-tile--tools')!);

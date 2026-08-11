@@ -49,7 +49,7 @@ export function ListenBand() {
         <button
           type="button"
           className="listen-tile"
-          onClick={() => void window.SoulSyncWebRouter?.navigateToPage('discover')}
+          onClick={() => void window.navigateToPage?.('discover')}
         >
           <span className="listen-tile-title">Your Mixes</span>
           <span className="listen-tile-sub">

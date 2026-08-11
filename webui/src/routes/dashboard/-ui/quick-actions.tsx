@@ -94,7 +94,7 @@ export function QuickActionsCard() {
         <button
           className="qa-tile qa-tile--minor qa-tile--tools"
           aria-label="Open Tools"
-          onClick={() => void window.SoulSyncWebRouter?.navigateToPage('tools')}
+          onClick={() => void window.navigateToPage?.('tools')}
         >
           <div className="qa-tile__bg" aria-hidden="true">
             <div className="qa-tile__gear">
@@ -140,7 +140,7 @@ export function QuickActionsCard() {
         <button
           className="qa-tile qa-tile--minor qa-tile--auto"
           aria-label="Open Automations"
-          onClick={() => void window.SoulSyncWebRouter?.navigateToPage('automations')}
+          onClick={() => void window.navigateToPage?.('automations')}
         >
           <div className="qa-tile__bg" aria-hidden="true">
             <div className="qa-tile__flow">

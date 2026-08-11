@@ -551,7 +551,7 @@ export function DashboardHeader() {
           className="header-button watchlist-button"
           id="watchlist-button"
           title={watchlist.title}
-          onClick={() => void window.SoulSyncWebRouter?.navigateToPage('watchlist')}
+          onClick={() => void window.navigateToPage?.('watchlist')}
         >
           <span className="hero-btn-icon">👁️</span>
           <span className="hero-btn-label">Watchlist</span>
@@ -571,7 +571,7 @@ export function DashboardHeader() {
             // (openWishlistFromHero) — it needs activeDownloadProcesses /
             // WishlistModalState / rehydrateModal, all script-scoped.
             if (window.openWishlistFromHero) void window.openWishlistFromHero();
-            else void window.SoulSyncWebRouter?.navigateToPage('wishlist');
+            else void window.navigateToPage?.('wishlist');
           }}
         >
           <span className="hero-btn-icon">🎵</span>

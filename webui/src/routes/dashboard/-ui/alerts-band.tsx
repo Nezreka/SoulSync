@@ -46,7 +46,7 @@ export function AlertsBand() {
           <button
             type="button"
             className="dash-alert-action"
-            onClick={() => void window.SoulSyncWebRouter?.navigateToPage('settings')}
+            onClick={() => void window.navigateToPage?.('settings')}
           >
             Open Settings
           </button>

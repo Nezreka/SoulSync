@@ -13,22 +13,27 @@
  * exactly like the card's progress indicator. React renders it hidden and never
  * touches it again.
  *
- * DECLARED DIVERGENCE: the vanilla's footer is assembled from three
- * typeof-guarded optional globals (playlistOrganizeToggleHtml,
- * playlistModalDownloadSyncFooterHtml, loadPlaylistOrganizePreferenceIntoModal,
- * 1938-1956). Those live in wishlist-tools and return HTML STRINGS; a React
- * tree cannot host them without dangerouslySetInnerHTML, which this port does
- * not use anywhere. The port renders the vanilla's own DOCUMENTED FALLBACK —
- * the single '📥 Download Missing Tracks' button — which is what the page shows
- * whenever those globals are absent. The quality-profile/organize toggle is
- * deferred with the same reasoning already recorded for the mirrored card and
- * the discovery-modal footer.
+ * DECLARED DIVERGENCE (narrowed): the vanilla's footer is assembled from
+ * typeof-guarded optional globals returning HTML strings
+ * (playlistOrganizeToggleHtml, playlistModalDownloadSyncFooterHtml,
+ * loadPlaylistOrganizePreferenceIntoModal, 1938-1956), which a React tree
+ * cannot host. The port originally rendered only the documented fallback (the
+ * '📥 Download Missing Tracks' button) — which LOST the Sync button (Boulder's
+ * report). The sync half of the footer is now re-rendered natively: the
+ * sync-mode <select id="sync-mode-<id>"> (startPlaylistSync reads that exact
+ * id, downloads.js:3848, so mode selection works unchanged) and the
+ * <button id="sync-btn-<id>"> the ENGINE mutates imperatively while syncing
+ * (adopted-region idiom, like the sync-status block above). Only the
+ * quality-profile/organize toggle remains deferred. In standalone mode the
+ * vanilla renders no sync footer at all (shared-helpers.js:1698) — same here
+ * via useStandalone.
  */
 
 import type { AccountPlaylistRow } from '../-sync.accounts';
 import type { AccountPlaylistTracks } from '../-sync.api';
 
 import { formatDuration } from '../-sync.core';
+import { useStandalone } from '../-sync.use-standalone';
 
 /** formatArtists' contract, as the vanilla feeds it (1927). */
 function formatArtists(artists: unknown): string {
@@ -57,6 +62,9 @@ export interface AccountDetailsModalProps {
   /** ARL closes the modal FIRST (2639); Spotify does not (1948). */
   closeBeforeDownload: boolean;
   onDownloadMissing: () => void;
+  /** Start THIS playlist's sync (the engine's startPlaylistSync, which reads
+   *  the sync-mode select rendered beside the button). */
+  onSync: () => void;
 }
 
 export function AccountDetailsModal({
@@ -68,7 +76,10 @@ export function AccountDetailsModal({
   onClose,
   closeBeforeDownload,
   onDownloadMissing,
+  onSync,
 }: AccountDetailsModalProps) {
+  const standalone = useStandalone();
+  const syncing = Boolean(window.isPlaylistSyncing?.(playlistId));
   const tracks = detail.tracks ?? [];
   // ARL tolerates a missing owner (2593); Spotify prints the row's (1902).
   const owner = detail.owner ?? row.owner ?? '';
@@ -157,6 +168,32 @@ export function AccountDetailsModal({
             >
               📥 Download Missing Tracks
             </button>
+            {!standalone ? (
+              <>
+                <select
+                  id={`sync-mode-${playlistId}`}
+                  className="playlist-modal-sync-mode"
+                  defaultValue=""
+                  title="Default uses your Settings > Playlist sync mode. Replace overwrites the server playlist; Reconcile edits it in place (keeps custom image/description); Append only adds new tracks."
+                >
+                  <option value="">Sync mode: default</option>
+                  <option value="replace">Replace</option>
+                  <option value="reconcile">Reconcile (keep image/desc)</option>
+                  <option value="append">Append only</option>
+                </select>
+                {/* ADOPTED: the engine rewrites this button's disabled/text
+                    while the sync runs (downloads.js:3873-3877). */}
+                <button
+                  type="button"
+                  id={`sync-btn-${playlistId}`}
+                  className="playlist-modal-btn playlist-modal-btn-primary"
+                  disabled={syncing}
+                  onClick={onSync}
+                >
+                  {syncing ? '⏳ Syncing...' : 'Sync Playlist'}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>

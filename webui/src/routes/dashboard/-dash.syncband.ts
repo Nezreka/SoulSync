@@ -56,6 +56,9 @@ export function syncBandRows(
   historyViews: SyncCardView[],
 ): SyncBandRow[] {
   const used = new Set<number>();
+  // rowKey -> the claimed history index. History arrives newest-first, so
+  // this doubles as the recency rank the final sort uses.
+  const recency = new Map<string, number>();
 
   const rows: SyncBandRow[] = scheduleRows.map((sr) => {
     // History arrives newest-first — the first unclaimed name match is this
@@ -64,12 +67,14 @@ export function syncBandRows(
     // manual bucket via the seen-set below.
     const idx = historyViews.findIndex((v, i) => !used.has(i) && norm(v.name) === norm(sr.name));
     let last: SyncCardView | null = null;
+    const rowKey = `s-${sr.key}-${sr.automationId}`;
     if (idx >= 0) {
       used.add(idx);
       last = historyViews[idx];
+      recency.set(rowKey, idx);
     }
     return {
-      rowKey: `s-${sr.key}-${sr.automationId}`,
+      rowKey,
       kind: 'scheduled' as const,
       name: sr.name,
       schedule: sr,
@@ -91,8 +96,10 @@ export function syncBandRows(
     // tab keeps the full log.
     if (seen.has(key)) return;
     seen.add(key);
+    const rowKey = `m-${v.id ?? `i${i}`}`;
+    recency.set(rowKey, i);
     rows.push({
-      rowKey: `m-${v.id ?? `i${i}`}`,
+      rowKey,
       kind: 'manual',
       name: v.name,
       schedule: null,
@@ -105,14 +112,11 @@ export function syncBandRows(
     });
   });
 
-  // Running rows lead; then scheduled in the board's urgency order (already
-  // sorted by -dash.autosync); manual rows trail in recency order (history
-  // order). A stable sort keeps within-group order intact.
-  const rank = (r: SyncBandRow) => {
-    if (r.schedule?.running) return 0;
-    if (r.kind === 'scheduled') return 1;
-    return 2;
-  };
+  // Running rows lead; then EVERYTHING by newest run first (Boulder: the
+  // newest syncs belong at the top) — scheduled and manual interleaved by
+  // their claimed history index; schedules that never ran trail in the
+  // board's urgency order. A stable sort keeps within-group order intact.
+  const rank = (r: SyncBandRow) => (r.schedule?.running ? -1 : (recency.get(r.rowKey) ?? Infinity));
   return rows
     .map((r, i) => ({ r, i }))
     .sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i)

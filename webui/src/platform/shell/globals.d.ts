@@ -542,6 +542,15 @@ declare global {
       openAddToWishlistAlbum: (input: WishlistAlbumWorkflowInput) => void | Promise<void>;
       notify?: (message: string, type?: string) => void;
     };
+    /** init.js:3256 — THE cross-page navigation entry: permission guard,
+     *  sidebar chrome (setActivePageChrome), currentPage bookkeeping, then
+     *  the router. React components navigating BETWEEN pages must call
+     *  this, not the raw SoulSyncWebRouter bridge below — the bridge moves
+     *  the URL but leaves the sidebar marking the old page. */
+    navigateToPage?: (
+      pageId: string,
+      options?: Record<string, unknown>,
+    ) => boolean | Promise<boolean> | void;
     SoulSyncWebRouter?: {
       routeManifest: ShellRouteDefinition[];
       getCurrentPath: () => string;

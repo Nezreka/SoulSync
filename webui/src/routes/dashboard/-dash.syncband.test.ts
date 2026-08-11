@@ -76,20 +76,31 @@ describe('syncBandRows', () => {
     expect(rows[0].coverage).toEqual({ inLibrary: 41, total: 50, pct: 82 });
   });
 
-  it('running rows lead, then scheduled in board order, then manual by recency', () => {
+  it('running leads, then newest run first across kinds, never-run schedules last', () => {
     const rows = syncBandRows(
       [
-        sched({ key: '1', automationId: 1, name: 'A idle' }),
+        sched({ key: '1', automationId: 1, name: 'A idle' }), // no runs yet
         sched({
           key: '2',
           automationId: 2,
           name: 'B live',
           running: { phase: 'Syncing...', progress: 40 },
         }),
+        sched({ key: '3', automationId: 3, name: 'C synced' }), // claims history idx 1
       ],
-      [view({ id: 10, name: 'Zed Manual' }), view({ id: 11, name: 'Ann Manual' })],
+      [
+        view({ id: 10, name: 'Zed Manual' }), // newest run of all
+        view({ id: 12, name: 'C synced' }),
+        view({ id: 11, name: 'Ann Manual' }),
+      ],
     );
-    expect(rows.map((r) => r.name)).toEqual(['B live', 'A idle', 'Zed Manual', 'Ann Manual']);
+    expect(rows.map((r) => r.name)).toEqual([
+      'B live', // running always leads
+      'Zed Manual', // newest run
+      'C synced', // scheduled, second-newest run — interleaved with manuals
+      'Ann Manual',
+      'A idle', // never ran — trails
+    ]);
   });
 
   it('a twin schedule (hourly + weekly) claims one run each without duplicating manuals', () => {

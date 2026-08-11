@@ -194,6 +194,7 @@ export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: Accoun
           onClose={() => setOpen(null)}
           closeBeforeDownload={false}
           onDownloadMissing={() => void window.openDownloadMissingModal?.(String(open.row.id))}
+          onSync={() => void window.startPlaylistSync?.(String(open.row.id))}
         />
       )}
     </div>
@@ -323,6 +324,13 @@ export function DeezerArlTab() {
             // and the count taken from the FETCHED tracks.
             window.registerSyncAccountPlaylist?.(arlShimRow(open.row, 'modal', open.detail.tracks));
             void window.openDownloadMissingModal?.(deezerArlId(open.row.id));
+          }}
+          onSync={() => {
+            // Same shim before the sync — the engine looks the prefixed id up
+            // in its registered rows (downloads.js:3858), which the React tab
+            // never auto-seeds the way the vanilla loader did.
+            window.registerSyncAccountPlaylist?.(arlShimRow(open.row, 'modal', open.detail.tracks));
+            void window.startPlaylistSync?.(deezerArlId(open.row.id));
           }}
         />
       )}
