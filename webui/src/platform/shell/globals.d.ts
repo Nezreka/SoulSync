@@ -542,6 +542,12 @@ declare global {
       openAddToWishlistAlbum: (input: WishlistAlbumWorkflowInput) => void | Promise<void>;
       notify?: (message: string, type?: string) => void;
     };
+    /** init.js — the performance switches' appliers, the exact functions the
+     *  Settings checkboxes call (body classes + canvas loops + localStorage).
+     *  The dashboard's quick-settings strip reuses them so both surfaces stay
+     *  in perfect agreement. Max performance overrides Reduce effects. */
+    applyReduceEffects?: (enabled: boolean) => void;
+    applyMaxPerformance?: (enabled: boolean) => void;
     /** init.js:3256 — THE cross-page navigation entry: permission guard,
      *  sidebar chrome (setActivePageChrome), currentPage bookkeeping, then
      *  the router. React components navigating BETWEEN pages must call

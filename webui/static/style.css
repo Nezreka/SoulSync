@@ -66005,10 +66005,196 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 }
 
 /* ── The Sync band (data-card="sync") — Auto Sync + Recent Syncs merged:
-   one full-width section, one row per playlist. Art carries the color,
-   columns carry the story: schedule → last result → ownership → next. ── */
+   one row per playlist, sharing its grid row with the Automations card.
+   Art carries the color, columns carry the story: schedule → last
+   result → ownership → next. ── */
 .dash-card[data-card="sync"] {
-    grid-column: 1 / -1;
+    grid-column: span 2;
+}
+
+/* ── The Automations card (data-card="automations") — the engine's
+   live/upcoming view beside the Sync band, plus the quick-settings
+   strip. Same quiet-chrome row language. ── */
+.dash-card[data-card="automations"] .dash-card__head {
+    position: relative;
+}
+.dash-autom-rows {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    min-height: 0;
+    max-height: 500px;
+    padding: 2px;
+}
+.dash-autom-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.dash-autom-row:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.10);
+}
+.dash-autom-row--off {
+    opacity: 0.55;
+}
+.dash-autom-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.25);
+}
+.dash-autom-dot--ok {
+    background: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.45);
+}
+.dash-autom-dot--err {
+    background: #f87171;
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.45);
+}
+.dash-autom-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.dash-autom-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dash-autom-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.dash-autom-last {
+    color: rgba(52, 211, 153, 0.7);
+}
+.dash-autom-last--bad {
+    color: rgba(248, 113, 113, 0.85);
+}
+.dash-autom-when {
+    flex-shrink: 0;
+    text-align: right;
+}
+.dash-autom-next {
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--accent-light-rgb));
+}
+.dash-autom-paused {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.dash-autom-run {
+    flex-shrink: 0;
+    padding: 4px 11px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.dash-autom-row:hover .dash-autom-run {
+    opacity: 1;
+}
+.dash-autom-run:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+}
+.dash-autom-run:disabled {
+    cursor: not-allowed;
+}
+@media (hover: none) {
+    .dash-autom-run { opacity: 0.7; }
+}
+/* The quick-settings strip — pill switches on a hairline shelf. */
+.dash-quick-settings {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.dash-quick-settings-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(255, 255, 255, 0.4);
+    margin-right: 2px;
+}
+.dash-qs-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px 4px 5px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.dash-qs-knob {
+    width: 22px;
+    height: 13px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    position: relative;
+    transition: background 0.15s ease;
+}
+.dash-qs-knob::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.6);
+    transition: transform 0.18s ease, background 0.18s ease;
+}
+.dash-qs-toggle--on {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgba(255, 255, 255, 0.9);
+}
+.dash-qs-toggle--on .dash-qs-knob {
+    background: rgba(var(--accent-rgb), 0.5);
+}
+.dash-qs-toggle--on .dash-qs-knob::after {
+    transform: translateX(9px);
+    background: #fff;
+}
+.dash-qs-toggle:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 .dash-card[data-card="sync"] .dash-card__head {
     position: relative;
@@ -68641,8 +68827,12 @@ body.max-performance .dash-card::after {
     }
     .dash-card--wide,
     .dash-card--full,
-    .dash-card[data-card="sync"] {
+    .dash-card[data-card="sync"],
+    .dash-card[data-card="automations"] {
         grid-column: auto;
+    }
+    .dash-autom-rows {
+        max-height: 320px;
     }
     .dash-card--strip {
         padding: 12px 16px;

@@ -52,6 +52,7 @@ describe('the page shell', () => {
       'library',
       'listen',
       'sync',
+      'automations',
       'active-downloads',
     ]);
 

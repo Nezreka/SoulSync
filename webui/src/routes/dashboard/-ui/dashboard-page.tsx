@@ -21,6 +21,7 @@ import { useEffect } from 'react';
 
 import { ActiveDownloadsShell } from './active-downloads-shell';
 import { AlertsBand } from './alerts-band';
+import { AutomationsCard } from './automations-card';
 import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
@@ -61,6 +62,9 @@ export function DashboardPage() {
             the notification tray with 3.2.0, Recent Activity to the tray,
             Quick Actions back to the sidebar. */}
         <SyncBand />
+        {/* Beside it: the rest of the engine — every automation that ISN'T a
+            playlist pipeline, plus the quick performance switches. */}
+        <AutomationsCard />
         <ActiveDownloadsShell />
       </div>
     </div>

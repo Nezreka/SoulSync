@@ -144,10 +144,22 @@ export const AUTOSYNC_SOURCE_LOGOS: Record<string, string> = {
   soulsync_discovery: '/static/favicon.png',
 };
 
+/** The automations table stamps next_run as UTC 'YYYY-MM-DD HH:MM:SS'
+ *  (automation_engine strptime + tzinfo=utc) — but Date.parse reads that
+ *  format as LOCAL time, skewing every countdown by the viewer's UTC
+ *  offset. Tag bare db stamps as UTC before parsing; ISO strings with
+ *  timezone info pass through untouched. */
+export function parseDbUtc(stamp: string): number {
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp)) {
+    return Date.parse(stamp.replace(' ', 'T') + 'Z');
+  }
+  return Date.parse(stamp);
+}
+
 /** "in 12m" / "in 3h" / "in 2d" / "due now"; null when absent or unparseable. */
 export function nextRunText(nextRun: string | null | undefined, nowMs: number): string | null {
   if (!nextRun) return null;
-  const t = Date.parse(nextRun);
+  const t = parseDbUtc(nextRun);
   if (!Number.isFinite(t)) return null;
   const diffMin = Math.floor((t - nowMs) / 60000);
   if (diffMin <= 0) return 'due now';
