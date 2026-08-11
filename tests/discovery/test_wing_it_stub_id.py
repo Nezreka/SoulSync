@@ -18,7 +18,14 @@ from pathlib import Path
 
 import pytest
 
-from core.discovery.wing_it import STUB_ID_PREFIX, is_stub_id, stub_track_id
+from core.discovery.wing_it import (
+    STUB_ID_PREFIX,
+    is_stub_id,
+    should_wishlist_stub,
+    stub_is_searchable,
+    stub_track_id,
+    wishlist_guesses_enabled,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -129,3 +136,63 @@ def test_is_stub_id_accepts_both_schemes(value):
 ])
 def test_is_stub_id_rejects_everything_else(value):
     assert is_stub_id(value) is False
+
+
+# ── the wishlist gate ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("artist,track", [
+    ("Yorushika", "Ghost in a Flower"),
+    ("Ado", "可愛くてごめん"),
+    ("A", "B"),
+])
+def test_searchable_when_both_fields_are_real(artist, track):
+    assert stub_is_searchable(artist, track) is True
+
+
+@pytest.mark.parametrize("artist,track", [
+    ("Unknown Artist", "Ghost in a Flower"),   # the case the original rule meant
+    ("Yorushika", "unknown track"),
+    ("  UNKNOWN   ARTIST  ", "Real Title"),    # case- and whitespace-insensitive
+    ("Various Artists", "Real Title"),
+    ("", "Real Title"),
+    (None, "Real Title"),
+    ("Real Artist", ""),
+    ("-", "Real Title"),
+])
+def test_not_searchable_when_a_field_is_a_placeholder(artist, track):
+    assert stub_is_searchable(artist, track) is False
+
+
+class _Cfg:
+    def __init__(self, value):
+        self.value = value
+
+    def get(self, key, default=None):
+        return self.value if key == "wishlist.wing_it_guesses" else default
+
+
+def test_wishlist_gate_is_off_by_default(monkeypatch):
+    import core.settings as cs
+    monkeypatch.setattr(cs, "config_manager", _Cfg(False))
+    assert wishlist_guesses_enabled() is False
+    assert should_wishlist_stub("Yorushika", "Ghost in a Flower") is False
+
+
+def test_wishlist_gate_lets_real_metadata_through_when_on(monkeypatch):
+    import core.settings as cs
+    monkeypatch.setattr(cs, "config_manager", _Cfg(True))
+    assert wishlist_guesses_enabled() is True
+    assert should_wishlist_stub("Yorushika", "Ghost in a Flower") is True
+    # ...but a nameless stub stays out even then.
+    assert should_wishlist_stub("Unknown Artist", "Ghost in a Flower") is False
+
+
+def test_wishlist_gate_fails_closed_without_a_config_manager(monkeypatch):
+    import core.settings as cs
+
+    class _Broken:
+        def get(self, *a, **k):
+            raise RuntimeError("no config")
+
+    monkeypatch.setattr(cs, "config_manager", _Broken())
+    assert wishlist_guesses_enabled() is False

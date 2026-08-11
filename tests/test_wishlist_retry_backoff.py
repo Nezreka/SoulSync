@@ -117,7 +117,7 @@ def test_record_failed_attempt_guards(tmp_path):
 
     db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
     svc = _ForwardingService(db)
-    assert record_failed_attempt(svc, {'id': 'wing_it_x'}, 'e', 1) is False   # wing-it skip
+    assert record_failed_attempt(svc, {'id': 'wing_it_x'}, 'e', 1) is False   # not on the wishlist
     assert record_failed_attempt(svc, {}, 'e', 1) is False                    # no id
     assert record_failed_attempt(svc, None, 'e', 1) is False                  # bad shape
     assert record_failed_attempt(svc, {'id': 'unknown'}, 'e', 1) is False     # no row → no-op
@@ -168,3 +168,29 @@ def test_ignore_ttl_reads_config(monkeypatch):
     assert ig.configured_ttl_days() == 30           # fallback
     monkeypatch.setattr(cs, 'config_manager', _Cfg(0))
     assert ig.configured_ttl_days() == 1            # floor
+
+
+def test_wing_it_track_on_the_wishlist_accrues_backoff(tmp_path):
+    """A Wing It stub that reached the wishlist must be stamped like any other.
+
+    It could not be, before wishlist.wing_it_guesses existed, because a stub was
+    never on the wishlist to stamp — record_failed_attempt returned early on the
+    id prefix. If that early return survived the setting, retry_count would stay
+    0 forever and retry_backoff would never escalate the track, burning a fresh
+    search every cycle on something that has failed for months."""
+    from database.music_database import MusicDatabase
+    from core.wishlist.processing import record_failed_attempt
+    from core.wishlist.retry_backoff import cooldown_seconds
+
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db, sp_id='wing_it_e6e3736d43fb')
+    svc = _ForwardingService(db)
+
+    for _ in range(4):
+        assert record_failed_attempt(
+            svc, {'id': 'wing_it_e6e3736d43fb'}, 'Not found', 1) is True
+
+    row = db.get_wishlist_tracks()[0]
+    assert row['retry_count'] == 4
+    # 4 failures earns the top cooldown tier, so it stops being retried hourly.
+    assert cooldown_seconds(row['retry_count']) == 7 * 24 * 3600

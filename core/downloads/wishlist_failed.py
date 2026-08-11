@@ -9,6 +9,7 @@ in web_server.py.
 from utils.logging_config import get_logger
 import time
 
+from core.discovery.wing_it import is_stub_id, should_wishlist_stub
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -121,12 +122,17 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                     try:
                         track_name = failed_track_info.get('track_name', f'Track {i+1}')
 
-                        # Skip wing-it fallback tracks — they had no real metadata match,
-                        # so adding them to wishlist would just retry with the same raw data.
+                        # Wing-it stubs had no catalogue match, so re-adding them just
+                        # retries the same raw data — unless wishlist.wing_it_guesses is
+                        # on, which is exactly the choice to search the guess anyway.
                         # Check the track ID prefix since the wishlist payload helper overwrites source.
                         track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
                         sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
-                        if str(sp_id).startswith('wing_it_'):
+                        _artists = track_data.get('artists') if isinstance(track_data, dict) else None
+                        _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
+                        if isinstance(_artist, dict):
+                            _artist = _artist.get('name')
+                        if is_stub_id(sp_id) and not should_wishlist_stub(_artist, track_name):
                             wing_it_skipped += 1
                             logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                             continue
