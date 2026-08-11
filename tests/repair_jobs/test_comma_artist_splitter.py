@@ -404,10 +404,20 @@ def test_fix_already_multivalue_counts_as_stale(tmp_path):
 
 
 def test_fix_no_tracks_resolves_as_already_gone(tmp_path):
+    """No list in the finding AND nothing in the DB -> the files are gone, and
+    that is a resolution, not an error.
+
+    Only success resolves a finding (fix_finding gates resolve_finding on
+    result['success']), so #1081's error return here left findings for deleted
+    files permanently stuck: Fix errored with "re-run the scan", and a rescan
+    cannot find files that no longer exist. This test's NAME described the
+    pre-#1081 contract all along — the PR flipped its body to expect the error;
+    the fix on dev restored the behaviour the name promises.
+    """
     db = _db(tmp_path)
     result = _worker(db, tmp_path)._fix_comma_artist_split('artist', 'DUMMY', None, _details())
-    assert result['success'] is False
-    assert 'no file list' in result['error']
+    assert result['success'] is True
+    assert result['action'] == 'already_gone'
 
 
 def test_fix_rejects_finding_without_parts(tmp_path):

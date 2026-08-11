@@ -1165,7 +1165,16 @@ class RepairWorker:
         if not files:
             files = self._comma_split_files_from_db(entity_id, details)
         if not files:
-            return {'success': False, 'error': 'Finding has no file list; re-run the scan to refresh it'}
+            # No list in the finding AND the DB fallback found nothing under
+            # this artist: the files are gone, so there is nothing left to
+            # split. This must stay a SUCCESS — only success resolves the
+            # finding (fix_finding checks result['success'] before calling
+            # resolve_finding), so returning an error here left a finding for
+            # deleted files permanently stuck: the Fix button errored with
+            # "re-run the scan", and a rescan is exactly the thing that can't
+            # find files that no longer exist. Restores the pre-#1081 return.
+            return {'success': True, 'action': 'already_gone',
+                    'message': 'No files under this artist anymore'}
 
         from mutagen import File as MutagenFile
         from mutagen.id3 import ID3, TPE1, TPE2, TXXX

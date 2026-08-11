@@ -26,6 +26,7 @@ Supported separators: comma (,), semicolon (;), ampersand (&), forward slash (/)
 """
 
 import json
+import os
 import re
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -215,7 +216,7 @@ class CommaArtistSplitterJob(RepairJob):
         # Track: combined_artist → (artist_id, db_artist_name, thumb_url, files_with_this_tag)
         findings_map = {}
 
-        for i, (track_id, file_path, artist_id, db_artist_name, thumb_url) in enumerate(tracks):
+        for i, (_track_id, file_path, artist_id, db_artist_name, thumb_url) in enumerate(tracks):
             if context.check_stop():
                 logger.debug("Scan stopped by user request")
                 return result
@@ -230,7 +231,7 @@ class CommaArtistSplitterJob(RepairJob):
                 resolved = resolve_library_file_path(
                     file_path, transfer_folder=context.transfer_folder if hasattr(context, 'transfer_folder') else None,
                     config_manager=context._config_manager if hasattr(context, '_config_manager') else None)
-                if not resolved or not __import__('os').path.exists(resolved):
+                if not resolved or not os.path.exists(resolved):
                     logger.debug(f"File not found or inaccessible: {file_path}")
                     continue
 
@@ -472,7 +473,10 @@ class CommaArtistSplitterJob(RepairJob):
                 val = audio.get('artist')
                 if val:
                     return str(val[0]) if isinstance(val, list) else str(val)
-        except Exception:
+        except Exception:  # noqa: S110
+            # A tag read that blows up on one file just means no artist could
+            # be extracted from it; the caller treats None as exactly that,
+            # and per-file logging would spam a scan over thousands of files.
             pass
         return None
 
