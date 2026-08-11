@@ -64,6 +64,31 @@ PENDING_DELETION_FILES = {
     "sync-services.js",
 }
 
+# Same category as PENDING_DELETION_FILES above — markup retired ahead of its JS —
+# but scoped to TOKENS, because the file itself is very much alive.
+#
+# The floating global search bar was removed from index.html (it duplicated the
+# Search page). Its controller in downloads.js was deliberately left in place:
+# initGlobalSearch bails on `if (!input || !bar || !results) return;`, so it is
+# inert, and keeping it meant the bar could be restored by putting the markup
+# back. The cost is these lookups, whose ids left with the markup and survive
+# only as .gsearch-* CSS classes.
+#
+# NOT added to KNOWN_CLASS_AS_ID for the reason that list states: it means
+# "real unfixed bugs in live features", and these are neither.
+#
+# SELF-DELETING, like the set above: the gsearch controller (~600 lines around
+# downloads.js:5000-5530, plus the _gsPlayTrack call at 2075) is slated for
+# removal. When it goes, this block stops matching — delete it then.
+RETIRED_MARKUP_TOKENS = {
+    ("downloads.js", "gsearch-bar"),
+    ("downloads.js", "gsearch-input"),
+    ("downloads.js", "gsearch-results"),
+    ("downloads.js", "gsearch-aura"),
+    ("downloads.js", "gsearch-shortcut"),
+    ("downloads.js", "gsearch-clear"),
+}
+
 KNOWN_CLASS_AS_ID = {
     # track-detail modal: audio element, artwork, badges, provenance, actions
     ("track-detail.js", "td-audio"),
@@ -221,6 +246,8 @@ def test_get_element_by_id_never_names_a_css_class():
                 if token in ids or token not in classes:
                     continue
                 if (name, token) in KNOWN_CLASS_AS_ID:
+                    continue
+                if (name, token) in RETIRED_MARKUP_TOKENS:
                     continue
                 offenders.append(f"{name}:{lineno} getElementById('{token}') — that's a CSS class, not an id")
     assert not offenders, "getElementById called with a class name:\n  " + "\n  ".join(offenders)
