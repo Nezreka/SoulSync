@@ -342,6 +342,56 @@ def create_blueprint() -> Blueprint:
                     total, len(per_service))
         return jsonify({'success': True, 'reset': total, 'services': per_service}), 200
 
+    @bp.route('/api/enrichment/<service_id>/verify-matches', methods=['POST'])
+    def enrichment_verify_matches(service_id: str):
+        """Targeted repair of the pre-fix corruption classes for one worker
+        (MusicDatabase.verify_enrichment_matches): reset every artist
+        id-collision cluster (the smear fingerprint) and every matched row
+        with a degenerate title (the empty-normalization class). Pure SQL +
+        a local title scan — no API calls; the fixed worker rematches the
+        reset rows on its next pass."""
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        try:
+            result = _db_getter().verify_enrichment_matches(service_id)
+        except Exception as e:
+            logger.error("verify-matches failed for %s: %s", service_id, e)
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'service': service_id, **result}), 200
+
+    @bp.route('/api/enrichment/verify-matches', methods=['POST'])
+    def enrichment_verify_matches_all():
+        """The hub-level Verify matches: the same repair across ALL workers.
+        The degenerate-title scan is service-independent, so it runs once and
+        every service resets against it. Per-service failures are skipped,
+        not fatal — same contract as retry-all-failed."""
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        db = _db_getter()
+        try:
+            degenerates = db.degenerate_entity_ids()
+        except Exception as e:
+            logger.error("verify-matches degenerate scan failed: %s", e)
+            degenerates = {}
+        totals = {'collision_clusters': 0, 'collision_rows': 0, 'degenerate_reset': 0}
+        per_service: dict = {}
+        for service_id in SERVICE_ENTITY_SUPPORT:
+            try:
+                result = db.verify_enrichment_matches(service_id, degenerates=degenerates)
+            except Exception as e:
+                logger.warning("verify-matches sweep: %s failed: %s", service_id, e)
+                continue
+            touched = (result.get('collision_rows', 0) or 0) + (result.get('degenerate_reset', 0) or 0)
+            if touched:
+                per_service[service_id] = result
+            for k in totals:
+                totals[k] += result.get(k, 0) or 0
+        logger.info("Enrichment verify-matches sweep: %s across %d worker(s)",
+                    totals, len(per_service))
+        return jsonify({'success': True, 'services': per_service, **totals}), 200
+
     @bp.route('/api/enrichment/<service_id>/priority', methods=['GET'])
     def enrichment_get_priority(service_id: str):
         """Return the pinned 'process this group first' entity for a worker."""

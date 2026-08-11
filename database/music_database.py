@@ -1656,6 +1656,75 @@ class MusicDatabase:
         finally:
             conn.close()
 
+    # Names/titles per entity table for the degenerate-title scan — computed
+    # once per verify call, shared across all services.
+    _VERIFY_ENTITY_NAME_COLS = {'artist': ('artists', 'name'),
+                                'album': ('albums', 'title'),
+                                'track': ('tracks', 'title')}
+
+    def degenerate_entity_ids(self) -> dict:
+        """{entity_type: [ids]} of rows whose display title is DEGENERATE
+        (normalizes to nothing) — the empty-normalization false-match class.
+        Service-independent, so callers compute it once and reset per service."""
+        from core.enrichment.unmatched import degenerate_title
+        out = {}
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            for entity, (table, col) in self._VERIFY_ENTITY_NAME_COLS.items():
+                try:
+                    cursor.execute(f"SELECT id, {col} FROM {table}")
+                    out[entity] = [r[0] for r in cursor.fetchall() if degenerate_title(r[1])]
+                except Exception as e:
+                    logger.debug(f"degenerate scan skipped for {table}: {e}")
+                    out[entity] = []
+            return out
+        finally:
+            conn.close()
+
+    def verify_enrichment_matches(self, service: str, degenerates: dict = None) -> dict:
+        """Targeted repair of the pre-fix corruption classes for ONE service
+        (see core/enrichment/unmatched.py's Verify-matches block): reset every
+        artist id-collision cluster (the smear fingerprint) and every MATCHED
+        row with a degenerate title (the empty-normalization class). Returns
+        {'collision_clusters', 'collision_rows', 'degenerate_reset'}. Pure
+        SQL + a local title scan — no API calls; the fixed workers rematch
+        the reset rows on their next pass."""
+        from core.enrichment.unmatched import (build_artist_collision_queries,
+                                               build_degenerate_reset_query)
+        result = {'collision_clusters': 0, 'collision_rows': 0, 'degenerate_reset': 0}
+        if degenerates is None:
+            degenerates = self.degenerate_entity_ids()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            queries = build_artist_collision_queries(service)
+            if queries:
+                count_clusters, count_rows, reset = queries
+                try:
+                    cursor.execute(count_clusters)
+                    result['collision_clusters'] = cursor.fetchone()[0] or 0
+                    cursor.execute(count_rows)
+                    result['collision_rows'] = cursor.fetchone()[0] or 0
+                    if result['collision_rows']:
+                        cursor.execute(reset)
+                except Exception as e:
+                    logger.warning(f"collision repair skipped for {service}: {e}")
+            for entity, ids in (degenerates or {}).items():
+                built = build_degenerate_reset_query(service, entity, ids)
+                if not built:
+                    continue
+                sql, params = built
+                try:
+                    cursor.execute(sql, params)
+                    result['degenerate_reset'] += cursor.rowcount or 0
+                except Exception as e:
+                    logger.debug(f"degenerate repair skipped for {service}/{entity}: {e}")
+            conn.commit()
+            return result
+        finally:
+            conn.close()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:

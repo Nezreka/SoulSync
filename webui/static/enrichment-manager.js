@@ -177,6 +177,9 @@ async function openEnrichmentManager(workerId) {
                         <button class="em-icon-btn em-retry-global" id="em-retry-global-btn"
                                 title="Re-queue every failed item across ALL workers"
                                 onclick="retryAllFailedEnrichmentGlobal(this)">↻ Retry all failed</button>
+                        <button class="em-icon-btn" id="em-verify-global-btn"
+                                title="Repair matches corrupted before the Aug 2026 matching fixes: reset artist id-collision clusters and degenerate-title false matches so the fixed workers rematch them"
+                                onclick="verifyEnrichmentMatchesGlobal(this)">✓ Verify matches</button>
                         <button class="em-icon-btn" id="em-refresh-btn" title="Refresh"
                                 onclick="refreshEnrichmentManager(this)">⟳</button>
                         <button class="em-icon-btn em-icon-btn--close" title="Close"
@@ -778,10 +781,12 @@ function _emRenderUnmatchedControls() {
     const tabs = supported.map(e => `
         <button class="em-seg-tab ${e === enrichmentManagerState.entityTab ? 'active' : ''}"
                 onclick="setEnrichmentEntityTab('${e}')">${_emEntityLabel(e, true)}</button>`).join('');
-    const bulkBtn = failed
+    const bulkBtn = (failed
         ? `<button class="em-btn em-btn--sm em-btn--ghost em-retry-all" title="Re-queue every not-found ${_emEntityLabel(entity, true).toLowerCase()}"
                    onclick="retryAllFailedEnrichment(this)">↻ Retry all failed</button>`
-        : '';
+        : '') +
+        `<button class="em-btn em-btn--sm em-btn--ghost" title="Repair pre-fix corruption for this worker: reset artist id-collision clusters and degenerate-title false matches for rematching"
+                 onclick="verifyEnrichmentMatches(this)">✓ Verify matches</button>`;
 
     host.innerHTML = `
         <div class="em-unmatched-bar">
@@ -1080,6 +1085,75 @@ async function retryAllFailedEnrichmentGlobal(btn) {
         showToast('Retry-all failed', 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+}
+
+function _emVerifySummary(data) {
+    const parts = [];
+    if (data.collision_rows) {
+        parts.push(`${data.collision_rows.toLocaleString()} artist(s) in ${data.collision_clusters.toLocaleString()} id collision(s)`);
+    }
+    if (data.degenerate_reset) {
+        parts.push(`${data.degenerate_reset.toLocaleString()} degenerate-title match(es)`);
+    }
+    return parts.length
+        ? `Re-queued ${parts.join(' + ')} for rematching`
+        : 'No corrupted matches found — everything checks out';
+}
+
+async function verifyEnrichmentMatches(btn) {
+    const service = enrichmentManagerState.selected;
+    const name = _emWorkerById[service]?.name || service;
+    const ok = typeof showConfirmDialog === 'function'
+        ? await showConfirmDialog({
+            title: 'Verify Matches',
+            message: `Scan ${name}'s matches for the corruption the old matching bugs could cause — artists sharing one ${name} id, and matches on titles with no real content — and re-queue anything suspect for a clean rematch? No API calls; the worker rematches re-queued items on its next pass.`,
+            confirmText: 'Verify', destructive: false })
+        : true;
+    if (!ok) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+    try {
+        const res = await fetch(`/api/enrichment/${service}/verify-matches`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast(_emVerifySummary(data), (data.collision_rows || data.degenerate_reset) ? 'success' : 'info');
+            enrichmentManagerState.page = 0;
+            await Promise.all([_emLoadBreakdown(service), _emLoadUnmatched()]);
+            _emRenderEntityCards();
+            _emRenderUnmatchedControls();
+            _emRenderUnmatchedList();
+        } else {
+            showToast(data.error || 'Verify failed', 'error');
+        }
+    } catch (e) {
+        showToast('Verify failed: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '✓ Verify matches'; }
+    }
+}
+
+async function verifyEnrichmentMatchesGlobal(btn) {
+    const ok = typeof showConfirmDialog === 'function'
+        ? await showConfirmDialog({
+            title: 'Verify All Matches',
+            message: 'Scan EVERY worker\'s matches for the corruption the old matching bugs could cause — artists sharing one source id, and matches on titles with no real content — and re-queue anything suspect for a clean rematch? No API calls now; the workers rematch re-queued items on their next passes.',
+            confirmText: 'Verify all', destructive: false })
+        : true;
+    if (!ok) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Verifying…'; }
+    try {
+        const res = await fetch('/api/enrichment/verify-matches', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast(_emVerifySummary(data), (data.collision_rows || data.degenerate_reset) ? 'success' : 'info');
+            await refreshEnrichmentManagerData();
+        } else {
+            showToast(data.error || 'Verify failed', 'error');
+        }
+    } catch (e) {
+        showToast('Verify failed: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '✓ Verify matches'; }
     }
 }
 
