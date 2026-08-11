@@ -66113,6 +66113,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: rgba(255, 255, 255, 0.45);
     white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
 }
 .dash-autom-last {
     color: rgba(52, 211, 153, 0.7);
@@ -66321,7 +66322,10 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .syncband-row {
     display: grid;
     grid-template-areas: "art main result owned when actions";
-    grid-template-columns: 46px minmax(180px, 1.3fr) minmax(200px, 1fr) 210px 84px minmax(96px, auto);
+    /* Every min here is load-bearing: the sum (plus gaps/padding) is the
+       narrowest card the flat row fits — beyond that the tablet stack
+       below takes over. */
+    grid-template-columns: 46px minmax(150px, 1.3fr) minmax(140px, 1fr) minmax(130px, 210px) 76px minmax(90px, auto);
     align-items: center;
     gap: 6px 14px;
     padding: 9px 14px;
@@ -68888,6 +68892,16 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="enrichment"] .rate-monitor-grid {
         grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+    /* The flat six-column sync row needs ~730px of card; tablet cards
+       don't guarantee it. Same stack the phone uses, full-size art. */
+    .syncband-row {
+        grid-template-areas:
+            "art main when"
+            "art result actions"
+            "owned owned owned";
+        grid-template-columns: 46px 1fr auto;
+        row-gap: 5px;
     }
 }
 
