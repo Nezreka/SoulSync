@@ -568,14 +568,17 @@
                 <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="metadata-source-name">Metadata Source</span>
+                    <button class="status-test-btn" id="metadata-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection(typeof getActiveMetadataSource === 'function' ? getActiveMetadataSource() : 'spotify')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="media-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="media-server-name">Media Server</span>
+                    <button class="status-test-btn" id="media-server-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection('server')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="soulseek-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="download-source-name">Download Source</span>
+                    <button class="status-test-btn" id="download-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection('soulseek')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
             </div>
             <!-- Status Section (video side) — its own sources: TMDB/TVDB metadata, video server,

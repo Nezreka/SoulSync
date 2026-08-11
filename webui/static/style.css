@@ -2943,6 +2943,37 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(255, 255, 255, 0.03);
 }
 
+/* Sidebar service-test buttons — the dashboard Services card retired; a
+   live connection test rides each Service Status row instead. Near-
+   invisible until the row is hovered so the sidebar stays calm; always
+   faintly visible on touch (no hover to reveal them). */
+.status-test-btn {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    padding: 0;
+    opacity: 0.25;
+    transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.status-indicator:hover .status-test-btn { opacity: 1; }
+.status-test-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+@media (hover: none) {
+    .status-test-btn { opacity: 0.6; }
+}
+
 .status-dot {
     width: 10px;
     height: 10px;
@@ -65779,13 +65810,14 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     flex: none;
 }
 
-/* Recent Syncs FILLS its card: the list grows into the row height the
-   Services card sets and scrolls past it. (The previous centered-flex
-   fix clipped the top of an overflowing list — centering and scrolling
-   don't mix.) The card also spans two columns beside Services, giving
-   long playlist names room. */
+/* Recent Syncs is a full-width band now that the Services card is gone
+   (its status + Test moved to the sidebar rows). Active Downloads below
+   it is display:none until transfers exist, so a partial span would
+   strand a permanently empty column. The body still grows and scrolls
+   (the previous centered-flex fix clipped an overflowing list —
+   centering and scrolling don't mix). */
 .dash-card[data-card="syncs"] {
-    grid-column: span 2;
+    grid-column: 1 / -1;
 }
 .dash-card[data-card="syncs"] .dash-card__body {
     flex: 1 1 auto;

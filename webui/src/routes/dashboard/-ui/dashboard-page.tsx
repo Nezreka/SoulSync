@@ -23,7 +23,6 @@ import { ActiveDownloadsShell } from './active-downloads-shell';
 import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
-import { ServicesCard } from './services-merged';
 import { SyncsCard } from './syncs-card';
 
 export function DashboardPage() {
@@ -41,15 +40,14 @@ export function DashboardPage() {
             a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
         <ContentBand />
-        {/* ONE ops row: Services beside Recent Syncs (span 2, fills its
-            height, wears the live "N syncing now" pill). The System Stats
-            strip RETIRED with 3.2.0 — telemetry lives where you act on it
-            now: downloads/speed/uptime/memory in the notification tray (+
-            the bell's download-count badge), finished downloads on the
-            downloads page. Recent Activity (the tray owns it) and Quick
-            Actions (the sidebar again, as buttons) are also gone; Service
-            Status and the rate equalizer are ONE Services card. */}
-        <ServicesCard />
+        {/* Recent Syncs is the ops band (full width, wears the live
+            "N syncing now" pill); Active Downloads appears below it only
+            while transfers exist. Everything else the old ops grid held is
+            rehomed where you act on it: the Services card retired (status
+            dots + Test buttons live on the sidebar's Service Status rows,
+            rate graphs in the Manage Workers modal), System Stats went to
+            the notification tray with 3.2.0, Recent Activity to the tray,
+            Quick Actions back to the sidebar. */}
         <SyncsCard />
         <ActiveDownloadsShell />
       </div>

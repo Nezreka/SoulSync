@@ -179,7 +179,8 @@ const HELPER_CONTENT = {
         tips: [
             'Green dot = connected and responding',
             'Red dot = disconnected or erroring',
-            'iTunes and Deezer work without authentication; Spotify requires OAuth'
+            'iTunes and Deezer work without authentication; Spotify requires OAuth',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'gs-connecting'
     },
@@ -189,7 +190,8 @@ const HELPER_CONTENT = {
         tips: [
             'Supports Plex, Jellyfin, and Navidrome',
             'Configure in Settings → Media Server Setup',
-            'Auto-scans your library after every successful download'
+            'Auto-scans your library after every successful download',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'set-media'
     },
@@ -199,7 +201,8 @@ const HELPER_CONTENT = {
         tips: [
             'Hybrid mode tries multiple sources in priority order',
             'Each streaming source has independent quality settings',
-            'Configure source priority via drag-and-drop in Settings'
+            'Configure source priority via drag-and-drop in Settings',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'search-sources'
     },
@@ -234,50 +237,6 @@ const HELPER_CONTENT = {
         docsId: 'import'
     },
 
-    // ─── DASHBOARD: SERVICE CARDS ───────────────────────────────────
-
-    '#metadata-source-service-card': {
-        title: 'Metadata Source Status',
-        description: 'Detailed connection info for your active metadata source. Shows connection state, response latency, and allows manual connection testing.',
-        tips: [
-            '"Test Connection" verifies the API is responding',
-            'Response time indicates network latency to the service',
-            'If stuck on "Checking...", the service may be rate-limited'
-        ],
-        docsId: 'gs-connecting',
-        actions: [
-            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('gs-connecting') }
-        ]
-    },
-    '#media-server-service-card': {
-        title: 'Media Server Status',
-        description: 'Detailed connection info for your media server. Verifies SoulSync can communicate with Plex, Jellyfin, or Navidrome for library scanning and audio streaming.',
-        tips: [
-            '"Test Connection" verifies the server URL and credentials',
-            'Select your Music Library in Settings after first connecting',
-            'Navidrome auto-detects new files — no scan trigger needed'
-        ],
-        docsId: 'set-media',
-        actions: [
-            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('set-media') }
-        ]
-    },
-    '#soulseek-service-card': {
-        title: 'Download Source Status',
-        description: 'Connection status of your primary download source. For Soulseek, this checks the slskd API; for streaming sources, it verifies authentication.',
-        tips: [
-            '"Test Connection" confirms the source is ready for downloads',
-            'Soulseek requires a running slskd instance with API key',
-            'Streaming sources (Tidal, Qobuz) need active subscriptions'
-        ],
-        docsId: 'search-sources',
-        actions: [
-            { label: 'Open Settings', onClick: () => { navigateToPage('settings'); setTimeout(() => typeof switchSettingsTab === 'function' && switchSettingsTab('downloads'), 400); } },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('search-sources') }
-        ]
-    },
 
     // ─── DASHBOARD: SYSTEM STATS ────────────────────────────────────
 
@@ -1952,15 +1911,6 @@ const HELPER_CONTENT = {
 
     // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
 
-    '#enrichment-pills-section': {
-        title: 'Enrichment Service Workers',
-        description: 'Per-service enrichment workers that run in the background to enrich your library metadata. Each button shows the worker status and lets you start/stop individual services.',
-        tips: [
-            'Green = running, grey = stopped, red = error',
-            'Click a service pill to toggle its worker on/off',
-            'Workers process tracks in batches — hover for detailed stats'
-        ]
-    },
     '#musicbrainz-button': {
         title: 'MusicBrainz Enrichment',
         description: 'Looks up recording IDs, release groups, and artist MBIDs from MusicBrainz. Provides canonical identifiers used by other services.',
@@ -2348,7 +2298,6 @@ const HELPER_TOURS = {
             { page: 'dashboard', selector: '#sync-history-cards', title: 'Recent Syncs', description: 'Your latest playlist sync runs — what matched, what downloaded, what failed. Click one to jump into the details.' },
             { page: 'dashboard', selector: '.dash-card--quick-actions', title: 'Quick Actions', description: 'One-click shortcuts to the things you do most — start a sync, open the tool pages, jump to search. The bigger Tools collection lives on its own pages under the System section of the sidebar.' },
             { page: 'dashboard', selector: '#dashboard-activity-feed', title: 'Recent Activity', description: 'Live stream of system events — downloads, syncs, enrichment updates, errors. Newest at the top, updates in real-time via WebSocket.' },
-            { page: 'dashboard', selector: '#enrichment-pills-section', title: 'Enrichment Services', description: 'Per-service enrichment coverage — how much of your library each metadata service has processed, with controls to manage priorities and intervals.' },
 
             // The shell around every page
             { page: 'dashboard', selector: '.side-toggle', title: 'Music / Video Toggle', description: 'SoulSync has two whole sides. This switch flips between the MUSIC app and the VIDEO app (movies + TV) — each has its own pages, library, and settings.' },
@@ -4062,7 +4011,7 @@ function _updateHelperBadge() {
 
 const TROUBLESHOOT_RULES = [
     {
-        selector: '#metadata-source-service-card .service-card-indicator.disconnected, #metadata-source-service-card .service-card-indicator.error',
+        selector: '#metadata-source-indicator .status-dot.disconnected, #metadata-source-indicator .status-dot.error',
         title: 'Metadata Source Disconnected',
         steps: [
             'Go to Settings → Connections and verify your API credentials',
