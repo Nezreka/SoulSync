@@ -65721,6 +65721,19 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     margin: 2px 0 0;
 }
 
+/* Library and Recent Syncs share rows with taller cards (the merged
+   Services card sets the row height), and their content top-aligned,
+   pooling the spare height into dead space at the bottom. Growing the
+   body and centering distributes it instead — the calm fix, no content
+   changes. */
+.dash-card[data-card="library"] .dash-card__body,
+.dash-card[data-card="syncs"] .dash-card__body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
 /* Divider between the two halves of the merged Services card. */
 /* Phone widths: the tab row wraps (two 18px tabs + a subtitle overflow
    ~375px otherwise), tiles and covers size down a step. The rail itself
