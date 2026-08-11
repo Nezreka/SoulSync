@@ -49,6 +49,14 @@ describe('automationCardRows', () => {
       next_run: '2026-08-11 12:30:00',
     },
     {
+      id: 5,
+      name: 'Auto-Process Episode Wishlist',
+      enabled: 1,
+      trigger_type: 'schedule',
+      action_type: 'video_process_episode_wishlist',
+      next_run: '2026-08-11 12:10:00',
+    },
+    {
       id: 3,
       name: 'Nightly backup',
       enabled: 1,

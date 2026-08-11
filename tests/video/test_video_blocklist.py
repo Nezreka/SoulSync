@@ -120,6 +120,35 @@ def test_ranker_unaccepts_every_release_from_a_blocked_uploader(db):
     assert by_user["goodpeer"]["accepted"] is True          # a different peer still passes
 
 
+def test_blocked_hit_with_a_prior_rejection_stays_a_string(db):
+    # THE Auto-Process Episode Wishlist crash (Boulder's report): the blocklist
+    # branch appended a LIST onto the string 'rejected' contract, so a blocked
+    # uploader's hit that ALSO failed a quality check raised
+    # "can only concatenate str (not 'list') to str" and killed the whole
+    # drain. The reason must stay ONE string, blocklist verdict leading.
+    from api.video.downloads import _evaluate_hits
+    from core.video.quality_profile import load as load_profile
+    profile = load_profile(db)
+    # A cam release — hard-rejected by quality BEFORE the blocklist branch
+    # whenever 'cam' is on the reject list; force it so the prior reason
+    # exists regardless of the default profile.
+    profile = {**profile, "rejects": list({*(profile.get("rejects") or []), "cam"})}
+    out = _evaluate_hits(
+        [_hit("baduser", "a.mkv", title="Heat.1995.1080p.CAM.x264")],
+        profile, "movie", None, None, blocked=set(), blocked_users={"baduser"})
+    rejected = out[0]["rejected"]
+    assert isinstance(rejected, str)
+    assert rejected.startswith("Uploader blocklisted")
+    assert "cam" in rejected  # the prior quality reason still travels
+
+    # And with NO prior rejection the reason is the bare blocklist string —
+    # a string, never the old bare list.
+    out2 = _evaluate_hits([_hit("baduser", "clean.mkv")],
+                          profile, "movie", None, None, blocked=set(),
+                          blocked_users={"baduser"})
+    assert out2[0]["rejected"] == "Uploader blocklisted"
+
+
 def test_block_source_api_via_scope(client):
     c, db = client
     r = c.post("/api/video/downloads/blocklist", json={"username": "baduser", "scope": "source"})

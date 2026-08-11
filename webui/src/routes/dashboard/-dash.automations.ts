@@ -34,6 +34,14 @@ export interface AutomationApiRow {
 /** The Sync band's rows — never duplicated here. */
 const SYNCBAND_ACTIONS = new Set(['playlist_pipeline', 'personalized_pipeline']);
 
+/** This dashboard is the MUSIC side; the shared engine also runs the video
+ *  side's automations, whose action types all carry the video_ prefix
+ *  (core/automation/handlers/registration.py) — they belong to the video
+ *  dashboard, not here (Boulder's report). */
+function isVideoAction(actionType: string): boolean {
+  return actionType.startsWith('video_');
+}
+
 function config(row: AutomationApiRow): Record<string, unknown> {
   const raw = row.trigger_config;
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
@@ -108,7 +116,8 @@ export function automationCardRows(
 ): AutomationCardRow[] {
   const out: AutomationCardRow[] = [];
   for (const row of rows || []) {
-    if (SYNCBAND_ACTIONS.has(String(row.action_type || ''))) continue;
+    const actionType = String(row.action_type || '');
+    if (SYNCBAND_ACTIONS.has(actionType) || isVideoAction(actionType)) continue;
     const enabled = row.enabled !== false && row.enabled !== 0;
     const live = progress[String(row.id)];
     out.push({
