@@ -1146,7 +1146,14 @@ async function verifyEnrichmentMatchesGlobal(btn) {
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.success) {
             showToast(_emVerifySummary(data), (data.collision_rows || data.degenerate_reset) ? 'success' : 'info');
-            await refreshEnrichmentManagerData();
+            const svc = enrichmentManagerState.selected;
+            if (svc) {
+                enrichmentManagerState.page = 0;
+                await Promise.all([_emLoadBreakdown(svc), _emLoadUnmatched()]);
+                _emRenderEntityCards();
+                _emRenderUnmatchedControls();
+                _emRenderUnmatchedList();
+            }
         } else {
             showToast(data.error || 'Verify failed', 'error');
         }
