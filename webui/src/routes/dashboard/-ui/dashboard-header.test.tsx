@@ -90,6 +90,7 @@ afterEach(() => {
   delete window.openWishlistFromHero;
   delete window.isJiosaavnExperimentalEnabled;
   delete window.SoulSyncWebRouter;
+  delete window.navigateToPage;
 });
 
 async function mountHeader() {
@@ -235,9 +236,9 @@ describe('click seams', () => {
     expect(openRepairModal).toHaveBeenCalledTimes(1);
   });
 
-  it('watchlist navigates through the router seam', async () => {
+  it('watchlist navigates through the global navigateToPage (the chrome-aware entry)', async () => {
     const navigateToPage = vi.fn(() => Promise.resolve(true));
-    window.SoulSyncWebRouter = { navigateToPage } as never;
+    window.navigateToPage = navigateToPage as never;
     const view = await mountHeader();
     fireEvent.click(view.container.querySelector('#watchlist-button')!);
     expect(navigateToPage).toHaveBeenCalledWith('watchlist');
@@ -246,7 +247,7 @@ describe('click seams', () => {
   it('wishlist prefers the init.js fast/slow path and falls back to navigation', async () => {
     const openWishlistFromHero = vi.fn();
     const navigateToPage = vi.fn(() => Promise.resolve(true));
-    window.SoulSyncWebRouter = { navigateToPage } as never;
+    window.navigateToPage = navigateToPage as never;
     window.openWishlistFromHero = openWishlistFromHero;
     const view = await mountHeader();
     fireEvent.click(view.container.querySelector('#wishlist-button')!);
