@@ -42,14 +42,12 @@ function refreshRateMonitorExperimentalVisibility() {
 
 
 function _handleRateMonitorUpdate(data) {
-    // Re-broadcast for the React dashboard's equalizer (tools-seam rule).
+    // Re-broadcast on the window seam (tools-seam rule); the React
+    // equalizer that consumed this retired when the grid left the Services
+    // card — rate graphs open from the Manage Workers modal now.
     window.dispatchEvent(new CustomEvent('ss:rate-monitor', { detail: data }));
-    // The equalizer is React-rendered from that frame since the dashboard
-    // flip (rate-equalizer.tsx). What stays vanilla is the DETAIL MODAL
-    // (_openRateModal, opened from the React bars through the window seam) —
-    // record every service's latest payload for it. The old renderer only
-    // recorded state while its grid happened to be visible; the modal wants
-    // it regardless.
+    // The DETAIL MODAL is vanilla (_openRateModal) — record every service's
+    // latest payload for it regardless of which page is showing.
     if (typeof isJiosaavnExperimentalEnabled === 'function' && !isJiosaavnExperimentalEnabled()) {
         _removeJiosaavnRateGauge();
     }

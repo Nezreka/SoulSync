@@ -45,9 +45,11 @@ describe('the page shell', () => {
       // (whose collection this is, then what's new in it), then one ops row
       // — Services beside Recent Syncs (span 2). The System Stats strip is
       // RETIRED: its numbers moved to the notification tray / downloads
-      // page / the syncs card's live pill. Services CONTAINS the old
-      // enrichment equalizer; Recent Activity (tray owns it) and Quick
-      // Actions (sidebar duplicate) are deliberately gone.
+      // page / the syncs card's live pill. The enrichment equalizer is
+      // GONE from the page (redundant with the header worker orbs; its
+      // per-service rate graphs open from the Manage Workers modal);
+      // Recent Activity (tray owns it) and Quick Actions (sidebar
+      // duplicate) are deliberately gone.
       'library',
       'services',
       'syncs',

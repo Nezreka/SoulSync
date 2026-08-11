@@ -653,6 +653,18 @@ async function setEnrichmentPriority(entity) {
     }
 }
 
+// Whether the api-monitor tracks this worker's call rate (Similar Artists
+// and Bandcamp have no rate gauge). _RATE_GAUGE_SERVICES is a script-level
+// const in api-monitor.js — reachable across classic scripts, but guarded
+// in case load order ever changes.
+function _emHasRateGraph(id) {
+    try {
+        return typeof _openRateModal === 'function' && _RATE_GAUGE_SERVICES.includes(id);
+    } catch (_e) {
+        return false;
+    }
+}
+
 function _emRenderPanelHeader() {
     const host = document.getElementById('em-panel-header');
     if (!host) return;
@@ -675,6 +687,9 @@ function _emRenderPanelHeader() {
             <div class="em-ph-actions">
                 <span id="em-ph-errors"></span>
                 <span id="em-ph-budget"></span>
+                ${_emHasRateGraph(id) ? `<button class="em-btn em-btn--ghost" id="em-ph-graph"
+                    title="24-hour API call history"
+                    onclick="_openRateModal('${id}')">📈 API Graph</button>` : ''}
                 <button class="em-btn" id="em-ph-toggle" onclick="toggleEnrichmentWorker('${id}')"></button>
             </div>
         </div>`;
