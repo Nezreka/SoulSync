@@ -78,37 +78,55 @@ def worker(db):
     return w
 
 
-def _insert_artist(db, artist_id="a1", name="Test Artist"):
+# The worker reads and writes Library v2 now (docs §32.3.1 stage 2), so the
+# fixtures below seed lib2 rows and the assertions read the provider-attempt ledger
+# plus external_ids where they used to read jiosaavn_match_status / jiosaavn_id.
+# MusicDatabase creates both schemas, so the fixture itself is unchanged.
+def _insert_artist(db, name="Test Artist"):
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-            (artist_id, name, "test"),
-        )
+        cur = conn.execute(
+            "INSERT INTO lib2_artists (name, sort_name) VALUES (?, ?)", (name, name))
         conn.commit()
+        return cur.lastrowid
 
 
-def _insert_album(db, album_id="al1", title="Test Album", artist_id="a1"):
+def _insert_album(db, artist_id, title="Test Album"):
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO albums (id, title, artist_id, server_source) VALUES (?, ?, ?, ?)",
-            (album_id, title, artist_id, "test"),
-        )
+        cur = conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, album_type) "
+            "VALUES (?, ?, 'album')", (artist_id, title))
         conn.commit()
+        return cur.lastrowid
 
 
-def _insert_track(db, track_id="t1", title="Test Track", artist_id="a1", album_id="al1"):
+def _insert_track(db, album_id, title="Test Track"):
     with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO tracks (id, title, artist_id, album_id, server_source) VALUES (?, ?, ?, ?, ?)",
-            (track_id, title, artist_id, album_id, "test"),
-        )
+        cur = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title) VALUES (?, ?)",
+            (album_id, title))
         conn.commit()
+        return cur.lastrowid
 
 
-def _status(db, table, entity_id, col="jiosaavn_match_status"):
-    with db._get_connection() as conn:
-        row = conn.execute(f"SELECT {col}, jiosaavn_id FROM {table} WHERE id = ?", (entity_id,)).fetchone()
-        return row[0], row[1]
+def _status(db, entity_type, entity_id):
+    """``(status, provider_id)`` — the ledger row and external_ids, which is where
+    the legacy match-status column and jiosaavn_id column now live."""
+    import json
+
+    from core.library2.provider_attempts import attempt_state
+
+    table = {"artist": "lib2_artists", "album": "lib2_albums",
+             "track": "lib2_tracks"}[entity_type]
+    conn = db._get_connection()
+    try:
+        state = attempt_state(conn, entity_type=entity_type, entity_id=entity_id)
+        raw = conn.execute(
+            f"SELECT external_ids FROM {table} WHERE id = ?", (entity_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    return (state.get("jiosaavn", {}).get("status"),
+            json.loads(raw or "{}").get("jiosaavn"))
 
 
 class TestJioSaavnWorkerGating:
@@ -139,121 +157,121 @@ class TestJioSaavnWorkerGating:
 class TestJioSaavnWorkerMatching:
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_artist_match(self, _enabled, worker, db):
-        _insert_artist(db)
-        worker._process_artist("a1", "Test Artist")
-        status, js_id = _status(db, "artists", "a1")
+        artist = _insert_artist(db)
+        worker._process_artist(artist, "Test Artist")
+        status, js_id = _status(db, "artist", artist)
         assert status == "matched"
         assert js_id == "art-1"
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_artist_not_found(self, _enabled, worker, db):
-        _insert_artist(db, name="Unknown Artist")
-        worker._process_artist("a1", "Unknown Artist")
-        status, js_id = _status(db, "artists", "a1")
+        artist = _insert_artist(db, name="Unknown Artist")
+        worker._process_artist(artist, "Unknown Artist")
+        status, js_id = _status(db, "artist", artist)
         assert status == "not_found"
         assert js_id is None
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_album_match(self, _enabled, worker, db):
-        _insert_artist(db)
-        _insert_album(db)
-        worker._process_album("al1", "Test Album", "Test Artist")
-        status, js_id = _status(db, "albums", "al1")
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
+        worker._process_album(album, "Test Album", "Test Artist")
+        status, js_id = _status(db, "album", album)
         assert status == "matched"
         assert js_id == "alb-1"
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_track_match(self, _enabled, worker, db):
-        _insert_artist(db)
-        _insert_album(db)
-        _insert_track(db)
-        worker._process_track("t1", "Test Track", "Test Artist")
-        status, js_id = _status(db, "tracks", "t1")
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
+        track = _insert_track(db, album)
+        worker._process_track(track, "Test Track", "Test Artist")
+        status, js_id = _status(db, "track", track)
         assert status == "matched"
         assert js_id == "trk-1"
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_preserves_existing_id(self, _enabled, worker, db):
-        # An id-only write (e.g. manual match) leaves status NULL. Processing it
-        # must PRESERVE the id AND stamp 'matched' — otherwise _get_next_item, which
-        # selects NULL rows every loop, re-picks it forever and wedges the queue (#964).
-        _insert_artist(db)
+        # An id-only write (e.g. manual match) leaves no attempt recorded.
+        # Processing it must PRESERVE the id AND record 'matched' — otherwise
+        # _get_next_item, which hands out unattempted rows every loop, re-picks it
+        # forever and wedges the queue (#964).
+        artist = _insert_artist(db)
         with db._get_connection() as conn:
             conn.execute(
-                "UPDATE artists SET jiosaavn_id = ? WHERE id = ?",
-                ("existing", "a1"),
-            )
+                "UPDATE lib2_artists SET external_ids = ? WHERE id = ?",
+                ('{"jiosaavn": "existing"}', artist))
             conn.commit()
-        worker._process_artist("a1", "Test Artist")
-        status, js_id = _status(db, "artists", "a1")
+        worker._process_artist(artist, "Test Artist")
+        status, js_id = _status(db, "artist", artist)
         assert js_id == "existing"
         assert status == "matched"
         # And it must not be handed out again by the queue.
         assert worker._get_next_item() is None
 
-
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_mark_status_updates_artist_and_album(self, _enabled, worker, db):
-        _insert_artist(db)
-        _insert_album(db)
-        worker._mark_status("artist", "a1", "not_found")
-        worker._mark_status("album", "al1", "error")
-        with db._get_connection() as conn:
-            artist = conn.execute(
-                "SELECT jiosaavn_match_status, updated_at FROM artists WHERE id = ?",
-                ("a1",),
-            ).fetchone()
-            album = conn.execute(
-                "SELECT jiosaavn_match_status, updated_at FROM albums WHERE id = ?",
-                ("al1",),
-            ).fetchone()
-        assert artist[0] == "not_found"
-        assert artist[1] is not None
-        assert album[0] == "error"
-        assert album[1] is not None
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
+        worker._mark_status("artist", artist, "not_found")
+        worker._mark_status("album", album, "error")
 
+        from core.library2.provider_attempts import attempt_state
+
+        conn = db._get_connection()
+        try:
+            artist_state = attempt_state(
+                conn, entity_type="artist", entity_id=artist)["jiosaavn"]
+            album_state = attempt_state(
+                conn, entity_type="album", entity_id=album)["jiosaavn"]
+        finally:
+            conn.close()
+        assert artist_state["status"] == "not_found"
+        assert artist_state["last_attempted_at"] is not None
+        assert album_state["status"] == "error"
+        assert album_state["last_attempted_at"] is not None
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_album_details_unavailable_marks_error_and_does_not_stall(self, _enabled, worker, db):
         # A search match whose detail fetch returns None must be marked 'error' (NOT
-        # left NULL): a NULL row is re-selected by _get_next_item every loop, spinning
-        # the API on one bad id and blocking every later album. 'error' + fresh
-        # last_attempted defers it to the retry_days queue instead (#964).
-        _insert_artist(db)
-        _insert_album(db)
+        # left unattempted): an unattempted row is re-selected by _get_next_item every
+        # loop, spinning the API on one bad id and blocking every later album. 'error'
+        # plus a fresh timestamp defers it to the retry_days queue instead (#964).
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
         # Match the artist first so only the album is left pending.
-        worker._process_artist("a1", "Test Artist")
+        worker._process_artist(artist, "Test Artist")
 
         class _ClientNoAlbumDetails(_FakeJioSaavnClient):
             def get_album(self, album_id):
                 return None
 
         worker._client = _ClientNoAlbumDetails()
-        worker._process_album("al1", "Test Album", "Test Artist")
-        status, js_id = _status(db, "albums", "al1")
+        worker._process_album(album, "Test Album", "Test Artist")
+        status, js_id = _status(db, "album", album)
         assert status == "error"
         assert js_id is None
         # Regression: the row must leave the immediate queue — no other pending work
-        # exists, so the queue is now empty rather than re-handing out al1.
+        # exists, so the queue is now empty rather than re-handing out the album.
         assert worker._get_next_item() is None
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_track_details_unavailable_marks_error_and_does_not_stall(self, _enabled, worker, db):
         # Same stall guard for tracks (#964).
-        _insert_artist(db)
-        _insert_album(db)
-        _insert_track(db)
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
+        track = _insert_track(db, album)
         # Match the artist + album first so only the track is left pending.
-        worker._process_artist("a1", "Test Artist")
-        worker._process_album("al1", "Test Album", "Test Artist")
+        worker._process_artist(artist, "Test Artist")
+        worker._process_album(album, "Test Album", "Test Artist")
 
         class _ClientNoTrackDetails(_FakeJioSaavnClient):
             def get_track_details(self, track_id):
                 return None
 
         worker._client = _ClientNoTrackDetails()
-        worker._process_track("t1", "Test Track", "Test Artist")
-        status, js_id = _status(db, "tracks", "t1")
+        worker._process_track(track, "Test Track", "Test Artist")
+        status, js_id = _status(db, "track", track)
         assert status == "error"
         assert js_id is None
         assert worker._get_next_item() is None
@@ -262,9 +280,9 @@ class TestJioSaavnWorkerMatching:
 class TestJioSaavnWorkerQueue:
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_queue_prefers_artists(self, _enabled, worker, db):
-        _insert_artist(db, "a1", "Test Artist")
-        _insert_album(db)
-        _insert_track(db, album_id="al1")
+        artist = _insert_artist(db)
+        album = _insert_album(db, artist)
+        _insert_track(db, album)
         item = worker._get_next_item()
         assert item["type"] == "artist"
 

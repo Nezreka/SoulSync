@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.amazon_client import AmazonClient
-from core.worker_utils import idle_backoff_seconds, interruptible_sleep, set_album_api_track_count
-from core.enrichment.manual_match_honoring import honor_stored_match
+from core.worker_utils import idle_backoff_seconds, interruptible_sleep
+from core.library2.worker_support import honor_stored_match
 from core.amazon_outage import is_source_outage, next_poll_delay_seconds
 
 logger = get_logger("amazon_worker")
@@ -20,7 +20,6 @@ class AmazonWorker:
     def __init__(self, database: MusicDatabase):
         self.db = database
         self.client = AmazonClient()
-        self._amazon_schema_checked = False
 
         self.running = False
         self.paused = False
@@ -49,38 +48,6 @@ class AmazonWorker:
         self._outage_streak = 0
 
         logger.info("Amazon background worker initialized")
-
-    def _ensure_amazon_schema(self, cursor) -> None:
-        """Ensure upgraded installs have the Amazon enrichment columns.
-
-        MusicDatabase normally runs this migration during startup, but the
-        worker should still be defensive because it is the code path that
-        repeatedly queries these columns in the background.
-        """
-        if self._amazon_schema_checked:
-            return
-
-        table_columns = {
-            'artists': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
-            'albums': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
-            'tracks': ('amazon_id', 'amazon_match_status', 'amazon_last_attempted'),
-        }
-        for table, columns in table_columns.items():
-            cursor.execute(f"PRAGMA table_info({table})")
-            existing = {row[1] for row in cursor.fetchall()}
-            for column in columns:
-                if column not in existing:
-                    column_type = 'TIMESTAMP' if column == 'amazon_last_attempted' else 'TEXT'
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
-        cursor.connection.commit()
-        self._amazon_schema_checked = True
 
     def start(self):
         if self.running:
@@ -173,94 +140,23 @@ class AmazonWorker:
         logger.info("Amazon worker thread finished")
 
     def _get_next_item(self) -> Optional[Dict[str, Any]]:
+        """Get next item to process from the Library-v2 catalogue.
+
+        Priority, retry window and the pinned-group override all live in
+        ``core.library2.worker_queue`` — the same rules every enrichment worker uses
+        (docs §32.3.1 stage 2).
+        """
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            self._ensure_amazon_schema(cursor)
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('amazon')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'amazon', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name FROM artists
-                WHERE amazon_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.amazon_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_amazon_id': row[3]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.amazon_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_amazon_id': row[3]}
-
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-
-            # Priority 4: Retry not_found artists
-            cursor.execute("""
-                SELECT id, name FROM artists
-                WHERE amazon_match_status = 'not_found' AND amazon_last_attempted < ?
-                ORDER BY amazon_last_attempted ASC LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry not_found albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.amazon_match_status = 'not_found' AND a.amazon_last_attempted < ?
-                ORDER BY a.amazon_last_attempted ASC LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_amazon_id': row[3]}
-
-            # Priority 6: Retry not_found tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.amazon_match_status = 'not_found' AND t.amazon_last_attempted < ?
-                ORDER BY t.amazon_last_attempted ASC LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'artist_amazon_id': row[3]}
-
-            return None
+            return next_pending(
+                conn, 'amazon',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('amazon') or None,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -332,17 +228,13 @@ class AmazonWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            return None
+        """The Amazon ASIN already stored for this entity, if any."""
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT amazon_id FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'amazon')
         except Exception:
             return None
         finally:
@@ -379,10 +271,9 @@ class AmazonWorker:
 
     def _process_album(self, album_id: int, album_name: str, artist_name: str, item: Dict[str, Any]):
         if honor_stored_match(
-            db=self.db, entity_table='albums', entity_id=album_id,
-            id_column='amazon_id',
-            client_fetch_fn=lambda asin: self.client.get_album(asin, include_tracks=False),
-            on_match_fn=self._refresh_album_via_stored_id,
+            self.db, entity_type='album', entity_id=album_id, service='amazon',
+            fetch=lambda asin: self.client.get_album(asin, include_tracks=False),
+            on_match=self._refresh_album_via_stored_id,
             log_prefix='Amazon',
         ):
             self.stats['matched'] += 1
@@ -420,10 +311,9 @@ class AmazonWorker:
 
     def _process_track(self, track_id: int, track_name: str, artist_name: str, item: Dict[str, Any]):
         if honor_stored_match(
-            db=self.db, entity_table='tracks', entity_id=track_id,
-            id_column='amazon_id',
-            client_fetch_fn=self.client.get_track_details,
-            on_match_fn=self._refresh_track_via_stored_id,
+            self.db, entity_type='track', entity_id=track_id, service='amazon',
+            fetch=self.client.get_track_details,
+            on_match=self._refresh_track_via_stored_id,
             log_prefix='Amazon',
         ):
             self.stats['matched'] += 1
@@ -461,132 +351,89 @@ class AmazonWorker:
 
     def _update_artist(self, artist_id: int, result):
         """Store Amazon metadata for an artist. ``result`` is an Artist dataclass."""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE artists SET
-                    amazon_id = ?,
-                    amazon_match_status = 'matched',
-                    amazon_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (str(result.id), artist_id))
-
-            # Backfill thumb_url from album cover stand-in when artist has no image
-            image_url = result.image_url
-            if not image_url:
-                try:
-                    image_url = self.client._get_artist_image_from_albums(result.id)
-                except Exception as exc:
-                    logger.debug("Artist image from albums failed for %s: %s", result.id, exc)
-            if image_url:
-                cursor.execute("""
-                    UPDATE artists SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (image_url, artist_id))
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating artist #{artist_id} with Amazon data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        image_url = result.image_url
+        if not image_url:
+            # Amazon has no artist image endpoint; an album cover stands in.
+            try:
+                image_url = self.client._get_artist_image_from_albums(result.id)
+            except Exception as exc:
+                logger.debug("Artist image via album cover failed for %s: %s", result.id, exc)
+        self._write('artist', artist_id, str(result.id), image=image_url)
 
     def _update_album(self, album_id: int, full_data: Dict[str, Any], asin: str):
         """Store Amazon metadata for an album. ``full_data`` is a get_album() dict."""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE albums SET
-                    amazon_id = ?,
-                    amazon_match_status = 'matched',
-                    amazon_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (asin, album_id))
-
-            # Backfill label when missing
-            label = full_data.get('label')
-            if label:
-                cursor.execute("""
-                    UPDATE albums SET label = ?
-                    WHERE id = ? AND (label IS NULL OR label = '')
-                """, (label, album_id))
-
-            # Backfill thumb_url
-            images = full_data.get('images') or []
-            thumb_url = images[0].get('url') if images else None
-            if thumb_url:
-                cursor.execute("""
-                    UPDATE albums SET thumb_url = ?
-                    WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
-                """, (thumb_url, album_id))
-
-            # Cache authoritative track count for completeness repair
-            total_tracks = full_data.get('total_tracks') or (
-                full_data.get('tracks', {}).get('total') if isinstance(full_data.get('tracks'), dict) else None
-            )
-            set_album_api_track_count(cursor, album_id, total_tracks)
-
-            conn.commit()
-
-        except Exception as e:
-            logger.error(f"Error updating album #{album_id} with Amazon data: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        images = full_data.get('images') or []
+        total_tracks = full_data.get('total_tracks') or (
+            full_data.get('tracks', {}).get('total')
+            if isinstance(full_data.get('tracks'), dict) else None
+        )
+        self._write(
+            'album', album_id, asin,
+            image=images[0].get('url') if images else None,
+            label=full_data.get('label'),
+            total_tracks=total_tracks,
+        )
 
     def _update_track(self, track_id: int, full_data: Dict[str, Any], asin: str):
         """Store Amazon metadata for a track. ``full_data`` is a get_track_details() dict."""
+        self._write('track', track_id, asin)
+
+    def _write(self, entity_type: str, entity_id: int, provider_id,
+               image: Optional[str] = None, label: Optional[str] = None,
+               total_tracks: Any = None):
+        """One write path for all three entity types (docs §32.3.1 stage 2).
+
+        Everything outside Amazon's own namespace is backfill: its artwork and label
+        are stand-ins, not authorities, and must not overwrite what a better source
+        or the user chose.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import set_expected_track_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
 
-            cursor.execute("""
-                UPDATE tracks SET
-                    amazon_id = ?,
-                    amazon_match_status = 'matched',
-                    amazon_last_attempted = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (asin, track_id))
+            backfill = {}
+            if image:
+                backfill['image_url'] = image
+            if label:
+                backfill['label'] = label
 
+            write_provider_enrichment(
+                conn, entity_type=entity_type, entity_id=entity_id,
+                service='amazon',
+                provider_id=provider_id,
+                backfill=backfill or None,
+            )
+            if entity_type == 'album':
+                set_expected_track_count(conn, entity_id, total_tracks)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='amazon', status='matched')
             conn.commit()
 
         except Exception as e:
-            logger.error(f"Error updating track #{track_id} with Amazon data: {e}")
+            logger.error(f"Error updating {entity_type} #{entity_id} with Amazon data: {e}")
             raise
         finally:
             if conn:
                 conn.close()
 
     def _mark_status(self, entity_type: str, entity_id: int, status: str):
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
-            logger.error(f"Unknown entity type: {entity_type}")
-            return
+        """Record the outcome of an attempt in the provider ledger.
 
+        Replaces the legacy `amazon_match_status`/`_last_attempted` column pair.
+        `not_found` becomes due again after the retry window; `error` does not, so a
+        provider outage cannot turn into an infinite retry loop.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                UPDATE {table} SET
-                    amazon_match_status = ?,
-                    amazon_last_attempted = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status, entity_id))
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='amazon', status=status)
             conn.commit()
         except Exception as e:
             logger.error(f"Error marking {entity_type} #{entity_id} status: {e}")
@@ -597,18 +444,10 @@ class AmazonWorker:
     def _count_pending_items(self) -> int:
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            self._ensure_amazon_schema(cursor)
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE amazon_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums  WHERE amazon_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks  WHERE amazon_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return pending_count(conn, 'amazon', retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -619,29 +458,10 @@ class AmazonWorker:
     def _get_progress_breakdown(self) -> Dict[str, Dict[str, int]]:
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            self._ensure_amazon_schema(cursor)
-            progress = {}
-
-            for table in ('artists', 'albums', 'tracks'):
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) AS total,
-                        SUM(CASE WHEN amazon_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                    FROM {table}
-                """)
-                row = cursor.fetchone()
-                if row:
-                    total, processed = row[0], row[1] or 0
-                    progress[table] = {
-                        'matched': processed,
-                        'total': total,
-                        'percent': int((processed / total * 100) if total > 0 else 0),
-                    }
-
-            return progress
-
+            return progress_breakdown(conn, 'amazon')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}
