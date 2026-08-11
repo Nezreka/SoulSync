@@ -35231,7 +35231,9 @@ div.artist-hero-badge {
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background:
+        radial-gradient(120% 180% at 0% 0%, rgba(var(--accent-rgb), 0.4) 0%, rgba(var(--accent-rgb), 0.1) 55%, transparent 100%),
+        linear-gradient(165deg, #16161c 0%, #0a0a0e 100%);
     background-size: cover;
     background-position: center;
     filter: blur(0px);
@@ -35321,15 +35323,17 @@ div.artist-hero-badge {
 }
 
 .hero-popularity.high {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.55));
+    color: #fff;
 }
 
 .hero-popularity.medium {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: rgba(255, 255, 255, 0.14);
 }
 
 .hero-popularity.low {
-    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.75);
 }
 
 .hero-popularity .meta-icon {
@@ -35502,7 +35506,9 @@ div.artist-hero-badge {
     align-items: center;
     justify-content: center;
     font-size: 120px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background:
+        radial-gradient(100% 140% at 20% 0%, rgba(var(--accent-rgb), 0.35), transparent 70%),
+        linear-gradient(165deg, #1c1c22 0%, #101014 100%);
 }
 
 .discover-hero-image img {
@@ -35872,15 +35878,16 @@ div.artist-hero-badge {
 }
 
 .discover-section-title {
-    font-size: 28px;
-    font-weight: 700;
+    font-size: 26px;
+    font-weight: 800;
     color: #fff;
+    letter-spacing: -0.02em;
     margin: 0 0 8px 0;
 }
 
 .discover-section-subtitle {
-    font-size: 14px;
-    color: #999;
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.5);
     margin: 0;
 }
 
@@ -35942,13 +35949,13 @@ div.artist-hero-badge {
 }
 
 .discover-section-actions .action-button.primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.65));
     color: #fff;
 }
 
 .discover-section-actions .action-button.primary:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.4);
 }
 
 .discover-section-actions .action-button.secondary {
@@ -35966,9 +35973,9 @@ div.artist-hero-badge {
 .discover-sync-status {
     margin: 16px 20px 20px 20px;
     padding: 16px 20px;
-    background: rgba(102, 126, 234, 0.1);
-    border: 1px solid rgba(102, 126, 234, 0.3);
-    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 10px;
     animation: slideDown 0.3s ease;
 }
 
@@ -39071,8 +39078,8 @@ div.artist-hero-badge {
     position: absolute;
     inset: 0;
     background: linear-gradient(135deg,
-            rgba(102, 126, 234, 0.1) 0%,
-            rgba(118, 75, 162, 0.1) 100%);
+            rgba(var(--accent-rgb), 0.12) 0%,
+            rgba(var(--accent-rgb), 0.04) 100%);
     opacity: 1;
     transition: opacity 0.3s ease;
 }
@@ -39115,8 +39122,8 @@ div.artist-hero-badge {
     position: absolute;
     inset: 0;
     background: linear-gradient(135deg,
-            rgba(102, 126, 234, 0.1) 0%,
-            rgba(118, 75, 162, 0.1) 100%);
+            rgba(var(--accent-rgb), 0.12) 0%,
+            rgba(var(--accent-rgb), 0.04) 100%);
     opacity: 1;
     transition: opacity 0.3s ease;
 }
