@@ -18209,6 +18209,53 @@ class MusicDatabase:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")
             return {'success': False, 'error': str(e)}
 
+    def resolve_library_tracks(self, pairs) -> Dict[tuple, Dict[str, Any]]:
+        """Batch (title, artist) -> library track resolution in ONE pass.
+
+        The per-track resolver runs LOWER(title) = ? per call — an unindexed
+        full scan of the tracks table EACH time, which turned a 50-track
+        playlist into minutes on a 300k-track library. This collects every
+        wanted title into one IN() query (one scan total) and matches the
+        artist in Python. Returns {(title_lower, artist_lower): row}; pairs
+        whose track isn't on disk are simply absent."""
+        wants = set()
+        for t, a in pairs or []:
+            t2 = str(t or '').strip().lower()
+            a2 = str(a or '').strip().lower()
+            if t2:
+                wants.add((t2, a2))
+        if not wants:
+            return {}
+        titles = sorted({k[0] for k in wants})
+        out: Dict[tuple, Dict[str, Any]] = {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                _CHUNK = 400   # stay far under SQLite's placeholder limit
+                for i in range(0, len(titles), _CHUNK):
+                    chunk = titles[i:i + _CHUNK]
+                    ph = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
+                               ar.name AS artist_name, al.title AS album_title,
+                               al.thumb_url, t.artist_id, t.album_id
+                        FROM tracks t
+                        JOIN artists ar ON ar.id = t.artist_id
+                        LEFT JOIN albums al ON al.id = t.album_id
+                        WHERE LOWER(t.title) IN ({ph})
+                          AND t.file_path IS NOT NULL AND t.file_path != ''
+                    """, chunk)
+                    for row in cursor.fetchall():
+                        r = dict(row)
+                        key = (str(r['title'] or '').lower(),
+                               str(r['artist_name'] or '').lower())
+                        if key in wants and key not in out:
+                            out[key] = r
+            return out
+        except Exception as e:
+            logger.error("Error batch-resolving library tracks: %s", e)
+            return {}
+
     def get_library_radio_tracks(self, limit=50, exclude_ids=None) -> Dict[str, Any]:
         """Seedless radio across the WHOLE library (Library Radio).
 

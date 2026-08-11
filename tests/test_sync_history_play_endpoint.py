@@ -22,31 +22,27 @@ web_server = pytest.importorskip('web_server')
 
 
 class _FakeDb:
-    def __init__(self, entry):
+    def __init__(self, entry, resolutions=None):
         self._entry = entry
+        self._resolutions = resolutions or {}
+        self.batch_calls = []
 
     def get_sync_history_entry(self, entry_id, profile_id=None):
         return self._entry
+
+    def resolve_library_tracks(self, pairs):
+        self.batch_calls.append(list(pairs))
+        out = {}
+        for title, artist in pairs:
+            row = self._resolutions.get((title, artist))
+            if row:
+                out[(title.lower(), artist.lower())] = row
+        return out
 
 
 @pytest.fixture
 def client():
     return web_server.app.test_client()
-
-
-def _install(monkeypatch, entry, resolutions):
-    """Stub the db handle and the per-track resolver. `resolutions` maps
-    (title, artist) -> resolver row (or None)."""
-    monkeypatch.setattr(web_server, 'MusicDatabase', lambda: _FakeDb(entry))
-
-    calls = []
-
-    def fake_resolve(database, fixer, title, artist):
-        calls.append((title, artist))
-        return resolutions.get((title, artist))
-
-    monkeypatch.setattr(web_server._stats_queries, 'resolve_track', fake_resolve)
-    return calls
 
 
 def test_resolves_matched_tracks_and_skips_the_rest(client, monkeypatch):
@@ -58,14 +54,15 @@ def test_resolves_matched_tracks_and_skips_the_rest(client, monkeypatch):
             {'name': 'String Artist', 'artists': ['Baauer']},
         ]),
     }
-    calls = _install(monkeypatch, entry, {
+    db = _FakeDb(entry, {
         ('Owned Song', 'Ado'): {
             'id': 't1', 'title': 'Owned Song', 'artist_name': 'Ado',
             'album_title': 'Kyougen', 'file_path': '/m/o.flac',
-            'image_url': 'k.jpg', 'bitrate': 1411, 'duration': 200,
+            'thumb_url': None, 'bitrate': 1411, 'duration': 200,
             'artist_id': 'ar1', 'album_id': 'al1',
         },
     })
+    monkeypatch.setattr(web_server, 'MusicDatabase', lambda: db)
     r = client.get('/api/sync/history/7/play')
     assert r.status_code == 200
     body = r.get_json()
@@ -77,10 +74,13 @@ def test_resolves_matched_tracks_and_skips_the_rest(client, monkeypatch):
     # The radio-row shape the player's one mapper expects.
     assert t == {'id': 't1', 'title': 'Owned Song', 'artist': 'Ado',
                  'album': 'Kyougen', 'file_path': '/m/o.flac',
-                 'image_url': 'k.jpg', 'bitrate': 1411, 'duration': 200,
+                 'image_url': None, 'bitrate': 1411, 'duration': 200,
                  'artist_id': 'ar1', 'album_id': 'al1'}
-    # Artists-as-strings parse too (older cached entries).
-    assert ('String Artist', 'Baauer') in calls
+    # ONE batch resolution for the whole playlist (the per-track version
+    # full-scanned the tracks table once per song — minutes on a big
+    # library), and artists-as-strings parse too (older cached entries).
+    assert len(db.batch_calls) == 1
+    assert ('String Artist', 'Baauer') in db.batch_calls[0]
 
 
 def test_missing_entry_is_404(client, monkeypatch):

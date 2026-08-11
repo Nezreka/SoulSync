@@ -21642,7 +21642,12 @@ def play_sync_history_entry(entry_id):
         if not entry:
             return jsonify({"success": False, "error": "Entry not found"}), 404
         cached = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
-        tracks = []
+
+        # One BATCH resolution, not one query per track: the per-track
+        # resolver's LOWER(title) scan cost a full pass of the tracks table
+        # each call, which read as "the play button does nothing for two
+        # minutes" on a 300k-track library.
+        wanted = []
         for t in cached[:200]:
             if not isinstance(t, dict):
                 continue
@@ -21650,20 +21655,22 @@ def play_sync_history_entry(entry_id):
             artists = t.get('artists') or []
             first = artists[0] if isinstance(artists, list) and artists else None
             artist = (first.get('name') if isinstance(first, dict) else str(first or '')).strip()
-            if not title:
-                continue
-            try:
-                row = _stats_queries.resolve_track(get_database(), fix_artist_image_url, title, artist)
-            except Exception:
-                row = None
+            if title:
+                wanted.append((title, artist))
+        resolved = db.resolve_library_tracks(wanted)
+
+        tracks = []
+        for title, artist in wanted:
+            row = resolved.get((title.lower(), artist.lower()))
             if row and row.get('file_path'):
+                thumb = row.get('thumb_url')
                 tracks.append({
                     'id': row.get('id'),
                     'title': row.get('title'),
                     'artist': row.get('artist_name'),
                     'album': row.get('album_title'),
                     'file_path': row.get('file_path'),
-                    'image_url': row.get('image_url'),
+                    'image_url': fix_artist_image_url(thumb) if thumb else None,
                     'bitrate': row.get('bitrate'),
                     'duration': row.get('duration'),
                     'artist_id': row.get('artist_id'),

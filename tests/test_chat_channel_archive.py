@@ -76,3 +76,34 @@ def test_tag_lengths_are_bounded_on_write(tmp_path):
     assert len(row['th']) == 160
     assert len(row['tn']) == 80
     assert 'av' not in row  # unparseable avatar is dropped, not archived as junk
+
+
+def test_resolve_library_tracks_batches_in_one_pass(tmp_path):
+    """The Listen button's resolver: one IN() query for the whole playlist,
+    case-insensitive on title AND artist, missing-file rows excluded."""
+    db = _db(tmp_path)
+    conn = db._get_connection()
+    try:
+        conn.execute("INSERT INTO artists (id, name) VALUES (?,?)", ('ar1', 'Ado'))
+        conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url) VALUES (?,?,?,?)",
+                     ('al1', 'ar1', 'Kyougen', 'k.jpg'))
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?,?,?,?,?)",
+            ('t1', 'al1', 'ar1', 'Show', '/m/show.flac'))
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?,?,?,?,?)",
+            ('t2', 'al1', 'ar1', 'Gone File', ''))
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = db.resolve_library_tracks([
+        ('SHOW', 'ado'),              # case-insensitive both sides
+        ('Gone File', 'Ado'),         # exists but no file -> absent
+        ('Never Synced', 'Nobody'),   # not in the library -> absent
+    ])
+    assert set(out.keys()) == {('show', 'ado')}
+    row = out[('show', 'ado')]
+    assert row['file_path'] == '/m/show.flac'
+    assert row['artist_name'] == 'Ado'
+    assert row['album_title'] == 'Kyougen'

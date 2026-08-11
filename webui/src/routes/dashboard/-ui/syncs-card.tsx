@@ -83,6 +83,9 @@ export function useSyncHistory() {
    *  the toast says so — playing 40 of 50 honestly beats silence. */
   const listen = useCallback(async (id: number | string, name: string) => {
     try {
+      // Instant acknowledgement — the resolve is one round-trip now, but a
+      // click must never feel dead even for the second it takes.
+      window.showToast?.(`Loading ${name}…`, 'info');
       const resp = await fetch(`/api/sync/history/${id}/play`);
       const data = (await resp.json()) as {
         success?: boolean;
