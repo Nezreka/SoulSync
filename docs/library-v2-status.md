@@ -3684,3 +3684,41 @@ Lücke — das Raster zeichnet genau dieses Feld, das Album bleibt dort leer.
 Dann `soulid` 13/4 (eigene Runde, §50.4.4.7), `imports/side_effects` 5/7,
 `library/missing_track_import` 8/4, `listening_stats_worker` 10/1 (blockiert),
 `worker_utils` 7/2.
+
+#### 50.4.4.10 Der atomare Album-Publish erzählte es nur der Legacy-Seite
+
+Stand: **394/96**. Beim Durchsehen der verbleibenden Schreibstellen fiel ein
+dritter Fall derselben Sorte auf wie in §50.4.4.9 — eine Dateiverschiebung, von
+der der Katalog nichts erfährt.
+
+#999 legt ein ganzes Album in einem privaten Spiegel an, damit der Medienserver
+nie ein halbes Release sieht, und schiebt es am Ende in die Bibliothek. Die
+Tracks wurden **aus dem Staging** importiert, `lib2_track_files` hält also den
+Staging-Pfad. Der Publish schrieb nur die Legacy-Zeile um. Danach zeigte der
+lib2-Eintrag in einen Baum, den der nächste Schritt löscht — und
+`path_drift_reconcile` findet die Datei über genau diesen gespeicherten Pfad,
+kann es also auch nicht heilen.
+
+`track_files.repoint_file_path(conn, alt, neu)` ist der gemeinsame Griff dafür:
+Treffer über den gespeicherten Pfad, Rückgabe der Zeilenzahl — „der Katalog kennt
+diese Datei nicht" und „erledigt" waren vorher nicht unterscheidbar, und der
+erste Fall ist genau der, der zur Karteileiche führt.
+
+**Reihenfolge ist hier keine Geschmacksfrage.** Der Test hat es gezeigt: mit der
+Legacy-Schreibung zuerst nahm ein Fehler dort die native gleich mit (der
+`except`-Zweig schluckt beides). Nativ zuerst, Legacy als Durchschrift danach.
+
+**Zwei Zahlen waren Prosa.** Der Zähler ist ein Regex: ein Kommentar („update
+tracks table") und ein Doku-Satz in `legacy_mirror` zählten als Schreibstellen.
+Umformuliert statt den Zähler zu verbiegen — dieselbe Regel wie bei der
+Log-Zeile in §50.4.4.6.
+
+**Was die Restliste jetzt wirklich ist.** Nach dieser Runde ist keine der
+verbleibenden Schreibstellen mehr ein eigenständiger Produzent — außer `soulid`
+(eigene Runde). `imports/side_effects` 7 schreibt die Legacy-Bibliothek im
+Modus „SoulSync ist der Medienserver", `library/missing_track_import` 4 legt die
+Legacy-Trackzeile für dieselbe Ansicht an, und der Rest
+(`downloads/lifecycle`, `imports/pipeline`, `library2/path_drift`,
+`reorganize_runner`, `repair_worker`) sind `tracks.file_path`-Durchschriften.
+Alle hängen an Lesern, die noch nicht umgezogen sind. **Stufe 2 ist damit
+abgeschlossen, bis auf soulid** — was bleibt, fällt mit Stufe 3.

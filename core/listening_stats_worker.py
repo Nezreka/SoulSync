@@ -198,7 +198,7 @@ class ListeningStatsWorker:
             self.stats['events_added'] += inserted
             logger.info(f"Inserted {inserted} new listening events (of {len(events)} total)")
 
-        # Step 2: Fetch play counts and update tracks table
+        # Step 2: Fetch play counts and record them per track
         self.current_item = f"Updating play counts from {active_server}..."
         try:
             server_counts = client.get_track_play_counts()

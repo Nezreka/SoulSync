@@ -12,7 +12,7 @@ and has no production caller.
 **Why triggers and not calls.** The obvious fix — call the resync after
 ``_run_single_enrichment`` — only covers the manual single-entity Enrich from
 the UI. The bulk is written by the workers' own loops: **137
-``UPDATE artists/albums/tracks`` statements across 14 files**, and only about
+enrichment writes to the three legacy tables across 14 files**, and only about
 half of them even touch ``updated_at``, so neither a per-call-site hook nor an
 ``updated_at`` sweep is complete. A hook also has to be remembered by whoever
 adds the fifteenth worker.

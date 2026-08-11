@@ -197,6 +197,26 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
+def repoint_file_path(conn, old_path: str, new_path: str) -> int:
+    """Follow a file that moved on disk, matched by the path we stored for it.
+
+    The by-path handle is the only one some callers have: the atomic album
+    publish knows the pair it just moved, not a track. Returns the number of
+    rows repointed, so a caller can tell "the catalogue did not know this file"
+    from "done" — the two used to be indistinguishable, and the first is how a
+    row ends up naming a path inside a staging tree that is about to be deleted.
+    Does not commit.
+    """
+    old_path = str(old_path or "")
+    new_path = str(new_path or "")
+    if not old_path or not new_path or old_path == new_path:
+        return 0
+    cursor = conn.execute(
+        "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+        "WHERE path=?", (new_path, old_path))
+    return int(cursor.rowcount or 0)
+
+
 def _absence_is_credible(stored: str, keep_path: str, config_manager: Any) -> bool:
     """Whether a stored path being absent really means the file is gone.
 
@@ -423,6 +443,7 @@ __all__ = [
     "primary_file_row",
     "primary_order",
     "quality_order",
+    "repoint_file_path",
     "set_file_state",
     "set_primary_file",
 ]
