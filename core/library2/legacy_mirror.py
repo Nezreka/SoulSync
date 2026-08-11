@@ -214,6 +214,56 @@ def drain(database: Any, *, limit: int = 5000, batch_size: int = 200,
     return stats
 
 
+def reconcile_divergent(database: Any, *, scan_limit: int = 2000,
+                        enqueue_limit: int = 500,
+                        after: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Queue mirrored rows that already disagree with legacy (iss32-T01a).
+
+    The triggers only see legacy writes that happen after they are installed.
+    Everything the twelve workers wrote before then is divergent and enqueues
+    nothing — on a real library that was 156 of 170 mirrored rows. Without this
+    sweep, promise 2's expected value of 0 would be unreachable and the figure
+    would measure only how long the mirror has existed.
+
+    The sweep reuses the audit's own walk and the existing queue, so it adds a
+    producer, not a second repair path: the ordinary drain does the writing,
+    at the pace and with the migration deference it already has. Bounded and
+    resumable through ``cursor`` for the same reason every other lib2 backfill
+    is (iss32-M05): no unbounded work inside one transaction.
+    """
+    from core.library2.enrich import iter_mirror_divergences
+
+    stats: Dict[str, Any] = {
+        "scanned": 0, "enqueued": 0, "dangling": 0, "exhausted": True,
+        "cursor": {},
+    }
+    cursor: Dict[str, Any] = dict(after or {})
+    conn = database._get_connection()
+    try:
+        for item in iter_mirror_divergences(conn, after=cursor):
+            stats["scanned"] += 1
+            cursor[item.entity_type] = item.lib2_id
+            if item.status == "divergent":
+                enqueue(conn, item.entity_type, item.legacy_id)
+                stats["enqueued"] += 1
+            elif item.status == "dangling":
+                # The legacy row is gone; queueing it would make ``drain``
+                # count it as unmapped and the next sweep find it again.
+                stats["dangling"] += 1
+            if (stats["scanned"] >= int(scan_limit)
+                    or stats["enqueued"] >= int(enqueue_limit)):
+                stats["exhausted"] = False
+                stats["cursor"] = cursor
+                break
+        conn.commit()
+    finally:
+        conn.close()
+    if stats["enqueued"]:
+        logger.info("Legacy → lib2 reconcile queued %s divergent row(s) "
+                    "(scanned %s)", stats["enqueued"], stats["scanned"])
+    return stats
+
+
 class MirrorDrainer:
     """Apply the queue on a timer, out of everyone else's way.
 
@@ -223,10 +273,12 @@ class MirrorDrainer:
     """
 
     def __init__(self, database: Any, *, interval: float = 30.0,
-                 limit: int = 5000) -> None:
+                 limit: int = 5000, sweep_scan_limit: int = 2000) -> None:
         self._database = database
         self._interval = max(float(interval), 1.0)
         self._limit = int(limit)
+        self._sweep_scan_limit = int(sweep_scan_limit)
+        self._sweep_cursor: Dict[str, Any] = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="Lib2LegacyMirrorDrainer", daemon=True)
@@ -245,7 +297,18 @@ class MirrorDrainer:
 
         if local_migration_active() or bootstrap_is_active(self._database):
             return {"applied": 0, "unmapped": 0, "failed": 0, "deferred": 1}
-        return drain(self._database, limit=self._limit)
+        stats = drain(self._database, limit=self._limit)
+        if stats["applied"] or stats["failed"]:
+            # The queue is the urgent work and the sweep is catch-up; running
+            # both in one tick would let a large backlog scan delay ordinary
+            # mirroring. An idle tick has the time.
+            return stats
+        sweep = reconcile_divergent(
+            self._database, scan_limit=self._sweep_scan_limit,
+            after=self._sweep_cursor)
+        self._sweep_cursor = sweep["cursor"]
+        stats.update(sweep)
+        return stats
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):

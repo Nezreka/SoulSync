@@ -185,6 +185,48 @@ def _quarantine_disk_findings(
     return observed
 
 
+def _mirror_divergence_findings(
+    collector: _Collector, conn: Any,
+) -> Tuple[bool, Dict[str, int]]:
+    """Turn the legacy↔lib2 mirror comparison into findings (iss32-T01a).
+
+    docs §32.3.1 promise 2: while both table worlds exist, their disagreement
+    is a figure in this report with an expected value of 0, not a matter of
+    trust. The walk and the compared field set both live in
+    ``core.library2.enrich`` — the same module the mirror writes through, so
+    the audit cannot fall behind what the mirror copies, and this auditor stays
+    what it says it is: a reader.
+    """
+    from core.library2.enrich import iter_mirror_divergences, mirror_check_ran
+
+    observed = {"mirror_checked": 0, "mirror_pending": 0, "mirror_dangling": 0}
+    ran = mirror_check_ran(conn)
+    if not ran:
+        return False, observed
+    for item in iter_mirror_divergences(conn):
+        if item.status == "pending":
+            observed["mirror_pending"] += 1
+        elif item.status == "dangling":
+            observed["mirror_dangling"] += 1
+            collector.add(
+                "lib2_mirror_legacy_row_missing", "info", "mirror_divergence",
+                item.lib2_id,
+                "Library-v2 row points at a legacy row that no longer exists",
+                entity_type=item.entity_type, legacy_id=item.legacy_id,
+            )
+        else:
+            observed["mirror_checked"] += 1
+            if item.status == "divergent":
+                collector.add(
+                    "lib2_mirror_divergence", "error", "mirror_divergence",
+                    item.lib2_id,
+                    "Mirrored legacy enrichment has not reached the Library-v2 row",
+                    entity_type=item.entity_type, legacy_id=item.legacy_id,
+                    fields=sorted(item.fields), values=item.fields,
+                )
+    return ran, observed
+
+
 def build_integrity_report(
     conn: Any,
     *,
@@ -478,6 +520,11 @@ def build_integrity_report(
             )
 
     observed.update(_quarantine_disk_findings(collector, quarantine_dir))
+
+    mirror_ran, mirror_observed = _mirror_divergence_findings(collector, conn)
+    coverage["mirror_divergence"] = mirror_ran
+    if mirror_ran:
+        observed.update(mirror_observed)
 
     clients = {
         str(key): dict(value)

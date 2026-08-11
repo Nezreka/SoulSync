@@ -20,7 +20,8 @@ regardless of the base row, so overwriting the base row here is always safe.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Tuple
 
 
 def _row_get(row: Any, col: str) -> Optional[Any]:
@@ -142,42 +143,136 @@ def _artist_enrichment(legacy_row: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def resync_artist_from_legacy(conn, lib2_artist_id: int, legacy_row: Any) -> bool:
-    genres = _row_get(legacy_row, "genres")
-    aliases = _row_get(legacy_row, "aliases")
-    conn.execute(
-        "UPDATE lib2_artists SET "
-        "image_url=COALESCE(?, image_url), "
-        "genres=COALESCE(?, genres), "
-        "summary=COALESCE(?, summary), style=COALESCE(?, style), "
-        "mood=COALESCE(?, mood), label=COALESCE(?, label), "
-        "aliases=COALESCE(?, aliases), "
-        "banner_url=COALESCE(?, banner_url), updated_at=CURRENT_TIMESTAMP "
-        "WHERE id=?",
-        (
-            _row_get(legacy_row, "thumb_url"),
-            _normalize_genres(genres) if genres else None,
-            _row_get(legacy_row, "summary"),
-            _row_get(legacy_row, "style"),
-            _row_get(legacy_row, "mood"),
-            _row_get(legacy_row, "label"),
-            _normalize_genres(aliases) if aliases else None,
-            _row_get(legacy_row, "banner_url"),
-            lib2_artist_id,
+@dataclass(frozen=True)
+class MirrorSpec:
+    """Everything one entity type mirrors, declared once.
+
+    The writer below and the divergence check in
+    ``core.library2.integrity_reconciler`` both read this. Two hand-kept lists
+    would drift the moment a field is added, and the audit is only worth
+    anything while it covers exactly what the mirror copies (iss32-T01a).
+    """
+
+    entity_type: str
+    lib2_table: str
+    legacy_table: str
+    link_column: str
+    # (lib2 column, legacy column, transform applied to a truthy legacy value)
+    scalars: Tuple[Tuple[str, str, Optional[Callable[[Any], Any]]], ...]
+    # lib2 column ← first non-empty of these legacy columns
+    id_columns: Tuple[Tuple[str, Tuple[str, ...]], ...]
+    # JSON object column ← builder(legacy_row), merged key by key
+    json_columns: Tuple[Tuple[str, Callable[[Any], Dict[str, Any]]], ...]
+
+
+MIRROR_SPECS: Dict[str, MirrorSpec] = {
+    "artist": MirrorSpec(
+        entity_type="artist",
+        lib2_table="lib2_artists",
+        legacy_table="artists",
+        link_column="legacy_artist_id",
+        scalars=(
+            ("image_url", "thumb_url", None),
+            ("genres", "genres", _normalize_genres),
+            ("summary", "summary", None),
+            ("style", "style", None),
+            ("mood", "mood", None),
+            ("label", "label", None),
+            ("aliases", "aliases", _normalize_genres),
+            ("banner_url", "banner_url", None),
         ),
+        id_columns=(
+            ("spotify_id", ("spotify_artist_id",)),
+            ("musicbrainz_id", ("musicbrainz_id",)),
+        ),
+        # iss32-E01: the review asks for "artwork, genres, bios, provider ids".
+        # The scalars cover artwork and genres; these two are the half that was
+        # missing entirely — a mirrored artist kept lib2's stale provider ids
+        # and never received a Last.fm/Genius/Discogs bio at all.
+        json_columns=(
+            ("external_ids", lambda row: _provider_ids(row, "artist")),
+            ("enrichment", _artist_enrichment),
+        ),
+    ),
+    "album": MirrorSpec(
+        entity_type="album",
+        lib2_table="lib2_albums",
+        legacy_table="albums",
+        link_column="legacy_album_id",
+        scalars=(
+            ("image_url", "thumb_url", None),
+            ("genres", "genres", _normalize_genres),
+            ("label", "label", None),
+            ("explicit", "explicit", None),
+            ("upc", "upc", None),
+            ("style", "style", None),
+            ("mood", "mood", None),
+        ),
+        id_columns=(
+            ("spotify_id", ("spotify_album_id",)),
+            ("musicbrainz_id", ("musicbrainz_release_id",)),
+        ),
+        json_columns=(("external_ids", lambda row: _provider_ids(row, "album")),),
+    ),
+    "track": MirrorSpec(
+        entity_type="track",
+        lib2_table="lib2_tracks",
+        legacy_table="tracks",
+        link_column="legacy_track_id",
+        scalars=(
+            ("bpm", "bpm", None),
+            ("explicit", "explicit", None),
+            ("genius_lyrics", "genius_lyrics", None),
+            ("copyright", "copyright", None),
+            ("style", "style", None),
+            ("mood", "mood", None),
+        ),
+        id_columns=(
+            ("spotify_id", ("spotify_track_id",)),
+            ("musicbrainz_id", ("musicbrainz_recording_id",)),
+            ("isrc", ("isrc",)),
+        ),
+        json_columns=(("external_ids", lambda row: _provider_ids(row, "track")),),
+    ),
+}
+
+
+def _scalar_value(legacy_row: Any, field: tuple) -> Optional[Any]:
+    """What the mirror would write for one scalar field, or None for "leave
+    the lib2 value alone" — which is what the ``COALESCE`` below encodes."""
+    _lib2_column, legacy_column, transform = field
+    value = _row_get(legacy_row, legacy_column)
+    if transform is None:
+        return value
+    return transform(value) if value else None
+
+
+def _id_value(legacy_row: Any, legacy_columns: Tuple[str, ...]) -> Optional[str]:
+    for column in legacy_columns:
+        value = _row_get(legacy_row, column)
+        if value not in (None, ""):
+            return str(value).strip()
+    return None
+
+
+def _apply_mirror(conn, spec: MirrorSpec, entity_id: int, legacy_row: Any) -> bool:
+    assignments = ", ".join(
+        f"{field[0]}=COALESCE(?, {field[0]})" for field in spec.scalars)
+    conn.execute(
+        f"UPDATE {spec.lib2_table} SET {assignments}, "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        (*(_scalar_value(legacy_row, field) for field in spec.scalars), entity_id),
     )
-    # iss32-E01: the review asks for "artwork, genres, bios, provider ids".
-    # The UPDATE above covers artwork and genres; the two below are the half
-    # that was missing entirely — a mirrored artist kept lib2's stale provider
-    # ids and never received a Last.fm/Genius/Discogs bio at all.
-    _merge_json_column(conn, "lib2_artists", lib2_artist_id, "external_ids",
-                       _provider_ids(legacy_row, "artist"))
-    _merge_json_column(conn, "lib2_artists", lib2_artist_id, "enrichment",
-                       _artist_enrichment(legacy_row))
-    _sync_dedicated_id_columns(conn, "lib2_artists", lib2_artist_id, legacy_row,
-                               {"spotify_id": ("spotify_artist_id",),
-                                "musicbrainz_id": ("musicbrainz_id",)})
+    for column, builder in spec.json_columns:
+        _merge_json_column(conn, spec.lib2_table, entity_id, column,
+                           builder(legacy_row))
+    _sync_dedicated_id_columns(conn, spec.lib2_table, entity_id, legacy_row,
+                               dict(spec.id_columns))
     return True
+
+
+def resync_artist_from_legacy(conn, lib2_artist_id: int, legacy_row: Any) -> bool:
+    return _apply_mirror(conn, MIRROR_SPECS["artist"], lib2_artist_id, legacy_row)
 
 
 def _sync_dedicated_id_columns(conn, table: str, entity_id: int, legacy_row: Any,
@@ -189,78 +284,20 @@ def _sync_dedicated_id_columns(conn, table: str, entity_id: int, legacy_row: Any
     JSON would leave the columns the read paths actually use behind.
     """
     for column, legacy_columns in mapping.items():
-        value = _row_get(legacy_row, legacy_columns[0])
-        for extra in legacy_columns[1:]:
-            if value in (None, ""):
-                value = _row_get(legacy_row, extra)
-        if value in (None, ""):
+        value = _id_value(legacy_row, tuple(legacy_columns))
+        if value is None:
             continue
         conn.execute(
             f"UPDATE {table} SET {column}=? WHERE id=? AND COALESCE({column},'')<>?",
-            (str(value).strip(), entity_id, str(value).strip()))
+            (value, entity_id, value))
 
 
 def resync_album_from_legacy(conn, lib2_album_id: int, legacy_row: Any) -> bool:
-    genres = _row_get(legacy_row, "genres")
-    conn.execute(
-        "UPDATE lib2_albums SET "
-        "image_url=COALESCE(?, image_url), "
-        "genres=COALESCE(?, genres), "
-        "label=COALESCE(?, label), explicit=COALESCE(?, explicit), "
-        "upc=COALESCE(?, upc), "
-        "style=COALESCE(?, style), mood=COALESCE(?, mood), "
-        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (
-            _row_get(legacy_row, "thumb_url"),
-            _normalize_genres(genres) if genres else None,
-            _row_get(legacy_row, "label"),
-            _row_get(legacy_row, "explicit"),
-            _row_get(legacy_row, "upc"),
-            _row_get(legacy_row, "style"),
-            _row_get(legacy_row, "mood"),
-            lib2_album_id,
-        ),
-    )
-    _merge_json_column(conn, "lib2_albums", lib2_album_id, "external_ids",
-                       _provider_ids(legacy_row, "album"))
-    _sync_dedicated_id_columns(conn, "lib2_albums", lib2_album_id, legacy_row,
-                               {"spotify_id": ("spotify_album_id",),
-                                "musicbrainz_id": ("musicbrainz_release_id",)})
-    return True
+    return _apply_mirror(conn, MIRROR_SPECS["album"], lib2_album_id, legacy_row)
 
 
 def resync_track_from_legacy(conn, lib2_track_id: int, legacy_row: Any) -> bool:
-    conn.execute(
-        "UPDATE lib2_tracks SET "
-        "bpm=COALESCE(?, bpm), explicit=COALESCE(?, explicit), "
-        "genius_lyrics=COALESCE(?, genius_lyrics), "
-        "copyright=COALESCE(?, copyright), "
-        "style=COALESCE(?, style), mood=COALESCE(?, mood), "
-        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (
-            _row_get(legacy_row, "bpm"),
-            _row_get(legacy_row, "explicit"),
-            _row_get(legacy_row, "genius_lyrics"),
-            _row_get(legacy_row, "copyright"),
-            _row_get(legacy_row, "style"),
-            _row_get(legacy_row, "mood"),
-            lib2_track_id,
-        ),
-    )
-    _merge_json_column(conn, "lib2_tracks", lib2_track_id, "external_ids",
-                       _provider_ids(legacy_row, "track"))
-    _sync_dedicated_id_columns(conn, "lib2_tracks", lib2_track_id, legacy_row,
-                               {"spotify_id": ("spotify_track_id",),
-                                "musicbrainz_id": ("musicbrainz_recording_id",),
-                                "isrc": ("isrc",)})
-    return True
-
-
-_RESYNC: Dict[str, tuple] = {
-    "artist": ("artists", resync_artist_from_legacy),
-    "album": ("albums", resync_album_from_legacy),
-    "track": ("tracks", resync_track_from_legacy),
-}
+    return _apply_mirror(conn, MIRROR_SPECS["track"], lib2_track_id, legacy_row)
 
 
 def resync_entity_from_legacy(conn, entity_type: str, lib2_id: int, legacy_id: Any) -> bool:
@@ -269,17 +306,215 @@ def resync_entity_from_legacy(conn, entity_type: str, lib2_id: int, legacy_id: A
     Returns False (no-op) if the legacy row is gone or ``entity_type`` is
     unrecognized — the caller's enrichment result is unaffected either way.
     """
-    spec = _RESYNC.get(entity_type)
+    spec = MIRROR_SPECS.get(entity_type)
     if spec is None:
         return False
-    legacy_table, fn = spec
-    row = conn.execute(f"SELECT * FROM {legacy_table} WHERE id=?", (legacy_id,)).fetchone()
+    row = conn.execute(
+        f"SELECT * FROM {spec.legacy_table} WHERE id=?", (legacy_id,)).fetchone()
     if row is None:
         return False
-    return fn(conn, lib2_id, row)
+    return _apply_mirror(conn, spec, lib2_id, row)
+
+
+def _same_value(expected: Any, actual: Any) -> bool:
+    """Compare a mirrored value with what the lib2 row carries.
+
+    Deliberately tolerant about representation, not about content: a REAL
+    ``120.0`` read back through a TEXT column, or an int that survived a JSON
+    round trip, is the same value. Anything stricter would report the whole
+    library; anything looser would hide the disagreement being measured.
+    """
+    if actual is None:
+        return expected is None
+    if isinstance(expected, (int, float)) and not isinstance(expected, bool):
+        try:
+            return float(expected) == float(actual)
+        except (TypeError, ValueError):
+            return False
+    return str(expected).strip() == str(actual).strip()
+
+
+def _is_absent(value: Any) -> bool:
+    """Whether a value carries nothing a mirror could meaningfully hand over.
+
+    An empty legacy column, an empty JSON array and NULL are the same absence.
+    Reporting ``'' vs NULL`` as a disagreement would put rows into the metric
+    that nobody can act on and that no drain would ever clear, which costs it
+    the property that makes it worth having: a non-zero value means a bug.
+    """
+    if value is None:
+        return True
+    return str(value).strip() in ("", "[]", "{}")
+
+
+def _json_divergence(column: str, incoming: Dict[str, Any],
+                     raw: Any) -> Dict[str, Dict[str, Any]]:
+    try:
+        current = json.loads(raw or "{}")
+        if not isinstance(current, dict):
+            current = {}
+    except (TypeError, ValueError):
+        current = {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, value in incoming.items():
+        if isinstance(value, dict):
+            bucket = current.get(key)
+            bucket = bucket if isinstance(bucket, dict) else {}
+            for sub_key, sub_value in value.items():
+                if not _same_value(sub_value, bucket.get(sub_key)):
+                    out[f"{column}.{key}.{sub_key}"] = {
+                        "legacy": sub_value, "lib2": bucket.get(sub_key)}
+        elif not _same_value(value, current.get(key)):
+            out[f"{column}.{key}"] = {"legacy": value, "lib2": current.get(key)}
+    return out
+
+
+def mirror_divergence(spec: MirrorSpec, legacy_row: Any,
+                      lib2_row: Any) -> Dict[str, Dict[str, Any]]:
+    """Fields where the lib2 row does not carry what the mirror would write.
+
+    Only fields the mirror actually copies are compared, and only where the
+    legacy side has something to give: the mirror is ``COALESCE``-based, so a
+    legacy NULL means "leave lib2 alone" by contract, not "lib2 is wrong".
+    An empty result is the expected state (docs §32.3.1, promise 2).
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for field in spec.scalars:
+        expected = _scalar_value(legacy_row, field)
+        if _is_absent(expected):
+            continue
+        actual = _row_get(lib2_row, field[0])
+        if not _same_value(expected, actual):
+            out[field[0]] = {"legacy": expected, "lib2": actual}
+    for column, legacy_columns in spec.id_columns:
+        expected = _id_value(legacy_row, legacy_columns)
+        if expected is None:
+            continue
+        actual = _row_get(lib2_row, column)
+        if str(actual or "").strip() != expected:
+            out[column] = {"legacy": expected, "lib2": actual}
+    for column, builder in spec.json_columns:
+        out.update(_json_divergence(
+            column, builder(legacy_row), _row_get(lib2_row, column)))
+    return out
+
+
+@dataclass(frozen=True)
+class MirrorObservation:
+    """How one mirrored lib2 row stands against its legacy source row."""
+
+    entity_type: str
+    lib2_id: Any
+    legacy_id: Any
+    status: str  # "in_step" | "divergent" | "dangling" | "pending"
+    fields: Dict[str, Dict[str, Any]]
+
+
+def _table_exists(conn, table: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
+    ).fetchone() is not None
+
+
+def legacy_key(value: Any) -> Optional[str]:
+    """One comparable form for a legacy row id.
+
+    ``artists.id`` is a ``TEXT PRIMARY KEY`` holding a media-server ratingKey,
+    while ``lib2_artists.legacy_artist_id`` is ``INTEGER``. SQLite matches the
+    two through column affinity, so the SQL is right while a Python dict keyed
+    on the raw value is not — measured against a real library, that difference
+    turned every mirrored row into a false "legacy row missing" and left the
+    divergence figure measuring nothing at all.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def iter_mirror_divergences(conn, *, batch_size: int = 500,
+                            after: Optional[Dict[str, Any]] = None):
+    """Yield one :class:`MirrorObservation` per mirrored lib2 row.
+
+    Rows without a legacy link are natively created and have nothing to
+    compare against; they are skipped rather than yielded. The walk is
+    resumable through ``after`` (``{entity_type: last lib2 id}``) and bounded
+    by whatever the caller takes from the generator, so a sweep can stay
+    inside a time budget without a second implementation of the join.
+    """
+    cursors = dict(after or {})
+    has_queue = _table_exists(conn, "lib2_legacy_dirty")
+    for entity_type, spec in MIRROR_SPECS.items():
+        if not (_table_exists(conn, spec.lib2_table)
+                and _table_exists(conn, spec.legacy_table)):
+            continue
+        pending = set()
+        if has_queue:
+            pending = {
+                legacy_key(row[0]) for row in conn.execute(
+                    "SELECT legacy_id FROM lib2_legacy_dirty WHERE entity_type=?",
+                    (entity_type,))
+            }
+        position = cursors.get(entity_type, -1)
+        while True:
+            # Keyset paging, not OFFSET: this walks a table that grows to one
+            # row per track, and OFFSET re-scans everything it skipped.
+            rows = [dict(row) for row in conn.execute(
+                f"SELECT * FROM {spec.lib2_table} "
+                f"WHERE {spec.link_column} IS NOT NULL AND id>? ORDER BY id LIMIT ?",
+                (position, int(batch_size)))]
+            if not rows:
+                break
+            position = rows[-1]["id"]
+            wanted = {
+                row[spec.link_column] for row in rows
+                if legacy_key(row[spec.link_column]) not in pending
+            }
+            legacy_rows: Dict[Optional[str], Any] = {}
+            if wanted:
+                holes = ",".join("?" for _ in wanted)
+                legacy_rows = {
+                    legacy_key(row["id"]): row for row in conn.execute(
+                        f"SELECT * FROM {spec.legacy_table} WHERE id IN ({holes})",
+                        tuple(wanted))
+                }
+            for row in rows:
+                legacy_id = row[spec.link_column]
+                key = legacy_key(legacy_id)
+                if key in pending:
+                    # Queued by the trigger and not yet drained: work in
+                    # flight, not a defect.
+                    yield MirrorObservation(
+                        entity_type, row["id"], legacy_id, "pending", {})
+                    continue
+                legacy_row = legacy_rows.get(key)
+                if legacy_row is None:
+                    yield MirrorObservation(
+                        entity_type, row["id"], legacy_id, "dangling", {})
+                    continue
+                fields = mirror_divergence(spec, legacy_row, row)
+                yield MirrorObservation(
+                    entity_type, row["id"], legacy_id,
+                    "divergent" if fields else "in_step", fields)
+
+
+def mirror_check_ran(conn) -> bool:
+    """Whether any entity type still has both of its tables to compare."""
+    return any(
+        _table_exists(conn, spec.lib2_table) and _table_exists(conn, spec.legacy_table)
+        for spec in MIRROR_SPECS.values()
+    )
 
 
 __all__ = [
+    "MIRROR_SPECS",
+    "MirrorObservation",
+    "MirrorSpec",
+    "iter_mirror_divergences",
+    "legacy_key",
+    "mirror_check_ran",
+    "mirror_divergence",
     "resync_artist_from_legacy",
     "resync_album_from_legacy",
     "resync_track_from_legacy",

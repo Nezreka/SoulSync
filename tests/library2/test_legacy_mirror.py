@@ -246,6 +246,150 @@ class TestDrainAppliesToLib2:
             conn.close()
 
 
+class TestReconcileTheBacklogTheTriggerNeverSaw:
+    """iss32-T01a, second half.
+
+    The trigger only sees legacy writes that happen *after* it is installed.
+    Everything the twelve workers wrote before this branch existed is already
+    divergent and enqueues nothing — measured against a real library: 156 of
+    170 mirrored rows. A metric with an expected value of 0 that no mechanism
+    can ever bring to 0 is not a metric, so the sweep that closes that gap
+    belongs with the mirror.
+    """
+
+    def _diverge_behind_the_triggers_back(self, db):
+        conn = _conn(db)
+        try:
+            conn.execute("DROP TRIGGER IF EXISTS trg_lib2_mirror_artists")
+            conn.execute("UPDATE artists SET lastfm_bio=?, spotify_artist_id=? "
+                         "WHERE id=1", ("Written before the mirror existed.", "sp-old"))
+            conn.commit()
+            ensure_legacy_mirror_schema(conn.cursor())
+            conn.commit()
+            assert pending_count(conn) == 0, "the trigger cannot see the past"
+        finally:
+            conn.close()
+
+    def _divergent_rows(self, db):
+        from core.library2.enrich import iter_mirror_divergences
+
+        conn = _conn(db)
+        try:
+            return [item for item in iter_mirror_divergences(conn)
+                    if item.status == "divergent"]
+        finally:
+            conn.close()
+
+    def test_sweep_enqueues_the_divergent_row_and_the_drain_clears_it(self, mirrored_db):
+        from core.library2.legacy_mirror import reconcile_divergent
+
+        self._diverge_behind_the_triggers_back(mirrored_db)
+        assert len(self._divergent_rows(mirrored_db)) == 1
+
+        stats = reconcile_divergent(mirrored_db)
+
+        assert stats["enqueued"] == 1
+        drain(mirrored_db)
+        assert self._divergent_rows(mirrored_db) == []
+        row = _lib2_artist(mirrored_db)
+        assert json.loads(row["enrichment"])["lastfm"]["bio"] == (
+            "Written before the mirror existed.")
+
+    def test_rows_in_step_are_left_alone(self, mirrored_db):
+        from core.library2.legacy_mirror import reconcile_divergent
+
+        stats = reconcile_divergent(mirrored_db)
+
+        assert stats["enqueued"] == 0
+        assert stats["scanned"] > 0
+        conn = _conn(mirrored_db)
+        try:
+            assert pending_count(conn) == 0
+        finally:
+            conn.close()
+
+    def test_a_bounded_sweep_resumes_where_it_stopped(self, mirrored_db):
+        from core.library2.legacy_mirror import reconcile_divergent
+
+        first = reconcile_divergent(mirrored_db, scan_limit=1)
+        assert first["scanned"] == 1
+        assert first["exhausted"] is False
+
+        second = reconcile_divergent(mirrored_db, scan_limit=1,
+                                     after=first["cursor"])
+
+        assert second["scanned"] == 1
+        assert second["cursor"] != first["cursor"]
+
+    def test_an_exhausted_sweep_restarts_from_the_beginning(self, mirrored_db):
+        from core.library2.legacy_mirror import reconcile_divergent
+
+        stats = reconcile_divergent(mirrored_db)
+
+        assert stats["exhausted"] is True
+        assert stats["cursor"] == {}
+
+    def test_a_dangling_link_is_never_enqueued(self, mirrored_db):
+        """``drain`` drops a queued id with no lib2 counterpart, and the
+        reverse case cannot be fixed by queueing either — the legacy row is
+        gone. Enqueueing it would be a no-op the sweep repeats forever."""
+        from core.library2.legacy_mirror import reconcile_divergent
+
+        conn = _conn(mirrored_db)
+        try:
+            conn.execute("DELETE FROM artists WHERE id=1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        stats = reconcile_divergent(mirrored_db)
+
+        assert stats["enqueued"] == 0
+        assert stats["dangling"] == 1
+
+
+class TestTheDrainerRunsTheSweep:
+    """A repair function with no production caller is the exact shape of the
+    defect this branch started from (iss32-E01)."""
+
+    def test_an_idle_tick_sweeps_for_backlog(self, mirrored_db):
+        from core.library2.legacy_mirror import MirrorDrainer
+
+        conn = _conn(mirrored_db)
+        try:
+            conn.execute("DROP TRIGGER IF EXISTS trg_lib2_mirror_artists")
+            conn.execute("UPDATE artists SET style='trip hop' WHERE id=1")
+            conn.commit()
+            ensure_legacy_mirror_schema(conn.cursor())
+            conn.commit()
+            assert pending_count(conn) == 0
+        finally:
+            conn.close()
+
+        drainer = MirrorDrainer(mirrored_db)
+        drainer.tick()   # finds nothing to drain, sweeps, queues the row
+        drainer.tick()   # drains what the sweep queued
+
+        assert _lib2_artist(mirrored_db)["style"] == "trip hop"
+
+    def test_a_busy_tick_drains_before_it_sweeps(self, mirrored_db):
+        """The queue is the urgent work; the sweep is catch-up. Doing both in
+        one tick would let a big backlog scan delay ordinary mirroring."""
+        from core.library2.legacy_mirror import MirrorDrainer
+
+        conn = _conn(mirrored_db)
+        try:
+            conn.execute("UPDATE artists SET style='trip hop' WHERE id=1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        stats = MirrorDrainer(mirrored_db).tick()
+
+        assert stats["applied"] == 1
+        assert stats.get("scanned", 0) == 0
+
+
 class TestLegacyApiArtistsPage:
     """iss32-E03: /api/library/artists must show what the v2 UI shows."""
 
