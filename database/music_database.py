@@ -12028,7 +12028,29 @@ class MusicDatabase:
                     ORDER BY rr.release_date DESC, rr.added_date DESC
                     LIMIT ?
                 """, (profile_id, limit))
-                return [dict(row) for row in cursor.fetchall()]
+                releases = [dict(row) for row in cursor.fetchall()]
+
+                # Owned = the library already has this (artist, album) —
+                # the dashboard rail badges those, and a click plays them
+                # instead of opening the download modal. Name-match, same
+                # comparison the recently-added art backfill uses; track
+                # completeness stays the click-time check's job.
+                for release in releases:
+                    try:
+                        cursor.execute(
+                            """
+                            SELECT 1 FROM albums al
+                            JOIN artists ar ON al.artist_id = ar.id
+                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                            LIMIT 1
+                            """,
+                            (release.get('artist_name') or '',
+                             release.get('album_name') or ''))
+                        release['owned'] = cursor.fetchone() is not None
+                    except Exception:
+                        release['owned'] = False
+                return releases
         except Exception as e:
             logger.error(f"Error getting watchlist recent releases: {e}")
             return []

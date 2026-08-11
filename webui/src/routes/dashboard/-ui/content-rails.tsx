@@ -32,6 +32,8 @@ import {
 } from '../-dash.content';
 
 interface RailCardProps {
+  /** Small corner check — the library already has this (discover's badge). */
+  owned?: boolean;
   cover: string;
   /** Second image to try when `cover` fails to load (the artist's art). */
   fallbackCover?: string;
@@ -45,7 +47,7 @@ interface RailCardProps {
   onOpen: () => void;
 }
 
-function RailCard({ cover, fallbackCover, name, sub, caption, badge, titleAttr, onOpen }: RailCardProps) {
+function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titleAttr, onOpen }: RailCardProps) {
   // Fallback ladder, one rung per failure: cover -> the artist's art -> ♫.
   // History thumb URLs can be stale or media-server-authed and die in the
   // browser even when they exist, so the second image matters as much as the
@@ -62,6 +64,11 @@ function RailCard({ cover, fallbackCover, name, sub, caption, badge, titleAttr, 
         </div>
       </div>
       <div className="ya-card-gradient" />
+      {owned && (
+        <div className="ya-card-badges">
+          <div className="discover-album-badge owned" title="In your library">✓</div>
+        </div>
+      )}
       {caption && <div className="dash-rail-caption">{caption}</div>}
       <div className="ya-card-info">
         <div className="ya-card-name">{name}</div>
@@ -166,6 +173,7 @@ export function ContentBand() {
           {releases.map((release, i) => (
             <RailCard
               key={`${release.artistName}::${release.albumName}::${i}`}
+              owned={release.owned}
               cover={release.cover}
               name={release.albumName}
               sub={release.artistName}

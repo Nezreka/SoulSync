@@ -107,6 +107,25 @@ describe('ContentBand', () => {
     );
   });
 
+  it('an owned release wears the library check badge; unowned does not', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('recently-added')) return ok({ albums: [] });
+      if (String(url).includes('watchlist/recent-releases'))
+        return ok({
+          releases: [
+            { album_name: 'Have It', artist_name: 'A', owned: true },
+            { album_name: 'Missing It', artist_name: 'B', owned: false },
+          ],
+        });
+      return ok({ albums: [] });
+    });
+    render(<ContentBand />);
+    const ownedCard = (await screen.findByText('Have It')).closest('.ya-card')!;
+    expect(ownedCard.querySelector('.discover-album-badge.owned')).toBeTruthy();
+    const missingCard = screen.getByText('Missing It').closest('.ya-card')!;
+    expect(missingCard.querySelector('.discover-album-badge')).toBeNull();
+  });
+
   it('the discover fallback keeps its honest subtitle', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (String(url).includes('recently-added')) return ok({ albums: [] });

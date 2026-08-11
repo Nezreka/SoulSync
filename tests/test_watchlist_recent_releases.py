@@ -73,6 +73,22 @@ def test_deezer_release_carries_its_album_id(tmp_path):
     assert dz['source'] == 'deezer'
 
 
+def test_owned_flag_marks_albums_the_library_already_has(tmp_path):
+    """The rail badges releases the library already holds (and the click
+    plays them). Owned = an albums row matching (artist, album) by name,
+    case-insensitively — track completeness stays the click-time check."""
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Ado')")
+        conn.execute(
+            "INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'kyougen ii')")
+        conn.commit()
+    releases = db.get_watchlist_recent_releases(limit=20, profile_id=1)
+    by_name = {r['album_name']: r['owned'] for r in releases}
+    assert by_name['Kyougen II'] is True   # case-insensitive name match
+    assert by_name['Older One'] is False
+
+
 def test_limit_caps_the_feed(tmp_path):
     releases = _db(tmp_path).get_watchlist_recent_releases(limit=1, profile_id=1)
     assert len(releases) == 1

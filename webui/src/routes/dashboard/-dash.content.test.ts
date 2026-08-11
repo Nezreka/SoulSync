@@ -173,6 +173,7 @@ describe('fetchers', () => {
       albumItunesId: '',
       albumDeezerId: '',
       sourceProvider: 'spotify',
+      owned: false,
       fromDiscover: false,
     });
     expect(fetchMock.mock.calls[0][0]).toContain('/api/discover/album/spotify/alb1');
@@ -216,6 +217,7 @@ describe('fetchers', () => {
       albumItunesId: '',
       albumDeezerId: '',
       sourceProvider: 'spotify',
+      owned: false,
       fromDiscover: false,
     });
     expect(toast).toHaveBeenCalledWith(expect.stringContaining('No spotify album ID'), 'error');

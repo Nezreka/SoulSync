@@ -111,6 +111,8 @@ export interface FreshRelease {
   albumItunesId: string;
   albumDeezerId: string;
   sourceProvider: string;
+  /** The library already holds this (artist, album) — the card badges it. */
+  owned: boolean;
   /** True when this card came from the discover fallback, not the watchlist. */
   fromDiscover: boolean;
 }
@@ -128,6 +130,7 @@ interface WatchlistReleaseRow {
   spotify_artist_id?: string;
   itunes_artist_id?: string;
   deezer_artist_id?: string;
+  owned?: boolean;
 }
 
 interface DiscoverAlbumRow {
@@ -158,6 +161,7 @@ function fromRow(row: WatchlistReleaseRow & DiscoverAlbumRow, fromDiscover: bool
     sourceProvider:
       row.source ??
       (row.album_spotify_id ? 'spotify' : row.album_deezer_id ? 'deezer' : 'itunes'),
+    owned: Boolean((row as WatchlistReleaseRow).owned),
     fromDiscover,
   };
 }
