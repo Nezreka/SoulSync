@@ -71,15 +71,25 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
     ),
     "albums": (
         "thumb_url", "genres", "label", "explicit", "upc", "style", "mood",
+        "release_date",
         "spotify_album_id", "musicbrainz_release_id", "deezer_id",
         "itunes_album_id", "audiodb_id", "discogs_id", "tidal_id", "qobuz_id",
         "amazon_id", "jiosaavn_id", "bandcamp_url", "lastfm_url",
+        # provider payload (mirrored into lib2_albums.enrichment)
+        "lastfm_listeners", "lastfm_playcount", "lastfm_tags", "lastfm_wiki",
+        "discogs_genres", "discogs_styles", "discogs_label", "discogs_catno",
+        "discogs_country", "discogs_rating", "discogs_rating_count",
+        "bandcamp_tags", "bandcamp_label",
     ),
     "tracks": (
         "bpm", "explicit", "genius_lyrics", "copyright", "style", "mood", "isrc",
+        "disc_number",
         "spotify_track_id", "musicbrainz_recording_id", "deezer_id",
         "itunes_track_id", "audiodb_id", "tidal_id", "qobuz_id", "amazon_id",
         "jiosaavn_id", "genius_id", "bandcamp_url", "lastfm_url",
+        # provider payload (mirrored into lib2_tracks.enrichment)
+        "lastfm_listeners", "lastfm_playcount", "lastfm_tags",
+        "genius_description", "genius_url", "bandcamp_tags", "bandcamp_label",
     ),
 }
 

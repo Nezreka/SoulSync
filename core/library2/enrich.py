@@ -99,58 +99,101 @@ def _merge_json_column(conn, table: str, entity_id: int, column: str,
             (json.dumps(merged, sort_keys=True, separators=(",", ":")), entity_id))
 
 
-# The legacy columns `_artist_enrichment` reads. They are not in `scalars` or
-# `id_columns` (they are folded into one JSON bucket), so without this inventory
-# neither the trigger-vs-resync guard nor the divergence metric can see them —
-# which is how `lastfm_playcount` went unmirrored.
-_ARTIST_ENRICHMENT_COLUMNS: Tuple[str, ...] = (
-    "lastfm_bio", "lastfm_listeners", "lastfm_playcount", "lastfm_tags",
-    "lastfm_similar", "lastfm_url",
-    "genius_description", "genius_alt_names", "genius_url",
-    "discogs_bio", "discogs_members", "discogs_urls",
-)
+def _list(raw):
+    """Legacy stores repeated values as a JSON array or a comma string."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else None
+    except (TypeError, ValueError):
+        parts = [p.strip() for p in str(raw).split(",") if p.strip()]
+        return parts or None
 
 
-def _artist_enrichment(legacy_row: Any) -> Dict[str, Dict[str, Any]]:
-    """Provider bios/stats, keyed by source — the ``bios`` Nezreka named.
+# The provider payload each entity type carries, as ``{source: {key: legacy
+# column}}``. Values wrapped in ``_AsList`` come through ``_list``.
+#
+# These columns are folded into one JSON bucket rather than named in ``scalars``,
+# so without this declaration neither the trigger-vs-resync guard nor the
+# divergence metric can see them — which is how ``artists.lastfm_playcount`` went
+# unmirrored, and how the entire album/track payload was being dropped
+# (docs §50.4.4.3).
+class _AsList(str):
+    """Marks a legacy column whose value is a list, not a scalar."""
 
-    These live in ``lib2_artists.enrichment`` rather than in columns because a
-    Last.fm bio and a Genius description are different text, not one field
-    from two sources (same reasoning as ``importer._artist_enrichment_payload``).
-    """
-    def _list(raw):
-        if not raw:
-            return None
-        try:
-            parsed = json.loads(raw)
-            return parsed if isinstance(parsed, list) else None
-        except (TypeError, ValueError):
-            parts = [p.strip() for p in str(raw).split(",") if p.strip()]
-            return parts or None
 
-    candidates = {
+_ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
+    "artist": {
         "lastfm": {
-            "bio": _row_get(legacy_row, "lastfm_bio"),
-            "listeners": _row_get(legacy_row, "lastfm_listeners"),
-            "playcount": _row_get(legacy_row, "lastfm_playcount"),
-            "tags": _list(_row_get(legacy_row, "lastfm_tags")),
-            "similar": _list(_row_get(legacy_row, "lastfm_similar")),
-            "url": _row_get(legacy_row, "lastfm_url"),
+            "bio": "lastfm_bio", "listeners": "lastfm_listeners",
+            "playcount": "lastfm_playcount", "tags": _AsList("lastfm_tags"),
+            "similar": _AsList("lastfm_similar"), "url": "lastfm_url",
         },
         "genius": {
-            "description": _row_get(legacy_row, "genius_description"),
-            "alt_names": _list(_row_get(legacy_row, "genius_alt_names")),
-            "url": _row_get(legacy_row, "genius_url"),
+            "description": "genius_description",
+            "alt_names": _AsList("genius_alt_names"), "url": "genius_url",
         },
         "discogs": {
-            "bio": _row_get(legacy_row, "discogs_bio"),
-            "members": _list(_row_get(legacy_row, "discogs_members")),
-            "urls": _list(_row_get(legacy_row, "discogs_urls")),
+            "bio": "discogs_bio", "members": _AsList("discogs_members"),
+            "urls": _AsList("discogs_urls"),
         },
-    }
+    },
+    "album": {
+        "lastfm": {
+            "listeners": "lastfm_listeners", "playcount": "lastfm_playcount",
+            "tags": _AsList("lastfm_tags"), "wiki": "lastfm_wiki",
+        },
+        "discogs": {
+            "genres": _AsList("discogs_genres"), "styles": _AsList("discogs_styles"),
+            "label": "discogs_label", "catno": "discogs_catno",
+            "country": "discogs_country", "rating": "discogs_rating",
+            "rating_count": "discogs_rating_count",
+        },
+        "bandcamp": {
+            "tags": _AsList("bandcamp_tags"), "label": "bandcamp_label",
+        },
+    },
+    "track": {
+        "lastfm": {
+            "listeners": "lastfm_listeners", "playcount": "lastfm_playcount",
+            "tags": _AsList("lastfm_tags"),
+        },
+        "genius": {"description": "genius_description", "url": "genius_url"},
+        "bandcamp": {
+            "tags": _AsList("bandcamp_tags"), "label": "bandcamp_label",
+        },
+    },
+}
+
+
+def enrichment_columns(entity_type: str) -> Tuple[str, ...]:
+    """Every legacy column the enrichment bucket reads for one entity type."""
+    return tuple(sorted({
+        str(column)
+        for sources in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).values()
+        for column in sources.values()
+    }))
+
+
+def _enrichment_payload(entity_type: str, legacy_row: Any) -> Dict[str, Dict[str, Any]]:
+    """Provider payload keyed by source — the ``bios`` Nezreka named, and the
+    album/track equivalent.
+
+    This lives in an ``enrichment`` JSON column rather than in table columns
+    because a Last.fm wiki and a Discogs catalogue number are different data,
+    not one field from two sources (same reasoning as
+    ``importer._artist_enrichment_payload``). A provider that wrote nothing
+    leaves no empty bucket behind.
+    """
     out: Dict[str, Dict[str, Any]] = {}
-    for source, fields in candidates.items():
-        cleaned = {k: v for k, v in fields.items() if v not in (None, "", [])}
+    for source, fields in (_ENRICHMENT_PAYLOAD.get(entity_type) or {}).items():
+        cleaned = {}
+        for key, column in fields.items():
+            raw = _row_get(legacy_row, str(column))
+            value = _list(raw) if isinstance(column, _AsList) else raw
+            if value not in (None, "", []):
+                cleaned[key] = value
         if cleaned:
             out[source] = cleaned
     return out
@@ -204,7 +247,7 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
         # and never received a Last.fm/Genius/Discogs bio at all.
         json_columns=(
             ("external_ids", lambda row: _provider_ids(row, "artist")),
-            ("enrichment", _artist_enrichment),
+            ("enrichment", lambda row: _enrichment_payload("artist", row)),
         ),
     ),
     "album": MirrorSpec(
@@ -220,12 +263,16 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
             ("upc", "upc", None),
             ("style", "style", None),
             ("mood", "mood", None),
+            ("release_date", "release_date", None),
         ),
         id_columns=(
             ("spotify_id", ("spotify_album_id",)),
             ("musicbrainz_id", ("musicbrainz_release_id",)),
         ),
-        json_columns=(("external_ids", lambda row: _provider_ids(row, "album")),),
+        json_columns=(
+            ("external_ids", lambda row: _provider_ids(row, "album")),
+            ("enrichment", lambda row: _enrichment_payload("album", row)),
+        ),
     ),
     "track": MirrorSpec(
         entity_type="track",
@@ -239,13 +286,17 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
             ("copyright", "copyright", None),
             ("style", "style", None),
             ("mood", "mood", None),
+            ("disc_number", "disc_number", None),
         ),
         id_columns=(
             ("spotify_id", ("spotify_track_id",)),
             ("musicbrainz_id", ("musicbrainz_recording_id",)),
             ("isrc", ("isrc",)),
         ),
-        json_columns=(("external_ids", lambda row: _provider_ids(row, "track")),),
+        json_columns=(
+            ("external_ids", lambda row: _provider_ids(row, "track")),
+            ("enrichment", lambda row: _enrichment_payload("track", row)),
+        ),
     ),
 }
 

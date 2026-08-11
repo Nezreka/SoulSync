@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     spotify_id TEXT,
     musicbrainz_id TEXT,
     external_ids TEXT NOT NULL DEFAULT '{}',
+    enrichment TEXT NOT NULL DEFAULT '{}',            -- provider-keyed payload (lastfm stats/wiki, discogs release detail, bandcamp)
     image_url TEXT,
     genres TEXT NOT NULL DEFAULT '[]',
     explicit INTEGER,
@@ -149,6 +150,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     musicbrainz_id TEXT,
     spotify_id TEXT,                                  -- for wishlist mirroring
     external_ids TEXT NOT NULL DEFAULT '{}',           -- long-tail provider ids (deezer/tidal/qobuz/itunes/...); isrc/mbid/spotify keep their own columns above
+    enrichment TEXT NOT NULL DEFAULT '{}',             -- provider-keyed payload (lastfm stats/tags, genius description, bandcamp)
     bpm REAL,
     explicit INTEGER,
     genius_lyrics TEXT,
@@ -412,6 +414,17 @@ _ADDED_COLUMNS = (
     ("lib2_artists", "banner_url", "ALTER TABLE lib2_artists ADD COLUMN banner_url TEXT"),
     ("lib2_artists", "enrichment",
      "ALTER TABLE lib2_artists ADD COLUMN enrichment TEXT NOT NULL DEFAULT '{}'"),
+    # docs §50.4.4.3: albums and tracks carry provider payload too — Last.fm
+    # listeners/playcount/tags/wiki, the Discogs release detail, Bandcamp tags.
+    # Without a destination the mirror dropped all of it, and the divergence
+    # metric could not see the loss either, because it audits what the mirror
+    # declares. Same shape as the artist column: one JSON object keyed by source,
+    # because a Last.fm wiki and a Discogs catalogue number are different data
+    # rather than one field from two providers.
+    ("lib2_albums", "enrichment",
+     "ALTER TABLE lib2_albums ADD COLUMN enrichment TEXT NOT NULL DEFAULT '{}'"),
+    ("lib2_tracks", "enrichment",
+     "ALTER TABLE lib2_tracks ADD COLUMN enrichment TEXT NOT NULL DEFAULT '{}'"),
     ("lib2_tracks", "genius_lyrics", "ALTER TABLE lib2_tracks ADD COLUMN genius_lyrics TEXT"),
     ("lib2_tracks", "copyright", "ALTER TABLE lib2_tracks ADD COLUMN copyright TEXT"),
     ("lib2_tracks", "play_count",

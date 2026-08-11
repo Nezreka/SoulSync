@@ -25,7 +25,7 @@ from core.library2.legacy_mirror import _WATCHED_COLUMNS
 
 def _mirrored_columns(legacy_table: str) -> set:
     """Every legacy column the resync reads for one table."""
-    from core.library2.enrich import _ARTIST_ENRICHMENT_COLUMNS
+    from core.library2.enrich import enrichment_columns
     from core.library2.match_status import SERVICES
 
     spec = next(s for s in MIRROR_SPECS.values() if s.legacy_table == legacy_table)
@@ -36,8 +36,7 @@ def _mirrored_columns(legacy_table: str) -> set:
         column = id_columns.get(spec.entity_type)
         if column:
             columns.add(column)
-    if spec.entity_type == "artist":
-        columns.update(_ARTIST_ENRICHMENT_COLUMNS)
+    columns.update(enrichment_columns(spec.entity_type))
     return columns
 
 
@@ -64,11 +63,13 @@ def test_every_mirrored_column_is_actually_watched():
         )
 
 
-def test_the_lastfm_payload_is_declared_in_one_place():
-    """The artist enrichment bundle is the one part of the mirror that reads
-    legacy columns without naming them in ``scalars`` or ``id_columns``, so it
-    needs its own inventory for the two tests above to see it."""
-    from core.library2.enrich import _ARTIST_ENRICHMENT_COLUMNS
+def test_the_provider_payload_is_declared_for_every_entity_type():
+    """The enrichment bucket is the one part of the mirror that reads legacy
+    columns without naming them in ``scalars`` or ``id_columns``, so it needs its
+    own inventory for the two tests above to see it — for all three entity types,
+    not just artists (docs §50.4.4.3)."""
+    from core.library2.enrich import enrichment_columns
 
-    assert "lastfm_playcount" in _ARTIST_ENRICHMENT_COLUMNS
-    assert "lastfm_listeners" in _ARTIST_ENRICHMENT_COLUMNS
+    assert "lastfm_playcount" in enrichment_columns("artist")
+    assert "discogs_catno" in enrichment_columns("album")
+    assert "genius_description" in enrichment_columns("track")
