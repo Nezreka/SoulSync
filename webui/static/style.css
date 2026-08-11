@@ -70863,6 +70863,9 @@ body.em-scroll-lock { overflow: hidden; }
 .em-bulk-bar { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 8px 12px;
     background: rgba(var(--em-accent-rgb, 99,102,241), 0.12); border: 1px solid rgba(var(--em-accent-rgb, 99,102,241), 0.3);
     border-radius: 10px; }
+/* display:flex above defeats the UA's [hidden]{display:none} — restore it,
+   or the empty bar renders as a permanent accent-tinted pill over the list. */
+.em-bulk-bar[hidden] { display: none; }
 .em-bulk-count { font-size: 13px; font-weight: 700; color: #fff; margin-right: auto; }
 
 /* Bulk retry-all + helper hint */
