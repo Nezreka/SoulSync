@@ -42,14 +42,16 @@ describe('the page shell', () => {
     expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
       // 3.2.0 calm grid: the ContentBand renders NOTHING here (its fetches
       // fail under the test's dead fetch mock). The Library strip LEADS
-      // (whose collection this is, then what's new in it), then Recent
-      // Syncs as the full-width ops band. Everything else is rehomed: the
-      // Services card retired (status + Test on the sidebar rows), the
-      // enrichment equalizer retired (redundant with the header worker
-      // orbs; rate graphs open from the Manage Workers modal), System
-      // Stats went to the notification tray, Recent Activity to the tray,
-      // Quick Actions back to the sidebar.
+      // (whose collection this is, then what's new in it), then the sync
+      // row — Auto Sync (the schedule board's mini view) beside Recent
+      // Syncs (span 2). Everything else is rehomed: the Services card
+      // retired (status + Test on the sidebar rows), the enrichment
+      // equalizer retired (redundant with the header worker orbs; rate
+      // graphs open from the Manage Workers modal), System Stats went to
+      // the notification tray, Recent Activity to the tray, Quick Actions
+      // back to the sidebar.
       'library',
+      'autosync',
       'syncs',
       'active-downloads',
     ]);

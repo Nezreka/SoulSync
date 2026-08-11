@@ -65810,14 +65810,184 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     flex: none;
 }
 
-/* Recent Syncs is a full-width band now that the Services card is gone
-   (its status + Test moved to the sidebar rows). Active Downloads below
-   it is display:none until transfers exist, so a partial span would
-   strand a permanently empty column. The body still grows and scrolls
-   (the previous centered-flex fix clipped an overflowing list —
-   centering and scrolling don't mix). */
+/* The sync row: Auto Sync (1 col) beside Recent Syncs (span 2) — the
+   future and the past of the same system sharing one band. The syncs
+   body still grows and scrolls (the old centered-flex fix clipped an
+   overflowing list — centering and scrolling don't mix). */
 .dash-card[data-card="syncs"] {
-    grid-column: 1 / -1;
+    grid-column: span 2;
+}
+
+/* ── The Auto Sync card — mini schedule board, quiet-chrome rows ── */
+.dash-card[data-card="autosync"] .dash-card__head {
+    position: relative;
+}
+.autosync-count-pill {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: rgba(255, 255, 255, 0.65);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    vertical-align: 2px;
+}
+.autosync-manage-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 5px 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.72);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.autosync-manage-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #fff;
+}
+.dash-card[data-card="autosync"] .dash-card__body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.autosync-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    min-height: 0;
+    max-height: 640px;
+    padding-right: 2px;
+}
+.autosync-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.autosync-row--off {
+    opacity: 0.55;
+}
+.autosync-health {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.25);
+}
+.autosync-health--good {
+    background: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.45);
+}
+.autosync-health--bad {
+    background: #f87171;
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.45);
+}
+.autosync-row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.autosync-row-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.autosync-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.autosync-row-source {
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+}
+.autosync-row-next {
+    color: rgba(var(--accent-rgb), 0.85);
+    font-weight: 500;
+}
+.autosync-run-btn {
+    flex-shrink: 0;
+    padding: 4px 11px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.autosync-row:hover .autosync-run-btn {
+    opacity: 1;
+}
+.autosync-run-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.autosync-run-btn:disabled {
+    cursor: not-allowed;
+}
+@media (hover: none) {
+    .autosync-run-btn { opacity: 0.7; }
+}
+.autosync-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+    padding: 28px 16px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+}
+.autosync-empty strong {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+}
+.autosync-empty span {
+    max-width: 300px;
+    line-height: 1.5;
+}
+.autosync-empty-cta {
+    margin-top: 6px;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.30);
+    color: rgb(var(--accent-light-rgb));
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+.autosync-empty-cta:hover {
+    background: rgba(var(--accent-rgb), 0.20);
 }
 .dash-card[data-card="syncs"] .dash-card__body {
     flex: 1 1 auto;
@@ -68232,6 +68402,13 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="library"] .library-status-header {
         min-width: 0;
         flex-basis: 100%;
+    }
+    .dash-card[data-card="syncs"],
+    .dash-card[data-card="autosync"] {
+        grid-column: auto;
+    }
+    .autosync-rows {
+        max-height: 300px;
     }
     .dash-card[data-card="syncs"] .sync-history-cards {
         max-height: 260px;

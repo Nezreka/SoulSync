@@ -694,6 +694,13 @@ declare global {
       onStatus: (id: string, data: unknown) => void;
     };
     openAutoSyncScheduleModal?: () => void | Promise<void>;
+    /** auto-sync.js:471 — the schedule board's state builder; the dashboard's
+     *  Auto Sync card reuses it so schedule semantics live in one place. */
+    buildAutoSyncScheduleState?: (
+      playlists: unknown[],
+      automations: unknown[],
+      historyData?: Record<string, unknown>,
+    ) => Record<string, unknown>;
     openSyncDetailModal?: (entryId: number) => void | Promise<void>;
     showLoginScreen?: () => void;
     showLaunchPinScreen?: () => void;
