@@ -70,10 +70,18 @@ _SETTLED = ("matched",)
 _SETTLED_SQL = ", ".join(f"'{status}'" for status in _SETTLED)
 
 
+# Workers that keep attempt bookkeeping without being a provider identity.
+# ``match_status.SERVICES`` lists sources whose id lands on the entity; these have
+# no id of their own — Similar Artists stores rows keyed by the id some OTHER
+# source already matched — but they still need a due/attempted record, which is
+# what this ledger is.
+DERIVED_SERVICES: frozenset = frozenset({"similar_artists", "listening_stats"})
+
+
 def _services() -> set:
     from core.library2.match_status import SERVICES
 
-    return {service for service, _label, _ids in SERVICES}
+    return {service for service, _label, _ids in SERVICES} | set(DERIVED_SERVICES)
 
 
 def _entity_type(value: Any) -> str:
