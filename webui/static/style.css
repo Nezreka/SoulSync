@@ -65872,8 +65872,8 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .autosync-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
+    gap: 11px;
+    padding: 10px 12px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.06);
@@ -65881,35 +65881,86 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .autosync-row--off {
     opacity: 0.55;
 }
-.autosync-health {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+.autosync-row--live {
+    border-color: rgba(var(--accent-rgb), 0.30);
+    background: rgba(var(--accent-rgb), 0.05);
+}
+.autosync-chip {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    overflow: hidden;
 }
-.autosync-health--good {
-    background: #34d399;
-    box-shadow: 0 0 6px rgba(52, 211, 153, 0.45);
+.autosync-chip-logo {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
 }
-.autosync-health--bad {
-    background: #f87171;
-    box-shadow: 0 0 6px rgba(248, 113, 113, 0.45);
+/* Same brand-visibility fixes the board's source icons use: white-on-dark
+   marks need inverting on our dark chip. */
+.autosync-chip-logo--tidal,
+.autosync-chip-logo--qobuz {
+    filter: invert(1);
+}
+.autosync-chip-glyph {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.55);
 }
 .autosync-row-main {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
+}
+.autosync-row-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
 }
 .autosync-row-name {
+    flex: 1;
+    min-width: 0;
     font-size: 12.5px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.92);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+.autosync-row-next {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--accent-light-rgb));
+}
+.autosync-row-paused {
+    flex-shrink: 0;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+}
+.autosync-row-live-pill {
+    flex-shrink: 0;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.15);
+    animation: autosyncLivePulse 1.6s ease-in-out infinite;
+}
+@keyframes autosyncLivePulse {
+    50% { opacity: 0.55; }
 }
 .autosync-row-meta {
     display: flex;
@@ -65920,13 +65971,43 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     white-space: nowrap;
     overflow: hidden;
 }
-.autosync-row-source {
-    color: rgba(255, 255, 255, 0.6);
-    font-weight: 500;
+.autosync-row-last {
+    color: rgba(52, 211, 153, 0.75);
 }
-.autosync-row-next {
+.autosync-row-last--bad {
+    color: rgba(248, 113, 113, 0.85);
+}
+.autosync-row-phase {
     color: rgba(var(--accent-rgb), 0.85);
-    font-weight: 500;
+}
+.autosync-cov {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 1px;
+}
+.autosync-cov-bar {
+    flex: 1;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+}
+.autosync-cov-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: rgba(52, 211, 153, 0.75);
+    transition: width 0.4s ease;
+}
+.autosync-cov-fill--live {
+    background: rgb(var(--accent-light-rgb));
+}
+.autosync-cov-text {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.45);
 }
 .autosync-run-btn {
     flex-shrink: 0;

@@ -3,22 +3,40 @@
  * view of the Auto-Sync schedule board (auto-sync.js). The card reuses the
  * board's own state builder through the window seam
  * (buildAutoSyncScheduleState, auto-sync.js:471) so the schedule semantics
- * live in ONE place; this module only turns that state into compact rows.
+ * live in ONE place; this module only turns that state into rich rows.
  *
  * The formatters replicate the vanilla labels 1:1 where cited:
  * - intervalLabel     = autoSyncIntervalLabel (auto-sync.js:68)
  * - weeklyLabel       = autoSyncWeeklyLabel (auto-sync.js:146)
  * - sourceLabel       = autoSyncSourceLabel's map (auto-sync.js:161)
+ * - SOURCE_LOGOS      = _AUTO_SYNC_SOURCE_LOGOS (auto-sync.js:184)
  * - health matching   = the parseInt playlist_id filter (auto-sync.js:2000)
+ * - run deltas        = autoSyncDelta over before/after_json (auto-sync.js:1499)
  */
 
+import { relativeTime } from './-dash.library';
+
 // ── The seam state's shape (what the card reads of it) ──────────────────────
+
+export interface AutoSyncSeamPipelineState {
+  status?: string;
+  progress?: number;
+  phase?: string;
+  [key: string]: unknown;
+}
 
 export interface AutoSyncSeamPlaylist {
   id: number | string;
   name?: string;
   custom_name?: string;
+  /** The server's single source of truth for what to show (web_server.py
+   *  get_mirrored_playlists_endpoint: alias if set, else upstream name). */
+  display_name?: string;
   source?: string;
+  total_count?: number;
+  in_library_count?: number;
+  wishlisted_count?: number;
+  pipeline_state?: AutoSyncSeamPipelineState | null;
   [key: string]: unknown;
 }
 
@@ -42,8 +60,9 @@ export interface AutoSyncSeamWeekly {
 export interface AutoSyncSeamHistoryEntry {
   playlist_id?: number | string;
   status?: string;
-  completed_at?: string;
   started_at?: string;
+  before_json?: Record<string, unknown> | null;
+  after_json?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
 
@@ -109,6 +128,21 @@ export function sourceLabel(source: string | undefined): string {
   return source.charAt(0).toUpperCase() + source.slice(1);
 }
 
+/** _AUTO_SYNC_SOURCE_LOGOS (auto-sync.js:184) — the same brand-chip URLs the
+ *  board headers use, so the visual language stays consistent. */
+export const AUTOSYNC_SOURCE_LOGOS: Record<string, string> = {
+  spotify: '/static/img/brands/spotify.png',
+  spotify_public: '/static/img/brands/spotify.png',
+  tidal: '/static/img/brands/tidal.svg',
+  youtube: '/static/img/brands/youtube.svg',
+  deezer: '/static/img/brands/deezer.png',
+  qobuz: '/static/img/brands/qobuz.svg',
+  itunes_link: '/static/img/brands/itunes.png',
+  lastfm: '/static/img/brands/lastfm.png',
+  listenbrainz: '/static/img/brands/listenbrainz.png',
+  soulsync_discovery: '/static/favicon.png',
+};
+
 /** "in 12m" / "in 3h" / "in 2d" / "due now"; null when absent or unparseable. */
 export function nextRunText(nextRun: string | null | undefined, nowMs: number): string | null {
   if (!nextRun) return null;
@@ -124,54 +158,91 @@ export function nextRunText(nextRun: string | null | undefined, nowMs: number): 
 
 // ── Row assembly ────────────────────────────────────────────────────────────
 
-export type AutoSyncHealth = 'good' | 'bad' | 'none';
+export interface AutoSyncRowCoverage {
+  inLibrary: number;
+  total: number;
+  /** 0–100, rounded like the syncs card's pct. */
+  pct: number;
+}
+
+export interface AutoSyncRowLastRun {
+  ok: boolean;
+  /** "2h ago" via the shared sync-card clock; '' when the stamp is missing. */
+  ago: string;
+  /** "+3 to library" — the in_library delta from the run's before/after
+   *  snapshots; null when the snapshots are absent or the delta is 0. */
+  delta: string | null;
+}
+
+export interface AutoSyncRowRunning {
+  phase: string;
+  /** 0–100. */
+  progress: number;
+}
 
 export interface AutoSyncCardRow {
   /** The schedule's board key (mirrored playlist id or synthetic row id). */
   key: string;
   automationId: number | string;
   name: string;
+  sourceKey: string;
   source: string;
+  logo: string | null;
   cadence: string;
   enabled: boolean;
   nextRun: string | null;
-  /** Outcome of the newest pipeline run recorded for this playlist. */
-  health: AutoSyncHealth;
+  coverage: AutoSyncRowCoverage | null;
+  lastRun: AutoSyncRowLastRun | null;
+  running: AutoSyncRowRunning | null;
 }
 
-function healthFor(key: string, history: AutoSyncSeamHistoryEntry[]): AutoSyncHealth {
+function lastRunFor(
+  key: string,
+  history: AutoSyncSeamHistoryEntry[],
+  nowMs: number,
+): AutoSyncRowLastRun | null {
   const id = parseInt(key, 10);
-  if (!Number.isFinite(id)) return 'none';
+  if (!Number.isFinite(id)) return null;
   // History arrives newest-first; the first match is the latest run — the
   // same parseInt equality the board's per-row history filter uses (:2000).
   const entry = (history || []).find((h) => parseInt(String(h.playlist_id), 10) === id);
-  if (!entry) return 'none';
+  if (!entry) return null;
   const status = entry.status || '';
-  if (status === 'completed' || status === 'finished') return 'good';
-  if (status === 'error' || status === 'skipped') return 'bad';
-  return 'none';
+  const ok = status === 'completed' || status === 'finished';
+  const before = (entry.before_json || {}) as Record<string, unknown>;
+  const after = (entry.after_json || {}) as Record<string, unknown>;
+  const libDelta = Number(after.in_library_count ?? NaN) - Number(before.in_library_count ?? NaN);
+  const delta = Number.isFinite(libDelta) && libDelta > 0 ? `+${libDelta} to library` : null;
+  return {
+    ok,
+    ago: entry.started_at ? relativeTime(entry.started_at, nowMs) : '',
+    delta,
+  };
 }
 
-function rowName(
-  key: string,
-  playlists: AutoSyncSeamPlaylist[],
-  automationName: string | undefined,
-): { name: string; source: string } {
-  const p = (playlists || []).find((pl) => String(pl.id) === String(key));
-  if (p) {
-    return {
-      name: String(p.custom_name || p.name || automationName || `Playlist #${key}`),
-      source: sourceLabel(p.source),
-    };
-  }
-  return { name: String(automationName || `Playlist #${key}`), source: '' };
+function runningFor(playlist: AutoSyncSeamPlaylist | undefined): AutoSyncRowRunning | null {
+  const state = playlist?.pipeline_state;
+  if (!state || state.status !== 'running') return null;
+  return {
+    phase: String(state.phase || 'Running pipeline...'),
+    progress: Math.max(0, Math.min(100, Number(state.progress) || 0)),
+  };
+}
+
+function coverageFor(playlist: AutoSyncSeamPlaylist | undefined): AutoSyncRowCoverage | null {
+  if (!playlist) return null;
+  const total = Number(playlist.total_count) || 0;
+  if (total <= 0) return null;
+  const inLibrary = Math.max(0, Math.min(total, Number(playlist.in_library_count) || 0));
+  return { inLibrary, total, pct: Math.round((inLibrary / total) * 100) };
 }
 
 /**
  * Flatten the seam state into the card's rows: one row per schedule entry
  * (a playlist carrying BOTH an hourly and a weekly automation honestly shows
- * twice). Sorted: enabled first, then soonest next run (unknown last), then
- * name — "what fires next" reads top-down.
+ * twice). Sorted: running first, then enabled by soonest next run (unknown
+ * last), disabled at the bottom — "what's happening / what fires next" reads
+ * top-down.
  */
 export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoSyncCardRow[] {
   const rows: AutoSyncCardRow[] = [];
@@ -183,16 +254,27 @@ export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoS
     enabled: boolean,
     nextRun: string | null | undefined,
   ) => {
-    const { name, source } = rowName(key, state.playlists, automationName);
+    const playlist = (state.playlists || []).find((pl) => String(pl.id) === String(key));
+    const sourceKey = playlist?.source || '';
     rows.push({
       key,
       automationId,
-      name,
-      source,
+      name: String(
+        playlist?.display_name ||
+          playlist?.custom_name ||
+          playlist?.name ||
+          automationName ||
+          `Playlist #${key}`,
+      ),
+      sourceKey,
+      source: playlist ? sourceLabel(sourceKey) : '',
+      logo: AUTOSYNC_SOURCE_LOGOS[sourceKey] || null,
       cadence,
       enabled,
       nextRun: nextRunText(nextRun, nowMs),
-      health: healthFor(key, state.runHistory),
+      coverage: coverageFor(playlist),
+      lastRun: lastRunFor(key, state.runHistory, nowMs),
+      running: runningFor(playlist),
     });
   };
 
@@ -204,9 +286,8 @@ export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoS
   }
 
   const sortStamp = (r: AutoSyncCardRow) => {
-    // Re-derive a comparable stamp from the display text's source order:
-    // due now < minutes < hours < days < none. The raw next_run string is
-    // gone by now, so rank the buckets — enough for a stable card order.
+    if (r.running) return -1;
+    // Bucket by the display text — due now < minutes < hours < days < none.
     if (r.nextRun === 'due now') return 0;
     if (r.nextRun && r.nextRun.endsWith('m')) return 1;
     if (r.nextRun && r.nextRun.endsWith('h')) return 2;

@@ -6,7 +6,10 @@
  * /api/automations, /api/playlist-pipeline/history) fed through the board's
  * OWN state builder via the window seam (buildAutoSyncScheduleState,
  * auto-sync.js:471) so schedule semantics live in one place. The card renders
- * compact rows from -dash.autosync's pure core.
+ * rich rows from -dash.autosync's pure core: source brand chip, ownership
+ * coverage bar (in_library/total from the batched status counts), last-run
+ * outcome + library delta from the run snapshots, live pipeline phase +
+ * progress while a run is in flight, and a countdown to the next firing.
  *
  * Actions are deliberately thin: Run Now fires the row's automation
  * (/api/automations/<id>/run — the action IS the pipeline), Manage opens the
@@ -15,14 +18,13 @@
  * Creating/editing schedules stays in the modal — this card never grows a
  * second implementation of the board.
  *
- * No poller (the request-flood rule): fetch on mount, after a Run Now, and
- * when the board modal closes (ss:autosync-board-closed would be ideal but
- * doesn't exist — the modal's close re-render seam is its removal, so the
- * card simply refetches on window focus, the cheap idiom the vanilla
- * dashboard used for db stats).
+ * No steady-state HTTP poller (the request-flood rule): fetch on mount, on
+ * window focus, after a Run Now, when the board modal closes — plus a short
+ * refresh loop ONLY while a pipeline is running (progress has to move). The
+ * minute tick is render-only (countdowns re-derive from cached state).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AutoSyncCardRow, AutoSyncSeamState } from '../-dash.autosync';
 
@@ -32,7 +34,8 @@ type Phase = 'loading' | 'ready' | 'error';
 
 function useAutoSyncCard() {
   const [phase, setPhase] = useState<Phase>('loading');
-  const [rows, setRows] = useState<AutoSyncCardRow[]>([]);
+  const [seam, setSeam] = useState<AutoSyncSeamState | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [runningId, setRunningId] = useState<number | string | null>(null);
   const mountedRef = useRef(true);
 
@@ -54,7 +57,8 @@ function useAutoSyncCard() {
       const state = build(playlists, automations, history) as unknown as AutoSyncSeamState;
 
       if (!mountedRef.current) return;
-      setRows(autoSyncCardRows(state, Date.now()));
+      setSeam(state);
+      setNowMs(Date.now());
       setPhase('ready');
     } catch {
       if (!mountedRef.current) return;
@@ -67,11 +71,27 @@ function useAutoSyncCard() {
     void load();
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
+    // Countdown tick — render-only, no network.
+    const tick = window.setInterval(() => {
+      if (mountedRef.current) setNowMs(Date.now());
+    }, 60_000);
     return () => {
       mountedRef.current = false;
       window.removeEventListener('focus', onFocus);
+      window.clearInterval(tick);
     };
   }, [load]);
+
+  const rows = useMemo(() => (seam ? autoSyncCardRows(seam, nowMs) : []), [seam, nowMs]);
+
+  // While a pipeline is in flight its phase/progress must move — refresh on a
+  // short loop that exists ONLY while a running row is present.
+  const anyRunning = rows.some((r) => r.running);
+  useEffect(() => {
+    if (!anyRunning) return;
+    const h = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(h);
+  }, [anyRunning, load]);
 
   const runNow = useCallback(
     async (row: AutoSyncCardRow) => {
@@ -88,7 +108,8 @@ function useAutoSyncCard() {
         window.showToast?.(`Could not run ${row.name}`, 'error');
       } finally {
         if (mountedRef.current) setRunningId(null);
-        // The run lands in history/next_run async — refresh shortly after.
+        // The run registers its pipeline state async — refresh shortly after
+        // (the running-row loop takes over from there).
         setTimeout(() => {
           if (mountedRef.current) void load();
         }, 1500);
@@ -112,6 +133,114 @@ function openBoard(reload: () => void) {
   }, 1000);
 }
 
+function SourceChip({ row }: { row: AutoSyncCardRow }) {
+  const [failed, setFailed] = useState(false);
+  const glyph = (row.source || row.name || '?').charAt(0).toUpperCase();
+  return (
+    <span className="autosync-chip" title={row.source || undefined}>
+      {row.logo && !failed ? (
+        <img
+          className={`autosync-chip-logo autosync-chip-logo--${row.sourceKey}`}
+          src={row.logo}
+          alt=""
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span className="autosync-chip-glyph">{glyph}</span>
+      )}
+    </span>
+  );
+}
+
+function Row({
+  row,
+  busy,
+  onRun,
+}: {
+  row: AutoSyncCardRow;
+  busy: boolean;
+  onRun: (row: AutoSyncCardRow) => void;
+}) {
+  const classes = ['autosync-row'];
+  if (!row.enabled) classes.push('autosync-row--off');
+  if (row.running) classes.push('autosync-row--live');
+
+  return (
+    <div className={classes.join(' ')}>
+      <SourceChip row={row} />
+      <span className="autosync-row-main">
+        <span className="autosync-row-top">
+          <span className="autosync-row-name" title={row.name}>
+            {row.name}
+          </span>
+          {row.running ? (
+            <span className="autosync-row-live-pill">running</span>
+          ) : row.enabled && row.nextRun ? (
+            <span className="autosync-row-next">{row.nextRun}</span>
+          ) : !row.enabled ? (
+            <span className="autosync-row-paused">paused</span>
+          ) : null}
+        </span>
+        {row.running ? (
+          <span className="autosync-row-meta autosync-row-phase" title={row.running.phase}>
+            {row.running.phase}
+          </span>
+        ) : (
+          <span className="autosync-row-meta">
+            <span>{row.cadence}</span>
+            {row.lastRun && row.lastRun.ago ? (
+              <span
+                className={
+                  row.lastRun.ok ? 'autosync-row-last' : 'autosync-row-last autosync-row-last--bad'
+                }
+                title={row.lastRun.ok ? 'Last run completed' : 'Last run failed'}
+              >
+                {row.lastRun.ok ? '' : '⚠ '}
+                {row.lastRun.delta ? `${row.lastRun.delta} · ` : ''}
+                {row.lastRun.ago}
+              </span>
+            ) : null}
+          </span>
+        )}
+        {row.running ? (
+          <span className="autosync-cov">
+            <span className="autosync-cov-bar">
+              <span
+                className="autosync-cov-fill autosync-cov-fill--live"
+                style={{ width: `${row.running.progress}%` }}
+              ></span>
+            </span>
+            <span className="autosync-cov-text">{row.running.progress}%</span>
+          </span>
+        ) : row.coverage ? (
+          <span
+            className="autosync-cov"
+            title={`${row.coverage.inLibrary} of ${row.coverage.total} tracks in your library`}
+          >
+            <span className="autosync-cov-bar">
+              <span className="autosync-cov-fill" style={{ width: `${row.coverage.pct}%` }}></span>
+            </span>
+            <span className="autosync-cov-text">
+              {row.coverage.inLibrary}/{row.coverage.total} owned
+            </span>
+          </span>
+        ) : null}
+      </span>
+      {!row.running ? (
+        <button
+          type="button"
+          className="autosync-run-btn"
+          disabled={busy}
+          onClick={() => onRun(row)}
+          title="Run this pipeline now"
+        >
+          {busy ? '…' : 'Run'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function AutoSyncCard() {
   const { phase, rows, runningId, runNow, reload } = useAutoSyncCard();
   const scheduled = rows.filter((r) => r.enabled).length;
@@ -126,11 +255,7 @@ export function AutoSyncCard() {
           ) : null}
         </h3>
         <p className="dash-card__sub">Playlists that keep themselves in sync.</p>
-        <button
-          type="button"
-          className="autosync-manage-btn"
-          onClick={() => openBoard(reload)}
-        >
+        <button type="button" className="autosync-manage-btn" onClick={() => openBoard(reload)}>
           Manage
         </button>
       </header>
@@ -153,43 +278,12 @@ export function AutoSyncCard() {
         ) : (
           <div className="autosync-rows">
             {rows.map((row) => (
-              <div
+              <Row
                 key={`${row.key}-${row.automationId}`}
-                className={row.enabled ? 'autosync-row' : 'autosync-row autosync-row--off'}
-              >
-                <span
-                  className={`autosync-health autosync-health--${row.health}`}
-                  title={
-                    row.health === 'good'
-                      ? 'Last run completed'
-                      : row.health === 'bad'
-                        ? 'Last run failed'
-                        : 'No runs recorded yet'
-                  }
-                ></span>
-                <span className="autosync-row-main">
-                  <span className="autosync-row-name" title={row.name}>
-                    {row.name}
-                  </span>
-                  <span className="autosync-row-meta">
-                    {row.source ? <span className="autosync-row-source">{row.source}</span> : null}
-                    <span>{row.cadence}</span>
-                    {row.enabled && row.nextRun ? (
-                      <span className="autosync-row-next">{row.nextRun}</span>
-                    ) : null}
-                    {!row.enabled ? <span className="autosync-row-next">paused</span> : null}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className="autosync-run-btn"
-                  disabled={runningId !== null}
-                  onClick={() => void runNow(row)}
-                  title="Run this pipeline now"
-                >
-                  {runningId === row.automationId ? '…' : 'Run'}
-                </button>
-              </div>
+                row={row}
+                busy={runningId !== null && runningId === row.automationId}
+                onRun={(r) => void runNow(r)}
+              />
             ))}
           </div>
         )}
