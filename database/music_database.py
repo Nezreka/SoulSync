@@ -491,7 +491,8 @@ class MusicDatabase:
             # push loop archived DECODED dicts, and decoding is exactly the
             # step that strips the envelope, so the tags existed nowhere
             # the frontend could reach. Same tolerant-ALTER pattern.
-            for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER'):
+            for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
+                              'edit_target TEXT'):
                 try:
                     cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
                 except sqlite3.OperationalError:
@@ -10922,11 +10923,13 @@ class MusicDatabase:
                 _av = int(m.get('av')) if m.get('av') is not None else None
             except (TypeError, ValueError):
                 _av = None
+            _ed = m.get('ed')
             rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json,
                          str(_chan)[:24] if _chan else None,
                          str(_th)[:160] if _th else None,
                          str(_tn)[:80] if _tn else None,
-                         _av))
+                         _av,
+                         str(_ed)[:160] if _ed else None))
         if not rows:
             return 0
         try:
@@ -10934,8 +10937,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -11102,7 +11105,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -11139,6 +11142,10 @@ class MusicDatabase:
                     r.pop('thread_name', None)
                 if not r.get('av'):
                     r.pop('av', None)
+                if r.get('edit_target'):
+                    r['ed'] = r.pop('edit_target')
+                else:
+                    r.pop('edit_target', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)

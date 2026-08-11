@@ -47,6 +47,23 @@ def test_channel_thread_avatar_tags_survive_the_archive(tmp_path):
         assert key not in plain, key
 
 
+def test_edit_target_survives_the_archive(tmp_path):
+    """An edit carrier's 'ed' key must reload with the message, or an edited
+    message silently un-edits after a restart."""
+    db = _db(tmp_path)
+    db.add_chat_messages('soulsync', [
+        {'username': 'boulder', 'message': 'the corrected words', 'rich': True,
+         'timestamp': '2026-08-11T03:00:00Z',
+         'ed': 'boulder|2026-08-11T02:59:00Z|typo'},
+        {'username': 'boulder', 'message': 'no edit here', 'rich': True,
+         'timestamp': '2026-08-11T03:01:00Z'},
+    ])
+    rows = db.get_chat_messages('soulsync')
+    by_msg = {r['message']: r for r in rows}
+    assert by_msg['the corrected words']['ed'] == 'boulder|2026-08-11T02:59:00Z|typo'
+    assert 'ed' not in by_msg['no edit here']
+
+
 def test_tag_lengths_are_bounded_on_write(tmp_path):
     db = _db(tmp_path)
     db.add_chat_messages('soulsync', [

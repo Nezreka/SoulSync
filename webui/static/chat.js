@@ -41,6 +41,7 @@
         pingArmed: false,        // suppress mention pings while the archive loads
         thread: null,            // {id, name} while viewing a thread (null = channel)
         replyTo: null,           // {u, x} while composing a reply
+        editing: null,           // {key} while editing one of your own messages
         pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
             open: false,         //   panel visible
@@ -370,20 +371,37 @@
 
     function _lineHtml(m) {
         var self = m.self === true || m.direction === 'Out';
-        var me = !self && state.view === 'room' && mentionsMe(m.message);
+        // Edits: the DISPLAYED text is the latest applied edit; m.message
+        // stays the original everywhere a stable identity matters (the react
+        // key hashes it, the message key embeds it).
+        var versions = m._editOrphan ? null : _editsFor(m);
+        var showText = versions ? versions[versions.length - 1] : String(m.message || '');
+        var me = !self && state.view === 'room' && mentionsMe(showText);
         var replyRef = (m.reply && m.reply.u)
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
               '<span>' + esc(m.reply.x || '') + '</span></div>'
             : '';
         var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
-            'data-chat-copy="' + attr(String(m.message || '')) + '">⧉</button>';
+            'data-chat-copy="' + attr(showText) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
             acts = '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
                 'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
-                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
+                'data-chat-reply-x="' + attr(showText.slice(0, 100)) + '">↩</button>' + acts;
+        }
+        // Your own SoulSync message, still under the edit cap → offer ✏.
+        // File cards are excluded (their text is the link the card dresses),
+        // and so are edit carriers themselves.
+        if (state.view === 'room' && state.canSend && state.selfName &&
+                m.username === state.selfName && m.rich && !m.ed && !m._editOrphan &&
+                !(m.file && m.file.n) &&
+                (!versions || versions.length < EDIT_MAX)) {
+            acts = '<button type="button" class="chat-line-reply" title="Edit' +
+                (versions ? ' (1 edit left)' : '') + '" ' +
+                'data-chat-edit-key="' + attr(_msgKey(m).slice(0, 160)) + '" ' +
+                'data-chat-edit-text="' + attr(showText) + '">✏</button>' + acts;
         }
         if (state.view === 'room' && state.canSend && !state.thread && _chanRoom()) {
             acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
@@ -394,7 +412,7 @@
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
                 'data-chat-pin-user="' + attr(m.username || '') + '" ' +
                 'data-chat-pin-ts="' + attr(String(m.timestamp || '')) + '" ' +
-                'data-chat-pin-x="' + attr(String(m.message || '').slice(0, 140)) + '">📌</button>';
+                'data-chat-pin-x="' + attr(showText.slice(0, 140)) + '">📌</button>';
         }
         var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
@@ -407,7 +425,22 @@
         }
         var bodyHtml = (m.file && m.file.n)
             ? _fileCardHtml(m)
-            : (m.rich ? renderRich(m.message) : renderPlain(m.message));
+            : (m.rich ? renderRich(showText) : renderPlain(showText));
+        // An edited message wears the marker; hovering it shows every prior
+        // version, oldest first (the history is retained, not replaced).
+        if (versions) {
+            var history = [String(m.message || '')].concat(versions.slice(0, -1));
+            bodyHtml += '<span class="chat-line-edited" title="' +
+                attr(history.map(function (v, i) {
+                    return (i === 0 ? 'original: ' : 'edit ' + i + ': ') + v;
+                }).join('\n')) + '">(edited)</span>';
+        }
+        // A carrier whose original isn't in the loaded window (or that fell
+        // past the edit cap) renders as itself, annotated.
+        if (m._editOrphan) {
+            bodyHtml = '<span class="chat-line-editnote" title="This is an edit of an ' +
+                'earlier message that isn’t loaded here">✏</span> ' + bodyHtml;
+        }
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
             bodyHtml + actions + chips + '</div>';
@@ -575,7 +608,11 @@
         var newest = String(msgs[msgs.length - 1].timestamp || '') + ':' + msgs.length;
         if (newest === state.lastStamp && host.childElementCount) return;   // nothing new
         state.lastStamp = newest;
-        var shown = msgs, hidden = 0, muted = 0;
+        // Fold message edits BEFORE any view filtering, so an edit applies to
+        // its target no matter which channel/thread either is shown in.
+        var editFold = _applyEdits(msgs);
+        _editsByKey = editFold.edits;
+        var shown = editFold.list, hidden = 0, muted = 0;
         if (state.view === 'room') {
             var ign = ignoredSet();
             if (ign.length) {
@@ -2810,6 +2847,36 @@
         if (bar) bar.hidden = true;
     }
 
+    // ── edit composing ───────────────────────────────────────────────────────
+    // Reuses the reply bar as the "editing…" banner (they're mutually
+    // exclusive composer modes) and preloads the input with the current text.
+    function startEdit(key, currentText) {
+        if (state.view !== 'room' || !state.canSend || !key) return;
+        cancelReply();
+        state.editing = { key: key };
+        var bar = q('[data-chat-reply-bar]');
+        var who = q('[data-chat-reply-who]');
+        var ex = q('[data-chat-reply-excerpt]');
+        if (who) who.textContent = '✏ editing your message';
+        if (ex) ex.textContent = String(currentText || '').slice(0, 100);
+        if (bar) bar.hidden = false;
+        var input = q('[data-chat-input]');
+        if (input) {
+            input.value = String(currentText || '');
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        }
+    }
+
+    function cancelEdit() {
+        if (!state.editing) return;
+        state.editing = null;
+        var bar = q('[data-chat-reply-bar]');
+        if (bar) bar.hidden = true;
+        var input = q('[data-chat-input]');
+        if (input) input.value = '';
+    }
+
     // ── reactions (chatbic P4) ───────────────────────────────────────────────
     var QUICK_REACTS = ['👍', '❤️', '😂', '🔥', '🎵', '👀', '💯'];
 
@@ -3642,6 +3709,51 @@
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
 
+    // ── message edits (envelope 'ed') ────────────────────────────────────
+    // Soulseek cannot unsend, so an edit is a NEW message whose 'ed' names
+    // the sender's own earlier message by key; its text is the replacement.
+    // Vanilla clients honestly see both lines. SoulSync folds the edit onto
+    // the original, shows "(edited)" and keeps every version — and a message
+    // may be edited at most twice (Boulder's rule): later edit carriers stop
+    // counting as edits and render as plain messages instead. Rules every
+    // client computes identically:
+    //   - only the AUTHOR's carriers apply (key starts with their name)
+    //   - the first EDIT_MAX carriers in stream order win
+    //   - a carrier whose target isn't in the loaded window still renders
+    //     (as an ✏-annotated line) — nothing is ever invisible.
+    var EDIT_MAX = 2;
+    var _editsByKey = {};      // target key -> [replacement texts], set per render
+
+    function _applyEdits(msgs) {
+        var present = {};
+        msgs.forEach(function (m) {
+            if (!m.ed) present[_msgKey(m).slice(0, 160)] = 1;
+        });
+        var edits = {};
+        var out = [];
+        msgs.forEach(function (m) {
+            var target = (typeof m.ed === 'string' && m.ed) ? m.ed : null;
+            if (!target) { out.push(m); return; }
+            var isAuthor = target.indexOf((m.username || '') + '|') === 0;
+            var slot = isAuthor ? (edits[target] || (edits[target] = [])) : null;
+            var applies = !!(slot && slot.length < EDIT_MAX);
+            if (applies) slot.push(String(m.message || ''));
+            if (!applies || !present[target]) {
+                // Not a valid/countable edit, or the original has scrolled
+                // out of the window — show the carrier itself.
+                out.push(Object.assign({}, m, { _editOrphan: true }));
+            }
+        });
+        return { list: out, edits: edits };
+    }
+
+    // The applied edits for a rendered message: null, or the version list
+    // (original first is NOT included — m.message stays the original).
+    function _editsFor(m) {
+        var slot = _editsByKey[_msgKey(m).slice(0, 160)];
+        return (slot && slot.length) ? slot : null;
+    }
+
     // ── preset avatars ─────────────────────────────────────────────────────
     // webui/static/avatar/1.png .. N.png. The id is an INDEX into that fixed
     // set and is bounds-checked everywhere it crosses the wire — it must never
@@ -4043,6 +4155,7 @@
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
+        cancelEdit();
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
@@ -4166,6 +4279,7 @@
         state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
+        cancelEdit();
         state.topicEditing = false;
         renderHead(); renderComposer(); renderBusUI();   // hides the panels (audio keeps playing)
         var host = q('[data-chat-messages]');
@@ -4219,6 +4333,11 @@
             payload.reply = state.replyTo;
             sentReply = state.replyTo;
         }
+        var sentEdit = null;
+        if (state.view === 'room' && state.editing && state.editing.key) {
+            payload.edit = state.editing.key;
+            sentEdit = state.editing.key;
+        }
         postJSON(url, payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -4230,8 +4349,10 @@
             // Optimistic echo: slskd takes a beat to include a just-sent message,
             // and the poll adds up to 4s more — paint it NOW, then let the next
             // authoritative render replace it (lastStamp reset forces that).
+            // Except edits: their echo would paint as a stray ✏ line under the
+            // original — the authoritative render folds it in place instead.
             var host = q('[data-chat-messages]');
-            if (host) {
+            if (host && !sentEdit) {
                 var empty = host.querySelector('.chat-empty');
                 if (empty) empty.remove();
                 host.insertAdjacentHTML('beforeend', renderGroups([{
@@ -4246,6 +4367,7 @@
             }
             state.stickBottom = true;
             cancelReply();
+            cancelEdit();
             refresh();
         });
     }
@@ -4332,12 +4454,19 @@
             if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
             t = e.target.closest('[data-chat-reply-user]');
             if (t) {
+                cancelEdit();
                 startReply(t.getAttribute('data-chat-reply-user'),
                            t.getAttribute('data-chat-reply-x'));
                 return;
             }
+            t = e.target.closest('[data-chat-edit-key]');
+            if (t) {
+                startEdit(t.getAttribute('data-chat-edit-key'),
+                          t.getAttribute('data-chat-edit-text'));
+                return;
+            }
             t = e.target.closest('[data-chat-reply-cancel]');
-            if (t) { cancelReply(); return; }
+            if (t) { cancelReply(); cancelEdit(); return; }
             t = e.target.closest('[data-chat-slash-pick]');
             if (t) { pickSlash(t.getAttribute('data-chat-slash-pick')); return; }
             t = e.target.closest('[data-chat-mention-pick]');

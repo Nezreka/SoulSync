@@ -73304,6 +73304,16 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 520px;
 }
 .chat-reply-ref b { color: rgba(255,255,255,0.75); }
+
+/* message edits: the marker on an edited message (hover = full history)
+   and the ✏ note on a carrier whose original isn't loaded */
+.chat-line-edited {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.38);
+    margin-left: 6px;
+    cursor: help;
+}
+.chat-line-editnote { color: rgba(255, 255, 255, 0.45); }
 .chat-reply-bar[hidden], .chat-mention-pop[hidden] { display: none !important; }
 .chat-reply-bar {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;

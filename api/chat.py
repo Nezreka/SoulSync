@@ -243,6 +243,12 @@ def _unwrap_room_messages(messages):
             f = chat_codec.file_of(dec)
             if f:
                 m["file"] = f
+            # Edit carrier: the client fold replaces the target's displayed
+            # text and keeps the history; the carrier itself stays a real
+            # message (Soulseek can't unsend, so hiding it would lie).
+            e2 = chat_codec.edit_of(dec)
+            if e2:
+                m["ed"] = e2
         out.append(m)
     return out, reactions, protocol
 
@@ -1399,6 +1405,14 @@ def create_blueprint() -> Blueprint:
             tname = str(body.get("thread_name") or "").strip()[:80]
             if tname:
                 extra["tn"] = tname
+        # Message edit: 'ed' targets one of the sender's OWN earlier messages
+        # by key; this envelope's text is the replacement. Author-match and
+        # the 2-edit cap are enforced by the client fold on every machine —
+        # the server only shape-checks (edit_of).
+        edit = chat_codec.edit_of({"ed": body.get("edit")})
+        if edit:
+            extra = dict(extra or {})
+            extra["ed"] = edit
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

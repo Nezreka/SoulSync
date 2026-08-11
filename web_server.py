@@ -41022,6 +41022,9 @@ def _emit_chat_push_loop():
                                     out['av'] = _av2
                             except (TypeError, ValueError):
                                 pass
+                            _ed2 = chat_codec.edit_of(dec)
+                            if _ed2:
+                                out['ed'] = _ed2
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
