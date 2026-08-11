@@ -5610,22 +5610,22 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Search Results Area */
 .search-results-container {
-    background: rgba(20, 20, 20, 0.2);
-    border-radius: 12px;
-    border: 1px solid rgba(64, 64, 64, 0.2);
-    padding: 16px;
+    background: transparent;
+    border-radius: 0;
+    border: none;
+    padding: 8px 0 0;
     display: flex;
     flex-direction: column;
     flex-grow: 1;
     min-height: 0;
-    /* Take remaining vertical space */
 }
 
 .search-results-header h3 {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 12px;
+    color: #ffffff;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
 }
 
 .search-results-scroll-area {
@@ -5637,9 +5637,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .search-results-placeholder {
     text-align: center;
-    padding: 50px;
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 14px;
+    padding: 44px 20px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 13.5px;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
 }
 
 /* SearchResultItem (Single Track) Styling */
