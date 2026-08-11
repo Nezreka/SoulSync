@@ -36,18 +36,18 @@ export function DashboardPage() {
     <div className="page-shell dashboard-container" id="dashboard-page">
       <DashboardHeader />
       <div className="dash-grid">
-        {/* ONE full-width content band: Recently Added | Fresh Releases behind
-            a tab switcher. Renders nothing until a feed has rows, so a fresh
-            install sees the ops grid it always saw. */}
-        <ContentBand />
-        {/* Two quiet full-width strips of numbers (system stats, then the
-            library counts + scan buttons), then ONE ops row: Services beside
-            Recent Syncs (which spans the remaining two columns and fills its
-            height). Recent Activity (the tray owns it) and Quick Actions
-            (the sidebar again, as buttons) are gone; Service Status and the
-            rate equalizer are ONE Services card. */}
-        <SystemStatsCard />
+        {/* The Library strip leads — whose collection this is, then what's
+            new in it. The content band (Recently Added | Fresh Releases
+            behind a tab switcher) renders nothing until a feed has rows, so
+            a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
+        <ContentBand />
+        {/* The stats strip, then ONE ops row: Services beside Recent Syncs
+            (which spans the remaining two columns and fills its height).
+            Recent Activity (the tray owns it) and Quick Actions (the
+            sidebar again, as buttons) are gone; Service Status and the rate
+            equalizer are ONE Services card. */}
+        <SystemStatsCard />
         <ServicesCard />
         <SyncsCard />
         <ActiveDownloadsShell />

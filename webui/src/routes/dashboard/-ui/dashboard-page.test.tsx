@@ -41,13 +41,14 @@ describe('the page shell', () => {
     const grid = root.querySelector('.dash-grid')!;
     expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
       // 3.2.0 calm grid: the ContentBand renders NOTHING here (its fetches
-      // fail under the test's dead fetch mock). Stats and Library are BOTH
-      // full-width strips now, then one ops row — Services beside Recent
-      // Syncs (span 2). Services CONTAINS the old enrichment equalizer;
-      // Recent Activity (tray owns it) and Quick Actions (sidebar
-      // duplicate) are deliberately gone.
-      'stats',
+      // fail under the test's dead fetch mock). The Library strip LEADS
+      // (whose collection this is, then what's new in it), stats strips
+      // below the band, then one ops row — Services beside Recent Syncs
+      // (span 2). Services CONTAINS the old enrichment equalizer; Recent
+      // Activity (tray owns it) and Quick Actions (sidebar duplicate) are
+      // deliberately gone.
       'library',
+      'stats',
       'services',
       'syncs',
       'active-downloads',
