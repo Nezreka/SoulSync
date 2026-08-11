@@ -249,10 +249,47 @@ export function DiscoverPage() {
   // re-renders with a real 4-tile mosaic and an honest track count.
   const lbCoversRef = useRef(lbCovers);
   lbCoversRef.current = lbCovers;
+  // Deferred: the eager version fetched EVERY LB playlist and EVERY decade
+  // playlist at mount just to paint 4-tile mosaics — dozens of requests
+  // before the user scrolled anywhere near those shelves. Each shelf now
+  // hydrates when it actually enters the viewport. Environments without
+  // IntersectionObserver (jsdom) keep the eager behaviour.
+  const [mosaicsWanted, setMosaicsWanted] = useState<{ lb: boolean; decades: boolean }>(() => {
+    const eager = typeof IntersectionObserver === 'undefined';
+    return { lb: eager, decades: eager };
+  });
   useEffect(() => {
-    // The decade cards are lazy too (2675) — the vanilla's hydration pass
-    // runs on every grid it renders, so decades get their mosaics with LB.
-    for (const mix of [...lb.mixes, ...mixes.decadeMixes]) {
+    if (typeof IntersectionObserver === 'undefined') return;
+    if (mosaicsWanted.lb && mosaicsWanted.decades) return;
+    const anchors: [keyof typeof mosaicsWanted, HTMLElement | null][] = [
+      ['lb', document.getElementById('listenbrainz')],
+      ['decades', document.getElementById('year-mixes-grid')],
+    ];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const hit = anchors.find(([, el]) => el === entry.target)?.[0];
+          if (hit) {
+            setMosaicsWanted((w) => (w[hit] ? w : { ...w, [hit]: true }));
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      // Start the fetch a screen early so the mosaics are painted by arrival.
+      { rootMargin: '600px' },
+    );
+    for (const [key, el] of anchors) {
+      if (el && !mosaicsWanted[key]) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [mosaicsWanted, lb.mixes.length, mixes.decadeMixes.length]);
+  useEffect(() => {
+    const due = [
+      ...(mosaicsWanted.lb ? lb.mixes : []),
+      ...(mosaicsWanted.decades ? mixes.decadeMixes : []),
+    ];
+    for (const mix of due) {
       if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
       const lazy = defaultLazySource(mix) ?? lbLazy(mix);
       if (!lazy) continue;
@@ -261,7 +298,7 @@ export function DiscoverPage() {
         .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
         .catch(() => {});
     }
-  }, [lb.mixes, mixes.decadeMixes, lbLazy]);
+  }, [lb.mixes, mixes.decadeMixes, lbLazy, mosaicsWanted]);
   const decadeMixesHydrated = useMemo(
     () =>
       mixes.decadeMixes.map((mix) =>

@@ -13,19 +13,19 @@ import { useDiscoverPage } from './-discover.use-page';
 const ABOVE_FOLD = [
   '/api/discover/hero',
   '/api/discover/adventurousness',
-  '/api/discover/genre-explorer',
   '/api/discover/listening-recommendations',
   '/api/discover/similar-artists',
-  '/api/discover/personalized/popular-picks',
-  '/api/discover/personalized/hidden-gems',
-  '/api/discover/personalized/discovery-shuffle',
-  '/api/discover/personalized/listening-mix',
   '/api/discover/recent-releases',
-  '/api/discover/genre-new-releases',
 ];
 
 /** Endpoints only the below-the-fold tier hits. */
 const BELOW_FOLD = [
+  '/api/discover/genre-explorer',
+  '/api/discover/personalized/popular-picks',
+  '/api/discover/personalized/hidden-gems',
+  '/api/discover/personalized/discovery-shuffle',
+  '/api/discover/personalized/listening-mix',
+  '/api/discover/genre-new-releases',
   '/api/discover/seasonal/current',
   '/api/discover/undiscovered-albums',
   '/api/discover/label-explorer',
