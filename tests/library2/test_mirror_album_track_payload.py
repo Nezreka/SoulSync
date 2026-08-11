@@ -159,19 +159,31 @@ class TestAlbumPayload:
 
 
 class TestTrackPayload:
-    def test_genius_and_bandcamp_all_arrive(self, conn):
+    def test_bandcamp_payload_arrives(self, conn):
         lib2_id, legacy_id = _track(
-            conn, genius_description="About the song.", genius_url="http://genius/x",
-            bandcamp_tags='["b"]', bandcamp_label="Label")
+            conn, bandcamp_tags='["b"]', bandcamp_label="Label")
 
         resync_entity_from_legacy(conn, "track", lib2_id, legacy_id)
 
         payload = json.loads(conn.execute(
             "SELECT enrichment FROM lib2_tracks WHERE id=?", (lib2_id,)
         ).fetchone()["enrichment"])
-        assert payload["genius"] == {
-            "description": "About the song.", "url": "http://genius/x"}
         assert payload["bandcamp"] == {"tags": ["b"], "label": "Label"}
+
+    def test_a_migrated_services_track_columns_no_longer_arrive(self, conn):
+        """Genius owns both its enrichment payload and ``tracks.genius_lyrics``
+        now — a scalar column, which is why the handover has to cover those too."""
+        lib2_id, legacy_id = _track(
+            conn, genius_description="Stale.", genius_lyrics="Stale words.",
+            bandcamp_label="Label")
+
+        resync_entity_from_legacy(conn, "track", lib2_id, legacy_id)
+
+        row = conn.execute(
+            "SELECT enrichment, genius_lyrics FROM lib2_tracks WHERE id=?",
+            (lib2_id,)).fetchone()
+        assert set(json.loads(row["enrichment"])) == {"bandcamp"}
+        assert row["genius_lyrics"] is None
 
     def test_disc_number_reaches_its_own_column(self, conn):
         lib2_id, legacy_id = _track(conn, disc_number=2)

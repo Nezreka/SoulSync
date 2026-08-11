@@ -149,8 +149,8 @@ class TestDrainAppliesToLib2:
         conn = _conn(mirrored_db)
         try:
             conn.execute(
-                "UPDATE artists SET discogs_bio=?, genius_description=? WHERE id=1",
-                ("A Bristol act.", "Known for trip hop."))
+                "UPDATE artists SET discogs_bio=?, discogs_members=? WHERE id=1",
+                ("A Bristol act.", '["3D","Daddy G"]'))
             conn.commit()
         finally:
             conn.close()
@@ -159,7 +159,7 @@ class TestDrainAppliesToLib2:
 
         enrichment = json.loads(_lib2_artist(mirrored_db)["enrichment"])
         assert enrichment["discogs"]["bio"] == "A Bristol act."
-        assert enrichment["genius"]["description"] == "Known for trip hop."
+        assert enrichment["discogs"]["members"] == ["3D", "Daddy G"]
 
     def test_a_migrated_services_legacy_write_is_not_mirrored(self, mirrored_db):
         """Last.fm's worker writes lib2 directly now, so its legacy columns must

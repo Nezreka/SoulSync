@@ -28,8 +28,10 @@ def _mirrored_columns(legacy_table: str) -> set:
     from core.library2.enrich import MIGRATED_SERVICES, enrichment_columns
     from core.library2.match_status import SERVICES
 
+    from core.library2.enrich import active_scalars
+
     spec = next(s for s in MIRROR_SPECS.values() if s.legacy_table == legacy_table)
-    columns = {field[1] for field in spec.scalars}
+    columns = {field[1] for field in active_scalars(spec)}
     for _lib2_column, legacy_columns in spec.id_columns:
         columns.update(legacy_columns)
     for service, _label, id_columns in SERVICES:
@@ -72,8 +74,11 @@ def test_the_provider_payload_is_declared_for_every_entity_type():
 
     assert "discogs_bio" in enrichment_columns("artist")
     assert "discogs_catno" in enrichment_columns("album")
-    assert "genius_description" in enrichment_columns("track")
+    assert "bandcamp_label" in enrichment_columns("track")
     # A migrated service drops out of the declaration entirely: its worker writes
     # lib2, so mirroring legacy on top would push a stale value over a fresh one.
-    assert "lastfm" in MIGRATED_SERVICES
-    assert not [c for c in enrichment_columns("album") if c.startswith("lastfm_")]
+    for service in ("lastfm", "genius"):
+        assert service in MIGRATED_SERVICES
+        for entity in ("artist", "album", "track"):
+            assert not [c for c in enrichment_columns(entity)
+                        if c.startswith(f"{service}_")], (service, entity)

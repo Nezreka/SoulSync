@@ -152,8 +152,11 @@ def test_resync_track_overwrites_from_legacy_row(conn):
     ).fetchone()
     assert row["bpm"] == 104.0
     assert row["explicit"] == 0
-    assert row["genius_lyrics"] == "some lyrics"
     assert row["copyright"] == "(C) 2016 OVO"
+    # `genius_lyrics` is deliberately absent: the Genius worker writes lib2
+    # directly now, so its columns left the mirror (`enrich.MIGRATED_SERVICES`)
+    # and copying legacy on top would push a stale value over a fresh one.
+    assert row["genius_lyrics"] is None
     assert row["style"] == "Pop Rap"
     assert row["mood"] == "Chill"
 

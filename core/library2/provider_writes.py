@@ -87,14 +87,20 @@ def write_provider_enrichment(
     payload: Optional[Mapping[str, Any]] = None,
     provider_id: Optional[str] = None,
     backfill: Optional[Mapping[str, Any]] = None,
+    columns: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Apply one provider's answer to one lib2 row.
 
     ``payload`` is merged under ``enrichment[service]`` — keys absent from this
     answer keep their previous value, so a bio-only refresh does not erase the
     listener count. ``provider_id`` goes to ``external_ids[service]`` (and the
-    promoted column, where there is one). ``backfill`` fills the named columns
-    only while they are empty.
+    promoted column, where there is one).
+
+    Two column modes, because the providers genuinely differ. ``backfill`` fills a
+    column only while it is empty — for fallbacks like Last.fm artwork. ``columns``
+    writes outright, for fields where a fresh fetch is the newer truth (Genius
+    lyrics); a ``None`` there still leaves the existing value alone, so a failed
+    lyrics fetch cannot blank lyrics already stored.
     """
     entity = _entity(entity_type)
     table = _TABLES[entity]
@@ -116,6 +122,17 @@ def write_provider_enrichment(
                 f"UPDATE {table} SET {promoted}=? "
                 f"WHERE id=? AND COALESCE({promoted},'')<>?",
                 (value, entity_id, value))
+
+    if columns:
+        available = _columns(conn, table)
+        unknown = set(columns) - available
+        if unknown:
+            raise ValueError(
+                f"{table} has no column(s) {sorted(unknown)} to write")
+        for column, value in columns.items():
+            if value not in (None, ""):
+                conn.execute(
+                    f"UPDATE {table} SET {column}=? WHERE id=?", (value, entity_id))
 
     if backfill:
         available = _columns(conn, table)

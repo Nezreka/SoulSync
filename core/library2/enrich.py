@@ -178,11 +178,31 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 #
 # This set is therefore the stage-2 progress marker: it grows by one entry per
 # migrated worker, and when it holds every service the mirror has no work left.
-MIGRATED_SERVICES: frozenset = frozenset({"lastfm"})
+MIGRATED_SERVICES: frozenset = frozenset({"lastfm", "genius"})
 
 
 def _migrated(service: str) -> bool:
     return str(service).strip().lower() in MIGRATED_SERVICES
+
+
+def _migrated_prefixes() -> tuple:
+    return tuple(f"{service}_" for service in MIGRATED_SERVICES)
+
+
+def active_scalars(spec: "MirrorSpec") -> tuple:
+    """The spec's scalar fields, minus those a migrated worker now owns.
+
+    Some provider payload lands in a real column rather than the enrichment
+    bucket — ``tracks.genius_lyrics`` is the case that found this. Leaving such a
+    column mirrored after its worker moved would let the drain push a stale legacy
+    value over the fresh native one, which is the exact hazard
+    ``MIGRATED_SERVICES`` exists to prevent. Matched by column prefix, the same
+    rule ``legacy_mirror.watched_columns`` uses, so the trigger and the resync
+    cannot disagree — and ``test_mirror_declaration`` proves they do not.
+    """
+    prefixes = _migrated_prefixes()
+    return tuple(
+        field for field in spec.scalars if not str(field[1]).startswith(prefixes))
 
 
 def enrichment_columns(entity_type: str) -> Tuple[str, ...]:
@@ -342,11 +362,12 @@ def _id_value(legacy_row: Any, legacy_columns: Tuple[str, ...]) -> Optional[str]
 
 def _apply_mirror(conn, spec: MirrorSpec, entity_id: int, legacy_row: Any) -> bool:
     assignments = ", ".join(
-        f"{field[0]}=COALESCE(?, {field[0]})" for field in spec.scalars)
+        f"{field[0]}=COALESCE(?, {field[0]})" for field in active_scalars(spec))
     conn.execute(
         f"UPDATE {spec.lib2_table} SET {assignments}, "
         "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (*(_scalar_value(legacy_row, field) for field in spec.scalars), entity_id),
+        (*(_scalar_value(legacy_row, field) for field in active_scalars(spec)),
+         entity_id),
     )
     for column, builder in spec.json_columns:
         _merge_json_column(conn, spec.lib2_table, entity_id, column,
@@ -464,7 +485,7 @@ def mirror_divergence(spec: MirrorSpec, legacy_row: Any,
     An empty result is the expected state (docs §32.3.1, promise 2).
     """
     out: Dict[str, Dict[str, Any]] = {}
-    for field in spec.scalars:
+    for field in active_scalars(spec):
         expected = _scalar_value(legacy_row, field)
         if _is_absent(expected):
             continue
@@ -593,6 +614,8 @@ def mirror_check_ran(conn) -> bool:
 
 
 __all__ = [
+    "MIGRATED_SERVICES",
+    "active_scalars",
     "MIRROR_SPECS",
     "MirrorObservation",
     "MirrorSpec",

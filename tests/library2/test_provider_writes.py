@@ -155,6 +155,39 @@ class TestBackfillOnlyWhenEmpty:
                 payload={}, backfill={"nonexistent": "x"})
 
 
+class TestOutrightColumnWrites:
+    """Some fields are not fallbacks. Genius lyrics replace what is there: a
+    fresh fetch is the newer truth, and backfill-only would freeze the first
+    version ever stored."""
+
+    def test_a_named_column_is_written_even_when_it_already_has_a_value(self, conn):
+        conn.execute("UPDATE lib2_tracks SET genius_lyrics='old words' WHERE id=1")
+        conn.commit()
+
+        write_provider_enrichment(
+            conn, entity_type="track", entity_id=1, service="genius",
+            payload={}, columns={"genius_lyrics": "new words"})
+
+        assert _row(conn, "lib2_tracks")["genius_lyrics"] == "new words"
+
+    def test_a_none_value_does_not_erase_what_is_there(self, conn):
+        """A lyrics fetch that failed must not blank lyrics we already have."""
+        conn.execute("UPDATE lib2_tracks SET genius_lyrics='keep me' WHERE id=1")
+        conn.commit()
+
+        write_provider_enrichment(
+            conn, entity_type="track", entity_id=1, service="genius",
+            payload={}, columns={"genius_lyrics": None})
+
+        assert _row(conn, "lib2_tracks")["genius_lyrics"] == "keep me"
+
+    def test_an_unknown_column_is_refused(self, conn):
+        with pytest.raises(ValueError):
+            write_provider_enrichment(
+                conn, entity_type="track", entity_id=1, service="genius",
+                payload={}, columns={"nope": "x"})
+
+
 class TestTheMirrorHandover:
     def test_a_migrated_service_is_no_longer_mirrored_from_legacy(self):
         """Its worker writes lib2 now. Mirroring legacy on top would push a stale
