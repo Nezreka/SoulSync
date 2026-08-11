@@ -3266,6 +3266,37 @@ Nur eine davon ist offen:
   nur ein `-updatedAt`-Datum in die Summary des Servers — die gesammelten
   Last.fm-/Genius-/Discogs-Bios haben SoulSync also nie verlassen.
 
+#### 50.4.4.3 Was der Spiegel noch fallen lässt (gemessen 11. August 2026)
+
+Beim Prüfen, ob `MIRROR_SPECS` vollständig ist, kam eine Lücke heraus, die die
+Divergenz-Kennzahl selbst **nicht** sehen kann: sie vergleicht, was die
+Deklaration nennt. Eine Spalte, die in der Deklaration fehlt, fehlt damit auch
+in der Messung. Genau so fiel `artists.lastfm_playcount` durch — Last.fm
+schreibt sie, nichts trug sie nach lib2, und weder Test noch Kennzahl sagten es.
+Behoben und in beide Richtungen festgenagelt
+(`tests/library2/test_mirror_declaration.py`).
+
+Der Bestand danach: von 63 Legacy-Artist-Spalten sind 30 gespiegelt, von 76
+Album-Spalten 19, von 74 Track-Spalten 19. Der größte Teil des Rests ist
+**Buchhaltung, die nicht gespiegelt werden soll** (`*_match_status`,
+`*_last_attempted`, Struktur- und Fremdschlüssel, `server_source`). Aber nicht
+alles davon:
+
+| Entität | Noch nicht gespiegelte Nutzdaten |
+|---|---|
+| Artist | `soul_id` (eine Provider-Identität, die `SERVICES` nicht abbildet) |
+| Album | `lastfm_listeners/playcount/tags/wiki`, `discogs_genres/styles/label/catno/country/rating/rating_count`, `bandcamp_id/tags/label`, `soul_id`, `record_type`, `release_date`, `copyright` |
+| Track | `lastfm_listeners/playcount/tags`, `genius_description/url`, `bandcamp_id/tags/label`, `soul_id`, `track_artist`, `year`, `disc_number` |
+
+**Der Blocker ist Schema, nicht Fleiß:** nur `lib2_artists` hat eine
+`enrichment`-Spalte. `lib2_albums` und `lib2_tracks` haben keine, also braucht
+die Album-/Track-Nutzlast erst eine Spalte, bevor sie deklariert werden kann.
+Ein Teil hat schon ein Zuhause (`lib2_albums.release_date`,
+`lib2_tracks.copyright`, `lib2_tracks.disc_number`) und ist rein deklarativ
+nachzutragen. Gemessen an Nezrekas Anforderung („i don't want to lose any
+enrichment functionality or data") gehört das vor die Legacy-Löschung, nicht
+danach.
+
 #### 50.4.5 PR-Hygiene, aus dem eigenen Kommentar vom 5. August
 
 - Die `docs/`-Notizen sollten laut eigenem PR-Kommentar gar nicht in diesem PR
