@@ -70613,12 +70613,12 @@ body.max-performance .dash-card::after {
     background: transparent; color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .em-tab.active { background: rgba(var(--accent-rgb), 0.16); border-color: rgba(var(--accent-rgb), 0.4); color: #fff; }
-.em-filter-row { display: flex; gap: 8px; align-items: center; }
+.em-filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
 .em-select, .em-search {
     padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
     border-radius: 8px; color: #fff; font-size: 13px;
 }
-.em-search { min-width: 200px; }
+.em-search { width: 100%; min-width: 0; }
 .em-search:focus, .em-select:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); }
 
 .em-unmatched-list { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
@@ -70750,7 +70750,7 @@ body.em-scroll-lock { overflow: hidden; }
     font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px;
     color: rgba(255,255,255,0.4); flex: 0 0 auto;
 }
-.em-section-label--inline { display: flex; align-items: center; gap: 8px; }
+.em-section-label--inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .em-count {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 22px; height: 19px; padding: 0 7px; border-radius: 999px;
@@ -70846,7 +70846,11 @@ body.em-scroll-lock { overflow: hidden; }
 .em-leg--pend i { background: rgba(240,192,96,0.9); }
 
 /* Unmatched toolbar */
-.em-unmatched-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; flex: 0 0 auto; }
+.em-unmatched-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; flex: 0 0 auto;
+    /* min-width:auto would be the SINGLE-LINE width (Chromium ignores
+       wrappability in intrinsic sizing) — the bar then overflows the panel
+       instead of wrapping. Zero it so the wrap can actually engage. */
+    min-width: 0; }
 .em-seg-tabs { display: inline-flex; padding: 3px; gap: 2px; background: rgba(255,255,255,0.05); border-radius: 10px; border: 1px solid rgba(255,255,255,0.07); }
 .em-seg-tab {
     padding: 6px 14px; border-radius: 8px; border: none; background: transparent;
@@ -70858,7 +70862,7 @@ body.em-scroll-lock { overflow: hidden; }
     background: rgba(var(--em-accent-rgb, 99,102,241), 0.9);
     color: #fff; box-shadow: 0 2px 8px rgba(var(--em-accent-rgb, 99,102,241), 0.4);
 }
-.em-search-wrap { position: relative; display: inline-flex; align-items: center; }
+.em-search-wrap { position: relative; display: inline-flex; align-items: center; flex: 1 1 200px; min-width: 140px; max-width: 320px; }
 .em-search-ico { position: absolute; left: 11px; color: rgba(255,255,255,0.4); font-size: 15px; pointer-events: none; }
 .em-search-wrap .em-search { padding-left: 30px; }
 .em-search:focus, .em-select:focus { outline: none; border-color: rgba(var(--em-accent-rgb, 99,102,241), 0.6); }
