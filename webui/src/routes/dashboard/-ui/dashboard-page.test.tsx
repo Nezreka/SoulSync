@@ -45,24 +45,14 @@ describe('the page shell', () => {
       // (whose collection this is, then what's new in it), then one ops row
       // — Services beside Recent Syncs (span 2). The System Stats strip is
       // RETIRED: its numbers moved to the notification tray / downloads
-      // page / the syncs card's live pill. The enrichment equalizer left
-      // the grid for the ambient orb field behind the page; Recent
-      // Activity (tray owns it) and Quick Actions (sidebar duplicate) are
-      // deliberately gone.
+      // page / the syncs card's live pill. Services CONTAINS the old
+      // enrichment equalizer; Recent Activity (tray owns it) and Quick
+      // Actions (sidebar duplicate) are deliberately gone.
       'library',
       'services',
       'syncs',
       'active-downloads',
     ]);
-
-    // The orb field: the rate monitor renders OUTSIDE the grid as a fixed
-    // decorative layer — inert, aria-hidden, still carrying the vanilla
-    // #rate-monitor-grid id (single instance on the page).
-    const orbField = root.querySelector('.dash-orb-field')!;
-    expect(orbField.getAttribute('aria-hidden')).toBe('true');
-    expect(orbField.hasAttribute('inert')).toBe(true);
-    expect(orbField.querySelector('#rate-monitor-grid')).not.toBeNull();
-    expect(grid.querySelector('#rate-monitor-grid')).toBeNull();
 
     // worker-orbs' anchor selector must resolve against this tree.
     expect(view.container.querySelector('#dashboard-page .dashboard-header')).not.toBeNull();

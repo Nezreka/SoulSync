@@ -23,7 +23,6 @@ import { ActiveDownloadsShell } from './active-downloads-shell';
 import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
-import { RateMonitorCard } from './rate-equalizer';
 import { ServicesCard } from './services-merged';
 import { SyncsCard } from './syncs-card';
 
@@ -53,17 +52,6 @@ export function DashboardPage() {
         <ServicesCard />
         <SyncsCard />
         <ActiveDownloadsShell />
-      </div>
-      {/* The orb field — the enrichment equalizer as ambient status art:
-          lifted out of the card grid, fixed dead-center of the viewport
-          BEHIND the page (Boulder's idea). Dimmed, pointer-inert, hidden
-          under the perf modes; the orbs still pulse on ss:rate-monitor
-          frames. Worker management stays with the header's Manage Workers
-          button. Mounted LAST so the header keeps being the shell's first
-          child (worker-orbs anchor pin) — position:fixed makes DOM order
-          irrelevant to where it paints. */}
-      <div className="dash-orb-field" aria-hidden="true" inert>
-        <RateMonitorCard embedded />
       </div>
     </div>
   );
