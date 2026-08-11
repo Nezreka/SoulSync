@@ -87,6 +87,17 @@ function useAutomationsCard() {
   return { loaded: rows !== null, view, busyId, runNow };
 }
 
+/** The Settings page's exact preset palette (index.html #accent-preset). */
+const ACCENT_PRESETS: Array<{ hex: string; name: string }> = [
+  { hex: '#1db954', name: 'Spotify Green' },
+  { hex: '#1d8ab9', name: 'Ocean Blue' },
+  { hex: '#a78bfa', name: 'Purple' },
+  { hex: '#8b5cf6', name: 'Boulder Purple' },
+  { hex: '#f59e0b', name: 'Sunset Orange' },
+  { hex: '#f43f5e', name: 'Rose' },
+  { hex: '#14b8a6', name: 'Teal' },
+];
+
 function QuickSettings() {
   const [reduce, setReduce] = useState(
     () => localStorage.getItem('soulsync-reduce-effects') === '1',
@@ -94,6 +105,29 @@ function QuickSettings() {
   const [maxPerf, setMaxPerf] = useState(
     () => localStorage.getItem('soulsync-max-performance') === '1',
   );
+  const [accent, setAccent] = useState(
+    () => localStorage.getItem('soulsync-accent') || '#1db954',
+  );
+
+  /** Apply instantly via init.js's own applier, then persist to the server
+   *  config (partial POST — the handler merges key-by-key). Without the
+   *  server write, bootstrapServerAppearanceSettings would revert the color
+   *  on the next load. Persist failures (e.g. a non-admin profile — the
+   *  endpoint is admin-only) stay quiet: the color still applies for the
+   *  session, which is honest feedback on its own. */
+  const pickAccent = (hex: string, isCustom: boolean) => {
+    setAccent(hex);
+    window.applyAccentColor?.(hex);
+    void fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ui_appearance: isCustom
+          ? { accent_preset: 'custom', accent_color: hex }
+          : { accent_preset: hex },
+      }),
+    }).catch(() => undefined);
+  };
 
   const toggleReduce = () => {
     const next = !reduce;
@@ -128,6 +162,40 @@ function QuickSettings() {
         <span className="dash-qs-knob"></span>
         Max performance
       </button>
+      <span className="dash-qs-accent">
+        {ACCENT_PRESETS.map((preset) => (
+          <button
+            key={preset.hex}
+            type="button"
+            className={
+              accent.toLowerCase() === preset.hex
+                ? 'dash-qs-swatch dash-qs-swatch--active'
+                : 'dash-qs-swatch'
+            }
+            style={{ background: preset.hex }}
+            title={preset.name}
+            onClick={() => pickAccent(preset.hex, false)}
+          />
+        ))}
+        {/* Native color input styled as the eighth swatch — live-applies
+            while dragging (input), persists on commit (change). */}
+        <input
+          type="color"
+          className={
+            ACCENT_PRESETS.some((p) => p.hex === accent.toLowerCase())
+              ? 'dash-qs-swatch dash-qs-swatch--custom'
+              : 'dash-qs-swatch dash-qs-swatch--custom dash-qs-swatch--active'
+          }
+          value={accent}
+          title="Custom color"
+          onInput={(event) => {
+            const hex = (event.target as HTMLInputElement).value;
+            setAccent(hex);
+            window.applyAccentColor?.(hex);
+          }}
+          onChange={(event) => pickAccent((event.target as HTMLInputElement).value, true)}
+        />
+      </span>
     </div>
   );
 }

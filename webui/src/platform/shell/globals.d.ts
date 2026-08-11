@@ -548,6 +548,9 @@ declare global {
      *  in perfect agreement. Max performance overrides Reduce effects. */
     applyReduceEffects?: (enabled: boolean) => void;
     applyMaxPerformance?: (enabled: boolean) => void;
+    /** init.js:43 — recomputes the --accent[-light|-neon]-rgb custom
+     *  properties app-wide and persists the per-device localStorage copy. */
+    applyAccentColor?: (hex: string) => void;
     /** init.js:3256 — THE cross-page navigation entry: permission guard,
      *  sidebar chrome (setActivePageChrome), currentPage bookkeeping, then
      *  the router. React components navigating BETWEEN pages must call

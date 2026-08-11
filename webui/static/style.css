@@ -66196,6 +66196,48 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     opacity: 0.45;
     cursor: not-allowed;
 }
+.dash-qs-accent {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+.dash-qs-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.dash-qs-swatch:hover {
+    transform: scale(1.2);
+}
+.dash-qs-swatch--active {
+    box-shadow:
+        0 0 0 2px rgba(8, 8, 12, 1),
+        0 0 0 3.5px rgba(255, 255, 255, 0.75);
+}
+/* The custom swatch is a native color input wearing a rainbow ring. */
+.dash-qs-swatch--custom {
+    appearance: none;
+    -webkit-appearance: none;
+    background: conic-gradient(#f43f5e, #f59e0b, #1db954, #14b8a6, #1d8ab9, #8b5cf6, #f43f5e);
+    overflow: hidden;
+}
+.dash-qs-swatch--custom::-webkit-color-swatch-wrapper {
+    padding: 0;
+    opacity: 0;
+}
+.dash-qs-swatch--custom::-webkit-color-swatch {
+    border: none;
+    opacity: 0;
+}
+.dash-qs-swatch--custom::-moz-color-swatch {
+    border: none;
+    opacity: 0;
+}
 .dash-card[data-card="sync"] .dash-card__head {
     position: relative;
 }
