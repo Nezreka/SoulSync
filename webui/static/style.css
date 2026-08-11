@@ -65721,17 +65721,30 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     margin: 2px 0 0;
 }
 
-/* Library and Recent Syncs share rows with taller cards (the merged
-   Services card sets the row height), and their content top-aligned,
-   pooling the spare height into dead space at the bottom. Growing the
-   body and centering distributes it instead — the calm fix, no content
-   changes. */
-.dash-card[data-card="library"] .dash-card__body,
+/* The Library STRIP — same language as the stats band above it. The tall
+   card left four numbers floating beside the taller Services card;
+   centering them (the first fix) just moved the void around. */
+.dash-card--strip {
+    grid-column: 1 / -1;
+    padding: 14px 24px;
+}
+.dash-card--strip .dash-card__body {
+    flex: none;
+}
+
+/* Recent Syncs FILLS its card: the list grows into the row height the
+   Services card sets and scrolls past it. (The previous centered-flex
+   fix clipped the top of an overflowing list — centering and scrolling
+   don't mix.) The card also spans two columns beside Services, giving
+   long playlist names room. */
+.dash-card[data-card="syncs"] {
+    grid-column: span 2;
+}
 .dash-card[data-card="syncs"] .dash-card__body {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    min-height: 0;
 }
 
 /* Divider between the two halves of the merged Services card. */
@@ -66910,21 +66923,34 @@ body.max-performance .dash-card::after {
 
 /* Library card — trim the inner library-status-card chrome since the
    bento card already provides the framing. */
+/* Strip internals: header block left, stats spread across the middle,
+   scan buttons riding in the header block. Progress + status messages
+   break to their own full-width line beneath. */
 .dash-card[data-card="library"] .library-status-card {
     background: transparent;
     border: none;
     box-shadow: none;
-    padding: 10px 0 0;
+    padding: 0;
     border-radius: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+    overflow: visible;
+}
+.dash-card[data-card="library"] .library-status-card::before {
+    display: none;
 }
 .dash-card[data-card="library"] .library-status-glow {
     display: none;
 }
 .dash-card[data-card="library"] .library-status-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
-    margin-bottom: 14px;
+    margin-bottom: 0;
+    flex: 0 1 auto;
+    min-width: 300px;
 }
 .dash-card[data-card="library"] .library-status-icon {
     width: 36px;
@@ -66955,7 +66981,7 @@ body.max-performance .dash-card::after {
 }
 .dash-card[data-card="library"] .library-status-actions {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     gap: 6px;
 }
 .dash-card[data-card="library"] .library-status-btn {
@@ -66965,19 +66991,21 @@ body.max-performance .dash-card::after {
     white-space: nowrap;
 }
 .dash-card[data-card="library"] .library-status-stats {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    gap: 10px 28px;
     padding: 0;
 }
 .dash-card[data-card="library"] .library-status-stat {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
+    gap: 10px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
 }
 .dash-card[data-card="library"] .library-status-stat-icon {
     width: 28px;
@@ -67008,6 +67036,13 @@ body.max-performance .dash-card::after {
     text-transform: uppercase;
     letter-spacing: 0.04em;
     margin-top: 2px;
+}
+/* Scan progress and the setup/status messages break out of the strip row
+   onto their own full-width line. */
+.dash-card[data-card="library"] .library-status-progress,
+.dash-card[data-card="library"] .library-status-message {
+    flex-basis: 100%;
+    margin-top: 0;
 }
 
 /* Stats card — 2x3 grid of compact metric chips. Override the default
@@ -67069,7 +67104,12 @@ body.max-performance .dash-card::after {
     overflow-y: auto;
     overflow-x: hidden;
     padding: 4px 2px;
-    max-height: 350px;
+    /* Fill the card (the row height Services sets), scroll past it. The
+       max-height is a sanity bound so a long history can't stretch the
+       whole ops row. */
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 640px;
 }
 
 .dash-card[data-card="syncs"] .sync-history-card {
@@ -67933,9 +67973,6 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="stats"] .stat-card-value {
         font-size: 18px;
     }
-    .dash-card[data-card="library"] .library-status-stats {
-        grid-template-columns: repeat(2, 1fr);
-    }
     .dash-card[data-card="enrichment"] .rate-monitor-grid {
         grid-template-columns: repeat(5, minmax(0, 1fr));
     }
@@ -67948,8 +67985,20 @@ body.max-performance .dash-card::after {
         gap: 12px;
     }
     .dash-card--wide,
-    .dash-card--full {
+    .dash-card--full,
+    .dash-card[data-card="syncs"] {
         grid-column: auto;
+    }
+    .dash-card--strip {
+        padding: 12px 16px;
+    }
+    /* One column can't fit header + stats side by side — stack them. */
+    .dash-card[data-card="library"] .library-status-header {
+        min-width: 0;
+        flex-basis: 100%;
+    }
+    .dash-card[data-card="syncs"] .sync-history-cards {
+        max-height: 260px;
     }
     .dash-card {
         padding: 16px 16px;
@@ -67985,9 +68034,6 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="enrichment"] .rate-gauge-card {
         padding: 8px 6px 6px;
-    }
-    .dash-card[data-card="syncs"] .sync-history-cards {
-        max-height: 220px;
     }
 }
 

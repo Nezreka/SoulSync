@@ -276,11 +276,11 @@ export function LibraryCard() {
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
 
   return (
-    <article className="dash-card" data-card="library">
-      <header className="dash-card__head">
-        <h3 className="dash-card__title">Library</h3>
-        <p className="dash-card__sub">Your collection at a glance.</p>
-      </header>
+    // A full-width STRIP in the stats band's language, not a tall card: four
+    // numbers and two buttons were rattling around a card whose height the
+    // Services card set. The outer head went with the box — the inner
+    // library-status-card already carries its own title/subtitle/actions.
+    <article className="dash-card dash-card--strip" data-card="library">
       <div className="dash-card__body">
         <div className={view.cardClass} id="library-status-card">
           <div className="library-status-glow"></div>

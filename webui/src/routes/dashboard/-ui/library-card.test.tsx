@@ -6,7 +6,6 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { compareTrees, extractDashArticle, parseVanilla } from './dash-artefact';
 import { LibraryCard } from './library-card';
 
 const fetchMock = vi.fn();
@@ -64,13 +63,35 @@ function fireDbStats(stats: Record<string, unknown>) {
   });
 }
 
-describe('the artefact differential', () => {
-  it('renders the vanilla library card 1:1 in its Checking state', async () => {
-    const vanilla = parseVanilla(
-      extractDashArticle('<article class="dash-card" data-card="library">'),
-    );
+describe('the strip shape', () => {
+  // The 1:1 vanilla artefact differential retired with the tall card:
+  // 3.2.0 re-renders the library as a full-width STRIP (the stats band's
+  // language), dropping the outer dash-card__head — the inner
+  // library-status-card carries its own title/subtitle/actions. What must
+  // survive is pinned instead: the strip class, and every id the state
+  // machine + scan flows write into (their tests below all target them).
+  it('keeps the strip class and the state-machine ids', async () => {
     const view = await mountCard();
-    compareTrees(vanilla, view.container.firstElementChild!, 'library');
+    const root = view.container.firstElementChild!;
+    expect(root.getAttribute('data-card')).toBe('library');
+    expect(root.className).toContain('dash-card--strip');
+    expect(root.querySelector('.dash-card__head')).toBeNull();
+    for (const id of [
+      'library-status-card',
+      'library-status-title',
+      'library-status-subtitle',
+      'library-status-scan-btn',
+      'library-status-deep-btn',
+      'library-status-stats',
+      'library-status-artists',
+      'library-status-albums',
+      'library-status-tracks',
+      'library-status-size',
+      'library-status-progress',
+      'library-status-message',
+    ]) {
+      expect(root.querySelector(`#${id}`)).not.toBeNull();
+    }
   });
 });
 

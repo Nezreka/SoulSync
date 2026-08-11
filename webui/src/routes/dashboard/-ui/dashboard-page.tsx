@@ -40,13 +40,15 @@ export function DashboardPage() {
             a tab switcher. Renders nothing until a feed has rows, so a fresh
             install sees the ops grid it always saw. */}
         <ContentBand />
-        {/* One quiet full-width strip of numbers, then the ops row. Recent
-            Activity (the tray owns it) and Quick Actions (the sidebar again,
-            as buttons) are gone; Service Status and the rate equalizer are
-            ONE Services card. */}
+        {/* Two quiet full-width strips of numbers (system stats, then the
+            library counts + scan buttons), then ONE ops row: Services beside
+            Recent Syncs (which spans the remaining two columns and fills its
+            height). Recent Activity (the tray owns it) and Quick Actions
+            (the sidebar again, as buttons) are gone; Service Status and the
+            rate equalizer are ONE Services card. */}
         <SystemStatsCard />
-        <ServicesCard />
         <LibraryCard />
+        <ServicesCard />
         <SyncsCard />
         <ActiveDownloadsShell />
       </div>
