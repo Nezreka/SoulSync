@@ -225,15 +225,23 @@ def test_duration_guard_still_catches_a_real_collision():
     assert captured == []
 
 
-def test_retag_is_refused_for_an_ambiguous_finding():
-    """The guard that stops a wrong suggestion becoming wrong data."""
+@pytest.mark.parametrize('fix_action', ['retag', 'relocate'])
+def test_retag_is_refused_for_an_ambiguous_finding(fix_action):
+    """The guard that stops a wrong suggestion becoming wrong data.
+
+    The subject is ``lib2:99`` because that is the only kind the scanner emits.
+    Written against a bare ``'99'`` this passed while testing nothing that runs:
+    the guard sat in the legacy branch, and the native path — the one every real
+    finding takes — wrote the arbitrary pick into the file's tags.
+    """
     from core.repair_worker import RepairWorker
 
     worker = RepairWorker.__new__(RepairWorker)
     out = worker._fix_acoustid_mismatch(
-        'track', '99', '/music/track.flac',
-        {'_fix_action': 'retag', 'ambiguous': True,
+        'track', 'lib2:99', '/music/track.flac',
+        {'_fix_action': fix_action, 'ambiguous': True,
          'acoustid_title': 'Saturday in the Park',
+         'acoustid_artist': 'Chicago',
          'candidates': ['"Saturday in the Park" by Chicago',
                         '"You\'re the Inspiration" by Chicago']},
     )
