@@ -66050,17 +66050,20 @@ body.max-performance .dash-card::before,
 body.max-performance .dash-card::after {
     display: none;
 }
+/* Quiet hover (Boulder, Aug 11, trial): containers aren't clickable, so
+   they don't perform for the cursor — the rail set the standard. The
+   cursor-following accent blobs are the same instinct as the old glow
+   hover, so they go with it; delete this display:none pair to bring them
+   back (init.js keeps writing the --blob vars either way).
+   No translateY lift on hover either: moving the card up pulls its bottom
+   edge off the cursor → un-hover → drop → re-hover flicker loop (#816). */
+.dash-card::before,
+.dash-card::after {
+    display: none;
+}
 .dash-card:hover {
-    border-color: rgba(var(--accent-rgb), 0.18);
-    /* No translateY lift: moving the card up on hover pulls its bottom edge off
-       the cursor when you hover that edge, which un-hovers → drops → re-hovers
-       in a rapid flicker loop (#816). The stronger shadow + glow below already
-       reads as "raised" without moving the hit box. */
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.40),
-        0 4px 14px rgba(0, 0, 0, 0.22),
-        0 0 28px rgba(var(--accent-rgb), 0.10),
-        inset 0 1px 0 rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.11);
+    border-top-color: rgba(255, 255, 255, 0.14);
 }
 
 /* Mount stagger — cards fade up on first paint (and on page revisit) */
