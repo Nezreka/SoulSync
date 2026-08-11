@@ -94,9 +94,15 @@ class TestWiring:
 
     def test_illegal_moves_never_reach_the_bus(self):
         # The fold owns "what does this move produce", so this holds for
-        # every variant rather than just chess.
-        assert "if (!next) return;                       // never put an illegal move on the bus" in _CHAT_JS
-        assert "window.ChatGames.previewMove(g, uci)" in _CHAT_JS
+        # every variant rather than just chess. The preview MUST carry the
+        # actor's seat: battleship's apply() refuses to judge a move without
+        # knowing who made it, so previewing without the seat rejected every
+        # battleship action — the send path was dead until the seat rode along.
+        assert "if (!next) return false;                 // never put an illegal move on the bus" in _CHAT_JS
+        assert "window.ChatGames.previewMove(g, uci, _arcSeat(g))" in _CHAT_JS
+        # Votes are cast for the ROOM's seat, and that is the actor they
+        # preview as.
+        assert "window.ChatGames.previewMove(g, uci, g.roomSeat)" in _CHAT_JS
 
     def test_move_carries_ply_and_checkpoint(self):
         # Without `n` a duplicate delivery double-applies; without `f` a
@@ -169,8 +175,11 @@ class TestWiring:
 
     def test_connect4_moves_are_throttled(self):
         # Every move is a real room message that vanilla Soulseek clients see
-        # as noise; chess is slow enough not to care, taps are not.
-        assert "if (nowMs - _arcLastMoveAt < 600) return;" in _CHAT_JS
+        # as noise; chess is slow enough not to care, taps are not. The floor
+        # keys on the EXACT action (game + move), not on time alone — a flat
+        # global floor also ate legitimate back-to-back actions (battleship's
+        # auto-answer followed by the player's own shot).
+        assert "if (moveKey === _arcLastMoveKey && nowMs - _arcLastMoveAt < 600) return false;" in _CHAT_JS
 
     def test_fold_cache_is_keyed_on_the_log_itself(self):
         # Keying on length alone served a stale fold whenever a different log
