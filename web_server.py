@@ -41025,6 +41025,17 @@ def _emit_chat_push_loop():
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
+                        # Arcade gm.* carriers are durable game state and DO
+                        # get archived (add_chat_game_carriers filters to gm.*
+                        # and is idempotent). Until now only the chat page's
+                        # hydrate endpoint archived them — with nobody on the
+                        # chat page, moves arriving from other room members
+                        # were never written down and an slskd restart lost
+                        # them. The rest of the bus stays live-only.
+                        try:
+                            get_database().add_chat_game_carriers(room, proto_events)
+                        except Exception:
+                            logger.debug("chat: loop game-carrier archive failed", exc_info=True)
                         socketio.emit('chat:room_protocol', {
                             'room': room, 'events': proto_events[-40:]})
                     if decoded:      # a reaction-only tick still tracks PMs below

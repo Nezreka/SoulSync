@@ -1391,7 +1391,9 @@
     // one, which every client works out from the same stream.
     function arcVote(gid, uci) {
         var g = _arcGame(gid);
-        if (!g || !window.ChatGames.previewMove(g, uci)) return;
+        // A ballot is cast for the ROOM's seat — that is the actor a variant
+        // judges the move by (chess and Connect 4 ignore it).
+        if (!g || !window.ChatGames.previewMove(g, uci, g.roomSeat)) return;
         state.arcade.sel = -1;
         state.arcade.promo = null;
         sendProtocol('gm.vote', { g: gid, n: g.ply, m: uci }).then(_arcAfterSend(gid));
@@ -1423,28 +1425,39 @@
     // Both are what let a client that missed the opening still follow along,
     // and what lets a client that has the history catch a disagreement.
     var _arcLastMoveAt = 0;
+    var _arcLastMoveKey = '';
 
     function arcMove(gid, uci) {
         var g = _arcGame(gid);
-        if (!g) return;
+        if (!g) return false;
         // Every move is a real message in the room, and vanilla Soulseek
-        // clients see each one as a line of noise. Chess is slow enough not
-        // to care; Connect 4 is a game of fast taps, so a short floor keeps
-        // a quick pair (or a double-click) from bursting the room.
+        // clients see each one as a line of noise. The floor keys on the
+        // EXACT action (game + move), not on time alone: it exists to eat a
+        // double-click, and a flat global floor also ate legitimate back-to-
+        // back actions — battleship answers a shot automatically and the
+        // answerer fires next, so their real shot landed inside the window
+        // and vanished with no feedback.
         var nowMs = Date.now();
-        if (nowMs - _arcLastMoveAt < 600) return;
+        var moveKey = gid + '|' + uci;
+        if (moveKey === _arcLastMoveKey && nowMs - _arcLastMoveAt < 600) return false;
+        _arcLastMoveKey = moveKey;
         _arcLastMoveAt = nowMs;
         // The fold owns "what does this move produce" so this works for any
         // variant, and so an illegal move is caught here rather than being
-        // sent and silently dropped by every client that receives it.
-        var next = window.ChatGames.previewMove(g, uci);
-        if (!next) return;                       // never put an illegal move on the bus
+        // sent and silently dropped by every client that receives it. The
+        // actor seat rides along: battleship's apply() refuses to judge a
+        // move without knowing who made it (only a board's owner may answer
+        // a shot at it), so previewing without it rejected EVERY battleship
+        // action — commit, fire, answer and reveal all died right here.
+        var next = window.ChatGames.previewMove(g, uci, _arcSeat(g));
+        if (!next) return false;                 // never put an illegal move on the bus
         state.arcade.sel = -1;
         state.arcade.promo = null;
         sendProtocol('gm.move', {
             g: gid, v: g.variant, n: g.ply, m: uci, f: next.fen,
         }).then(_arcAfterSend(gid));
         renderArcade();                          // clear the selection immediately
+        return true;
     }
 
     // ── Arcade rendering ────────────────────────────────────────────────
@@ -2129,7 +2142,6 @@
         if (idx === undefined) return;
         var key = game.id + '|' + shots.length;
         if (_bsAnswered[key]) return;                 // one answer per shot
-        _bsAnswered[key] = 1;
 
         var board = secret.board;
         var res = 'miss';
@@ -2142,7 +2154,11 @@
             }
             res = hit >= len ? 'sunk' : 'hit';
         }
-        arcMove(game.id, 'r:' + res);
+        // Marked answered only when the send actually went out — marking
+        // first meant a send arcMove dropped (rate floor, dead game) was
+        // swallowed forever and the game sat at "Answering…" until a reload.
+        // The tick runs on every bus event, so a miss here simply retries.
+        if (arcMove(game.id, 'r:' + res)) _bsAnswered[key] = 1;
     }
 
     // Once our fleet is down we owe a reveal; send it without ceremony.
@@ -2451,9 +2467,14 @@
         var H = window.ChatHash;
         if (!H) return;
         var salt = H.salt();
+        // Secret saved BEFORE the send — a crash in between must never lose
+        // the fleet the room now holds a fingerprint of. The draft is only
+        // cleared when the commit actually went out, so a dropped send
+        // leaves the layout on screen to commit again instead of wiping it.
         _bsSecret(gid, { salt: salt, board: draft.board });
-        state.arcade.bs = null;
-        arcMove(gid, 'c:' + H.commit(salt, draft.board));
+        if (arcMove(gid, 'c:' + H.commit(salt, draft.board))) {
+            state.arcade.bs = null;
+        }
     }
 
     function _arcColumnClick(col) {
@@ -4862,6 +4883,31 @@
     }
 
     // ── protocol bus (the hidden coordination channel) ──────────────────
+
+    // Bound the log without eating live games. The old flat slice(-300)
+    // treated a chess move and a typing blip as equals, so a chatty room
+    // (typ/hello/jukebox events) evicted a game's gm.new and early moves
+    // MID-SESSION — the refold then degraded the game to 'partial', dropped
+    // inferred seats and reset the board to the last checkpoint while you
+    // were playing it. Ephemeral chatter keeps the old bound; game carriers
+    // get a deeper one (two full-length games' worth). Order is preserved —
+    // the fold depends on stream order.
+    function _trimProtocolLog(log) {
+        var keptGm = 0, keptOther = 0;
+        var out = [];
+        for (var i = log.length - 1; i >= 0; i--) {
+            var e = log[i];
+            var k = e && e.p && e.p.k;
+            if (typeof k === 'string' && k.slice(0, 3) === 'gm.') {
+                if (keptGm < 1200) { out.push(e); keptGm++; }
+            } else if (keptOther < 300) {
+                out.push(e); keptOther++;
+            }
+        }
+        out.reverse();
+        return out;
+    }
+
     function _ingestProtocol(events) {
         if (!events || !events.length) return;
         var log = state.protocolLog;
@@ -4887,7 +4933,7 @@
                 renderTyping();
             }
         });
-        if (log.length > 300) state.protocolLog = log.slice(-300);
+        if (log.length > 300) state.protocolLog = _trimProtocolLog(log);
         if (fresh.length) {
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
