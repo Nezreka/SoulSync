@@ -689,6 +689,25 @@
         }
     }
 
+    // ── per-channel mute (local, per browser — like the user mute) ──────────
+    // A muted channel stays fully readable and keeps its place in the list;
+    // it just goes quiet: no unread badge, dimmed row, 🔕. Mentions still
+    // ping (someone saying your name cuts through, Discord-style). Nothing
+    // rides the wire — muting is this browser's preference, nobody else's.
+    function mutedChans() {
+        try { return JSON.parse(localStorage.getItem('chat_chan_muted') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isChanMuted(slug) { return mutedChans().indexOf(slug) > -1; }
+    function toggleChanMuted(slug) {
+        if (!slug) return;
+        var list = mutedChans();
+        var i = list.indexOf(slug);
+        if (i > -1) list.splice(i, 1); else list.push(slug);
+        try { localStorage.setItem('chat_chan_muted', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        renderChannels();
+    }
+
     // ── ignore list (local mute — per browser, hides messages + greys the user) ──
     function ignoredSet() {
         try { return JSON.parse(localStorage.getItem('chat_ignored') || '[]'); }
@@ -973,13 +992,21 @@
             var isClosed = !!closed[group.cat];
             var rows = isClosed ? '' : group.items.map(function (ch) {
                 var on = state.channel === ch.slug;
-                var n = unread[ch.slug] || 0;
+                var muted = isChanMuted(ch.slug);
+                // Muted = quiet: the unread badge is suppressed, not the
+                // channel. Mentions still ping regardless.
+                var n = muted ? 0 : (unread[ch.slug] || 0);
                 var row = '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
-                    (n ? ' chat-chan--unread' : '') + '" type="button" ' +
+                    (n ? ' chat-chan--unread' : '') +
+                    (muted ? ' chat-chan--muted' : '') + '" type="button" ' +
                     'data-chat-chan="' + attr(ch.slug) + '">' +
                     '<span class="chat-chan-hash">#</span>' +
                     '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
                     (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
+                    '<span class="chat-chan-mute" data-chat-chan-mute="' + attr(ch.slug) + '" ' +
+                        'title="' + (muted ? 'Unmute #' + attr(ch.slug) : 'Mute #' + attr(ch.slug) +
+                        ' — no unread badge, mentions still ping') + '">' +
+                        (muted ? '🔕' : '🔔') + '</span>' +
                 '</button>';
                 // Forum-style: the active channel's threads hang beneath it.
                 if (on) {
@@ -4490,6 +4517,13 @@
             }
             t = e.target.closest('[data-chat-thread-close]');
             if (t) { closeThread(); return; }
+            t = e.target.closest('[data-chat-chan-mute]');
+            if (t) {
+                // The bell sits INSIDE the channel row button — handle it
+                // first or the click would also switch channels.
+                toggleChanMuted(t.getAttribute('data-chat-chan-mute'));
+                return;
+            }
             t = e.target.closest('[data-chat-chan]');
             if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
             // ── Arcade ──

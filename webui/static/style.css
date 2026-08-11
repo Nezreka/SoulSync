@@ -65762,8 +65762,12 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     .dash-card--tiles {
         padding: 12px 16px;
     }
+    /* Phone: space-between flex wrapped the six tiles into ragged rows —
+       a fixed 3x2 grid (2x3 on the smallest screens, below) reads clean. */
     .stats-strip {
-        gap: 10px 18px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px 10px;
     }
     .stat-tile .stat-card-value {
         font-size: 18px;
@@ -65823,7 +65827,24 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     overflow-y: hidden;
     padding-bottom: 10px;
     scrollbar-width: thin;
+    /* Firefox night scrollbar; the ::-webkit rules below cover Chromium —
+       without them Chrome painted its default light bar across the dark rail. */
+    scrollbar-color: rgba(var(--accent-rgb), 0.35) rgba(255, 255, 255, 0.04);
     -webkit-overflow-scrolling: touch;
+}
+.dash-rail::-webkit-scrollbar {
+    height: 6px;
+}
+.dash-rail::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+}
+.dash-rail::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.35);
+    border-radius: 6px;
+}
+.dash-rail::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.55);
 }
 .dash-rail .dash-rail-card {
     width: 150px;
@@ -67115,7 +67136,58 @@ body.max-performance .dash-card::after {
 .dash-card[data-card="syncs"] .sync-history-card {
     min-width: 0;
     width: 100%;
-    padding: 10px 12px;
+    padding: 12px 14px;
+}
+/* The roomier card spends its height on detail: a bigger thumb, a type tag
+   in the meta line, and colored chips (matched / ⬇ downloaded / ✗ failed /
+   wall time) replacing the crammed counts string. */
+.dash-card[data-card="syncs"] .sync-card-thumb,
+.dash-card[data-card="syncs"] .sync-card-thumb img {
+    width: 46px;
+    height: 46px;
+}
+.dash-card[data-card="syncs"] .sync-card-counts {
+    display: none;
+}
+.sync-card-type {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(var(--accent-rgb), 0.85);
+    background: rgba(var(--accent-rgb), 0.10);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 5px;
+    padding: 1px 5px;
+}
+.sync-card-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+}
+.sync-card-chip {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 6px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}
+.sync-card-chip--dl {
+    color: rgba(74, 222, 128, 0.9);
+    background: rgba(74, 222, 128, 0.08);
+    border-color: rgba(74, 222, 128, 0.2);
+}
+.sync-card-chip--fail {
+    color: rgba(248, 113, 113, 0.9);
+    background: rgba(248, 113, 113, 0.08);
+    border-color: rgba(248, 113, 113, 0.2);
+}
+.sync-card-chip--dim {
+    color: rgba(255, 255, 255, 0.38);
 }
 
 /* Enrichment / rate monitor — VU-meter equalizer bars.
@@ -68000,6 +68072,24 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="syncs"] .sync-history-cards {
         max-height: 260px;
     }
+    /* Narrow card: smaller thumb, tighter padding, and the pct/bar block
+       shrinks so the name + chips keep the room. Chips already wrap. */
+    .dash-card[data-card="syncs"] .sync-history-card {
+        padding: 10px 10px;
+        gap: 8px;
+    }
+    .dash-card[data-card="syncs"] .sync-card-thumb,
+    .dash-card[data-card="syncs"] .sync-card-thumb img {
+        width: 38px;
+        height: 38px;
+    }
+    .dash-card[data-card="syncs"] .sync-card-stats {
+        max-width: 84px;
+    }
+    .dash-card[data-card="syncs"] .sync-card-chip {
+        font-size: 10px;
+        padding: 2px 5px;
+    }
     .dash-card {
         padding: 16px 16px;
         border-radius: 14px;
@@ -68053,6 +68143,9 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="stats"] .stat-card-value {
         font-size: 20px;
+    }
+    .stats-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .dash-card[data-card="enrichment"] .rate-monitor-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -72306,6 +72399,16 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 }
 .chat-chan:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.85); }
 .chat-chan--on { background: rgba(255,255,255,0.09); color: #fff; }
+/* per-channel mute: dimmed row; the bell only shows on hover (🔔 to mute)
+   except a muted channel wears its 🔕 all the time */
+.chat-chan--muted { opacity: 0.45; }
+.chat-chan-mute {
+    display: none; font-size: 11px; line-height: 1;
+    padding: 2px; border-radius: 4px; flex-shrink: 0;
+}
+.chat-chan:hover .chat-chan-mute { display: inline-block; }
+.chat-chan--muted .chat-chan-mute { display: inline-block; }
+.chat-chan-mute:hover { background: rgba(255,255,255,0.12); }
 .chat-chan-hash { color: rgba(255,255,255,0.3); font-size: 17px; font-weight: 500; }
 .chat-chan--on .chat-chan-hash { color: rgba(255,255,255,0.55); }
 .chat-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

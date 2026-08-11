@@ -223,6 +223,15 @@ export interface SyncCardView {
   pct: number;
   counts: string;
   thumbUrl: string | null;
+  /** Additive detail for the roomier dashboard card: the raw numbers split
+   *  out of `counts` (chips render them colored), what KIND of sync it was,
+   *  and how long it took when both stamps exist. */
+  found: number;
+  total: number;
+  downloaded: number;
+  failed: number;
+  typeLabel: string | null;
+  duration: string | null;
 }
 
 export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardView {
@@ -252,6 +261,23 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     (downloaded > 0 ? ` · ${downloaded} ⬇` : '') +
     (failed > 0 ? ` · ${failed} ✗` : '');
 
+  // What kind of sync: an album download beats the raw sync_type for the
+  // label (the type says 'manual' for those; 'album' is what the row IS).
+  const typeLabel = entry.is_album_download
+    ? 'album'
+    : (entry.sync_type ? String(entry.sync_type).toLowerCase() : null);
+
+  // Wall time, when both stamps exist and parse.
+  let duration: string | null = null;
+  const completedAt = entry.completed_at as string | undefined;
+  if (startedAt && completedAt) {
+    const ms = Date.parse(completedAt) - Date.parse(startedAt);
+    if (Number.isFinite(ms) && ms >= 0) {
+      const s = Math.round(ms / 1000);
+      duration = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+    }
+  }
+
   return {
     id: entry.id,
     healthClass,
@@ -261,5 +287,11 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     pct,
     counts,
     thumbUrl: (entry.thumb_url as string) || null,
+    found,
+    total,
+    downloaded,
+    failed,
+    typeLabel,
+    duration,
   };
 }

@@ -129,7 +129,33 @@ export function SyncsCard() {
                     <div className="sync-card-name">{view.name}</div>
                     <div className="sync-card-meta">
                       <span className="sync-card-source">{view.sourceLabel}</span>
+                      {view.typeLabel ? (
+                        <span className="sync-card-type">{view.typeLabel}</span>
+                      ) : null}
                       <span className="sync-card-time">{view.timeStr}</span>
+                    </div>
+                    {/* The roomier dashboard card spends its height on detail:
+                        matched / downloaded / failed as colored chips, plus
+                        wall time when the sync recorded both stamps. The
+                        plain counts line stays for narrow widths (CSS swaps
+                        them). */}
+                    <div className="sync-card-chips">
+                      <span className="sync-card-chip">
+                        {view.found}/{view.total} matched
+                      </span>
+                      {view.downloaded > 0 ? (
+                        <span className="sync-card-chip sync-card-chip--dl">
+                          ⬇ {view.downloaded}
+                        </span>
+                      ) : null}
+                      {view.failed > 0 ? (
+                        <span className="sync-card-chip sync-card-chip--fail">
+                          ✗ {view.failed}
+                        </span>
+                      ) : null}
+                      {view.duration ? (
+                        <span className="sync-card-chip sync-card-chip--dim">{view.duration}</span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="sync-card-stats">
