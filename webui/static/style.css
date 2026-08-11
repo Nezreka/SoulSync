@@ -73428,6 +73428,15 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-card-note-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.45); }
 .chat-card-note-save { align-self: flex-end; }
 
+/* the Challenge variant row (⚔ on the user card) */
+.chat-card-challenge {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex; flex-direction: column; gap: 7px;
+}
+.chat-card-challenge-label { font-size: 11px; color: rgba(255,255,255,0.55); }
+.chat-card-challenge-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* ── chat file sharing (filepost.dev, chat P2) ── */
 .chat-file-card {
     display: flex; align-items: center; gap: 9px; flex-wrap: wrap;

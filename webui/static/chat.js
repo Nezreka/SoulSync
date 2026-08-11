@@ -2887,6 +2887,14 @@
                 ? 'Show this user’s messages again'
                 : 'Hide this user’s messages (this browser only)';
         }
+        // Challenge = a PRIVATE Arcade game with them in the invited seat.
+        // The whole invite lifecycle (gm.new {o}, join gate, 'private' badge)
+        // has been in the fold since P2 — this button is its first way in.
+        var chBtn = overlay.querySelector('[data-chat-card-challenge]');
+        if (chBtn) {
+            chBtn.hidden = !state.canSend || !_arcReady() ||
+                (state.selfName && name === state.selfName);
+        }
         getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
             var info = (res.ok && res.body.info) || {};
@@ -2966,6 +2974,52 @@
     function closeUserCard() {
         var overlay = q('[data-chat-user-card]');
         if (overlay) overlay.hidden = true;
+    }
+
+    // The Challenge button toggles a small variant row inside the card —
+    // three choices, no second modal. Picking one sends gm.new {o: them}
+    // and the normal _arcAfterSend flow lands you on the fresh board.
+    function _arcChallengeRow(overlay) {
+        var body = overlay.querySelector('[data-chat-user-card-body]');
+        if (!body) return;
+        var existing = body.querySelector('.chat-card-challenge');
+        if (existing) { existing.remove(); return; }
+        var div = document.createElement('div');
+        div.className = 'chat-card-challenge';
+        div.innerHTML = '<span class="chat-card-challenge-label">Pick the game — ' +
+            'only they can take the seat</span>' +
+            '<div class="chat-card-challenge-btns">' +
+            [['chess', '♟ Chess'], ['connect4', '🔴 Connect 4'], ['battleship', '🚢 Battleship']]
+                .map(function (v) {
+                    return '<button class="chat-arc-btn" type="button" ' +
+                        'data-chat-card-challenge-v="' + v[0] + '">' + v[1] + '</button>';
+                }).join('') +
+            '</div>';
+        body.appendChild(div);
+    }
+
+    // Ping the invited user when a challenge NAMING THEM arrives. Once per
+    // game per session, and only while the table is still open — replayed
+    // archive carriers on a page load would otherwise re-announce every
+    // stale table ever aimed at us.
+    var _arcChallengeToasted = {};
+    function _arcNoticeChallenges(fresh) {
+        if (!state.selfName || !_arcReady()) return;
+        (fresh || []).forEach(function (e) {
+            if (!e || !e.p || e.p.k !== 'gm.new') return;
+            if (e.p.o !== state.selfName || e.username === state.selfName) return;
+            var gid = String(e.p.g || '');
+            if (!gid || _arcChallengeToasted[gid]) return;
+            _arcChallengeToasted[gid] = 1;
+            var g = _gamesState().games[gid];
+            if (!g || g.status !== 'open' || g.expired) return;
+            if (typeof showToast === 'function') {
+                showToast('⚔ ' + e.username + ' challenged you to ' +
+                    (g.variant === 'connect4' ? 'Connect 4'
+                        : g.variant === 'battleship' ? 'Battleship' : 'chess') +
+                    ' — it’s waiting in the Arcade', 'info', 6000);
+            }
+        });
     }
 
     // ── share browser: a peer's files, downloadable in place ─────────────────
@@ -4615,6 +4669,25 @@
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
                 return;
             }
+            t = e.target.closest('[data-chat-card-challenge-v]');
+            if (t) {
+                var vOv = q('[data-chat-user-card]');
+                var vOpp = vOv && vOv.getAttribute('data-chat-user-card-for');
+                if (vOpp) {
+                    arcNewGame('w', vOpp, t.getAttribute('data-chat-card-challenge-v'), false);
+                    closeUserCard();
+                    if (typeof showToast === 'function') {
+                        showToast('Challenge sent — ' + vOpp + ' is the only one who can join', 'success');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-challenge]');
+            if (t) {
+                var cOv = q('[data-chat-user-card]');
+                if (cOv) _arcChallengeRow(cOv);
+                return;
+            }
             t = e.target.closest('[data-chat-card-browse]');
             if (t) {
                 var bOv = q('[data-chat-user-card]');
@@ -4939,6 +5012,7 @@
             renderUsersList();
             renderBusUI();
             _arcAnswerSyncs(fresh);
+            _arcNoticeChallenges(fresh);
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
