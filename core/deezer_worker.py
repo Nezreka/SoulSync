@@ -231,7 +231,7 @@ class DeezerWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE deezer_match_status = 'not_found' AND deezer_last_attempted < ?
+                WHERE deezer_match_status IN ('not_found', 'error') AND deezer_last_attempted < ?
                 ORDER BY deezer_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -245,7 +245,7 @@ class DeezerWorker:
                 SELECT a.id, a.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.deezer_match_status = 'not_found' AND a.deezer_last_attempted < ?
+                WHERE a.deezer_match_status IN ('not_found', 'error') AND a.deezer_last_attempted < ?
                 ORDER BY a.deezer_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -258,7 +258,7 @@ class DeezerWorker:
                 SELECT t.id, t.title, ar.name AS artist_name, ar.deezer_id AS artist_deezer_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.deezer_match_status = 'not_found' AND t.deezer_last_attempted < ?
+                WHERE t.deezer_match_status IN ('not_found', 'error') AND t.deezer_last_attempted < ?
                 ORDER BY t.deezer_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -288,6 +288,13 @@ class DeezerWorker:
         """Check if Deezer result name matches our query with fuzzy matching"""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
@@ -433,6 +440,11 @@ class DeezerWorker:
         """Process an artist: search Deezer, verify, store metadata"""
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
+            # Has an id but status may still be NULL (e.g. an id-only manual
+            # match) and _get_next_item selects NULL rows every loop — stamp
+            # 'matched' so this artist stops re-selecting and blocking the
+            # queue (#964, the JioSaavn fix applied here too).
+            self._mark_status('artist', artist_id, 'matched')
             logger.debug(f"Preserving existing Deezer ID for artist '{artist_name}': {existing_id}")
             return
 

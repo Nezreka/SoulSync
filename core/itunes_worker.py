@@ -290,7 +290,7 @@ class iTunesWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE itunes_match_status = 'not_found' AND itunes_last_attempted < ?
+                WHERE itunes_match_status IN ('not_found', 'error') AND itunes_last_attempted < ?
                 ORDER BY itunes_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -302,7 +302,7 @@ class iTunesWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.itunes_match_status = 'not_found' AND a.itunes_last_attempted < ?
+                WHERE a.itunes_match_status IN ('not_found', 'error') AND a.itunes_last_attempted < ?
                 ORDER BY a.itunes_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -314,7 +314,7 @@ class iTunesWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.itunes_match_status = 'not_found' AND t.itunes_last_attempted < ?
+                WHERE t.itunes_match_status IN ('not_found', 'error') AND t.itunes_last_attempted < ?
                 ORDER BY t.itunes_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -396,6 +396,11 @@ class iTunesWorker:
 
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
+            # Has an id but status may still be NULL (e.g. an id-only manual
+            # match) and _get_next_item selects NULL rows every loop — stamp
+            # 'matched' so this artist stops re-selecting and blocking the
+            # queue (#964, the JioSaavn fix applied here too).
+            self._mark_status('artist', artist_id, 'matched')
             logger.debug(f"Preserving existing iTunes ID for artist '{artist_name}': {existing_id}")
             return
 
@@ -1047,6 +1052,13 @@ class iTunesWorker:
     def _name_matches(self, query_name: str, result_name: str) -> bool:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold

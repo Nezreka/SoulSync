@@ -198,11 +198,14 @@ def test_reset_builder_also_clears_artist_source_id():
         assert f'{service}_match_status = NULL' in sql
 
 
-def test_reset_builder_does_not_clear_track_id():
-    # Tracks have no source-id column (ids live in tags) — must not emit one.
+def test_reset_builder_clears_track_id_too():
+    # The old pin here ("tracks have no source-id column") was wrong — tracks
+    # DO carry per-service id columns (core/source_ids), and leaving one in
+    # place made a track rematch an instant no-op re-confirmation of the old
+    # id (#868's track-shaped twin). Reset must forget it.
     sql, _ = build_reset_query('spotify', 'track', 'item', entity_id=5)
     assert 'spotify_match_status = NULL' in sql
-    assert 'spotify_track_id = NULL' not in sql
+    assert 'spotify_track_id = NULL' in sql
 
 
 def test_reset_builder_clears_bandcamp_url_and_id_on_album_and_track():

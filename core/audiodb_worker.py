@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.audiodb_client import AudioDBClient
-from core.worker_utils import accept_artist_match, interruptible_sleep
+from core.worker_utils import accept_artist_match, _names_equivalent, interruptible_sleep
 
 logger = get_logger("audiodb_worker")
 
@@ -289,15 +289,20 @@ class AudioDBWorker:
             return True
 
         if str(result_artist_id) != str(parent_audiodb_id):
+            # Guard: only correct on a POSITIVE name match. The old check
+            # skipped only on a CONFIRMED mismatch — a payload without
+            # strArtist fell through and rewrote the parent artist's
+            # audiodb_id unconditionally. Same failure the Deezer #988 fix
+            # closed: no name means no verification, so no correction.
             parent_name = item.get('artist') or ''
             result_artist_name = result.get('strArtist') or ''
-            if (result_artist_name and parent_name
-                    and not self._name_matches(parent_name, result_artist_name)):
+            if not (result_artist_name and parent_name
+                    and self._name_matches(parent_name, result_artist_name)):
                 logger.info(
                     f"Skipping artist-ID correction from {item['type']} "
-                    f"'{item['name']}': result artist '{result_artist_name}' "
-                    f"≠ parent '{parent_name}' (collab/compilation, not a "
-                    f"correction)"
+                    f"'{item['name']}': cannot verify result artist "
+                    f"'{result_artist_name}' == parent '{parent_name}' "
+                    f"(collab/compilation or missing name, not a correction)"
                 )
                 return True
 
@@ -324,6 +329,23 @@ class AudioDBWorker:
                 return
 
             artist_id = row[0]
+            # #988-class guard (ported from the Deezer fix): never overwrite
+            # with an AudioDB id already owned by a DIFFERENTLY-named artist.
+            # Same-named holders legitimately share an id.
+            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+            _self_row = cursor.fetchone()
+            this_name = (_self_row[0] if _self_row else '') or (item.get('artist') or '')
+            cursor.execute(
+                "SELECT name FROM artists WHERE audiodb_id = ? AND id != ?",
+                (str(correct_audiodb_id), artist_id))
+            for (other_name,) in cursor.fetchall():
+                if not _names_equivalent(this_name, other_name):
+                    logger.warning(
+                        f"Refusing AudioDB-ID correction: id {correct_audiodb_id} is "
+                        f"already held by '{other_name}' (≠ '{this_name}') — avoiding a "
+                        f"shared/duplicate id (artist #{artist_id})")
+                    return
+
             cursor.execute("""
                 UPDATE artists SET
                     audiodb_id = ?,
@@ -344,6 +366,13 @@ class AudioDBWorker:
         """Check if AudioDB result name matches our query with fuzzy matching"""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")

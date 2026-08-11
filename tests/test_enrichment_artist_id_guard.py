@@ -89,12 +89,31 @@ def test_tidal_corrects_on_name_match():
 
 
 # --------------------------------------------------------------------------
-# Shared: a missing result name preserves the old "trust the search" behavior
-# (only the workers that pass an id+name — qobuz/tidal — exercise this path).
+# Shared: a MISSING result name means no verification is possible, so no
+# correction happens — fail closed, the Deezer #988 semantics. The previous
+# pin here ("trust the search" when the name is absent) was the corruption
+# vector itself: the Tidal client builds album/track artist stubs with an id
+# and NO name at all, so under the old rule every collaboration/compilation
+# unconditionally rewrote the parent artist's tidal_id.
 # --------------------------------------------------------------------------
 
-def test_qobuz_missing_result_name_preserves_old_behavior():
+def test_qobuz_missing_result_name_never_corrects():
     w = _stub(QobuzWorker, '_correct_artist_qobuz_id')
     item = _item('Kendrick Lamar', '111', 'artist_qobuz_id')
     w._verify_artist_id(item, '999', None)
-    assert w._corrections == [(1, '999')]
+    assert w._corrections == []
+
+
+def test_tidal_missing_result_name_never_corrects():
+    # Not an edge case for Tidal — it's the ONLY case its client produces.
+    w = _stub(TidalWorker, '_correct_artist_tidal_id')
+    item = _item('Kendrick Lamar', '111', 'artist_tidal_id')
+    w._verify_artist_id(item, '999', None)
+    assert w._corrections == []
+
+
+def test_audiodb_missing_result_name_never_corrects():
+    w = _stub(AudioDBWorker, '_correct_artist_audiodb_id')
+    item = _item('Kendrick Lamar', '111', 'artist_audiodb_id')
+    w._verify_artist_id(item, {'idArtist': '999', 'strArtist': ''})
+    assert w._corrections == []
