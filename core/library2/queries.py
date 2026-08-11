@@ -262,6 +262,53 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
     }
 
 
+def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, Any]]:
+    """Name lookup for non-UI consumers, with the two fields they need.
+
+    The metadata-update worker pushes genres into Plex/Jellyfin and uses a
+    stored Spotify id to skip a provider search. It read those from the legacy
+    ``artists`` row through ``MusicDatabase.search_artists`` /
+    ``api_get_artist``; both fields exist on the lib2 row.
+
+    Deliberately not ``list_artists``: that one carries the artist page's whole
+    roll-up — album/single/track counts, quality-profile resolution and a
+    window function over every file for the size column. A worker asking "do we
+    know this name?" should not pay for any of it.
+
+    The filter matches the stored name and overrides are projected afterwards,
+    exactly as ``list_artists`` does. Alias members are folded away (§40) so a
+    caller cannot push the same genres twice.
+    """
+    text = str(name or "").strip()
+    if not text:
+        return []
+    rows = conn.execute(
+        """
+        SELECT id, name, genres, spotify_id, external_ids
+          FROM lib2_artists
+         WHERE canonical_artist_id IS NULL AND name LIKE :pattern
+         ORDER BY LENGTH(name), name
+         LIMIT :limit
+        """,
+        {"pattern": f"%{text}%", "limit": max(1, min(int(limit), 50))},
+    ).fetchall()
+    projected = project_metadata_many(
+        conn,
+        entity_type="artist",
+        provider_fields={int(row["id"]): dict(row) for row in rows},
+    )
+    found = []
+    for row in rows:
+        effective, _overrides = projected[int(row["id"])]
+        found.append({
+            "id": row["id"],
+            "name": effective["name"],
+            "genres": _json_list(effective["genres"]),
+            "spotify_id": _artist_provider_ids(row).get("spotify"),
+        })
+    return found
+
+
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
                  page: int = 1, limit: int = 75,
                  include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
