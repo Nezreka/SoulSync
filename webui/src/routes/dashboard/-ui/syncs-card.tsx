@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SyncHistoryEntry } from '../-dash.api';
 
 import { fetchDashboardSyncHistory } from '../-dash.api';
+import { useDashboardStatsEvent } from '../-dash.events';
 import { syncCardView } from '../-dash.library';
 
 export function useSyncHistory() {
@@ -77,17 +78,65 @@ export function useSyncHistory() {
     }
   }, []);
 
-  return { entries, fadingIds, remove };
+  /** Listen: the synced playlist resolved against the LIBRARY server-side,
+   *  handed to the player's queue. Tracks that never landed are skipped and
+   *  the toast says so — playing 40 of 50 honestly beats silence. */
+  const listen = useCallback(async (id: number | string, name: string) => {
+    try {
+      const resp = await fetch(`/api/sync/history/${id}/play`);
+      const data = (await resp.json()) as {
+        success?: boolean;
+        error?: string;
+        name?: string;
+        total?: number;
+        tracks?: unknown[];
+      };
+      if (!data.success) throw new Error(data.error || 'failed');
+      const tracks = data.tracks || [];
+      if (!tracks.length) {
+        window.showToast?.('None of those tracks are in your library yet', 'info');
+        return;
+      }
+      if (data.total && tracks.length < data.total) {
+        window.showToast?.(
+          `Playing ${tracks.length} of ${data.total} — the rest aren't in your library`,
+          'info',
+        );
+      }
+      await window.playTrackList?.(tracks, data.name || name);
+    } catch {
+      window.showToast?.('Could not load that playlist', 'error');
+    }
+  }, []);
+
+  return { entries, fadingIds, remove, listen };
 }
 
 export function SyncsCard() {
-  const { entries, fadingIds, remove } = useSyncHistory();
+  const { entries, fadingIds, remove, listen } = useSyncHistory();
   const nowMs = Date.now();
+
+  // Live "N syncing now" pill — the retired stats strip's Active Syncs
+  // number, rehomed where syncs actually live (fed by the same global
+  // dashboard:stats re-broadcast the strip used).
+  const [activeSyncs, setActiveSyncs] = useState(0);
+  useDashboardStatsEvent(
+    useCallback((data) => {
+      if (typeof data.active_syncs === 'number') setActiveSyncs(data.active_syncs);
+    }, []),
+  );
 
   return (
     <article className="dash-card" data-card="syncs">
       <header className="dash-card__head">
-        <h3 className="dash-card__title">Recent Syncs</h3>
+        <h3 className="dash-card__title">
+          Recent Syncs
+          {activeSyncs > 0 ? (
+            <span className="dash-syncs-live">
+              {activeSyncs} syncing now
+            </span>
+          ) : null}
+        </h3>
         <p className="dash-card__sub">Playlists you&apos;ve synced.</p>
       </header>
       <div className="dash-card__body">
@@ -124,6 +173,16 @@ export function SyncsCard() {
                     ) : (
                       <div className="sync-card-thumb-placeholder">♫</div>
                     )}
+                    <button
+                      className="sync-card-listen"
+                      title="Listen — play this playlist from your library"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (view.id !== undefined) void listen(view.id, view.name);
+                      }}
+                    >
+                      ▶
+                    </button>
                   </div>
                   <div className="sync-card-info">
                     <div className="sync-card-name">{view.name}</div>

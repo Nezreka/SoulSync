@@ -125,6 +125,9 @@ declare global {
     /** media-player.js — seedless Library Radio: queues a ranked-random batch
      *  from the whole library and arms radio mode for refills. */
     startLibraryRadio?: () => void | Promise<void>;
+    /** media-player.js — play a resolved library track list (radio-row shape)
+     *  as the queue, labeled with a "Playing from" context. */
+    playTrackList?: (tracks: unknown[], contextName?: string) => void | Promise<void>;
     /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
      *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
      *  spans. Shared (survives discover.js's deletion), so the React page

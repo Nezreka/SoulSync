@@ -6369,6 +6369,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-color: rgba(var(--accent-rgb), 0.45);
 }
 
+.notif-bell-dl {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    background: rgba(var(--accent-rgb), 0.95);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 18px;
+    text-align: center;
+    padding: 0 4px;
+    pointer-events: none;
+}
+/* the tray's system footer — the retired dashboard stats strip, rehomed */
+.notif-panel-sys {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding: 8px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.notif-panel-sys:empty { display: none; }
+.notif-sys-item { white-space: nowrap; }
+.notif-sys-item--link { cursor: pointer; }
+.notif-sys-item--link:hover { color: rgba(var(--accent-rgb), 0.95); }
+.notif-sys-sep { color: rgba(255, 255, 255, 0.2); }
+
 .notif-panel-body {
     overflow-y: auto; flex: 1; padding: 6px;
 }
@@ -65686,6 +65719,20 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .dash-card--rail {
     grid-column: 1 / -1; /* one full-width band */
     min-width: 0; /* let the strip scroll instead of widening the track */
+    /* No box at all: a shelf of covers reads best floating on the page
+       (the Spotify-home idiom), and the outline competed with the art. */
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 4px 2px;
+}
+.dash-card--rail::before,
+.dash-card--rail::after {
+    display: none;
+}
+.dash-card--rail:hover {
+    border: none;
+    box-shadow: none;
 }
 
 /* The band's tab switcher — quiet text tabs, accent underline on the
@@ -65745,6 +65792,27 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     display: flex;
     flex-direction: column;
     min-height: 0;
+}
+
+/* Live "N syncing now" pill on the Recent Syncs title. */
+.dash-syncs-live {
+    display: inline-block;
+    margin-left: 10px;
+    vertical-align: 2px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(74, 222, 128, 0.95);
+    background: rgba(74, 222, 128, 0.10);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+    border-radius: 999px;
+    padding: 2px 9px;
+    animation: dashSyncsPulse 2.2s ease-in-out infinite;
+}
+@keyframes dashSyncsPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
 }
 
 /* Divider between the two halves of the merged Services card. */
@@ -65890,8 +65958,11 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: linear-gradient(165deg,
         rgba(16, 16, 20, 0.94) 0%,
         rgba(8, 8, 12, 0.98) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    /* Quiet chrome (Boulder: the bright outlined boxes read as clutter) —
+       hairline neutral borders; the color belongs to the CONTENT (covers,
+       service glows), not the containers. */
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 18px;
     box-shadow:
         0 6px 24px rgba(0, 0, 0, 0.42),
@@ -65980,7 +66051,7 @@ body.max-performance .dash-card::after {
     display: none;
 }
 .dash-card:hover {
-    border-color: rgba(var(--accent-rgb), 0.35);
+    border-color: rgba(var(--accent-rgb), 0.18);
     /* No translateY lift: moving the card up on hover pulls its bottom edge off
        the cursor when you hover that edge, which un-hovers → drops → re-hovers
        in a rapid flicker loop (#816). The stronger shadow + glow below already
@@ -67188,6 +67259,31 @@ body.max-performance .dash-card::after {
 }
 .sync-card-chip--dim {
     color: rgba(255, 255, 255, 0.38);
+}
+/* Listen: a ▶ over the thumb on hover — plays the synced playlist from the
+   library (server-resolved; tracks that never landed are skipped). */
+.dash-card[data-card="syncs"] .sync-card-thumb {
+    position: relative;
+}
+.sync-card-listen {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: inherit;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+    padding-left: 2px;
+}
+.sync-history-card:hover .sync-card-listen {
+    display: flex;
+}
+.sync-card-listen:hover {
+    background: rgba(var(--accent-rgb), 0.55);
 }
 
 /* Enrichment / rate monitor — VU-meter equalizer bars.

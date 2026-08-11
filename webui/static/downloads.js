@@ -4343,7 +4343,60 @@ const _notifState = {
     filter: 'all',       // panel type filter: all | success | error | warning | info
     pending: [],         // toasts awaiting the fire-and-forget journal flush
     flushTimer: null,
+    sysStats: null,      // last dashboard:stats frame — feeds the tray's system footer
 };
+
+// ── system status in the tray ────────────────────────────────────────────
+// The dashboard's System Stats strip retired (Boulder: telemetry belongs
+// where you act on it, not as a home-page section). The live numbers moved
+// HERE: the tray footer shows downloads/speed/uptime/memory, and the bell
+// wears a small second badge with the active-download count — the same
+// at-a-glance signal the sidebar downloads button gives. Fed by the global
+// dashboard:stats socket re-broadcast; refreshed once on panel open so a
+// dead socket still shows current numbers.
+window.addEventListener('ss:dashboard-stats', function (e) {
+    _notifState.sysStats = e.detail || null;
+    _updateNotifDlBadge();
+    const host = document.querySelector('[data-notif-sys]');
+    if (host) host.innerHTML = _notifSysHTML();
+});
+
+function _updateNotifDlBadge() {
+    const el = document.getElementById('notif-bell-dl');
+    if (!el) return;
+    const n = (_notifState.sysStats && _notifState.sysStats.active_downloads) || 0;
+    el.textContent = n > 99 ? '99+' : n;
+    el.style.display = n > 0 ? '' : 'none';
+}
+
+function _notifSysHTML() {
+    const s = _notifState.sysStats;
+    if (!s) return '';
+    const bits = [];
+    const dl = s.active_downloads || 0;
+    bits.push('<span class="notif-sys-item notif-sys-item--link" ' +
+        'onclick="navigateToPage(\'active-downloads\')" title="Open the download manager">' +
+        '⬇ ' + dl + ' active' +
+        (dl > 0 && s.download_speed ? ' · ' + _escToast(String(s.download_speed)) : '') +
+        '</span>');
+    if (s.uptime) bits.push('<span class="notif-sys-item" title="Application runtime">⏱ ' + _escToast(String(s.uptime)) + '</span>');
+    if (s.memory_usage) {
+        bits.push('<span class="notif-sys-item" title="System memory' +
+            (s.process_memory ? ' — SoulSync uses ' + _escAttr(String(s.process_memory)) : '') + '">▦ ' +
+            _escToast(String(s.memory_usage)) + '</span>');
+    }
+    return bits.join('<span class="notif-sys-sep">·</span>');
+}
+
+function _seedNotifSys() {
+    fetch('/api/system/stats').then(r => r.ok ? r.json() : null).then(data => {
+        if (!data) return;
+        _notifState.sysStats = data;
+        _updateNotifDlBadge();
+        const host = document.querySelector('[data-notif-sys]');
+        if (host) host.innerHTML = _notifSysHTML();
+    }).catch(() => {});
+}
 
 // Journal toasts to the server so a reflexive "Clear All" loses nothing —
 // batched, fire-and-forget, never blocks the UI.
@@ -4704,9 +4757,11 @@ function _openNotifPanel() {
         <div class="notif-filter-row">${_notifFilterChipsHTML()}</div>
         <div class="notif-active-host" data-notif-active-host>${_overlayActiveHTML()}</div>
         <div class="notif-panel-body">${_notifEntriesHTML()}</div>
+        <div class="notif-panel-sys" data-notif-sys>${_notifSysHTML()}</div>
     `;
 
     document.body.appendChild(panel);
+    _seedNotifSys();      // fresh system numbers even when the socket is down
     _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
     _seedCollectionSyncTask();
     _seedCollectionArtTask();

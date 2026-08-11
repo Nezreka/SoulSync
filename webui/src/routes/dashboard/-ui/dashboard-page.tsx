@@ -25,7 +25,6 @@ import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
 import { ServicesCard } from './services-merged';
 import { SyncsCard } from './syncs-card';
-import { SystemStatsCard } from './system-stats';
 
 export function DashboardPage() {
   useEffect(() => {
@@ -42,12 +41,14 @@ export function DashboardPage() {
             a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
         <ContentBand />
-        {/* The stats strip, then ONE ops row: Services beside Recent Syncs
-            (which spans the remaining two columns and fills its height).
-            Recent Activity (the tray owns it) and Quick Actions (the
-            sidebar again, as buttons) are gone; Service Status and the rate
-            equalizer are ONE Services card. */}
-        <SystemStatsCard />
+        {/* ONE ops row: Services beside Recent Syncs (span 2, fills its
+            height, wears the live "N syncing now" pill). The System Stats
+            strip RETIRED with 3.2.0 — telemetry lives where you act on it
+            now: downloads/speed/uptime/memory in the notification tray (+
+            the bell's download-count badge), finished downloads on the
+            downloads page. Recent Activity (the tray owns it) and Quick
+            Actions (the sidebar again, as buttons) are also gone; Service
+            Status and the rate equalizer are ONE Services card. */}
         <ServicesCard />
         <SyncsCard />
         <ActiveDownloadsShell />

@@ -3156,6 +3156,28 @@ async function startLibraryRadio() {
 }
 window.startLibraryRadio = startLibraryRadio;
 
+// Play a resolved LIBRARY track list as the queue (a synced playlist, a mix —
+// anything already shaped like /api/library/radio rows). Replaces the queue,
+// plays from the top, labels the "Playing from" context. Radio mode is left
+// OFF: a playlist has an end, and auto-queueing similar tracks after it is
+// the radio button's call, not this one's.
+async function playTrackList(tracks, contextName) {
+    var list = (tracks || []).filter(function (t) { return t && t.file_path; });
+    if (!list.length) {
+        showToast('None of these tracks are in your library yet', 'info');
+        return;
+    }
+    npCancelCrossfade();
+    npRadioMode = false;
+    clearQueue();
+    if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+    npQueue = list.map(npMapRadioTrack);
+    renderNpQueue();
+    npSetPlayContext(contextName || 'Playlist');
+    await playQueueItem(0);
+}
+window.playTrackList = playTrackList;
+
 async function npFetchRadioTracks(forceAdvance = false) {
     // forceAdvance: a manual skip at the tail of the fetched batch (next
     // button / 'n' key) — the user asked for the next track, so advance as

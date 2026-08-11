@@ -21629,6 +21629,54 @@ def get_sync_history_entry(entry_id):
         logger.error(f"Error getting sync history entry: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/sync/history/<int:entry_id>/play')
+def play_sync_history_entry(entry_id):
+    """The synced playlist as a PLAYABLE library track list. Each cached track
+    resolves against the library with the same title+artist matcher the stats
+    play button uses; tracks that never landed are skipped (total says how
+    many the playlist really has). Same track shape as /api/library/radio so
+    the player maps it with the one helper it already owns."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id, profile_id=get_current_profile_id())
+        if not entry:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        cached = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+        tracks = []
+        for t in cached[:200]:
+            if not isinstance(t, dict):
+                continue
+            title = str(t.get('name') or t.get('title') or '').strip()
+            artists = t.get('artists') or []
+            first = artists[0] if isinstance(artists, list) and artists else None
+            artist = (first.get('name') if isinstance(first, dict) else str(first or '')).strip()
+            if not title:
+                continue
+            try:
+                row = _stats_queries.resolve_track(get_database(), fix_artist_image_url, title, artist)
+            except Exception:
+                row = None
+            if row and row.get('file_path'):
+                tracks.append({
+                    'id': row.get('id'),
+                    'title': row.get('title'),
+                    'artist': row.get('artist_name'),
+                    'album': row.get('album_title'),
+                    'file_path': row.get('file_path'),
+                    'image_url': row.get('image_url'),
+                    'bitrate': row.get('bitrate'),
+                    'duration': row.get('duration'),
+                    'artist_id': row.get('artist_id'),
+                    'album_id': row.get('album_id'),
+                })
+        return jsonify({"success": True,
+                        "name": entry.get('playlist_name') or '',
+                        "total": len(cached),
+                        "tracks": tracks})
+    except Exception as e:
+        logger.error(f"Error resolving sync entry {entry_id} for playback: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
 def readd_sync_track_to_wishlist(entry_id, track_index):
     """Re-add a synced unmatched track to the wishlist with the SAME context the
