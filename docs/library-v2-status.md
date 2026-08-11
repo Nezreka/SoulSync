@@ -3219,11 +3219,52 @@ vom 5. August nennt die alte Library-React-Schicht importlos. Nachgemessen am
 Vermutlich Folge des Upstream-Syncs. **Vor dem Löschen erneut messen, nicht dem
 alten Kommentar glauben.**
 
-*Vorschlag, noch nicht gebaut:* eine **Ratsche** — ein Test, der die Zahl der
-Legacy-Schreibstellen zählt und fehlschlägt, sobald sie wächst. Damit kann
-während Stufe 2 nichts zurückrutschen und die Zahl wird zum Fortschrittsbalken
-(238 heute → 0 am Ende von Stufe 3). Offene Designfrage: nur Schreibstellen
-ratschen, oder Lesen und Schreiben getrennt.
+**Die Ratsche ist gebaut** (`eee086f2d`, 11. August 2026).
+`tests/library2/test_legacy_usage_ratchet.py` samt `legacy_usage.py` und
+`legacy_usage_baseline.json`. Entscheidung des Nutzers: **die Lesestellen werden
+mitgeratscht, nicht nur die Schreibstellen** — Legacy soll vollständig
+verschwinden. Beide Zahlen sind fixiert, beide haben das Ziel 0.
+
+Basiswerte nach der Zählregel dieses Tests: **647 lesend / 239 schreibend**.
+Die kleine Abweichung zu 656/238 oben ist die Zählregel selbst: die Ratsche
+schließt die Migrations-Hilfstabelle `artists_new` aus und zählt ein `DELETE`
+einmal als Schreibstelle statt zusätzlich als das `FROM`, das darin steckt. Der
+Test schlägt **in beide Richtungen** fehl: Wachstum ist die Regression,
+derentwegen er existiert; ein Rückgang schlägt ebenfalls fehl, mit der
+Anweisung, den Basiswert im selben Commit zu senken — nur so bleibt die Ratsche
+stramm und die Zahl wird zum Fortschrittsbalken.
+
+#### 50.4.4.1 Wo die Zahl als Nächstes fällt
+
+Die Zahl sinkt erst, wenn das SQL in `database/music_database.py` verschwindet,
+und das setzt voraus, dass seine Aufrufer weg sind. Gemessen am 11. August:
+
+- `MusicDatabase.search_artists` hat genau **einen** Produktiv-Aufrufer:
+  `core/search/orchestrator.py:_build_db_artists`. Dort wird Legacy zuerst
+  gesucht und lib2-native Artists werden hineingemischt — auf lib2 umgestellt
+  entfällt das Mischen ersatzlos.
+- `api_get_artist` hat genau einen: `api/library.py`.
+
+**Falle, bevor jemand das für einen Dreizeiler hält:** `api/library.py` kann
+*nicht* einfach auf `legacy_api_artists_page` umgestellt werden. Der Endpunkt
+übergibt `profile_id`, die lib2-Seite kennt keine Profil-Skopierung — der
+`watchlist=`-Filter eines Nicht-Admin-Profils würde damit stillschweigend seine
+Bedeutung ändern (Leitfaden §2.6). Das ist eine Entscheidung, kein Austausch.
+
+#### 50.4.4.2 Die Media-Server-Frage zerfällt in zwei Hälften
+
+Nur eine davon ist offen:
+
+- **Der Scan, der Zeilen erzeugt** (`music_database.py:7083/7126/7261/7304/7544`)
+  — dort geht es darum, ob ein Media-Server überhaupt lib2-Zeilen anlegen darf.
+  Haltung des Nutzers: **nein**. Wird Nezreka direkt gefragt, bevor gebaut wird.
+- **Der Metadata-Update-Worker** war nur ein **Leser** und ist umgestellt
+  (`b32395159`). Er ist der einzige Pfad, auf dem überhaupt etwas zum
+  Media-Server zurückfließt: Genres aus der gespeicherten Artist-Zeile und deren
+  Spotify-ID als Abkürzung. Fotos und Album-Artwork kommen immer direkt von
+  Spotify, und `update_artist_biography` schreibt keine Bio, sondern stempelt
+  nur ein `-updatedAt`-Datum in die Summary des Servers — die gesammelten
+  Last.fm-/Genius-/Discogs-Bios haben SoulSync also nie verlassen.
 
 #### 50.4.5 PR-Hygiene, aus dem eigenen Kommentar vom 5. August
 
