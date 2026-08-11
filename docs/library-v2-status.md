@@ -3137,17 +3137,33 @@ Tabellen. Diese Punkte sind nicht erneut aufzurollen.
 Alle neun Punkte aus Nezrekas Review sind erledigt und in `57d238ea5` gepusht.
 Was hier steht, ist der Rest — sortiert nach Verbindlichkeit, nicht nach Größe.
 
-#### 50.4.1 Zugesagt und **nicht** gebaut
+#### 50.4.1 Zugesagt und nicht gebaut — **erledigt am 11. August 2026** (`7aacec830`)
 
-**Der Divergenz-Check fehlt.** [issues §32.3.1](library-v2-issues.md) gibt
+**Der Divergenz-Check fehlte.** [issues §32.3.1](library-v2-issues.md) gibt
 Nezreka drei Zusagen; Zusage 2 lautet, dass die Abweichung zwischen Legacy und
 lib2 in den gespiegelten Feldern eine *Kennzahl* im vorhandenen read-only
 Integritätsreport wird (Erwartungswert 0, jeder andere Wert ein Bug mit
-Zeilennummern). `core/library2/integrity_reconciler.py` hat Divergenz-Checks
-für Datei-Indizes (`index_divergence`), aber **keinen** für Enrichment-Felder.
-Das ist die unmittelbare Antwort auf seinen Satz „both sticking around and
-disagreeing with each other" und steht als Versprechen in einem committeten
-Dokument. Ungefähr 60 Zeilen. **Zuerst machen.**
+Zeilennummern). Umgesetzt als `lib2_mirror_divergence` je Zeile plus
+`observed.mirror_checked/mirror_pending/mirror_dangling`; Details in
+[issues §32.5](library-v2-issues.md) (iss32-T01a).
+
+Die verglichene Feldmenge ist bewusst **keine zweite Liste**: `enrich.py` ist
+jetzt deklarativ (`MIRROR_SPECS`), Spiegel und Audit lesen dieselbe Erklärung.
+Zwei Befunde kamen erst aus der Messung gegen die echte Bibliothek, nicht aus
+den Tests — sie sind der Grund, warum Regel 5 aus dem Leitfaden auf einer
+echten DB besteht:
+
+- **Der erste Lauf hat nichts gemessen.** `artists.id` ist `TEXT`, der lib2-Link
+  `INTEGER`; SQLite gleicht das über die Spalten-Affinität aus, ein Python-Dict
+  nicht. 170 von 170 Zeilen wurden als „Legacy-Zeile fehlt" gemeldet
+  (iss32-T01b).
+- **Die Kennzahl stand danach auf 156 von 170 — und konnte 0 nie erreichen.**
+  Die Trigger aus iss32-E01 sehen nur, was *nach* ihrer Installation geschrieben
+  wird; der gesamte Rückstand der zwölf Worker enqueued nichts. Deshalb gehört
+  `reconcile_divergent` dazu: ein begrenzter, fortsetzbarer Sweep, der den
+  Rückstand in die **vorhandene** Queue stellt (iss32-T01c). Gegen einen
+  Snapshot der echten DB über den Produktivpfad nachgewiesen: 156 → 0,
+  Endzustand 170 geprüft / 0 offen / Queue leer.
 
 #### 50.4.2 Zwei Fehler in `native_enrichment_sweep`, gefunden und behoben
 
