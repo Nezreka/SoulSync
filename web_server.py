@@ -293,6 +293,21 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+
+# The browser's media engine buffers audio in bursts: it opens a Range
+# request, kills it once its internal buffer is full, and re-requests as
+# playback drains it — up to a few times per SECOND. Correct behavior on
+# both sides, but every burst printed an access-log line, which buried the
+# terminal while a song played. Drop just the audio-chunk lines.
+import logging
+
+
+class _AudioChunkLogFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return '/stream/audio' not in msg and '/stream/library-audio' not in msg
+
+logging.getLogger('werkzeug').addFilter(_AudioChunkLogFilter())
 app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # Static assets (library.js / style.css / etc.) get aggressive browser
@@ -15369,7 +15384,10 @@ def _serve_audio_file_with_range(file_path, mimetype_override=None):
                 f.seek(byte_start)
                 remaining = content_length
                 while remaining:
-                    chunk_size = min(8192, remaining)
+                    # 64KB reads: the browser re-opens this endpoint a few
+                    # times a second while buffering, and 8KB yields made
+                    # every one of those visits cost thousands of iterations.
+                    chunk_size = min(65536, remaining)
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
@@ -15388,6 +15406,10 @@ def _serve_audio_file_with_range(file_path, mimetype_override=None):
         response.headers.add('Content-Length', str(file_size))
         response.headers['Cache-Control'] = 'no-cache'
         return response
+
+
+# What /stream/audio last announced — dedupes the per-chunk log lines.
+_LAST_SERVED_AUDIO = {'path': None, 'url': None}
 
 
 @app.route('/stream/audio')
@@ -15410,10 +15432,17 @@ def stream_audio():
 
         # Library track played via the media server's stream API (#809).
         if stream_url:
-            logger.info("Serving audio via server stream proxy")
+            if stream_url != _LAST_SERVED_AUDIO.get('url'):
+                _LAST_SERVED_AUDIO['url'] = stream_url
+                logger.info("Serving audio via server stream proxy")
             return _proxy_stream_url_with_range(stream_url)
 
-        logger.info(f"Serving audio file: {os.path.basename(file_path)}")
+        # One INFO line per TRACK, not per buffer top-up: the browser
+        # re-requests ranges continuously while it plays, and announcing
+        # every chunk drowned the log.
+        if file_path != _LAST_SERVED_AUDIO.get('path'):
+            _LAST_SERVED_AUDIO['path'] = file_path
+            logger.info(f"Serving audio file: {os.path.basename(file_path)}")
         return _serve_audio_file_with_range(file_path, mimetype_override=mimetype_override)
     except Exception as e:
         logger.error(f"Error serving audio file: {e}")
