@@ -24,6 +24,48 @@ export const MIN_QUERY_LENGTH = 2;
  *
  * Enter bypasses it entirely — see the page component.
  */
+const RECENT_KEY = 'soulsyncRecentSearches';
+const RECENT_MAX = 8;
+
+/** The recent-searches list, newest first. Storage failures read as empty. */
+export function loadRecentSearches(): string[] {
+  try {
+    const raw: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]');
+    return Array.isArray(raw)
+      ? raw.filter((q): q is string => typeof q === 'string' && q.trim() !== '').slice(0, RECENT_MAX)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Record a submitted query — case-insensitively deduped, capped, newest first. */
+export function saveRecentSearch(query: string): string[] {
+  const q = query.trim();
+  if (!q) return loadRecentSearches();
+  const next = [q, ...loadRecentSearches().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(
+    0,
+    RECENT_MAX,
+  );
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* storage full/denied — the list just doesn't persist */
+  }
+  return next;
+}
+
+/** Forget one entry (the chip's ✕). */
+export function removeRecentSearch(query: string): string[] {
+  const next = loadRecentSearches().filter((x) => x.toLowerCase() !== query.trim().toLowerCase());
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* ditto */
+  }
+  return next;
+}
+
 export const SEARCH_DEBOUNCE_MS = 600;
 
 /**

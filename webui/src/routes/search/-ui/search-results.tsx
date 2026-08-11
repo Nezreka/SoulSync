@@ -185,8 +185,95 @@ export function SearchResults({
   // is exactly what the vanilla's always-present div does.
   const anyArtists = dbArtists.length > 0 || artists.length > 0;
 
+  // The spotlight: the best match gets the big card. Artists outrank albums
+  // outrank tracks — the same priority the section order implies.
+  const topArtist = dbArtists[0] ?? artists[0];
+  const topAlbum = topArtist ? undefined : fullAlbums[0] ?? singlesAndEps[0];
+  const topTrack = topArtist || topAlbum ? undefined : tracks[0];
+  const spotlight = topArtist
+    ? {
+        kind: topArtist === dbArtists[0] ? 'Artist · In your library' : 'Artist',
+        name: topArtist.name ?? '',
+        image: artistImages[String(topArtist.id ?? '')] || artistImage(topArtist),
+        round: true,
+        href: onArtistHref(topArtist, topArtist === dbArtists[0]),
+        onOpen: undefined as (() => void) | undefined,
+      }
+    : topAlbum
+      ? {
+          kind: topAlbum.album_type === 'single' || topAlbum.album_type === 'ep' ? 'Single / EP' : 'Album',
+          name: topAlbum.name ?? '',
+          image: albumImage(topAlbum),
+          round: false,
+          href: undefined,
+          onOpen: () => onAlbumClick(topAlbum),
+        }
+      : topTrack
+        ? {
+            kind: 'Track',
+            name: topTrack.name ?? '',
+            image: topTrack.image_url || undefined,
+            round: false,
+            href: undefined,
+            onOpen: () => onTrackClick(topTrack),
+          }
+        : null;
+
+  const spotlightBody = spotlight ? (
+    <>
+      {spotlight.image ? (
+        <img
+          className={`enh-top-result-art${spotlight.round ? ' enh-top-result-art--round' : ''}`}
+          src={spotlight.image}
+          alt=""
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+          }}
+        />
+      ) : (
+        <div
+          className={`enh-top-result-art enh-top-result-art--ph${spotlight.round ? ' enh-top-result-art--round' : ''}`}
+        >
+          {spotlight.round ? '🎤' : '💿'}
+        </div>
+      )}
+      <div className="enh-top-result-text">
+        <div className="enh-top-result-name">{spotlight.name}</div>
+        <div className="enh-top-result-kind">{spotlight.kind}</div>
+      </div>
+    </>
+  ) : null;
+
   return (
     <>
+      {spotlight ? (
+        <div className="enh-dropdown-section" id="enh-top-result">
+          <div className="enh-section-header">
+            <h4 className="enh-section-title">Top result</h4>
+          </div>
+          {spotlight.href ? (
+            <a className="enh-top-result-card" href={spotlight.href}>
+              {spotlightBody}
+            </a>
+          ) : (
+            <div
+              className="enh-top-result-card"
+              role="button"
+              tabIndex={0}
+              onClick={spotlight.onOpen}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  spotlight.onOpen?.();
+                }
+              }}
+            >
+              {spotlightBody}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {anyArtists ? (
         <div className="enh-artists-wrapper">
           {/* Already yours — first, because this is an acquisition surface. */}

@@ -40593,6 +40593,98 @@ div.artist-hero-badge {
 /* Page header sized like a destination, scoped to the search page only. */
 .downloads-main-panel:has(#enh-source-row) .downloads-title { font-size: 28px; letter-spacing: -0.03em; }
 .downloads-main-panel:has(#enh-source-row) .downloads-subtitle { color: rgba(255, 255, 255, 0.45); }
+/* Recent searches — the idle surface under the hero pill. */
+.enh-recent { margin-top: 18px; }
+.enh-recent-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.enh-recent-chip {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 999px; padding: 2px 6px 2px 2px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.enh-recent-chip:hover { background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.16); }
+.enh-recent-chip-label {
+    background: transparent; border: none; color: rgba(255, 255, 255, 0.8);
+    font-size: 13px; font-weight: 500; padding: 6px 6px 6px 12px; cursor: pointer;
+}
+.enh-recent-chip-x {
+    background: transparent; border: none; width: 24px; height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; color: rgba(255, 255, 255, 0.35); font-size: 11px; cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.enh-recent-chip-x:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+/* Jump chips — anchor row above the sections. */
+.enh-jump-chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 22px; position: sticky; top: 0; z-index: 20;
+    padding: 8px 0; background: linear-gradient(180deg, rgba(10, 10, 12, 0.92) 70%, transparent);
+    backdrop-filter: blur(6px);
+}
+.enh-jump-chip {
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px; padding: 7px 16px; color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.enh-jump-chip:hover { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.2); }
+
+/* Top result — the spotlight banner. */
+.enh-top-result-card {
+    display: flex; align-items: center; gap: 20px;
+    background: #17171b; border-radius: 14px; padding: 20px 24px;
+    cursor: pointer; text-decoration: none; color: inherit;
+    transition: background 0.25s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    max-width: 560px;
+}
+.enh-top-result-card:hover {
+    background: #232329; transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.enh-top-result-art {
+    width: 104px; height: 104px; border-radius: 10px; object-fit: cover;
+    flex-shrink: 0; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+.enh-top-result-art--round { border-radius: 50%; }
+.enh-top-result-art--ph {
+    display: flex; align-items: center; justify-content: center; font-size: 40px;
+    background: linear-gradient(135deg, #26262b 0%, #1a1a1e 100%); color: rgba(255, 255, 255, 0.3);
+}
+.enh-top-result-text { min-width: 0; }
+.enh-top-result-name {
+    font-size: 24px; font-weight: 800; color: #fff; letter-spacing: -0.02em;
+    line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-bottom: 8px;
+}
+.enh-top-result-kind {
+    display: inline-block; font-size: 11.5px; font-weight: 700;
+    background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 5px 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Loading skeletons — ghosts in the result shapes. */
+.enh-skel-strip { display: flex; gap: 16px; justify-content: center; margin: 22px 0 0; }
+.enh-skel {
+    display: inline-block; background: rgba(255, 255, 255, 0.05);
+    animation: enhSkelPulse 1.4s ease-in-out infinite;
+}
+.enh-skel--circle { width: 92px; height: 92px; border-radius: 50%; }
+.enh-skel--square { width: 92px; height: 92px; border-radius: 8px; }
+.enh-skel-strip .enh-skel:nth-child(2) { animation-delay: 0.12s; }
+.enh-skel-strip .enh-skel:nth-child(3) { animation-delay: 0.24s; }
+.enh-skel-strip .enh-skel:nth-child(4) { animation-delay: 0.36s; }
+.enh-skel-strip .enh-skel:nth-child(5) { animation-delay: 0.48s; }
+@keyframes enhSkelPulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+}
+@media (max-width: 600px) {
+    .enh-skel-strip .enh-skel:nth-child(n+4) { display: none; }
+    .enh-top-result-art { width: 84px; height: 84px; }
+    .enh-top-result-name { font-size: 19px; }
+}
+
 /* Tile sizes step down on phones. */
 @media (max-width: 600px) {
     .enh-compact-item.artist-card { width: 138px; padding: 12px 12px 14px; }

@@ -237,7 +237,7 @@ describe('the dropdown state machine', () => {
     type('aphex twin');
 
     await waitFor(() => expect(visibleBody()).toBe('results'), { timeout: 3000 });
-    expect(screen.getByText('Drukqs')).toBeInTheDocument();
+    expect(screen.getAllByText('Drukqs').length).toBeGreaterThan(0);
     expect(document.getElementById('enhanced-dropdown')?.className).not.toContain('hidden');
   });
 
@@ -266,7 +266,7 @@ describe('the dropdown state machine', () => {
     renderRoute('/search');
     await settled();
     type('aphex twin');
-    await screen.findByText('Drukqs');
+    await screen.findAllByText('Drukqs');
 
     act(() => {
       document.body.click();
@@ -395,8 +395,11 @@ describe('where a result card points', () => {
     await settled();
     type('aphex twin');
 
-    const owned = await screen.findByText('Owned Artist', undefined, { timeout: 3000 });
-    expect(owned.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+    // Twice on screen — the spotlight and the card — both linking home.
+    const owned = await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
+    for (const el of owned) {
+      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+    }
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(

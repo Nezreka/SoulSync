@@ -100,9 +100,13 @@ describe('SearchResults', () => {
       artists: [{ id: 'sp1', name: 'Aphex Twin', source: 'spotify' }],
       labels: [{ id: 'l1', name: 'Warp' }],
     });
-    expect(screen.getByText('Aphex Twin').closest('a')?.getAttribute('href')).toBe(
-      '/artist-detail/spotify/sp1',
-    );
+    // The name renders twice now — the Top result spotlight and the card —
+    // and BOTH must be real links to the same place.
+    const names = screen.getAllByText('Aphex Twin');
+    expect(names.length).toBe(2);
+    for (const el of names) {
+      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/spotify/sp1');
+    }
     expect(screen.getByText('Warp').closest('a')?.getAttribute('href')).toBe('/label-detail/l1');
   });
 
@@ -197,7 +201,8 @@ describe('SearchResults', () => {
     // MusicBrainz cover-art urls are built without probing, so misses are
     // routine; the browser's broken-image glyph is not acceptable.
     renderResults({ albums: [album({ image_url: 'https://cdn/missing.jpg' })] });
-    const img = document.querySelector('img') as HTMLImageElement;
+    // The CARD's image, not the spotlight's — the spotlight handles its own 404.
+    const img = document.querySelector('.enh-item-image.album-cover') as HTMLImageElement;
     fireEvent.error(img);
     expect(document.querySelector('.album-placeholder')?.textContent).toBe('💿');
   });
@@ -212,10 +217,38 @@ describe('SearchResults', () => {
       onTrackClick,
     });
 
-    fireEvent.click(screen.getByText('Drukqs'));
+    fireEvent.click(document.querySelector('#enh-albums-list .enh-item-name')!);
     fireEvent.click(screen.getByText('Xtal'));
     expect(onAlbumClick).toHaveBeenCalledOnce();
     expect(onTrackClick).toHaveBeenCalledOnce();
+  });
+
+  it('spotlights the best match: artist over album over track', () => {
+    const onAlbumClick = vi.fn();
+    renderResults({
+      dbArtists: [{ id: 7, name: 'Owned Artist' }],
+      artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
+      albums: [album()],
+      onAlbumClick,
+      // inLibrary-aware, unlike the harness default — the spotlight must pass
+      // the flag for a db artist or this renders spotify/7.
+      onArtistHref: (a, inLibrary) => `/artist-detail/${inLibrary ? 'library' : 'spotify'}/${a.id}`,
+    });
+    // A library artist outranks everything, links where its card links, and
+    // wears the round treatment.
+    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
+    expect(spot.querySelector('.enh-top-result-name')?.textContent).toBe('Owned Artist');
+    expect(spot.getAttribute('href')).toBe('/artist-detail/library/7');
+    expect(spot.querySelector('.enh-top-result-art')?.className).toContain('--round');
+  });
+
+  it('spotlights an album when no artist matched, opening via the album handler', () => {
+    const onAlbumClick = vi.fn();
+    renderResults({ albums: [album()], onAlbumClick });
+    const spot = document.querySelector('#enh-top-result .enh-top-result-card')!;
+    expect(spot.querySelector('.enh-top-result-name')?.textContent).toBe('Drukqs');
+    fireEvent.click(spot);
+    expect(onAlbumClick).toHaveBeenCalledOnce();
   });
 
   it('plays a track without also opening its download modal', () => {

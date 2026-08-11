@@ -28,9 +28,13 @@ import {
   fallbackBannerText,
   isIdLookupQuery,
   labelDetailPath,
+  loadRecentSearches,
+  removeRecentSearch,
+  saveRecentSearch,
   SEARCH_DEBOUNCE_MS,
   shouldSearch,
   sourceLabel,
+  splitAlbums,
 } from '../-search.helpers';
 import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
@@ -66,6 +70,7 @@ export function SearchPage() {
   const [dismissed, setDismissed] = useState(false);
   const [labels, setLabels] = useState<SearchLabel[]>([]);
   const [idLookupPending, setIdLookupPending] = useState(false);
+  const [recents, setRecents] = useState<string[]>(loadRecentSearches);
 
   const basic = useBasicSearchController();
   const basicSearchRef = useRef(basic.search);
@@ -168,6 +173,7 @@ export function SearchPage() {
         void runIdLookup(trimmed);
         return;
       }
+      setRecents(saveRecentSearch(trimmed));
       setDismissed(false);
       submitQuery(trimmed);
     },
@@ -301,6 +307,40 @@ export function SearchPage() {
             onIdSubmit={() => void runIdLookup(idValue)}
           />
 
+          {/* Recent searches — the idle surface. Shown only when nothing else
+              is: no open results, no soulseek panel, nothing typed. */}
+          {!open && !soulseekActive && !query.trim() && recents.length > 0 ? (
+            <div className="enh-recent" id="enh-recent-searches">
+              <div className="enh-section-header">
+                <h4 className="enh-section-title">Recent searches</h4>
+              </div>
+              <div className="enh-recent-chips">
+                {recents.map((entry) => (
+                  <span key={entry} className="enh-recent-chip">
+                    <button
+                      type="button"
+                      className="enh-recent-chip-label"
+                      onClick={() => {
+                        setQuery(entry);
+                        runSearch(entry);
+                      }}
+                    >
+                      {entry}
+                    </button>
+                    <button
+                      type="button"
+                      className="enh-recent-chip-x"
+                      title="Remove from recent searches"
+                      onClick={() => setRecents(removeRecentSearch(entry))}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div id="enhanced-dropdown" className={`enhanced-dropdown${open ? '' : ' hidden'}`}>
             <div className="enhanced-dropdown-content">
               <button
@@ -321,6 +361,17 @@ export function SearchPage() {
                 id="enhanced-loading"
               >
                 <div className="spinner" />
+                {/* Skeleton ghosts in the shapes the results will take. */}
+                <div className="enh-skel-strip" aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <span key={`c${i}`} className="enh-skel enh-skel--circle" />
+                  ))}
+                </div>
+                <div className="enh-skel-strip" aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <span key={`s${i}`} className="enh-skel enh-skel--square" />
+                  ))}
+                </div>
                 <p id="enhanced-loading-text">
                   {idLookupPending
                     ? 'Resolving link…'
@@ -346,6 +397,16 @@ export function SearchPage() {
                 >
                   {served ? fallbackBannerText(state.activeSource, served) : null}
                 </div>
+
+                {view === 'results' ? (
+                  <JumpChips
+                    artists={results.db_artists.length + results.artists.length}
+                    albums={splitAlbums(results.albums).albums.length}
+                    singles={splitAlbums(results.albums).singlesAndEps.length}
+                    tracks={results.tracks.length}
+                    labels={labels.length}
+                  />
+                ) : null}
 
                 <SearchResults
                   activeSource={state.activeSource}
@@ -394,6 +455,48 @@ export function SearchPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The chip row that scrolls to a section — rendered only for sections with
+ *  rows, anchored on the section ids the results already carry. */
+function JumpChips({
+  artists,
+  albums,
+  singles,
+  tracks,
+  labels,
+}: {
+  artists: number;
+  albums: number;
+  singles: number;
+  tracks: number;
+  labels: number;
+}) {
+  const chips: [string, number, string][] = [
+    ['Artists', artists, 'enh-spotify-artists-section'],
+    ['Albums', albums, 'enh-albums-section'],
+    ['Singles & EPs', singles, 'enh-singles-section'],
+    ['Tracks', tracks, 'enh-tracks-section'],
+    ['Labels', labels, 'enh-labels-section'],
+  ];
+  const visible = chips.filter(([, count]) => count > 0);
+  if (visible.length < 2) return null;
+  return (
+    <div className="enh-jump-chips" id="enh-jump-chips">
+      {visible.map(([label, , sectionId]) => (
+        <button
+          key={sectionId}
+          type="button"
+          className="enh-jump-chip"
+          onClick={() =>
+            document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
