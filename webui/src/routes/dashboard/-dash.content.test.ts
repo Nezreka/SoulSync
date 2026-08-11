@@ -178,7 +178,7 @@ describe('fetchers', () => {
     });
     expect(fetchMock.mock.calls[0][0]).toContain('/api/discover/album/spotify/alb1');
     expect(modal).toHaveBeenCalledWith(
-      'recent_album_alb1',
+      'discover_album_alb1',
       'New One',
       // Track artists are NAME STRINGS and each track carries the full album —
       // the modal's other callers (discover) all hand it this shape, and thin

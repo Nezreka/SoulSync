@@ -338,7 +338,13 @@ export async function openFreshRelease(release: FreshRelease): Promise<void> {
         release.deezerArtistId || (source === 'deezer' ? (albumArtist?.id ?? '') : ''),
     };
     await window.openDownloadMissingModalForYouTube?.(
-      `recent_album_${albumId}`,
+      // The modal keys EVERYTHING off this prefix: discover_album_ is what
+      // unlocks the album hero (artist name + art + album context). An
+      // unrecognised prefix — recent_album_ was — falls through to the
+      // 'YouTube playlist' framing with no context at all, which is exactly
+      // the broken header this replaced. Same prefix discover's own
+      // recent-release cards use for the same entity.
+      `discover_album_${albumId}`,
       albumData.name ?? release.albumName,
       spotifyTracks,
       artistContext,
