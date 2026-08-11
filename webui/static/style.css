@@ -68818,6 +68818,12 @@ body.max-performance .dash-card::after {
     .dash-card--full {
         grid-column: 1 / -1;
     }
+    /* On the 2-col grid Sync's span-2 already fills its row — Automations
+       loses its desktop neighbour, so half-width would strand it next to
+       an empty cell. Full width until the 3-col layout pairs them again. */
+    .dash-card[data-card="automations"] {
+        grid-column: 1 / -1;
+    }
     .dash-card {
         padding: 20px 22px;
     }
