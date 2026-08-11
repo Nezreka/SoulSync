@@ -1955,8 +1955,13 @@ const HELPER_CONTENT = {
     // ─── DASHBOARD: RECENT SYNCS & RATE MONITOR ──────────────────────
 
     '#sync-history-cards': {
-        title: 'Recent Syncs',
-        description: 'Quick view of your most recent playlist sync operations. Shows playlist name, track counts, and completion status.',
+        title: 'Sync',
+        description: 'Every playlist in one band: its schedule and next run, the last run\'s matched/downloaded/failed results, and an ownership bar showing how much of it is in your library. Hover a row to Run its pipeline or Listen from your library; click for the full run detail.',
+        tips: [
+            'Rows with a cadence are on an Auto-Sync schedule; "manual" rows are one-off syncs',
+            'A running pipeline shows its live phase and progress on the row',
+            'Manage opens the full Auto-Sync schedule board'
+        ]
     },
     '#rate-monitor-section': {
         title: 'API Rate Monitor',
@@ -2294,7 +2299,7 @@ const HELPER_TOURS = {
             // Main content — top to bottom
             { page: 'dashboard', selector: '#library-status-card', title: 'Library', description: 'Your library at a glance — artists, albums, tracks, and total size — with a health dot on the title. Quick Scan picks up new content fast (incremental); Deep Scan re-reads everything and clears out stale entries.' },
             { page: 'dashboard', selector: '.dash-card--rail', title: 'Recently Added & Fresh Releases', description: 'The latest albums to land in your library, and fresh releases from artists you follow — switch between them with the tabs. Click a cover to jump to the album.' },
-            { page: 'dashboard', selector: '#sync-history-cards', title: 'Recent Syncs', description: 'Your latest playlist sync runs — what matched, what downloaded, what failed, how long it took. A live pill shows syncs running right now, and hovering a playlist reveals a Listen button that plays it from your library.' },
+            { page: 'dashboard', selector: '#sync-history-cards', title: 'Sync', description: 'Every playlist in one band: its schedule and next run, the last run\'s results, and how much of it you own. Hover a row to Run its pipeline now or Listen to it from your library; click a row for the full run detail; Manage opens the Auto-Sync board.' },
             { page: 'dashboard', selector: '.status-section', title: 'Service Status', description: 'Your three core connections live in the sidebar on every page: metadata source, media server, and download source. The dot is the health; hover a row for its bolt button to run a live connection test, or click the row to switch sources.' },
 
             // The shell around every page

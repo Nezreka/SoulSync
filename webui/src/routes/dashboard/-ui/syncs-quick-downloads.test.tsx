@@ -1,7 +1,11 @@
 /**
- * The three remaining P7 cards: Recent Syncs (data + 401 + delete), Quick
- * Actions (static tiles + seams), and the Active Downloads ADOPTED shell.
- * Each gets its artefact differential against the live vanilla region.
+ * The Sync band (schedule + history merged), Quick Actions, and the Active
+ * Downloads ADOPTED shell. Quick Actions / Active Downloads keep their
+ * artefact differentials against the live vanilla region; the band diverges
+ * from the vanilla syncs card BY DESIGN (the merge), so it gets behavioral
+ * pins instead — the invariants inherited from the old Recent Syncs card
+ * (payload render, detail-modal click, delete fade, 401 unlock, app-locked
+ * poll guard) all still hold on the band's rows.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
@@ -10,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActiveDownloadsShell } from './active-downloads-shell';
 import { compareTrees, extractDashArticle, parseVanilla } from './dash-artefact';
 import { QuickActionsCard } from './quick-actions';
-import { SyncsCard } from './syncs-card';
+import { SyncBand } from './sync-band';
 
 const fetchMock = vi.fn((..._args: unknown[]) => Promise.reject(new Error('down')));
 
@@ -55,14 +59,6 @@ async function mount(node: React.ReactElement) {
 }
 
 describe('the artefact differentials', () => {
-  it('Recent Syncs renders the vanilla card 1:1 initially', async () => {
-    const vanilla = parseVanilla(
-      extractDashArticle('<article class="dash-card" data-card="syncs">'),
-    );
-    const view = await mount(<SyncsCard />);
-    compareTrees(vanilla, view.container.firstElementChild!, 'syncs');
-  });
-
   it('Quick Actions renders the vanilla card 1:1', async () => {
     const vanilla = parseVanilla(
       extractDashArticle('<article class="dash-card dash-card--quick-actions" data-card="tools">'),
@@ -82,7 +78,7 @@ describe('the artefact differentials', () => {
   });
 });
 
-describe('Recent Syncs', () => {
+describe('the Sync band', () => {
   const ENTRY = {
     id: 7,
     sync_type: 'playlist',
@@ -94,39 +90,44 @@ describe('Recent Syncs', () => {
     thumb_url: '/thumb.jpg',
   };
 
-  it('renders cards from the history payload', async () => {
+  it('renders a manual row from the history payload when no schedules load', async () => {
+    // The schedule endpoints all reject here → history-only rows, kind manual.
     syncRoutes({ entries: [ENTRY] });
-    const view = await mount(<SyncsCard />);
-    const card = view.container.querySelector('.sync-history-card')!;
-    expect(card.className).toBe('sync-history-card health-good');
-    expect(card.querySelector('.sync-card-name')!.textContent).toBe('Bangers');
-    expect(card.querySelector('.sync-card-source')!.textContent).toBe('Spotify');
-    expect(card.querySelector('.sync-card-pct')!.textContent).toBe('80%');
-    expect(card.querySelector('.sync-card-counts')!.textContent).toBe('8/10 matched · 3 ⬇');
-    expect(card.querySelector('img')!.getAttribute('src')).toBe('/thumb.jpg');
+    const view = await mount(<SyncBand />);
+    const row = view.container.querySelector('.syncband-row')!;
+    expect(row.querySelector('.syncband-name')!.textContent).toBe('Bangers');
+    expect(row.querySelector('.syncband-sub')!.textContent).toBe('Spotify · playlist');
+    expect(row.querySelector('.syncband-chip')!.textContent).toBe('8/10 matched');
+    expect(row.querySelector('.syncband-chip--dl')!.textContent).toBe('⬇ 3');
+    expect(row.querySelector('.syncband-manual')!.textContent).toBe('manual');
+    expect(row.querySelector('.syncband-art img')!.getAttribute('src')).toBe('/thumb.jpg');
+    // The rows container keeps the tour/helper anchor id.
+    expect(view.container.querySelector('#sync-history-cards')).not.toBeNull();
   });
 
-  it('an empty history shows the vanilla empty state; wishlist runs are filtered out', async () => {
+  it('an empty history shows the empty state; wishlist runs are filtered out', async () => {
     syncRoutes({ entries: [{ id: 1, sync_type: 'wishlist' }] });
-    const view = await mount(<SyncsCard />);
-    expect(view.container.querySelector('.sync-history-empty')!.textContent).toBe('No syncs yet');
+    const view = await mount(<SyncBand />);
+    expect(view.container.querySelector('.autosync-empty strong')!.textContent).toBe(
+      'Nothing syncing yet',
+    );
   });
 
-  it('card click opens the vanilla detail modal', async () => {
+  it('row click opens the vanilla detail modal', async () => {
     const openSyncDetailModal = vi.fn();
     window.openSyncDetailModal = openSyncDetailModal;
     syncRoutes({ entries: [ENTRY] });
-    const view = await mount(<SyncsCard />);
-    fireEvent.click(view.container.querySelector('.sync-history-card')!);
+    const view = await mount(<SyncBand />);
+    fireEvent.click(view.container.querySelector('.syncband-row')!);
     expect(openSyncDetailModal).toHaveBeenCalledWith(7);
   });
 
-  it('delete DELETEs the entry and removes the card without opening the modal', async () => {
+  it('delete DELETEs the entry and removes the row without opening the modal', async () => {
     vi.useFakeTimers();
     const openSyncDetailModal = vi.fn();
     window.openSyncDetailModal = openSyncDetailModal;
     syncRoutes({ entries: [ENTRY] });
-    const view = await mount(<SyncsCard />);
+    const view = await mount(<SyncBand />);
     fetchMock.mockImplementation((url: unknown, init?: unknown) =>
       String(url).includes('/api/sync/history/7') &&
       (init as RequestInit | undefined)?.method === 'DELETE'
@@ -134,13 +135,13 @@ describe('Recent Syncs', () => {
         : Promise.reject(new Error('down')),
     );
     await act(async () => {
-      fireEvent.click(view.container.querySelector('.sync-card-delete')!);
+      fireEvent.click(view.container.querySelector('.syncband-btn--x')!);
     });
     expect(openSyncDetailModal).not.toHaveBeenCalled(); // stopPropagation
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
     });
-    expect(view.container.querySelector('.sync-history-card')).toBeNull();
+    expect(view.container.querySelector('.syncband-row')).toBeNull();
   });
 
   it('a 401 surfaces the correct unlock screen', async () => {
@@ -149,15 +150,24 @@ describe('Recent Syncs', () => {
     window.showLoginScreen = showLoginScreen;
     window.showLaunchPinScreen = showLaunchPinScreen;
     syncRoutes({ login_required: true }, 401);
-    await mount(<SyncsCard />);
+    await mount(<SyncBand />);
     expect(showLoginScreen).toHaveBeenCalledTimes(1);
     expect(showLaunchPinScreen).not.toHaveBeenCalled();
   });
 
-  it('never polls while the app is locked', async () => {
+  it('never polls ANY endpoint while the app is locked', async () => {
     document.body.classList.add('app-locked');
-    await mount(<SyncsCard />);
+    await mount(<SyncBand />);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('Manage opens the real Auto-Sync board modal', async () => {
+    const openAutoSyncScheduleModal = vi.fn();
+    window.openAutoSyncScheduleModal = openAutoSyncScheduleModal;
+    syncRoutes({ entries: [] });
+    const view = await mount(<SyncBand />);
+    fireEvent.click(view.container.querySelector('.autosync-manage-btn')!);
+    expect(openAutoSyncScheduleModal).toHaveBeenCalledTimes(1);
   });
 });
 

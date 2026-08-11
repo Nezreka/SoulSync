@@ -20,11 +20,10 @@
 import { useEffect } from 'react';
 
 import { ActiveDownloadsShell } from './active-downloads-shell';
-import { AutoSyncCard } from './autosync-card';
 import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
-import { SyncsCard } from './syncs-card';
+import { SyncBand } from './sync-band';
 
 export function DashboardPage() {
   useEffect(() => {
@@ -41,17 +40,17 @@ export function DashboardPage() {
             a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
         <ContentBand />
-        {/* The sync row: Auto Sync (the future — what's scheduled and when
-            it fires next) beside Recent Syncs (the past — span 2, wears the
-            live "N syncing now" pill). Active Downloads appears below only
-            while transfers exist. Everything else the old ops grid held is
+        {/* The Sync band — Auto Sync and Recent Syncs merged into one
+            full-width section (they were the same system explained twice):
+            one row per playlist with schedule, latest run, ownership, and
+            live pipeline state. Active Downloads appears below only while
+            transfers exist. Everything else the old ops grid held is
             rehomed where you act on it: the Services card retired (status
             dots + Test buttons live on the sidebar's Service Status rows,
             rate graphs in the Manage Workers modal), System Stats went to
             the notification tray with 3.2.0, Recent Activity to the tray,
             Quick Actions back to the sidebar. */}
-        <AutoSyncCard />
-        <SyncsCard />
+        <SyncBand />
         <ActiveDownloadsShell />
       </div>
     </div>

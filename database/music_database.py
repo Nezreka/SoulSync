@@ -17621,17 +17621,27 @@ class MusicDatabase:
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
 
-                # In-library counts in one shot. Case-sensitive join so
-                # idx_artists_name + idx_tracks_title kick in.
+                # In-library counts in one shot. ID-FIRST: a mirrored track's
+                # source id against enriched tracks' spotify_track_id
+                # (idx_tracks_spotify_id), OR the case-sensitive name
+                # join (idx_artists_name + idx_tracks_title). The name join
+                # alone undercounted — the sync matcher lands tracks under
+                # normalized names the exact join never credits.
                 try:
                     cursor.execute("""
                         SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                        JOIN artists a ON a.name = mpt.artist_name
-                        JOIN tracks t ON t.artist_id = a.id
-                                     AND t.title = mpt.track_name
                         WHERE mp.profile_id = ?
+                          AND (
+                            (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                             AND EXISTS (SELECT 1 FROM tracks ti
+                                         WHERE ti.spotify_track_id = mpt.source_track_id))
+                            OR EXISTS (SELECT 1 FROM artists a
+                                       JOIN tracks t ON t.artist_id = a.id
+                                       WHERE a.name = mpt.artist_name
+                                         AND t.title = mpt.track_name)
+                          )
                         GROUP BY mpt.playlist_id
                     """, (profile_id,))
                     for row in cursor.fetchall():
@@ -17680,20 +17690,25 @@ class MusicDatabase:
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
-                # In-library: case-sensitive equality so SQLite can use
-                # `idx_artists_name` and `idx_tracks_title`. COLLATE NOCASE on
-                # the join columns prevents index usage and takes ~18s per
-                # playlist on a 300k-track library; the case-sensitive variant
-                # is ~6ms. Misses purely-case-different matches (rare — Spotify
-                # canonicalizes artist/track names that match library imports).
+                # In-library, id-first like the batched variant: source id
+                # against enriched tracks' spotify_track_id
+                # (idx_tracks_spotify_id), OR the case-sensitive name
+                # join (COLLATE NOCASE would defeat idx_artists_name /
+                # idx_tracks_title — ~18s vs ~6ms on a 300k-track library).
                 try:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
-                        JOIN artists a ON a.name = mpt.artist_name
-                        JOIN tracks t ON t.artist_id = a.id
-                                     AND t.title = mpt.track_name
                         WHERE mpt.playlist_id = ?
+                          AND (
+                            (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
+                             AND EXISTS (SELECT 1 FROM tracks ti
+                                         WHERE ti.spotify_track_id = mpt.source_track_id))
+                            OR EXISTS (SELECT 1 FROM artists a
+                                       JOIN tracks t ON t.artist_id = a.id
+                                       WHERE a.name = mpt.artist_name
+                                         AND t.title = mpt.track_name)
+                          )
                     """, (playlist_id,))
                     result['in_library'] = cursor.fetchone()['in_library'] or 0
                 except Exception as extra_err:

@@ -65810,16 +65810,13 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     flex: none;
 }
 
-/* The sync row: Auto Sync (1 col) beside Recent Syncs (span 2) — the
-   future and the past of the same system sharing one band. The syncs
-   body still grows and scrolls (the old centered-flex fix clipped an
-   overflowing list — centering and scrolling don't mix). */
-.dash-card[data-card="syncs"] {
-    grid-column: span 2;
+/* ── The Sync band (data-card="sync") — Auto Sync + Recent Syncs merged:
+   one full-width section, one row per playlist. Art carries the color,
+   columns carry the story: schedule → last result → ownership → next. ── */
+.dash-card[data-card="sync"] {
+    grid-column: 1 / -1;
 }
-
-/* ── The Auto Sync card — mini schedule board, quiet-chrome rows ── */
-.dash-card[data-card="autosync"] .dash-card__head {
+.dash-card[data-card="sync"] .dash-card__head {
     position: relative;
 }
 .autosync-count-pill {
@@ -65854,101 +65851,208 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border-color: rgba(255, 255, 255, 0.18);
     color: #fff;
 }
-.dash-card[data-card="autosync"] .dash-card__body {
+.dash-card[data-card="sync"] .dash-card__body {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
 }
-.autosync-rows {
+.syncband-rows {
     display: flex;
     flex-direction: column;
     gap: 6px;
     overflow-y: auto;
     min-height: 0;
-    max-height: 640px;
-    padding-right: 2px;
+    max-height: 560px;
+    padding: 2px;
 }
-.autosync-row {
-    display: flex;
+.syncband-row {
+    display: grid;
+    grid-template-areas: "art main result owned when actions";
+    grid-template-columns: 46px minmax(180px, 1.3fr) minmax(200px, 1fr) 210px 84px minmax(96px, auto);
     align-items: center;
-    gap: 11px;
-    padding: 10px 12px;
-    border-radius: 10px;
+    gap: 6px 14px;
+    padding: 9px 14px;
+    border-radius: 12px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease,
+        opacity 0.2s ease, transform 0.2s ease;
 }
-.autosync-row--off {
-    opacity: 0.55;
+.syncband-row:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.10);
 }
-.autosync-row--live {
+.syncband-row--live {
     border-color: rgba(var(--accent-rgb), 0.30);
     background: rgba(var(--accent-rgb), 0.05);
 }
-.autosync-chip {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
+.syncband-row--off {
+    opacity: 0.55;
+}
+.syncband-art {
+    grid-area: art;
+    position: relative;
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
     flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    overflow: hidden;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+    transition: transform 0.18s ease;
 }
-.autosync-chip-logo {
-    width: 20px;
-    height: 20px;
-    object-fit: contain;
+.syncband-row:hover .syncband-art {
+    transform: scale(1.05);
 }
-/* Same brand-visibility fixes the board's source icons use: white-on-dark
-   marks need inverting on our dark chip. */
-.autosync-chip-logo--tidal,
-.autosync-chip-logo--qobuz {
-    filter: invert(1);
+.syncband-art > img:not(.syncband-art-badge) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 9px;
 }
-.autosync-chip-glyph {
-    font-size: 14px;
+.syncband-art-glyph {
+    font-size: 17px;
     font-weight: 700;
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.5);
 }
-.autosync-row-main {
-    flex: 1;
+.syncband-art-badge {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    width: 19px;
+    height: 19px;
+    padding: 3px;
+    border-radius: 6px;
+    background: #101014;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    object-fit: contain;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+/* White-on-dark brand marks need inverting; the filter only touches the
+   image pixels — background/border stay put because the badge's box paints
+   beneath its own bitmap. Wrong for Tidal/Qobuz? They ship dark marks. */
+.syncband-art-badge--tidal,
+.syncband-art-badge--qobuz {
+    background: #e8e8ec;
+}
+.syncband-main {
+    grid-area: main;
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
 }
-.autosync-row-top {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-}
-.autosync-row-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 12.5px;
+.syncband-name {
+    font-size: 13px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.92);
+    color: rgba(255, 255, 255, 0.94);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.autosync-row-next {
-    flex-shrink: 0;
+.syncband-sub {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.syncband-result {
+    grid-area: result;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+.syncband-chip {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.7);
+    white-space: nowrap;
+}
+.syncband-chip--dl {
+    color: rgba(74, 222, 128, 0.9);
+    border-color: rgba(74, 222, 128, 0.22);
+    background: rgba(74, 222, 128, 0.08);
+}
+.syncband-chip--fail {
+    color: rgba(248, 113, 113, 0.9);
+    border-color: rgba(248, 113, 113, 0.22);
+    background: rgba(248, 113, 113, 0.08);
+}
+.syncband-ago {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+}
+.syncband-ago--none {
+    font-style: italic;
+}
+.syncband-phase {
     font-size: 11px;
+    color: rgba(var(--accent-rgb), 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.syncband-owned {
+    grid-area: owned;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.syncband-owned-bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+}
+.syncband-owned-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(52, 211, 153, 0.55), rgba(52, 211, 153, 0.95));
+    transition: width 0.4s ease;
+}
+.syncband-owned-fill--live {
+    background: rgb(var(--accent-light-rgb));
+}
+.syncband-owned-text {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+}
+.syncband-when {
+    grid-area: when;
+    text-align: right;
+    white-space: nowrap;
+}
+.syncband-next {
+    font-size: 11.5px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: rgb(var(--accent-light-rgb));
 }
-.autosync-row-paused {
-    flex-shrink: 0;
+.syncband-paused,
+.syncband-manual {
     font-size: 10.5px;
     color: rgba(255, 255, 255, 0.4);
 }
-.autosync-row-live-pill {
-    flex-shrink: 0;
+.syncband-live-pill {
     font-size: 9.5px;
     font-weight: 700;
     text-transform: uppercase;
@@ -65957,83 +66061,47 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border-radius: 999px;
     color: rgb(var(--accent-light-rgb));
     background: rgba(var(--accent-rgb), 0.15);
-    animation: autosyncLivePulse 1.6s ease-in-out infinite;
+    animation: syncbandLivePulse 1.6s ease-in-out infinite;
 }
-@keyframes autosyncLivePulse {
+@keyframes syncbandLivePulse {
     50% { opacity: 0.55; }
 }
-.autosync-row-meta {
+.syncband-actions {
+    grid-area: actions;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.45);
-    white-space: nowrap;
-    overflow: hidden;
+    gap: 6px;
+    justify-content: flex-end;
+    opacity: 0;
+    transition: opacity 0.15s ease;
 }
-.autosync-row-last {
-    color: rgba(52, 211, 153, 0.75);
+.syncband-row:hover .syncband-actions {
+    opacity: 1;
 }
-.autosync-row-last--bad {
-    color: rgba(248, 113, 113, 0.85);
+@media (hover: none) {
+    .syncband-actions { opacity: 0.75; }
 }
-.autosync-row-phase {
-    color: rgba(var(--accent-rgb), 0.85);
-}
-.autosync-cov {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 1px;
-}
-.autosync-cov-bar {
-    flex: 1;
-    height: 3px;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.07);
-    overflow: hidden;
-}
-.autosync-cov-fill {
-    display: block;
-    height: 100%;
-    border-radius: 2px;
-    background: rgba(52, 211, 153, 0.75);
-    transition: width 0.4s ease;
-}
-.autosync-cov-fill--live {
-    background: rgb(var(--accent-light-rgb));
-}
-.autosync-cov-text {
-    flex-shrink: 0;
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.45);
-}
-.autosync-run-btn {
-    flex-shrink: 0;
+.syncband-btn {
     padding: 4px 11px;
     font-size: 11px;
     font-weight: 500;
     border-radius: 6px;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.10);
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease;
 }
-.autosync-row:hover .autosync-run-btn {
-    opacity: 1;
-}
-.autosync-run-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
+.syncband-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.09);
     color: #fff;
 }
-.autosync-run-btn:disabled {
+.syncband-btn:disabled {
     cursor: not-allowed;
+    opacity: 0.5;
 }
-@media (hover: none) {
-    .autosync-run-btn { opacity: 0.7; }
+.syncband-btn--x:hover {
+    color: #f87171;
+    border-color: rgba(248, 113, 113, 0.4);
 }
 .autosync-empty {
     flex: 1;
@@ -66070,12 +66138,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .autosync-empty-cta:hover {
     background: rgba(var(--accent-rgb), 0.20);
 }
-.dash-card[data-card="syncs"] .dash-card__body {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
+/* (the Sync band's body flex rules live in its block above) */
 
 /* Live "N syncing now" pill on the Recent Syncs title. */
 .dash-syncs-live {
@@ -66344,9 +66407,15 @@ body.max-performance .dash-card::after {
 .dash-card::after {
     display: none;
 }
+/* Boulder preferred the rail's read: on hover the frame DISSOLVES and the
+   surface deepens a touch, so the content comes forward — the opposite of
+   a border brightening at the cursor. */
 .dash-card:hover {
-    border-color: rgba(255, 255, 255, 0.11);
-    border-top-color: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.02);
+    border-top-color: rgba(255, 255, 255, 0.04);
+    background: linear-gradient(165deg,
+        rgba(11, 11, 15, 0.96) 0%,
+        rgba(5, 5, 8, 0.99) 100%);
 }
 
 /* Mount stagger — cards fade up on first paint (and on page revisit) */
@@ -66360,7 +66429,7 @@ body.max-performance .dash-card::after {
 .dash-card[data-card="services"]        { animation-delay: 0.00s; }
 .dash-card[data-card="stats"]           { animation-delay: 0.06s; }
 .dash-card[data-card="library"]         { animation-delay: 0.12s; }
-.dash-card[data-card="syncs"]           { animation-delay: 0.18s; }
+.dash-card[data-card="sync"]            { animation-delay: 0.18s; }
 .dash-card[data-card="tools"]           { animation-delay: 0.24s; }
 .dash-card[data-card="activity"]        { animation-delay: 0.30s; }
 .dash-card[data-card="enrichment"]      { animation-delay: 0.36s; }
@@ -67507,103 +67576,8 @@ body.max-performance .dash-card::after {
     overflow-y: auto;
 }
 
-/* Sync history strip — horizontal scroller */
-.dash-card[data-card="syncs"] .sync-history-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 4px 2px;
-    /* Fill the card (the row height Services sets), scroll past it. The
-       max-height is a sanity bound so a long history can't stretch the
-       whole ops row. */
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: 640px;
-}
-
-.dash-card[data-card="syncs"] .sync-history-card {
-    min-width: 0;
-    width: 100%;
-    padding: 12px 14px;
-}
-/* The roomier card spends its height on detail: a bigger thumb, a type tag
-   in the meta line, and colored chips (matched / ⬇ downloaded / ✗ failed /
-   wall time) replacing the crammed counts string. */
-.dash-card[data-card="syncs"] .sync-card-thumb,
-.dash-card[data-card="syncs"] .sync-card-thumb img {
-    width: 46px;
-    height: 46px;
-}
-.dash-card[data-card="syncs"] .sync-card-counts {
-    display: none;
-}
-.sync-card-type {
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: rgba(var(--accent-rgb), 0.85);
-    background: rgba(var(--accent-rgb), 0.10);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: 5px;
-    padding: 1px 5px;
-}
-.sync-card-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 6px;
-}
-.sync-card-chip {
-    font-size: 10.5px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.045);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 6px;
-    padding: 2px 7px;
-    white-space: nowrap;
-}
-.sync-card-chip--dl {
-    color: rgba(74, 222, 128, 0.9);
-    background: rgba(74, 222, 128, 0.08);
-    border-color: rgba(74, 222, 128, 0.2);
-}
-.sync-card-chip--fail {
-    color: rgba(248, 113, 113, 0.9);
-    background: rgba(248, 113, 113, 0.08);
-    border-color: rgba(248, 113, 113, 0.2);
-}
-.sync-card-chip--dim {
-    color: rgba(255, 255, 255, 0.38);
-}
-/* Listen: a ▶ over the thumb on hover — plays the synced playlist from the
-   library (server-resolved; tracks that never landed are skipped). */
-.dash-card[data-card="syncs"] .sync-card-thumb {
-    position: relative;
-}
-.sync-card-listen {
-    position: absolute;
-    inset: 0;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: inherit;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    font-size: 15px;
-    cursor: pointer;
-    padding-left: 2px;
-}
-.sync-history-card:hover .sync-card-listen {
-    display: flex;
-}
-.sync-card-listen:hover {
-    background: rgba(var(--accent-rgb), 0.55);
-}
+/* (the old dashboard syncs-card overrides retired with the Sync band —
+   base .sync-history-card styles above stay for the sync page surfaces) */
 
 /* Enrichment / rate monitor — VU-meter equalizer bars.
  *
@@ -68473,7 +68447,7 @@ body.max-performance .dash-card::after {
     }
     .dash-card--wide,
     .dash-card--full,
-    .dash-card[data-card="syncs"] {
+    .dash-card[data-card="sync"] {
         grid-column: auto;
     }
     .dash-card--strip {
@@ -68484,33 +68458,23 @@ body.max-performance .dash-card::after {
         min-width: 0;
         flex-basis: 100%;
     }
-    .dash-card[data-card="syncs"],
-    .dash-card[data-card="autosync"] {
-        grid-column: auto;
+    /* The band stacks: art + name + countdown up top, result chips next,
+       the ownership bar full-width beneath. Actions stay touchable. */
+    .syncband-rows {
+        max-height: 420px;
     }
-    .autosync-rows {
-        max-height: 300px;
+    .syncband-row {
+        grid-template-areas:
+            "art main when"
+            "art result actions"
+            "owned owned owned";
+        grid-template-columns: 40px 1fr auto;
+        row-gap: 5px;
+        padding: 9px 10px;
     }
-    .dash-card[data-card="syncs"] .sync-history-cards {
-        max-height: 260px;
-    }
-    /* Narrow card: smaller thumb, tighter padding, and the pct/bar block
-       shrinks so the name + chips keep the room. Chips already wrap. */
-    .dash-card[data-card="syncs"] .sync-history-card {
-        padding: 10px 10px;
-        gap: 8px;
-    }
-    .dash-card[data-card="syncs"] .sync-card-thumb,
-    .dash-card[data-card="syncs"] .sync-card-thumb img {
-        width: 38px;
-        height: 38px;
-    }
-    .dash-card[data-card="syncs"] .sync-card-stats {
-        max-width: 84px;
-    }
-    .dash-card[data-card="syncs"] .sync-card-chip {
-        font-size: 10px;
-        padding: 2px 5px;
+    .syncband-art {
+        width: 40px;
+        height: 40px;
     }
     .dash-card {
         padding: 16px 16px;

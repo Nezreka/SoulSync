@@ -29,6 +29,7 @@ export interface AutoSyncSeamPlaylist {
   id: number | string;
   name?: string;
   custom_name?: string;
+  image_url?: string | null;
   /** The server's single source of truth for what to show (web_server.py
    *  get_mirrored_playlists_endpoint: alias if set, else upstream name). */
   display_name?: string;
@@ -188,6 +189,8 @@ export interface AutoSyncCardRow {
   sourceKey: string;
   source: string;
   logo: string | null;
+  /** The mirrored playlist's own cover art, when the source supplied one. */
+  imageUrl: string | null;
   cadence: string;
   enabled: boolean;
   nextRun: string | null;
@@ -269,6 +272,7 @@ export function autoSyncCardRows(state: AutoSyncSeamState, nowMs: number): AutoS
       sourceKey,
       source: playlist ? sourceLabel(sourceKey) : '',
       logo: AUTOSYNC_SOURCE_LOGOS[sourceKey] || null,
+      imageUrl: playlist?.image_url || null,
       cadence,
       enabled,
       nextRun: nextRunText(nextRun, nowMs),
