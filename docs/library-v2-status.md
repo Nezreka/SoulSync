@@ -3594,3 +3594,93 @@ leben; sie fallen mit deren Scannern. `soulid` 17 (eigene Runde), dann
 `imports/side_effects` 12, `library/missing_track_import` 12,
 `listening_stats_worker` 11 (blockiert), `worker_utils` 9 (die Legacy-Helfer, die
 nur noch soulid und repair_worker benutzen).
+
+#### 50.4.4.9 Der Repair-Worker liest die Legacy-Tabellen nicht mehr
+
+Stand: **394/98**. `core/repair_worker.py` fällt von 17/25 auf **0/6** — rund
+tausend Zeilen weg. Die Übergabe hatte das anders vorhergesagt („die
+`_fix_*`-Legacy-Zweige leben für `lossy_converter`, `missing_lyrics`,
+`short_preview_track`, `audio_corruption_detector" weiter"). Gemessen stimmte
+das nicht: **jeder** Repair-Job mit Katalog-Subjekt gibt `lib2:<id>` aus, auch
+diese vier. Damit war keiner der zwölf Legacy-Zweige mehr von einem Scan aus
+erreichbar, den der Code noch erzeugen kann.
+
+**Was an einer bloßen Ratschen-Zahl vorbeigeht.** Zwei Versionen desselben Fixes
+driften, und die tote merkt niemand — dieselbe Diagnose wie bei den
+Scan-Projektionen (§50.4.4.8), nur eine Ebene weiter. Hier hat das Driften schon
+stattgefunden:
+
+- **Die #1132-Ambiguitätssperre lag nur im Legacy-Zweig.** Ein Fingerprint, der
+  gleich gut auf mehrere Aufnahmen passt, hat keine einzige richtige Antwort;
+  `acoustid_title` ist dann ein willkürlicher Griff. Genau deshalb verweigert
+  #1132 Retag und Relocate. Der native Pfad — der einzige, den eine echte
+  Meldung nimmt — hatte diese Prüfung nie und schrieb den willkürlichen Griff in
+  die Tags der Datei. Der Test dazu war grün: er lief mit `entity_id='99'`, also
+  gegen den Zweig, den es gar nicht mehr gibt. Die Sperre steht jetzt vor der
+  Subjekt-Verzweigung, weil sie von der Subjektart nicht abhängt.
+- **Blasphemy Mode zeigte auf die gelöschte FLAC.** `lossy_converter` mit
+  `delete_original` schrieb `WHERE id = ?` mit der Entity-Id der Meldung — die
+  für jede Meldung, die dieser Job erzeugen kann, `lib2:<n>` lautet. Das traf
+  keine Zeile und meldete nichts; der Katalog zeigte weiter auf die Datei, die
+  gerade entfernt worden war.
+- **Der Ordner-Scan-Rename fasste den Katalog nicht an.** Die
+  Pfad-Fallback-Hälfte von `track_number_repair` (Meldungen ohne Katalog-Subjekt)
+  aktualisierte `tracks` über den alten Pfad statt `lib2_track_files`. Nach dem
+  Rename existiert dieser Pfad nirgends mehr — und `path_drift_reconcile` sucht
+  die Datei über genau ihn, kann es also nicht heilen. Beide Stellen laufen jetzt
+  über `_record_renamed_file`.
+
+**Eine fehlende Entity-Id ist kein veraltetes Subjekt.** Der Ordner-Scan meldet
+Dateien, die der Katalog nicht kennt; sein Fix ist der Tag-Schreibvorgang. Die
+Sperre greift nur bei *vorhandener*, nicht-`lib2:`-Id — das ist die eine
+Unterscheidung, an der ein zu grober Wächter die halbe Job-Funktion still
+abgeschaltet hätte.
+
+**Was mit einer alten Meldung passiert.** Eine vor der Umstellung persistierte,
+nie angewandte Meldung mit bare-Id kann noch im Bestand liegen. Sie wird
+abgelehnt (`stale_subject`), und `_prune_stale_legacy_findings` räumt die
+pending-Hälfte beim Start ab — sonst stünde sie mit einem Knopf da, der nicht
+funktionieren kann. Der nächste Scan hebt dasselbe Problem gegen das richtige
+Subjekt. Resolved/dismissed bleibt, wie beim Prune der stillgelegten Jobs.
+
+**Sechs Schreibstellen bleiben, alle derselbe Fall:** `tracks.file_path` und
+`tracks.track_number`. Diese Spalten spiegelt `legacy_mirror` nicht (er wacht
+über Enrichment), also müsste eine Verschiebung sonst beim Legacy-Blick
+verschwinden. Sie fallen mit den Lesern (Stufe 3). Ein Test pinnt das
+semantisch statt als Zahl: kein `DELETE`, kein `INSERT`, keine andere Spalte.
+
+**Vierzehn rote Tests, die nicht von dieser Runde stammen — und die Gabel, die
+sie verdeckten.** Ein voller Suite-Lauf zeigte sie: `test_metadata_gap_filler`
+(2), `test_missing_cover_art` (11), `test_track_repair_canonical` (1). Alle seit
+§50.4.4.8 rot, unbemerkt, weil jene Runde nur library2+repair+repair_jobs+imports
+lief. Der Kern ist derselbe wie überall in diesem Kapitel: die Fixtures legten
+das Legacy-Schema an, das die nativen Scans nicht mehr lesen — ein Test gegen
+einen Scan, der nichts durchlaufen hat.
+
+Beim Nachziehen kamen zwei Dinge heraus, die keine Fixture-Frage sind:
+
+- **`missing_cover_art` hatte die Gabel noch.** `_try_source`, `_find_artist_art`,
+  `_result_matches`, `_extract_artwork_url` und die drei Namensvergleich-Helfer —
+  138 Zeilen Provider-Schleife, deren einziger Aufrufer der ersetzte Legacy-Scan
+  war. Der native Scan fragt `fetch_artwork_url`. Gelöscht; das Modul fällt von
+  330 auf 159 Zeilen. Die Semantik, die dabei nicht verschwindet: Reihenfolge und
+  Suchergebnis-Prüfung liegen in `provider_adapters`/`art_lookup` und sind dort
+  getestet, die Platten-Entscheidung (DB-Bild, eingebettet, cover.jpg) bleibt die
+  des Jobs und wird jetzt gegen den nativen Scan geprüft.
+- **Ein lokaler Import machte ein Modul untestbar.** `metadata_gap_filler.scan`
+  importierte `get_client_for_source`/`get_primary_source`/`get_source_priority`
+  **noch einmal innerhalb der Funktion**, obwohl das Modul sie oben schon hat. Der
+  lokale Import überschattete die Modulnamen und machte sie unersetzbar — der
+  Test ging an seinem Fake vorbei und rief den echten Deezer-Client. Weg.
+
+Ein Verhaltensunterschied ist dabei benannt statt weggetestet worden: Legacy
+schwieg bei einem Album mit Bildern auf der Platte, aber leerem DB-Thumb (der
+Thumb galt als Cache). Nativ ist ein leeres `lib2_albums.image_url` eine eigene
+Lücke — das Raster zeichnet genau dieses Feld, das Album bleibt dort leer.
+`details.db_missing` sagt, welche der drei Lücken es ist.
+
+**Rest, nach Größe:** `database/music_database.py` 179/49 und `web_server.py`
+79/15 — die Lesestellen-Phase, jetzt unstrittig der ganze verbleibende Block.
+Dann `soulid` 13/4 (eigene Runde, §50.4.4.7), `imports/side_effects` 5/7,
+`library/missing_track_import` 8/4, `listening_stats_worker` 10/1 (blockiert),
+`worker_utils` 7/2.
