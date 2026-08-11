@@ -105,7 +105,7 @@ describe('libraryCardView — the five states', () => {
     expect(view.cardClass).toBe('library-status-card has-data');
     expect(view.title).toBe('Plex Library');
     expect(view.subtitle).toBe('Last refreshed 5m ago');
-    expect(view.scanLabel).toBe('Refresh');
+    expect(view.scanLabel).toBe('Quick Scan');
     expect(view.deepVisible).toBe(true);
     expect(view.stats).toEqual({
       artists: (1200).toLocaleString(),

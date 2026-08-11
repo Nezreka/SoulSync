@@ -67045,16 +67045,34 @@ body.max-performance .dash-card::after {
     min-width: 300px;
 }
 .dash-card[data-card="library"] .library-status-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: rgba(168, 85, 247, 0.12);
-    border: 1px solid rgba(168, 85, 247, 0.25);
-    color: rgba(168, 85, 247, 0.9);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    display: none;
+}
+.dash-card[data-card="library"] .library-status-title::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 8px;
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.25);
+}
+.dash-card[data-card="library"] .has-data .library-status-title::before {
+    background: #34d399;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.45);
+}
+.dash-card[data-card="library"] .scanning .library-status-title::before {
+    background: rgb(var(--accent-light-rgb));
+    animation: dashLibDotPulse 1.2s ease-in-out infinite;
+}
+.dash-card[data-card="library"] .needs-setup .library-status-title::before {
+    background: #fbbf24;
+}
+.dash-card[data-card="library"] .empty-library .library-status-title::before {
+    background: rgba(255, 255, 255, 0.35);
+}
+@keyframes dashLibDotPulse {
+    50% { opacity: 0.35; }
 }
 .dash-card[data-card="library"] .library-status-info {
     flex: 1;
@@ -67077,38 +67095,47 @@ body.max-performance .dash-card::after {
     gap: 6px;
 }
 .dash-card[data-card="library"] .library-status-btn {
-    padding: 6px 10px;
+    padding: 6px 12px;
     font-size: 11.5px;
+    font-weight: 500;
     border-radius: 7px;
     white-space: nowrap;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.72);
+}
+.dash-card[data-card="library"] .library-status-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    transform: none;
+}
+.dash-card[data-card="library"] .library-status-btn.scanning {
+    background: rgba(239, 68, 68, 0.10);
+    border-color: rgba(239, 68, 68, 0.30);
+    color: #f87171;
 }
 .dash-card[data-card="library"] .library-status-stats {
     display: flex;
     flex: 1 1 auto;
     flex-wrap: wrap;
     justify-content: space-evenly;
-    gap: 10px 28px;
+    gap: 10px 0;
     padding: 0;
 }
 .dash-card[data-card="library"] .library-status-stat {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0;
+    padding: 2px 28px;
     background: none;
     border: none;
     border-radius: 0;
 }
+.dash-card[data-card="library"] .library-status-stat + .library-status-stat {
+    border-left: 1px solid rgba(255, 255, 255, 0.07);
+}
 .dash-card[data-card="library"] .library-status-stat-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
-    background: rgba(168, 85, 247, 0.10);
-    color: rgba(168, 85, 247, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    display: none;
 }
 .dash-card[data-card="library"] .library-status-stat-text {
     display: flex;
@@ -67116,18 +67143,19 @@ body.max-performance .dash-card::after {
     min-width: 0;
 }
 .dash-card[data-card="library"] .library-status-stat-value {
-    font-size: 16px;
+    font-size: 19px;
     font-weight: 700;
+    letter-spacing: -0.01em;
     color: #fff;
-    line-height: 1.1;
+    line-height: 1.15;
     font-variant-numeric: tabular-nums;
 }
 .dash-card[data-card="library"] .library-status-stat-label {
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.42);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-top: 2px;
+    letter-spacing: 0.08em;
+    margin-top: 3px;
 }
 /* Scan progress and the setup/status messages break out of the strip row
    onto their own full-width line. */
@@ -68102,9 +68130,9 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="stats"] .stat-card-subtitle {
         font-size: 10px;
     }
-    /* Library stats: 4 across stays in wider 2-col cell */
-    .dash-card[data-card="library"] .library-status-stats {
-        grid-template-columns: repeat(4, 1fr);
+    /* Library strip: tighter metric spacing in the narrower cell */
+    .dash-card[data-card="library"] .library-status-stat {
+        padding: 2px 18px;
     }
     /* Enrichment full spans both cols — 10 tiles single row still fits */
     .dash-card[data-card="enrichment"] .rate-monitor-grid {
@@ -68205,7 +68233,15 @@ body.max-performance .dash-card::after {
         gap: 8px;
     }
     .dash-card[data-card="library"] .library-status-stats {
+        display: grid;
         grid-template-columns: repeat(2, 1fr);
+        gap: 10px 12px;
+    }
+    .dash-card[data-card="library"] .library-status-stat {
+        padding: 0;
+    }
+    .dash-card[data-card="library"] .library-status-stat + .library-status-stat {
+        border-left: none;
     }
     .dash-card[data-card="library"] .library-status-header {
         flex-wrap: wrap;

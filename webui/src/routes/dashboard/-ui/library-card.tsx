@@ -252,7 +252,7 @@ const CHECKING: LibraryCardView = {
   subtitle: 'Checking status...',
   scanVisible: false,
   scanScanning: false,
-  scanLabel: 'Refresh',
+  scanLabel: 'Quick Scan',
   deepVisible: false,
   statsVisible: false,
   stats: null,
