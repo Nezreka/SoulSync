@@ -3297,6 +3297,40 @@ nachzutragen. Gemessen an Nezrekas Anforderung („i don't want to lose any
 enrichment functionality or data") gehört das vor die Legacy-Löschung, nicht
 danach.
 
+#### 50.4.4.4 Stufe 2 hat begonnen — Reihenfolge und Stand (11. August 2026)
+
+Nutzerentscheidung: `enrichment`-Spalten für Albums/Tracks **ja** (erledigt,
+`eb69f18fb`), Profil-Skopierung von `api/library.py` **parkiert**, dann **alle
+Worker und Tools** auf lib2, **danach alle Lesestellen**.
+
+Der Umbau der 16 Worker hatte eine Voraussetzung, die vorher niemand benannt
+hatte: **ein Worker enriched nicht „alles", er wählt einen Batch** — und diese
+Wahl trifft Legacy über zwei Spalten je Provider,
+`<service>_match_status` und `<service>_last_attempted`. Ein Worker, der lib2
+liest, konnte „noch nie versucht" nicht von „am Dienstag versucht, Provider
+kennt ihn nicht" unterscheiden. Er hätte jeden Provider in jedem Zyklus erneut
+nach jeder Entität gefragt.
+
+`core/library2/provider_attempts.py` (`20f43a337`) schließt das: ein Ledger je
+`(entity_type, entity_id, service)` statt Spaltenpaare je Tabelle — dieselbe
+Begründung wie für lib2 selbst, denn im Legacy-Schema kostete Bandcamp drei
+`ALTER TABLE`, und die 26 Buchhaltungsspalten auf `artists` sind der Hauptgrund,
+warum diese Tabelle 63 Spalten hat. Am echten Bestand nachgewiesen: **1.053
+Versuchszeilen** aus Legacy übernommen, danach bietet `due_entities` die von
+Legacy bereits gematchten Entitäten nicht mehr an.
+
+Bewusst **nicht** im Spiegel: `*_last_attempted` wird bei jedem Provider-Aufruf
+geschrieben; würde der Trigger darauf feuern, stünde bei jedem Enrichment-Zyklus
+die ganze Bibliothek in der Queue. Die Altdaten werden einmalig gesät, im
+Leerlauf-Tick des Drainers statt auf dem Startpfad (iss32-M03).
+
+**Was damit noch vor den 16 Workern liegt:** jeder Worker braucht zusätzlich
+einen lib2-Batch-Selektor an der Stelle seiner heutigen Legacy-`SELECT`s und
+einen Schreibpfad über `MIRROR_SPECS`-Ziele statt Legacy-Spalten. Das sind 334
+Legacy-Statements in 16 Dateien — mechanisch, aber Stück für Stück und je Worker
+mit eigenem Test. Die Ratsche (647/239) ist dabei das Maß: sie fällt erst, wenn
+das SQL wirklich verschwindet, nicht wenn nur der Aufrufer wechselt.
+
 #### 50.4.5 PR-Hygiene, aus dem eigenen Kommentar vom 5. August
 
 - Die `docs/`-Notizen sollten laut eigenem PR-Kommentar gar nicht in diesem PR
