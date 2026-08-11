@@ -44,7 +44,7 @@ upgrade candidate) stays a live decision of the acquisition path
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -98,7 +98,10 @@ def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
 
 
 def recompute_wanted(conn: Any, *, profile_id: int = 1,
-                     track_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+                     track_ids: Optional[List[int]] = None,
+                     batch_size: int = 0,
+                     on_batch: Optional[Callable[[int, int], None]] = None,
+                     ) -> Dict[str, Any]:
     """Recompute the projection — fully, or scoped to ``track_ids``.
 
     Upserts one row per (profile, track); full runs also prune rows of
@@ -110,10 +113,21 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
     whose wanted/reason/profile/version didn't change, so use ``written``
     (== ``len(changed_track_ids)``) to gauge real write volume. Does not
     commit.
+
+    iss32-M05 — a full recompute used to ``fetchall()`` the join over every
+    track and then run one upsert per row, all inside the caller's single
+    transaction. At 307,885 tracks that is a multi-minute write lock and a
+    result set to match. Pass ``batch_size`` to walk the tracks by keyset
+    instead; ``on_batch(done, total)`` then runs after each chunk so the
+    caller can commit, checkpoint the WAL and report progress. The function
+    still never commits by itself — whether a batch becomes durable is the
+    caller's decision, because only the caller knows if it owns the
+    transaction.
     """
     stats = {"projected": 0, "wanted": 0, "pruned": 0, "flag_mismatches": 0}
     changed_track_ids: List[int] = []
     scope_sql, scope_args = "", []
+    batched = bool(batch_size) and track_ids is None
     if track_ids is not None:
         if not track_ids:
             return stats
@@ -125,6 +139,8 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
             "DELETE FROM lib2_wanted_tracks WHERE profile_id=? AND track_id "
             "NOT IN (SELECT id FROM lib2_tracks)", (int(profile_id),))
         stats["pruned"] = cur.rowcount
+        if batched:
+            scope_sql = " WHERE t.id > ? ORDER BY t.id LIMIT ?"
 
     # The effective-profile cascade columns (track/album/artist) are joined
     # in here so the projection resolves each track's profile from this one
@@ -135,7 +151,7 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
     # primary_artist_id falls through to the default profile rather than
     # crashing the whole projection (the old per-track resolver used an inner
     # join and would raise LookupError on such a row).
-    rows = conn.execute(
+    projection_sql = (
         f"""SELECT t.id AS track_id, t.monitored AS flag,
                    t.quality_profile_id AS trk_prof,
                    COALESCE(t.quality_profile_explicit, 0) AS trk_prof_expl,
@@ -160,9 +176,7 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
               LEFT JOIN lib2_monitor_rules aa
                      ON aa.entity_type='artist'
                     AND aa.entity_id=al.primary_artist_id
-                    AND aa.profile_id=?{scope_sql}""",
-        (int(profile_id), int(profile_id), int(profile_id), *scope_args),
-    ).fetchall()
+                    AND aa.profile_id=?{scope_sql}""")
 
     from core.library2.profile_lookup import (
         default_quality_profile_id,
@@ -170,54 +184,74 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
     )
     default_profile_id = default_quality_profile_id(conn)
 
-    for r in rows:
-        wanted, reason = _decide(r["trk_mon"], r["trk_prov"],
-                                 r["alb_mon"], r["alb_prov"],
-                                 r["art_mon"], r["art_prov"])
-        # Same Track > Album > Artist > Global cascade the per-entity
-        # effective_quality_profile uses (shared resolve_profile_cascade).
-        effective_profile_id = resolve_profile_cascade(
-            (
-                ("track", r["track_id"], r["trk_prof"], r["trk_prof_expl"]),
-                ("album", r["album_id"], r["alb_prof"], r["alb_prof_expl"]),
-                ("artist", r["artist_id"], r["art_prof"], r["art_prof_expl"]),
-            ),
-            default_profile_id,
-        )["id"]
-        # The WHERE on the upsert skips the write (and its updated_at bump)
-        # when nothing changed — a full hourly recompute otherwise re-writes
-        # every unchanged row, churning indexes for no reason (review Teil B).
-        cur = conn.execute(
-            """INSERT INTO lib2_wanted_tracks(
-                   profile_id, track_id, wanted, reason,
-                   effective_profile_id, projection_version)
-               VALUES(?,?,?,?,?,?)
-               ON CONFLICT(profile_id, track_id) DO UPDATE SET
-                   wanted=excluded.wanted,
-                   reason=excluded.reason,
-                   effective_profile_id=excluded.effective_profile_id,
-                   projection_version=excluded.projection_version,
-                   updated_at=CURRENT_TIMESTAMP
-               WHERE lib2_wanted_tracks.wanted IS NOT excluded.wanted
-                  OR lib2_wanted_tracks.reason IS NOT excluded.reason
-                  OR lib2_wanted_tracks.effective_profile_id
-                     IS NOT excluded.effective_profile_id
-                  OR lib2_wanted_tracks.projection_version
-                     IS NOT excluded.projection_version""",
-            (int(profile_id), r["track_id"], 1 if wanted else 0, reason,
-             effective_profile_id, PROJECTION_VERSION))
-        # rowcount is 0 when the upsert's WHERE found nothing to change (a
-        # genuine no-op row) — callers (e.g. the wishlist reconcile) use this
-        # to re-mirror a track whose wanted/profile state just changed even
-        # when it's already wishlisted, without re-touching every unchanged
-        # row (review Teil B's original efficiency goal).
-        if cur.rowcount:
-            changed_track_ids.append(int(r["track_id"]))
-        stats["projected"] += 1
-        if wanted:
-            stats["wanted"] += 1
-        if wanted != bool(r["flag"]):
-            stats["flag_mismatches"] += 1
+    def _project(rows: Any) -> None:
+        for r in rows:
+            wanted, reason = _decide(r["trk_mon"], r["trk_prov"],
+                                     r["alb_mon"], r["alb_prov"],
+                                     r["art_mon"], r["art_prov"])
+            # Same Track > Album > Artist > Global cascade the per-entity
+            # effective_quality_profile uses (shared resolve_profile_cascade).
+            effective_profile_id = resolve_profile_cascade(
+                (
+                    ("track", r["track_id"], r["trk_prof"], r["trk_prof_expl"]),
+                    ("album", r["album_id"], r["alb_prof"], r["alb_prof_expl"]),
+                    ("artist", r["artist_id"], r["art_prof"], r["art_prof_expl"]),
+                ),
+                default_profile_id,
+            )["id"]
+            # The WHERE on the upsert skips the write (and its updated_at bump)
+            # when nothing changed — a full hourly recompute otherwise re-writes
+            # every unchanged row, churning indexes for no reason (review Teil B).
+            cur = conn.execute(
+                """INSERT INTO lib2_wanted_tracks(
+                       profile_id, track_id, wanted, reason,
+                       effective_profile_id, projection_version)
+                   VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(profile_id, track_id) DO UPDATE SET
+                       wanted=excluded.wanted,
+                       reason=excluded.reason,
+                       effective_profile_id=excluded.effective_profile_id,
+                       projection_version=excluded.projection_version,
+                       updated_at=CURRENT_TIMESTAMP
+                   WHERE lib2_wanted_tracks.wanted IS NOT excluded.wanted
+                      OR lib2_wanted_tracks.reason IS NOT excluded.reason
+                      OR lib2_wanted_tracks.effective_profile_id
+                         IS NOT excluded.effective_profile_id
+                      OR lib2_wanted_tracks.projection_version
+                         IS NOT excluded.projection_version""",
+                (int(profile_id), r["track_id"], 1 if wanted else 0, reason,
+                 effective_profile_id, PROJECTION_VERSION))
+            # rowcount is 0 when the upsert's WHERE found nothing to change (a
+            # genuine no-op row) — callers (e.g. the wishlist reconcile) use this
+            # to re-mirror a track whose wanted/profile state just changed even
+            # when it's already wishlisted, without re-touching every unchanged
+            # row (review Teil B's original efficiency goal).
+            if cur.rowcount:
+                changed_track_ids.append(int(r["track_id"]))
+            stats["projected"] += 1
+            if wanted:
+                stats["wanted"] += 1
+            if wanted != bool(r["flag"]):
+                stats["flag_mismatches"] += 1
+
+    base_args = (int(profile_id), int(profile_id), int(profile_id))
+    if batched:
+        total = int(conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0])
+        after_id = 0
+        while True:
+            rows = conn.execute(
+                projection_sql, (*base_args, after_id, int(batch_size))).fetchall()
+            if not rows:
+                break
+            # The scope clause orders by t.id, so the last row is the high
+            # watermark this chunk consumed.
+            after_id = int(rows[-1]["track_id"])
+            _project(rows)
+            if on_batch is not None:
+                on_batch(stats["projected"], total)
+    else:
+        _project(conn.execute(projection_sql, (*base_args, *scope_args)).fetchall())
+
     if stats["flag_mismatches"]:
         logger.info("Wanted projection: %d of %d tracks diverge from their "
                     "monitored flag (profile %s)", stats["flag_mismatches"],
@@ -338,10 +372,20 @@ def wanted_projection_status(conn: Any, *, profile_id: int = 1) -> Dict[str, Any
     return values
 
 
-def ensure_wanted_projection(cursor: Any) -> None:
-    """Schema-ensure hook: create the table; rebuild the projection when it
-    is empty-but-should-not-be or was built by an older priority version.
-    Otherwise just prune rows of deleted tracks (cheap)."""
+def ensure_wanted_projection(cursor: Any, *, batch_size: int = 0,
+                             on_batch: Optional[Callable[[int, int], None]] = None,
+                             ) -> Optional[Dict[str, Any]]:
+    """Convergence hook: rebuild the projection when it is
+    empty-but-should-not-be or was built by an older priority version.
+    Otherwise just prune rows of deleted tracks (cheap).
+
+    iss32-M03: the rebuild branch is the expensive one and the one that fires
+    on exactly the install that can least afford it — an interrupted migration
+    leaves ``lib2_wanted_tracks`` empty while ``lib2_tracks`` is full, so the
+    next start recomputes the entire library. ``batch_size``/``on_batch`` hand
+    that cost to the background runner. The table DDL now lives in
+    :func:`ensure_wanted_schema`, which the schema step still calls directly.
+    """
     ensure_wanted_schema(cursor)
     row = cursor.execute(
         "SELECT COUNT(*), COALESCE(MIN(projection_version), 0) "
@@ -350,12 +394,13 @@ def ensure_wanted_projection(cursor: Any) -> None:
     tracks_exist = cursor.execute(
         "SELECT 1 FROM lib2_tracks LIMIT 1").fetchone() is not None
     if tracks_exist and (have_rows == 0 or min_version < PROJECTION_VERSION):
-        stats = recompute_wanted(cursor)
+        stats = recompute_wanted(cursor, batch_size=batch_size, on_batch=on_batch)
         logger.info("Wanted projection rebuilt: %s", stats)
-    else:
-        cursor.execute(
-            "DELETE FROM lib2_wanted_tracks WHERE track_id NOT IN "
-            "(SELECT id FROM lib2_tracks)")
+        return stats
+    cursor.execute(
+        "DELETE FROM lib2_wanted_tracks WHERE track_id NOT IN "
+        "(SELECT id FROM lib2_tracks)")
+    return None
 
 
 __all__ = [

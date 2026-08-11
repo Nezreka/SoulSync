@@ -22,6 +22,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'acoustid_scanner': 'lib2',
     'missing_cover_art': 'lib2',
     'missing_lyrics': 'lib2',
+    'mbid_mismatch_detector': 'lib2',
+    'native_enrichment_sweep': 'lib2',
     'replaygain_filler': 'lib2',
     'empty_folder_cleaner': 'filesystem',
     'metadata_gap_filler': 'lib2',
@@ -70,6 +72,12 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'acoustid_scanner': frozenset({'observe', 'tags', 'metadata'}),
     'missing_cover_art': frozenset({'observe', 'metadata', 'tags', 'artwork'}),
     'missing_lyrics': frozenset({'observe', 'tags'}),
+    # Reads embedded MusicBrainz ids and, on fix, strips or rewrites the
+    # tag. Never moves, deletes or re-indexes a file.
+    'mbid_mismatch_detector': frozenset({'observe', 'tags'}),
+    # Writes provider ids, artwork and descriptive columns onto lib2
+    # rows. Touches no file and changes nothing about what is wanted.
+    'native_enrichment_sweep': frozenset({'metadata', 'artwork'}),
     'replaygain_filler': frozenset({'observe', 'tags'}),
     'empty_folder_cleaner': frozenset({'none'}),
     'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
@@ -115,7 +123,6 @@ RETIRED_JOB_IDS = frozenset({
     # job_id, it never calls create_finding). Pruning this one on every worker
     # start silently deletes pending admin-review findings with no
     # replacement — see docs/library-overhaul-branch-review-2026-07-19.md A2.
-    'mbid_mismatch_detector',
     'single_album_dedup',
     'unknown_artist_fixer',
     'canonical_version_resolve',
@@ -198,6 +205,8 @@ _JOB_MODULES = [
     'core.repair_jobs.dead_file_cleaner',
     'core.repair_jobs.acoustid_scanner',
     'core.repair_jobs.missing_cover_art',
+    'core.repair_jobs.mbid_mismatch_detector',
+    'core.repair_jobs.native_enrichment_sweep',
     'core.repair_jobs.missing_lyrics',
     'core.repair_jobs.replaygain_filler',
     'core.repair_jobs.empty_folder_cleaner',

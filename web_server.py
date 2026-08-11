@@ -9901,16 +9901,44 @@ def get_library_artists():
         # Get database instance
         database = get_database()
 
-        # Get artists from database
-        result = database.get_library_artists(
-            search_query=search_query,
-            letter=letter,
-            page=page,
-            limit=limit,
-            watchlist_filter=watchlist_filter,
-            profile_id=get_current_profile_id(),
-            source_filter=source_filter
-        )
+        # iss32-E03: read the Library-v2 catalogue, not the legacy tables.
+        # Enrichment and metadata edits land in lib2_*, so serving this from
+        # `artists` meant the API contradicted the UI. The response shape and
+        # the legacy `id` are preserved — see
+        # core.library2.queries.legacy_api_artists_page for why the id must
+        # stay legacy. Falls back to the legacy reader if the v2 catalogue is
+        # not populated yet (a fresh install before the bootstrap ran).
+        result = None
+        try:
+            from core.library2.queries import legacy_api_artists_page
+            conn = database._get_connection()
+            try:
+                if conn.execute("SELECT 1 FROM lib2_artists LIMIT 1").fetchone():
+                    result = legacy_api_artists_page(
+                        conn,
+                        search_query=search_query,
+                        letter=letter,
+                        page=page,
+                        limit=limit,
+                        watchlist_filter=watchlist_filter,
+                        source_filter=source_filter,
+                    )
+            finally:
+                conn.close()
+        except Exception as _lib2_read_err:
+            logger.warning(
+                f"library artists: v2 read failed, falling back to legacy: {_lib2_read_err}")
+
+        if result is None:
+            result = database.get_library_artists(
+                search_query=search_query,
+                letter=letter,
+                page=page,
+                limit=limit,
+                watchlist_filter=watchlist_filter,
+                profile_id=get_current_profile_id(),
+                source_filter=source_filter
+            )
 
         # Fix image URLs for all artists
         for artist in result['artists']:
@@ -14510,6 +14538,16 @@ def library_enrich_entity():
                 results[service] = {"success": False, "error": str(e)}
         finally:
             lock.release()
+
+        # iss32-E01: the worker wrote the legacy row; carry it into lib2 NOW
+        # rather than at the next drain tick, because the user is looking at
+        # the result. The trigger has already queued it — this only applies
+        # that one entity early, so a failure here costs nothing.
+        try:
+            from core.library2.legacy_mirror import drain as _mirror_drain
+            _mirror_drain(get_database(), entity_type=entity_type, legacy_id=entity_id)
+        except Exception as _mirror_err:
+            logger.debug(f"immediate lib2 mirror after enrich skipped: {_mirror_err}")
 
         # Re-fetch updated data to return fresh state
         database = get_database()
@@ -32739,6 +32777,25 @@ def _autostart_popularity_backfill():
         _t.sleep(3600)  # re-check hourly; new artists fill within the hour
 
 
+def _enrichment_workers():
+    """Every background metadata worker, whatever exists at call time.
+
+    Deliberately resolved on each call rather than captured once: the workers
+    are constructed at different points during startup and some are
+    conditional on configuration, so a list built too early would silently
+    miss whoever was not ready yet (iss32-M02).
+    """
+    return [
+        w for w in (
+            mb_worker, audiodb_worker, discogs_worker, deezer_worker,
+            jiosaavn_worker, amazon_worker, similar_artists_worker,
+            spotify_enrichment_worker, itunes_enrichment_worker, lastfm_worker,
+            genius_worker, bandcamp_worker, tidal_enrichment_worker,
+            qobuz_enrichment_worker, soulid_worker, listening_stats_worker,
+        ) if w is not None
+    ]
+
+
 def _autostart_library_v2_bootstrap_import():
     """Migrate an upgrading installation into `lib2_*` on its own.
 
@@ -32777,6 +32834,20 @@ def _autostart_library_v2_bootstrap_import():
         )
     except Exception as e:
         logger.debug(f"lib2 bootstrap claim reclaim skipped: {e}")
+
+    # iss32-M03: the whole-library convergence passes that used to run inside
+    # `_initialize_database`'s single transaction, on the startup path. Here
+    # they are in a daemon thread, commit per batch and checkpoint the WAL, so
+    # the server is already serving while they run. On a converged install
+    # this is a handful of indexed seeks that find nothing.
+    #
+    # They run BEFORE the import loop on purpose: an interrupted migration
+    # leaves exactly the unconverged state these passes exist for, and the
+    # import's own finalize then finds its work already done.
+    try:
+        lib2_bootstrap.run_deferred_backfills(get_database())
+    except Exception as e:
+        logger.warning(f"Library v2 convergence pass failed (retries next start): {e}")
 
     # iss29-A06: the backoff must describe how long we have been waiting for
     # something to happen, not how many times we have looked.
@@ -43372,6 +43443,29 @@ def start_runtime_services():
                              name='Lib2BootstrapImportAutostart').start()
         except Exception as _lib2_bootstrap_err:
             logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
+
+        # iss32-M02: give the migration SQLite's single writer for its
+        # duration. Without this the enrichment workers and the automation
+        # engine spend the whole import colliding with it — both sides lose.
+        try:
+            from core.library2.migration_gate import MigrationPauseSupervisor
+            library_v2_migration_gate = MigrationPauseSupervisor(
+                get_database(),
+                _enrichment_workers,
+                automation_engine,
+            ).start()
+        except Exception as _lib2_gate_err:
+            logger.debug(f"could not start lib2 migration pause supervisor: {_lib2_gate_err}")
+
+        # iss32-E01: carry enrichment the twelve metadata workers write into
+        # the legacy rows over into lib2_*. Transitional bridge — see
+        # core/library2/legacy_mirror.py for why it is a trigger and not a
+        # call, and docs §32.3.1 for when it goes away.
+        try:
+            from core.library2.legacy_mirror import MirrorDrainer
+            library_v2_mirror_drainer = MirrorDrainer(get_database()).start()
+        except Exception as _lib2_mirror_err:
+            logger.debug(f"could not start lib2 legacy mirror drainer: {_lib2_mirror_err}")
 
         # Name the holder when SQLite's single write lock gets stuck. Without
         # this the log only ever shows victims ("database is locked" from

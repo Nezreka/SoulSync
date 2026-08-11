@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import unicodedata
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
 
@@ -137,7 +137,19 @@ _INDEXES = (
     # A lib2 track appears at most once per edition.
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_lib2_release_tracks_track "
     "ON lib2_release_tracks(release_edition_id, track_id) WHERE track_id IS NOT NULL",
+    # iss32-M05: the unique index above leads with release_edition_id, so it
+    # cannot answer "is this track materialized anywhere?" — the predicate the
+    # backfill runs once per track and the prune runs over the whole table.
+    # Without this index that is a scan of lib2_release_tracks per track; on
+    # 307k tracks it is the difference between minutes and hours.
+    "CREATE INDEX IF NOT EXISTS idx_lib2_release_tracks_track_id "
+    "ON lib2_release_tracks(track_id)",
 )
+
+# iss32-M05: how many source rows one commit covers. Small enough that the
+# write lock is never held for long, large enough that the per-commit fsync
+# does not dominate. 500 tracks is roughly a quarter second of work.
+BACKFILL_BATCH_SIZE = 500
 
 
 def ensure_editions_schema(cursor: Any) -> None:
@@ -265,8 +277,25 @@ def _find_recording_by_hard_ids(cursor: Any, isrc: Optional[str],
                           ("spotify_id", spotify_id)):
         if not value:
             continue
+        # iss32-M08: the `AND {column} IS NOT NULL AND {column} <> ''` is not
+        # redundant — it is what makes the PARTIAL unique index usable.
+        #
+        # `idx_lib2_recordings_isrc` is declared `WHERE isrc IS NOT NULL AND
+        # isrc <> ''`. SQLite may only use a partial index when the query's
+        # WHERE provably implies the index's WHERE, and `isrc = ?` with a bound
+        # parameter proves nothing at planning time. Without these conjuncts
+        # the plan is `SCAN lib2_recordings` — a full table scan, three times
+        # per track, against a table that grows to one row per track.
+        #
+        # Measured on a 307,885-track catalogue: 200 probes took 755 ms as a
+        # scan and 3.1 ms through the index. That single line is the
+        # difference between a migration that takes hours and one that takes
+        # minutes, and it is why Nezreka's run looked hung — it was not stuck,
+        # it was quadratic.
         row = cursor.execute(
-            f"SELECT id FROM lib2_recordings WHERE {column}=?", (value,)).fetchone()
+            f"SELECT id FROM lib2_recordings "
+            f"WHERE {column}=? AND {column} IS NOT NULL AND {column} <> ''",
+            (value,)).fetchone()
         if row:
             return int(row[0])
     return None
@@ -278,11 +307,14 @@ def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
     partial unique indexes can never be violated."""
     if not value:
         return
+    # Same partial-index rule as _find_recording_by_hard_ids: without the two
+    # extra conjuncts the collision check is a full scan of lib2_recordings.
     cursor.execute(
         f"""UPDATE lib2_recordings SET {column}=?, updated_at=CURRENT_TIMESTAMP
              WHERE id=? AND ({column} IS NULL OR {column}='')
                AND NOT EXISTS (SELECT 1 FROM lib2_recordings o
-                                WHERE o.{column}=? AND o.id<>?)""",
+                                WHERE o.{column}=? AND o.{column} IS NOT NULL
+                                  AND o.{column} <> '' AND o.id<>?)""",
         (value, int(recording_id), value, int(recording_id)))
 
 
@@ -408,46 +440,120 @@ def prune_orphaned_edition_rows(cursor: Any) -> int:
     return pruned
 
 
-def backfill_editions(cursor: Any) -> Dict[str, int]:
+def backfill_editions(cursor: Any, *, connection: Any = None,
+                      batch_size: int = BACKFILL_BATCH_SIZE,
+                      progress: Optional[Callable[[str, int, int], None]] = None,
+                      on_batch: Optional[Callable[[], None]] = None,
+                      should_stop: Optional[Callable[[], bool]] = None,
+                      ) -> Dict[str, int]:
     """Converge the additive edition/recording model. Idempotent.
 
     Creates the default edition for every album that has none, one
     recording + release track for every track not yet materialized, files
     review findings for unverified canonical links and prunes shadow rows of
-    deleted tracks. Runs from the schema-ensure step AND after imports.
+    deleted tracks.
+
+    iss32-M05 — this used to ``fetchall()`` every unmaterialized album and
+    track and write them all inside the caller's single transaction. On
+    Nezreka's 69,296 albums / 307,885 tracks that held SQLite's only write
+    lock for nine minutes: every enrichment worker, the automation engine and
+    the config save saw ``database is locked``, and the run reported no
+    progress at all because the next checkpoint only comes after the step.
+
+    It now walks both sources by keyset in ``batch_size`` chunks. Pass
+    ``connection`` to get a real ``COMMIT`` after every batch — that is what
+    turns the nine-minute lock into a sequence of short ones and gives
+    :mod:`core.library2.wal` a window to checkpoint in. Without it the
+    behaviour is the old one (single transaction, caller commits), which is
+    what the importer's own finalize and the test suite rely on.
+
+    ``progress(stage, done, total)`` is called once per batch, ``on_batch()``
+    after each commit (the WAL checkpoint hook), and ``should_stop()`` is
+    polled between batches so a shutdown does not have to wait out a full
+    library. Stopping early is safe: the predicate is "not yet materialized",
+    so the next run continues where this one left off.
     """
     stats = {"editions": 0, "release_tracks": 0, "review_findings": 0, "pruned": 0}
+
+    def _commit() -> None:
+        if connection is not None:
+            connection.commit()
+            if on_batch is not None:
+                on_batch()
+
+    def _stopped() -> bool:
+        return bool(should_stop and should_stop())
+
+    def _report(stage: str, done: int, total: int) -> None:
+        if progress is not None:
+            progress(stage, done, total)
+
     stats["pruned"] = prune_orphaned_edition_rows(cursor)
+    _commit()
 
-    albums = cursor.execute(
-        """SELECT al.id, al.title, al.spotify_id, al.musicbrainz_id,
-                  al.release_date, al.track_count, al.expected_track_count
-             FROM lib2_albums al
+    # --- Albums: one default edition each -----------------------------------
+    album_total = int(cursor.execute(
+        """SELECT COUNT(*) FROM lib2_albums al
             WHERE NOT EXISTS (SELECT 1 FROM lib2_release_editions e
-                               WHERE e.release_group_id = al.id)""").fetchall()
-    for album_row in albums:
-        _ensure_default_edition(cursor, album_row)
-        stats["editions"] += 1
+                               WHERE e.release_group_id = al.id)""").fetchone()[0])
+    _report("editions", 0, album_total)
+    after_id = 0
+    while not _stopped():
+        albums = cursor.execute(
+            """SELECT al.id, al.title, al.spotify_id, al.musicbrainz_id,
+                      al.release_date, al.track_count, al.expected_track_count
+                 FROM lib2_albums al
+                WHERE al.id > ?
+                  AND NOT EXISTS (SELECT 1 FROM lib2_release_editions e
+                                   WHERE e.release_group_id = al.id)
+                ORDER BY al.id LIMIT ?""", (after_id, batch_size)).fetchall()
+        if not albums:
+            break
+        for album_row in albums:
+            _ensure_default_edition(cursor, album_row)
+            stats["editions"] += 1
+            after_id = int(album_row["id"])
+        _commit()
+        _report("editions", stats["editions"], album_total)
 
-    tracks = cursor.execute(
-        """SELECT t.id, t.album_id, t.title, t.duration, t.isrc,
-                  t.musicbrainz_id, t.spotify_id, t.disc_number, t.track_number
-             FROM lib2_tracks t
+    # --- Tracks: one recording + release track each -------------------------
+    track_total = int(cursor.execute(
+        """SELECT COUNT(*) FROM lib2_tracks t
             WHERE NOT EXISTS (SELECT 1 FROM lib2_release_tracks rt
-                               WHERE rt.track_id = t.id)
-            ORDER BY t.id""").fetchall()
+                               WHERE rt.track_id = t.id)""").fetchone()[0])
+    _report("release_tracks", 0, track_total)
     edition_cache: Dict[int, Optional[int]] = {}
-    for track_row in tracks:
-        album_id = track_row["album_id"]
-        if album_id not in edition_cache:
-            edition_cache[album_id] = default_edition_id(cursor, album_id)
-        edition_id = edition_cache[album_id]
-        if edition_id is None:
-            continue
-        if ensure_release_track(cursor, track_row, edition_id):
-            stats["release_tracks"] += 1
+    seen = 0
+    after_id = 0
+    while not _stopped():
+        tracks = cursor.execute(
+            """SELECT t.id, t.album_id, t.title, t.duration, t.isrc,
+                      t.musicbrainz_id, t.spotify_id, t.disc_number, t.track_number
+                 FROM lib2_tracks t
+                WHERE t.id > ?
+                  AND NOT EXISTS (SELECT 1 FROM lib2_release_tracks rt
+                                   WHERE rt.track_id = t.id)
+                ORDER BY t.id LIMIT ?""", (after_id, batch_size)).fetchall()
+        if not tracks:
+            break
+        for track_row in tracks:
+            # Keyset advances even for tracks we skip below — an album without
+            # a default edition must not make the walk stand still forever.
+            after_id = int(track_row["id"])
+            seen += 1
+            album_id = track_row["album_id"]
+            if album_id not in edition_cache:
+                edition_cache[album_id] = default_edition_id(cursor, album_id)
+            edition_id = edition_cache[album_id]
+            if edition_id is None:
+                continue
+            if ensure_release_track(cursor, track_row, edition_id):
+                stats["release_tracks"] += 1
+        _commit()
+        _report("release_tracks", seen, track_total)
 
     stats["review_findings"] = _review_unverified_canonical_links(cursor)
+    _commit()
     if any(stats.values()):
         logger.info("Edition/recording backfill: %s", stats)
     return stats

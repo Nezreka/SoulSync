@@ -63,6 +63,91 @@ _HEARTBEAT_THROTTLE_SECONDS = 5
 # iss29-A08: comfortably inside STALE_AFTER_SECONDS, so several beats have to be
 # missed in a row before anything considers the run dead.
 KEEPALIVE_INTERVAL_SECONDS = 60
+# iss32-M01: how often the migration says where it is, in the log, regardless
+# of how chatty the current stage happens to be. Nezreka asked for "every 30s
+# or maybe faster"; 30 s is often enough to tell a working run from a hung one
+# and rare enough not to drown the log over a multi-hour migration.
+PROGRESS_LOG_INTERVAL_SECONDS = 30
+
+
+class _ProgressTicker:
+    """Log the migration's position on a timer, not on callback cadence.
+
+    iss32-M01: progress used to reach only the claim row, for the UI. The log
+    got ``starting``, ``resuming`` and ``completed`` and nothing in between, so
+    a run that stopped moving looked exactly like a run that was working —
+    which is precisely what happened on Nezreka's library: nine minutes of
+    silence at "5/7 · 71%" with no way to tell the difference.
+
+    Two properties matter and neither is free:
+
+    - the timer fires **independently of the stage**, so a stage that reports
+      no progress for minutes still produces a log line. A ticker driven by
+      the progress callback would go quiet in exactly the situation it exists
+      for.
+    - a tick whose counter has not moved since the last one says so. "no
+      progress in 4m 30s" is the sentence someone reading the log actually
+      needs; repeating the same numbers without comment is not.
+    """
+
+    def __init__(self, label: str,
+                 interval: float = PROGRESS_LOG_INTERVAL_SECONDS) -> None:
+        self._label = label
+        # Floor only guards against a caller passing 0 and spinning; the real
+        # cadence is PROGRESS_LOG_INTERVAL_SECONDS.
+        self._interval = max(float(interval), 0.01)
+        self._lock = threading.Lock()
+        self._state: Optional[tuple] = None       # (stage, current, total)
+        self._changed_at = time.monotonic()
+        self._started_at = time.monotonic()
+        self._last_logged: Optional[tuple] = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="Lib2BootstrapProgressLog", daemon=True)
+
+    def start(self) -> "_ProgressTicker":
+        self._thread.start()
+        return self
+
+    def update(self, stage: Any, current: Any, total: Any) -> None:
+        state = (str(stage or "?"), int(current or 0), int(total or 0))
+        with self._lock:
+            if state != self._state:
+                self._state = state
+                self._changed_at = time.monotonic()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+    @staticmethod
+    def _duration(seconds: float) -> str:
+        seconds = int(seconds)
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m {seconds % 60:02d}s"
+        return f"{seconds // 3600}h {(seconds % 3600) // 60:02d}m"
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            with self._lock:
+                state, changed_at = self._state, self._changed_at
+                last_logged = self._last_logged
+                self._last_logged = state
+            if state is None:
+                continue
+            stage, current, total = state
+            elapsed = self._duration(time.monotonic() - self._started_at)
+            position = f"{current:,}/{total:,}" if total else f"{current:,}"
+            percent = f" ({current * 100 // total}%)" if total else ""
+            if state == last_logged:
+                stalled = self._duration(time.monotonic() - changed_at)
+                logger.info("%s: %s %s%s — no progress in %s (%s elapsed)",
+                            self._label, stage, position, percent, stalled, elapsed)
+            else:
+                logger.info("%s: %s %s%s — %s elapsed",
+                            self._label, stage, position, percent, elapsed)
 
 LIB2_BOOTSTRAP_STATE_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_bootstrap_state (
@@ -549,6 +634,96 @@ def mark_waiting_for_source(database: Any, owner_token: str, *, watermark: str) 
         conn.close()
 
 
+def _checkpoint_wal(database: Any) -> None:
+    """Fold the WAL back into the main database on a fresh connection."""
+    from core.library2.wal import checkpoint_wal
+
+    try:
+        conn = database._get_connection()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("wal checkpoint could not open a connection: %s", exc)
+        return
+    try:
+        pages = checkpoint_wal(conn)
+        if pages:
+            logger.info("Library v2 migration checkpointed %d WAL pages", pages)
+    finally:
+        conn.close()
+
+
+def bootstrap_is_active(database: Any, *,
+                        stale_after_seconds: int = STALE_AFTER_SECONDS) -> bool:
+    """Whether a bootstrap run is genuinely alive right now.
+
+    iss32-M02: this is the persisted signal the worker pause hangs on. It is
+    deliberately the claim row and not an in-memory flag — a process that dies
+    mid-migration must not leave the enrichment workers paused forever. A dead
+    run stops beating, its claim goes stale, and this returns False on its own
+    without anyone having to clean up.
+    """
+    try:
+        state = get_state(database)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("bootstrap activity check failed: %s", exc)
+        return False
+    if state.get("status") != "running":
+        return False
+    beat = state.get("heartbeat_at")
+    if not beat:
+        return False
+    try:
+        beat_at = datetime.fromisoformat(str(beat))
+    except ValueError:
+        return False
+    if beat_at.tzinfo is None:
+        beat_at = beat_at.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - beat_at).total_seconds()
+    return age <= stale_after_seconds
+
+
+def run_deferred_backfills(database: Any, *,
+                           should_stop: Optional[Callable[[], bool]] = None,
+                           batch_size: int = 500) -> Dict[str, Any]:
+    """Run the whole-library convergence passes off the startup path.
+
+    iss32-M03: these are the five passes ``ensure_library_v2_schema`` used to
+    do inline, inside ``_initialize_database``'s single transaction. Here they
+    get their own connection, commit per batch, checkpoint the WAL as they go
+    and log their position — none of which is possible from inside a schema
+    step whose caller owns the transaction.
+
+    Cheap and silent on a converged install: every pass is scoped by "not
+    converged yet", so the whole function is a handful of indexed seeks that
+    find nothing.
+    """
+    from core.library2.migration_gate import migration_activity
+    from core.library2.schema import run_library_v2_backfills
+    from core.library2.wal import PeriodicCheckpointer
+
+    ticker = _ProgressTicker("Library v2 convergence").start()
+    conn = database._get_connection()
+    # iss32-M02: on an interrupted migration these passes write as much as the
+    # import itself, so the enrichment workers have to stand aside for them
+    # too — and they hold no claim the persisted signal could see.
+    try:
+        with migration_activity():
+            checkpointer = PeriodicCheckpointer(conn)
+            stats = run_library_v2_backfills(
+                conn, commit=True, batch_size=batch_size,
+                progress=ticker.update,
+                on_batch=checkpointer.batch_committed,
+                should_stop=should_stop,
+            )
+            conn.commit()
+    finally:
+        ticker.stop()
+        conn.close()
+    if any(stats.values()):
+        logger.info("Library v2 convergence complete: %s", stats)
+    _checkpoint_wal(database)
+    return stats
+
+
 def should_stop_autostart(result: Dict[str, Any]) -> bool:
     """Whether the periodic autostart caller may retire for good.
 
@@ -614,8 +789,13 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     else:
         logger.info("Library v2 bootstrap import starting")
     last_beat = {"t": 0.0}
+    # iss32-M01: the log ticker sees EVERY progress call, including the ones
+    # the heartbeat throttle below drops — throttling exists to spare the
+    # database a write, not to keep the operator in the dark.
+    ticker = _ProgressTicker("Library v2 bootstrap import").start()
 
     def _progress(stage, current, total, *, connection=None, rowid=None, run_id=None):
+        ticker.update(stage, current, total)
         now = time.monotonic()
         # iss29-A02: a beat carrying a rowid is the ONLY kind `heartbeat`
         # persists as a resume checkpoint, and those are exactly the stage
@@ -659,6 +839,13 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 logger.warning("Library v2 post-import precache failed: %s", exc)
     finally:
         keepalive.stop()
+        ticker.stop()
+        # iss32-M04: the import committed in batches all the way through, so
+        # by here the WAL holds everything it wrote and nothing is folded back
+        # until some later checkpoint happens to run. Truncating it now is the
+        # difference between the next start reading a 135 MB WAL and a fresh
+        # one. Best-effort by contract; a reader holding the WAL just defers it.
+        _checkpoint_wal(database)
 
     # iss29-A04: stamp the watermark the walks actually saw, not the one the
     # source has now. The three walks are keyset scans taken at three different
@@ -681,9 +868,12 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
 
 
 __all__ = [
+    "PROGRESS_LOG_INTERVAL_SECONDS",
+    "bootstrap_is_active",
     "ensure_bootstrap_schema",
     "get_state",
     "reclaim_abandoned_claim",
+    "run_deferred_backfills",
     "resume_point_for",
     "should_stop_autostart",
     "try_claim",

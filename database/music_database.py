@@ -185,7 +185,15 @@ class MusicDatabase:
         self._initialize_database_once()
 
     def _warn_about_stale_sqlite_sidecars(self):
-        """Warn if SQLite sidecars are present and the database looks unhealthy."""
+        """Warn if SQLite sidecars are present and the database looks unhealthy.
+
+        iss32-M07: the check below is ``PRAGMA quick_check``, which reads every
+        page of the database. Sidecars exist after any unclean stop, so on a
+        9 GB library this ran on the startup path, before the first log line,
+        for as long as it takes to read 9 GB. Its result is only ever logged —
+        nothing branches on it — so it belongs in a background thread. The
+        thread is a daemon: a diagnostic must never hold up shutdown either.
+        """
         db_key = str(self.database_path.resolve())
         with _database_initialization_lock:
             if db_key in _database_sidecar_warnings:
@@ -197,38 +205,45 @@ class MusicDatabase:
         existing = [p.name for p in (wal_path, shm_path) if p.exists()]
 
         if existing:
-            check_result = None
-            try:
-                conn = sqlite3.connect(f"file:{self.database_path}?mode=ro", uri=True, timeout=5.0)
-                try:
-                    row = conn.execute("PRAGMA quick_check").fetchone()
-                    check_result = row[0] if row else None
-                finally:
-                    conn.close()
-            except Exception as e:
-                logger.warning(
-                    "SQLite sidecar files detected for %s: %s, and database health check could not be run (%s). "
-                    "This usually means the previous shutdown was not clean.",
-                    self.database_path,
-                    ", ".join(existing),
-                    e,
-                )
-                return
+            threading.Thread(
+                target=self._run_sidecar_health_check, args=(existing,),
+                name="SqliteSidecarHealthCheck", daemon=True,
+            ).start()
 
-            if check_result != "ok":
-                logger.warning(
-                    "SQLite sidecar files detected for %s: %s, and quick_check returned %r. "
-                    "This usually means the previous shutdown was not clean.",
-                    self.database_path,
-                    ", ".join(existing),
-                    check_result,
-                )
-            else:
-                logger.debug(
-                    "SQLite sidecar files present for %s (%s) but quick_check returned ok.",
-                    self.database_path,
-                    ", ".join(existing),
-                )
+    def _run_sidecar_health_check(self, existing):
+        """The read-only integrity probe behind _warn_about_stale_sqlite_sidecars."""
+        check_result = None
+        try:
+            conn = sqlite3.connect(f"file:{self.database_path}?mode=ro", uri=True, timeout=5.0)
+            try:
+                row = conn.execute("PRAGMA quick_check").fetchone()
+                check_result = row[0] if row else None
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(
+                "SQLite sidecar files detected for %s: %s, and database health check could not be run (%s). "
+                "This usually means the previous shutdown was not clean.",
+                self.database_path,
+                ", ".join(existing),
+                e,
+            )
+            return
+
+        if check_result != "ok":
+            logger.warning(
+                "SQLite sidecar files detected for %s: %s, and quick_check returned %r. "
+                "This usually means the previous shutdown was not clean.",
+                self.database_path,
+                ", ".join(existing),
+                check_result,
+            )
+        else:
+            logger.debug(
+                "SQLite sidecar files present for %s (%s) but quick_check returned ok.",
+                self.database_path,
+                ", ".join(existing),
+            )
 
     def _initialize_database_once(self):
         """Run schema setup and migrations once per database path per process."""
@@ -1216,7 +1231,15 @@ class MusicDatabase:
             # additive — only creates lib2_* tables, never touches legacy tables.
             try:
                 from core.library2.schema import ensure_library_v2_schema
-                ensure_library_v2_schema(conn)
+                # iss32-M03: DDL only. The five whole-library backfills that
+                # used to run here are unbounded on an interrupted migration,
+                # and everything in this method shares ONE transaction that
+                # commits at the very end — so they held the write lock (and,
+                # via _database_initialization_lock, every thread wanting a DB
+                # handle) for the entire duration. They now run in the
+                # background via core.library2.schema.run_library_v2_backfills,
+                # driven from _autostart_library_v2_bootstrap_import.
+                ensure_library_v2_schema(conn, run_backfills=False)
                 self._record_migration(cursor, 'library_v2_schema')
             except Exception as lib2_err:
                 logger.error(f"Library v2 schema init failed: {lib2_err}")

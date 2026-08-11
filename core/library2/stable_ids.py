@@ -91,35 +91,74 @@ def ensure_track_stable_id(conn, track_id: int) -> Optional[str]:
     return stable_id
 
 
-def backfill_stable_ids(cursor) -> int:
+def backfill_stable_ids(cursor, *, connection=None, batch_size: int = 500,
+                        progress=None, on_batch=None, should_stop=None) -> int:
     """Mint stable_ids for every lib2 album/track that lacks one.
 
-    Called from the schema-ensure step so existing installs converge once;
-    afterwards rows are filled lazily on first use. Returns how many rows
-    were filled."""
+    Called from :func:`core.library2.schema.run_library_v2_backfills` so
+    existing installs converge once; afterwards rows are filled lazily on
+    first use. Returns how many rows were filled.
+
+    iss32-M05: both passes used to ``fetchall()`` the whole outstanding set and
+    then run one UPDATE per row inside the caller's transaction — 307,885
+    updates in one lock on a freshly imported large library. They now walk by
+    keyset in ``batch_size`` chunks; passing ``connection`` commits each chunk.
+    Without ``connection`` the behaviour is the old one, which is what the
+    importer's finalize (already inside its own batch discipline) uses.
+    """
     filled = 0
+
+    def _commit() -> None:
+        if connection is not None:
+            connection.commit()
+            if on_batch is not None:
+                on_batch()
+
+    def _stopped() -> bool:
+        return bool(should_stop and should_stop())
+
     # Positional access — works for plain tuples and sqlite3.Row alike.
-    albums = cursor.execute(
-        """SELECT al.id, ar.name, al.title, al.album_type
-             FROM lib2_albums al
-             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            WHERE al.stable_id IS NULL""").fetchall()
-    for album_id, artist_name, title, album_type in albums:
-        cursor.execute(
-            "UPDATE lib2_albums SET stable_id=? WHERE id=? AND stable_id IS NULL",
-            (compute_album_stable_id(artist_name, title, album_type), album_id))
-        filled += cursor.rowcount
-    tracks = cursor.execute(
-        """SELECT t.id, al.stable_id, t.title, t.disc_number, t.track_number
-             FROM lib2_tracks t
-             JOIN lib2_albums al ON al.id = t.album_id
-            WHERE t.stable_id IS NULL""").fetchall()
-    for track_id, album_sid, title, disc_number, track_number in tracks:
-        cursor.execute(
-            "UPDATE lib2_tracks SET stable_id=? WHERE id=? AND stable_id IS NULL",
-            (compute_track_stable_id(album_sid or "", title,
-                                     disc_number, track_number), track_id))
-        filled += cursor.rowcount
+    after_id = 0
+    while not _stopped():
+        albums = cursor.execute(
+            """SELECT al.id, ar.name, al.title, al.album_type
+                 FROM lib2_albums al
+                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE al.stable_id IS NULL AND al.id > ?
+                ORDER BY al.id LIMIT ?""", (after_id, batch_size)).fetchall()
+        if not albums:
+            break
+        for album_id, artist_name, title, album_type in albums:
+            cursor.execute(
+                "UPDATE lib2_albums SET stable_id=? WHERE id=? AND stable_id IS NULL",
+                (compute_album_stable_id(artist_name, title, album_type), album_id))
+            filled += cursor.rowcount
+            after_id = int(album_id)
+        _commit()
+        if progress is not None:
+            progress("stable_ids", filled, 0)
+
+    after_id = 0
+    while not _stopped():
+        tracks = cursor.execute(
+            """SELECT t.id, al.stable_id, t.title, t.disc_number, t.track_number
+                 FROM lib2_tracks t
+                 JOIN lib2_albums al ON al.id = t.album_id
+                WHERE t.stable_id IS NULL AND t.id > ?
+                ORDER BY t.id LIMIT ?""", (after_id, batch_size)).fetchall()
+        if not tracks:
+            break
+        for track_id, album_sid, title, disc_number, track_number in tracks:
+            cursor.execute(
+                "UPDATE lib2_tracks SET stable_id=? WHERE id=? AND stable_id IS NULL",
+                (compute_track_stable_id(album_sid or "", title,
+                                         disc_number, track_number), track_id))
+            filled += cursor.rowcount
+            after_id = int(track_id)
+        _commit()
+        if progress is not None:
+            progress("stable_ids", filled, 0)
+
     if filled:
         logger.info("Backfilled %d Library-v2 stable_ids", filled)
     return filled

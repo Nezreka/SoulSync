@@ -3000,37 +3000,130 @@ regress."
 
 | ID | Kurzfassung | Status |
 |---|---|---|
-| iss32-M01 | Zeitgesteuertes Fortschrittslog für den Bootstrap-Import | **Offen** — Lücke im Code bestätigt |
-| iss32-M02 | Enrichment-Worker/Automation Engine während der Migration pausieren | **Offen** — Symptom aus dem Log, Ursache nicht verifiziert |
-| iss32-M03 | Migration von der Startup-Reihenfolge entkoppeln | **Offen, aber Prämisse teilweise widerlegt** — der Autostart läuft bereits im Daemon-Thread; das Symptom des zweiten Starts ist unerklärt und zuerst zu diagnostizieren |
-| iss32-M04 | WAL-Checkpoint während der Migration | **Offen** — `wal_checkpoint` existiert nirgends im Repo |
-| iss32-E01 | `resync_entity_from_legacy` verdrahten | **Offen** — Nezrekas Vermutung im Code bestätigt, keine Aufrufstelle außerhalb der Tests |
-| iss32-E02 | Native Artists erreichen nur `native_enrich` statt aller zwölf Worker | **Offen** — deckt sich mit dem bereits bekannten Native-Artist-Enrich-Dead-End |
-| iss32-E03 | `/api/library/artists` liest weiterhin Legacy | **Offen** — im Code bestätigt (`web_server.py:9889`) |
-| iss32-T01 | Sind `lib2_artists`/`lib2_albums`/`lib2_tracks` Endzustand oder Übergang? | **Offen — Antwort, kein Code** |
-| iss32-S01 | `mbid_mismatch_detector` nicht in `PRESERVED_RETIRED_FINDING_IDS` | **Offen — Entscheidung mit Begründung** |
+| iss32-M01 | Zeitgesteuertes Fortschrittslog für den Bootstrap-Import | **Erledigt** — `_ProgressTicker`, alle 30 s, inkl. „no progress in …“ |
+| iss32-M02 | Enrichment-Worker/Automation Engine während der Migration pausieren | **Erledigt** — `MigrationPauseSupervisor` + `pause_for_migration` in der Automation Engine |
+| iss32-M03 | Migration von der Startup-Reihenfolge entkoppeln | **Erledigt** — `run_backfills=False` im Init, Konvergenz im Daemon-Thread |
+| iss32-M04 | WAL-Checkpoint während der Migration | **Erledigt** — `core/library2/wal.py`, alle 20 Batches + Abschluss-Checkpoint |
+| iss32-M05 | `backfill_editions`/`recompute_wanted` ohne Zwischen-Commit | **Erledigt** — Keyset-Batches mit Commit in editions/stable_ids/wanted, auch im Importer-Finalize |
+| iss32-M06 | Schema-Init ist eine einzige Transaktion + Python-weiter Init-Lock | **Teilweise** — die unbegrenzte Arbeit ist raus; die Init-Transaktion bleibt bewusst eine |
+| iss32-M07 | `PRAGMA quick_check` über die ganze DB bei jedem Start mit Sidecars | **Erledigt** — `quick_check` im Daemon-Thread |
+| iss32-M08 | Partieller Index unbenutzbar → `backfill_editions` quadratisch | **Erledigt** — Index-Prädikat in der Abfrage mitgeschrieben; 128 Zeilen/s und fallend → flach ~9.000 Zeilen/s |
+| iss32-E01 | `resync_entity_from_legacy` verdrahten | **Erledigt** — Trigger + Dirty-Queue + Drainer; Bios und Provider-IDs ergänzt |
+| iss32-E02 | Native Artists erreichen nur `native_enrich` statt aller zwölf Worker | **Erledigt, mit benannter Restlücke** — nativer Sweep-Job + `enrichment_depth`; Provider-Bios rein nativer Artists erst in Stufe 2 |
+| iss32-E03 | `/api/library/artists` liest weiterhin Legacy | **Erledigt** — liest lib2, Antwortform und ID-Vertrag erhalten |
+| iss32-T01 | Sind `lib2_artists`/`lib2_albums`/`lib2_tracks` Endzustand oder Übergang? | **Entschieden 10. August 2026** — Tabellen sind Endzustand, Doppelung nicht. Alle Worker und alle Tools werden auf lib2 umgeschrieben, Legacy verschwindet. Stufenplan in [issues §32.3.1](library-v2-issues.md); Produzenten-Umbau (Stufe 2) bewusst in einem eigenen PR |
+| iss32-S01 | `mbid_mismatch_detector` nicht in `PRESERVED_RETIRED_FINDING_IDS` | **Erledigt** — als nativer V2-Job zurückgeholt, beide Fix-Handler wieder da |
 
-### 50.2 Empfohlene Reihenfolge für den nächsten Chat
+### 50.1a Umsetzungsstand Block 1 (Migration) — 10./11. August 2026
 
-1. **iss32-M03 zuerst diagnostizieren, nicht fixen.** Der zweite Start, der
-   nicht über die DB-Init hinauskam, ist der einzige Befund, dessen Ursache
-   noch völlig offen ist. Er kann M01/M02/M04 miterklären — oder ein eigener
-   Fehler sein. Alles andere in 32.1 auf Verdacht zu ändern, bevor das geklärt
-   ist, riskiert einen Fix am falschen Ort.
-2. **iss32-M01 und iss32-M04.** Beide sind klein, unabhängig und im Code
-   bestätigt. M01 ist zusätzlich Voraussetzung dafür, jeden weiteren Lauf
-   überhaupt beurteilen zu können — ohne Fortschrittslog ist der nächste Test
-   wieder blind.
-3. **iss32-M02**, danach ein Migrationslauf gegen eine Kopie einer möglichst
-   großen DB. Die eigene Test-DB reicht dafür nachweislich nicht; die
-   Größenordnung des Fehlerbildes hängt an Nezrekas Skala.
-4. **iss32-T01 beantworten, bevor iss32-E02 umgesetzt wird.** Die beiden hängen
-   zusammen: der billige E02-Fix (Legacy-Row für native Artists anlegen) macht
-   Legacy zum Pflichtdurchgang und widerspricht der Zielrichtung „Legacy weg
-   oder read-only".
-5. **iss32-E01**, dann **iss32-E03**, dann **iss32-E02** entlang der in T01
-   getroffenen Entscheidung.
-6. **iss32-S01** zum Schluss — eine Zeile plus Begründung.
+| ID | Umsetzung | Ort |
+|---|---|---|
+| iss32-M03 | `ensure_library_v2_schema(connection, run_backfills=False)`; die fünf Voll-Backfills wandern nach `run_library_v2_backfills` und werden aus `_autostart_library_v2_bootstrap_import` heraus im Daemon-Thread gefahren | `core/library2/schema.py`, `database/music_database.py:1219`, `web_server.py` |
+| iss32-M05 | `backfill_editions`, `backfill_stable_ids` und `recompute_wanted` laufen als Keyset-Walks in Batches mit Commit je Batch; die Finalize-Schritte des Importers reichen Connection + Progress durch | `core/library2/editions.py`, `stable_ids.py`, `wanted.py`, `importer.py:1571 ff.` |
+| iss32-M01 | `_ProgressTicker` — Logausgabe alle 30 s unabhängig von der Callback-Frequenz, mit „no progress in …" wenn der Zähler steht; Finalize meldet Sub-Stages (`finalizing:editions`) statt nur „5/7" | `core/library2/bootstrap.py` |
+| iss32-M04 | `checkpoint_wal` / `PeriodicCheckpointer`, alle 20 Batches `PRAGMA wal_checkpoint(TRUNCATE)`, plus ein Abschluss-Checkpoint nach dem Lauf | `core/library2/wal.py` |
+| iss32-M02 | `MigrationPauseSupervisor` pausiert die 16 Worker und die Automation Engine, solange die Claim-Row lebt oder eine In-Process-Konvergenz läuft; setzt nur fort, was er selbst pausiert hat | `core/library2/migration_gate.py`, `core/automation_engine.py` |
+| iss32-M07 | `PRAGMA quick_check` läuft in `_run_sidecar_health_check` in einem Daemon-Thread statt auf dem Startpfad | `database/music_database.py:187 ff.` |
+| iss32-M08 | Die Prädikate des partiellen Index werden in der Abfrage mitgeschrieben, damit SQLite ihn überhaupt verwenden darf | `core/library2/editions.py:275/288` |
+| iss32-M06 | Teilweise: die unbegrenzte Arbeit ist aus der Init-Transaktion draußen. Die Transaktion selbst bleibt eine — bewusst, siehe Korrekturvertrag | — |
+
+**Nachgemessener Zusatzbefund:** Batch-Commits allein reichen nicht. Bei 20.000
+Tracks wartete ein konkurrierender Writer trotz Commit je Batch weiterhin die
+volle Laufzeit, weil die Schleife den Lock innerhalb von Mikrosekunden wieder
+nimmt und SQLites Busy-Handler auf 100-ms-Polling zurückfällt. `PeriodicCheckpointer`
+pausiert deshalb nach jedem Commit um einen gedeckelten Bruchteil der
+Batch-Dauer (15 %, max. 50 ms).
+
+**Messung bei Nezrekas Skala** (synthetischer Katalog: 4.979 Artists / 69.296
+Alben / **307.885 Tracks**, 600-MB-DB). Der Schritt, in dem seine Migration
+stand — `backfill_editions`:
+
+| | vorher | nachher |
+|---|---:|---:|
+| Durchsatz bei 23k materialisierten Zeilen | 323 Zeilen/s | ~9.000 Zeilen/s |
+| Durchsatz bei 58k | 128 Zeilen/s, weiter fallend | ~9.000 Zeilen/s |
+| Durchsatz bei 230k | ~35 Zeilen/s (live gemessen) | ~9.000 Zeilen/s |
+| Restliche 246.185 Zeilen | hochgerechnet ~2 h | **27 s** |
+
+Der Durchsatz ist nach dem M08-Fix **flach über die gesamte Tabelle** — genau
+das war vorher nicht so, und genau deshalb sah der Lauf wie ein Hänger aus.
+
+**Sperrverhalten bei voller Skala**, mit einem konkurrierenden Writer, der tut
+was Config-Save und Worker taten (kleines UPDATE alle 50 ms, `busy_timeout`
+30 s wie in der App). Beide Seiten laufen **mit** dem M08-Fix, damit die
+Messung das Sperrverhalten isoliert und nicht nur M08 nochmal zeigt:
+
+| 307.885 Tracks / 69.296 Alben, 799-MB-DB | vorher (eine Transaktion) | nachher |
+|---|---:|---:|
+| Dauer | 36,0 s | 37,6 s |
+| WAL-Spitze | **227 MB** | **8 MB** |
+| durchgekommene Fremd-Writes | **5** | **430** |
+| mit `database is locked` gescheitert | 1 | **0** |
+| längste Wartezeit eines Fremd-Writes | **30,0 s** (= Timeout, also aufgegeben) | 1,9 s |
+
+Die 227 MB WAL und der eine Writer, der nach 30 s aufgibt, sind exakt Nezrekas
+Fehlerbild — 135 MB und weiter wachsend, „Config DB save failed after 6
+attempts". Der Preis dafür sind 1,6 s mehr Laufzeit.
+
+Messung bei 20.000 Tracks / 2.000 Alben (`scale_bench.py`, konkurrierender
+Writer mit denselben 30 s `busy_timeout` wie die App):
+
+| | vorher | nachher |
+|---|---:|---:|
+| Dauer `backfill_editions` | 19,3 s | 22,4 s |
+| WAL-Spitze | 12,5 MB | 5,8 MB |
+| durchgekommene Fremd-Writes | 2 | 25 |
+| längste Wartezeit eines Fremd-Writes | 19,2 s | 6,1 s |
+| `ensure_library_v2_schema` auf dem Startpfad | 19,4 s | 0,1 s |
+
+Regressionstests: `tests/library2/test_migration_hardening.py` (20 Tests).
+
+### 50.1b Umsetzungsstand Block 2 + 3 (Enrichment, Tabellen, Small) — 11. August 2026
+
+| ID | Umsetzung | Ort |
+|---|---|---|
+| iss32-E01 | Trigger auf `artists`/`albums`/`tracks` mit `WHEN`-Klausel auf genau den gespiegelten Spalten → `lib2_legacy_dirty` → `MirrorDrainer` (30 s) plus Sofort-Drain nach dem manuellen UI-Enrich. **Kein Worker angefasst** — erfasst alle 137 Schreibstellen. `resync_*_from_legacy` mitgewachsen: Provider-IDs (`external_ids` + die promoteten Spalten) und Provider-Bios (`enrichment`) wurden vorher **gar nicht** gespiegelt | `core/library2/legacy_mirror.py` (neu), `enrich.py`, `schema.py`, `web_server.py` |
+| iss32-E03 | `/api/library/artists` liest `legacy_api_artists_page` aus lib2. Antwortform Feld für Feld erhalten; `id` bleibt bewusst die Legacy-ID (Consumer geben sie an `navigateToArtistDetail`), `lib2_artist_id` kommt dazu. Fällt auf den Legacy-Reader zurück, solange der Katalog leer ist | `core/library2/queries.py`, `web_server.py:9889` |
+| iss32-E02 | Nativer Sweep-Job statt Legacy-Shim: `native_enrichment_sweep` läuft `enrich_native_entity_all_services` über native Artists ohne Katalog-Provider-ID, in Batches. Der native Pfad konnte das längst — es hat ihn nur nie jemand periodisch ausgelöst. Zusätzlich `enrichment_depth: full\|native` im Artist-Read, damit die UI nicht länger beide als „matched" ausgibt | `core/repair_jobs/native_enrichment_sweep.py` (neu), `queries.py` |
+| iss32-T01 | Beantwortet, siehe [issues §32.3.1](library-v2-issues.md) | Doku |
+| iss32-S01 | `mbid_mismatch_detector` zurück — **als nativer V2-Job**: Subjects aus `active_file_subjects`, Pfade über `resolve_lib2_path`, Entity-IDs `lib2:<track_id>`; beide Fix-Handler (`mbid_mismatch`, `album_mbid_mismatch`) wieder da. Die Tag-IO ist unverändert aus Nezrekas Original übernommen — sie hat nie Legacy-Tabellen angefasst | `core/repair_jobs/mbid_mismatch_detector.py`, `core/repair_worker.py`, `core/repair_jobs/__init__.py` |
+
+**Bewusst offen und benannt, nicht vergessen:** die Provider-**Bios**
+(Last.fm-Bio/Listeners/Similar, Genius-Description, Discogs-Members) stehen in
+`lib2_artists.enrichment` und werden ausschließlich von den Last.fm-, Genius-
+und Discogs-Workern geschrieben — gegen Legacy-Zeilen. Ein Artist **mit**
+Legacy-Zeile bekommt sie jetzt über den Spiegel (E01). Ein rein nativer Artist
+bekommt sie erst, wenn diese drei Worker nativ sind (Stufe 2). `enrichment_depth`
+sagt das an der Schnittstelle, statt Parität zu behaupten.
+
+Regressionstests: `tests/library2/test_legacy_mirror.py` (13 Tests — Trigger,
+Drain, Artwork/Genres/Bios/Provider-IDs, E03-Antwortform).
+
+### 50.2 Reihenfolge (aktualisiert nach der Diagnose vom 10. August, abends)
+
+M03 ist diagnostiziert — die Ursache steht in [issues §32.1.0](library-v2-issues.md).
+Damit fällt der ursprüngliche Schritt 1 weg und die Migrationsarbeit ordnet sich
+neu, entlang der Ursachenkette statt entlang der Symptomliste:
+
+1. **iss32-M03 + iss32-M05 zuerst, zusammen.** Beide sind dieselbe Ursache aus
+   zwei Richtungen: unbegrenzte Arbeit in einer offenen Transaktion. Getrennt
+   gefixt bringt jede Hälfte für sich wenig — der Startpfad bliebe blockiert
+   bzw. der Writer weiter minutenlang gehalten.
+2. **iss32-M01.** Ohne zeitgesteuertes Fortschrittslog ist jeder weitere Lauf
+   wieder blind — insbesondere der Verifikationslauf für Schritt 1.
+3. **iss32-M04.** Braucht die Commit-Fenster aus M05; vorher hat ein Checkpoint
+   nichts zu tun.
+4. **iss32-M02.** Richtig und vom Nutzer gewollt, aber nach 1–3 nicht mehr die
+   Rettung, sondern die Absicherung.
+5. **iss32-M06/M07** als Aufräumarbeiten am Startpfad.
+6. **Migrationslauf gegen eine Kopie einer möglichst großen DB.** Die eigene
+   Test-DB reicht nachweislich nicht.
+7. **iss32-T01 ist entschieden** ([issues §32.3.1](library-v2-issues.md)):
+   Endzustand lib2, alle Worker und Tools wandern, Legacy verschwindet — der
+   Produzenten-Umbau aber in einem eigenen PR. Für diesen PR bleibt Stufe 1:
+   **iss32-E01** (Spiegel) → **iss32-E03** (letzter Legacy-Leser) →
+   **iss32-E02** als Übergangslösung, deren Ablaufdatum Stufe 2 ist.
+8. **iss32-S01** zum Schluss.
 
 ### 50.3 Was dieser Review *nicht* bemängelt hat
 

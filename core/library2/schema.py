@@ -31,7 +31,7 @@ schema-init steps in ``MusicDatabase._initialize_database``.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
 
@@ -792,7 +792,7 @@ def _backfill_artist_name_keys(cursor: Any) -> int:
     return len(updates)
 
 
-def ensure_library_v2_schema(connection: Any) -> None:
+def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> None:
     """Create the Library v2 tables + indexes if missing.
 
     Idempotent. Safe to call on every app startup. The caller is responsible for
@@ -803,6 +803,19 @@ def ensure_library_v2_schema(connection: Any) -> None:
     schema is ensured here too (idempotent; normally already done by
     ``MusicDatabase._initialize_database`` — this covers standalone use such
     as the sqlite-only test harness).
+
+    ``run_backfills=False`` performs DDL only and leaves the five whole-library
+    data backfills to :func:`run_library_v2_backfills` (iss32-M03). That is what
+    the app startup passes, and it is the difference between a server that comes
+    up in seconds and one that does not come up at all: those backfills are
+    ``WHERE … IS NULL`` cheap on a converged install and unbounded on an
+    interrupted migration, and ``MusicDatabase._initialize_database`` runs this
+    whole function inside a single transaction that commits only at its very
+    end. On Nezreka's 307,885-track library that combination held SQLite's
+    write lock — and the process-wide database-init lock — for over 30 minutes
+    with no log output. DDL is left here because it is bounded, and because
+    every other path (importer, tests, sqlite-only harness) needs the tables to
+    exist the moment this returns.
     """
     cursor = connection.cursor()
     try:
@@ -854,11 +867,8 @@ def ensure_library_v2_schema(connection: Any) -> None:
             "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name_key "
             "ON lib2_artists(name_key)"
         )
-        filled = _backfill_artist_name_keys(cursor)
-        if filled:
-            logger.info("Backfilled %d Library-v2 artist name keys", filled)
     except Exception as e:  # noqa: BLE001
-        logger.error("artist name_key migration failed (will retry next start): %s", e)
+        logger.error("artist name_key index failed (will retry next start): %s", e)
     # Provider-less stable ids (audit P1-12). Index + backfill run AFTER the
     # additive column migration above so they also work on installs that
     # predate the stable_id columns.
@@ -867,21 +877,20 @@ def ensure_library_v2_schema(connection: Any) -> None:
                        "ON lib2_albums(stable_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_stable "
                        "ON lib2_tracks(stable_id)")
-        from core.library2.stable_ids import backfill_stable_ids
-        backfill_stable_ids(cursor)
     except Exception as e:  # noqa: BLE001
-        logger.error("stable_id backfill failed (will retry next start): %s", e)
+        logger.error("stable_id index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.
+    #
+    # The triggers stay here, not in the backfill: they are what keeps NEW
+    # writes correct, so they must be installed before anything can write —
+    # deferring them would leave a window in which the invariant is unpoliced.
     try:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_primary "
             "ON lib2_track_files(track_id, is_primary)")
-        from core.library2.track_files import backfill_primary_flags, install_primary_triggers
-        changed = backfill_primary_flags(cursor)
-        if changed:
-            logger.info("Primary-file backfill adjusted %d file rows", changed)
+        from core.library2.track_files import install_primary_triggers
         install_primary_triggers(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("primary-file migration failed (will retry next start): %s", e)
@@ -910,19 +919,18 @@ def ensure_library_v2_schema(connection: Any) -> None:
     # the deciding rule level recorded. Rebuilds itself when fresh or when
     # the priority version changed.
     try:
-        from core.library2.wanted import ensure_wanted_projection
-        ensure_wanted_projection(cursor)
+        from core.library2.wanted import ensure_wanted_schema
+        ensure_wanted_schema(cursor)
     except Exception as e:  # noqa: BLE001
-        logger.error("wanted-projection migration failed (will retry next start): %s", e)
+        logger.error("wanted-projection schema failed (will retry next start): %s", e)
     # Release editions + recordings (audit P1-04 / ADR-04, §14.2 Schritt 3):
     # additive shadow model — one default edition per album, one recording +
     # release track per track; recordings merge on hard IDs only.
     try:
-        from core.library2.editions import backfill_editions, ensure_editions_schema
+        from core.library2.editions import ensure_editions_schema
         ensure_editions_schema(cursor)
-        backfill_editions(cursor)
     except Exception as e:  # noqa: BLE001
-        logger.error("edition/recording migration failed (will retry next start): %s", e)
+        logger.error("edition/recording schema failed (will retry next start): %s", e)
     # Typed provider provenance (audit ADR-06): normalized payload snapshots
     # carry completeness, parser version and a stable hash. Refresh paths use
     # this contract to distinguish a complete catalog from partial pagination.
@@ -999,11 +1007,116 @@ def ensure_library_v2_schema(connection: Any) -> None:
         ensure_bootstrap_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("bootstrap-state migration failed (will retry next start): %s", e)
+    # iss32-E01 transitional bridge: legacy enrichment writes are queued by
+    # trigger and applied to lib2 by core.library2.legacy_mirror. Deleted
+    # together with the triggers once the producers write lib2 directly
+    # (docs §32.3.1 Stufe 2).
+    try:
+        from core.library2.legacy_mirror import ensure_legacy_mirror_schema
+        ensure_legacy_mirror_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("legacy-mirror migration failed (will retry next start): %s", e)
+    if run_backfills:
+        run_library_v2_backfills(connection)
     logger.debug("Library v2 schema ensured")
+
+
+def run_library_v2_backfills(connection: Any, *, commit: bool = False,
+                             batch_size: int = 500,
+                             progress: Optional[Callable[[str, int, int], None]] = None,
+                             on_batch: Optional[Callable[[], None]] = None,
+                             should_stop: Optional[Callable[[], bool]] = None,
+                             ) -> Dict[str, Any]:
+    """The five whole-library convergence passes, outside the DDL step.
+
+    iss32-M03/M05. Each pass is scoped by "not converged yet"
+    (``… IS NULL`` / ``NOT EXISTS``), so on a healthy install every one of
+    them is an indexed seek that finds nothing, and on an interrupted
+    migration they are the size of the library. That asymmetry is exactly why
+    they must not sit in ``_initialize_database``'s single transaction.
+
+    ``commit=True`` makes each pass durable as it goes — required for the
+    background runner, forbidden for the inline call from
+    :func:`ensure_library_v2_schema`, whose caller owns the transaction.
+    ``should_stop`` is polled between passes and inside the batched ones, so
+    shutdown does not wait out a large library; every pass resumes from where
+    it stopped because the scope predicate is the progress marker.
+    """
+    stats: Dict[str, Any] = {}
+    cursor = connection.cursor()
+
+    def _commit() -> None:
+        if commit:
+            connection.commit()
+            if on_batch is not None:
+                on_batch()
+
+    def _stopped() -> bool:
+        return bool(should_stop and should_stop())
+
+    def _report(stage: str, done: int, total: int) -> None:
+        if progress is not None:
+            progress(stage, done, total)
+
+    if not _stopped():
+        try:
+            filled = _backfill_artist_name_keys(cursor)
+            stats["artist_name_keys"] = filled
+            if filled:
+                logger.info("Backfilled %d Library-v2 artist name keys", filled)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("artist name_key backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.stable_ids import backfill_stable_ids
+            stats["stable_ids"] = backfill_stable_ids(
+                cursor, connection=connection if commit else None,
+                batch_size=batch_size, progress=progress, on_batch=on_batch,
+                should_stop=should_stop)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("stable_id backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.track_files import backfill_primary_flags
+            changed = backfill_primary_flags(cursor)
+            stats["primary_flags"] = changed
+            if changed:
+                logger.info("Primary-file backfill adjusted %d file rows", changed)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("primary-file backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.wanted import ensure_wanted_projection
+            stats["wanted"] = ensure_wanted_projection(
+                cursor, batch_size=batch_size if commit else 0,
+                on_batch=(lambda done, total: (_report("wanted", done, total),
+                                               _commit())) if commit else None)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("wanted-projection backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.editions import backfill_editions
+            stats["editions"] = backfill_editions(
+                cursor, connection=connection if commit else None,
+                batch_size=batch_size, progress=progress, on_batch=on_batch,
+                should_stop=should_stop)
+        except Exception as e:  # noqa: BLE001
+            logger.error("edition/recording backfill failed (will retry next start): %s", e)
+
+    return stats
 
 
 __all__ = [
     "ensure_library_v2_schema",
+    "run_library_v2_backfills",
     "LIB2_ARTISTS_DDL",
     "LIB2_ALBUMS_DDL",
     "LIB2_ALBUM_ARTISTS_DDL",

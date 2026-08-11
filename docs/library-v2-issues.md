@@ -5419,12 +5419,76 @@ Dass überhaupt noch geschrieben wurde, war ausschließlich am WAL ablesbar:
 Der Durchsatz **fällt** also, statt zu steigen; die Haupt-DB blieb konstant bei
 9.652 MB. Nach 30 Minuten Abbruch.
 
+#### 32.1.0 Gemeinsame Ursache (Nachtrag 10. August 2026, abends)
+
+Der zweite Durchgang durch den Code hat die vier Einzelbefunde auf **eine**
+Ursache zurückgeführt. Sie erklärt jedes beobachtete Symptom, einschließlich des
+bis dahin unerklärten zweiten Starts.
+
+**Befund A — der gesamte Schema-Init ist eine einzige Transaktion.**
+`MusicDatabase._initialize_database` (`database/music_database.py:277`) läuft
+über rund 960 Zeilen und hat **genau ein** `conn.commit()`, am Ende
+(`:1239`). Alles dazwischen hält den einzigen SQLite-Writer.
+
+**Befund B — in dieser Transaktion stehen fünf unbegrenzte Voll-Backfills.**
+`ensure_library_v2_schema` (aufgerufen `music_database.py:1219`) führt aus:
+
+| Aufruf | Ort | Umfang bei Nezrekas DB |
+|---|---|---|
+| `_backfill_artist_name_keys` | `schema.py:857` | alle Artists ohne `name_key` |
+| `backfill_stable_ids` | `schema.py:871` | alle Alben/Tracks ohne `stable_id`, Zeile für Zeile |
+| `backfill_primary_flags` | `schema.py:882` | vier Voll-UPDATEs über `lib2_track_files`, davon eines mit korreliertem Subselect je Track |
+| `ensure_wanted_projection` | `schema.py:914` | **vollständiges** `recompute_wanted`, sobald `lib2_wanted_tracks` leer ist und `lib2_tracks` nicht |
+| `backfill_editions` | `schema.py:923` | ein `fetchall()` über **alle** nicht materialisierten Tracks, danach 2 Inserts je Track |
+
+Diese Aufrufe sind mit `WHERE … IS NULL` idempotent und kosten auf einer
+konvergierten Installation fast nichts. Auf einer **abgebrochenen Migration**
+ist genau das Gegenteil der Fall: dort ist alles unkonvergiert.
+
+**Befund C — das erklärt den Stillstand bei „5/7 · 71 %".**
+`FINALIZE_STAGE` hat `_FINALIZE_STEPS = 7` (`importer.py:45`); 5/7 = 71 %. Der
+Schritt, der nach dem Checkpoint 5 läuft, ist `backfill_editions`
+(`importer.py:1612`) — 69.296 Alben plus 307.885 Tracks, ohne
+Zwischen-Commit und ohne einen einzigen Progress-Report. Neun Minuten
+gehaltener Schreib-Lock bei `busy_timeout = 30000` (`music_database.py:263`)
+sind exakt das, was jeder andere Writer als `database is locked` sieht — die
+zwölf Enrichment-Worker, die Automation Engine und der Config-Save („after 6
+attempts").
+
+**Befund D — das erklärt den zweiten Start.**
+Der Abbruch rollte `backfill_editions` zurück (kein Commit war erfolgt). Beim
+Neustart macht deshalb der **DB-Init selbst** dieselbe Arbeit noch einmal:
+`backfill_editions` über 307.885 Tracks *und* ein volles `recompute_wanted`
+(Schritt 7 war nie gelaufen, `lib2_wanted_tracks` also leer) — in der einen
+Init-Transaktion, auf dem Startpfad, vor jedem Log. Daraus folgt Zeile für
+Zeile, was Nezreka gemessen hat:
+
+- keine Logausgabe → die Backfills loggen erst *nach* der Schleife
+- WAL wächst → unbestätigte Writes gehen ausschließlich ins WAL
+- Haupt-DB konstant 9.652 MB → eine offene Transaktion kann nicht
+  gecheckpointet werden
+- Durchsatz fällt → jede `NOT EXISTS`-Prüfung muss den wachsenden WAL-Index
+  mitlesen
+- „never got past db init" → `_initialize_database_once`
+  (`music_database.py:185`) hält zusätzlich `_database_initialization_lock`,
+  also blockiert jeder weitere Thread, der `get_database()` ruft, schon in
+  Python
+
+**Konsequenz für M03:** Nezrekas Forderung „keep it off the startup path" ist
+**richtig** — nur nicht an der Stelle, an der der erste Prüfdurchgang gesucht
+hat. Der Bootstrap-Autostart liegt tatsächlich im Daemon-Thread; die
+migrationsäquivalente Arbeit im Schema-Ensure liegt es nicht.
+
 | ID | Diagnose | Verifikationsstand | Korrekturvertrag |
 |---|---|---|---|
 | iss32-M01 | Kein zeitgesteuertes Fortschrittslog. `_progress(stage, current, total, …)` in `core/library2/bootstrap.py:618` schreibt den Fortschritt nur in die Claim-Row (Heartbeat, für die UI). Ins Log gehen ausschließlich „starting" (Zeile 615), „resuming" (612) und „completed" (679). Ein hängender Lauf ist deshalb von einem laufenden nicht unterscheidbar. | **Im Code bestätigt** | Zeitgesteuerte `logger.info`-Ausgabe im Format `41.000/307.885` mindestens alle 30 s, unabhängig davon, wie oft die aktuelle Stage einen Progress-Callback feuert. Der Timer muss auch dann feuern, wenn eine einzelne Stage lange ohne Callback läuft — sonst wird genau der beobachtete Fall wieder nicht sichtbar. |
-| iss32-M02 | Enrichment-Worker und Automation Engine konkurrieren während der Migration um den einzigen SQLite-Writer. Ergebnis ist beidseitige Blockade statt Priorisierung. | **Nicht verifiziert**, Symptom aus dem Log | Enrichment-Worker (und die Automation Engine) für die Dauer eines aktiven Bootstrap-Laufs pausieren und danach zuverlässig wieder aufnehmen — auch wenn der Lauf abbricht oder der Prozess stirbt. Die Pause darf nicht an einen In-Memory-Flag hängen, den ein Neustart verliert. |
-| iss32-M03 | Nezrekas Forderung „keep it off the startup path so the server comes up first". Der Autostart läuft bereits in einem Daemon-Thread mit 30-s-Vorlauf (`web_server.py:43371` → `_autostart_library_v2_bootstrap_import`, `web_server.py:32742`). Der beobachtete zweite Start, der „nicht über die DB-Init hinauskam", ist damit **nicht** durch die Thread-Platzierung erklärt. | **Teilweise widerlegt** — die Forderung ist strukturell erfüllt, das Symptom bleibt unerklärt | Vor jeder Codeänderung ist zu klären, *was* beim zweiten Start blockierte: der Reclaim der verwaisten Claim-Row, ein Schema-/Migrationsschritt in `core/library2/schema.py`, oder schlicht der WAL-Rückstau aus M04. Erst danach entscheiden, ob überhaupt etwas an der Startreihenfolge zu ändern ist. Eine Änderung „auf Verdacht" wäre hier falsch. |
-| iss32-M04 | Kein WAL-Checkpoint während der Migration. `wal_checkpoint` kommt im gesamten Repository **kein einziges Mal** vor. Ein 135-MB-WAL ohne Checkpoint erklärt den fallenden Durchsatz unmittelbar: jeder Reader muss den wachsenden WAL durchlaufen. | **Im Code bestätigt** (Grep über alle `*.py`) | Periodischer `PRAGMA wal_checkpoint(TRUNCATE)` bzw. `(PASSIVE)` in sicheren Abständen während des Bootstrap-Laufs. Wichtig: ein Checkpoint braucht ein Fenster ohne offene Reader — der Checkpoint darf die Migration nicht seinerseits blockieren. |
+| iss32-M02 | Enrichment-Worker und Automation Engine konkurrieren während der Migration um den einzigen SQLite-Writer. Ergebnis ist beidseitige Blockade statt Priorisierung. Der Nutzer hat dem ausdrücklich zugestimmt: Worker zuerst stoppen, dann migrieren. **Vorarbeit vorhanden:** alle 16 Worker (`core/*_worker.py`) haben bereits `pause()`/`resume()` und prüfen `self.paused` in ihrer Schleife. Die Automation Engine (`core/automation_engine.py`) hat nur `start()`/`stop()`, dort fehlt das Gegenstück. | **Nicht verifiziert** als alleinige Ursache — der eigentliche Auslöser ist iss32-M05; die Pause bleibt trotzdem richtig und nötig | Ein zentraler Gate-Supervisor pausiert alle Enrichment-Worker und die Automation Engine, solange ein Bootstrap-Lauf aktiv ist, und nimmt sie danach wieder auf. Zustandsträger ist **nicht** ein In-Memory-Flag, sondern die vorhandene Claim-Row `lib2_bootstrap_state` (`status='running'` + frischer Heartbeat): ein abgestürzter Lauf lässt seinen Claim veralten, und die Worker laufen von selbst wieder an. Der Supervisor darf nur die Worker fortsetzen, die **er** pausiert hat — eine vom Nutzer gesetzte Pause bleibt bestehen. |
+| iss32-M03 | Nezrekas Forderung „keep it off the startup path so the server comes up first". Der Bootstrap-**Autostart** läuft bereits in einem Daemon-Thread mit 30-s-Vorlauf (`web_server.py:43371` → `_autostart_library_v2_bootstrap_import`, `web_server.py:32742`) — dort liegt das Problem nicht. Es liegt in `ensure_library_v2_schema`, das aus `_initialize_database` heraus (`music_database.py:1219`) fünf unbegrenzte Voll-Backfills **synchron auf dem Startpfad** und in der Init-Transaktion ausführt (Befund B/D oben). | **Bestätigt, an anderer Stelle als vom Review vermutet** | Der Schema-Ensure macht nur noch DDL und konvergierte Billig-Prüfungen. Jeder Backfill mit unbegrenztem Umfang wandert auf den Hintergrundpfad, in Batches mit Commit. Der Server muss hochkommen, bevor irgendein Backfill die erste Zeile schreibt. |
+| iss32-M04 | Kein WAL-Checkpoint während der Migration. `wal_checkpoint` kommt im gesamten Repository **kein einziges Mal** vor. Ein 135-MB-WAL ohne Checkpoint erklärt den fallenden Durchsatz unmittelbar: jeder Reader muss den wachsenden WAL durchlaufen. | **Im Code bestätigt** (Grep über alle `*.py`) | Periodischer `PRAGMA wal_checkpoint(TRUNCATE)` in den Commit-Pausen des Bootstrap-Laufs. Ein Checkpoint braucht ein Fenster ohne offene Transaktion — er ist deshalb nur zusammen mit iss32-M05 wirksam, nicht davor. |
+| iss32-M05 | **Neu.** Die langen Finalize-Schritte laufen ohne Zwischen-Commit. `backfill_editions` (`importer.py:1612`) materialisiert 69.296 Alben + 307.885 Tracks in einer einzigen offenen Transaktion, `recompute_wanted` (`importer.py:1618`) danach ebenso. Neun Minuten gehaltener Writer sind die direkte Ursache der `database is locked`-Welle und des gescheiterten Config-Saves — nicht nur „Konkurrenz um den Writer". | **Im Code bestätigt** | Beide Schritte arbeiten in Batches fester Größe, committen je Batch, melden je Batch Fortschritt und lassen zwischen den Batches ein Fenster für andere Writer und für den Checkpoint aus M04. |
+| iss32-M06 | **Neu.** Der gesamte Schema-Init ist eine einzige Transaktion mit genau einem `conn.commit()` am Ende (`music_database.py:1239`), und `_initialize_database_once` (`:185`) hält währenddessen zusätzlich `_database_initialization_lock`. Ein langsamer Init blockiert damit nicht nur SQLite-Writer, sondern jeden Thread, der überhaupt ein DB-Handle anfordert. | **Im Code bestätigt** | Die lib2-Backfills verlassen diese Transaktion (M03). Ob der Init darüber hinaus in mehrere Transaktionen zerfällt, ist eine separate Entscheidung — für die Migration reicht es, dass nichts Unbegrenztes mehr darin steht. |
+| iss32-M08 | **Neu, und der eigentliche Grund für die Dauer.** `_find_recording_by_hard_ids` (`core/library2/editions.py:275`) sucht das Recording per `SELECT id FROM lib2_recordings WHERE isrc=?`. Der zugehörige Index ist **partiell** (`… WHERE isrc IS NOT NULL AND isrc <> ''`), und SQLite darf einen partiellen Index nur verwenden, wenn die WHERE-Klausel der Abfrage die des Index *beweisbar* impliziert. `isrc = ?` beweist mit einem gebundenen Parameter gar nichts, also lautet der Plan `SCAN lib2_recordings` — ein Full Table Scan, **dreimal pro Track**, gegen eine Tabelle, die auf eine Zeile pro Track wächst. Der Backfill ist damit quadratisch. | **Gemessen** auf einem 307.885-Track-Katalog: 200 Probes = 755 ms als Scan, 3,1 ms über den Index. Durchsatz vorher 128 Zeilen/s und **fallend** (bei 58k Zeilen), nachher **flach ~9.000 Zeilen/s** über die gesamte Tabelle | Die Prädikate des partiellen Index in der Abfrage mitschreiben (`AND isrc IS NOT NULL AND isrc <> ''`), ebenso in der Kollisionsprüfung von `_fill_missing_hard_id`. Betroffen sind ausschließlich die drei `lib2_recordings`-Indizes: nur ihr Prädikat enthält `<> ''`. Ein reines `IS NOT NULL` kann SQLite aus `spalte = ?` selbst folgern (Gleichheit mit NULL ist nie wahr), weshalb `idx_lib2_release_tracks_track` und `idx_lib2_editions_default` nie betroffen waren — nachgeprüft. |
+| iss32-M07 | **Neu, Nebenbefund.** `_warn_about_stale_sqlite_sidecars` (`music_database.py:202`) führt bei jedem Start, an dem `-wal`/`-shm` existieren — also nach jedem unsauberen Stopp —, ein `PRAGMA quick_check` über die **gesamte** Datenbank aus. Bei 9,6 GB ist das reine Lese-I/O über alle Seiten, auf dem Startpfad, vor jeder lib2-Logzeile. Rein diagnostisch: das Ergebnis wird nur geloggt. | **Im Code bestätigt** | Die Prüfung gehört in einen Hintergrund-Thread oder hinter eine Größen-/Zeitschranke. Sie darf den Start nicht verzögern, weil ihr Ergebnis den Start ohnehin nicht beeinflusst. |
 
 ### 32.2 Enrichment darf beim Wechsel auf V2 nicht regressieren
 
@@ -5435,7 +5499,7 @@ provider ids, **all twelve workers**." Begründung: V1 kann das bereits.
 
 | ID | Diagnose | Verifikationsstand | Korrekturvertrag |
 |---|---|---|---|
-| iss32-E01 | `resync_entity_from_legacy` ist **nicht verdrahtet**. Die Funktion existiert in `core/library2/enrich.py:123` und steht im `__all__` (Zeile 143), aber der einzige weitere Fundort im Produktivcode ist eine Docstring-Erwähnung in `core/library2/native_enrich.py:7`. Aufrufstellen gibt es nur in `tests/library2/test_enrich_resync.py`. Die zwölf Worker schreiben über `_run_single_enrichment` (`web_server.py:14559`) die Legacy-Row — und nichts spiegelt das Ergebnis nach `lib2_*`. | **Im Code bestätigt** — Nezrekas Vermutung trifft zu | `resync_entity_from_legacy` nach jedem erfolgreichen `_run_single_enrichment` aufrufen, für alle drei Entity-Typen. Der Aufruf muss die Legacy-ID kennen, die der Worker gerade geschrieben hat. Der Regressionstest muss beweisen, dass ein Worker-Lauf die `lib2_*`-Row **tatsächlich** verändert — nicht nur, dass die Funktion für sich genommen funktioniert (das tut sie bereits, siehe die vorhandenen Tests). |
+| iss32-E01 | `resync_entity_from_legacy` ist **nicht verdrahtet**. Die Funktion existiert in `core/library2/enrich.py:123` und steht im `__all__` (Zeile 143), aber der einzige weitere Fundort im Produktivcode ist eine Docstring-Erwähnung in `core/library2/native_enrich.py:7`. Aufrufstellen gibt es nur in `tests/library2/test_enrich_resync.py`. Die zwölf Worker schreiben über `_run_single_enrichment` (`web_server.py:14559`) die Legacy-Row — und nichts spiegelt das Ergebnis nach `lib2_*`. | **Im Code bestätigt** — Nezrekas Vermutung trifft zu | Ein Aufruf hinter `_run_single_enrichment` deckt **nur den manuellen Einzel-Enrich aus der UI** ab. Die eigentliche Masse schreiben die Worker-Schleifen selbst: **137 `UPDATE artists/albums/tracks`-Statements in 14 Worker-Dateien**, und nur etwa die Hälfte davon setzt `updated_at`. Eine Spiegelung, die an `updated_at` oder an einzelnen Aufrufstellen hängt, ist damit nachweislich lückenhaft. Zu liefern ist ein Mechanismus, der **jeden** Legacy-Schreiber erfasst, unabhängig von der Datei — plus ein Regressionstest, der beweist, dass ein echter Worker-Lauf die `lib2_*`-Row verändert, nicht nur, dass `resync_entity_from_legacy` isoliert funktioniert (das belegen die vorhandenen Tests bereits). |
 | iss32-E02 | Zwei Klassen von Artists mit unterschiedlicher Enrichment-Tiefe, ohne dass die UI sie unterscheidet: Artists aus der alten Library bekommen alle zwölf Worker; in V2 nativ entstandene Artists (Featured Credits, Wishlist, Discography) haben keine Legacy-Row und bekommen nur `native_enrich` — also Provider-ID, Artwork, Genres. Beide zeigen „matched". | **Bekannt und unabhängig bestätigt**, siehe Memory `library-v2-native-artist-enrich-deadend` (RC1 lösbar, RC2 Compound-Namen teilweise nicht) | Native Artists müssen denselben Enrichment-Pfad erreichen. Zwei Wege sind denkbar und vor der Umsetzung zu entscheiden: (a) für einen nativen Artist bei Bedarf eine Legacy-Row anlegen und den bestehenden Worker-Pfad fahren, oder (b) die zwölf Worker so entkoppeln, dass sie eine `lib2`-Identität direkt bedienen. (a) ist billiger, zementiert aber die Legacy-Tabelle als Pflichtdurchgang — was direkt gegen 32.3 arbeitet. Solange die Lücke besteht, darf die UI nicht beide Zustände als „matched" ausgeben. |
 | iss32-E03 | `/api/library/artists` (`web_server.py:9889`) liest weiterhin Legacy: der Handler ruft `database.get_library_artists(...)`. Metadaten-Edits und Enrichment aus der neuen UI erscheinen dort folglich nicht. | **Im Code bestätigt** | Endpunkt auf die V2-Projektion umstellen. Vorher zu klären: welche Consumer hängen daran? Bekannt sind mindestens `tests/test_finding_artist_link_ui.py` (Finding-Artist-Verlinkung baut `/api/library/artists?search=`) und `/api/library/artists/export` (`web_server.py:30763`). Die Antwortform muss erhalten bleiben oder alle Consumer mitwandern. |
 
@@ -5461,8 +5525,78 @@ aus …". Zu beachten ist die Wechselwirkung mit iss32-E02(a): der billige Fix
 dort macht die Legacy-Row zum Pflichtdurchgang und damit die Antwort „Legacy
 wird read-only" schwerer haltbar. Beide Punkte gehören zusammen beantwortet.
 
+#### 32.3.1 Entscheidung (10. August 2026, Nutzer)
+
+**Die Tabellen sind der Endzustand. Die Doppelung ist es nicht.** Ziel ist
+vollständig das, was Nezreka verlangt: eine Bibliothek, alles liest und
+schreibt `lib2_*`, die Legacy-Tabellen verschwinden. **Sämtliche Worker und
+sämtliche Tools werden auf Library V2 umgeschrieben** — nicht nur die bereits
+migrierte Repair-Seite.
+
+**Zeitliche Zuordnung:** Der Umbau der Metadaten-/Enrichment-Worker geschieht
+**nicht in diesem PR**. Dieser PR liefert Stufe 1 (siehe unten) und die
+Zusage; der Produzenten-Umbau ist ein eigener PR, weil dort der Ingest-Pfad
+liegt — geht dabei etwas schief, ist nicht ein Feature kaputt, sondern der
+einzige Weg, auf dem Daten in die App kommen.
+
+**Zwei Gründe, warum die zweite Tabellenwelt keine Bequemlichkeit war** (beide
+sind beim Spalte-für-Spalte-Vergleich unsichtbar, den Nezreka gemacht hat):
+
+1. **Der Primärschlüssel gehört dem Media-Server.** `artists.id` *ist* der
+   ratingKey. Die INSERTs geben die id deshalb explizit an
+   (`music_database.py:7060/7238/7521`), und wenn Plex den ratingKey bei einem
+   Re-Scan ändert, wird die komplette Zeile unter neuer id neu angelegt und die
+   Enrichment-Daten über eine handgepflegte Liste von 22 Spaltennamen
+   hinüberkopiert (`music_database.py:7043 ff.`). Eine Bibliothek, die ohne
+   Media-Server funktionieren soll, kann ihre Identität nicht von einem
+   Media-Server beziehen.
+2. **Die Semantik unterscheidet sich, nicht nur der Spaltensatz.**
+   `lib2_tracks` enthält Tracks **ohne Datei** (`core/library2/missing_tracks.py`),
+   `lib2_albums` Alben mit `origin='discography'`, die niemand besitzt. In der
+   alten Welt heißt eine Zeile in `tracks`: diese Datei liegt auf der Platte.
+   Ein Merge in die Alt-Tabellen würde diese Bedeutung ändern und damit **656
+   Lesestellen in 64 Dateien** still falsch machen, ohne dass ein Compiler oder
+   ein vorhandener Test das fängt.
+
+**Bestandsaufnahme (gemessen am 10. August 2026, ohne `tests/`):**
+
+| Bereich | lib2-Bezüge | Legacy-Statements | Stand |
+|---|---:|---:|---|
+| Repair-Jobs + `repair_worker.py` | 92 (Worker) + ~180 (Jobs) | Reste, siehe unten | **migriert** (P1/P2) |
+| Download-/Import-Pfad (`core/imports/side_effects.py`) | 7 | 7 | **dual**, schreibt bereits beide Welten |
+| 16 Metadaten-/Enrichment-Worker (`core/*_worker.py`) | **0** | **334** | **nicht angefasst** |
+| Media-Server-Scan (`database_update_worker.py` → `music_database.py`) | 0 | 49 Schreib-/195 Lesestellen | **nicht angefasst** |
+| Gesamt Produktivcode | — | 656 lesend / 237 schreibend in 64 Dateien | — |
+
+Restliche Legacy-Bindung auf der bereits migrierten Repair-Seite (gehört auf
+die Stufe-2-Liste, kein Blocker): `comma_artist_splitter` 0/7,
+`genre_cleanup` 0/3, `live_commentary_cleaner` 0/3, `track_number_repair` 3/11,
+`album_tag_consistency` 3/8, `metadata_gap_filler` 2/4, `missing_cover_art` 4/4.
+
+**Stufenplan:**
+
+| Stufe | Inhalt | Wann |
+|---|---|---|
+| 1 | Konsumenten lesen lib2 (E03 als Nachzügler); Legacy→lib2-Spiegel (E01) hält beide Seiten deckungsgleich; Divergenz wird im Integritätsreport als Kennzahl geführt | **dieser PR** |
+| 2 | Produzenten schreiben lib2: 16 Enrichment-Worker, Media-Server-Scan, die sieben Repair-Job-Reste. Danach löst sich E02 von selbst auf — native Artists haben keine Sonderrolle mehr | eigener PR, direkt danach |
+| 3 | Legacy read-only: Bootstrap-Import stellt sich ab, Spiegel und Shim-Zeilen fallen ersatzlos weg, Tabellen bleiben ein Release lang lesbar stehen | Folge-Release |
+| 4 | Legacy-Tabellen droppen | ein Release später |
+
+**Drei Zusagen, die die Doppelung überprüfbar ungefährlich machen, solange sie
+besteht** — das ist die eigentliche Antwort auf „both sticking around and
+disagreeing with each other":
+
+1. **Einbahnstraße, hart.** Nur Legacy → lib2, nie zurück. Zwei Zeilen können
+   nur auseinanderlaufen, wenn beide beschrieben werden.
+2. **Divergenz ist eine Kennzahl, kein Vertrauensvorschuss.** Der vorhandene
+   read-only Integritätsreport (`build_integrity_report`,
+   `core/library2/integrity_reconciler.py`) bekommt einen Check über die
+   gespiegelten Felder. Erwartungswert 0; jeder andere Wert ist ein Bug mit
+   Zeilennummern.
+3. **Stufe 2 vor neuer Feature-Arbeit**, nicht „irgendwann".
+
 ### 32.4 `mbid_mismatch_detector` — Findings werden gepruned
 
 | ID | Diagnose | Verifikationsstand | Korrekturvertrag |
 |---|---|---|---|
-| iss32-S01 | `mbid_mismatch_detector` steht in `RETIRED_JOB_IDS` (`core/repair_jobs/__init__.py:118`), aber **nicht** in `PRESERVED_RETIRED_FINDING_IDS` (ab Zeile 153). `core/repair_worker.py:570` bildet `prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS`, folglich werden seine Findings beim Worker-Start gelöscht. | **Im Code bestätigt** | Nezreka fragt ausdrücklich nur nach, ob das Absicht ist („doesn't affect me, i have none"), und verweist auf den `library_reorganize`-Kommentar direkt darüber, der dieselbe Gefahr behandelt. Zu liefern ist eine Entscheidung mit Begründung: entweder in `PRESERVED_RETIRED_FINDING_IDS` aufnehmen, oder den Kommentar so erweitern, dass die Absicht an der Stelle selbst dokumentiert ist. |
+| iss32-S01 | `mbid_mismatch_detector` steht in `RETIRED_JOB_IDS` (`core/repair_jobs/__init__.py:118`), aber **nicht** in `PRESERVED_RETIRED_FINDING_IDS` (ab Zeile 153). `core/repair_worker.py:570` bildet `prune_ids = RETIRED_JOB_IDS - PRESERVED_RETIRED_FINDING_IDS`, folglich werden seine Findings beim Worker-Start gelöscht. | **Im Code bestätigt — und der Befund reicht weiter als die Frage** | Die Nachprüfung ergibt drei Dinge, die die Antwort verschieben: (1) `core/repair_jobs/mbid_mismatch_detector.py` existiert **auf `main`** und ist auf diesem Branch **gelöscht**; (2) der zugehörige Fix-Handler in `core/repair_worker.py` ist mitgelöscht — im ganzen Repo kommt `mbid_mismatch` nur noch als String in `RETIRED_JOB_IDS` vor; (3) **kein** nativer Job ersetzt ihn: eingebettete MusicBrainz-Recording-IDs werden nirgends mehr gegen die MB-API geprüft. Damit greift genau die Begründung, die der `library_reorganize`-Kommentar zwei Zeilen darüber gibt. Der Job stammt zudem von Nezreka selbst (`87b39634a`, 16. März 2026). Nur in `PRESERVED_RETIRED_FINDING_IDS` aufzunehmen, würde Findings erhalten, die mangels Handler niemand mehr beheben kann. Zu entscheiden ist deshalb zwischen „als nativen V2-Job zurückholen" und „bewusst ersatzlos streichen, und das Nezreka so sagen". |

@@ -1035,6 +1035,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # cannot become visible until the batch transaction is committed.
             conn.commit()
 
+        # iss32-M01/M04/M05: the finalize steps below are whole-library work.
+        # They report under a sub-stage name so the log and the UI can tell
+        # "materializing editions, 41,000/307,885" from "finalizing, 5/7", and
+        # they checkpoint the WAL in the gaps their batch commits open up.
+        # Neither is possible while a step is one long transaction.
+        from core.library2.wal import PeriodicCheckpointer
+        wal_checkpointer = PeriodicCheckpointer(conn)
+
+        def finalize_progress(sub_stage: str, done: int, total: int) -> None:
+            # rowid stays None: a finalize position is not a walk position, so
+            # this must never be written as a resume checkpoint.
+            report_progress(f"{FINALIZE_STAGE}:{sub_stage}", done, total)
+
         def walk_from(stage: str) -> Optional[int]:
             """Where this walk starts: a rowid, or None when it is already done."""
             if resume is None:
@@ -1588,7 +1601,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # Mint provider-less stable ids for everything this run inserted
         # (audit P1-12) — the schema-ensure backfill ran before the inserts.
         from core.library2.stable_ids import backfill_stable_ids
-        backfill_stable_ids(cursor)
+        backfill_stable_ids(cursor, connection=conn, batch_size=IMPORT_BATCH_SIZE,
+                            progress=finalize_progress,
+                            on_batch=wal_checkpointer.batch_committed)
         from core.library2.monitor_rules import (
             project_entity_monitor_rules,
             restore_album_monitor_intent,
@@ -1608,14 +1623,29 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         # Materialize the edition/recording shadow model for everything this
         # run inserted (audit P1-04 / ADR-04) — the schema-ensure backfill ran
         # before the inserts, so it has to run again here.
+        # iss32-M05: this is the step Nezreka's run stood in for nine minutes.
+        # 69,296 albums + 307,885 tracks used to be materialized inside the
+        # transaction opened at checkpoint 5, so the write lock was held for
+        # the whole step and the next progress report only came after it.
+        # Batched + committed, it reports every 500 rows and lets other
+        # writers in between.
         from core.library2.editions import backfill_editions
-        stats["editions"] = backfill_editions(cursor)
+        stats["editions"] = backfill_editions(
+            cursor, connection=conn, batch_size=IMPORT_BATCH_SIZE,
+            progress=finalize_progress,
+            on_batch=wal_checkpointer.batch_committed)
         conn.commit()
         checkpoint(FINALIZE_STAGE, 6, _FINALIZE_STEPS)
         # Rebuild the wanted projection over the imported rules (§11.2).
         from core.library2.wanted import ensure_wanted_schema, recompute_wanted
         ensure_wanted_schema(cursor)
-        stats["wanted"] = recompute_wanted(cursor, profile_id=profile_id or 1)
+        stats["wanted"] = recompute_wanted(
+            cursor, profile_id=profile_id or 1, batch_size=IMPORT_BATCH_SIZE,
+            on_batch=lambda done, total: (
+                finalize_progress("wanted", done, total),
+                conn.commit(),
+                wal_checkpointer.batch_committed(),
+            ))
         conn.commit()
         checkpoint(FINALIZE_STAGE, _FINALIZE_STEPS, _FINALIZE_STEPS)
         logger.info("Library v2 import complete: %s", stats)

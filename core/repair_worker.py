@@ -1370,6 +1370,10 @@ class RepairWorker:
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
+            # iss32-S01: restored with the job. Without these two the findings
+            # would be visible and unfixable.
+            'mbid_mismatch': self._fix_mbid_mismatch,
+            'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
             'expired_download': self._fix_expired_download,
@@ -2969,6 +2973,65 @@ class RepairWorker:
                 conn.close()
         except Exception as e:  # noqa: BLE001
             logger.debug("Failed to refresh lib2 tag cache for file %s: %s", file_id, e)
+
+    def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Strip the wrong MusicBrainz recording id from the audio file.
+
+        iss32-S01: restored with the job. Path resolution goes through
+        ``_resolve_finding_path`` so a ``lib2:<track_id>`` entity resolves the
+        native way, like every other migrated file tool.
+        """
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+        resolved, _native_track_id = self._resolve_finding_path(entity_id, raw_path)
+        if not resolved or not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found: {os.path.basename(str(raw_path))}'}
+        try:
+            from core.repair_jobs.mbid_mismatch_detector import _remove_mbid_from_file
+            if not _remove_mbid_from_file(resolved):
+                return {'success': False,
+                        'error': 'MBID tag not found in file (may have been removed already)'}
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to remove MBID: {e}'}
+        mbid = str(details.get('mbid') or 'unknown')
+        return {
+            'success': True,
+            'action': 'removed_mbid',
+            'message': (f'Removed wrong MBID ({mbid[:8]}…) from '
+                        f'"{details.get("title", "unknown")}" — was pointing to '
+                        f'"{details.get("mb_title", "unknown")}"'),
+        }
+
+    def _fix_album_mbid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Rewrite a dissenting track's album MBID to the album's consensus.
+
+        Only the dissenter is touched — the other tracks already agree, and
+        rewriting them would turn a one-file repair into an album-wide one.
+        """
+        consensus_mbid = details.get('consensus_mbid')
+        if not consensus_mbid:
+            return {'success': False, 'error': 'No consensus MBID in finding details'}
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+        resolved, _native_track_id = self._resolve_finding_path(entity_id, raw_path)
+        if not resolved or not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found: {os.path.basename(str(raw_path))}'}
+        try:
+            from core.repair_jobs.mbid_mismatch_detector import _write_album_mbid_to_file
+            if not _write_album_mbid_to_file(resolved, consensus_mbid):
+                return {'success': False,
+                        'error': 'Could not write album MBID — unsupported format or write failed'}
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to write album MBID: {e}'}
+        return {
+            'success': True,
+            'action': 'rewrote_album_mbid',
+            'message': (f'Updated album MBID on "{details.get("title", "track")}" '
+                        f'({str(details.get("wrong_mbid") or "")[:8]}… → '
+                        f'{str(consensus_mbid)[:8]}…)'),
+        }
 
     def _fix_missing_lyrics(self, entity_type, entity_id, file_path, details):
         """Apply a missing-lyrics finding: fetch + write the .lrc sidecar and

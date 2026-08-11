@@ -131,6 +131,137 @@ def _artist_provider_ids(row: Any) -> Dict[str, str]:
     return ids
 
 
+_LEGACY_API_SOURCE_COLUMNS = {
+    "spotify": "spotify", "musicbrainz": "musicbrainz", "deezer": "deezer",
+    "discogs": "discogs", "audiodb": "audiodb", "itunes": "itunes",
+    "lastfm": "lastfm", "genius": "genius", "tidal": "tidal", "qobuz": "qobuz",
+    "amazon": "amazon", "jiosaavn": "jiosaavn",
+}
+
+
+def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all",
+                            page: int = 1, limit: int = 75,
+                            watchlist_filter: str = "all",
+                            source_filter: str = "") -> Dict[str, Any]:
+    """``/api/library/artists`` served from lib2 instead of the legacy tables.
+
+    iss32-E03. The endpoint read ``database.get_library_artists`` — the legacy
+    table — so metadata edits and enrichment performed in the Library-v2 UI
+    were invisible to it. The response shape is reproduced field for field,
+    because the shape is the contract: ``findExactArtist`` in the tools page
+    and the finding→artist link both consume it.
+
+    **The ``id`` stays the legacy artist id.** Consumers hand it straight to
+    ``navigateToArtistDetail``, and the artist-detail page resolves a bare
+    numeric id against the legacy table by contract (see the tool-integration
+    audit). Returning a lib2 id here would look correct and navigate to
+    nothing. ``lib2_artist_id`` is added alongside for callers that want the
+    native identity.
+
+    **Artists with no legacy row are omitted.** They are invisible to this
+    endpoint today too, and giving them an id that navigation cannot resolve
+    would be a regression dressed as a feature. They stop being a special case
+    in Stufe 2, when the producers write lib2 directly and the artist-detail
+    page can take a native id (docs §32.3.1).
+    """
+    from core.library2.provider_ids import parse_external_ids
+
+    page = max(1, int(page))
+    limit = max(1, min(int(limit), 500))
+    offset = (page - 1) * limit
+
+    clauses = ["a.canonical_artist_id IS NULL", "a.legacy_artist_id IS NOT NULL"]
+    params: Dict[str, Any] = {}
+    if search_query:
+        clauses.append("a.name LIKE :like ESCAPE '\\'")
+        params["like"] = f"%{str(search_query).replace(chr(92), chr(92) * 2).replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
+    if letter and letter != "all":
+        if letter == "#":
+            clauses.append("UPPER(SUBSTR(a.name, 1, 1)) NOT GLOB '[A-Z]'")
+        else:
+            clauses.append("UPPER(SUBSTR(a.name, 1, 1)) = UPPER(:letter)")
+            params["letter"] = letter
+    if watchlist_filter == "watched":
+        clauses.append("a.monitored = 1")
+    elif watchlist_filter == "unwatched":
+        clauses.append("COALESCE(a.monitored, 0) = 0")
+
+    # Provider match filter. lib2 keeps provider identity in external_ids (plus
+    # the promoted spotify_id/musicbrainz_id columns), so the legacy
+    # column-per-provider test becomes a JSON containment test.
+    negate = str(source_filter or "").startswith("!")
+    source_key = str(source_filter or "").lstrip("!").strip().lower()
+    if source_key in _LEGACY_API_SOURCE_COLUMNS:
+        namespace = _LEGACY_API_SOURCE_COLUMNS[source_key]
+        promoted = {"spotify": "a.spotify_id", "musicbrainz": "a.musicbrainz_id"}.get(namespace)
+        has_it = f"json_extract(a.external_ids, '$.{namespace}') IS NOT NULL"
+        if promoted:
+            has_it = f"({has_it} OR ({promoted} IS NOT NULL AND {promoted} <> ''))"
+        clauses.append(f"NOT ({has_it})" if negate else has_it)
+
+    where = " AND ".join(clauses)
+    total_count = int(conn.execute(
+        f"SELECT COUNT(*) FROM lib2_artists a WHERE {where}", params).fetchone()[0])
+
+    rows = conn.execute(
+        f"""SELECT a.id, a.legacy_artist_id, a.name, a.image_url, a.genres,
+                   a.external_ids, a.spotify_id, a.musicbrainz_id, a.monitored,
+                   (SELECT COUNT(*) FROM lib2_albums al
+                     WHERE al.primary_artist_id = a.id
+                       AND al.origin = 'library') AS album_count,
+                   (SELECT COUNT(*) FROM lib2_tracks t
+                      JOIN lib2_albums al2 ON al2.id = t.album_id
+                     WHERE al2.primary_artist_id = a.id) AS track_count
+              FROM lib2_artists a
+             WHERE {where}
+             ORDER BY a.name COLLATE NOCASE
+             LIMIT :limit OFFSET :offset""",
+        {**params, "limit": limit, "offset": offset}).fetchall()
+
+    artists: List[Dict[str, Any]] = []
+    for row in rows:
+        ids = parse_external_ids(row["external_ids"])
+        if row["spotify_id"]:
+            ids.setdefault("spotify", str(row["spotify_id"]))
+        if row["musicbrainz_id"]:
+            ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+        artists.append({
+            "id": row["legacy_artist_id"],
+            "lib2_artist_id": row["id"],
+            "name": row["name"],
+            "image_url": row["image_url"],
+            "genres": _json_list(row["genres"]),
+            "musicbrainz_id": ids.get("musicbrainz"),
+            "spotify_artist_id": ids.get("spotify"),
+            "itunes_artist_id": ids.get("itunes"),
+            "deezer_id": ids.get("deezer"),
+            "audiodb_id": ids.get("audiodb"),
+            "discogs_id": ids.get("discogs"),
+            "lastfm_url": ids.get("lastfm"),
+            "genius_url": ids.get("genius"),
+            "tidal_id": ids.get("tidal"),
+            "qobuz_id": ids.get("qobuz"),
+            "soul_id": ids.get("soulid") or ids.get("soul"),
+            "amazon_id": ids.get("amazon"),
+            "album_count": int(row["album_count"] or 0),
+            "track_count": int(row["track_count"] or 0),
+            "is_watched": bool(row["monitored"]),
+        })
+
+    total_pages = (total_count + limit - 1) // limit
+    return {
+        "artists": artists,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        },
+    }
+
+
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
                  page: int = 1, limit: int = 75,
                  include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
@@ -581,6 +712,14 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # lib2 row id is not one. Expose what the row already stores instead
         # of making the client take a second round trip to /match-status.
         "provider_ids": _artist_provider_ids(a),
+        # iss32-E02: "both show as matched so you can't tell them apart."
+        # An artist with a legacy counterpart is walked by the twelve metadata
+        # workers and can carry provider bios; one born inside lib2 is served
+        # by the native path, which resolves provider ids, artwork, genres and
+        # the descriptive columns but not the Last.fm/Genius/Discogs bios
+        # (those workers still write legacy rows — Stufe 2). Say which, instead
+        # of letting the chips imply parity.
+        "enrichment_depth": "full" if a["legacy_artist_id"] is not None else "native",
         "monitored": bool(a["monitored"]),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),
@@ -1327,5 +1466,5 @@ def list_quality_profiles(conn) -> List[Dict[str, Any]]:
     return [_quality_profile_dict(row) for row in rows if row is not None]
 
 
-__all__ = ["list_artists", "list_artist_track_files", "get_artist", "get_album", "get_track",
-           "list_quality_profiles"]
+__all__ = ["legacy_api_artists_page", "list_artists", "list_artist_track_files",
+           "get_artist", "get_album", "get_track", "list_quality_profiles"]
