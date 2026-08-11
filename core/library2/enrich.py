@@ -99,6 +99,18 @@ def _merge_json_column(conn, table: str, entity_id: int, column: str,
             (json.dumps(merged, sort_keys=True, separators=(",", ":")), entity_id))
 
 
+# The legacy columns `_artist_enrichment` reads. They are not in `scalars` or
+# `id_columns` (they are folded into one JSON bucket), so without this inventory
+# neither the trigger-vs-resync guard nor the divergence metric can see them —
+# which is how `lastfm_playcount` went unmirrored.
+_ARTIST_ENRICHMENT_COLUMNS: Tuple[str, ...] = (
+    "lastfm_bio", "lastfm_listeners", "lastfm_playcount", "lastfm_tags",
+    "lastfm_similar", "lastfm_url",
+    "genius_description", "genius_alt_names", "genius_url",
+    "discogs_bio", "discogs_members", "discogs_urls",
+)
+
+
 def _artist_enrichment(legacy_row: Any) -> Dict[str, Dict[str, Any]]:
     """Provider bios/stats, keyed by source — the ``bios`` Nezreka named.
 
@@ -120,6 +132,7 @@ def _artist_enrichment(legacy_row: Any) -> Dict[str, Dict[str, Any]]:
         "lastfm": {
             "bio": _row_get(legacy_row, "lastfm_bio"),
             "listeners": _row_get(legacy_row, "lastfm_listeners"),
+            "playcount": _row_get(legacy_row, "lastfm_playcount"),
             "tags": _list(_row_get(legacy_row, "lastfm_tags")),
             "similar": _list(_row_get(legacy_row, "lastfm_similar")),
             "url": _row_get(legacy_row, "lastfm_url"),

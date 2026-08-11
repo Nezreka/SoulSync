@@ -59,8 +59,13 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
         "spotify_artist_id", "musicbrainz_id", "deezer_id", "itunes_artist_id",
         "audiodb_id", "discogs_id", "tidal_id", "qobuz_id", "amazon_id",
         "jiosaavn_id", "genius_id", "lastfm_url",
-        # provider bios/stats (mirrored into lib2_artists.enrichment)
-        "lastfm_bio", "lastfm_listeners", "lastfm_tags", "lastfm_similar",
+        # provider bios/stats (mirrored into lib2_artists.enrichment). Kept in
+        # step with `enrich._ARTIST_ENRICHMENT_COLUMNS` by
+        # tests/library2/test_mirror_declaration.py — a column watched here but
+        # not copied there churns the queue, and one copied there but not watched
+        # here only ever moves on a manual Enrich.
+        "lastfm_bio", "lastfm_listeners", "lastfm_playcount", "lastfm_tags",
+        "lastfm_similar",
         "genius_description", "genius_alt_names", "genius_url",
         "discogs_bio", "discogs_members", "discogs_urls",
     ),
