@@ -120,7 +120,7 @@ def test_dashboard_tour_matches_the_current_dashboard():
     dash = block.split("'dashboard': {")[1].split("'first-download': {")[0]
     for anchor in ('.dashboard-header', '.header-actions', '#watchlist-button',
                    '#wishlist-button', '#library-status-card', '.dash-card--rail',
-                   '#sync-history-cards', '.status-section',
+                   '.listen-hero', '#sync-history-cards', '.status-section',
                    '.side-toggle', '#profile-indicator', '.version-button'):
         assert anchor in dash, f'dashboard tour lost its {anchor} step'
     # the pre-redesign tool cards are gone from the dashboard tour, and so are
