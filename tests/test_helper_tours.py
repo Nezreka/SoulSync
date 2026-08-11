@@ -119,15 +119,18 @@ def test_dashboard_tour_matches_the_current_dashboard():
     block = _tour_block()
     dash = block.split("'dashboard': {")[1].split("'first-download': {")[0]
     for anchor in ('.dashboard-header', '.header-actions', '#watchlist-button',
-                   '#wishlist-button', '.service-status-grid', '.stats-grid-dashboard',
-                   '#library-status-card', '#sync-history-cards', '.dash-card--quick-actions',
-                   '#dashboard-activity-feed', '#enrichment-pills-section',
+                   '#wishlist-button', '#library-status-card', '.dash-card--rail',
+                   '#sync-history-cards', '.status-section',
                    '.side-toggle', '#profile-indicator', '.version-button'):
         assert anchor in dash, f'dashboard tour lost its {anchor} step'
-    # the pre-redesign tool cards are gone from the dashboard tour
+    # the pre-redesign tool cards are gone from the dashboard tour, and so are
+    # the retired ops sections (stats strip, quick actions, activity feed,
+    # services card, enrichment pills — all rehomed off the dashboard)
     for stale in ('#db-updater-card', '#metadata-updater-card', '#duplicate-cleaner-card',
                   '#backup-manager-card', '#metadata-cache-card', '#media-scan-card',
-                  '#discovery-pool-card'):
+                  '#discovery-pool-card', '.service-status-grid', '.stats-grid-dashboard',
+                  '.dash-card--quick-actions', '#dashboard-activity-feed',
+                  '#enrichment-pills-section'):
         assert stale not in dash, f'dashboard tour still anchors to the moved {stale}'
 
 

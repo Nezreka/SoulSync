@@ -589,10 +589,12 @@
                 <div class="status-indicator" id="video-metadata-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-metadata-name">Metadata (TMDB/TVDB)</span>
+                    <button class="status-test-btn" id="video-metadata-test-btn" title="Test connection" onclick="event.stopPropagation(); testVideoConnection('metadata')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="video-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-server-name">Media Server</span>
+                    <button class="status-test-btn" id="video-server-test-btn" title="Test connection" onclick="event.stopPropagation(); testVideoConnection('server')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="video-download-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
