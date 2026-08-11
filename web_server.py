@@ -27747,9 +27747,14 @@ def update_youtube_discovery_match():
 
 def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url=''):
     """Build stub matched_data for tracks that failed metadata discovery.
-    Used as automatic Wing It fallback so tracks still flow through the download pipeline."""
+    Used as automatic Wing It fallback so tracks still flow through the download pipeline.
+
+    The id comes from core.discovery.wing_it so it is stable — the previous
+    `hash(...) % 100000` was salted per interpreter, so a stub written to
+    mirrored_playlist_tracks.extra_data resolved to a different id after a restart."""
+    from core.discovery.wing_it import stub_track_id
     return {
-        'id': f"wing_it_{hash(f'{artist_name}_{track_name}') % 100000}",
+        'id': stub_track_id(artist_name, track_name),
         'name': track_name,
         'artists': [{'name': artist_name}] if isinstance(artist_name, str) else artist_name,
         'album': {'name': '', 'album_type': 'single', 'images': [], 'release_date': ''},
