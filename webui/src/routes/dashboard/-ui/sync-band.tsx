@@ -294,9 +294,6 @@ function Row({
           </span>
         ) : row.last ? (
           <>
-            <span className="syncband-chip">
-              {row.last.found}/{row.last.total} matched
-            </span>
             {row.last.downloaded > 0 ? (
               <span className="syncband-chip syncband-chip--dl">⬇ {row.last.downloaded}</span>
             ) : null}
@@ -321,19 +318,23 @@ function Row({
             </span>
             <span className="syncband-owned-text">{running.progress}%</span>
           </>
-        ) : sched?.coverage ? (
+        ) : row.coverage ? (
           <>
             <span
               className="syncband-owned-bar"
-              title={`${sched.coverage.inLibrary} of ${sched.coverage.total} tracks in your library`}
+              title={
+                row.last
+                  ? `${row.coverage.inLibrary} of ${row.coverage.total} tracks matched at the last sync`
+                  : `${row.coverage.inLibrary} of ${row.coverage.total} tracks in your library`
+              }
             >
               <span
                 className="syncband-owned-fill"
-                style={{ width: `${sched.coverage.pct}%` }}
+                style={{ width: `${row.coverage.pct}%` }}
               ></span>
             </span>
             <span className="syncband-owned-text">
-              {sched.coverage.inLibrary}/{sched.coverage.total} owned
+              {row.coverage.inLibrary}/{row.coverage.total} in library
             </span>
           </>
         ) : null}

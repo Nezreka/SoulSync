@@ -60,6 +60,8 @@ describe('syncBandRows', () => {
       ['manual', 'Random Album'],
     ]);
     expect(rows[0].last?.id).toBe(901);
+    // The run's matched count IS the row's completeness number.
+    expect(rows[0].coverage).toEqual({ inLibrary: 47, total: 50, pct: 94 });
     // No playlist art → the claimed run's thumb backs the row.
     expect(rows[0].thumbUrl).toBe('/thumbs/dw.jpg');
     expect(rows[1].sourceLabel).toBe('Wishlist');
@@ -70,6 +72,8 @@ describe('syncBandRows', () => {
     const rows = syncBandRows([sched({ imageUrl: '/covers/dw.png' })], []);
     expect(rows[0].thumbUrl).toBe('/covers/dw.png');
     expect(rows[0].last).toBeNull();
+    // Never-run schedules fall back to the db owned join.
+    expect(rows[0].coverage).toEqual({ inLibrary: 41, total: 50, pct: 82 });
   });
 
   it('running rows lead, then scheduled in board order, then manual by recency', () => {

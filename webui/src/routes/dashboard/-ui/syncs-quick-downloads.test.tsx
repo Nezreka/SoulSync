@@ -97,8 +97,11 @@ describe('the Sync band', () => {
     const row = view.container.querySelector('.syncband-row')!;
     expect(row.querySelector('.syncband-name')!.textContent).toBe('Bangers');
     expect(row.querySelector('.syncband-sub')!.textContent).toBe('Spotify · playlist');
-    expect(row.querySelector('.syncband-chip')!.textContent).toBe('8/10 matched');
     expect(row.querySelector('.syncband-chip--dl')!.textContent).toBe('⬇ 3');
+    // ONE completeness number: the bar carries the run's matched count —
+    // no separate "matched" chip to contradict it.
+    expect(row.querySelector('.syncband-owned-text')!.textContent).toBe('8/10 in library');
+    expect(row.textContent).not.toContain('matched');
     expect(row.querySelector('.syncband-manual')!.textContent).toBe('manual');
     expect(row.querySelector('.syncband-art img')!.getAttribute('src')).toBe('/thumb.jpg');
     // The rows container keeps the tour/helper anchor id.

@@ -26,12 +26,27 @@ export interface SyncBandRow {
   /** The newest sync-history run for this playlist — null when a scheduled
    *  playlist has no recorded runs yet. */
   last: SyncCardView | null;
+  /** ONE completeness number per row (Boulder: matched-vs-owned side by
+   *  side read as two contradictory answers to the same question). The
+   *  last run's matched count wins when a run exists — the sync engine's
+   *  full fuzzy matcher against the real server, timestamped by the ago
+   *  chip — and the db owned join only backs never-run schedules (it lags
+   *  fresh downloads until the next library scan and undercounts sources
+   *  whose ids aren't Spotify's). */
+  coverage: { inLibrary: number; total: number; pct: number } | null;
   /** Art preference: the mirrored playlist's own cover, else the run's thumb. */
   thumbUrl: string | null;
   logo: string | null;
   sourceKey: string;
   /** Manual rows label their source from the history entry. */
   sourceLabel: string;
+}
+
+function coverageOf(last: SyncCardView | null, schedule: AutoSyncCardRow | null) {
+  if (last && last.total > 0) {
+    return { inLibrary: last.found, total: last.total, pct: last.pct };
+  }
+  return schedule?.coverage ?? null;
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -59,6 +74,7 @@ export function syncBandRows(
       name: sr.name,
       schedule: sr,
       last,
+      coverage: coverageOf(last, sr),
       thumbUrl: sr.imageUrl || last?.thumbUrl || null,
       logo: sr.logo,
       sourceKey: sr.sourceKey,
@@ -81,6 +97,7 @@ export function syncBandRows(
       name: v.name,
       schedule: null,
       last: v,
+      coverage: coverageOf(v, null),
       thumbUrl: v.thumbUrl,
       logo: null,
       sourceKey: '',
