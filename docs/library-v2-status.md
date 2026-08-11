@@ -3476,3 +3476,65 @@ Nezreka geparkt ist, und ist kein mechanischer Port.
 `tidal` 32, `deezer` 30, `soulid` 17, `listening_stats` 11 (blockiert).
 `core/worker_utils.py` hält noch 9 Stellen — die Legacy-Helfer, die nur noch
 diese fünf Provider-Worker und `soulid` benutzen; mit ihnen fallen sie weg.
+
+#### 50.4.4.7 Alle Provider-Worker draußen — der Spiegel hat seine Provider-Hälfte erledigt
+
+Stand: **454/119** (Start der Stufe 2: 647/239). Vierzehn Worker halten kein
+Legacy-Statement mehr. Und das ist mehr als eine Zahl: **jeder Provider in
+`match_status.SERVICES` ist umgestellt**. Der Spiegel trägt Provider-Ids und
+Payloads damit nur noch als Backfill — er füllt eine Lücke und überschreibt nie.
+Ein neuer Test scheitert, wenn ein Provider zu `SERVICES` kommt, ohne dass sein
+Worker mitkommt; das wäre die stille Rückkehr der Stale-Overwrite-Gefahr.
+
+**Die Batch-Form, einmal statt zweimal.** Spotify und iTunes waren
+zeichengleich, bis auf das Service-Präfix — je etwa hundert Zeilen SQL, zweimal.
+`worker_queue.next_batch_pending` hält jetzt die ganze Reihenfolge: Pinned-Gruppe,
+unversuchte Artists, Album-Batch, Track-Batch, dann die Einzel-Fallbacks für
+Kinder, deren eigener Eltern-Datensatz nie gematcht hat. Das Batchen ist der Punkt,
+kein Implementierungsdetail: „alle Alben dieses Artists" ist **ein** API-Aufruf für
+das ganze Set, wo der Einzelpfad einen pro Album verbraucht. Dazu
+`pending_children` und `record_children` — ein fehlgeschlagener Bulk-Aufruf ist ein
+Ergebnis für alle noch unversuchten Kinder, und lässt die schon gematchten in Ruhe.
+
+**`include_parent_id` ersetzt fünf Kopien.** Fünf Worker vergleichen den Treffer
+eines Kindes gegen die Provider-Id des Eltern-Artists — sonst stempelt eine
+Kollaboration, deren Album einem anderen Artist gehört, die falsche Id auf unseren.
+Jeder hatte seinen eigenen Zwei-Abfragen-Tanz dafür.
+
+**Loch 3 in der Übergabe, gefunden von einem bestehenden Test.** lib2 hält
+Spotify- und MusicBrainz-Ids **doppelt**: eine promovierte Spalte, auf die die
+Lesepfade joinen, plus `external_ids`. Nur die JSON-Hälfte war Backfill; die Spalte
+wurde weiter durchgeschrieben, der Drain hätte also über die frische native Id eine
+alte Legacy-Id gedrückt. `_ID_COLUMN_OWNERS` deklariert die beiden besetzten
+Spalten (`isrc` bewusst nicht — provider-neutral, mehrere Quellen schreiben sie).
+
+Damit ist die Übergabe an drei Stellen vollständig: JSON-Payload, Skalarspalten
+(§50.4.4.6), promovierte Id-Spalten.
+
+**Ein zerstörerischer Fehler, den die Tests gefangen haben, nicht ich.** Ein
+falscher Bearbeitungsbereich löschte `_normalize_name`, `_name_matches`,
+`_verify_artist_id` und `_correct_artist_*_id` aus allen drei Dateien
+(qobuz/tidal/deezer). Aus HEAD wiederhergestellt, der Korrekturpfad dabei
+umgestellt. Erwähnenswert, weil es zeigt, was die Verhaltenstests hier tragen:
+die Ratsche war zufrieden (0/0), die Datei kompilierte, und vier Methoden waren
+weg.
+
+**`soulid` ist bewusst nicht umgestellt — und das ist kein Restposten.**
+Der Worker *erzeugt* eine deterministische Inhalts-Id (`generate_soul_id`) statt
+einen Provider zu matchen; es gibt keinen Versuch zu protokollieren und keine
+externe Id. Vor allem aber ist `soul_id` querschneidend: **achtzehn Dateien**
+lesen es — der Import-Pfad, das Tag-Schreiben (`SOUL_ID`-Tag),
+`library/track_identity`, `imports/album_grouping`, `library_reorganize`,
+`stats/queries`. Und `soul_id` steht *nicht* in `match_status.SERVICES`, wird also
+auch nicht gespiegelt: würde nur der Worker nach lib2 schreiben, sähen die
+achtzehn Leser nichts mehr. Das braucht eine eigene Runde, die Schreiber und Leser
+zusammen bewegt — plus eine Entscheidung, wo `soul_id` in lib2 wohnt
+(`core/metadata/types.py:599` benutzt schon `external_ids['soul']`, das ist der
+naheliegende Kandidat).
+
+**Rest, nach Größe:** `database/music_database.py` 228, `web_server.py` 94,
+`repair_worker` 42, `soulid` 17 (eigene Runde, s.o.), `listening_stats` 11
+(blockiert an der Medienserver-Frage), dann eine lange Schwanzverteilung
+kleiner Lesestellen. `core/worker_utils.py` hält noch 7 Stellen: die
+Legacy-Helfer, die jetzt nur noch `soulid` und der Repair-Worker benutzen — mit
+denen fallen sie weg.
