@@ -139,10 +139,91 @@ _LEGACY_API_SOURCE_COLUMNS = {
 }
 
 
+class _ProfileWatchlist:
+    """The calling profile's legacy watchlist, as one rule used twice.
+
+    Guide §2.6: the global lib2 ``monitored`` flag is the *admin's* intent, and
+    other household profiles keep their own watchlist. So membership is decided
+    by ``watchlist_artists`` rows for one ``profile_id``, matched exactly the way
+    ``MusicDatabase.get_library_artists`` matches them: Spotify id, iTunes id, or
+    lowercased name.
+
+    The page filter has to run in SQL or pagination would count the wrong rows,
+    while ``is_watched`` is decided per returned row. Both come from this one
+    object so the two answers cannot drift apart.
+    """
+
+    def __init__(self, conn, profile_id: int) -> None:
+        self.spotify: set = set()
+        self.itunes: set = set()
+        self.names: set = set()
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist_artists'"
+        ).fetchone()
+        if not exists:
+            # A fresh install can read the catalogue before the legacy watchlist
+            # table exists. Falling back to `monitored` here is exactly the
+            # substitution that lost profile scoping in the first place, so the
+            # honest reading of "no rows" is "nothing is watched".
+            return
+        for row in conn.execute(
+            "SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) AS name_lower "
+            "FROM watchlist_artists WHERE profile_id = ?", (int(profile_id),)
+        ):
+            if row["spotify_artist_id"]:
+                self.spotify.add(str(row["spotify_artist_id"]))
+            if row["itunes_artist_id"]:
+                self.itunes.add(str(row["itunes_artist_id"]))
+            if row["name_lower"]:
+                self.names.add(str(row["name_lower"]))
+
+    def __bool__(self) -> bool:
+        return bool(self.spotify or self.itunes or self.names)
+
+    def sql(self, params: Dict[str, Any]) -> str:
+        """A predicate over ``lib2_artists a``, binding into ``params``.
+
+        Returns ``"0"`` for an empty watchlist: nothing can match, and the
+        legacy reader says the same.
+        """
+        parts = []
+        for prefix, values, columns in (
+            ("wlsp", self.spotify, ("a.spotify_id", "json_extract(a.external_ids,'$.spotify')")),
+            ("wlit", self.itunes, ("json_extract(a.external_ids,'$.itunes')",)),
+        ):
+            if not values:
+                continue
+            keys = []
+            for index, value in enumerate(sorted(values)):
+                key = f"{prefix}_{index}"
+                params[key] = value
+                keys.append(f":{key}")
+            joined = ", ".join(keys)
+            parts.append("(" + " OR ".join(
+                f"({column} IS NOT NULL AND {column} IN ({joined}))"
+                for column in columns) + ")")
+        if self.names:
+            keys = []
+            for index, value in enumerate(sorted(self.names)):
+                key = f"wlnm_{index}"
+                params[key] = value
+                keys.append(f":{key}")
+            parts.append(f"LOWER(a.name) IN ({', '.join(keys)})")
+        return "(" + " OR ".join(parts) + ")" if parts else "0"
+
+    def contains(self, *, name: Any, provider_ids: Mapping[str, str]) -> bool:
+        if str(provider_ids.get("spotify") or "") in self.spotify and self.spotify:
+            return True
+        if str(provider_ids.get("itunes") or "") in self.itunes and self.itunes:
+            return True
+        return str(name or "").strip().casefold() in self.names
+
+
 def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all",
                             page: int = 1, limit: int = 75,
                             watchlist_filter: str = "all",
-                            source_filter: str = "") -> Dict[str, Any]:
+                            source_filter: str = "",
+                            profile_id: int = 1) -> Dict[str, Any]:
     """``/api/library/artists`` served from lib2 instead of the legacy tables.
 
     iss32-E03. The endpoint read ``database.get_library_artists`` — the legacy
@@ -181,10 +262,11 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
         else:
             clauses.append("UPPER(SUBSTR(a.name, 1, 1)) = UPPER(:letter)")
             params["letter"] = letter
+    watchlist = _ProfileWatchlist(conn, profile_id)
     if watchlist_filter == "watched":
-        clauses.append("a.monitored = 1")
+        clauses.append(watchlist.sql(params))
     elif watchlist_filter == "unwatched":
-        clauses.append("COALESCE(a.monitored, 0) = 0")
+        clauses.append(f"NOT {watchlist.sql(params)}")
 
     # Provider match filter. lib2 keeps provider identity in external_ids (plus
     # the promoted spotify_id/musicbrainz_id columns), so the legacy
@@ -245,7 +327,10 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
             "amazon_id": ids.get("amazon"),
             "album_count": int(row["album_count"] or 0),
             "track_count": int(row["track_count"] or 0),
-            "is_watched": bool(row["monitored"]),
+            # Not `row["monitored"]`: that is the admin's global lib2 intent,
+            # and telling a guest profile it owns the admin's monitoring is the
+            # regression this reproduces the legacy meaning to avoid.
+            "is_watched": watchlist.contains(name=row["name"], provider_ids=ids),
         })
 
     total_pages = (total_count + limit - 1) // limit

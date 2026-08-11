@@ -9922,6 +9922,11 @@ def get_library_artists():
                         limit=limit,
                         watchlist_filter=watchlist_filter,
                         source_filter=source_filter,
+                        # Guide §2.6: the watchlist is per profile. Omitting this
+                        # made the filter read the admin's global lib2 monitor
+                        # flag for every caller — the legacy path below has
+                        # always passed it.
+                        profile_id=get_current_profile_id(),
                     )
             finally:
                 conn.close()
