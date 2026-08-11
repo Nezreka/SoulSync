@@ -224,14 +224,13 @@ export interface SyncCardView {
   counts: string;
   thumbUrl: string | null;
   /** Additive detail for the roomier dashboard card: the raw numbers split
-   *  out of `counts` (chips render them colored), what KIND of sync it was,
-   *  and how long it took when both stamps exist. */
+   *  out of `counts` (chips render them colored) and what KIND of sync it
+   *  was. (A wall-time chip lived here briefly — Boulder: irrelevant.) */
   found: number;
   total: number;
   downloaded: number;
   failed: number;
   typeLabel: string | null;
-  duration: string | null;
 }
 
 export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardView {
@@ -267,16 +266,6 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     ? 'album'
     : (entry.sync_type ? String(entry.sync_type).toLowerCase() : null);
 
-  // Wall time, when both stamps exist and parse.
-  let duration: string | null = null;
-  const completedAt = entry.completed_at as string | undefined;
-  if (startedAt && completedAt) {
-    const ms = Date.parse(completedAt) - Date.parse(startedAt);
-    if (Number.isFinite(ms) && ms >= 0) {
-      const s = Math.round(ms / 1000);
-      duration = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-    }
-  }
 
   return {
     id: entry.id,
@@ -292,6 +281,5 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     downloaded,
     failed,
     typeLabel,
-    duration,
   };
 }

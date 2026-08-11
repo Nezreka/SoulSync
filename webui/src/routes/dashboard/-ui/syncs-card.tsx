@@ -215,9 +215,6 @@ export function SyncsCard() {
                           ✗ {view.failed}
                         </span>
                       ) : null}
-                      {view.duration ? (
-                        <span className="sync-card-chip sync-card-chip--dim">{view.duration}</span>
-                      ) : null}
                     </div>
                   </div>
                   <div className="sync-card-stats">

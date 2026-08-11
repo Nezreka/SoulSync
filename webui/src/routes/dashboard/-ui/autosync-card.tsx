@@ -97,7 +97,18 @@ function useAutoSyncCard() {
     async (row: AutoSyncCardRow) => {
       setRunningId(row.automationId);
       try {
-        const res = await fetch(`/api/automations/${row.automationId}/run`, { method: 'POST' });
+        // The board's OWN run path — /api/automations/<id>/run also executes
+        // the pipeline, but through the automation engine, whose progress
+        // goes to the automation log; only THIS endpoint registers the
+        // playlist_pipeline_progress_states that the board modal and this
+        // card's running UI read. Every card row keys a real mirrored
+        // playlist (the state builder drops ungenerated synthetic rows), so
+        // the key is always a valid pipeline target.
+        const res = await fetch(`/api/mirrored-playlists/${row.key}/pipeline/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) {
           window.showToast?.(data.error || `Could not run ${row.name}`, 'error');
