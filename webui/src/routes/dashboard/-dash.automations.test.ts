@@ -82,10 +82,27 @@ describe('automationCardRows', () => {
     expect(wishlist.nextRun).toBe('in 2h');
     expect(wishlist.lastRun).toEqual({ ago: '4h ago', ok: true, error: null });
     expect(wishlist.runCount).toBe(42);
+    // showAutomationHistory's third argument travels on the row.
+    expect(wishlist.actionType).toBe('process_wishlist');
+    expect(wishlist.running).toBeNull();
     expect(backup.lastRun?.ok).toBe(false);
     expect(backup.lastRun?.error).toBe('disk full');
     expect(paused.enabled).toBe(false);
     expect(paused.nextRun).toBeNull();
+  });
+
+  it('a progress entry marks its row running and it leads the sort', () => {
+    const out = automationCardRows(rows, NOW, {
+      '1': { status: 'running', phase: 'Processing wishlist...', progress: 37 },
+      '3': { status: 'finished', phase: 'Done' }, // finished ≠ running
+    });
+    expect(out.map((r) => r.name)).toEqual([
+      'Wishlist processing', // running leads despite the later stamp
+      'Nightly backup',
+      'Paused thing',
+    ]);
+    expect(out[0].running).toEqual({ phase: 'Processing wishlist...', progress: 37 });
+    expect(out[1].running).toBeNull();
   });
 
   it('survives an empty list', () => {

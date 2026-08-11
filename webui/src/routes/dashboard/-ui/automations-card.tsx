@@ -23,12 +23,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AutomationApiRow, AutomationCardRow } from '../-dash.automations';
+import type {
+  AutomationApiRow,
+  AutomationCardRow,
+  AutomationProgressState,
+} from '../-dash.automations';
 
 import { automationCardRows } from '../-dash.automations';
 
 function useAutomationsCard() {
   const [rows, setRows] = useState<AutomationApiRow[] | null>(null);
+  const [progress, setProgress] = useState<Record<string, AutomationProgressState>>({});
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<number | string | null>(null);
   const mountedRef = useRef(true);
@@ -36,11 +41,19 @@ function useAutomationsCard() {
   const load = useCallback(async () => {
     if (document.body.classList.contains('app-locked')) return;
     try {
-      const res = await fetch('/api/automations');
-      if (!res.ok) return;
-      const data = (await res.json()) as AutomationApiRow[];
-      if (!Array.isArray(data) || !mountedRef.current) return;
-      setRows(data);
+      const [listRes, progressRes] = await Promise.all([
+        fetch('/api/automations'),
+        fetch('/api/automations/progress'),
+      ]);
+      if (!mountedRef.current) return;
+      if (listRes.ok) {
+        const data = (await listRes.json()) as AutomationApiRow[];
+        if (Array.isArray(data)) setRows(data);
+      }
+      if (progressRes.ok) {
+        const live = (await progressRes.json()) as Record<string, AutomationProgressState>;
+        if (live && typeof live === 'object') setProgress(live);
+      }
       setNowMs(Date.now());
     } catch {
       // keep the previous rows
@@ -62,7 +75,19 @@ function useAutomationsCard() {
     };
   }, [load]);
 
-  const view = useMemo(() => automationCardRows(rows ?? [], nowMs), [rows, nowMs]);
+  const view = useMemo(
+    () => automationCardRows(rows ?? [], nowMs, progress),
+    [rows, nowMs, progress],
+  );
+
+  // While an automation runs its phase/progress must move — a short loop
+  // that exists ONLY while a running row is present (the band's idiom).
+  const anyRunning = view.some((r) => r.running);
+  useEffect(() => {
+    if (!anyRunning) return;
+    const h = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(h);
+  }, [anyRunning, load]);
 
   const runNow = useCallback(
     async (row: AutomationCardRow) => {
@@ -84,7 +109,30 @@ function useAutomationsCard() {
     [load],
   );
 
-  return { loaded: rows !== null, view, busyId, runNow };
+  /** Pause/resume — the page's own toggle route; the engine reschedules on
+   *  enable and cancels timers on disable server-side. */
+  const toggle = useCallback(
+    async (row: AutomationCardRow) => {
+      setBusyId(row.id);
+      try {
+        const res = await fetch(`/api/automations/${row.id}/toggle`, { method: 'POST' });
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!res.ok || data.error) {
+          window.showToast?.(data.error || `Could not toggle ${row.name}`, 'error');
+        } else {
+          window.showToast?.(row.enabled ? `${row.name} paused` : `${row.name} resumed`, 'success');
+        }
+      } catch {
+        window.showToast?.(`Could not toggle ${row.name}`, 'error');
+      } finally {
+        if (mountedRef.current) setBusyId(null);
+        void load();
+      }
+    },
+    [load],
+  );
+
+  return { loaded: rows !== null, view, busyId, runNow, toggle };
 }
 
 /** The Settings page's exact preset palette (index.html #accent-preset). */
@@ -129,6 +177,13 @@ function QuickSettings() {
     }).catch(() => undefined);
   };
 
+  const [particles, setParticles] = useState(
+    () => localStorage.getItem('soulsync-particles') !== 'false',
+  );
+  const [orbs, setOrbs] = useState(
+    () => localStorage.getItem('soulsync-worker-orbs') !== 'false',
+  );
+
   const toggleReduce = () => {
     const next = !reduce;
     setReduce(next);
@@ -138,6 +193,16 @@ function QuickSettings() {
     const next = !maxPerf;
     setMaxPerf(next);
     window.applyMaxPerformance?.(next);
+  };
+  const toggleParticles = () => {
+    const next = !particles;
+    setParticles(next);
+    window.applyParticlesSetting?.(next);
+  };
+  const toggleOrbs = () => {
+    const next = !orbs;
+    setOrbs(next);
+    window.applyWorkerOrbsSetting?.(next);
   };
 
   return (
@@ -161,6 +226,26 @@ function QuickSettings() {
       >
         <span className="dash-qs-knob"></span>
         Max performance
+      </button>
+      <button
+        type="button"
+        className={particles && !maxPerf ? 'dash-qs-toggle dash-qs-toggle--on' : 'dash-qs-toggle'}
+        disabled={maxPerf}
+        title="The ambient page particles on this device"
+        onClick={toggleParticles}
+      >
+        <span className="dash-qs-knob"></span>
+        Particles
+      </button>
+      <button
+        type="button"
+        className={orbs && !maxPerf ? 'dash-qs-toggle dash-qs-toggle--on' : 'dash-qs-toggle'}
+        disabled={maxPerf}
+        title="The header's enrichment worker orbs on this device"
+        onClick={toggleOrbs}
+      >
+        <span className="dash-qs-knob"></span>
+        Worker orbs
       </button>
       <span className="dash-qs-accent">
         {ACCENT_PRESETS.map((preset) => (
@@ -201,7 +286,7 @@ function QuickSettings() {
 }
 
 export function AutomationsCard() {
-  const { loaded, view, busyId, runNow } = useAutomationsCard();
+  const { loaded, view, busyId, runNow, toggle } = useAutomationsCard();
 
   return (
     <article className="dash-card" data-card="automations">
@@ -237,43 +322,70 @@ export function AutomationsCard() {
             view.map((row) => (
               <div
                 key={row.id}
-                className={row.enabled ? 'dash-autom-row' : 'dash-autom-row dash-autom-row--off'}
+                className={[
+                  'dash-autom-row',
+                  row.enabled ? '' : 'dash-autom-row--off',
+                  row.running ? 'dash-autom-row--live' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                role="button"
+                title="Run history"
+                onClick={() =>
+                  window.showAutomationHistory?.(Number(row.id), row.name, row.actionType)
+                }
               >
                 <span
                   className={
-                    !row.lastRun
-                      ? 'dash-autom-dot'
-                      : row.lastRun.ok
-                        ? 'dash-autom-dot dash-autom-dot--ok'
-                        : 'dash-autom-dot dash-autom-dot--err'
+                    row.running
+                      ? 'dash-autom-dot dash-autom-dot--live'
+                      : !row.lastRun
+                        ? 'dash-autom-dot'
+                        : row.lastRun.ok
+                          ? 'dash-autom-dot dash-autom-dot--ok'
+                          : 'dash-autom-dot dash-autom-dot--err'
                   }
                   title={
-                    !row.lastRun
-                      ? 'No runs yet'
-                      : row.lastRun.ok
-                        ? `Last run ${row.lastRun.ago} · ${row.runCount} runs`
-                        : `Last run failed: ${row.lastRun.error}`
+                    row.running
+                      ? row.running.phase
+                      : !row.lastRun
+                        ? 'No runs yet'
+                        : row.lastRun.ok
+                          ? `Last run ${row.lastRun.ago} · ${row.runCount} runs`
+                          : `Last run failed: ${row.lastRun.error}`
                   }
                 ></span>
                 <span className="dash-autom-main">
                   <span className="dash-autom-name" title={row.name}>
                     {row.name}
                   </span>
-                  <span className="dash-autom-meta">
-                    <span>{row.trigger}</span>
-                    {row.lastRun ? (
-                      <span
-                        className={
-                          row.lastRun.ok ? 'dash-autom-last' : 'dash-autom-last dash-autom-last--bad'
-                        }
-                      >
-                        {row.lastRun.ok ? row.lastRun.ago : `⚠ ${row.lastRun.ago}`}
-                      </span>
-                    ) : null}
-                  </span>
+                  {row.running ? (
+                    <span className="dash-autom-meta dash-autom-phase" title={row.running.phase}>
+                      {row.running.phase}
+                    </span>
+                  ) : (
+                    <span className="dash-autom-meta">
+                      <span>{row.trigger}</span>
+                      {row.lastRun ? (
+                        <span
+                          className={
+                            row.lastRun.ok
+                              ? 'dash-autom-last'
+                              : 'dash-autom-last dash-autom-last--bad'
+                          }
+                        >
+                          {row.lastRun.ok ? row.lastRun.ago : `⚠ ${row.lastRun.ago}`}
+                        </span>
+                      ) : null}
+                    </span>
+                  )}
                 </span>
                 <span className="dash-autom-when">
-                  {row.enabled ? (
+                  {row.running ? (
+                    <span className="dash-autom-live-pill">
+                      {row.running.progress > 0 ? `${row.running.progress}%` : 'running'}
+                    </span>
+                  ) : row.enabled ? (
                     row.nextRun ? (
                       <span className="dash-autom-next">{row.nextRun}</span>
                     ) : null
@@ -281,15 +393,32 @@ export function AutomationsCard() {
                     <span className="dash-autom-paused">paused</span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  className="dash-autom-run"
-                  disabled={busyId !== null}
-                  title="Run this automation now"
-                  onClick={() => void runNow(row)}
-                >
-                  {busyId === row.id ? '…' : 'Run'}
-                </button>
+                <span className="dash-autom-actions" onClick={(e) => e.stopPropagation()}>
+                  {!row.running ? (
+                    <>
+                      <button
+                        type="button"
+                        className="dash-autom-run"
+                        disabled={busyId !== null}
+                        title={row.enabled ? 'Pause this automation' : 'Resume this automation'}
+                        onClick={() => void toggle(row)}
+                      >
+                        {busyId === row.id ? '…' : row.enabled ? '⏸' : '▶'}
+                      </button>
+                      {row.enabled ? (
+                        <button
+                          type="button"
+                          className="dash-autom-run"
+                          disabled={busyId !== null}
+                          title="Run this automation now"
+                          onClick={() => void runNow(row)}
+                        >
+                          {busyId === row.id ? '…' : 'Run'}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                </span>
               </div>
             ))
           )}

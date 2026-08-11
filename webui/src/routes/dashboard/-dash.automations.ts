@@ -80,26 +80,50 @@ export function triggerLabel(row: AutomationApiRow): string {
   return `On ${humanizeEvent(event)}`;
 }
 
+export interface AutomationProgressState {
+  status?: string;
+  phase?: string;
+  progress?: number;
+  [key: string]: unknown;
+}
+
 export interface AutomationCardRow {
   id: number | string;
   name: string;
+  /** showAutomationHistory needs it (the shared run-history modal). */
+  actionType: string;
   trigger: string;
   enabled: boolean;
   nextRun: string | null;
   lastRun: { ago: string; ok: boolean; error: string | null } | null;
+  /** Live state from /api/automations/progress while a run is in flight. */
+  running: { phase: string; progress: number } | null;
   runCount: number;
 }
 
-export function automationCardRows(rows: AutomationApiRow[], nowMs: number): AutomationCardRow[] {
+export function automationCardRows(
+  rows: AutomationApiRow[],
+  nowMs: number,
+  progress: Record<string, AutomationProgressState> = {},
+): AutomationCardRow[] {
   const out: AutomationCardRow[] = [];
   for (const row of rows || []) {
     if (SYNCBAND_ACTIONS.has(String(row.action_type || ''))) continue;
     const enabled = row.enabled !== false && row.enabled !== 0;
+    const live = progress[String(row.id)];
     out.push({
       id: row.id,
       name: String(row.name || `Automation #${row.id}`),
+      actionType: String(row.action_type || ''),
       trigger: triggerLabel(row),
       enabled,
+      running:
+        live?.status === 'running'
+          ? {
+              phase: String(live.phase || 'Running...'),
+              progress: Math.max(0, Math.min(100, Number(live.progress) || 0)),
+            }
+          : null,
       nextRun: enabled ? nextRunText(row.next_run, nowMs) : null,
       lastRun: row.last_run
         ? {
@@ -116,8 +140,9 @@ export function automationCardRows(rows: AutomationApiRow[], nowMs: number): Aut
     });
   }
 
-  // Soonest-to-fire first (raw stamps, not the display buckets); no next_run
-  // (event-triggered) after timed ones; disabled last. Stable within groups.
+  // Running first; then soonest-to-fire by raw stamp (not display buckets);
+  // no next_run (event-triggered) after timed ones; disabled last. Stable
+  // within groups.
   const stamp = (row: AutomationApiRow) => {
     if (!row.next_run) return Infinity;
     const t = parseDbUtc(String(row.next_run));
@@ -127,6 +152,7 @@ export function automationCardRows(rows: AutomationApiRow[], nowMs: number): Aut
   return out
     .map((r, i) => ({ r, i }))
     .sort((a, b) => {
+      if (!!a.r.running !== !!b.r.running) return a.r.running ? -1 : 1;
       if (a.r.enabled !== b.r.enabled) return a.r.enabled ? -1 : 1;
       const sa = stamp(byId.get(a.r.id)!);
       const sb = stamp(byId.get(b.r.id)!);

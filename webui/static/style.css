@@ -66036,7 +66036,12 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer; /* row click opens the shared run-history modal */
     transition: background 0.15s ease, border-color 0.15s ease;
+}
+.dash-autom-row--live {
+    border-color: rgba(var(--accent-rgb), 0.30);
+    background: rgba(var(--accent-rgb), 0.05);
 }
 .dash-autom-row:hover {
     background: rgba(255, 255, 255, 0.045);
@@ -66059,6 +66064,31 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .dash-autom-dot--err {
     background: #f87171;
     box-shadow: 0 0 6px rgba(248, 113, 113, 0.45);
+}
+.dash-autom-dot--live {
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.55);
+    animation: syncbandLivePulse 1.6s ease-in-out infinite;
+}
+.dash-autom-phase {
+    color: rgba(var(--accent-rgb), 0.9);
+}
+.dash-autom-live-pill {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.15);
+    animation: syncbandLivePulse 1.6s ease-in-out infinite;
+}
+.dash-autom-actions {
+    display: flex;
+    gap: 5px;
+    flex-shrink: 0;
 }
 .dash-autom-main {
     flex: 1;
@@ -66106,7 +66136,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 }
 .dash-autom-run {
     flex-shrink: 0;
-    padding: 4px 11px;
+    padding: 4px 9px;
     font-size: 11px;
     font-weight: 500;
     border-radius: 6px;

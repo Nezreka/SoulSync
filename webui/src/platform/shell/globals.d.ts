@@ -551,6 +551,10 @@ declare global {
     /** init.js:43 — recomputes the --accent[-light|-neon]-rgb custom
      *  properties app-wide and persists the per-device localStorage copy. */
     applyAccentColor?: (hex: string) => void;
+    /** init.js:104/126 — the other two per-device appearance switches
+     *  (canvas particles / header worker orbs), same applier contract. */
+    applyParticlesSetting?: (enabled: boolean) => void;
+    applyWorkerOrbsSetting?: (enabled: boolean) => void;
     /** init.js:3256 — THE cross-page navigation entry: permission guard,
      *  sidebar chrome (setActivePageChrome), currentPage bookkeeping, then
      *  the router. React components navigating BETWEEN pages must call
