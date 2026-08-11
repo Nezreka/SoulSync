@@ -3324,12 +3324,43 @@ geschrieben; würde der Trigger darauf feuern, stünde bei jedem Enrichment-Zykl
 die ganze Bibliothek in der Queue. Die Altdaten werden einmalig gesät, im
 Leerlauf-Tick des Drainers statt auf dem Startpfad (iss32-M03).
 
-**Was damit noch vor den 16 Workern liegt:** jeder Worker braucht zusätzlich
-einen lib2-Batch-Selektor an der Stelle seiner heutigen Legacy-`SELECT`s und
-einen Schreibpfad über `MIRROR_SPECS`-Ziele statt Legacy-Spalten. Das sind 334
-Legacy-Statements in 16 Dateien — mechanisch, aber Stück für Stück und je Worker
-mit eigenem Test. Die Ratsche (647/239) ist dabei das Maß: sie fällt erst, wenn
-das SQL wirklich verschwindet, nicht wenn nur der Aufrufer wechselt.
+#### 50.4.4.5 Zwei Worker sind umgestellt, das Rezept steht
+
+`lastfm` (`1d56e062b`) und `genius` (`819535c51`) enthalten **null**
+Legacy-Statements mehr, je durch einen Test an der Datei selbst festgenagelt. Die
+Ratsche ist zum ersten Mal gefallen: **647/239 → 626/229**.
+
+Drei geteilte Teile, absichtlich nicht je Worker kopiert — die restlichen
+vierzehn brauchen genau dasselbe:
+
+| Teil | Aufgabe |
+|---|---|
+| `library2/worker_queue.py` | Batch-Auswahl: Reihenfolge Artist→Album→Track, Pinned-Group-Override, Retry-Fenster. Nur `not_found` wird wiederholt, `error` nicht — sonst wird ein Provider-Ausfall zur Endlosschleife. |
+| `library2/provider_writes.py` | Der Schreibpfad. Drei Spaltenmodi, weil die Provider sich wirklich unterscheiden: `payload` → `enrichment[service]`, `backfill` → nur solange leer (Last.fm-Artwork ist ein Fallback), `columns` → schreibt durch (Genius-Lyrics; `None` lässt trotzdem stehen, damit ein fehlgeschlagener Abruf vorhandene Lyrics nicht löscht). |
+| `enrich.MIGRATED_SERVICES` | Die Übergabe, und sie ist **Pflicht**, nicht Kosmetik. |
+
+**Warum die Übergabe Pflicht ist:** Zusage 1 (der Spiegel läuft nur in eine
+Richtung) ist genau so lange sicher, wie Legacy der einzige Schreiber dieser
+Felder ist. Sobald der Worker lib2 schreibt, drückt der nächste Drain den alten
+Legacy-Wert über den frischen nativen — und die Divergenz-Kennzahl meldet die
+korrekte Ausgabe des Workers als Defekt. Der Service verlässt den Spiegel
+deshalb im selben Commit, der seinen Worker verschiebt. Die Menge ist damit der
+Fortschrittsmarker für Stufe 2: ein Eintrag je umgestelltem Worker, und wenn alle
+drin sind, hat der Spiegel keine Arbeit mehr.
+
+**Ein echtes Loch, das der Deklarations-Wächter gefunden hat:**
+`tracks.genius_lyrics` ist eine gespiegelte *Skalarspalte*, nicht Teil des
+Enrichment-Buckets — `MIGRATED_SERVICES` griff dort nicht, der Drain hätte die
+Lyrics des Workers beim nächsten Tick wieder überschrieben. `active_scalars`
+schließt das über dieselbe Präfix-Regel wie `watched_columns`. Ohne den Wächter
+wäre das unsichtbar geblieben: das Symptom ist ein Wert, der still zurückspringt.
+
+**Rest, nach Größe:** `repair_worker` 42, `spotify` 35, `itunes` 35, `qobuz` 33,
+`tidal` 32, `deezer` 30, `audiodb` 24, `amazon` 20, `jiosaavn` 20,
+`musicbrainz` 17, `soulid` 17, `discogs` 14, `bandcamp` 13,
+`listening_stats` 11, `similar_artists` 4. Mechanisch, aber je Worker mit eigenem
+Test — und die Ratsche ist das Maß: sie fällt erst, wenn das SQL wirklich
+verschwindet, nicht wenn nur ein Aufrufer wechselt.
 
 #### 50.4.5 PR-Hygiene, aus dem eigenen Kommentar vom 5. August
 
