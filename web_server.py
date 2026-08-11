@@ -15184,10 +15184,15 @@ def library_delete_tracks_batch():
 
 @app.route('/api/library/radio')
 def library_radio():
-    """Get a smart queue of similar tracks for radio mode auto-play."""
+    """Get a smart queue of similar tracks for radio mode auto-play.
+
+    Two modes: seeded (track_id → similar tracks, the classic radio refill)
+    and seedless (?library=1 → ranked-random across the whole library, the
+    Library Radio starter)."""
     try:
         track_id = request.args.get('track_id')
-        if not track_id:
+        library_mode = request.args.get('library') in ('1', 'true')
+        if not track_id and not library_mode:
             return jsonify({"success": False, "error": "track_id is required"}), 400
 
         limit = request.args.get('limit', 20, type=int)
@@ -15195,7 +15200,10 @@ def library_radio():
         exclude_ids = [eid.strip() for eid in exclude_raw.split(',') if eid.strip()] if exclude_raw else None
 
         database = get_database()
-        result = database.get_radio_tracks(track_id, limit=limit, exclude_ids=exclude_ids)
+        if track_id:
+            result = database.get_radio_tracks(track_id, limit=limit, exclude_ids=exclude_ids)
+        else:
+            result = database.get_library_radio_tracks(limit=limit, exclude_ids=exclude_ids)
 
         if not result.get('success'):
             return jsonify(result), 404

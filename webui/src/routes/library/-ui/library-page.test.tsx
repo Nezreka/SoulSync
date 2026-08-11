@@ -120,6 +120,17 @@ describe('LibraryPage rendering', () => {
     await waitFor(() => expect(window.showLibraryDownloadsSection).toHaveBeenCalled());
     expect(document.querySelector('[data-library-downloads-host]')).not.toBeNull();
   });
+
+  it('the header Radio button hands off to the player global', async () => {
+    // Library Radio lives in media-player.js (it owns the queue + radio
+    // mode); the page only provides the entry point.
+    window.startLibraryRadio = vi.fn();
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    fireEvent.click(document.querySelector('.library-radio-btn')!);
+    expect(window.startLibraryRadio).toHaveBeenCalled();
+    delete window.startLibraryRadio;
+  });
 });
 
 describe('LibraryPage filters', () => {

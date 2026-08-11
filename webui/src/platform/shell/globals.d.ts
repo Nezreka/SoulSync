@@ -122,6 +122,9 @@ declare global {
     /** stats-automations.js — the parameterized radio core the Artist Web's
      *  "Play radio" hands off to (survives the discover.js deletion). */
     startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
+    /** media-player.js — seedless Library Radio: queues a ranked-random batch
+     *  from the whole library and arms radio mode for refills. */
+    startLibraryRadio?: () => void | Promise<void>;
     /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
      *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
      *  spans. Shared (survives discover.js's deletion), so the React page

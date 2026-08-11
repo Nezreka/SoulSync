@@ -190,6 +190,15 @@ export function LibraryPage() {
         </div>
         <button
           type="button"
+          className="library-watchlist-all-btn library-radio-btn"
+          title="Library Radio — shuffle your whole library, similar tracks keep auto-queuing"
+          onClick={() => void window.startLibraryRadio?.()}
+        >
+          <span className="watchlist-all-icon">📻</span>
+          <span className="watchlist-all-text">Radio</span>
+        </button>
+        <button
+          type="button"
           className="library-watchlist-all-btn library-export-btn"
           title="Export artists — pick watchlist or whole library, as JSON / CSV / text"
           onClick={() => setExporting(true)}

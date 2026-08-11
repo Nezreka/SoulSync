@@ -18202,6 +18202,63 @@ class MusicDatabase:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")
             return {'success': False, 'error': str(e)}
 
+    def get_library_radio_tracks(self, limit=50, exclude_ids=None) -> Dict[str, Any]:
+        """Seedless radio across the WHOLE library (Library Radio).
+
+        Same machinery as get_radio_tracks' last tier: pull a generous random
+        pool of playable tracks, then let core.radio.selection rank it
+        (play_count + lastfm popularity, recency penalty, stable jitter) so the
+        mix leans familiar-but-fresh instead of pure noise. Once tracks are
+        playing, refills go through the normal seeded get_radio_tracks path —
+        this only starts the station.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                from core.radio.selection import RadioCollector
+
+                collector = RadioCollector(limit, exclude_ids=exclude_ids)
+
+                # Same defensive probe as get_radio_tracks: ranking columns are
+                # migration-added, omit them from the SELECT when absent.
+                cursor.execute("PRAGMA table_info(tracks)")
+                _track_cols = {row[1] for row in cursor.fetchall()}
+                _rank_cols = "".join(
+                    f"t.{c}, " for c in ("play_count", "lastfm_playcount")
+                    if c in _track_cols
+                )
+
+                # No seed track means the exclude set can be EMPTY — and
+                # "NOT IN ()" is a syntax error — so the clause is conditional.
+                _exclude_sql = ""
+                if collector.exclude_values():
+                    _exclude_sql = f"AND t.id NOT IN ({collector.exclude_placeholders()})"
+
+                cursor.execute(f"""
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           t.file_path, t.bitrate,
+                           t.album_id, t.artist_id,
+                           {_rank_cols}
+                           al.title   AS album,
+                           COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
+                           ar.name    AS artist
+                    FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                      {_exclude_sql}
+                    ORDER BY RANDOM()
+                    LIMIT ?
+                """, collector.exclude_values() + [max(limit * 4, limit + 10)])
+                collector.collect(cursor.fetchall(), rank=True)
+
+                return {'success': True, 'tracks': collector.tracks}
+
+        except Exception as e:
+            logger.error(f"Error getting library radio tracks: {e}")
+            return {'success': False, 'error': str(e)}
+
     # ── Library Issues CRUD ──
 
     def create_issue(self, profile_id: int, entity_type: str, entity_id: str,
