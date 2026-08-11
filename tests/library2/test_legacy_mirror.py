@@ -390,6 +390,56 @@ class TestTheDrainerRunsTheSweep:
         assert stats.get("scanned", 0) == 0
 
 
+class TestTheDrainerSeedsProviderBookkeeping:
+    """The provider-attempt ledger is worthless until something fills it from the
+    history legacy already holds — otherwise the first worker to move to lib2
+    re-asks every provider about the whole library.
+
+    It runs on an idle tick, not on the startup path (iss32-M03), and once per
+    process: it is a one-off seeding pass, not recurring work.
+    """
+
+    def test_an_idle_tick_seeds_the_ledger_from_legacy(self, mirrored_db):
+        from core.library2.legacy_mirror import MirrorDrainer
+        from core.library2.provider_attempts import attempt_state
+
+        conn = _conn(mirrored_db)
+        try:
+            for column in ("lastfm_match_status", "lastfm_last_attempted"):
+                try:
+                    conn.execute(f"ALTER TABLE artists ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass
+            conn.execute(
+                "UPDATE artists SET lastfm_match_status='not_found', "
+                "lastfm_last_attempted='2026-07-01 10:00:00' WHERE id=1")
+            conn.commit()
+            lib2_id = conn.execute(
+                "SELECT id FROM lib2_artists WHERE legacy_artist_id=1").fetchone()["id"]
+        finally:
+            conn.close()
+
+        MirrorDrainer(mirrored_db).tick()
+
+        conn = _conn(mirrored_db)
+        try:
+            state = attempt_state(conn, entity_type="artist", entity_id=lib2_id)
+        finally:
+            conn.close()
+        assert state["lastfm"]["status"] == "not_found"
+        assert state["lastfm"]["last_attempted_at"].startswith("2026-07-01")
+
+    def test_it_seeds_once_and_not_on_every_tick(self, mirrored_db):
+        from core.library2.legacy_mirror import MirrorDrainer
+
+        drainer = MirrorDrainer(mirrored_db)
+        first = drainer.tick()
+        second = drainer.tick()
+
+        assert "seeded" in first
+        assert "seeded" not in second
+
+
 class TestLegacyApiArtistsPage:
     """iss32-E03: /api/library/artists must show what the v2 UI shows."""
 

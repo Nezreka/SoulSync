@@ -294,6 +294,7 @@ class MirrorDrainer:
         self._limit = int(limit)
         self._sweep_scan_limit = int(sweep_scan_limit)
         self._sweep_cursor: Dict[str, Any] = {}
+        self._seeded_provider_attempts = False
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="Lib2LegacyMirrorDrainer", daemon=True)
@@ -318,12 +319,33 @@ class MirrorDrainer:
             # both in one tick would let a large backlog scan delay ordinary
             # mirroring. An idle tick has the time.
             return stats
+        if not self._seeded_provider_attempts:
+            # One-off: carry the legacy per-provider history into the lib2 ledger
+            # so the first worker to move does not re-ask every provider about
+            # the whole library. Idempotent, but pointless to repeat, and it
+            # belongs off the startup path (iss32-M03).
+            self._seeded_provider_attempts = True
+            stats.update(self._seed_provider_attempts())
         sweep = reconcile_divergent(
             self._database, scan_limit=self._sweep_scan_limit,
             after=self._sweep_cursor)
         self._sweep_cursor = sweep["cursor"]
         stats.update(sweep)
         return stats
+
+    def _seed_provider_attempts(self) -> Dict[str, int]:
+        from core.library2.provider_attempts import backfill_from_legacy
+
+        conn = self._database._get_connection()
+        try:
+            seeded = backfill_from_legacy(conn)
+            conn.commit()
+            return seeded
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("provider-attempt seeding failed: %s", exc)
+            return {"seeded": 0, "scanned": 0}
+        finally:
+            conn.close()
 
     def _run(self) -> None:
         while not self._stop.wait(self._interval):

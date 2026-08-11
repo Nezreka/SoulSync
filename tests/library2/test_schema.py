@@ -21,6 +21,7 @@ _EXPECTED_TABLES = {
     # changed, drained into lib2 by core.library2.legacy_mirror. Goes away
     # with the triggers when the producers write lib2 directly.
     "lib2_legacy_dirty",
+    "lib2_provider_attempts",
 }
 
 

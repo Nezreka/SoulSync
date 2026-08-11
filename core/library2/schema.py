@@ -1029,6 +1029,15 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_legacy_mirror_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("legacy-mirror migration failed (will retry next start): %s", e)
+    # Stage-2 groundwork: per-provider enrichment bookkeeping, which every
+    # enrichment worker needs in order to pick a batch from lib2 instead of from
+    # the legacy `*_match_status`/`*_last_attempted` columns. DDL only here — the
+    # seeding pass from legacy is background work (iss32-M03).
+    try:
+        from core.library2.provider_attempts import ensure_provider_attempt_schema
+        ensure_provider_attempt_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("provider-attempt migration failed (will retry next start): %s", e)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library v2 schema ensured")
