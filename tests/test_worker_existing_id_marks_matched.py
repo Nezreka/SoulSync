@@ -224,10 +224,26 @@ class TestGetExistingIdColumnMapping:
             assert worker._get_existing_id("album", album_id) == "https://last.fm/a"
             assert worker._get_existing_id("track", track_id) == "https://last.fm/a"
 
-    def test_musicbrainz_worker_reads_correct_column_per_entity(self, db):
+    def test_musicbrainz_worker_finds_the_mbid_on_every_entity(self, db):
+        """The original bug was a per-entity column map that queried all three as
+        ``musicbrainz_id``, so albums and tracks silently never found theirs. lib2
+        keeps the mbid under one name on every entity, which removes the map — but
+        the guarantee still has to hold, so it is still pinned."""
         from core import musicbrainz_worker as mbw
 
-        artist_id, album_id, track_id = self._insert_tree(db)
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, musicbrainz_id) "
+                "VALUES('A','A','mb-artist')").lastrowid
+            album_id = cur.execute(
+                "INSERT INTO lib2_albums(primary_artist_id,title,album_type,"
+                "musicbrainz_id) VALUES(?,'Album','album','mb-release')",
+                (artist_id,)).lastrowid
+            track_id = cur.execute(
+                "INSERT INTO lib2_tracks(album_id,title,musicbrainz_id) "
+                "VALUES(?,'Track','mb-rec')", (album_id,)).lastrowid
+            conn.commit()
 
         with patch.object(mbw, "MusicBrainzService", return_value=MagicMock()):
             worker = mbw.MusicBrainzWorker(db)
@@ -334,11 +350,9 @@ class TestMusicBrainzWorkerMarksMatched:
 
         with db._get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO artists (id, name, musicbrainz_id) VALUES (?, ?, ?)",
-                ("art_mb", "A", "mb-uuid"),
-            )
-            artist_id = "art_mb"
+            artist_id = cur.execute(
+                "INSERT INTO lib2_artists(name, sort_name, musicbrainz_id) "
+                "VALUES('A','A','mb-uuid')").lastrowid
             conn.commit()
 
         fake_service = MagicMock()

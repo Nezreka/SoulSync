@@ -161,6 +161,19 @@ class TestAMigratedServicesScalarColumn:
         assert row["style"] == "downtempo", "a native write is not overwritten"
         assert row["mood"] == "brooding", "an empty field is still filled"
 
+    def test_an_empty_json_array_counts_as_a_gap(self, conn):
+        """``aliases`` and ``genres`` default to ``'[]'``, not NULL or ''. A backfill
+        that only treated NULL as empty would never fire for them — the column is
+        never NULL — so the legacy value would be silently unreachable, which is the
+        loss this whole mechanism exists to prevent."""
+        lib2_id, legacy_id = _artist(
+            conn, aliases='["\u6fa4\u91ce\u5f18\u4e4b"]')
+
+        resync_entity_from_legacy(conn, "artist", lib2_id, legacy_id)
+
+        assert json.loads(_row(conn, "lib2_artists", lib2_id)["aliases"]) == [
+            "\u6fa4\u91ce\u5f18\u4e4b"]
+
     def test_an_unmigrated_services_column_still_overwrites(self, conn):
         """Legacy remains authoritative wherever legacy is still the only writer —
         otherwise a corrected value could never reach lib2."""

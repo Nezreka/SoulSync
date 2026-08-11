@@ -6,8 +6,9 @@ against. Three layers covered:
 1. ``fetch_artist_aliases`` — pulls aliases off the MB get-artist
    response, defensive against missing fields, broken JSON, network
    errors.
-2. ``update_artist_aliases`` — persists to ``artists.aliases`` as a
-   JSON array. Empty/None → column cleared.
+2. ``update_artist_aliases`` — persists to ``lib2_artists.aliases`` as a
+   JSON array (docs §32.3.1 stage 2 moved it off legacy). Empty/None → column
+   cleared, which in lib2 means ``'[]'`` rather than NULL: the column is NOT NULL.
 3. ``get_artist_aliases`` — reads back by artist NAME (not id) since
    that's what the verifier has at quarantine time.
 
@@ -48,25 +49,22 @@ def service(temp_db):
 _seed_counter = 0
 
 
-def _seed_artist(db, name: str, **fields) -> str:
-    """Insert a row into the artists table.
+def _seed_artist(db, name: str, **fields) -> int:
+    """Insert a row into ``lib2_artists``.
 
-    `artists.id` is TEXT (NOT INTEGER auto-increment), so we mint a
-    deterministic test id rather than relying on rowid magic.
-    Returns the id as str — that's what the production code paths
-    use too (read methods, joins, etc.).
+    The alias read and write both live in Library v2 now. Unlike legacy's TEXT
+    primary key this is an autoincrementing integer, so the id comes back from the
+    insert rather than being minted here.
     """
-    global _seed_counter
-    _seed_counter += 1
-    artist_id = f"test-artist-{_seed_counter}"
     conn = db._get_connection()
     cursor = conn.cursor()
-    cols = ['id', 'name'] + list(fields.keys())
+    cols = ['name', 'sort_name'] + list(fields.keys())
     placeholders = ','.join('?' * len(cols))
     cursor.execute(
-        f"INSERT INTO artists ({','.join(cols)}) VALUES ({placeholders})",
-        [artist_id, name] + list(fields.values()),
+        f"INSERT INTO lib2_artists ({','.join(cols)}) VALUES ({placeholders})",
+        [name, name] + list(fields.values()),
     )
+    artist_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return artist_id
@@ -183,7 +181,7 @@ class TestUpdateArtistAliases:
         service.update_artist_aliases(artist_id, ['澤野弘之', 'SawanoHiroyuki'])
 
         conn = temp_db._get_connection()
-        row = conn.execute("SELECT aliases FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        row = conn.execute("SELECT aliases FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
         conn.close()
         parsed = json.loads(row[0])
         assert parsed == ['澤野弘之', 'SawanoHiroyuki']
@@ -193,7 +191,7 @@ class TestUpdateArtistAliases:
         service.update_artist_aliases(artist_id, ['a'])
         service.update_artist_aliases(artist_id, ['b', 'c'])
         conn = temp_db._get_connection()
-        row = conn.execute("SELECT aliases FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        row = conn.execute("SELECT aliases FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
         conn.close()
         assert json.loads(row[0]) == ['b', 'c']
 
@@ -201,9 +199,11 @@ class TestUpdateArtistAliases:
         artist_id = _seed_artist(temp_db, 'X', aliases=json.dumps(['old']))
         service.update_artist_aliases(artist_id, [])
         conn = temp_db._get_connection()
-        row = conn.execute("SELECT aliases FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        row = conn.execute("SELECT aliases FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
         conn.close()
-        assert row[0] is None
+        # lib2_artists.aliases is NOT NULL, so "cleared" is an empty array rather
+        # than NULL. Same emptiness the readers already test for.
+        assert json.loads(row[0]) == []
 
     def test_none_artist_id_is_noop(self, service, temp_db):
         """Defensive: caller might pass None on edge cases. Don't crash."""
@@ -270,7 +270,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
-        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
+        worker.db = temp_db  # worker code uses self.db (e.g. provider_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = {
             'mbid': '60d2ea34-1912-425f-bf9c-fc544e4448cd', 'name': 'Hiroyuki Sawano',
@@ -301,7 +301,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
-        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
+        worker.db = temp_db  # worker code uses self.db (e.g. provider_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = None
         worker.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
@@ -394,7 +394,7 @@ class TestWorkerAliasEnrichment:
 
         worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
         worker.database = temp_db
-        worker.db = temp_db  # worker code uses self.db (e.g. source_id_conflict)
+        worker.db = temp_db  # worker code uses self.db (e.g. provider_id_conflict)
         worker.mb_service = MagicMock()
         worker.mb_service.match_artist.return_value = {'mbid': 'mb-x', 'name': 'X'}
         worker.mb_service.fetch_artist_aliases.side_effect = Exception("boom")

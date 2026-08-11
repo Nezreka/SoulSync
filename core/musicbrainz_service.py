@@ -652,24 +652,27 @@ class MusicBrainzService:
         return cleaned
 
     def update_artist_aliases(self, artist_id: int, aliases: list) -> None:
-        """Persist the alias list to `artists.aliases` as a JSON array.
+        """Persist the alias list to ``lib2_artists.aliases`` as a JSON array.
 
-        Idempotent — overwrites any existing value. Empty list
-        clears the column (caller may want this if MB has no aliases
-        for the artist anymore).
+        Idempotent — overwrites any existing value. An empty list clears the column
+        (the caller may want this if MB no longer lists aliases for the artist), so
+        this is an outright write rather than a backfill.
         """
         if artist_id is None:
             return
         conn = None
         try:
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE artists SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(aliases) if aliases else None, artist_id),
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='musicbrainz',
+                columns={'aliases': json.dumps(aliases) if aliases else '[]'},
             )
             conn.commit()
-            logger.debug("Updated artist %s aliases (%d entries)", artist_id, len(aliases or []))
+            logger.debug("Updated artist %s aliases (%d entries)",
+                         artist_id, len(aliases or []))
         except Exception as e:
             logger.error(f"Error updating artist aliases for {artist_id}: {e}")
             if conn:
@@ -694,8 +697,12 @@ class MusicBrainzService:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            # Reads lib2, because that is where update_artist_aliases writes now
+            # (docs §32.3.1 stage 2). A reader left on legacy would not see the
+            # aliases the worker just stored.
             cursor.execute(
-                "SELECT aliases FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1",
+                "SELECT aliases FROM lib2_artists WHERE name = ? COLLATE NOCASE "
+                "LIMIT 1",
                 (artist_name,),
             )
             row = cursor.fetchone()
@@ -715,84 +722,54 @@ class MusicBrainzService:
             if conn:
                 conn.close()
 
+    def _record_mbid(self, entity_type: str, entity_id, mbid: Optional[str],
+                     status: str):
+        """Store an MBID and the attempt outcome on a Library-v2 row.
+
+        One method for all three entity types: legacy needed three because the
+        column name differed per table (musicbrainz_id / musicbrainz_release_id /
+        musicbrainz_recording_id), while lib2 keeps the mbid in one promoted
+        ``musicbrainz_id`` column plus ``external_ids`` on every entity.
+
+        A miss records the attempt and leaves any stored id alone. Legacy nulled it
+        out, which was a no-op on every path that can reach here — a stored id
+        short-circuits into the preserve-manual-match branch long before — and
+        keeping it means a transient failure can never erase a good id.
+        """
+        conn = None
+        try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+
+            conn = self.db._get_connection()
+            if mbid:
+                write_provider_enrichment(
+                    conn, entity_type=entity_type, entity_id=entity_id,
+                    service='musicbrainz', provider_id=mbid)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='musicbrainz', status=status)
+            conn.commit()
+
+            logger.debug(f"Updated {entity_type} {entity_id} with MBID: {mbid}, "
+                         f"status: {status}")
+
+        except Exception as e:
+            logger.error(f"Error updating {entity_type} {entity_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
     def update_artist_mbid(self, artist_id: int, mbid: Optional[str], status: str):
         """Update artist with MusicBrainz ID"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE artists
-                SET musicbrainz_id = ?,
-                    musicbrainz_last_attempted = ?,
-                    musicbrainz_match_status = ?
-                WHERE id = ?
-            """, (mbid, datetime.now(), status, artist_id))
-            
-            conn.commit()
-            
-            logger.debug(f"Updated artist {artist_id} with MBID: {mbid}, status: {status}")
-            
-        except Exception as e:
-            logger.error(f"Error updating artist {artist_id}: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-    
+        self._record_mbid('artist', artist_id, mbid, status)
+
     def update_album_mbid(self, album_id: int, mbid: Optional[str], status: str):
         """Update album with MusicBrainz release ID"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE albums
-                SET musicbrainz_release_id = ?,
-                    musicbrainz_last_attempted = ?,
-                    musicbrainz_match_status = ?
-                WHERE id = ?
-            """, (mbid, datetime.now(), status, album_id))
-            
-            conn.commit()
-            
-            logger.debug(f"Updated album {album_id} with MBID: {mbid}, status: {status}")
-            
-        except Exception as e:
-            logger.error(f"Error updating album {album_id}: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-    
+        self._record_mbid('album', album_id, mbid, status)
+
     def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str):
         """Update track with MusicBrainz recording ID"""
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE tracks
-                SET musicbrainz_recording_id = ?,
-                    musicbrainz_last_attempted = ?,
-                    musicbrainz_match_status = ?
-                WHERE id = ?
-            """, (mbid, datetime.now(), status, track_id))
-
-            conn.commit()
-
-            logger.debug(f"Updated track {track_id} with MBID: {mbid}, status: {status}")
-
-        except Exception as e:
-            logger.error(f"Error updating track {track_id}: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
+        self._record_mbid('track', track_id, mbid, status)
 

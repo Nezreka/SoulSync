@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.musicbrainz_service import MusicBrainzService
-from core.worker_utils import interruptible_sleep, owned_album_titles, source_id_conflict
+from core.worker_utils import interruptible_sleep
+from core.library2.worker_support import owned_album_titles, provider_id_conflict
 
 logger = get_logger("musicbrainz_worker")
 
@@ -163,98 +164,15 @@ class MusicBrainzWorker:
         """Get next item to process from priority queue"""
         conn = None
         try:
+            from core.library2.worker_queue import next_pending
+            from core.worker_utils import read_enrichment_priority
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Pinned-group override (Manage Enrichment Workers): process one
-            # entity type first, then fall through to the normal chain. Unset or
-            # exhausted ⇒ default artist→album→track order, unchanged.
-            from core.worker_utils import read_enrichment_priority, priority_pending_item
-            _prio = read_enrichment_priority('musicbrainz')
-            if _prio:
-                _pi = priority_pending_item(cursor, 'musicbrainz', _prio)
-                if _pi:
-                    return _pi
-
-            # Priority 1: Unattempted artists
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL
-                ORDER BY id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 2: Unattempted albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.musicbrainz_match_status IS NULL AND a.id IS NOT NULL
-                ORDER BY a.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 3: Unattempted tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.musicbrainz_match_status IS NULL AND t.id IS NOT NULL
-                ORDER BY t.id ASC
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 4: Retry 'not_found' artists after retry_days
-            not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
-            cursor.execute("""
-                SELECT id, name
-                FROM artists
-                WHERE musicbrainz_match_status = 'not_found' AND musicbrainz_last_attempted < ?
-                ORDER BY musicbrainz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Retrying artist '{row[1]}' (last attempted before cutoff)")
-                return {'type': 'artist', 'id': row[0], 'name': row[1]}
-
-            # Priority 5: Retry 'not_found' albums
-            cursor.execute("""
-                SELECT a.id, a.title, ar.name AS artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.musicbrainz_match_status = 'not_found' AND a.musicbrainz_last_attempted < ?
-                ORDER BY a.musicbrainz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            # Priority 6: Retry 'not_found' tracks
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name
-                FROM tracks t
-                JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.musicbrainz_match_status = 'not_found' AND t.musicbrainz_last_attempted < ?
-                ORDER BY t.musicbrainz_last_attempted ASC
-                LIMIT 1
-            """, (not_found_cutoff,))
-            row = cursor.fetchone()
-            if row:
-                return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2]}
-
-            return None
+            return next_pending(
+                conn, 'musicbrainz',
+                retry_after_days=self.retry_days,
+                pinned=read_enrichment_priority('musicbrainz') or None,
+            )
 
         except Exception as e:
             logger.error(f"Error getting next item: {e}")
@@ -264,29 +182,20 @@ class MusicBrainzWorker:
                 conn.close()
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a MusicBrainz ID (e.g. from manual match).
+        """The MBID already stored for this entity, if any.
 
-        MusicBrainz ID columns differ per entity type: artists use `musicbrainz_id`,
-        albums use `musicbrainz_release_id`, and tracks use `musicbrainz_recording_id`.
-        Before this fix, all three were queried as `musicbrainz_id`, so the
-        existing-ID check silently failed for albums and tracks.
+        Legacy needed a per-entity column map (musicbrainz_id /
+        musicbrainz_release_id / musicbrainz_recording_id) and an early bug queried
+        all three as `musicbrainz_id`, so the check silently failed for albums and
+        tracks. lib2 keeps the mbid under one name on every entity, which removes the
+        map and the class of bug with it.
         """
-        table_config = {
-            'artist': ('artists', 'musicbrainz_id'),
-            'album': ('albums', 'musicbrainz_release_id'),
-            'track': ('tracks', 'musicbrainz_recording_id'),
-        }
-        cfg = table_config.get(entity_type)
-        if not cfg:
-            return None
-        table, column = cfg
         conn = None
         try:
+            from core.library2.worker_support import stored_provider_id
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT {column} FROM {table} WHERE id = ?", (entity_id,))
-            row = cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return stored_provider_id(conn, entity_type, entity_id, 'musicbrainz')
         except Exception:
             return None
         finally:
@@ -294,20 +203,19 @@ class MusicBrainzWorker:
                 conn.close()
 
     def _artist_aliases_empty(self, artist_id: Any) -> bool:
-        """Check if `artists.aliases` for this row is NULL or empty.
+        """Whether ``lib2_artists.aliases`` for this row is empty.
 
-        Used by the existing-MBID backfill path to skip the MB call
-        when aliases are already populated (re-scan cycles after
-        backfill complete should be no-ops). Defensive: returns True
-        on any error so the backfill attempt happens — a redundant MB
-        call is cheaper than missing the backfill entirely.
+        Used by the existing-MBID backfill path to skip the MB call when aliases are
+        already populated, so re-scan cycles after the backfill are no-ops.
+        Defensive: returns True on any error so the backfill still happens — a
+        redundant MB call is cheaper than missing the backfill entirely.
         """
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT aliases FROM artists WHERE id = ? LIMIT 1", (artist_id,))
-            row = cursor.fetchone()
+            row = conn.execute(
+                "SELECT aliases FROM lib2_artists WHERE id = ? LIMIT 1",
+                (artist_id,)).fetchone()
             if not row:
                 return False  # Row doesn't exist — nothing to backfill
             value = row[0]
@@ -366,17 +274,25 @@ class MusicBrainzWorker:
                 return
 
             if item_type == 'artist':
-                result = self.mb_service.match_artist(
-                    item_name, owned_titles=owned_album_titles(self.db, item_id))
+                conn = self.db._get_connection()
+                try:
+                    owned = owned_album_titles(conn, item_id)
+                finally:
+                    conn.close()
+                result = self.mb_service.match_artist(item_name, owned_titles=owned)
                 mbid = result.get('mbid') if result else None
                 # MB's combined score can match a weak name ("Grant" -> "Amy
                 # Grant") when its own relevance rank is high. Guard against
                 # assigning an mbid a differently-named artist already holds, so
                 # one mbid can't be smeared across unrelated artists.
-                conflict = (
-                    source_id_conflict(self.db, 'musicbrainz_id', mbid, item_id, item_name)
-                    if mbid else None
-                )
+                conflict = None
+                if mbid:
+                    conn = self.db._get_connection()
+                    try:
+                        conflict = provider_id_conflict(
+                            conn, 'musicbrainz', mbid, item_id, item_name)
+                    finally:
+                        conn.close()
                 if mbid and not conflict:
                     self.mb_service.update_artist_mbid(item_id, mbid, 'matched')
                     # Issue #442 — pull alternate-spelling aliases (Japanese
@@ -453,22 +369,11 @@ class MusicBrainzWorker:
         """Count how many items still need processing"""
         conn = None
         try:
+            from core.library2.worker_queue import pending_count
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            # Count unattempted items
-            cursor.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM artists WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM albums WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
-                    (SELECT COUNT(*) FROM tracks WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL)
-                AS pending
-            """)
-
-            row = cursor.fetchone()
-
-            return row[0] if row else 0
-
+            return pending_count(conn, 'musicbrainz',
+                                 retry_after_days=self.retry_days)
         except Exception as e:
             logger.error(f"Error counting pending items: {e}")
             return 0
@@ -480,61 +385,10 @@ class MusicBrainzWorker:
         """Get progress breakdown by entity type"""
         conn = None
         try:
+            from core.library2.worker_queue import progress_breakdown
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            progress = {}
-
-            # Artists progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM artists
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['artists'] = {
-                    'matched': processed,  # Actually "processed" count for UI
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Albums progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM albums
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['albums'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            # Tracks progress
-            cursor.execute("""
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN musicbrainz_match_status IS NOT NULL THEN 1 ELSE 0 END) AS processed
-                FROM tracks
-            """)
-            row = cursor.fetchone()
-            if row:
-                total, processed = row[0], row[1] or 0
-                progress['tracks'] = {
-                    'matched': processed,
-                    'total': total,
-                    'percent': int((processed / total * 100) if total > 0 else 0)
-                }
-
-            return progress
-
+            return progress_breakdown(conn, 'musicbrainz')
         except Exception as e:
             logger.error(f"Error getting progress breakdown: {e}")
             return {}

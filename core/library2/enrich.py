@@ -189,7 +189,7 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 # migrated worker, and when it holds every service the mirror has no work left.
 MIGRATED_SERVICES: frozenset = frozenset({
     "lastfm", "genius", "discogs", "bandcamp", "audiodb", "similar_artists",
-    "amazon", "jiosaavn",
+    "amazon", "jiosaavn", "musicbrainz",
 })
 
 
@@ -211,7 +211,7 @@ def _migrated_prefixes() -> tuple:
 # value from a stale legacy row.
 _SCALAR_OWNERS: Dict[str, Dict[str, str]] = {
     "artist": {"style": "audiodb", "mood": "audiodb", "label": "audiodb",
-               "banner_url": "audiodb"},
+               "banner_url": "audiodb", "aliases": "musicbrainz"},
     "album": {"style": "audiodb", "mood": "audiodb"},
     "track": {"style": "audiodb", "mood": "audiodb"},
 }
@@ -415,8 +415,14 @@ def _apply_mirror(conn, spec: MirrorSpec, entity_id: int, legacy_row: Any) -> bo
     fields = (*active_scalars(spec), *handover_scalars(spec))
     assignments = ", ".join(
         f"{field[0]}=COALESCE(?, {field[0]})" for field in active_scalars(spec))
+    # NULLIF twice over: a JSON-array column defaults to '[]', never NULL, so
+    # treating only NULL as empty would mean the backfill never fires for `aliases`
+    # or `genres` and the legacy value stays unreachable. Same emptiness rule as
+    # `_is_absent` and `provider_writes._is_empty`. The trailing column reference is
+    # what keeps an empty-on-both-sides NOT NULL column legal — without it the
+    # expression collapses to NULL.
     handover = ", ".join(
-        f"{field[0]}=COALESCE(NULLIF({field[0]},''), ?)"
+        f"{field[0]}=COALESCE(NULLIF(NULLIF({field[0]},''),'[]'), ?, {field[0]})"
         for field in handover_scalars(spec))
     conn.execute(
         f"UPDATE {spec.lib2_table} SET "
