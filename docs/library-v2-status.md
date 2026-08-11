@@ -3538,3 +3538,59 @@ naheliegende Kandidat).
 kleiner Lesestellen. `core/worker_utils.py` hält noch 7 Stellen: die
 Legacy-Helfer, die jetzt nur noch `soulid` und der Repair-Worker benutzen — mit
 denen fallen sie weg.
+
+#### 50.4.4.8 Die Rollback-Gabel bei den Repair-Jobs ist weg
+
+Stand: **411/117**. Acht Maintenance-Jobs hatten **zwei** Versionen ihres Scans:
+eine Library-v2-Version in `core/repair_jobs/native_p3.py`, die tatsächlich lief,
+und die Legacy-Projektion, von der sie erbte — aufbewahrt für ein Rollback, das
+nicht mehr zur Debatte steht. Zwei Versionen desselben Scans driften
+auseinander, und die tote ist die, deren Bruch niemand merkt.
+
+Zusammengeführt und `native_p3` gelöscht: `track_number_repair`,
+`acoustid_scanner`, `album_tag_consistency`, `metadata_gap_filler`,
+`missing_cover_art`, `live_commentary_cleaner`, `genre_cleanup`,
+`comma_artist_splitter`. Die Methodenkörper wurden verschoben, nicht neu
+getippt — jeder gegen sein natives Original diff-geprüft.
+
+**Der Folder-Scan-Pfad war nie überschrieben.** `track_number_repair.scan_folders`
+behielt vier Legacy-Helfer, die einen Dateipfad auf eine Katalogzeile auflösen.
+Einer brauchte eine echte Entscheidung: `_lookup_canonical_from_db` las
+`albums.canonical_source`/`canonical_album_id`, und lib2 hält diese Anheftung
+stattdessen als **Default-Release-Edition** des Albums — dieselbe Idee eine Ebene
+tiefer, Release-Group als Album, Edition als das konkrete Release, auf das die
+Dateien gematcht wurden. Der Suffix-Match-Fallback bleibt und ist jetzt begründet:
+eine auf einem Rechner indizierte und von einem anderen gescannte Bibliothek hat
+dieselben Dateien unter verschiedenen absoluten Präfixen, und ohne ihn verliert
+der Folder-Scan still alles, was der Katalog beitragen könnte.
+
+**Der alte Wächter war ein Stellvertreter.** Er prüfte „die registrierte Klasse
+kommt aus `native_p3`". Ersetzt durch
+`tests/repair/test_catalogue_jobs_are_native.py`: diese Module halten überhaupt
+kein Legacy-SQL, gemessen mit demselben Zähler wie die Ratsche. Das ist strikt
+stärker — eine native Unterklasse, die eine Projektion vergessen hätte, wäre
+durch die alte Prüfung gekommen.
+
+**Zwei Diagnose-Ausgaben wären still verschwunden.** Der native
+`album_tag_consistency`-Scan hatte sie nie: die Aufschlüsselung „N Alben in der
+Datenbank — X geeignet, Y Einzeltrack, Z ohne gespeicherte Dateipfade" und die
+Warnung „N Album/Alben übersprungen, Dateien nicht lesbar". Beide sind portiert,
+nicht mitsamt ihren Tests gelöscht. Die Aufschlüsselung zählt jetzt zwei Alben,
+wo Legacy drei zählte, und das ist keine Regression: ein lib2-Track ohne aktive
+Datei-Zeile ist überhaupt kein File-Subject, der Ausschluss passiert also eine
+Ebene tiefer als früher. Steht an der Assertion.
+
+**Ein Fund, den ich melden muss:** ein falscher Bearbeitungsbereich löschte bei
+qobuz/tidal/deezer vier Methoden pro Datei. Die Ratsche war zufrieden (0/0), die
+Dateien kompilierten. Nur die Verhaltenstests haben es gefangen — die Ratsche
+misst, ob Legacy-SQL weg ist, nicht ob der Port intakt ist.
+
+**Rest, nach Größe:** `database/music_database.py` 228 und `web_server.py` 94 sind
+Lesestellen (die nächste Phase). `repair_worker` 42 — dort sind die
+Legacy-Zweige der `_fix_*`-Handler, die für die acht kollabierten Jobs jetzt tot
+sind, aber für die Jobs mit bare-id-Subjects (`lossy_converter`,
+`missing_lyrics`, `short_preview_track`, `audio_corruption_detector`) weiter
+leben; sie fallen mit deren Scannern. `soulid` 17 (eigene Runde), dann
+`imports/side_effects` 12, `library/missing_track_import` 12,
+`listening_stats_worker` 11 (blockiert), `worker_utils` 9 (die Legacy-Helfer, die
+nur noch soulid und repair_worker benutzen).
