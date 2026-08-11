@@ -157,7 +157,7 @@ describe('fetchers', () => {
     window.openDownloadMissingModalForYouTube = modal;
     fetchMock
       .mockReturnValueOnce(
-        ok({ id: 'alb1', name: 'New One', tracks: [{ id: 't1', name: 'Song A' }] }),
+        ok({ id: 'alb1', name: 'New One', image_url: 'cover.jpg', tracks: [{ id: 't1', name: 'Song A' }] }),
       )
       .mockReturnValueOnce(ok({ owned_tracks: { 'Song A': { owned: false } } }));
     await openFreshRelease({
@@ -167,6 +167,8 @@ describe('fetchers', () => {
       releaseDate: '2026-08-01',
       trackCount: 1,
       spotifyArtistId: 'sp1',
+      itunesArtistId: '',
+      deezerArtistId: 'dz-artist',
       albumSpotifyId: 'alb1',
       albumItunesId: '',
       albumDeezerId: '',
@@ -177,9 +179,23 @@ describe('fetchers', () => {
     expect(modal).toHaveBeenCalledWith(
       'recent_album_alb1',
       'New One',
-      expect.arrayContaining([expect.objectContaining({ name: 'Song A' })]),
-      expect.objectContaining({ name: 'Watched' }),
-      expect.anything(),
+      // Track artists are NAME STRINGS and each track carries the full album —
+      // the modal's other callers (discover) all hand it this shape, and thin
+      // objects here rendered the modal header context-less.
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Song A',
+          artists: ['Watched'],
+          album: expect.objectContaining({ name: 'New One', images: [{ url: 'cover.jpg' }] }),
+        }),
+      ]),
+      expect.objectContaining({
+        name: 'Watched',
+        source: 'spotify',
+        spotify_artist_id: 'sp1',
+        deezer_artist_id: 'dz-artist',
+      }),
+      expect.objectContaining({ name: 'New One', album_type: 'album' }),
     );
   });
 
@@ -194,6 +210,8 @@ describe('fetchers', () => {
       releaseDate: '',
       trackCount: 0,
       spotifyArtistId: '',
+      itunesArtistId: '',
+      deezerArtistId: '',
       albumSpotifyId: '',
       albumItunesId: '',
       albumDeezerId: '',

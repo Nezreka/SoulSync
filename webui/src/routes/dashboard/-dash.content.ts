@@ -104,6 +104,8 @@ export interface FreshRelease {
   releaseDate: string;
   trackCount: number;
   spotifyArtistId: string;
+  itunesArtistId: string;
+  deezerArtistId: string;
   /** Album ids + provider, for the album fetch behind the click. */
   albumSpotifyId: string;
   albumItunesId: string;
@@ -124,6 +126,8 @@ interface WatchlistReleaseRow {
   album_deezer_id?: string;
   artist_name?: string;
   spotify_artist_id?: string;
+  itunes_artist_id?: string;
+  deezer_artist_id?: string;
 }
 
 interface DiscoverAlbumRow {
@@ -146,6 +150,8 @@ function fromRow(row: WatchlistReleaseRow & DiscoverAlbumRow, fromDiscover: bool
     releaseDate: row.release_date ?? '',
     trackCount: row.track_count ?? 0,
     spotifyArtistId: row.spotify_artist_id ?? row.artist_spotify_id ?? '',
+    itunesArtistId: row.itunes_artist_id ?? '',
+    deezerArtistId: row.deezer_artist_id ?? '',
     albumSpotifyId: row.album_spotify_id ?? '',
     albumItunesId: row.album_itunes_id ?? '',
     albumDeezerId: row.album_deezer_id ?? '',
@@ -197,6 +203,11 @@ interface AlbumDetail {
   id?: string;
   name?: string;
   image_url?: string;
+  album_type?: string;
+  total_tracks?: number;
+  release_date?: string;
+  images?: { url?: string }[];
+  artists?: { id?: string; name?: string }[];
   tracks?: AlbumDetailTrack[];
 }
 
@@ -283,20 +294,51 @@ export async function openFreshRelease(release: FreshRelease): Promise<void> {
       return;
     }
 
+    // The modal reads the discover context contract (its other callers all
+    // build it): an album with an IMAGES array, track artists as NAME STRINGS,
+    // and an artist carrying source + per-provider ids. Thin {id, name} shapes
+    // rendered the modal header context-less.
+    const albumForModal = {
+      id: albumData.id,
+      name: albumData.name ?? release.albumName,
+      album_type: albumData.album_type || 'album',
+      total_tracks: albumData.total_tracks || albumData.tracks.length,
+      release_date: albumData.release_date || release.releaseDate,
+      images:
+        albumData.images && albumData.images.length
+          ? albumData.images
+          : [{ url: albumData.image_url || release.cover }].filter((img) => img.url),
+    };
+    const albumArtist = albumData.artists?.[0];
+    const trackArtists = (track: AlbumDetailTrack & { artists?: { name?: string }[] }) => {
+      const list = track.artists ?? albumData.artists ?? [{ name: release.artistName }];
+      return list.map((a) => a?.name || a);
+    };
     const spotifyTracks = albumData.tracks.map((track) => ({
       id: track.id,
       name: track.name,
-      artists: [{ name: release.artistName }],
-      album: { id: albumData.id, name: albumData.name, image_url: albumData.image_url },
+      artists: trackArtists(track),
+      album: albumForModal,
       duration_ms: track.duration_ms || 0,
       track_number: track.track_number || 0,
     }));
+    const artistContext = {
+      id: release.spotifyArtistId || albumArtist?.id || '',
+      name: release.artistName || albumArtist?.name || '',
+      source,
+      spotify_artist_id:
+        release.spotifyArtistId || (source === 'spotify' ? (albumArtist?.id ?? '') : ''),
+      itunes_artist_id:
+        release.itunesArtistId || (source === 'itunes' ? (albumArtist?.id ?? '') : ''),
+      deezer_artist_id:
+        release.deezerArtistId || (source === 'deezer' ? (albumArtist?.id ?? '') : ''),
+    };
     await window.openDownloadMissingModalForYouTube?.(
       `recent_album_${albumId}`,
       albumData.name ?? release.albumName,
       spotifyTracks,
-      { id: release.spotifyArtistId || null, name: release.artistName },
-      { id: albumData.id, name: albumData.name, image_url: albumData.image_url },
+      artistContext,
+      albumForModal,
     );
     window.hideLoadingOverlay?.();
   } catch (error) {

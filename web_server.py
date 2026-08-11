@@ -9355,7 +9355,19 @@ def get_recently_added_albums():
     try:
         limit = min(50, max(1, int(request.args.get('limit', 20))))
         db = get_database()
-        return jsonify({'success': True, 'albums': db.get_recently_added_albums(limit=limit)})
+        albums = db.get_recently_added_albums(limit=limit)
+        # Server-synced art is stored as media-server URLs that need auth and
+        # die in the browser — the exact reason /api/library/artist/<id>/thumb
+        # runs its thumb through this normalizer. Same treatment here, or the
+        # cards render the placeholder while holding a "valid" URL.
+        for album in albums:
+            for key in ('thumb_url', 'artist_thumb_url'):
+                if album.get(key):
+                    try:
+                        album[key] = fix_artist_image_url(album[key]) or ''
+                    except Exception:
+                        album[key] = ''
+        return jsonify({'success': True, 'albums': albums})
     except Exception as e:
         logger.error(f"Error getting recently added albums: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
