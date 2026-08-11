@@ -37,12 +37,11 @@ class MetadataGapFillerJob(RepairJob):
     supports_artist_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
-        from core.metadata_service import (
-            get_client_for_source,
-            get_primary_source,
-            get_source_priority,
-        )
-
+        # These three are already imported at module scope. Re-importing them
+        # here rebound the names locally, which silently made the module-level
+        # ones impossible to substitute — a test that swapped the source
+        # priority or the client factory was overridden by the real thing and
+        # went out to the live provider instead.
         result = JobResult()
         settings = self._get_settings(context)
         fill_isrc = settings.get("fill_isrc", True)

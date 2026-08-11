@@ -66,61 +66,47 @@ class _FakeMBClient:
 
 
 def _make_db():
+    """A Library-v2 catalogue with one file, because that is what the scan reads.
+
+    This fixture used to hand-roll ``artists``/``albums``/``tracks``. The job
+    stopped reading those when its native scan replaced the legacy projection,
+    and an empty ``lib2_track_files`` yields no subjects at all — the tests then
+    asserted against a scan that had walked nothing.
+    """
+    from core.library2.schema import ensure_library_v2_schema
+
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE artists (
-            id INTEGER PRIMARY KEY,
-            name TEXT,
-            thumb_url TEXT
-        )
-        """
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists (id, name, sort_name) VALUES (1, 'Artist', 'Artist')")
+    conn.execute(
+        "INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Album')")
+    conn.execute(
+        "INSERT INTO lib2_tracks (id, album_id, title, isrc, external_ids) "
+        "VALUES (1, 1, 'Track Title', '', ?)",
+        ('{"spotify": "sp-1", "deezer": "dz-1"}',),
     )
-    cursor.execute(
-        """
-        CREATE TABLE albums (
-            id INTEGER PRIMARY KEY,
-            title TEXT,
-            thumb_url TEXT
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE tracks (
-            id INTEGER PRIMARY KEY,
-            title TEXT,
-            artist_id INTEGER,
-            album_id INTEGER,
-            spotify_track_id TEXT,
-            itunes_track_id TEXT,
-            deezer_track_id TEXT,
-            isrc TEXT,
-            musicbrainz_recording_id TEXT
-        )
-        """
-    )
-    cursor.execute("INSERT INTO artists (id, name, thumb_url) VALUES (1, 'Artist', '')")
-    cursor.execute("INSERT INTO albums (id, title, thumb_url) VALUES (1, 'Album', '')")
-    cursor.execute(
-        """
-        INSERT INTO tracks
-            (id, title, artist_id, album_id, spotify_track_id, itunes_track_id, deezer_track_id, isrc, musicbrainz_recording_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (1, 'Track Title', 1, 1, 'sp-1', None, 'dz-1', '', ''),
-    )
+    conn.execute(
+        "INSERT INTO lib2_track_files (track_id, path, format, is_primary) "
+        "VALUES (1, '/music/Artist/Album/01 - Track Title.flac', 'flac', 1)")
     conn.commit()
     return conn
+
+
+class _Config:
+    """``features.library_v2`` off means ``active_file_subjects`` returns [] —
+    the switch every native scan is behind."""
+
+    def get(self, key, default=None):
+        return True if key == 'features.library_v2' else default
 
 
 def _make_context(conn):
     findings = []
     return SimpleNamespace(
         db=SimpleNamespace(_get_connection=lambda: conn),
-        config_manager=SimpleNamespace(get=lambda key, default=None: default),
+        config_manager=_Config(),
         check_stop=lambda: False,
         wait_if_paused=lambda: False,
         update_progress=lambda *args, **kwargs: None,
