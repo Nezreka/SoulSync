@@ -177,7 +177,7 @@ async function openEnrichmentManager(workerId) {
                         <button class="em-icon-btn em-retry-global" id="em-retry-global-btn"
                                 title="Re-queue every failed item across ALL workers"
                                 onclick="retryAllFailedEnrichmentGlobal(this)">↻ Retry all failed</button>
-                        <button class="em-icon-btn" id="em-verify-global-btn"
+                        <button class="em-icon-btn em-verify-global" id="em-verify-global-btn"
                                 title="Repair matches corrupted before the Aug 2026 matching fixes: reset artist id-collision clusters and degenerate-title false matches so the fixed workers rematch them"
                                 onclick="verifyEnrichmentMatchesGlobal(this)">✓ Verify matches</button>
                         <button class="em-icon-btn" id="em-refresh-btn" title="Refresh"

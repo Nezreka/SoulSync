@@ -74408,6 +74408,15 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
 .em-retry-global:disabled { opacity: 0.55; cursor: default; }
 
+/* Global "Verify matches" — same pill override beside it (green = repair). */
+.em-verify-global {
+    width: auto; height: 32px; padding: 0 13px; border-radius: 999px;
+    gap: 6px; font-size: 12px; font-weight: 800; white-space: nowrap;
+    color: #86efac; background: rgba(34, 197, 94, 0.14);
+}
+.em-verify-global:hover { transform: none; background: rgba(34, 197, 94, 0.24); }
+.em-verify-global:disabled { opacity: 0.55; cursor: default; }
+
 /* discography gap-fill (#1067): source badge on cards from other sources */
 .gapfill-source-badge {
     position: absolute; left: 8px; top: 8px; z-index: 2;
