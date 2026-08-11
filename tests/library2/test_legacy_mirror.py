@@ -145,21 +145,31 @@ class TestDrainAppliesToLib2:
         # The promoted column has to move too — read paths join on it.
         assert row["spotify_id"] == "sp-new"
 
-    def test_bios_reach_lib2(self, mirrored_db):
+    def test_prose_reaches_lib2(self, mirrored_db):
+        """The "bios" half of iss32-E01: a mirrored artist used to keep lib2's
+        stale text forever.
+
+        This checks the shared ``summary`` column, which the workers still on
+        legacy write. The per-service ``enrichment`` bucket is no longer exercised
+        here because every provider that had one now writes lib2 itself — its
+        mechanism is covered in ``test_mirror_album_track_payload``, which turns the
+        handover off on purpose so the copying path stays under test for whichever
+        provider is declared next.
+        """
         conn = _conn(mirrored_db)
         try:
             conn.execute(
-                "UPDATE artists SET discogs_bio=?, discogs_members=? WHERE id=1",
-                ("A Bristol act.", '["3D","Daddy G"]'))
+                "UPDATE artists SET summary=?, style=? WHERE id=1",
+                ("A Bristol act.", "trip hop"))
             conn.commit()
         finally:
             conn.close()
 
         drain(mirrored_db)
 
-        enrichment = json.loads(_lib2_artist(mirrored_db)["enrichment"])
-        assert enrichment["discogs"]["bio"] == "A Bristol act."
-        assert enrichment["discogs"]["members"] == ["3D", "Daddy G"]
+        row = _lib2_artist(mirrored_db)
+        assert row["summary"] == "A Bristol act."
+        assert row["style"] == "trip hop"
 
     def test_a_migrated_services_legacy_write_is_not_mirrored(self, mirrored_db):
         """Last.fm's worker writes lib2 directly now, so its legacy columns must
@@ -277,7 +287,7 @@ class TestReconcileTheBacklogTheTriggerNeverSaw:
         conn = _conn(db)
         try:
             conn.execute("DROP TRIGGER IF EXISTS trg_lib2_mirror_artists")
-            conn.execute("UPDATE artists SET discogs_bio=?, spotify_artist_id=? "
+            conn.execute("UPDATE artists SET summary=?, spotify_artist_id=? "
                          "WHERE id=1", ("Written before the mirror existed.", "sp-old"))
             conn.commit()
             ensure_legacy_mirror_schema(conn.cursor())
@@ -307,8 +317,7 @@ class TestReconcileTheBacklogTheTriggerNeverSaw:
         assert stats["enqueued"] == 1
         drain(mirrored_db)
         assert self._divergent_rows(mirrored_db) == []
-        row = _lib2_artist(mirrored_db)
-        assert json.loads(row["enrichment"])["discogs"]["bio"] == (
+        assert _lib2_artist(mirrored_db)["summary"] == (
             "Written before the mirror existed.")
 
     def test_rows_in_step_are_left_alone(self, mirrored_db):

@@ -178,7 +178,9 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
 #
 # This set is therefore the stage-2 progress marker: it grows by one entry per
 # migrated worker, and when it holds every service the mirror has no work left.
-MIGRATED_SERVICES: frozenset = frozenset({"lastfm", "genius"})
+MIGRATED_SERVICES: frozenset = frozenset({
+    "lastfm", "genius", "discogs", "bandcamp",
+})
 
 
 def _migrated(service: str) -> bool:
