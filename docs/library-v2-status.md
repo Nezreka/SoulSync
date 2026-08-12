@@ -4177,3 +4177,75 @@ das SQL gar nicht ansah (`fetchall` gab eine vorbereitete Liste zurück) — er
 wäre mit jedem Tabellennamen grün geblieben. Die Attrappe hält jetzt eine echte
 `MusicDatabase`, die Alben werden als lib2-Zeilen gesät, und acht neue Tests
 decken die drei Funktionen direkt ab.
+
+#### 50.4.4.21 Die großen Blöcke, erste Schneise: die Bibliotheks-Aggregate
+
+Stand: **306/87**. `database/music_database.py` fällt von 177/49 auf
+**155/46**. Das ist die erste Schneise durch die größte Datei; die Auswahl folgt
+zwei Regeln des Nutzers: so viel wie möglich, aber **die
+Media-Server-Integration bleibt offen**, solange nicht entschieden ist, wer
+lib2-Zeilen anlegen darf.
+
+**Was portiert ist.** `get_library_health`, `get_library_disk_usage`,
+`get_statistics`, `get_all_library_tracks_for_export`,
+`get_library_album_names`, `get_library_spotify_album_ids`,
+`get_artist_genres_by_name`. Dazu zwei tote Methoden gelöscht (`clear_all_data`
+0/3, `get_album_completion_stats` 3/0 — beide ohne einen einzigen Aufrufer,
+auch keinen dynamischen).
+
+**Zwei Konstanten sagen jetzt, was gemeint ist.** `_OWNED_TRACK` (das Release
+trägt `origin`, der Track erbt es) und `_LIVE_FILE` (eine gelöschte Dateizeile
+ist Geschichte, kein Speicherplatz). Beide Unterscheidungen gibt es in Legacy
+nicht — dort war jede Zeile Besitz und jede Datei aktuell —, und beide würden
+sonst in jeder einzelnen Abfrage neu (und irgendwann falsch) formuliert.
+
+**Bytes zählen Dateien, Zahlen zählen Tracks.** Ein Track kann in v2 mehrere
+Dateien haben (ADR-03: eine primäre plus Behalter). Der Byte-Gesamtwert summiert
+deshalb *jede* lebende Datei — das ist der Platz, den die Platte wirklich
+verliert —, während `tracks_with_size`/`tracks_without_size` track-zentrisch
+bleiben, weil genau daran der Hinweis „(run a Deep Scan)" hängt.
+
+**Ein Fund, den erst der Test zeigte:** `GROUP BY format` in der
+Format-Aufschlüsselung. In Legacy war `format` nur ein Alias auf einen
+CASE-Ausdruck; `lib2_track_files` hat aber eine echte Spalte dieses Namens, und
+SQLite löst einen nackten Alias in `GROUP BY` zur **Spalte** auf. Die ganze
+Bibliothek fiel damit in einen einzigen (leeren) Eimer, und die Zahl daneben war
+die Gesamtzahl. Jetzt heißt der Alias `fmt`. Ein Aliasname, der in Legacy
+harmlos war, ist in lib2 ein Spaltenname — das gehört auf die Prüfliste jeder
+weiteren Portierung.
+
+**Wieder die Faltung.** `get_library_album_names` und
+`get_artist_genres_by_name` verglichen über SQL-`LOWER()`, also nur ASCII,
+gegen eine Gegenseite, die in Python faltet. Ersteres faltet jetzt beidseitig in
+Python (die Tabelle wird ohnehin ganz gelesen), letzteres trifft über
+`name_key`.
+
+**Was bewusst liegen bleibt** (und warum, damit die nächste Runde nicht dieselbe
+Diagnose noch einmal stellt):
+
+- **Media-Server-Schreiber und alles Server-Skopierte**:
+  `insert_or_update_media_artist/album/track`, `delete_removed_content`,
+  `cleanup_orphaned_records`, `merge_duplicate_artists`, `clear_server_data`,
+  `track_exists(_by_server)`, `get_all_*_ids_for_server`,
+  `get_statistics_for_server`, `get_database_info_for_server`,
+  `get_tracks_for_m3u_resolution` (nimmt `server_source`) — zusammen der größte
+  Einzelblock. lib2 hat keine `server_source`-Spalte, und ob ein Scan überhaupt
+  lib2-Zeilen anlegen darf, ist die offene Frage (§50.4.4.2).
+- **`get_genre_breakdown` und alles über `listening_history`**: die Verknüpfung
+  läuft über `listening_history.db_track_id`, und die füllt
+  `listening_stats_worker` — derselbe Blocker (kein Medien-Server-Id-Feld in
+  lib2).
+- **Der Reorganize-Bridge-Pfad** (`get_album_display_meta`,
+  `get_artist_albums_for_reorganize`): `core/library2/reorganize_bridge.py`
+  löst *absichtlich* Legacy-Ids auf und delegiert an die legacy-gebundene
+  Reorganize-Pipeline. Diese beiden Lesestellen zu portieren, ohne die Pipeline
+  zu portieren, würde die Brücke zerreißen.
+- **Der Artist-Detail-Block** (`get_artist_discography` 16/0,
+  `web_server.get_artist_detail` 11/0): der größte verbleibende Einzelposten und
+  kein reiner Port. Der Endpunkt sucht zuerst per **roher Id** im Katalog, wird
+  aber vom Frontend nur noch mit einer **Provider-Id** aufgerufen (die
+  V2-Discovery-Ansicht) — eine numerische Deezer-Id kann auf eine Katalog-Id
+  treffen und liefert dann fremde Bibliotheksdaten (dieselbe Familie wie
+  iss29-B04c). Der ehrliche Port ist „bei gesetztem `source` über die
+  Provider-Id auflösen, sonst über die Katalog-Id", und das ist eine
+  Produktentscheidung, keine Umschreibung.

@@ -37,17 +37,26 @@ def db(tmp_path: Path) -> MusicDatabase:
 
 def _insert_track(db: MusicDatabase, *, track_id: str, file_path: str,
                   file_size, album_id: str = 'a1', artist_id: str = 'ar1') -> None:
-    """Helper: seed an artist+album+track row with the given size."""
+    """Seed a v2 track and its file row.
+
+    The size lives on the FILE in v2 (ADR-03), not on the track — the track
+    itself has no path and no bytes.
+    """
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)",
-                (artist_id, 'Test Artist'))
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                (album_id, artist_id, 'Test Album'))
+    cur.execute("INSERT OR IGNORE INTO lib2_artists (id, name, name_key)"
+                " VALUES (1, 'Test Artist', 'test artist')")
+    cur.execute("INSERT OR IGNORE INTO lib2_albums (id, primary_artist_id, title,"
+                "                                   origin)"
+                " VALUES (1, 1, 'Test Album', 'library')")
+    new_track = cur.execute(
+        "INSERT INTO lib2_tracks (album_id, title) VALUES (1, ?)",
+        (f'track-{track_id}',),
+    ).lastrowid
     cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path, file_size) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (track_id, album_id, artist_id, f'track-{track_id}', file_path, file_size),
+        "INSERT INTO lib2_track_files (track_id, path, size, is_primary)"
+        " VALUES (?, ?, ?, 1)",
+        (new_track, file_path, file_size),
     )
     conn.commit()
     conn.close()

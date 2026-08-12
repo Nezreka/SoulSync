@@ -15,6 +15,15 @@ from utils.logging_config import get_logger
 
 logger = get_logger("music_database")
 
+# A file row that still stands for something on disk. `deleted` rows are kept
+# as history (ADR-03), so every aggregate over files has to say so.
+_LIVE_FILE = "COALESCE(f.file_state, 'active') <> 'deleted'"
+
+# A track the user owns. v2 also stores a tracked artist's discography, in the
+# same tables — the release carries the distinction, so a track inherits it.
+_OWNED_TRACK = ("EXISTS (SELECT 1 FROM lib2_albums al "
+                "WHERE al.id = t.album_id AND al.origin = 'library')")
+
 _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
@@ -5421,56 +5430,76 @@ class MusicDatabase:
                 conn.close()
 
     def get_library_health(self):
-        """Get library health metrics."""
+        """Library health metrics for the System-Statistics page.
+
+        Everything here describes the library the user OWNS: v2 keeps a tracked
+        artist's discography in the same tables (``origin``), and counting those
+        would report a library nobody has. Formats and bytes come from the file
+        rows (ADR-03) and skip files that only exist as history.
+        """
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Total tracks
-            cursor.execute("SELECT COUNT(*) FROM tracks WHERE id IS NOT NULL")
+            cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_OWNED_TRACK}")
             total_tracks = (cursor.fetchone() or [0])[0]
 
-            # Unplayed
-            cursor.execute("SELECT COUNT(*) FROM tracks WHERE (play_count IS NULL OR play_count = 0) AND id IS NOT NULL")
+            cursor.execute(
+                "SELECT COUNT(*) FROM lib2_tracks t "
+                f"WHERE COALESCE(t.play_count, 0) = 0 AND {_OWNED_TRACK}")
             unplayed = (cursor.fetchone() or [0])[0]
 
-            # Format breakdown
-            cursor.execute("""
+            # The labels are what the page renders, so the extension keeps
+            # deciding them — `lib2_track_files.format` is free text a provider
+            # or a tag wrote, and is not always set.
+            cursor.execute(f"""
                 SELECT
                     CASE
-                        WHEN LOWER(file_path) LIKE '%.flac' THEN 'FLAC'
-                        WHEN LOWER(file_path) LIKE '%.mp3' THEN 'MP3'
-                        WHEN LOWER(file_path) LIKE '%.opus' THEN 'Opus'
-                        WHEN LOWER(file_path) LIKE '%.m4a' THEN 'AAC'
-                        WHEN LOWER(file_path) LIKE '%.ogg' THEN 'OGG'
-                        WHEN LOWER(file_path) LIKE '%.wav' THEN 'WAV'
+                        WHEN LOWER(f.path) LIKE '%.flac' THEN 'FLAC'
+                        WHEN LOWER(f.path) LIKE '%.mp3' THEN 'MP3'
+                        WHEN LOWER(f.path) LIKE '%.opus' THEN 'Opus'
+                        WHEN LOWER(f.path) LIKE '%.m4a' THEN 'AAC'
+                        WHEN LOWER(f.path) LIKE '%.ogg' THEN 'OGG'
+                        WHEN LOWER(f.path) LIKE '%.wav' THEN 'WAV'
                         ELSE 'Other'
-                    END as format,
+                    END as fmt,
                     COUNT(*) as count
-                FROM tracks
-                WHERE file_path IS NOT NULL AND file_path != ''
-                GROUP BY format
+                FROM lib2_track_files f
+                WHERE f.path IS NOT NULL AND f.path != '' AND {_LIVE_FILE}
+                -- `fmt`, not `format`: lib2_track_files HAS a `format` column,
+                -- and a bare alias of that name is resolved to the column in
+                -- GROUP BY — which silently grouped the whole library into one
+                -- (empty) bucket.
+                GROUP BY fmt
                 ORDER BY count DESC
             """)
             format_breakdown = {row[0]: row[1] for row in cursor.fetchall()}
 
-            # Total duration
-            cursor.execute("SELECT COALESCE(SUM(duration), 0) FROM tracks WHERE id IS NOT NULL")
+            cursor.execute(
+                "SELECT COALESCE(SUM(t.duration), 0) FROM lib2_tracks t "
+                f"WHERE {_OWNED_TRACK}")
             total_duration_ms = (cursor.fetchone() or [0])[0]
 
-            # Enrichment coverage
+            # Enrichment coverage: how much of the catalogue each service has
+            # matched. Only Spotify and MusicBrainz have promoted columns in v2;
+            # the long tail lives in `external_ids`, and Last.fm's payload (it
+            # has no id) in `enrichment`.
             enrichment = {}
-            for service, col in [('spotify', 'spotify_artist_id'), ('musicbrainz', 'musicbrainz_id'),
-                                 ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
-                                 ('itunes', 'itunes_artist_id'), ('audiodb', 'audiodb_id'),
-                                 ('genius', 'genius_id'), ('tidal', 'tidal_id'),
-                                 ('qobuz', 'qobuz_id')]:
+            matched_expr = {
+                'spotify': "spotify_id IS NOT NULL AND spotify_id != ''",
+                'musicbrainz': "musicbrainz_id IS NOT NULL AND musicbrainz_id != ''",
+                'lastfm': "json_extract(enrichment, '$.lastfm') IS NOT NULL",
+            }
+            for service in ('deezer', 'itunes', 'audiodb', 'genius', 'tidal', 'qobuz'):
+                matched_expr[service] = (
+                    f"json_extract(external_ids, '$.{service}') IS NOT NULL")
+            cursor.execute("SELECT COUNT(*) FROM lib2_artists")
+            total_artists = (cursor.fetchone() or [0])[0]
+            for service, expr in matched_expr.items():
                 try:
-                    cursor.execute(f"SELECT COUNT(*) FROM artists WHERE {col} IS NOT NULL AND {col} != ''")
+                    cursor.execute(f"SELECT COUNT(*) FROM lib2_artists WHERE {expr}")
                     matched = (cursor.fetchone() or [0])[0]
-                    cursor.execute("SELECT COUNT(*) FROM artists WHERE id IS NOT NULL")
-                    total_artists = (cursor.fetchone() or [0])[0]
                     enrichment[service] = round(matched / total_artists * 100, 1) if total_artists else 0
                 except Exception:
                     enrichment[service] = 0
@@ -5572,23 +5601,33 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Confirm column exists (defensive against fresh-install race
-            # where the migration hasn't run yet).
+            # Confirm the file table exists (defensive against a fresh-install
+            # race where the v2 schema hasn't been created yet).
             try:
-                cursor.execute("SELECT file_size FROM tracks LIMIT 1")
+                cursor.execute("SELECT size FROM lib2_track_files LIMIT 1")
             except Exception:
                 return empty
 
+            # A file is what occupies disk, and a track may own more than one
+            # (ADR-03: one primary plus keepers). The byte total therefore sums
+            # every live file, while the two counts stay track-centric, which
+            # is what the "(run a Deep Scan)" hint on the page means.
             cursor.execute(
-                "SELECT COALESCE(SUM(file_size), 0), "
-                "       COUNT(file_size), "
-                "       COUNT(*) - COUNT(file_size) "
-                "FROM tracks"
+                "SELECT COALESCE(SUM(f.size), 0) FROM lib2_track_files f "
+                f"WHERE {_LIVE_FILE}"
+            )
+            total_bytes = int((cursor.fetchone() or [0])[0] or 0)
+            cursor.execute(
+                "SELECT COUNT(*), "
+                "       COUNT(*) FILTER (WHERE t.sized > 0) "
+                "  FROM (SELECT t.id, ("
+                "            SELECT COUNT(f.size) FROM lib2_track_files f "
+                f"            WHERE f.track_id = t.id AND {_LIVE_FILE}"
+                "        ) AS sized FROM lib2_tracks t) t"
             )
             row = cursor.fetchone()
-            total_bytes = int(row[0] or 0)
-            tracks_with_size = int(row[1] or 0)
-            tracks_without_size = int(row[2] or 0)
+            tracks_with_size = int((row or [0, 0])[1] or 0)
+            tracks_without_size = int((row or [0, 0])[0] or 0) - tracks_with_size
 
             # Per-format breakdown via Python aggregation. Doing the
             # extension split in SQLite is fragile (paths with dots
@@ -5596,9 +5635,9 @@ class MusicDatabase:
             # in Python is one os.path.splitext per row, which is
             # negligible cost compared to the SUM() above.
             cursor.execute(
-                "SELECT file_path, file_size FROM tracks "
-                "WHERE file_size IS NOT NULL AND file_path IS NOT NULL "
-                "      AND file_path != ''"
+                "SELECT f.path, f.size FROM lib2_track_files f "
+                f"WHERE {_LIVE_FILE} AND f.size IS NOT NULL "
+                "      AND f.path IS NOT NULL AND f.path != ''"
             )
             by_format: dict = {}
             for path, size in cursor.fetchall():
@@ -6533,20 +6572,33 @@ class MusicDatabase:
         pass
     
     def get_statistics(self) -> Dict[str, int]:
-        """Get database statistics for all servers (legacy method)"""
+        """How big the owned library is: artists, releases, tracks.
+
+        ``COUNT(DISTINCT name)`` is deliberate and predates v2: two rows for one
+        name are one artist to the user. Releases and tracks are the ones the
+        user owns — a tracked artist's discography lives in the same tables.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("SELECT COUNT(DISTINCT name) FROM artists")
+
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a "
+                    " WHERE EXISTS (SELECT 1 FROM lib2_albums al "
+                    "                WHERE al.primary_artist_id = a.id "
+                    "                  AND al.origin = 'library')"
+                    "    OR EXISTS (SELECT 1 FROM lib2_album_artists aa "
+                    "                 JOIN lib2_albums al ON al.id = aa.album_id "
+                    "                WHERE aa.artist_id = a.id "
+                    "                  AND al.origin = 'library')")
                 artist_count = cursor.fetchone()[0]
-                
-                cursor.execute("SELECT COUNT(*) FROM albums")
+
+                cursor.execute("SELECT COUNT(*) FROM lib2_albums WHERE origin = 'library'")
                 album_count = cursor.fetchone()[0]
-                
-                cursor.execute("SELECT COUNT(*) FROM tracks")
+
+                cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_OWNED_TRACK}")
                 track_count = cursor.fetchone()[0]
-                
+
                 return {
                     'artists': artist_count,
                     'albums': album_count,
@@ -6592,28 +6644,6 @@ class MusicDatabase:
             logger.error(f"Error getting database statistics for {server_source}: {e}")
             return {'artists': 0, 'albums': 0, 'tracks': 0}
     
-    def clear_all_data(self):
-        """Clear all data from database (for full refresh) - DEPRECATED: Use clear_server_data instead"""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute("DELETE FROM tracks")
-                cursor.execute("DELETE FROM albums")
-                cursor.execute("DELETE FROM artists")
-                
-                conn.commit()
-                
-                # VACUUM to actually shrink the database file and reclaim disk space
-                logger.info("Vacuuming database to reclaim disk space...")
-                self._vacuum_best_effort(cursor)
-                
-                logger.info("All database data cleared and file compacted")
-                
-        except Exception as e:
-            logger.error(f"Error clearing database: {e}")
-            raise
-
     def _vacuum_best_effort(self, cursor):
         """Run VACUUM without making the caller fail if compaction hiccups."""
         try:
@@ -7742,17 +7772,23 @@ class MusicDatabase:
 
         Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
         ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
+        from core.library2.track_files import primary_order
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.file_path AS path, t.title AS title, ar.name AS artist,
+            cursor.execute(f"""
+                SELECT f.path AS path, t.title AS title, ar.name AS artist,
                        t.duration AS duration_ms, t.track_number AS track_number
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                JOIN lib2_track_files f ON f.id = (
+                     SELECT inner_f.id FROM lib2_track_files inner_f
+                      WHERE inner_f.track_id = t.id
+                        AND COALESCE(inner_f.file_state, 'active') <> 'deleted'
+                        AND COALESCE(inner_f.path, '') <> ''
+                      ORDER BY {primary_order('inner_f')} LIMIT 1)
                 ORDER BY ar.name COLLATE NOCASE, al.title COLLATE NOCASE, t.track_number
             """)
             out: List[Dict[str, Any]] = []
@@ -9467,54 +9503,6 @@ class MusicDatabase:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
 
         return cleaned.strip()
-    
-    def get_album_completion_stats(self, artist_name: str) -> Dict[str, int]:
-        """
-        Get completion statistics for all albums by an artist.
-        Returns dict with counts of complete, partial, and missing albums.
-        """
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # Get all albums by this artist with track counts
-            cursor.execute("""
-                SELECT albums.id, albums.track_count, COUNT(tracks.id) as actual_tracks
-                FROM albums
-                JOIN artists ON albums.artist_id = artists.id
-                LEFT JOIN tracks ON albums.id = tracks.album_id
-                WHERE artists.name LIKE ?
-                GROUP BY albums.id, albums.track_count
-            """, (f"%{artist_name}%",))
-            
-            results = cursor.fetchall()
-            stats = {
-                'complete': 0,          # >=90% of tracks
-                'nearly_complete': 0,   # 80-89% of tracks
-                'partial': 0,           # 1-79% of tracks  
-                'missing': 0,           # 0% of tracks
-                'total': len(results)
-            }
-            
-            for row in results:
-                expected_tracks = row['track_count'] or 1  # Avoid division by zero
-                actual_tracks = row['actual_tracks']
-                completion_ratio = actual_tracks / expected_tracks
-                
-                if actual_tracks == 0:
-                    stats['missing'] += 1
-                elif completion_ratio >= 0.9:
-                    stats['complete'] += 1
-                elif completion_ratio >= 0.8:
-                    stats['nearly_complete'] += 1
-                else:
-                    stats['partial'] += 1
-            
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Error getting album completion stats for artist '{artist_name}': {e}")
-            return {'complete': 0, 'nearly_complete': 0, 'partial': 0, 'missing': 0, 'total': 0}
     
     def set_metadata(self, key: str, value: str):
         """Set a metadata value"""
@@ -12295,25 +12283,35 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT DISTINCT spotify_album_id FROM albums
-                    WHERE spotify_album_id IS NOT NULL AND spotify_album_id != ''
+                    SELECT DISTINCT spotify_id FROM lib2_albums
+                    WHERE spotify_id IS NOT NULL AND spotify_id != ''
+                      AND origin = 'library'
                 """)
-                return {row['spotify_album_id'] for row in cursor.fetchall()}
+                return {row['spotify_id'] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting library spotify album IDs: {e}")
             return set()
 
     def get_library_album_names(self):
-        """Get normalized (artist, album) pairs from library for fuzzy ownership matching"""
+        """Normalized (artist, album) pairs of what the user OWNS, for fuzzy
+        ownership matching.
+
+        Folded in Python, not in SQL: the caller lowercases the provider's
+        spelling in Python, and SQLite's ``LOWER()`` only folds ASCII — a stored
+        "Björk" stayed "Björk" and never met the "björk" on the other side.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT LOWER(a.title) as album, LOWER(ar.name) as artist
-                    FROM albums a
-                    JOIN artists ar ON a.artist_id = ar.id
+                    SELECT al.title AS album, ar.name AS artist
+                    FROM lib2_albums al
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE al.origin = 'library'
                 """)
-                return {(row['artist'], row['album']) for row in cursor.fetchall()}
+                return {(str(row['artist'] or '').lower(),
+                         str(row['album'] or '').lower())
+                        for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting library album names: {e}")
             return set()
@@ -12881,10 +12879,15 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 placeholders = ','.join('?' for _ in clean)
+                # Matched on the indexed dedup key, not on `LOWER(name)`:
+                # SQLite folds ASCII only, so a stored "Björk" never answered a
+                # searched "björk" (iss29-D13).
+                from core.library2.importer import normalize_name
                 cursor.execute(
-                    f"SELECT LOWER(name) AS n, genres FROM artists "
-                    f"WHERE genres IS NOT NULL AND TRIM(genres) != '' AND LOWER(name) IN ({placeholders})",
-                    clean,
+                    f"SELECT name AS n, genres FROM lib2_artists "
+                    f"WHERE genres IS NOT NULL AND TRIM(genres) != '' "
+                    f"  AND genres != '[]' AND name_key IN ({placeholders})",
+                    [normalize_name(name) for name in clean],
                 )
                 for row in cursor.fetchall():
                     raw = (row['genres'] or '').strip()
@@ -12898,7 +12901,7 @@ class MusicDatabase:
                         genres = [g.strip() for g in raw.split(',') if g.strip()]
                     genres = [str(g).strip() for g in genres if str(g).strip()]
                     if genres:
-                        out[row['n']] = genres
+                        out[str(row['n'] or '').lower()] = genres
         except Exception as e:
             logger.debug(f"get_artist_genres_by_name failed: {e}")
         return out
