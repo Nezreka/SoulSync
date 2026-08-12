@@ -134,11 +134,87 @@ def merge_provider_id(
     return json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# --- Reading provider identity back out, in SQL ------------------------------
+# Two dedicated columns, everything else in ``external_ids`` — that is lib2's
+# storage shape, and it is nobody else's business. The JSON responses that carry
+# these ids outward have used ``core.source_ids``' vocabulary for years, so the
+# projection below hands the catalogue's row back under exactly those names and
+# no consumer has to learn a second one.
+ARTIST_IDS_SQL = """
+    spotify_id AS spotify_artist_id,
+    musicbrainz_id,
+    json_extract(external_ids, '$.itunes') AS itunes_artist_id,
+    json_extract(external_ids, '$.deezer') AS deezer_id,
+    json_extract(external_ids, '$.discogs') AS discogs_id,
+    json_extract(external_ids, '$.audiodb') AS audiodb_id,
+    json_extract(external_ids, '$.tidal') AS tidal_id,
+    json_extract(external_ids, '$.qobuz') AS qobuz_id,
+    json_extract(external_ids, '$.amazon') AS amazon_id,
+    json_extract(external_ids, '$.genius') AS genius_id,
+    json_extract(external_ids, '$.lastfm') AS lastfm_url,
+    json_extract(external_ids, '$.genius_url') AS genius_url
+"""
+
+# The providers that kept a column of their own. Hydrabase is in here because
+# its key IS ``soul_id`` — the content id every SoulSync node computes alike —
+# and that has a column precisely because it is not one provider's answer among
+# many; ``external_ids`` is not a junk drawer for identifiers that aren't.
+_DEDICATED_ID_COLUMNS = {
+    "spotify": "spotify_id",
+    "musicbrainz": "musicbrainz_id",
+    "hydrabase": "soul_id",
+}
+
+
+def provider_id_sql(source: Any, *, alias: str = "") -> Optional[str]:
+    """A SQL expression for one provider's id on a lib2 row, or ``None``.
+
+    Callers that used to interpolate a legacy per-provider column name ask for
+    this instead — it resolves to the column when the provider has one and to
+    the ``external_ids`` slot when it doesn't.
+    """
+
+    provider = normalize_provider_name(source)
+    if not provider:
+        return None
+    prefix = f"{alias}." if alias else ""
+    column = _DEDICATED_ID_COLUMNS.get(provider)
+    if column:
+        return f"{prefix}{column}"
+    return f"json_extract({prefix}external_ids, '$.{provider}')"
+
+
+def any_provider_id_sql(alias: str = "") -> str:
+    """A SQL predicate: does this lib2 row carry a given id, from any provider?
+
+    Takes the searched id once per placeholder — every dedicated column plus
+    the ``external_ids`` bucket. :data:`ANY_PROVIDER_ID_PARAMS` is how many.
+    """
+
+    prefix = f"{alias}." if alias else ""
+    columns = " OR ".join(f"{prefix}{column} = ?"
+                          for column in sorted(_DEDICATED_ID_COLUMNS.values()))
+    return (
+        f"({columns}"
+        f" OR EXISTS (SELECT 1 FROM json_each({prefix}external_ids)"
+        f"            WHERE json_each.value = ?))"
+    )
+
+
+#: Placeholders :func:`any_provider_id_sql` binds, so callers can say
+#: ``(value,) * ANY_PROVIDER_ID_PARAMS`` and never miscount.
+ANY_PROVIDER_ID_PARAMS = len(set(_DEDICATED_ID_COLUMNS.values())) + 1
+
+
 __all__ = [
+    "ANY_PROVIDER_ID_PARAMS",
+    "ARTIST_IDS_SQL",
+    "any_provider_id_sql",
     "merge_provider_id",
     "normalize_provider_name",
     "parse_external_ids",
     "preferred_provider_identity",
     "provider_only",
+    "provider_id_sql",
     "source_ids_from_values",
 ]

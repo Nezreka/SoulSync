@@ -4554,3 +4554,58 @@ jedes Feld, das er vorher trug; Pfad und Bitrate kommen aus der primären Datei,
 habe ich schon", „welche Labels kenne ich") sind jetzt auf `origin='library'`
 verengt. Ohne das hätte die Diskografie eines verfolgten Artists die Entdeckung
 genau der Alben unterdrückt, für die es sie gibt.
+
+#### 50.4.4.31 Artist-Detail, Radio und die Bearbeitungsschreiber
+
+Stand: **77/17**. `database/music_database.py` fällt von 52/14 auf **33/8**,
+`core/artist_source_lookup.py` von 2/0 auf **0/0**.
+
+**Die Projektion hat jetzt einen zweiten Aufrufer und deshalb ein Zuhause.**
+`_ARTIST_IDS_SQL` lag in `web_server.py`; `get_artist_full_detail` liefert
+dieselben Feldnamen (das Discography-Modal liest `spotify_artist_id`,
+`itunes_artist_id`, `deezer_id` direkt aus der Antwort). Der Block heißt jetzt
+`ARTIST_IDS_SQL` und steht in `core/library2/provider_ids.py` — neben der
+Speicherform, die er verbirgt. Dazu zwei Geschwister:
+`provider_id_sql(source)` (wo liegt die Id *dieses* Anbieters — eigene Spalte
+oder `external_ids`-Schlüssel) und `any_provider_id_sql()` (trägt die Zeile
+diese Id von *irgendeinem* Anbieter). Hydrabase steht in der Spaltenliste, weil
+sein Schlüssel `soul_id` ist — und der hat eine eigene Spalte, gerade weil er
+nicht die Antwort eines Anbieters unter vielen ist.
+
+**Der Fremd-Id-Einstieg** (`find_library_artist_for_source` und der Fallback in
+`get_artist_full_detail`) benutzt beides. `SOURCE_ID_FIELD` bleibt, aber nicht
+mehr als Spaltenname: es sagt jetzt, welche Quellen überhaupt aufgelöst werden
+und unter welchem Feldnamen die Antwort ihre Id trägt.
+
+**„Alle Alben dieses Artists" wird ausgesprochen statt geraten.** Legacy
+sammelte Artist-Zeilen mit *gleichem Namen auf demselben Server*. Der Katalog
+hat dafür `canonical_artist_id` (§40): eine Alias-Zeile zeigt auf ihre
+kanonische, die Familie ist die Wurzel plus alles, was auf sie zeigt — und die
+Frage funktioniert von beiden Enden.
+
+**Die Radio-Auswahl** liest den Katalog. Zwei Dinge fallen dabei weg: die
+Spaltenprobe (`play_count` ist in lib2 von Anfang an da, die globale
+Popularität steht als `$.lastfm.playcount` in `enrichment`) und der
+Dateipfad-Filter — der Join auf die primäre, nicht gelöschte Datei erledigt
+ihn, und schließt nebenbei die Diskografie-Zeilen aus, die es in Legacy gar
+nicht gab.
+
+**Drei Fallen in den kleinen Schreibern:**
+
+1. **`name_key` muss der Umbenennung folgen.** `update_artist_fields` schreibt
+   `name`; jede Suche geht über den gefalteten Schlüssel. Ohne Nachziehen wäre
+   der Artist unter dem neuen Namen unauffindbar und unter dem alten weiter
+   auffindbar gewesen.
+2. **`record_type` heißt in lib2 `album_type`.** Die Whitelist ist die Sprache
+   der Bearbeitungs-API und bleibt es; eine Zuordnung (`_EDIT_COLUMN`)
+   übersetzt beim Schreiben. Damit fällt auch das alte Raten aus dem Titel weg
+   („enthält 'single' und ≤3 Tracks") — `album_type` ist NOT NULL und das,
+   worauf Scan, Import und Provider sich ohnehin geeinigt haben.
+3. **Die ASCII-Falte, wieder zweimal.** `get_artist_tracks_indexed` und der
+   Namens-Fallback der Quellensuche verglichen mit `LOWER()`; „BJÖRK" fand
+   „Björk" nie und fiel jedes Mal auf den langsamen LIKE-Pfad zurück.
+
+**#1069 gilt weiter, aber anders begründet.** Die Kommentare sagten „`artists.id`
+ist TEXT". Der Katalog vergibt eigene Integer-Ids und hält die des Servers in
+`server_id` — die Regel („eine Id aus der URL ist opak, sie wird nie geparst")
+überlebt die Begründung.

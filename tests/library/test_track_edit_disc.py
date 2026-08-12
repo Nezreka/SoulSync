@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_library_track
 
 
 
@@ -25,11 +26,10 @@ from database.music_database import MusicDatabase
 def db():
     d = MusicDatabase(os.path.join(tempfile.mkdtemp(), "t.db"))
     conn = d._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('AR1','Art')")
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('A1','AR1','Alb')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, disc_number) "
-                "VALUES ('T1','A1','AR1','Song',3,1)")
+    d.edited_track_id = seed_library_track(
+        conn, artist='Art', album='Alb', title='Song',
+        artist_server_id='AR1', album_server_id='A1', track_server_id='T1',
+        track_number=3, disc_number=1)
     conn.commit()
     conn.close()
     return d
@@ -40,17 +40,17 @@ def db():
 # ---------------------------------------------------------------------------
 
 def test_disc_number_is_editable(db):
-    res = db.update_track_fields('T1', {'disc_number': 2})
+    res = db.update_track_fields(db.edited_track_id, {'disc_number': 2})
     assert res['success'] and 'disc_number' in res['updated_fields']
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT disc_number FROM tracks WHERE id='T1'")
+    cur.execute("SELECT disc_number FROM lib2_tracks WHERE id=?", (db.edited_track_id,))
     assert cur.fetchone()['disc_number'] == 2
     conn.close()
 
 
 def test_non_whitelisted_field_still_ignored(db):
-    res = db.update_track_fields('T1', {'disc_number': 4, 'bogus_field': 'x'})
+    res = db.update_track_fields(db.edited_track_id, {'disc_number': 4, 'bogus_field': 'x'})
     assert 'disc_number' in res['updated_fields']
     assert 'bogus_field' not in res['updated_fields']
 

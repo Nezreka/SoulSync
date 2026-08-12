@@ -7129,28 +7129,28 @@ class MusicDatabase:
 
         return normalized
     
-    def get_artist(self, artist_id) -> Optional[DatabaseArtist]:  # id is TEXT (server-native; numeric only on Plex) — #1069
-        """Get artist by ID"""
+    def get_artist(self, artist_id) -> Optional[DatabaseArtist]:
+        """Get artist by catalogue ID"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+
+                cursor.execute("SELECT * FROM lib2_artists WHERE id = ?", (artist_id,))
                 row = cursor.fetchone()
-                
+
                 if row:
                     genres = json.loads(row['genres']) if row['genres'] else None
                     return DatabaseArtist(
                         id=row['id'],
                         name=row['name'],
-                        thumb_url=row['thumb_url'],
+                        thumb_url=row['image_url'],
                         genres=genres,
                         summary=row['summary'],
-                        created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                        updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                        created_at=_as_datetime(row['added_at']),
+                        updated_at=_as_datetime(row['updated_at'])
                     )
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error getting artist {artist_id}: {e}")
             return None
@@ -7276,31 +7276,33 @@ class MusicDatabase:
             )
             return [dict(r) for r in cursor.fetchall()]
 
-    def get_albums_by_artist(self, artist_id) -> List[DatabaseAlbum]:  # id is TEXT (server-native) — #1069
-        """Get all albums by artist ID"""
+    def get_albums_by_artist(self, artist_id) -> List[DatabaseAlbum]:
+        """Get all albums by artist catalogue ID"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
-            cursor.execute("SELECT * FROM albums WHERE artist_id = ? ORDER BY year, title", (artist_id,))
+
+            cursor.execute(
+                "SELECT * FROM lib2_albums WHERE primary_artist_id = ?"
+                " ORDER BY year, title", (artist_id,))
             rows = cursor.fetchall()
-            
+
             albums = []
             for row in rows:
                 genres = json.loads(row['genres']) if row['genres'] else None
                 albums.append(DatabaseAlbum(
                     id=row['id'],
-                    artist_id=row['artist_id'],
+                    artist_id=row['primary_artist_id'],
                     title=row['title'],
                     year=row['year'],
-                    thumb_url=row['thumb_url'],
+                    thumb_url=row['image_url'],
                     genres=genres,
                     track_count=row['track_count'],
                     duration=row['duration'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                    created_at=_as_datetime(row['added_at']),
+                    updated_at=_as_datetime(row['updated_at'])
                 ))
-            
+
             return albums
             
         except Exception as e:
@@ -7530,14 +7532,23 @@ class MusicDatabase:
             return None
     
     def get_tracks_by_album(self, album_id: int) -> List[DatabaseTrack]:
-        """Get all tracks by album ID"""
+        """Get all tracks by album catalogue ID"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
-            cursor.execute("SELECT * FROM tracks WHERE album_id = ? ORDER BY track_number, title", (album_id,))
+
+            cursor.execute(f"""
+                SELECT t.*, al.primary_artist_id AS artist_id,
+                       f.path AS file_path, f.bitrate AS bitrate
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}
+                WHERE t.album_id = ?
+                ORDER BY t.track_number, t.title
+            """, (album_id,))
             rows = cursor.fetchall()
-            
+
             tracks = []
             for row in rows:
                 tracks.append(DatabaseTrack(
@@ -7549,10 +7560,10 @@ class MusicDatabase:
                     duration=row['duration'],
                     file_path=row['file_path'],
                     bitrate=row['bitrate'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                    created_at=_as_datetime(row['added_at']),
+                    updated_at=_as_datetime(row['updated_at'])
                 ))
-            
+
             return tracks
 
         except Exception as e:
@@ -8419,33 +8430,37 @@ class MusicDatabase:
             return candidates
 
     def get_artist_tracks_indexed(self, name: str, server_source: Optional[str] = None, limit: int = 10000) -> List[DatabaseTrack]:
-        """Indexed two-step lookup: artist_id by exact name (then case-insensitive
-        fallback), then tracks via `artist_id IN (...)`. Avoids the function-in-WHERE
-        pattern in search_tracks that defeats the artists.name index. Returns []
-        when the artist isn't in the library — caller can decide to fall back to
-        the slower LIKE-based path for track_artist / diacritic recall."""
+        """Indexed two-step lookup: artist id by exact name (then folded-name
+        fallback), then that artist's tracks via the release. Avoids the
+        function-in-WHERE pattern in search_tracks that defeats the name index.
+        Returns [] when the artist isn't in the library — caller can decide to
+        fall back to the slower LIKE-based path for track_artist recall."""
         if not name:
             return []
         try:
+            from core.library2.importer import normalize_name
+
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Step 1: exact case-sensitive match — hits idx_artists_name in O(log n).
+            # Step 1: exact match — hits idx_lib2_artists_name in O(log n).
             # Spotify's canonical artist names match the library 90%+ of the time.
-            cursor.execute("SELECT id FROM artists WHERE name = ?", (name,))
+            cursor.execute("SELECT id FROM lib2_artists WHERE name = ?", (name,))
             artist_ids = [r['id'] for r in cursor.fetchall()]
 
-            # Step 2: case-insensitive fallback if exact missed. Full scan, but only
-            # runs on the (uncommon) miss path so amortized cost stays low.
+            # Step 2: folded fallback if exact missed. `name_key` is the stored
+            # casefold, so this catches "BJÖRK" — SQLite's LOWER() only folds
+            # A-Z and would have sent every non-ASCII artist down the slow path.
             if not artist_ids:
-                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (name,))
+                cursor.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
+                               (normalize_name(name),))
                 artist_ids = [r['id'] for r in cursor.fetchall()]
 
             if not artist_ids:
                 return []
 
             placeholders = ','.join('?' for _ in artist_ids)
-            where = f"t.artist_id IN ({placeholders})"
+            where = f"al.primary_artist_id IN ({placeholders})"
             params: list = list(artist_ids)
             if server_source:
                 where += " AND t.server_source = ?"
@@ -8453,11 +8468,15 @@ class MusicDatabase:
             params.append(limit)
 
             cursor.execute(f"""
-                SELECT t.*, a.name as artist_name, al.title as album_title,
-                       al.thumb_url as album_thumb_url
-                FROM tracks t
-                JOIN artists a ON a.id = t.artist_id
-                JOIN albums al ON al.id = t.album_id
+                SELECT t.*, al.primary_artist_id AS artist_id,
+                       a.name as artist_name, al.title as album_title,
+                       al.image_url as album_thumb_url,
+                       f.path AS file_path, f.bitrate AS bitrate
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}
                 WHERE {where}
                 LIMIT ?
             """, params)
@@ -13814,32 +13833,32 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get artist with all columns
-                cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+                from core.library2.provider_ids import (
+                    ANY_PROVIDER_ID_PARAMS, ARTIST_IDS_SQL, any_provider_id_sql,
+                )
+
+                # Get artist with all columns, plus the provider ids under the
+                # names this method's responses have always carried.
+                artist_select = (f"SELECT *, image_url AS thumb_url, {ARTIST_IDS_SQL}"
+                                 f" FROM lib2_artists")
+                cursor.execute(f"{artist_select} WHERE id = ?", (artist_id,))
                 artist_row = cursor.fetchone()
                 if not artist_row:
                     # `artist_id` may be a *source* ID (e.g. a MusicBrainz MBID
-                    # from a search result) rather than the integer library PK.
+                    # from a search result) rather than the catalogue's own PK.
                     # The /api/artist-detail route resolves this upstream via
                     # find_library_artist_for_source, but the enhanced-view and
                     # quality-analysis endpoints call this method directly with
                     # whatever ID the page holds — for a library artist opened
                     # from a non-library search result that's the source ID, so
-                    # the page 404'd. Resolve by matching any per-service ID
-                    # column (single source of truth: SOURCE_ID_FIELD).
-                    from core.artist_source_lookup import SOURCE_ID_FIELD
-                    id_columns = list(dict.fromkeys(SOURCE_ID_FIELD.values()))
-                    where = ' OR '.join(f"{col} = ?" for col in id_columns)
+                    # the page 404'd.
                     cursor.execute(
-                        f"SELECT * FROM artists WHERE {where} LIMIT 1",
-                        tuple(str(artist_id) for _ in id_columns),
+                        f"{artist_select} WHERE {any_provider_id_sql()} LIMIT 1",
+                        (str(artist_id),) * ANY_PROVIDER_ID_PARAMS,
                     )
                     artist_row = cursor.fetchone()
                 if not artist_row:
                     return {'success': False, 'error': f'Artist with ID {artist_id} not found'}
-
-                artist_name = artist_row['name']
-                server_source = artist_row['server_source']
 
                 # Parse artist data
                 artist_data = dict(artist_row)
@@ -13853,18 +13872,23 @@ class MusicDatabase:
                 else:
                     artist_data['genres'] = []
 
-                # Get all album IDs for this artist (including same-name artists on same server)
-                cursor.execute("""
-                    SELECT id FROM artists
-                    WHERE name = ? AND server_source = ?
-                """, (artist_name, server_source))
+                # Every catalogue row that is this artist. Legacy had to guess
+                # at that with "same name on the same server"; v2 says it
+                # outright — an alias row points at its canonical one (§40), so
+                # the family is the canonical row plus everything linked to it.
+                root_id = artist_data.get('canonical_artist_id') or artist_data['id']
+                cursor.execute(
+                    "SELECT id FROM lib2_artists"
+                    " WHERE id = ? OR canonical_artist_id = ?", (root_id, root_id))
                 artist_ids = [row['id'] for row in cursor.fetchall()]
 
                 # Get all albums with all columns
                 placeholders = ','.join('?' * len(artist_ids))
                 cursor.execute(f"""
-                    SELECT * FROM albums
-                    WHERE artist_id IN ({placeholders})
+                    SELECT *, image_url AS thumb_url, primary_artist_id AS artist_id,
+                           album_type AS record_type, added_at AS created_at
+                    FROM lib2_albums
+                    WHERE primary_artist_id IN ({placeholders})
                     ORDER BY year DESC, title
                 """, artist_ids)
                 album_rows = cursor.fetchall()
@@ -13882,25 +13906,28 @@ class MusicDatabase:
                     else:
                         album_data['genres'] = []
 
-                    # Get all tracks for this album with all columns
-                    cursor.execute("""
-                        SELECT * FROM tracks
-                        WHERE album_id = ?
-                        ORDER BY track_number, title
+                    # Get all tracks for this album with all columns. Path and
+                    # bitrate belong to the file, not the track (ADR-03), and a
+                    # deleted file row is history — it must not present itself
+                    # as a track the user still has.
+                    cursor.execute(f"""
+                        SELECT t.*, t.spotify_id AS spotify_track_id,
+                               f.path AS file_path, f.bitrate AS bitrate,
+                               t.added_at AS created_at
+                        FROM lib2_tracks t
+                        LEFT JOIN lib2_track_files f
+                               ON f.track_id = t.id AND f.is_primary = 1
+                              AND {_LIVE_FILE}
+                        WHERE t.album_id = ?
+                        ORDER BY t.track_number, t.title
                     """, (album_data['id'],))
                     track_rows = cursor.fetchall()
                     album_data['tracks'] = [dict(tr) for tr in track_rows]
 
-                    # Determine record type from data if not set
-                    if not album_data.get('record_type'):
-                        track_count = len(album_data['tracks']) or album_data.get('track_count') or 0
-                        title_lower = (album_data.get('title') or '').lower()
-                        if any(ind in title_lower for ind in ['single', ' - single', '(single)']) and track_count <= 3:
-                            album_data['record_type'] = 'single'
-                        elif any(ind in title_lower for ind in ['ep', ' - ep', '(ep)', 'extended play']) or (4 <= track_count <= 7):
-                            album_data['record_type'] = 'ep'
-                        else:
-                            album_data['record_type'] = 'album'
+                    # No record-type guess from the title any more: legacy left
+                    # the column empty and fell back to substring-sniffing,
+                    # v2's `album_type` is NOT NULL and is what the scan, the
+                    # import and the providers all agree on.
 
                     albums.append(album_data)
 
@@ -13913,6 +13940,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting artist full detail for ID {artist_id}: {e}")
             return {'success': False, 'error': str(e)}
+
+    # The editable field names above are the vocabulary of the edit UI and its
+    # API; a few of them are spelled differently in the catalogue. Renaming the
+    # request payload instead would break every caller for nothing.
+    _EDIT_COLUMN = {'record_type': 'album_type'}
+
+    @classmethod
+    def _edit_clause(cls, valid_updates: Dict[str, Any]) -> Tuple[str, list]:
+        """``SET`` clause and values for a whitelisted edit payload."""
+        columns = [cls._EDIT_COLUMN.get(field, field) for field in valid_updates]
+        return (', '.join(f'{column} = ?' for column in columns),
+                list(valid_updates.values()))
 
     def update_artist_fields(self, artist_id, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update artist metadata fields. Only whitelisted fields are accepted."""
@@ -13928,9 +13967,19 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
-                values = list(valid_updates.values()) + [artist_id]
-                cursor.execute(f"UPDATE artists SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                set_clause, values = self._edit_clause(valid_updates)
+                if 'name' in valid_updates:
+                    # `name_key` is the folded key every lookup goes through.
+                    # A rename that left it behind would make the artist
+                    # unfindable under the new name and still findable under
+                    # the old one.
+                    from core.library2.importer import normalize_name
+                    set_clause += ', name_key = ?'
+                    values.append(normalize_name(valid_updates['name']))
+                cursor.execute(
+                    f"UPDATE lib2_artists SET {set_clause},"
+                    f" updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values + [artist_id])
                 conn.commit()
                 if cursor.rowcount == 0:
                     return {'success': False, 'error': f'Artist {artist_id} not found'}
@@ -13941,14 +13990,14 @@ class MusicDatabase:
 
     def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
         """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
-        every enrichment worker fills art only ``WHERE thumb_url IS NULL OR = ''``, so none will
+        every enrichment worker fills art only ``WHERE image_url IS NULL OR = ''``, so none will
         overwrite a user pick. Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (thumb_url, album_id))
             conn.commit()
             return cursor.rowcount > 0
@@ -13961,14 +14010,14 @@ class MusicDatabase:
 
     def set_artist_thumb_url(self, artist_id, thumb_url: str) -> bool:
         """Set an artist's photo URL (the user's image-picker choice). A non-empty value also PINS
-        it: every enrichment worker fills artist thumbs only ``WHERE thumb_url IS NULL OR = ''``,
+        it: every enrichment worker fills artist thumbs only ``WHERE image_url IS NULL OR = ''``,
         so none will overwrite a user pick. Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE lib2_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (thumb_url, artist_id))
             conn.commit()
             return cursor.rowcount > 0
@@ -13992,9 +14041,11 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
-                values = list(valid_updates.values()) + [album_id]
-                cursor.execute(f"UPDATE albums SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                set_clause, values = self._edit_clause(valid_updates)
+                cursor.execute(
+                    f"UPDATE lib2_albums SET {set_clause},"
+                    f" updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values + [album_id])
                 conn.commit()
                 if cursor.rowcount == 0:
                     return {'success': False, 'error': f'Album {album_id} not found'}
@@ -14012,9 +14063,11 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
-                values = list(valid_updates.values()) + [track_id]
-                cursor.execute(f"UPDATE tracks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", values)
+                set_clause, values = self._edit_clause(valid_updates)
+                cursor.execute(
+                    f"UPDATE lib2_tracks SET {set_clause},"
+                    f" updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    values + [track_id])
                 conn.commit()
                 if cursor.rowcount == 0:
                     return {'success': False, 'error': f'Track {track_id} not found'}
@@ -14034,12 +14087,12 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                set_clause = ', '.join(f'{k} = ?' for k in valid_updates)
+                set_clause, values = self._edit_clause(valid_updates)
                 placeholders = ','.join('?' * len(track_ids))
-                values = list(valid_updates.values()) + list(track_ids)
                 cursor.execute(
-                    f"UPDATE tracks SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
-                    values
+                    f"UPDATE lib2_tracks SET {set_clause},"
+                    f" updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                    values + list(track_ids)
                 )
                 conn.commit()
                 return {'success': True, 'updated_count': cursor.rowcount, 'updated_fields': list(valid_updates.keys())}
@@ -17754,7 +17807,7 @@ class MusicDatabase:
 
                 # Resolve the seed track and its album / artist
                 cursor.execute("""
-                    SELECT t.id, t.artist_id, t.album_id,
+                    SELECT t.id, al.primary_artist_id AS artist_id, t.album_id,
                            al.genres  AS album_genres,
                            al.mood    AS album_mood,
                            al.style   AS album_style,
@@ -17762,9 +17815,9 @@ class MusicDatabase:
                            ar.genres  AS artist_genres,
                            ar.mood    AS artist_mood,
                            ar.style   AS artist_style
-                    FROM tracks t
-                    JOIN albums al ON al.id = t.album_id
-                    JOIN artists ar ON ar.id = t.artist_id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
                     WHERE t.id = ?
                 """, (track_id,))
                 seed = cursor.fetchone()
@@ -17804,32 +17857,30 @@ class MusicDatabase:
                 def _pool(n):
                     return max(n * _POOL_FACTOR, n + 10)
 
-                # Ranking signals (play_count / lastfm_playcount) are added by a
-                # migration, but probe for them so radio still works on a DB that
-                # predates it — the ranker treats missing columns as score 0, so
-                # we simply omit them from the SELECT when absent rather than
-                # crashing on "no such column".
-                cursor.execute("PRAGMA table_info(tracks)")
-                _track_cols = {row[1] for row in cursor.fetchall()}
-                _rank_cols = "".join(
-                    f"t.{c}, " for c in ("play_count", "lastfm_playcount")
-                    if c in _track_cols
-                )
-
-                _track_select = f"""
+                # Ranking signals. Local plays are a column; the global
+                # popularity hint is one key of the provider-keyed enrichment
+                # payload the catalogue keeps per track. Both always exist, so
+                # unlike legacy there is nothing to probe for.
+                _track_select = """
                     SELECT t.id, t.title, t.track_number, t.duration,
-                           t.file_path, t.bitrate,
-                           t.album_id, t.artist_id,
-                           {_rank_cols}
+                           f.path AS file_path, f.bitrate AS bitrate,
+                           t.album_id, al.primary_artist_id AS artist_id,
+                           t.play_count,
+                           json_extract(t.enrichment, '$.lastfm.playcount')
+                               AS lastfm_playcount,
                            al.title   AS album,
-                           COALESCE(al.thumb_url, ar.thumb_url) AS image_url,
+                           COALESCE(al.image_url, ar.image_url) AS image_url,
                            ar.name    AS artist
-                    FROM tracks t
-                    JOIN albums al ON al.id = t.album_id
-                    JOIN artists ar ON ar.id = t.artist_id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    JOIN lib2_track_files f
+                      ON f.track_id = t.id AND f.is_primary = 1 AND """ + _LIVE_FILE + """
                 """
-                # Only return tracks that have actual files on disk
-                _file_filter = "t.file_path IS NOT NULL AND t.file_path != ''"
+                # Only return tracks that have actual files on disk. The join
+                # above already excludes the discography rows a tracked artist
+                # brings in — they have no file.
+                _file_filter = "f.path IS NOT NULL AND f.path != ''"
 
                 # --- 1. Same artist, different albums (capped at 30% of limit) ---
                 artist_cap = same_artist_cap(limit)

@@ -106,24 +106,25 @@ def test_no_sources_returns_empty(monkeypatch):
 
 def test_set_artist_thumb_url_pins_and_workers_respect_it(tmp_path):
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_artist
     db = MusicDatabase(database_path=str(tmp_path / "m.db"))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (1, 'Adele', '')")
+    artist_id = seed_artist(conn, server_id='ar1', name='Adele', image_url='')
     conn.commit()
     conn.close()
 
-    assert db.set_artist_thumb_url(1, "https://picked/photo.jpg") is True
-    artist = db.get_artist(1)
+    assert db.set_artist_thumb_url(artist_id, "https://picked/photo.jpg") is True
+    artist = db.get_artist(artist_id)
     assert artist.thumb_url == "https://picked/photo.jpg"
 
-    # The enrichment workers' guard (thumb only filled when empty) must leave
+    # The enrichment workers' guard (image only filled when empty) must leave
     # a user pick alone — same WHERE clause every worker uses.
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET thumb_url = ? WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')",
-                 ("https://worker/other.jpg", 1))
+    conn.execute("UPDATE lib2_artists SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')",
+                 ("https://worker/other.jpg", artist_id))
     conn.commit()
     conn.close()
-    assert db.get_artist(1).thumb_url == "https://picked/photo.jpg"
+    assert db.get_artist(artist_id).thumb_url == "https://picked/photo.jpg"
 
     assert db.set_artist_thumb_url(999, "x") is False   # unknown artist -> False
 
@@ -328,24 +329,27 @@ def test_one_slow_source_does_not_block_or_drop_the_others(monkeypatch):
     assert cands == [{"source": "deezer", "url": "https://dz/img.jpg"}]
 
 
-def test_text_artist_ids_work_end_to_end(tmp_path):
-    """#1069: the exact Navidrome shape from the report — a TEXT primary key.
-    Every db call the art endpoints make must take the string id verbatim."""
+def test_server_native_string_ids_work_end_to_end(tmp_path):
+    """#1069: the exact Navidrome shape from the report — a server whose own
+    ids are opaque strings. The catalogue keeps those as `server_id` and mints
+    its own row id, so the art endpoints address rows by the catalogue id and
+    the string never reaches a lookup."""
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_album, seed_artist
     db = MusicDatabase(database_path=str(tmp_path / "m.db"))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, server_source) VALUES "
-                 "('7dB07x8Q2P9jPvGeDHxIFa', 'Ed Sheeran', 'navidrome')")
-    conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES "
-                 "('al-x', '7dB07x8Q2P9jPvGeDHxIFa', 'Divide', 'navidrome')")
+    artist_id = seed_artist(conn, server_id='7dB07x8Q2P9jPvGeDHxIFa',
+                            name='Ed Sheeran', server_source='navidrome')
+    seed_album(conn, server_id='al-x', title='Divide', artist_id=artist_id,
+               server_source='navidrome')
     conn.commit()
     conn.close()
 
-    artist = db.get_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    artist = db.get_artist(artist_id)
     assert artist is not None and artist.name == 'Ed Sheeran'
-    assert db.set_artist_thumb_url('7dB07x8Q2P9jPvGeDHxIFa', 'https://x/p.jpg') is True
-    assert db.get_artist('7dB07x8Q2P9jPvGeDHxIFa').thumb_url == 'https://x/p.jpg'
-    albums = db.get_albums_by_artist('7dB07x8Q2P9jPvGeDHxIFa')
+    assert db.set_artist_thumb_url(artist_id, 'https://x/p.jpg') is True
+    assert db.get_artist(artist_id).thumb_url == 'https://x/p.jpg'
+    albums = db.get_albums_by_artist(artist_id)
     assert [a.title for a in albums] == ['Divide']
 
 

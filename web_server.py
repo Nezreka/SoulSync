@@ -936,21 +936,10 @@ def check_download_permission():
 # The catalogue's artist row under the field names this file's handlers (and
 # their JSON responses) already speak. v2 promotes Spotify and MusicBrainz to
 # columns and keeps the rest in `external_ids`; aliasing here means the readers
-# below did not have to learn a second vocabulary (§50.4.4.30).
-_ARTIST_IDS_SQL = """
-    spotify_id AS spotify_artist_id,
-    musicbrainz_id,
-    json_extract(external_ids, '$.itunes') AS itunes_artist_id,
-    json_extract(external_ids, '$.deezer') AS deezer_id,
-    json_extract(external_ids, '$.discogs') AS discogs_id,
-    json_extract(external_ids, '$.audiodb') AS audiodb_id,
-    json_extract(external_ids, '$.tidal') AS tidal_id,
-    json_extract(external_ids, '$.qobuz') AS qobuz_id,
-    json_extract(external_ids, '$.amazon') AS amazon_id,
-    json_extract(external_ids, '$.genius') AS genius_id,
-    json_extract(external_ids, '$.lastfm') AS lastfm_url,
-    json_extract(external_ids, '$.genius_url') AS genius_url
-"""
+# below did not have to learn a second vocabulary (§50.4.4.30). The projection
+# itself lives next to the storage shape it hides, because `MusicDatabase`
+# serves the same field names (§50.4.4.31).
+from core.library2.provider_ids import ARTIST_IDS_SQL as _ARTIST_IDS_SQL
 
 
 def _catalogue_name_key(name):
@@ -10043,7 +10032,7 @@ def write_artist_image_to_disk(artist_id):
         source_override = (data.get('source_override') or '').strip().lower() or None
 
         db = get_database()
-        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        # #1069: an id from the URL is opaque — never int() an artist id.
         artist_id = str(artist_id or '').strip()
         if not artist_id:
             return jsonify({"success": False, "error": "Invalid artist id"}), 400
@@ -10755,9 +10744,10 @@ def get_artist_art_options(artist_id):
     the library row has one (exact), otherwise a name search on that source.
     Mirrors the album art-options endpoint."""
     try:
-        # #1069 (matvei4iz): artists.id is TEXT since the id-columns migration —
-        # Navidrome/Jellyfin ids are strings ("7dB07x8Q…"), and int() here made
-        # the whole picker 400 for every non-Plex backend. Ids are opaque.
+        # #1069 (matvei4iz): int() here made the whole picker 400 for every
+        # non-Plex backend, whose ids are strings ("7dB07x8Q…"). The catalogue
+        # mints its own row ids now and keeps the server's as `server_id`, but
+        # the rule stands: an id arriving from a URL is opaque, never parsed.
         artist_id = str(artist_id or '').strip()
         if not artist_id:
             return jsonify({"error": "Invalid artist id"}), 400
@@ -10812,7 +10802,7 @@ def set_artist_art(artist_id):
         if not url:
             return jsonify({"error": "url is required"}), 400
 
-        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        # #1069: an id from the URL is opaque — never int() an artist id.
         artist_id = str(artist_id or '').strip()
         if not artist_id:
             return jsonify({"error": "Invalid artist id"}), 400
