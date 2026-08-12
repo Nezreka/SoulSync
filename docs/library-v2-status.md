@@ -3904,3 +3904,35 @@ jetzt; ein nativer Artist bekommt Bild ohne toten Link).
 Suchen-und-Ersetzen-Arbeit. Jede Datei hat genau diese drei Fragen — welchen
 Id-Raum ihre Antwort spricht, wie sie den Namen normalisiert, und wo das ist,
 was in lib2 in einer anderen Tabelle liegt.
+
+#### 50.4.4.14 „In deiner Bibliothek" fragt den nativen Katalog
+
+Stand: **361/90**. `core/search/library_check.py` fällt von 5/0 auf **0/0**.
+
+Der Endpunkt lädt die ganze Bibliothek in zwei Dicts und beantwortet damit pro
+Suchergebnis „habe ich das schon". Drei Dinge waren zu klären:
+
+**„Besessen" heißt `origin='library'`.** lib2 hält zusätzlich Provider-Zeilen —
+Releases, die zu einem verfolgten Artist gelistet sind, ohne Dateien. Sie mit
+„in deiner Bibliothek" zu markieren ist genau die Behauptung, die dieser
+Endpunkt zu verweigern hat.
+
+**Der Vergleichsschlüssel wird jetzt auf beiden Seiten in Python gebaut.** Auf
+der Suchergebnis-Seite war er das immer; die Katalog-Seite benutzte SQL-`LOWER()`
+— ASCII-only. Ein gespeichertes „Björk" und ein gesuchtes „BJÖRK" falteten also
+auf verschiedene Zeichenketten, und ein besessener Track wurde als fehlend
+gemeldet. Dieselbe Faltung beidseitig (`normalize_name`, casefold statt lower),
+und weil die Tabelle hier ohnehin komplett in ein Dict gelesen wird, kostet es
+nichts.
+
+**Eine Faltung, nicht zwei.** Der Wunschlisten-Schlüssel und der
+Katalog-Schlüssel werden gegen *dasselbe* Suchergebnis verglichen; falteten sie
+verschieden, könnte ein Track als „auf der Wunschliste, aber nicht besessen"
+erscheinen, nur weil jede Seite ihr Kleinschreiben anders buchstabiert.
+`presence_key` in `core/wishlist/presence.py` ist jetzt die eine Funktion, die
+beide benutzen.
+
+**Ein Pfad ist eine Dateizeile.** `file_path` kommt aus der primären aktiven
+Datei (ADR-03); eine Trackzeile ohne Datei bleibt besessen — das ist ein
+bekannter, ungeholter Track, und genau das hat `in_library` ohne Pfad immer
+bedeutet.

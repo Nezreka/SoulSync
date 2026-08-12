@@ -16,8 +16,54 @@ import logging
 from typing import Optional
 
 from core.wishlist.presence import load_wishlist_keys as _load_wishlist_keys_shared
+from core.wishlist.presence import presence_key as _presence_key
 
 logger = logging.getLogger(__name__)
+
+
+# Ownership is asked of Library v2 (docs §50.4.4.14). Three things the port had
+# to settle:
+#
+# **"Owned" is ``origin='library'``.** lib2 also holds provider-only
+# discography rows — releases listed for an artist we follow, with no files.
+# Badging those "in your library" is exactly the claim this endpoint exists to
+# refuse.
+#
+# **The comparison key is built in Python on both sides.** It always was on the
+# search-result side; the catalogue side used SQL ``LOWER()``, which is
+# ASCII-only, so a stored ``Björk`` and a searched ``BJÖRK`` folded to different
+# strings and an owned track was reported missing. Same normalizer both sides
+# now — the whole table is read into a dict here anyway, so nothing is paid for
+# it.
+#
+# **A path is a file row.** ``file_path`` comes from the primary active file
+# (ADR-03), and a track row without one is still owned — it is a known,
+# unfetched track, which is what ``in_library`` without a path has always meant.
+_OWNED_ALBUMS_SQL = """
+    SELECT al.title, ar.name
+      FROM lib2_albums al
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE al.origin = 'library'
+"""
+
+_OWNED_TRACKS_SQL = """
+    SELECT t.title, ar.name, t.legacy_track_id, al.title, al.image_url,
+           (SELECT f.path FROM lib2_track_files f
+             WHERE f.track_id = t.id
+               AND COALESCE(f.file_state, 'active') = 'active'
+               AND f.path IS NOT NULL AND f.path != ''
+             ORDER BY f.is_primary DESC, f.id LIMIT 1)
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE al.origin = 'library'
+     ORDER BY t.id
+"""
+
+
+def _primary_artist(raw: str) -> str:
+    """A search result credits every artist; ownership is keyed on the first."""
+    return str(raw or '').split(',')[0]
 
 
 def _resolve_plex_thumb(thumb: str, plex_base: str, plex_token: str) -> str:
@@ -70,45 +116,35 @@ def check_library_presence(
     try:
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT LOWER(al.title) || '|||' || LOWER(ar.name) "
-            "FROM albums al JOIN artists ar ON ar.id = al.artist_id"
-        )
-        owned_albums = {r[0] for r in cursor.fetchall()}
+        cursor.execute(_OWNED_ALBUMS_SQL)
+        owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
-        cursor.execute(
-            """
-            SELECT LOWER(t.title) || '|||' || LOWER(a.name), t.id, t.file_path,
-                   t.title, a.name, al.title, al.thumb_url
-            FROM tracks t
-            JOIN artists a ON a.id = t.artist_id
-            JOIN albums al ON al.id = t.album_id
-            """
-        )
+        cursor.execute(_OWNED_TRACKS_SQL)
         owned_tracks: dict[str, dict] = {}
         for r in cursor.fetchall():
-            if r[0] not in owned_tracks:  # keep first match only
-                owned_tracks[r[0]] = {
-                    'track_id': r[1],
-                    'file_path': r[2],
-                    'title': r[3],
-                    'artist_name': r[4],
-                    'album_title': r[5],
-                    'album_thumb_url': r[6],
+            key = _presence_key(r[0], r[1])
+            if key not in owned_tracks:  # keep first match only
+                owned_tracks[key] = {
+                    'track_id': r[2],
+                    'file_path': r[5],
+                    'title': r[0],
+                    'artist_name': r[1],
+                    'album_title': r[3],
+                    'album_thumb_url': r[4],
                 }
 
         wishlist_keys = _load_wishlist_keys(cursor, profile_id)
 
         album_results: list[bool] = []
         for a in albums:
-            key = (a.get('name', '').lower() + '|||' + a.get('artist', '').split(',')[0].strip().lower())
+            key = _presence_key(a.get('name', ''), _primary_artist(a.get('artist', '')))
             album_results.append(key in owned_albums)
 
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
 
         track_results: list[dict] = []
         for t in tracks:
-            key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
+            key = _presence_key(t.get('name', ''), _primary_artist(t.get('artist', '')))
             in_wishlist = key in wishlist_keys
             match = owned_tracks.get(key)
             if match:
