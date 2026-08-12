@@ -17565,6 +17565,33 @@ class MusicDatabase:
             logger.error(f"Error updating mirrored playlist source reference: {e}")
             return False
 
+    def adopt_discovered_artist(self, track_id: int, artist_name: str) -> bool:
+        """Promote a discovery match's artist onto the mirrored row itself —
+        ONLY when the stored artist is missing or the 'Unknown Artist'
+        placeholder. Discovery used to write matched_data alone, so an
+        explored playlist still displayed (and searched as) 'Unknown Artist'
+        forever, even with a confident match sitting in extra_data (found by
+        the PR #1136 author: their explored playlist stayed 75% unknown).
+        A real stored artist is never overwritten — a 0.7-confidence guess
+        must not replace source-provided truth."""
+        name = str(artist_name or '').strip()
+        if not name or name.lower() == 'unknown artist':
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE mirrored_playlist_tracks SET artist_name = ? "
+                    "WHERE id = ? AND (artist_name IS NULL OR TRIM(artist_name) = '' "
+                    "OR LOWER(TRIM(artist_name)) = 'unknown artist')",
+                    (name, track_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"adopt_discovered_artist failed for {track_id}: {e}")
+            return False
+
     def update_mirrored_track_extra_data(self, track_id: int, extra_data_dict: dict) -> bool:
         """Merge new data into a mirrored track's extra_data JSON field."""
         try:

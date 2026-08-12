@@ -42,6 +42,19 @@ from core.discovery.manual_match import should_rediscover
 logger = logging.getLogger(__name__)
 
 
+def _matched_primary_artist(matched_data) -> str:
+    """The match's primary artist name, or ''. matched_data carries artists
+    as [{'name': ...}] (built here) or [str] (older cache rows)."""
+    try:
+        artists = (matched_data or {}).get('artists') or []
+        first = artists[0] if artists else None
+        if isinstance(first, dict):
+            return str(first.get('name') or '').strip()
+        return str(first or '').strip()
+    except Exception:
+        return ''
+
+
 def _canonical_best_score(deps, title, artist, duration_ms, results):
     """Score search results against the source track, trying the canonicalized
     title/artist too and keeping the better confidence (#785).
@@ -198,6 +211,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             'matched_data': cached_match,
                         }
                         db.update_mirrored_track_extra_data(track_id, extra_data)
+                        db.adopt_discovered_artist(track_id, _matched_primary_artist(cached_match))
                         total_discovered += 1
                         logger.info(f"CACHE [{i+1}/{len(undiscovered_tracks)}]: {track_name} → {cached_match.get('name', '?')}")
                         deps.update_automation_progress(automation_id,
@@ -351,6 +365,10 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         'matched_data': matched_data,
                     }
                     db.update_mirrored_track_extra_data(track_id, extra_data)
+                    # A match on an "Unknown Artist" row should FIX the row —
+                    # matched_data alone leaves the mirror displaying (and
+                    # searching as) Unknown Artist forever (#1136 review).
+                    db.adopt_discovered_artist(track_id, _matched_primary_artist(matched_data))
                     total_discovered += 1
 
                     # Save to discovery cache
