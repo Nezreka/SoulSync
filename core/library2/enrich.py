@@ -191,6 +191,11 @@ MIGRATED_SERVICES: frozenset = frozenset({
     "lastfm", "genius", "discogs", "bandcamp", "audiodb", "similar_artists",
     "amazon", "jiosaavn", "musicbrainz", "spotify", "itunes", "qobuz", "tidal",
     "deezer",
+    # Not in ``match_status.SERVICES`` and never was: soulid answers no query,
+    # it computes a content id locally (docs §50.4.4.12). It belongs here all
+    # the same, because this set means "the producer writes lib2 now" — which
+    # is exactly the condition that makes an overwriting mirror unsafe.
+    "soulid",
 })
 
 
@@ -212,9 +217,11 @@ def _migrated_prefixes() -> tuple:
 # value from a stale legacy row.
 _SCALAR_OWNERS: Dict[str, Dict[str, str]] = {
     "artist": {"style": "audiodb", "mood": "audiodb", "label": "audiodb",
-               "banner_url": "audiodb", "aliases": "musicbrainz"},
-    "album": {"style": "audiodb", "mood": "audiodb"},
-    "track": {"style": "audiodb", "mood": "audiodb"},
+               "banner_url": "audiodb", "aliases": "musicbrainz",
+               "soul_id": "soulid"},
+    "album": {"style": "audiodb", "mood": "audiodb", "soul_id": "soulid"},
+    "track": {"style": "audiodb", "mood": "audiodb", "soul_id": "soulid",
+              "album_soul_id": "soulid"},
 }
 
 
@@ -346,6 +353,7 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
             ("label", "label", None),
             ("aliases", "aliases", _normalize_genres),
             ("banner_url", "banner_url", None),
+            ("soul_id", "soul_id", None),
         ),
         id_columns=(
             ("spotify_id", ("spotify_artist_id",)),
@@ -374,6 +382,7 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
             ("style", "style", None),
             ("mood", "mood", None),
             ("release_date", "release_date", None),
+            ("soul_id", "soul_id", None),
         ),
         id_columns=(
             ("spotify_id", ("spotify_album_id",)),
@@ -397,6 +406,8 @@ MIRROR_SPECS: Dict[str, MirrorSpec] = {
             ("style", "style", None),
             ("mood", "mood", None),
             ("disc_number", "disc_number", None),
+            ("soul_id", "soul_id", None),
+            ("album_soul_id", "album_soul_id", None),
         ),
         id_columns=(
             ("spotify_id", ("spotify_track_id",)),

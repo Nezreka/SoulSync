@@ -63,6 +63,78 @@ def generate_soul_id(*parts: str) -> str:
     return f'soul_{digest}'
 
 
+# ── The Library-v2 pending sets (docs §50.4.4.12) ────────────────────────────
+#
+# Two rules hold all of these together, and both are about keeping the hash
+# inputs identical to what every other SoulSync node feeds them.
+#
+# **A track hashes its ALBUM's artist.** Legacy joined ``tracks.artist_id``,
+# which the media-server scan fills with the album artist; the featured credit
+# lives in the separate ``track_artist`` column and never reached the hash. lib2
+# keeps that credit in ``lib2_track_artists``, so preferring it here — as the
+# file-subject query rightly does elsewhere, where the question is "who made
+# this recording" — would hand ``Drake feat. Wizkid`` to the hash and re-key the
+# track away from every other node.
+#
+# **Only owned releases are in the id space.** lib2 also holds
+# ``origin='discography'`` rows: releases a provider listed for an artist we
+# follow, which have no files and no legacy counterpart. Legacy's soul-id space
+# was the owned library, and every reader (the Hydrabase album lookup, the
+# import identity match) asks about owned material.
+_PENDING = "(%(alias)ssoul_id IS NULL OR %(alias)ssoul_id = '')"
+
+PENDING_ALBUMS_SQL = f"""
+    SELECT al.id, al.title, ar.name AS artist_name
+    FROM lib2_albums al
+    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+    WHERE {_PENDING % {'alias': 'al.'}}
+      AND al.title IS NOT NULL AND al.title != ''
+      AND ar.name IS NOT NULL AND ar.name != ''
+      AND al.origin = 'library'
+"""
+
+PENDING_TRACKS_SQL = f"""
+    SELECT t.id, t.title, ar.name AS artist_name, al.title AS album_title
+    FROM lib2_tracks t
+    JOIN lib2_albums al ON al.id = t.album_id
+    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+    WHERE {_PENDING % {'alias': 't.'}}
+      AND t.title IS NOT NULL AND t.title != ''
+      AND ar.name IS NOT NULL AND ar.name != ''
+      AND al.origin = 'library'
+"""
+
+PENDING_ARTISTS_SQL = f"""
+    SELECT id, name
+    FROM lib2_artists
+    WHERE {_PENDING % {'alias': ''}}
+      AND name IS NOT NULL AND name != ''
+"""
+
+# The two disambiguators the artist hash reaches for, in legacy's order: the
+# alphabetically first owned track title verifies the provider lookup, and the
+# alphabetically first owned album title is the fallback when no provider
+# recognizes the artist.
+OWNED_TRACK_TITLE_SQL = """
+    SELECT t.title
+    FROM lib2_tracks t
+    JOIN lib2_albums al ON al.id = t.album_id
+    WHERE al.primary_artist_id = ? AND al.origin = 'library'
+      AND t.title IS NOT NULL AND t.title != ''
+    ORDER BY t.title ASC
+    LIMIT 1
+"""
+
+OWNED_ALBUM_TITLE_SQL = """
+    SELECT title
+    FROM lib2_albums
+    WHERE primary_artist_id = ? AND origin = 'library'
+      AND title IS NOT NULL AND title != ''
+    ORDER BY title ASC
+    LIMIT 1
+"""
+
+
 class SoulIDWorker:
     """Background worker that generates soul IDs for all library entities.
 
@@ -214,27 +286,16 @@ class SoulIDWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, name FROM artists
-                WHERE (soul_id IS NULL OR soul_id = '')
-                  AND name IS NOT NULL AND name != ''
-                  AND id IS NOT NULL
-                LIMIT 1
-            """)
+            cursor.execute(PENDING_ARTISTS_SQL + " LIMIT 1")
             row = cursor.fetchone()
             if not row:
                 return 0
 
-            artist_id, name = row
+            artist_id, name = row[0], row[1]
             self.current_item = f"Artist: {name}"
 
             # Get a track title from this artist for verification lookup
-            cursor.execute("""
-                SELECT title FROM tracks
-                WHERE artist_id = ? AND title IS NOT NULL AND title != ''
-                ORDER BY title ASC
-                LIMIT 1
-            """, (artist_id,))
+            cursor.execute(OWNED_TRACK_TITLE_SQL, (artist_id,))
             track_row = cursor.fetchone()
             verify_track = track_row[0] if track_row else None
 
@@ -246,12 +307,7 @@ class SoulIDWorker:
                 self.current_item = f"Artist: {name} (id:{canonical_id})"
             else:
                 # Fallback: use name + first album title alphabetically
-                cursor.execute("""
-                    SELECT title FROM albums
-                    WHERE artist_id = ? AND title IS NOT NULL AND title != ''
-                    ORDER BY title ASC
-                    LIMIT 1
-                """, (artist_id,))
+                cursor.execute(OWNED_ALBUM_TITLE_SQL, (artist_id,))
                 album_row = cursor.fetchone()
                 if album_row:
                     soul_id = generate_soul_id(name, album_row[0])
@@ -263,7 +319,8 @@ class SoulIDWorker:
                 soul_id = f'soul_unnamed_{artist_id}'
 
             cursor.execute(
-                "UPDATE artists SET soul_id = ? WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                "UPDATE lib2_artists SET soul_id = ? "
+                "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                 (soul_id, artist_id)
             )
             conn.commit()
@@ -494,16 +551,7 @@ class SoulIDWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT al.id, al.title, ar.name as artist_name
-                FROM albums al
-                JOIN artists ar ON ar.id = al.artist_id
-                WHERE (al.soul_id IS NULL OR al.soul_id = '')
-                  AND al.title IS NOT NULL AND al.title != ''
-                  AND ar.name IS NOT NULL AND ar.name != ''
-                  AND al.id IS NOT NULL
-                LIMIT ?
-            """, (self.batch_size,))
+            cursor.execute(PENDING_ALBUMS_SQL + " LIMIT ?", (self.batch_size,))
             rows = cursor.fetchall()
             if not rows:
                 return 0
@@ -516,7 +564,8 @@ class SoulIDWorker:
                 if not soul_id:
                     soul_id = f'soul_unnamed_{album_id}'
                 cursor.execute(
-                    "UPDATE albums SET soul_id = ? WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                    "UPDATE lib2_albums SET soul_id = ? "
+                    "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                     (soul_id, album_id)
                 )
                 count += 1
@@ -547,17 +596,7 @@ class SoulIDWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name as artist_name, al.title as album_title
-                FROM tracks t
-                JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE (t.soul_id IS NULL OR t.soul_id = '')
-                  AND t.title IS NOT NULL AND t.title != ''
-                  AND ar.name IS NOT NULL AND ar.name != ''
-                  AND t.id IS NOT NULL
-                LIMIT ?
-            """, (self.batch_size,))
+            cursor.execute(PENDING_TRACKS_SQL + " LIMIT ?", (self.batch_size,))
             rows = cursor.fetchall()
             if not rows:
                 return 0
@@ -578,7 +617,8 @@ class SoulIDWorker:
                 if not song_soul_id:
                     song_soul_id = f'soul_unnamed_{track_id}'
                 cursor.execute(
-                    "UPDATE tracks SET soul_id = ?, album_soul_id = ? WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
+                    "UPDATE lib2_tracks SET soul_id = ?, album_soul_id = ? "
+                    "WHERE id = ? AND (soul_id IS NULL OR soul_id = '')",
                     (song_soul_id, album_soul_id or None, track_id)
                 )
                 count += 1
@@ -606,7 +646,17 @@ class SoulIDWorker:
 
     def _migrate_artist_soul_ids(self):
         """One-time reset: clear all artist soul IDs when algorithm changes.
-        Uses a versioned metadata flag to run only once per algorithm version."""
+        Uses a versioned metadata flag to run only once per algorithm version.
+
+        One thing to know before bumping the version string while the legacy
+        tables still exist: the mirror carries ``artists.soul_id`` into an empty
+        ``lib2_artists.soul_id`` (docs §50.4.4.12), so a reset here would be
+        refilled from the legacy value the *previous* algorithm produced. That is
+        exactly right today — the flag has read ``debut_year_api_v2`` on every
+        install since before the move, so the reset never fires and the mirror's
+        one job is to carry those ids across. A genuinely new algorithm belongs
+        after the legacy tables are gone (stage 3), or has to clear both sides.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -618,7 +668,7 @@ class SoulIDWorker:
                 return  # Already on latest version
 
             # Reset all artist soul IDs for regeneration
-            cursor.execute("UPDATE artists SET soul_id = NULL WHERE soul_id IS NOT NULL")
+            cursor.execute("UPDATE lib2_artists SET soul_id = NULL WHERE soul_id IS NOT NULL")
             reset_count = cursor.rowcount
 
             # Mark current version
@@ -649,34 +699,13 @@ class SoulIDWorker:
             cursor = conn.cursor()
             total = 0
 
-            # Must match the WHERE clauses in _process_* methods exactly
-            cursor.execute("""
-                SELECT COUNT(*) FROM artists
-                WHERE (soul_id IS NULL OR soul_id = '')
-                  AND name IS NOT NULL AND name != ''
-                  AND id IS NOT NULL
-            """)
-            total += (cursor.fetchone() or [0])[0]
-
-            cursor.execute("""
-                SELECT COUNT(*) FROM albums al
-                JOIN artists ar ON ar.id = al.artist_id
-                WHERE (al.soul_id IS NULL OR al.soul_id = '')
-                  AND al.title IS NOT NULL AND al.title != ''
-                  AND ar.name IS NOT NULL AND ar.name != ''
-                  AND al.id IS NOT NULL
-            """)
-            total += (cursor.fetchone() or [0])[0]
-
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks t
-                JOIN artists ar ON ar.id = t.artist_id
-                WHERE (t.soul_id IS NULL OR t.soul_id = '')
-                  AND t.title IS NOT NULL AND t.title != ''
-                  AND ar.name IS NOT NULL AND ar.name != ''
-                  AND t.id IS NOT NULL
-            """)
-            total += (cursor.fetchone() or [0])[0]
+            # Counted through the very statements the batches take, rather than a
+            # second copy of each WHERE clause kept identical by a comment. A
+            # progress figure that disagrees with the work is how a worker looks
+            # stuck long after it has finished.
+            for sql in (PENDING_ARTISTS_SQL, PENDING_ALBUMS_SQL, PENDING_TRACKS_SQL):
+                cursor.execute(f"SELECT COUNT(*) FROM ({sql})")
+                total += (cursor.fetchone() or [0])[0]
 
             return total
         except Exception:

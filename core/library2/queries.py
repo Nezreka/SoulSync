@@ -287,7 +287,8 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
 
     rows = conn.execute(
         f"""SELECT a.id, a.legacy_artist_id, a.name, a.image_url, a.genres,
-                   a.external_ids, a.spotify_id, a.musicbrainz_id, a.monitored,
+                   a.external_ids, a.spotify_id, a.musicbrainz_id, a.soul_id,
+                   a.monitored,
                    (SELECT COUNT(*) FROM lib2_albums al
                      WHERE al.primary_artist_id = a.id
                        AND al.origin = 'library') AS album_count,
@@ -323,7 +324,11 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
             "genius_url": ids.get("genius"),
             "tidal_id": ids.get("tidal"),
             "qobuz_id": ids.get("qobuz"),
-            "soul_id": ids.get("soulid") or ids.get("soul"),
+            # The column is where the SoulID worker writes (docs §50.4.4.12).
+            # The two external_ids keys stay as fallbacks: `soul` is what the
+            # typed-metadata converter emits for an importer-supplied id, and a
+            # row that only ever passed through it has nothing in the column.
+            "soul_id": row["soul_id"] or ids.get("soulid") or ids.get("soul"),
             "amazon_id": ids.get("amazon"),
             "album_count": int(row["album_count"] or 0),
             "track_count": int(row["track_count"] or 0),

@@ -83,6 +83,9 @@ INSERT INTO tracks  VALUES(102,11,1,'One Dance',1,200000,'/m/single.flac',900,50
 # instead. Consumers that SELECT these columns directly (the repair-job scanners)
 # only tell the truth when they run against this shape.
 _MIGRATED_COLUMNS = {
+    "artists": [
+        "soul_id TEXT",
+    ],
     "albums": [
         "spotify_album_id TEXT",
         "itunes_album_id TEXT",
@@ -97,6 +100,7 @@ _MIGRATED_COLUMNS = {
         "itunes_track_id TEXT",
         "deezer_id TEXT",
         "soul_id TEXT",
+        "album_soul_id TEXT",
         "disc_number INTEGER DEFAULT 1",
     ],
 }

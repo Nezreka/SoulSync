@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
+    soul_id TEXT,                                     -- deterministic content id every SoulSync node computes alike (core/soulid_worker.py); Hydrabase's key, not a provider's answer
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -110,6 +111,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     tracklist_retry_at TIMESTAMP,
     origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
     stable_id TEXT,                                    -- provider-less identity (audit P1-12); minted once, survives reset+reimport
+    soul_id TEXT,                                      -- deterministic content id (see lib2_artists.soul_id); NOT stable_id, which is lib2's own minted identity
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
@@ -158,6 +160,8 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     play_count INTEGER NOT NULL DEFAULT 0,
     last_played TIMESTAMP,
     stable_id TEXT,                                   -- provider-less identity (audit P1-12); minted once, survives reset+reimport
+    soul_id TEXT,                                     -- song-level content id: artist + title, so a single and its album cut share it
+    album_soul_id TEXT,                               -- release-specific: artist + album + title
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
@@ -452,6 +456,17 @@ _ADDED_COLUMNS = (
     # provider for the same permanently-unmatched name on every trigger.
     ("lib2_artists", "unmapped_last_attempted_at",
      "ALTER TABLE lib2_artists ADD COLUMN unmapped_last_attempted_at TIMESTAMP"),
+    # docs §50.4.4.12: the SoulID worker's destination. Every SoulSync node
+    # computes the same hash from the same names, which is what lets Hydrabase
+    # key on it — so these are content ids, deliberately not ``stable_id``
+    # (lib2's own minted identity, owned by the importer). Existing installs
+    # receive the ids already generated on the legacy side through the mirror's
+    # backfill rather than paying three seconds of API courtesy per artist again.
+    ("lib2_artists", "soul_id", "ALTER TABLE lib2_artists ADD COLUMN soul_id TEXT"),
+    ("lib2_albums", "soul_id", "ALTER TABLE lib2_albums ADD COLUMN soul_id TEXT"),
+    ("lib2_tracks", "soul_id", "ALTER TABLE lib2_tracks ADD COLUMN soul_id TEXT"),
+    ("lib2_tracks", "album_soul_id",
+     "ALTER TABLE lib2_tracks ADD COLUMN album_soul_id TEXT"),
 )
 
 
@@ -892,6 +907,22 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_tracks(stable_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("stable_id index failed (will retry next start): %s", e)
+    # Soul ids (docs §50.4.4.12). Same placement rule as the two above: the
+    # column arrives in the additive migration, so the index cannot be declared
+    # in ``_INDEXES`` — that list runs before it. These are lookup keys, not just
+    # stored values: Hydrabase album/track resolution and the import identity
+    # match both arrive holding one.
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_artists_soul "
+                       "ON lib2_artists(soul_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_albums_soul "
+                       "ON lib2_albums(soul_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_soul "
+                       "ON lib2_tracks(soul_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album_soul "
+                       "ON lib2_tracks(album_soul_id)")
+    except Exception as e:  # noqa: BLE001
+        logger.error("soul_id index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.

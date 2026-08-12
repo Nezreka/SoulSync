@@ -3774,3 +3774,91 @@ sie ist da oder nicht.
 schreiben die Legacy-Bibliothek für den Modus „SoulSync ist der Medienserver"),
 `listening_stats_worker` 10/1 (blockiert), und die
 `tracks.file_path`-Durchschriften.
+
+#### 50.4.4.12 soulid — der letzte eigenständige Produzent, und wo die Id in lib2 wohnt
+
+Stand: **374/90**. `core/soulid_worker.py` fällt von 13/4 auf **0/0**. Damit ist
+Stufe 2 abgeschlossen: keine Schreibstelle im Baum ist noch ein eigenständiger
+Produzent, alles Verbliebene sind Durchschriften an Lesern, die mit Stufe 3
+fallen.
+
+**Warum das keine vierzehnte Worker-Konversion war.** `soulid` steht nicht in
+`match_status.SERVICES` und stand nie darin. Der Worker *fragt* keinen Provider,
+er *rechnet* eine Id aus — ein deterministischer Hash normalisierter Namen, den
+jeder SoulSync-Knoten unabhängig auf denselben Wert bringt. Genau das macht ihn
+zum Schlüssel von Hydrabase. Es gibt also keinen `provider_attempts`-Eintrag zu
+schreiben, keine `worker_queue`-Charge zu ziehen und keine Retry-Politik: die
+Pending-Menge ist „Zeilen, deren `soul_id` leer ist".
+
+**Wo die Id wohnt: eine Spalte, kein `external_ids`-Schlüssel.** `queries.py`
+las `ids.get("soulid") or ids.get("soul")`, ein Schlüssel, den nichts je
+geschrieben hat. Ihn nun zu füllen wäre der kürzere Weg gewesen und der falsche:
+`external_ids` ist die Provider-Identität einer Zeile, und
+`preferred_provider_identity` / `track_identity_reconcile` behandeln jeden
+Schlüssel darin als solche. Eine Soul-Id ist aber bewusst *unscharf* —
+`normalize_for_soul_id` streift Klammerzusätze ab, „Album (Deluxe)" und „Album"
+bekommen dieselbe Id. Als Provider-Identität gelesen würde sie zwei Editionen
+zusammenführen und in einem Wishlist-Eintrag als Quelle „soul" mit einem Hash
+landen, mit dem kein Downloader etwas anfangen kann. Also je eine eigene Spalte
+auf `lib2_artists`/`lib2_albums`/`lib2_tracks` plus `album_soul_id` auf Tracks,
+indiziert wie in Legacy. Nicht zu verwechseln mit `stable_id`: das ist lib2s
+eigene geprägte Identität, die dem Importer gehört.
+
+**Zwei Eingabe-Regeln, die die Determiniertheit tragen.**
+
+- **Ein Track hasht den Artist seines *Albums*.** Legacy jointe
+  `tracks.artist_id`, und das ist der Album-Artist; die Gast-Kreditierung liegt
+  in der getrennten Spalte `track_artist` und kam nie in den Hash. lib2 hält
+  genau diese Kreditierung in `lib2_track_artists` — sie hier zu bevorzugen, wie
+  es `active_file_subjects` zu Recht tut, hätte „Drake feat. Wizkid" in den Hash
+  gegeben und den Track gegenüber jedem anderen Knoten umgeschlüsselt. Das ist
+  die eine Stelle, an der die aus §50.4.4.11 restaurierte Kompilations-Regel
+  *nicht* gilt, und ein Test hält sie fest.
+- **Nur besessene Releases gehören in den Id-Raum.** lib2 kennt zusätzlich
+  `origin='discography'`-Zeilen: Veröffentlichungen, die ein Provider zu einem
+  verfolgten Artist gelistet hat, ohne Dateien und ohne Legacy-Gegenstück.
+  Legacys Id-Raum war die besessene Bibliothek, und die Leser (Hydrabase-
+  Album-Auflösung, der Import-Identitätsabgleich) fragen nach besessenem
+  Material.
+
+**Der Übergang der schon erzeugten Ids ist der eigentliche Aufwand.** Ein
+Artist kostet drei Sekunden API-Höflichkeit; eine Bibliothek mit fünftausend
+Artists neu zu rechnen wären vier Stunden. Zwei Wege bringen die Legacy-Ids
+herüber, und beide waren nötig: der **Importer** trägt sie mit der Zeile ein
+(Erstmigration), und der **Spiegel** trägt sie als `handed_over`-Skalar nach —
+Backfill, nie Überschreibung. Das ist dieselbe Begründung wie bei jedem
+migrierten Provider: Überschreiben ließe den Rückstands-Sweep einen alten
+Legacy-Wert über eine frisch erzeugte native Id schieben, Weglassen ließe
+Tausende von Artist-Ids liegen, die danach nichts mehr herüberholt. `soulid`
+steht deshalb in `MIGRATED_SERVICES`, obwohl es kein Provider ist: die Menge
+bedeutet „der Produzent schreibt jetzt lib2", und genau das ist die Bedingung,
+unter der ein überschreibender Spiegel unsicher wird.
+
+**Eine Falle für später, benannt statt versteckt.** `_migrate_artist_soul_ids`
+setzt bei einem Algorithmuswechsel alle Artist-Ids zurück. Solange die
+Legacy-Tabellen existieren, füllt der Spiegel eine so geleerte Spalte aus dem
+Legacy-Wert *des alten Algorithmus* wieder auf. Heute ist das folgenlos — die
+Marke steht auf jeder Installation seit vor dem Umzug auf `debut_year_api_v2`,
+der Reset läuft also nie, und die einzige Aufgabe des Spiegels ist der Übergang.
+Ein echter neuer Algorithmus gehört hinter Stufe 3 oder muss beide Seiten
+löschen.
+
+**Nebenbei aufgeräumt:** `_count_pending` zählte durch eine zweite Kopie jeder
+`WHERE`-Klausel, zusammengehalten von einem Kommentar („Must match the WHERE
+clauses in `_process_*` exactly"). Jetzt zählt es durch dieselben Statements,
+die die Chargen ziehen. Eine Fortschrittszahl, die der Arbeit widerspricht, ist
+die Art, wie ein Worker lange nach dem Ende noch beschäftigt aussieht.
+
+**Was die Legacy-Leser sehen.** Nichts Neues — dieselbe Lage wie bei den
+vierzehn Provider-Workern: `artists.soul_id` behält, was der Legacy-Lauf erzeugt
+hat, und neue Entitäten bekommen ihre Id nur noch nativ. Betroffen sind
+`stats/queries`, `listening_stats_worker`, `library/track_identity`,
+`imports/album_grouping`, `metadata/album_tracks` und die beiden großen Dateien.
+Sie fallen mit Stufe 3.
+
+**Rest, nach Größe:** `database/music_database.py` 179/49 und `web_server.py`
+79/15 — die Lesestellen-Phase, jetzt der gesamte Rest von Belang. Dann
+`imports/side_effects` 5/7 und `library/missing_track_import` 8/4 (beide
+schreiben die Legacy-Bibliothek für den Modus „SoulSync ist der Medienserver"),
+`listening_stats_worker` 10/1 (blockiert), und die
+`tracks.file_path`-Durchschriften.

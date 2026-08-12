@@ -720,7 +720,7 @@ class _ArtistResolver:
                 "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
-                "aliases=?, legacy_artist_id=?, "
+                "aliases=?, soul_id=COALESCE(?, soul_id), legacy_artist_id=?, "
                 "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (fields["name"], normalize_name(fields["name"]),
                  fields["sort_name"], row_ids.get("spotify"),
@@ -728,7 +728,7 @@ class _ArtistResolver:
                  external_json, fields["image_url"], fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
                  fields["label"], fields["banner_url"], fields["aliases"],
-                 legacy_id, run_id, existing),
+                 fields["soul_id"], legacy_id, run_id, existing),
             )
             self._by_legacy[_legacy_key(legacy_id)] = existing
             self._by_name.setdefault(normalize_name(fields["name"]), existing)
@@ -739,13 +739,14 @@ class _ArtistResolver:
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, genres, summary, style, mood, label, "
-            "banner_url, aliases, legacy_artist_id, quality_profile_id, "
-            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "banner_url, aliases, soul_id, legacy_artist_id, quality_profile_id, "
+            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (fields["name"], normalize_name(fields["name"]),
              fields["sort_name"], spotify_col, mbid_col, external_json,
              fields["image_url"], fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
-             fields["aliases"], legacy_id, self.default_profile_id, run_id, 0),
+             fields["aliases"], fields["soul_id"], legacy_id,
+             self.default_profile_id, run_id, 0),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[_legacy_key(legacy_id)] = new_id
@@ -1103,6 +1104,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "deezer_artist_id", "deezer_id", "tidal_artist_id", "tidal_id",
                 "qobuz_artist_id", "qobuz_id", "thumb_url", "banner_url",
                 "genres", "summary", "style", "mood", "label", "aliases",
+                "soul_id",
                 "lastfm_bio", "lastfm_listeners", "lastfm_tags",
                 "lastfm_similar", "lastfm_url", "genius_description",
                 "genius_alt_names", "genius_url", "discogs_bio",
@@ -1163,6 +1165,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "label": _pick(row, "label"),
                 "aliases": _normalize_genres(_pick(row, "aliases")),
                 "banner_url": _pick(row, "banner_url"),
+                # docs §50.4.4.12: the SoulID worker writes lib2 now, so the id
+                # it already spent an API round-trip on has to arrive with the
+                # row rather than wait for the mirror's backlog sweep to notice.
+                "soul_id": _pick(row, "soul_id"),
             }, run_id)
             # Last.fm/Genius/Discogs bio/listeners/similar/tags — provider
             # enrichment content, not identity, so it's merged separately
@@ -1190,7 +1196,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "track_count", "album_type", "release_type", "type", "year",
                 "api_track_count", "release_date", "spotify_album_id",
                 "musicbrainz_release_id", "thumb_url", "genres", "explicit",
-                "label", "upc", "style", "mood", "deezer_album_id",
+                "label", "upc", "style", "mood", "soul_id", "deezer_album_id",
                 "deezer_id", "tidal_album_id", "tidal_id", "qobuz_album_id",
                 "qobuz_id", *_provider_id_columns("album"),
             ),
@@ -1253,6 +1259,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # §48: rich-metadata-edit parity — same AudioDB-sourced fields
                 # already carried over for artists (see above).
                 _pick(row, "style"), _pick(row, "mood"),
+                # docs §50.4.4.12 — see the artist note.
+                _pick(row, "soul_id"),
             )
             existing = album_map.get(_legacy_key(row["id"]))
             if existing is None:
@@ -1277,6 +1285,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "explicit=COALESCE(?, explicit), label=COALESCE(?, label), "
                     "upc=COALESCE(?, upc), "
                     "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+                    "soul_id=COALESCE(?, soul_id), "
                     "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (*fields, row["id"], run_id, existing),
@@ -1297,9 +1306,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
                     "track_count, expected_track_count, explicit, label, upc, "
-                    "style, mood, "
+                    "style, mood, soul_id, "
                     "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*fields, row["id"], default_profile_id, album_monitored, run_id),
                 )
                 album_id = cursor.lastrowid
@@ -1381,6 +1390,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "track_number", "disc_number", "duration", "isrc",
                 "musicbrainz_recording_id", "spotify_track_id", "bpm",
                 "explicit", "genius_lyrics", "copyright", "style", "mood",
+                "soul_id", "album_soul_id",
                 "play_count", "last_played", "file_path", "quality_profile_id",
                 "artist_id", "track_artist", "file_size", "bitrate",
                 "sample_rate", "bit_depth", "verification_status",
@@ -1423,6 +1433,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 # play-count-fallback slicing below (tfields[-2:]) still lands
                 # on the right two columns.
                 _pick(row, "style"), _pick(row, "mood"),
+                # docs §50.4.4.12 — same placement rule as style/mood above.
+                _pick(row, "soul_id"), _pick(row, "album_soul_id"),
                 _pick(row, "play_count"), _pick(row, "last_played"),
             )
             existing = track_map.get(_legacy_key(row["id"]))
@@ -1439,6 +1451,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "genius_lyrics=COALESCE(?, genius_lyrics), "
                     "copyright=COALESCE(?, copyright), "
                     "style=COALESCE(?, style), mood=COALESCE(?, mood), "
+                    "soul_id=COALESCE(?, soul_id), "
+                    "album_soul_id=COALESCE(?, album_soul_id), "
                     "play_count=COALESCE(?, play_count), "
                     "last_played=COALESCE(?, last_played), "
                     "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -1472,10 +1486,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 cursor.execute(
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
-                    "genius_lyrics, copyright, style, mood, play_count, last_played, "
+                    "genius_lyrics, copyright, style, mood, soul_id, album_soul_id, "
+                    "play_count, last_played, "
                     "legacy_track_id, quality_profile_id, quality_profile_explicit, "
                     "monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (*insert_fields, row["id"], track_profile_id, profile_explicit,
                      track_monitored, run_id),
                 )

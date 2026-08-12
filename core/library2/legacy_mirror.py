@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS lib2_legacy_dirty (
 _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
     "artists": (
         "thumb_url", "genres", "summary", "style", "mood", "label", "banner_url",
-        "aliases",
+        "aliases", "soul_id",
         # provider identity (mirrored into lib2_artists.external_ids)
         "spotify_artist_id", "musicbrainz_id", "deezer_id", "itunes_artist_id",
         "audiodb_id", "discogs_id", "tidal_id", "qobuz_id", "amazon_id",
@@ -71,7 +71,7 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
     ),
     "albums": (
         "thumb_url", "genres", "label", "explicit", "upc", "style", "mood",
-        "release_date",
+        "release_date", "soul_id",
         "spotify_album_id", "musicbrainz_release_id", "deezer_id",
         "itunes_album_id", "audiodb_id", "discogs_id", "tidal_id", "qobuz_id",
         "amazon_id", "jiosaavn_id", "bandcamp_url", "lastfm_url",
@@ -83,7 +83,7 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
     ),
     "tracks": (
         "bpm", "explicit", "genius_lyrics", "copyright", "style", "mood", "isrc",
-        "disc_number",
+        "disc_number", "soul_id", "album_soul_id",
         "spotify_track_id", "musicbrainz_recording_id", "deezer_id",
         "itunes_track_id", "audiodb_id", "tidal_id", "qobuz_id", "amazon_id",
         "jiosaavn_id", "genius_id", "bandcamp_url", "lastfm_url",
