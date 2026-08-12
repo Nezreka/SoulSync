@@ -16926,9 +16926,35 @@ def _youtube_cookie_opts():
         mode = config_manager.get('youtube.cookies_browser', '')
         path = config_manager.get('youtube.cookies_file', '')
         exists = bool(path) and os.path.exists(path)
+        if path and not exists:
+            # Silently degrading to anonymous here looks identical to "YouTube
+            # is rate-limiting us": private playlists come back empty or short
+            # and every track resolves badly. Say so once, out loud.
+            logger.warning(
+                "[YouTube] Configured cookies file does not exist: %s — continuing "
+                "anonymously. Private playlists (Liked Music, list=LM) will be "
+                "incomplete or invisible. Re-paste cookies in Settings → YouTube.",
+                path,
+            )
         return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
         return {}
+
+
+def _ytmusic_auth_headers():
+    """ytmusicapi browser-auth headers from the same pasted cookies.txt, or None.
+
+    ytmusicapi can't take a cookie FILE, so the jar is projected into the header
+    form it wants. Only PASTE_MODE can feed it: `cookiesfrombrowser` is yt-dlp's
+    own browser-store reader and there's no cookie file to read in that case.
+    None means anonymous — public playlists still resolve."""
+    from core.youtube_cookies import PASTE_MODE, ytmusic_auth_from_cookiefile
+    try:
+        if str(config_manager.get('youtube.cookies_browser', '') or '').strip() != PASTE_MODE:
+            return None
+        return ytmusic_auth_from_cookiefile(config_manager.get('youtube.cookies_file', ''))
+    except Exception:  # noqa: S110 - auth is best-effort; anonymous still works
+        return None
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
@@ -16974,7 +17000,22 @@ def parse_youtube_playlist(url):
     Uses flat playlist extraction to avoid rate limits and get all tracks
     Returns a list of track dictionaries compatible with our Track structure
     """
-    from core.youtube_track_meta import derive_artist_and_title
+    from core.youtube_track_meta import derive_artist_and_title, is_music_youtube_url
+    # On music.youtube.com each flat entry carries the ARTIST's channel; on
+    # youtube.com it carries the playlist owner's (#863). Decided once here from
+    # the URL because the per-entry data can't distinguish the two.
+    allow_channel_artist = is_music_youtube_url(url)
+
+    # A music.youtube.com playlist has a real catalog entry — artist AND album
+    # per track, and no flat-extraction page cap (#908). Try it first; it
+    # returns None on any failure so yt-dlp below stays the fallback. Never
+    # attempted for youtube.com: a video playlist has no catalog entry.
+    if allow_channel_artist:
+        from core.youtube_music_meta import fetch_ytmusic_playlist
+        ytm_playlist = fetch_ytmusic_playlist(url, _ytmusic_auth_headers())
+        if ytm_playlist:
+            return ytm_playlist
+
     try:
         # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
         ydl_opts = {
@@ -17022,7 +17063,8 @@ def parse_youtube_playlist(url):
                 # instead of blindly using `uploader`, which on a playlist is the
                 # OWNER, not the track artist (#863: every track became "Wing It"
                 # / "Unknown Artist"). Returns ('' , title) when nothing reliable.
-                derived_artist, derived_title = derive_artist_and_title(entry)
+                derived_artist, derived_title = derive_artist_and_title(
+                    entry, allow_channel_artist=allow_channel_artist)
 
                 # Clean the track title and artist using our cleaning functions.
                 if derived_artist:
@@ -17045,13 +17087,17 @@ def parse_youtube_playlist(url):
                 
                 tracks.append(track_data)
 
-            # NOTE: current yt-dlp flat extraction returns ONLY the title per entry
-            # (no uploader/artist), so tracks whose title isn't "Artist - Title"
-            # land here as "Unknown Artist". The per-video artist recovery does NOT
-            # run here — it would block this request for minutes on a big playlist
-            # and risk the 120s worker timeout. It runs in the async discovery
-            # worker instead (which already iterates every track with a progress
-            # bar). See run_youtube_discovery_worker / recover_youtube_artist (#863).
+            # NOTE: on youtube.com, flat extraction gives no trustworthy per-entry
+            # artist (the channel is the playlist owner), so tracks whose title
+            # isn't "Artist - Title" land here as "Unknown Artist". The per-video
+            # artist recovery does NOT run here — it would block this request for
+            # minutes on a big playlist and risk the 120s worker timeout. It runs
+            # in the async discovery worker instead (which already iterates every
+            # track with a progress bar). See run_youtube_discovery_worker /
+            # recover_youtube_artist (#863).
+            #
+            # music.youtube.com does NOT have that problem: its entries carry a
+            # per-track channel, so `allow_channel_artist` resolves them inline.
 
             # Create playlist object matching GUI structure
             playlist_data = {
