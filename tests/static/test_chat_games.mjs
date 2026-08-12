@@ -1283,3 +1283,122 @@ describe('wagers', () => {
     assert.equal(out.games.g001.wager, 0);
   });
 });
+
+describe('othello — flips, explicit passes, the disc count', () => {
+    // Build a 64-cell body string from {index: 'w'|'b'} placements.
+    const body = (placed) => {
+        const cells = Array(64).fill('.');
+        for (const [i, c] of Object.entries(placed)) cells[i] = c;
+        return cells.join('');
+    };
+    // Our start: 'w' opens (the lifecycle's convention), sitting where black
+    // sits over the board — d4/e5 carry 'b', e4/d5 carry 'w'.
+    const START = body({ 27: 'b', 36: 'b', 28: 'w', 35: 'w' }) + ' w';
+    const game = fen => ({ variant: 'othello', fen });
+
+    test('the opening has exactly the four classic moves', () => {
+        assert.deepEqual([...G.othelloLegal(START, 'w')].sort((a, b) => a - b),
+                         [19, 26, 37, 44]);
+    });
+    test('a move flips the bracketed run and hands over the turn', () => {
+        const out = G.previewMove(game(START), '19');
+        assert.ok(out);
+        assert.equal(out.over, false);
+        const [b, turn] = out.fen.split(' ');
+        assert.equal(turn, 'b');
+        assert.equal(b[19], 'w');
+        assert.equal(b[27], 'w', 'the flanked disc flipped');
+        assert.equal(b[36], 'b', 'the unflanked disc did not');
+    });
+    test('a non-flipping placement is not a move', () => {
+        assert.equal(G.previewMove(game(START), '0'), null);
+    });
+    test('passing is only legal when genuinely stuck', () => {
+        assert.equal(G.previewMove(game(START), 'p'), null, 'moves exist — no pass');
+        // w's only enemy disc is a corner with no bracket anywhere: truly stuck.
+        const stuck = body({ 0: 'b', 1: 'w', 27: 'w', 28: 'w', 35: 'w', 36: 'w' }) + ' w';
+        const out = G.previewMove(game(stuck), 'p');
+        assert.ok(out, 'stuck side may pass');
+        assert.equal(out.fen.split(' ')[1], 'b');
+        assert.equal(out.over, false);
+    });
+    test('a garbage position cannot be adopted (empty centre)', () => {
+        assert.equal(G.previewMove(game('.'.repeat(64) + ' w'), '19'), null);
+    });
+    test('the last legal move ends the game on a disc count', () => {
+        // 62 white discs + one black at 62; 63 is the only empty square.
+        const placed = {};
+        for (let i = 0; i < 62; i++) placed[i] = 'w';
+        placed[62] = 'b';
+        const nearEnd = body(placed) + ' w';
+        // Adopt mid-stream (the rolling-archive path), then the real move
+        // lands through the adapter and _finish records the count.
+        const pre = G.previewMove(game(nearEnd), '63');
+        assert.ok(pre && pre.over, 'filling the board ends it');
+        const g = G.reduceGames([
+            ev('anna', { k: 'gm.move', g: 'g0777', v: 'othello', n: 50, m: '5', f: nearEnd }, T0),
+            ev('bea', { k: 'gm.move', g: 'g0777', n: 51, m: '63', f: pre.fen }, T0 + 1000),
+        ]).games.g0777;
+        assert.ok(g, 'the adopted game exists');
+        assert.equal(g.status, 'over');
+        assert.equal(g.result, '1-0');
+        assert.equal(g.reason, '64–0 discs');
+        assert.equal(g.winner, 'bea', 'the second mover held white');
+    });
+});
+
+describe('gomoku — five in a row on the goban', () => {
+    const EMPTY = '.'.repeat(225) + ' w';
+    const game = fen => ({ variant: 'gomoku', fen });
+
+    test('stones land and alternate; occupied cells refuse', () => {
+        const a = G.previewMove(game(EMPTY), '112');
+        assert.ok(a && !a.over);
+        assert.equal(a.fen[112], 'w');
+        assert.equal(a.fen.split(' ')[1], 'b');
+        assert.equal(G.previewMove(game(a.fen), '112'), null, 'occupied');
+        assert.equal(G.previewMove(game(EMPTY), '225'), null, 'off the board');
+    });
+    test('the fifth stone in a row wins for its colour', () => {
+        // w builds 0..4 along the top row, b answers on row 1.
+        let fen = EMPTY;
+        const moves = ['0', '15', '1', '16', '2', '17', '3', '18', '4'];
+        let out = null;
+        for (const m of moves) {
+            out = G.previewMove(game(fen), m);
+            assert.ok(out, 'move ' + m + ' must be legal');
+            fen = out.fen;
+        }
+        assert.equal(out.over, true, 'five in a row ends it');
+    });
+    test('a vertical five wins too', () => {
+        let fen = EMPTY;
+        for (const m of ['7', '8', '22', '23', '37', '38', '52', '53']) {
+            fen = G.previewMove(game(fen), m).fen;
+        }
+        const out = G.previewMove(game(fen), '67');   // w's fifth in column 7
+        assert.ok(out);
+        assert.equal(out.over, true);
+    });
+    test('a forged position with impossible counts cannot be adopted', () => {
+        // Three w stones to one b with w to move — nobody reached that legally.
+        const cells = Array(225).fill('.');
+        cells[0] = 'w'; cells[1] = 'w'; cells[2] = 'w'; cells[3] = 'b';
+        const forged = cells.join('') + ' w';
+        assert.equal(G.reduceGames([
+            ev('mallory', { k: 'gm.move', g: 'g0888', v: 'gomoku', n: 9, m: '2', f: forged }, T0),
+        ]).order.length, 0);
+    });
+    test('full lifecycle: open, join, first stone', () => {
+        const first = G.previewMove(game(EMPTY), '112');
+        const g = G.reduceGames([
+            ev('anna', { k: 'gm.new', g: 'g0999', v: 'gomoku' }, T0),
+            ev('bea', { k: 'gm.join', g: 'g0999' }, T0 + 1000),
+            ev('anna', { k: 'gm.move', g: 'g0999', v: 'gomoku', n: 0, m: '112', f: first.fen }, T0 + 2000),
+        ]).games.g0999;
+        assert.equal(g.status, 'live');
+        assert.equal(g.variant, 'gomoku');
+        assert.equal(g.ply, 1);
+        assert.equal(g.fen, first.fen);
+    });
+});
