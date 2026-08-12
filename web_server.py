@@ -11386,20 +11386,12 @@ def get_library_graph():
     """
     try:
         from core.graph.artist_graph import build_genre_grouped_map
+        from core.graph.library_artists import load_library_artists
         db = get_database()
         conn = db._get_connection()
         try:
             cur = conn.cursor()
-            owned = set()
-            meta = {}
-            artists = []
-            for name, thumb, genres, aid, source in cur.execute(
-                "SELECT name, thumb_url, genres, id, server_source FROM artists"
-            ):
-                key = (name or "").strip().lower()
-                owned.add(key)
-                meta[key] = {"thumb_url": thumb, "genres": genres}
-                artists.append((name, genres, thumb, aid, source))
+            owned, meta, artists = load_library_artists(cur)
             rows = cur.execute(
                 "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
                 "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
@@ -11474,12 +11466,9 @@ def _discovery_load_inputs(cur):
     popularity) — enriching from metadata_cache_entities instead measured 18-250s per request
     (random reads into a 1.3M-row table), for data these rows already have.
     """
-    owned = set()
-    owned_meta = {}
-    for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
-        key = (name or "").strip().lower()
-        owned.add(key)
-        owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+    from core.graph.library_artists import load_library_artists
+
+    owned, owned_meta, _nodes = load_library_artists(cur)
     rows = cur.execute(
         "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
         "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity, "

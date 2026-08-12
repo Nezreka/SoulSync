@@ -4281,3 +4281,24 @@ jeder andere". Nativ zu sein war nur deshalb ein Grund, die Id wegzulassen,
 zusätzlich unter ihren eigenen Namen zurück (`lib2_track_id`,
 `lib2_artist_id`), weil der Player sie so kennt (iss29-B08) und dann direkt in
 die Bibliotheksseite verlinkt, statt über die Umleitung zu gehen.
+
+#### 50.4.4.23 Die zwei Artist-Graphen lesen den Katalog — und hörten auf, ins Leere zu verlinken
+
+Stand: **304/87**. `web_server.py` fällt von 79/15 auf **77/15**. Zwei
+Lesestellen, aber sie hingen an demselben Vertragsbruch wie §50.4.4.22.
+
+Die Taste Map (`/api/graph/library`) und das Discovery-Web
+(`/api/graph/discovery`) beginnen beide mit „jeder Artist, den die Bibliothek
+hat". Beide hatten ihre eigene Kopie derselben Abfrage; beide liegen jetzt auf
+`core/graph/library_artists.load_library_artists`.
+
+**Der Fehler, der dabei herausfiel:** die Knoten trugen `server_source` als
+`source` mit — also `'plex'`, `'jellyfin'`, `'navidrome'`. Der Link daraus ist
+`/artist-detail/plex/<id>`, und diese Route liest alles außer `library:` als
+**Provider-Discovery-Anfrage** (ldp-01). „Open artist page" auf der Taste Map
+schickte den Benutzer damit auf die Suche nach einem Provider namens „plex".
+Jetzt ist die Quelle `library` und die Id die Katalog-Id — derselbe Raum, den
+die Route auflöst.
+
+**Alias-Zeilen sind keine zweiten Knoten** (§40): ein zweiter Knoten für
+denselben Artist würde dessen Ähnlichkeitskanten auf beide aufteilen.
