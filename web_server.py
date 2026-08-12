@@ -2403,7 +2403,12 @@ SERVICE_CONFIG_REGISTRY = {
     'bandcamp':     {'always': True},   # public search + release-page scrape, no credentials
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
-    'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
+    # Qobuz login (M&E mode) stores its credentials NESTED under
+    # qobuz.session = {app_id, app_secret, user_auth_token} — the top-level
+    # keys this registry used to check are never written, so a fully
+    # authenticated Qobuz read as unconfigured and its pill never went
+    # green (#1137). The session dict is truthy exactly when a login saved it.
+    'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token'], ['session']]},
     'lastfm':       {'required': ['api_key']},
     'genius':       {'required': ['access_token']},
     'acoustid':     {'required': ['api_key']},
@@ -3579,19 +3584,24 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            if isinstance(_experimental_in, dict):
-                for key, value in _experimental_in.items():
-                    config_manager.set(f'experimental.{key}', value)
+            # ONE database write for the whole page save. Per-leaf saves were
+            # hundreds of encrypt+serialize+commit cycles per click — enough
+            # self-inflicted lock contention to shove the config onto the
+            # (previously non-atomic) JSON fallback path (#1137).
+            with config_manager.batch():
+                if isinstance(_experimental_in, dict):
+                    for key, value in _experimental_in.items():
+                        config_manager.set(f'experimental.{key}', value)
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
-                if service in new_settings:
-                    if service == 'experimental' and isinstance(_experimental_in, dict):
-                        continue
-                    for key, value in new_settings[service].items():
-                        config_manager.set(f'{service}.{key}', value)
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
+                    if service in new_settings:
+                        if service == 'experimental' and isinstance(_experimental_in, dict):
+                            continue
+                        for key, value in new_settings[service].items():
+                            config_manager.set(f'{service}.{key}', value)
 
-            if _primary_override:
-                config_manager.set('metadata.fallback_source', _primary_override)
+                if _primary_override:
+                    config_manager.set('metadata.fallback_source', _primary_override)
 
             # The Settings → Quality page's toggles are saved as config keys
             # (above), but the pipeline enforces the PROFILE row (live, per
@@ -24610,7 +24620,12 @@ def deezer_download_test():
             'https://www.deezer.com/ajax/gw-light.php',
             params={'method': 'deezer.getUserData', 'api_version': '1.0', 'api_token': 'null'},
             json={},
-            timeout=15
+            # (connect, read): a host that blackholes deezer.com (VPS ranges,
+            # blocked regions — #1137) fails in 5s instead of pinning one of
+            # gunicorn's 8 request threads for the full 15 (this test runs
+            # synchronously in the handler, and the settings page auto-fires
+            # every source test on load).
+            timeout=(5, 15)
         )
         logger.debug(f"Deezer test raw response status={resp.status_code}, body_preview={resp.text[:500]}")
         resp.raise_for_status()

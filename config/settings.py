@@ -304,8 +304,18 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Could not ensure database exists: {e}")
 
-    def _load_from_database(self) -> Optional[Dict[str, Any]]:
-        """Load configuration from database, decrypting sensitive values."""
+    def _load_from_database(self) -> tuple:
+        """Load configuration from database, decrypting sensitive values.
+
+        Returns ``(config_data, load_error)``. The two None cases are NOT
+        the same thing and must never be collapsed: ``(None, False)`` means
+        the row is POSITIVELY absent (fresh install — safe to write
+        defaults), while ``(None, True)`` means the row could not be read
+        (locked DB, I/O error, corrupt blob). Treating "unreadable" as
+        "absent" is how issue #1137 destroyed a user's whole config: the
+        loader regenerated defaults and INSERT OR REPLACE'd them over the
+        real row that one transient failure had hidden.
+        """
         conn = None
         try:
             self._ensure_database_exists()
@@ -316,20 +326,41 @@ class ConfigManager:
             row = cursor.fetchone()
 
             if row and row[0]:
-                config_data = json.loads(row[0])
+                try:
+                    config_data = json.loads(row[0])
+                except Exception as e:
+                    # The row EXISTS but its JSON is broken — preserve the
+                    # evidence where no later write can destroy it, and
+                    # report an error, never an absence.
+                    logger.error(f"Config row exists but is unreadable JSON: {e}")
+                    self._quarantine_corrupt_blob(row[0])
+                    return None, True
                 # Decrypt sensitive values (gracefully handles plaintext migration)
                 config_data = self._decrypt_sensitive(config_data)
                 logger.info("Configuration loaded from database")
-                return config_data
+                return config_data, False
             else:
-                return None
+                return None, False
 
         except Exception as e:
             logger.warning(f"Could not load config from database: {e}")
-            return None
+            return None, True
         finally:
             if conn:
                 conn.close()
+
+    def _quarantine_corrupt_blob(self, raw: str) -> None:
+        """Copy an unreadable config blob next to config.json before anything
+        else runs — whatever is recoverable from it stays recoverable."""
+        try:
+            stamp = time.strftime('%Y%m%d-%H%M%S')
+            path = self.config_path.parent / f"config.corrupt-{stamp}.json"
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(str(raw))
+            logger.error(f"Unreadable config blob preserved at {path}")
+        except Exception as e:
+            logger.error(f"Could not quarantine corrupt config blob: {e}")
 
     def _load_stored_log_level(self) -> Optional[str]:
         """Load the persisted UI log level preference, if one exists."""
@@ -819,15 +850,42 @@ class ConfigManager:
         3. Defaults (fresh install)
         """
         logger.info("Loading configuration...")
-        
+
         # Try loading from database first
-        config_data = self._load_from_database()
+        config_data, load_error = self._load_from_database()
+
+        # An unreadable row is usually a transient boot-time lock — retry
+        # before deciding anything. What we must NEVER do is mistake it for
+        # a fresh install: that path ends in defaults being written OVER the
+        # user's real row (issue #1137, "a crash lost all my settings").
+        if config_data is None and load_error:
+            for delay in (0.5, 1.0, 2.0, 4.0):
+                time.sleep(delay)
+                config_data, load_error = self._load_from_database()
+                if config_data is not None or not load_error:
+                    break
 
         if config_data:
             # Configuration exists in database
             self.config_data = self._apply_log_level_overrides(config_data)
             # Ensure sensitive values are encrypted at rest (one-time migration)
             self._migrate_encrypt_if_needed()
+            return
+
+        if load_error:
+            # The row may still exist — we just can't read it right now.
+            # Run this session on config.json (if present) or defaults, but
+            # PROTECT the database row: no save this session may touch it.
+            self._db_row_protected = True
+            file_cfg = self._load_from_config_file()
+            self.config_data = self._apply_log_level_overrides(
+                file_cfg or self._get_default_config())
+            logger.error(
+                "Config could not be read from the database — running on %s. "
+                "The stored config row is PROTECTED and will not be "
+                "overwritten this session; restart once the database is "
+                "healthy to load it again.",
+                "config.json" if file_cfg else "defaults")
             return
 
         # Database is empty - try migration from config.json
@@ -867,6 +925,23 @@ class ConfigManager:
         file. The single 1s retry that used to live here gave up too
         early on HDD-backed Docker volumes.
         """
+        # Batch mode: callers writing dozens of leaves (the settings POST,
+        # config import) coalesce into ONE database write at batch exit —
+        # per-leaf saves were hundreds of full encrypt+serialize+commit
+        # cycles per click, and that self-inflicted lock contention is what
+        # pushed saves onto the fallback path in the first place (#1137).
+        if getattr(self, '_batch_depth', 0) > 0:
+            self._batch_dirty = True
+            return
+
+        # A session that could not READ the stored row must never WRITE
+        # over it — the row probably still holds the user's real config.
+        # Edits made while degraded persist to config.json only.
+        if getattr(self, '_db_row_protected', False):
+            logger.warning("Config DB row is protected this session — saving to config.json only")
+            self._save_config_file_atomic()
+            return
+
         # Cumulative delay across attempts: 0.2 + 0.5 + 1.0 + 2.0 + 4.0 = 7.7s
         # plus the 30s busy_timeout that already runs inside each attempt.
         retry_delays = [0.2, 0.5, 1.0, 2.0, 4.0]
@@ -884,13 +959,41 @@ class ConfigManager:
             f"Config DB save failed after {len(retry_delays) + 1} attempts (database is locked) — "
             "falling back to config.json"
         )
+        self._save_config_file_atomic()
+
+    def _save_config_file_atomic(self):
+        """Write config.json via temp-file + os.replace. The old plain
+        open(path,'w') truncated the file the instant it opened — a crash
+        mid-dump left zero bytes where the user's fallback config was."""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, 'w') as f:
+            tmp_path = self.config_path.with_suffix('.json.tmp')
+            with open(tmp_path, 'w') as f:
                 json.dump(self.config_data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.config_path)
             logger.warning("Configuration saved to config.json as fallback")
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
+
+    def batch(self):
+        """Context manager: suppress per-leaf saves, one write on exit."""
+        manager = self
+
+        class _Batch:
+            def __enter__(self):
+                manager._batch_depth = getattr(manager, '_batch_depth', 0) + 1
+                return manager
+
+            def __exit__(self, exc_type, exc, tb):
+                manager._batch_depth -= 1
+                if manager._batch_depth <= 0 and getattr(manager, '_batch_dirty', False):
+                    manager._batch_dirty = False
+                    manager._save_config()
+                return False
+
+        return _Batch()
 
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')
@@ -929,7 +1032,8 @@ class ConfigManager:
                     count += 1
 
         if isinstance(incoming, dict):
-            _walk(incoming, "")
+            with self.batch():          # one DB write for the whole import
+                _walk(incoming, "")
         return count
 
     def redacted_config(self) -> Dict[str, Any]:
