@@ -39958,7 +39958,7 @@ div.artist-hero-badge {
 /* ── Source picker — a boxless rail of brand pills; the pills carry the
    color, the way Spotify's filter chips sit bare on the page. ── */
 .enh-source-row {
-    display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: visible;
+    display: flex; flex-wrap: wrap;
     gap: 8px; padding: 6px 2px 10px; margin: 8px 0 10px;
     scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     background: transparent; border: none; border-radius: 0; box-shadow: none;
@@ -39967,6 +39967,12 @@ div.artist-hero-badge {
 .enh-source-row::-webkit-scrollbar { height: 5px; }
 .enh-source-row::-webkit-scrollbar-track { background: transparent; }
 .enh-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
+/* The panel is a grid item (min-width: auto), so any wide child can push it
+   past the viewport and the overflow clips at an ancestor that never
+   scrolls — the chips just vanish off-screen. min-width: 0 keeps the panel
+   inside its column so children wrap or scroll THEMSELVES. Scoped to the
+   search page; the downloads page shares this class. */
+.downloads-main-panel:has(#enh-source-row) { min-width: 0; }
 .enh-source-icon {
     position: relative; display: inline-flex; flex-direction: row;
     align-items: center; justify-content: center; gap: 8px; min-width: 0;
@@ -39992,6 +39998,11 @@ div.artist-hero-badge {
 .enh-source-icon-glyph img { width: 22px; height: 22px; object-fit: contain; display: block; }
 .enh-source-icon-label { font-size: 12.5px; letter-spacing: 0.01em; font-weight: 600; }
 .enh-source-icon.active .enh-source-icon-label { font-weight: 700; }
+@media (max-width: 700px) {
+    .enh-source-icon { padding: 7px 12px 7px 10px; font-size: 12px; }
+    .enh-source-icon-glyph { width: 18px; height: 18px; font-size: 15px; }
+    .enh-source-icon-glyph img { width: 18px; height: 18px; }
+}
 
 /* Active state — brand-coloured gradient + outer glow. Each source gets its
    own palette. `transform: scale(1.03)` lifts the chip slightly above its
