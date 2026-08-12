@@ -3862,3 +3862,45 @@ Sie fallen mit Stufe 3.
 schreiben die Legacy-Bibliothek für den Modus „SoulSync ist der Medienserver"),
 `listening_stats_worker` 10/1 (blockiert), und die
 `tracks.file_path`-Durchschriften.
+
+#### 50.4.4.13 Stufe 3 beginnt: die Statistik-Seite liest den nativen Katalog
+
+Stand: **366/90**. `core/stats/queries.py` fällt von 8/0 auf **0/0** — die erste
+reine Lesestelle, die umzieht, und ein guter Prüfstein für das Muster, weil sie
+alle drei Fragen der Phase auf einmal stellt.
+
+**Warum diese Seite überhaupt über Namen sucht.** Eine Zeile in
+`listening_history` hat keine Entity-Id, nur Titel und Interpret, wie der
+Medienserver sie gemeldet hat. Der Katalog muss also über den Namen gefunden
+werden — und genau daran hängen die drei Entscheidungen.
+
+**Die Id bleibt die Legacy-Id.** Jede Id von hier geht an
+`navigateToArtistDetail`, und eine bloße numerische Entity-Id löst sich per
+Vertrag gegen die Legacy-Tabelle auf — derselbe Grund, aus dem
+`library2.queries` `legacy_artist_id` als `id` zurückgibt. Eine native Zeile hat
+keine; sie wird trotzdem angereichert (ihr Bild ist echt), sie hat nur nichts,
+was die Navigation öffnen könnte, und das Frontend zeichnet eine leere Id längst
+als reinen Text. Das `ORDER BY` bevorzugt deshalb die verknüpfte Zeile vor einem
+namensgleichen nativen Zwilling.
+
+**Artists treffen über `name_key`, nicht über `LOWER(name)`.** Das ist der
+indizierte Dedup-Schlüssel, und SQLites `lower()` ist ASCII-only — der alte
+Vergleich verfehlte jeden kyrillischen, griechischen und türkischen Namen, den
+er finden sollte (iss29-D13). Eine Portierung, die den Vergleich mitnimmt, hätte
+den Fehler mitgenommen.
+
+**Ein Pfad ist eine eigene Zeile.** lib2 hält Pfad und Bitrate auf
+`lib2_track_files` (ADR-03); „hat eine abspielbare Datei" ist damit ein Join
+gegen aktive Dateien statt ein `file_path IS NOT NULL`. Der gespeicherte Pfad
+wird zurückgegeben, wie er gespeichert ist — ihn auf die Platte aufzulösen ist
+Sache des Aufrufers, wie schon, als die Spalte am Track hing.
+
+Der Legacy-Test-Satz ist umgeschrieben, nicht gelöscht: dieselben sechs
+Verhaltensweisen, gegen lib2-Zeilen gesät, plus zwei neue für die beiden
+Stellen, an denen sich das Verhalten bewusst ändert (Nicht-ASCII-Name trifft
+jetzt; ein nativer Artist bekommt Bild ohne toten Link).
+
+**Was daran das Muster für den Rest ist:** die Lesestellen-Phase ist keine
+Suchen-und-Ersetzen-Arbeit. Jede Datei hat genau diese drei Fragen — welchen
+Id-Raum ihre Antwort spricht, wie sie den Namen normalisiert, und wo das ist,
+was in lib2 in einer anderen Tabelle liegt.

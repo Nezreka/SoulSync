@@ -20,6 +20,80 @@ logger = logging.getLogger(__name__)
 ImageUrlFixer = Callable[[Optional[str]], Optional[str]]
 
 
+# The stats page shows names the media server reported for a play; the catalogue
+# has to be found by name because there is no id in a listening-history row.
+# Three things about doing that against Library v2 (docs §50.4.4.13):
+#
+# **The id stays the legacy one.** Every id here is handed to
+# ``navigateToArtistDetail``, and a bare numeric entity id resolves against the
+# legacy table by contract — the same reason ``library2.queries`` returns
+# ``legacy_artist_id`` as ``id``. A native row has none; it is still worth
+# enriching (its artwork is real), it just has nothing navigation could open,
+# and the front end already renders a null id as plain text. The ``ORDER BY``
+# therefore prefers a linked row over a native twin of the same name.
+#
+# **Artists match on ``name_key``, not ``LOWER(name)``.** It is the indexed
+# dedup key, and SQLite's ``lower()`` is ASCII-only — the old comparison missed
+# every Cyrillic/Greek/Turkish name it was supposed to find (iss29-D13).
+#
+# **A path is a file row.** lib2 keeps paths and bitrate on
+# ``lib2_track_files`` (ADR-03), so "has a playable file" is a join, and the
+# stored path is returned as stored — resolving it to disk is the caller's job,
+# as it was when the column lived on the track.
+_ARTIST_BY_NAME_SQL = """
+    SELECT image_url,
+           json_extract(enrichment, '$.lastfm.listeners'),
+           json_extract(enrichment, '$.lastfm.playcount'),
+           soul_id,
+           legacy_artist_id
+      FROM lib2_artists
+     WHERE name_key = ?
+     ORDER BY (legacy_artist_id IS NULL), id
+     LIMIT 1
+"""
+
+_ALBUM_BY_TITLE_SQL = """
+    SELECT al.image_url, al.legacy_album_id, ar.legacy_artist_id
+      FROM lib2_albums al
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE LOWER(al.title) = LOWER(?)
+       AND al.image_url IS NOT NULL AND al.image_url != ''
+     ORDER BY (al.legacy_album_id IS NULL), al.id
+     LIMIT 1
+"""
+
+_TRACK_BY_TITLE_AND_ARTIST_SQL = """
+    SELECT al.image_url, t.legacy_track_id, ar.legacy_artist_id
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
+     ORDER BY (t.legacy_track_id IS NULL), t.id
+     LIMIT 1
+"""
+
+_PLAYABLE_TRACK_SQL = """
+    SELECT t.legacy_track_id, t.title, f.path, f.bitrate, t.duration,
+           ar.name, al.title, al.image_url,
+           ar.legacy_artist_id, al.legacy_album_id
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+      JOIN lib2_track_files f ON f.track_id = t.id
+     WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
+       AND f.path IS NOT NULL AND f.path != ''
+       AND COALESCE(f.file_state, 'active') = 'active'
+     ORDER BY f.is_primary DESC, f.id
+     LIMIT 1
+"""
+
+
+def _name_key(name: Any) -> str:
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
+
 def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str) -> dict:
     """Read pre-computed stats cache for a time range. Instant response."""
     conn = database._get_connection()
@@ -66,22 +140,14 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT thumb_url, id, lastfm_listeners, lastfm_playcount, soul_id
-                    FROM artists
-                    WHERE LOWER(name) = LOWER(?)
-                    LIMIT 1
-                    """,
-                    (artist['name'],),
-                )
+                cursor.execute(_ARTIST_BY_NAME_SQL, (_name_key(artist['name']),))
                 row = cursor.fetchone()
                 if row:
                     artist['image_url'] = image_url_fixer(row[0]) if row[0] else None
-                    artist['id'] = row[1]
-                    artist['global_listeners'] = row[2]
-                    artist['global_playcount'] = row[3]
-                    artist['soul_id'] = row[4]
+                    artist['global_listeners'] = row[1]
+                    artist['global_playcount'] = row[2]
+                    artist['soul_id'] = row[3]
+                    artist['id'] = row[4]
             finally:
                 conn.close()
         except Exception as e:
@@ -99,14 +165,7 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT al.thumb_url, al.id, al.artist_id FROM albums al
-                    WHERE LOWER(al.title) = LOWER(?) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
-                    LIMIT 1
-                    """,
-                    (album['name'],),
-                )
+                cursor.execute(_ALBUM_BY_TITLE_SQL, (album['name'],))
                 row = cursor.fetchone()
                 if row:
                     album['image_url'] = image_url_fixer(row[0]) if row[0] else None
@@ -129,16 +188,8 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
             conn = database._get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT al.thumb_url, t.id, t.artist_id FROM tracks t
-                    JOIN albums al ON al.id = t.album_id
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-                    LIMIT 1
-                    """,
-                    (track['name'], track['artist']),
-                )
+                cursor.execute(_TRACK_BY_TITLE_AND_ARTIST_SQL,
+                               (track['name'], _name_key(track['artist'])))
                 row = cursor.fetchone()
                 if row:
                     track['image_url'] = image_url_fixer(row[0]) if row[0] else None
@@ -218,20 +269,7 @@ def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: 
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
-                   ar.name as artist_name, al.title as album_title,
-                   al.thumb_url, t.artist_id, t.album_id
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-              AND t.file_path IS NOT NULL AND t.file_path != ''
-            LIMIT 1
-            """,
-            (title.strip(), artist.strip()),
-        )
+        cursor.execute(_PLAYABLE_TRACK_SQL, (title.strip(), _name_key(artist)))
         row = cursor.fetchone()
     finally:
         conn.close()
