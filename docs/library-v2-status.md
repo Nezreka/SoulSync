@@ -3961,3 +3961,34 @@ Der „echtes SQL"-Test, den #945 aus gutem Grund hinterlassen hat (das breite
 tarnen), läuft jetzt gegen ein echtes lib2-Schema statt gegen ein
 handgeschriebenes Legacy-Paar — plus zwei neue: der Dateipfad kommt aus der
 primären Datei, und ein nicht-lateinischer Artist erreicht die DB-Stufe.
+
+#### 50.4.4.16 Der Genre-Tauchgang fragt lib2, was schon da ist
+
+Stand: **351/90**. `core/metadata/cache.py` fällt von 6/0 auf **0/0** — davon
+waren allerdings nur drei echt: die drei anderen waren Kommentarprosa („get
+genres from tracks or albums"), die der Regex mitzählt. Umformuliert statt den
+Zähler zu verbiegen, dieselbe Regel wie in §50.4.4.6 und §50.4.4.10. Für die
+nächsten Dateien lohnt der Blick vorab: `core/personalized_playlists.py` 8/0
+enthält denselben Anteil Prosa.
+
+Zwei der sechs Schritte des Deep Dive sind Katalogfragen, keine Cache-Fragen:
+welche der gefundenen Alben schon besessen sind, und welche der gefundenen
+Artists eine Bibliotheksseite zum Verlinken haben. Beide lasen Legacy, und beide
+hatten wieder denselben Defekt — `LOWER()`, ASCII-only, also fand ein
+gespeichertes „Björk" nie ein gefundenes „Björk" aus dem Provider-Cache, und die
+Seite bot dem Benutzer einen Download für ein Album an, das er längst hat.
+
+**Die Artist-Hälfte wird in SQL über `name_key` verengt, die Titel-Hälfte in
+Python verglichen.** lib2 hat keinen gefalteten Titel-Schlüssel; ihn in SQL zu
+falten hieße, die ASCII-Grenze beizubehalten. Der Titelvergleich in Python
+kostet nichts, weil die Zeilen ohnehin in eine Menge gelesen werden.
+
+**`library_id` bleibt die Legacy-Id** (Artist-Detail löst eine bloße numerische
+Id gegen Legacy auf), und ein rein nativer Artist bekommt gar keinen Link statt
+eines, der ins Leere führt.
+
+**Über diesen Pfad gab es bisher keinen einzigen Test.** Die sechs neuen laufen
+deshalb gegen ein echtes Schema statt gegen einen gefälschten Cursor: der
+Fehlermodus, um den es geht — eine Spalte oder ein Join, den es nicht gibt —
+beantwortet die ganze Seite still mit „nichts besessen", und genau das kann ein
+Stub nicht sehen.

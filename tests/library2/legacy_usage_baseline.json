@@ -1,5 +1,5 @@
 {
   "_note": "Legacy-table sites in production Python. May only go down; lower these numbers in the same commit that removes the sites. Both must reach 0 (docs \u00a732.3.1 stage 3/4). See test_legacy_usage_ratchet.py.",
-  "reads": 357,
+  "reads": 351,
   "writes": 90
 }
