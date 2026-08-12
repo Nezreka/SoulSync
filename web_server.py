@@ -40508,12 +40508,15 @@ def repair_findings_list():
         status = request.args.get('status')
         severity = request.args.get('severity')
         finding_type = request.args.get('finding_type')
+        sort = request.args.get('sort')
+        q = request.args.get('q')
         page = int(request.args.get('page', 0))
         limit = int(request.args.get('limit', 50))
 
         result = repair_worker.get_findings(
             job_id=job_id, status=status, severity=severity,
-            page=page, limit=limit, finding_type=finding_type
+            page=page, limit=limit, finding_type=finding_type,
+            sort=sort, q=q
         )
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
@@ -40541,6 +40544,37 @@ def repair_findings_counts():
     except Exception as e:
         logger.error(f"Error getting findings counts: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/groups', methods=['GET'])
+def repair_findings_groups():
+    """Findings folded to one row per TYPE — what the inbox renders.
+
+    The flat list meant paging 30-at-a-time through thousands of rows with no
+    way to see that most of them were one safe, one-click type.
+    """
+    try:
+        if repair_worker is None:
+            return jsonify({'groups': []}), 200
+        return jsonify({'groups': repair_worker.get_finding_groups()}), 200
+    except Exception as e:
+        logger.error(f"Error grouping repair findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
+def repair_finding_reopen(finding_id):
+    """Put a resolved/dismissed finding back to pending — the undo half of
+    dismiss, which is otherwise permanent by design."""
+    try:
+        if repair_worker is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        ok = repair_worker.reopen_finding(finding_id)
+        if not ok:
+            return jsonify({'success': False,
+                            'error': 'Finding not found or already pending'}), 404
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error reopening finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/repair/finding-types', methods=['GET'])
 def repair_finding_types():

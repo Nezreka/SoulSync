@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -84,6 +85,13 @@ def worker():
     conn.commit()
     w = RepairWorker.__new__(RepairWorker)   # no __init__: no threads, no config
     w.db = _Db(conn)
+    # __init__ never ran, so the bulk-fix machinery it would have built is
+    # seeded here — the guard under test lives inside that lock.
+    w._bulk_fix_lock = threading.Lock()
+    w._bulk_fix_thread = None
+    w._bulk_fix_stop_event = threading.Event()
+    w._bulk_fix_state = {}
+    w.should_stop = False
     return w
 
 
@@ -248,14 +256,33 @@ def test_findings_can_be_filtered_to_one_type(worker):
 
 # ── bulk safety ──────────────────────────────────────────────────────────────
 
-def test_bulk_refuses_an_unscoped_fix_action(worker):
+def test_bulk_refuses_an_action_that_would_span_types(worker):
     """'delete' deletes files for orphan/quality/acoustid findings, but names
     the track to KEEP for duplicates. One string across a mixed selection is
     how a user answering about orphans silently deleted other audio."""
+    _raise(worker, job_id='orphan_file_detector', finding_type='orphan_file',
+           entity_id=None, file_path='/transfer/loose.mp3')
+    _raise(worker, job_id='duplicate_detector', finding_type='duplicate_tracks',
+           entity_id='t5', file_path='/music/dupe.flac')
+
     result = worker.start_bulk_fix(fix_action='delete')
     assert result['started'] is False
     assert result['invalid'] is True
-    assert 'single finding type' in result['error']
+    assert 'different' in result['error']
+
+
+def test_bulk_allows_an_action_a_job_scope_already_narrows_to_one_type(worker):
+    """The per-job Fix All prompts (orphan/dead/acoustid/quality) send an
+    action scoped by JOB, and those jobs emit a single type — rejecting them
+    would break a working flow while catching nothing real."""
+    _raise(worker, job_id='orphan_file_detector', finding_type='orphan_file',
+           entity_id=None, file_path='/transfer/loose.mp3')
+    _raise(worker, job_id='missing_lyrics', finding_type='missing_lyrics',
+           entity_id='t7', file_path='/music/c.flac')
+
+    started = worker.start_bulk_fix(job_id='orphan_file_detector', fix_action='staging')
+    assert started.get('invalid') is not True, started
+    worker._bulk_fix_stop_event.set()   # do not let the thread do real work
 
 
 def test_safe_only_excludes_every_destructive_type(worker):
@@ -366,3 +393,94 @@ def test_a_run_still_records_its_finish_without_error_text(worker):
     row = conn.execute(
         'SELECT status, finished_at FROM repair_job_runs WHERE id = ?', (run_id,)).fetchone()
     assert row[0] == 'failed' and row[1] is not None
+
+# ── phase 2: grouping, sort/search, reopen, per-type progress ────────────────
+
+def test_groups_fold_the_list_to_one_row_per_type(worker):
+    """The unit of decision is the TYPE, not the instance — grouping is what
+    turns 'thousands of findings' into a handful of choices."""
+    _raise(worker)                                                     # dead_file, warning
+    _raise(worker, entity_id='t2', file_path='/music/b.flac')          # dead_file again
+    _raise(worker, job_id='missing_lyrics', finding_type='missing_lyrics',
+           severity='info', entity_id='t3', file_path='/music/c.flac')
+    _raise(worker, job_id='audio_corruption_detector', finding_type='corrupt_audio',
+           severity='error', entity_id='t4', file_path='/music/bad.flac')
+
+    groups = {g['finding_type']: g for g in worker.get_finding_groups()}
+    assert groups['dead_file']['pending'] == 2
+    assert groups['dead_file']['job_ids'] == ['dead_file_cleaner']
+    assert groups['corrupt_audio']['severity_max'] == 'error'
+    # Worst first: an error group outranks a warning group outranks info.
+    order = [g['finding_type'] for g in worker.get_finding_groups()]
+    assert order[0] == 'corrupt_audio'
+    assert order.index('dead_file') < order.index('missing_lyrics')
+
+
+def test_a_group_severity_follows_its_PENDING_rows_only(worker):
+    """Clearing the error must not leave the group flagged red forever."""
+    _raise(worker, job_id='audio_corruption_detector', finding_type='corrupt_audio',
+           severity='error', entity_id='t4', file_path='/music/bad.flac')
+    _raise(worker, job_id='audio_corruption_detector', finding_type='corrupt_audio',
+           severity='info', entity_id='t5', file_path='/music/meh.flac')
+    worker.db._conn.execute(
+        "UPDATE repair_findings SET status = 'resolved' WHERE severity = 'error'")
+    worker.db._conn.commit()
+
+    group = {g['finding_type']: g for g in worker.get_finding_groups()}['corrupt_audio']
+    assert group['severity_max'] == 'info'
+    assert group['pending'] == 1 and group['resolved'] == 1
+
+
+def test_sort_and_search_narrow_a_big_list(worker):
+    _raise(worker, title='Alpha', file_path='/music/alpha.flac', entity_id='t1')
+    _raise(worker, title='Beta', file_path='/music/beta.flac', entity_id='t2',
+           severity='error')
+
+    by_severity = worker.get_findings(sort='severity')['items']
+    assert by_severity[0]['title'] == 'Beta', 'errors triage first'
+
+    found = worker.get_findings(q='alpha')
+    assert found['total'] == 1 and found['items'][0]['title'] == 'Alpha'
+    # Path matches too — people search by folder as often as by title.
+    assert worker.get_findings(q='beta.flac')['total'] == 1
+
+
+def test_an_unknown_sort_falls_back_instead_of_reaching_sql(worker):
+    _raise(worker)
+    assert worker.get_findings(sort='; DROP TABLE repair_findings--')['total'] == 1
+
+
+def test_reopen_revives_a_dismissed_finding(worker):
+    _raise(worker)
+    fid = _rows(worker)[0][0]
+    worker.db._conn.execute(
+        "UPDATE repair_findings SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP")
+    worker.db._conn.commit()
+
+    assert worker.reopen_finding(fid) is True
+    row = worker.db._conn.execute(
+        'SELECT status, resolved_at FROM repair_findings WHERE id = ?', (fid,)).fetchone()
+    assert row[0] == 'pending'
+    assert row[1] is None, 'a stale resolved_at would let the grace re-suppress it'
+    # Nothing to reopen on a row that is already pending.
+    assert worker.reopen_finding(fid) is False
+
+
+def test_bulk_progress_tallies_per_type(worker):
+    _raise(worker, job_id='missing_lyrics', finding_type='missing_lyrics',
+           entity_id='t7', file_path='/music/c.flac')
+    _raise(worker, job_id='missing_cover_art', finding_type='missing_cover_art',
+           entity_id='t8', file_path='/music/d.flac')
+    ids = [r[0] for r in _rows(worker)]
+
+    worker._bulk_fix_state = {'running': True, 'total': len(ids), 'done': 0,
+                             'fixed': 0, 'failed': 0, 'stopped': False,
+                             'errors': [], 'error': None, 'per_type': {}}
+    worker._bulk_fix_stop_event = type('E', (), {'is_set': lambda self: False})()
+    worker.should_stop = False
+    worker.fix_finding = lambda fid, fix_action=None: {'success': fid == ids[0]}
+
+    worker._run_bulk_fix(ids)
+    per_type = worker._bulk_fix_state['per_type']
+    assert per_type['missing_lyrics'] == {'fixed': 1, 'failed': 0}
+    assert per_type['missing_cover_art'] == {'fixed': 0, 'failed': 1}

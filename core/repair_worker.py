@@ -1054,14 +1054,28 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    # Sort keys the inbox offers. Severity-first is the triage default; a flat
+    # newest-first list buries three corrupt files under four hundred missing
+    # lyrics. Whitelisted rather than interpolated — this lands in ORDER BY.
+    _FINDING_SORTS = {
+        'newest': 'created_at DESC',
+        'oldest': 'created_at ASC',
+        'severity': ("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 "
+                     "ELSE 2 END, created_at DESC"),
+        'path': 'file_path IS NULL, file_path ASC, created_at DESC',
+    }
+
     def get_findings(self, job_id: str = None, status: str = None,
                      severity: str = None, page: int = 0, limit: int = 50,
-                     finding_type: str = None) -> dict:
+                     finding_type: str = None, sort: str = None,
+                     q: str = None) -> dict:
         """Get paginated findings with optional filters.
 
         ``finding_type`` is what the grouped inbox pages through: one type at
         a time, so the user acts on a coherent set instead of a flat list
-        that interleaves "delete this file" with "add cover art".
+        that interleaves "delete this file" with "add cover art". ``q``
+        searches title and path — with thousands of rows, "where is that one
+        album" had no answer but paging.
         """
         conn = None
         try:
@@ -1083,8 +1097,14 @@ class RepairWorker:
             if finding_type:
                 where_parts.append("finding_type = ?")
                 params.append(finding_type)
+            if q and str(q).strip():
+                needle = f"%{str(q).strip()}%"
+                where_parts.append("(title LIKE ? OR file_path LIKE ?)")
+                params.extend([needle, needle])
 
             where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+            order_by = self._FINDING_SORTS.get(sort or 'newest',
+                                               self._FINDING_SORTS['newest'])
 
             # Count total
             cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
@@ -1106,7 +1126,7 @@ class RepairWorker:
                        user_action, resolved_at, created_at, updated_at, {error_col}
                 FROM repair_findings
                 {where}
-                ORDER BY created_at DESC
+                ORDER BY {order_by}
                 LIMIT ? OFFSET ?
             """, params + [limit, offset])
 
@@ -1155,6 +1175,96 @@ class RepairWorker:
         except Exception as e:
             logger.error("Error fetching findings: %s", e, exc_info=True)
             return {'items': [], 'total': 0, 'page': page, 'limit': limit}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_finding_groups(self) -> List[dict]:
+        """One row per finding TYPE — the unit the inbox works in.
+
+        The flat list made a user page 30-at-a-time through thousands of rows
+        with no way to see that 90% of them were one boring, safe, one-click
+        type. Grouping is what turns "3,000 findings" into "four decisions".
+
+        Counts every status in one GROUP BY (the type/status index carries
+        it), so a group can show what is left AND what has already been dealt
+        with without a second round trip.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT finding_type, status, severity, COUNT(*), MAX(created_at)
+                FROM repair_findings
+                GROUP BY finding_type, status, severity
+            """)
+            rows = cursor.fetchall()
+
+            # Which jobs feed each type — a group shows its source without
+            # the user having to cross-reference the jobs list.
+            cursor.execute(
+                "SELECT DISTINCT finding_type, job_id FROM repair_findings")
+            jobs_by_type: Dict[str, set] = {}
+            for finding_type, job_id in cursor.fetchall():
+                jobs_by_type.setdefault(finding_type, set()).add(job_id)
+        except Exception as e:
+            logger.error("Error grouping findings: %s", e, exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        rank = {'error': 0, 'warning': 1, 'info': 2}
+        groups: Dict[str, dict] = {}
+        for finding_type, status, severity, count, last_seen in rows:
+            group = groups.setdefault(finding_type, {
+                'finding_type': finding_type,
+                'pending': 0, 'resolved': 0, 'dismissed': 0, 'total': 0,
+                'severity_max': 'info', 'last_seen': None, 'job_ids': [],
+            })
+            if status in ('pending', 'resolved', 'dismissed'):
+                group[status] += count
+            group['total'] += count
+            # Severity of the group = the worst PENDING row in it. A cleared
+            # error must not keep a group flagged red forever.
+            if status == 'pending' and rank.get(severity, 2) < rank.get(group['severity_max'], 2):
+                group['severity_max'] = severity or 'info'
+            if last_seen and (group['last_seen'] is None or last_seen > group['last_seen']):
+                group['last_seen'] = last_seen
+
+        for finding_type, group in groups.items():
+            group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
+
+        # Worst first, then biggest — the order you would actually work in.
+        return sorted(
+            groups.values(),
+            key=lambda g: (rank.get(g['severity_max'], 2), -g['pending'], g['finding_type']),
+        )
+
+    def reopen_finding(self, finding_id: int) -> bool:
+        """Put a resolved/dismissed finding back to pending.
+
+        The undo half of dismiss. Dismiss is permanent by design (the dedup
+        never raises that finding again), which is only safe to offer freely
+        if it can be taken back. Clears resolved_at so the recurrence grace
+        does not then suppress the very row we just revived.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'pending', user_action = NULL, resolved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status IN ('resolved', 'dismissed')
+            """, (finding_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error reopening finding %s: %s", finding_id, e)
+            return False
         finally:
             if conn:
                 conn.close()
@@ -4554,21 +4664,20 @@ class RepairWorker:
                        finding_type: str = None, safe_only: bool = False) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
-        ``fix_action`` REQUIRES ``finding_type``. The action string is
+        ``fix_action`` may only reach ONE finding type per run. The string is
         interpreted per handler — 'delete' means "delete the file" to the
         orphan, quality and AcoustID fixers, while `_fix_duplicates` reads the
         same parameter as the id of the track to KEEP. Forwarding one string
         across a mixed selection is how a user answering a question about
         orphan files could silently delete audio under three other types.
-        Scope it to one type or send no action at all.
+
+        The check is on the RESOLVED SELECTION, not on which filter produced
+        it: a job scope usually is a single type (the orphan detector emits
+        only orphan_file), and rejecting those would break the working
+        per-job Fix All while catching nothing real.
 
         Returns ``{'started': True, 'total': N}`` or
         ``{'started': False, 'error': ..., 'already_running': bool}``."""
-        if fix_action and not finding_type:
-            return {'started': False, 'invalid': True, 'error': (
-                'A fix action can only be applied to a single finding type — '
-                'it means something different to every fixer. Scope the run to '
-                'one type, or run it without an action.')}
         with self._bulk_fix_lock:
             if self._bulk_fix_thread is not None and self._bulk_fix_thread.is_alive():
                 return {'started': False, 'already_running': True,
@@ -4582,6 +4691,16 @@ class RepairWorker:
                 return {'started': False, 'error': str(e)}
             if not ids:
                 return {'started': False, 'error': 'No pending fixable findings match'}
+
+            if fix_action:
+                spanned = set(self._types_for_findings(ids).values())
+                if len(spanned) > 1:
+                    return {'started': False, 'invalid': True, 'error': (
+                        f"'{fix_action}' would be applied to {len(spanned)} different "
+                        "finding types, and it means something different to each fixer "
+                        "(for one it deletes files; for another it names the copy to "
+                        "KEEP). Narrow the run to a single type, or run it without an "
+                        "action.")}
 
             self._bulk_fix_stop_event.clear()
             # Every key the runner will ever touch is seeded here so later
@@ -4600,6 +4719,9 @@ class RepairWorker:
                 'safe_only': bool(safe_only),
                 'errors': [],
                 'error': None,
+                # Per-type tallies so a mixed run can say WHAT it is fixing
+                # ("312 cover art, 40 lyrics") instead of one opaque number.
+                'per_type': {},
             }
             self._bulk_fix_thread = threading.Thread(
                 target=self._run_bulk_fix, args=(list(ids), fix_action),
@@ -4609,8 +4731,30 @@ class RepairWorker:
                         len(ids), f" for {job_id}" if job_id else "")
             return {'started': True, 'total': len(ids)}
 
+    def _types_for_findings(self, ids: List[int]) -> Dict[int, str]:
+        """finding_id → finding_type, read once so the bulk loop can tally per
+        type without a query per row."""
+        if not ids:
+            return {}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(ids))
+            cursor.execute(
+                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({placeholders})",
+                list(ids))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug("Could not read finding types for bulk run: %s", e)
+            return {}
+        finally:
+            if conn:
+                conn.close()
+
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
         state = self._bulk_fix_state
+        types = self._types_for_findings(ids)
         try:
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -4623,6 +4767,16 @@ class RepairWorker:
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
+                slug = types.get(fid)
+                if slug:
+                    tally = state['per_type'].get(slug)
+                    if tally is None:
+                        # Seeded whole, never key-by-key: get_bulk_fix_status
+                        # copies this dict from another thread and a partial
+                        # insert could be observed mid-write.
+                        tally = {'fixed': 0, 'failed': 0}
+                        state['per_type'][slug] = tally
+                    tally['fixed' if result.get('success') else 'failed'] += 1
                 if result.get('success'):
                     state['fixed'] += 1
                 else:
