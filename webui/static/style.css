@@ -73536,12 +73536,21 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
    own height — the grid rows do — which is what stops the collapse the avatar
    picker hit (a cell height depending on content that depends on the cell). */
 .chat-arc-lobby { padding: 12px 16px 24px; overflow-y: auto; }
+/* the marquee: layered glows, not a flat tinted box */
 .chat-arc-hero {
-    border-radius: 12px; padding: 18px 20px; margin-bottom: 18px;
-    background: linear-gradient(135deg, rgba(29,185,84,0.14), rgba(255,255,255,0.03));
-    border: 1px solid rgba(29,185,84,0.22);
+    position: relative; overflow: hidden;
+    border-radius: 16px; padding: 22px 24px; margin-bottom: 18px;
+    background:
+        radial-gradient(90% 140% at 0% 0%, rgba(29,185,84,0.18), transparent 55%),
+        radial-gradient(70% 120% at 100% 100%, rgba(255,213,79,0.08), transparent 60%),
+        rgba(255,255,255,0.025);
+    border: 1px solid rgba(29,185,84,0.25);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
-.chat-arc-hero-title { font-size: 20px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.chat-arc-hero-title {
+    font-size: 24px; font-weight: 800; letter-spacing: -0.02em;
+    color: #fff; margin-bottom: 6px;
+}
 .chat-arc-hero-sub {
     font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.62); max-width: 62ch;
 }
@@ -73551,8 +73560,12 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 /* the purse reads as a physical thing rather than another stat line */
 .chat-arc-purse {
     flex: none; display: flex; flex-direction: column; align-items: center; gap: 1px;
-    padding: 10px 16px; border-radius: 12px;
-    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,213,79,0.28);
+    padding: 11px 18px; border-radius: 14px;
+    background:
+        radial-gradient(120% 100% at 50% 0%, rgba(255,213,79,0.10), transparent 65%),
+        rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,213,79,0.32);
+    box-shadow: inset 0 1px 0 rgba(255,213,79,0.15);
 }
 .chat-arc-purse-coin { font-size: 17px; line-height: 1; }
 .chat-arc-purse-amt {
@@ -73574,19 +73587,43 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     gap: 10px; margin-bottom: 6px;
 }
 .chat-arc-tile {
+    position: relative; overflow: hidden;
     display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
-    padding: 14px 14px 13px; cursor: pointer; text-align: left;
-    border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+    padding: 15px 14px 13px; cursor: pointer; text-align: left;
+    border-radius: 14px; border: 1px solid rgba(255,255,255,0.08);
     background: rgba(255,255,255,0.035); color: inherit;
-    transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    transition: transform .12s ease, border-color .12s ease,
+                background .12s ease, box-shadow .12s ease;
+    --tile-glow: 29,185,84;   /* each game overrides its own hue below */
+}
+.chat-arc-tile::before {
+    content: ''; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, rgba(var(--tile-glow),0.75), transparent 70%);
+    opacity: 0.55; transition: opacity .12s ease;
 }
 .chat-arc-tile:hover {
-    background: rgba(29,185,84,0.1); border-color: rgba(29,185,84,0.45);
+    background:
+        radial-gradient(120% 130% at 20% 0%, rgba(var(--tile-glow),0.16), transparent 60%),
+        rgba(255,255,255,0.045);
+    border-color: rgba(var(--tile-glow),0.5);
     transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.35);
 }
-.chat-arc-tile-icon { font-size: 26px; line-height: 1.1; }
+.chat-arc-tile:hover::before { opacity: 1; }
+.chat-arc-tile-icon {
+    font-size: 28px; line-height: 1.15;
+    filter: drop-shadow(0 3px 6px rgba(0,0,0,0.45));
+}
 .chat-arc-tile-name { font-size: 14px; font-weight: 800; color: #fff; }
 .chat-arc-tile-blurb { font-size: 11px; color: rgba(255,255,255,0.45); line-height: 1.35; }
+/* every game gets its own light — the shelf reads like a real arcade row */
+.chat-arc-tile[data-chat-arc-variant="connect4"] { --tile-glow: 90,140,235; }
+.chat-arc-tile[data-chat-arc-variant="battleship"] { --tile-glow: 88,178,196; }
+.chat-arc-tile[data-chat-arc-variant="othello"] { --tile-glow: 46,160,84; }
+.chat-arc-tile[data-chat-arc-variant="gomoku"] { --tile-glow: 202,146,80; }
+.chat-arc-tile[data-chat-arc-room] { --tile-glow: 168,120,250; }
+.chat-arc-tile[data-chat-triv-open] { --tile-glow: 236,116,166; }
+.chat-arc-tile[data-chat-slot-open] { --tile-glow: 255,193,7; }
 .chat-arc-tilefoot { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
 .chat-arc-inline {
     border: none; background: none; padding: 0; cursor: pointer; font: inherit;
@@ -73604,6 +73641,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px;
     color: rgba(255,255,255,0.45); margin: 18px 2px 8px;
 }
+/* a hairline runs out from each section title — cheap structure, big calm */
+.chat-arc-sectitle::after {
+    content: ''; flex: 1 1 auto; height: 1px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.12), transparent);
+}
 .chat-arc-count {
     background: rgba(255,255,255,0.08); border-radius: 8px; padding: 1px 7px;
     font-size: 11px; letter-spacing: 0;
@@ -73612,11 +73654,19 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-card {
     display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
     padding: 12px 14px; margin-bottom: 8px; cursor: pointer;
-    border-radius: 10px; border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.07);
     background: rgba(255,255,255,0.03); color: inherit;
+    transition: transform .1s ease, border-color .1s ease,
+                background .1s ease, box-shadow .1s ease;
 }
-.chat-arc-card:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.14); }
-.chat-arc-card--mine { border-color: rgba(29,185,84,0.3); }
+.chat-arc-card:hover {
+    background: rgba(255,255,255,0.055); border-color: rgba(255,255,255,0.16);
+    transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+.chat-arc-card--mine {
+    border-color: rgba(29,185,84,0.35);
+    box-shadow: inset 3px 0 0 rgba(29,185,84,0.55);
+}
 .chat-arc-card-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .chat-arc-card-sub { font-size: 12px; color: rgba(255,255,255,0.45); }
 .chat-arc-card-actions { display: flex; gap: 8px; margin-top: 4px; }
@@ -73663,6 +73713,10 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     border-radius: 10px; overflow: hidden; border: 1px solid rgba(255,255,255,0.12);
     user-select: none;
 }
+/* all four boards sit ON the page rather than in it */
+.chat-arc-board, .chat-arc-c4board, .chat-arc-othboard, .chat-arc-gmkboard {
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
 .chat-arc-board--over { opacity: 0.75; }
 .chat-arc-sq {
     display: flex; align-items: center; justify-content: center; position: relative;
@@ -73690,7 +73744,12 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-pc--w { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
 .chat-arc-pc--b { color: #14181c; text-shadow: 0 1px 1px rgba(255,255,255,0.18); }
 
-.chat-arc-status { font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.8); }
+/* the status line is the board's VOICE — a quiet pill, not floating text */
+.chat-arc-status {
+    font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,0.82);
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px; padding: 8px 12px;
+}
 .chat-arc-note {
     font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.04);
     border-left: 3px solid rgba(255,193,7,0.5); border-radius: 4px; padding: 7px 10px;
@@ -73929,6 +73988,11 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-arc-ladrow:last-of-type { border-bottom: none; }
 .chat-arc-ladrow--me { color: #1db954; font-weight: 700; }
 .chat-arc-ladno { color: rgba(255,255,255,0.35); text-align: right; }
+/* the podium: gold, silver, bronze — rank readable before any number is */
+.chat-arc-ladrow:nth-of-type(1) .chat-arc-ladno { color: #ffd54f; font-weight: 800; }
+.chat-arc-ladrow:nth-of-type(1) .chat-arc-ladelo { color: #ffd54f; }
+.chat-arc-ladrow:nth-of-type(2) .chat-arc-ladno { color: #cfd8dc; font-weight: 800; }
+.chat-arc-ladrow:nth-of-type(3) .chat-arc-ladno { color: #d29c6b; font-weight: 800; }
 .chat-arc-ladname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-arc-ladwl { font-size: 11px; color: rgba(255,255,255,0.4); }
 .chat-arc-ladelo { font-weight: 800; font-variant-numeric: tabular-nums; }
