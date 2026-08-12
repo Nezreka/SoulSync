@@ -369,6 +369,19 @@
         return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
     }
 
+    // Moderator gate — one list, owned by chat-protocol.js (the reducers
+    // enforce it on EVERY client; this only decides which buttons WE see).
+    function _selfIsMod() {
+        var CP = window.ChatProtocol;
+        return !!(CP && CP.isModerator && CP.isModerator(state.selfName));
+    }
+
+    function _hiddenSet() {
+        var CP = window.ChatProtocol;
+        if (!CP || !CP.reduceHidden || state.view !== 'room') return {};
+        return CP.reduceHidden(_roomEvents());
+    }
+
     function _lineHtml(m) {
         var self = m.self === true || m.direction === 'Out';
         // Edits: the DISPLAYED text is the latest applied edit; m.message
@@ -376,6 +389,26 @@
         // key hashes it, the message key embeds it).
         var versions = m._editOrphan ? null : _editsFor(m);
         var showText = versions ? versions[versions.length - 1] : String(m.message || '');
+        // Moderator-hidden messages collapse to a stub on EVERY SoulSync
+        // client (the reducer only folds mod.hide from moderators, so the
+        // envelope can't be forged). Click reveals locally; a moderator
+        // also gets the unhide that lifts it for the whole room.
+        var hideKey = String(m.username || '') + '|' + String(m.timestamp || '');
+        if (state.view === 'room' && _hiddenSet()[hideKey]) {
+            if (!state.revealedHidden || !state.revealedHidden[hideKey]) {
+                return '<div class="chat-line chat-line--hidden" data-chat-hidden-reveal="' +
+                    attr(hideKey) + '" title="Click to view anyway">' +
+                    '🚫 <span>Message from <b>' + esc(m.username || '') +
+                    '</b> hidden by a moderator</span>' +
+                    (_selfIsMod()
+                        ? ' <button type="button" class="chat-line-reply" ' +
+                          'data-chat-unhide-user="' + attr(m.username || '') + '" ' +
+                          'data-chat-unhide-ts="' + attr(String(m.timestamp || '')) +
+                          '">unhide</button>'
+                        : '') +
+                    '</div>';
+            }
+        }
         var me = !self && state.view === 'room' && mentionsMe(showText);
         var replyRef = (m.reply && m.reply.u)
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
@@ -408,11 +441,17 @@
                 'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
                 'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
         }
-        if (state.view === 'room' && state.canSend) {
+        // Pin + hide are MODERATOR tools now (Boulder): the reducers refuse
+        // anyone else's events anyway — hiding the buttons just keeps honest
+        // UIs honest, exactly like the reserved avatar's picker.
+        if (state.view === 'room' && state.canSend && _selfIsMod()) {
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
                 'data-chat-pin-user="' + attr(m.username || '') + '" ' +
                 'data-chat-pin-ts="' + attr(String(m.timestamp || '')) + '" ' +
-                'data-chat-pin-x="' + attr(showText.slice(0, 140)) + '">📌</button>';
+                'data-chat-pin-x="' + attr(showText.slice(0, 140)) + '">📌</button>' +
+                '<button type="button" class="chat-line-reply" title="Hide for everyone (moderator)" ' +
+                'data-chat-hide-user="' + attr(m.username || '') + '" ' +
+                'data-chat-hide-ts="' + attr(String(m.timestamp || '')) + '">🚫</button>';
         }
         var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
@@ -1186,6 +1225,16 @@
             return _arcCache.out;
         }
         var out = window.ChatGames.reduceGames(_roomEvents(), Date.now());
+        // Moderator game-kill: a killed id is erased from the fold — board,
+        // cards, lifecycle, everywhere — on every client that folds the room.
+        var CPk = window.ChatProtocol;
+        var kills = (CPk && CPk.reduceGameKills) ? CPk.reduceGameKills(_roomEvents()) : {};
+        if (out && out.order && out.order.some(function (id) { return kills[id]; })) {
+            var games = {};
+            var order = out.order.filter(function (id) { return !kills[id]; });
+            order.forEach(function (id) { games[id] = out.games[id]; });
+            out = { games: games, order: order };
+        }
         _arcCache = { ref: log, n: log.length, room: state.room, out: out };
         return out;
     }
@@ -1611,7 +1660,11 @@
                     (g.partial ? ' · joined mid-game' : '') +
                 '</span>' +
                 badge +
-                (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : '') +
+                ((_selfIsMod()
+                    ? '<span class="chat-arc-card-actions"><button type="button" class="chat-line-reply" ' +
+                      'title="End this game for everyone (moderator)" ' +
+                      'data-chat-arc-kill="' + attr(g.id) + '">🛑</button>' + (actions || '') + '</span>'
+                    : (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : ''))) +
             '</div>';
         }
 
@@ -4542,6 +4595,23 @@
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');
             if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-kill]');
+            if (t) {
+                e.stopPropagation();     // the card click would open the board
+                var killId = t.getAttribute('data-chat-arc-kill');
+                var doKill = function () {
+                    sendProtocol('mod.gamekill', { id: killId });
+                    if (typeof showToast === 'function') showToast('🛑 Game ended for the room', 'info');
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({ title: 'End Game',
+                        message: 'End this game for everyone in the room? The board disappears for all players.',
+                        confirmText: 'End game', destructive: true }).then(function (ok) {
+                        if (ok !== false) doKill();
+                    });
+                } else { doKill(); }
+                return;
+            }
             t = e.target.closest('[data-chat-arc-resign]');
             if (t) { arcResign(t.getAttribute('data-chat-arc-resign')); return; }
             t = e.target.closest('[data-chat-arc-draw]');
@@ -4693,6 +4763,26 @@
                                           ts: t.getAttribute('data-chat-pin-ts'),
                                           x: t.getAttribute('data-chat-pin-x') });
                 if (typeof showToast === 'function') showToast('📌 Pinned for the room', 'success');
+                return;
+            }
+            t = e.target.closest('[data-chat-hide-user]');
+            if (t) {
+                sendProtocol('mod.hide', { u: t.getAttribute('data-chat-hide-user'),
+                                           ts: t.getAttribute('data-chat-hide-ts') });
+                if (typeof showToast === 'function') showToast('🚫 Hidden for the room', 'success');
+                return;
+            }
+            t = e.target.closest('[data-chat-unhide-user]');
+            if (t) {
+                sendProtocol('mod.unhide', { u: t.getAttribute('data-chat-unhide-user'),
+                                             ts: t.getAttribute('data-chat-unhide-ts') });
+                return;
+            }
+            t = e.target.closest('[data-chat-hidden-reveal]');
+            if (t && !e.target.closest('[data-chat-unhide-user]')) {
+                state.revealedHidden = state.revealedHidden || {};
+                state.revealedHidden[t.getAttribute('data-chat-hidden-reveal')] = true;
+                renderMessages(state.msgs || []);
                 return;
             }
             t = e.target.closest('[data-chat-poll-btn]');
@@ -5282,13 +5372,15 @@
                     return '<div class="chat-pin-row">' +
                         '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
                         '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
-                        (state.canSend
+                        (state.canSend && _selfIsMod()
                             ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
                               'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
                             : '') +
                     '</div>';
                 }).join('')
-                : '<div class="chat-side-none">Nothing pinned yet — hover a message and hit 📌</div>');
+                : '<div class="chat-side-none">' +
+                    (_selfIsMod() ? 'Nothing pinned yet — hover a message and hit 📌'
+                                  : 'Nothing pinned yet') + '</div>');
     }
 
     // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────

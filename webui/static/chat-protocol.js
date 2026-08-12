@@ -199,12 +199,58 @@
 
     // pin.add {u, ts, x} / pin.del {u, ts} → rolling board of pinned
     // messages (dedupe by author|timestamp, cap 8 — oldest falls off).
+    // ── Moderators ────────────────────────────────────────────────────
+    // The RESERVED_AVATARS trust model extended to ACTIONS: the slskd
+    // sender name on a room message cannot be forged, so every client can
+    // verify a moderator event locally, and non-moderator copies of the
+    // same event are ignored by everyone. Mirrored nowhere — this list is
+    // the single source both reducers and chat.js UI gating read.
+    var CHAT_MODERATORS = ['boulderbadgedad'];
+
+    function isModerator(username) {
+        return CHAT_MODERATORS.indexOf(String(username || '').trim().toLowerCase()) !== -1;
+    }
+
+    // mod.hide {u, ts} / mod.unhide {u, ts} → { 'u|ts': true } of messages
+    // every SoulSync client renders collapsed. Moderator-only by fold rule.
+    function reduceHidden(events) {
+        var hidden = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k !== 'mod.hide' && p.k !== 'mod.unhide') return;
+            if (!isModerator(ev.username)) return;
+            var u = String(p.u || ''), ts = String(p.ts || '');
+            if (!u || !ts || u.length > 64 || ts.length > 64) return;
+            if (p.k === 'mod.hide') hidden[u + '|' + ts] = true;
+            else delete hidden[u + '|' + ts];
+        });
+        return hidden;
+    }
+
+    // mod.gamekill {id} → { id: true }. A killed game vanishes from the
+    // arcade fold on every client. Moderator-only by fold rule.
+    function reduceGameKills(events) {
+        var kills = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'mod.gamekill') return;
+            if (!isModerator(ev.username)) return;
+            var id = String(ev.p.id || '');
+            if (id && id.length <= 64) kills[id] = true;
+        });
+        return kills;
+    }
+
     function reducePins(events) {
         var pins = [];
         (events || []).forEach(function (ev) {
             if (!ev || !ev.p || typeof ev.username !== 'string') return;
             var p = ev.p;
             if (p.k !== 'pin.add' && p.k !== 'pin.del') return;
+            // Owner-only pins (Boulder): the board folds moderator events
+            // exclusively, so anyone else's pin.add is inert on every client.
+            if (!isModerator(ev.username)) return;
             var u = String(p.u || ''), ts = String(p.ts || '');
             if (!u || !ts || u.length > 64 || ts.length > 64) return;
             var key = u + '|' + ts;
@@ -329,6 +375,9 @@
         reduceAvatars: reduceAvatars,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
+        isModerator: isModerator,
+        reduceHidden: reduceHidden,
+        reduceGameKills: reduceGameKills,
         reducePins: reducePins,
         reducePoll: reducePoll,
         reduceTopic: reduceTopic,

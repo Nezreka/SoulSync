@@ -240,28 +240,33 @@ describe('reducePins — the shared pin board', () => {
     const add = (by, u, ts, x) => ev(by, { k: 'pin.add', u, ts, x });
 
     test('add, dedupe (re-pin moves to newest), delete', () => {
+        // Pins are MODERATOR-only now (Boulder's owner powers): every event
+        // here rides the moderator name; sender identity checks moved to the
+        // moderation describe below.
+        const MOD = 'boulderbadgedad';
         const pins = P.reducePins([
-            add('a', 'bob', 't1', 'first'),
-            add('a', 'sue', 't2', 'second'),
-            add('b', 'bob', 't1', 'again'),          // re-pin same message
-            ev('c', { k: 'pin.del', u: 'sue', ts: 't2' }),
+            add(MOD, 'bob', 't1', 'first'),
+            add(MOD, 'sue', 't2', 'second'),
+            add(MOD, 'bob', 't1', 'again'),          // re-pin same message
+            ev(MOD, { k: 'pin.del', u: 'sue', ts: 't2' }),
         ]);
         assert.equal(pins.length, 1);
         assert.equal(pins[0].u, 'bob');
-        assert.equal(pins[0].by, 'b');               // latest pinner wins
+        assert.equal(pins[0].by, MOD);
     });
 
     test('board caps at 8 — oldest falls off', () => {
         const evs = [];
-        for (let i = 0; i < 10; i++) evs.push(add('a', 'u' + i, 't' + i, 'x'));
+        for (let i = 0; i < 10; i++) evs.push(add('boulderbadgedad', 'u' + i, 't' + i, 'x'));
         const pins = P.reducePins(evs);
         assert.equal(pins.length, 8);
         assert.equal(pins[0].u, 'u2');
     });
 
     test('garbage never lands', () => {
-        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: '', ts: 't' })]).length, 0);
-        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: 'x'.repeat(99), ts: 't' })]).length, 0);
+        const MOD = 'boulderbadgedad';
+        assert.equal(P.reducePins([ev(MOD, { k: 'pin.add', u: '', ts: 't' })]).length, 0);
+        assert.equal(P.reducePins([ev(MOD, { k: 'pin.add', u: 'x'.repeat(99), ts: 't' })]).length, 0);
     });
 });
 
@@ -339,4 +344,51 @@ describe('reduceTopic + reduceTuned', () => {
             ev('a', { k: 'jbx.tune', on: 0 }),
         ]), { b: 1 });
     });
+});
+
+// ── Moderator model (Boulder's reserved-owner powers) ──────────────────────
+describe('moderation', () => {
+  const P = ctx.window.ChatProtocol;
+  const mod = 'BoulderBadgeDad';        // casefold must match 'boulderbadgedad'
+  const rando = 'SomeUser';
+
+  test('isModerator is casefolded and exact', () => {
+    assert.equal(P.isModerator('boulderbadgedad'), true);
+    assert.equal(P.isModerator('  BoulderBadgeDad '), true);
+    assert.equal(P.isModerator('boulderbadgedad2'), false);
+    assert.equal(P.isModerator(''), false);
+    assert.equal(P.isModerator(null), false);
+  });
+
+  test('reducePins folds ONLY moderator pins now', () => {
+    const pins = P.reducePins([
+      { username: rando, p: { k: 'pin.add', u: 'a', ts: '1', x: 'not yours' } },
+      { username: mod, p: { k: 'pin.add', u: 'b', ts: '2', x: 'mine' } },
+      // a rando's unpin of the moderator's pin is inert too
+      { username: rando, p: { k: 'pin.del', u: 'b', ts: '2' } },
+    ]);
+    assert.equal(pins.length, 1);
+    assert.equal(pins[0].x, 'mine');
+  });
+
+  test('reduceHidden folds hide/unhide from moderators only', () => {
+    const hidden = P.reduceHidden([
+      { username: rando, p: { k: 'mod.hide', u: 'victim', ts: '9' } },  // forged — inert
+      { username: mod, p: { k: 'mod.hide', u: 'spammer', ts: '5' } },
+      { username: mod, p: { k: 'mod.hide', u: 'spammer', ts: '6' } },
+      { username: mod, p: { k: 'mod.unhide', u: 'spammer', ts: '6' } },
+    ]);
+    assert.deepEqual({ ...hidden }, { 'spammer|5': true });
+  });
+
+  test('reduceGameKills folds moderator kills only, hostile input inert', () => {
+    const kills = P.reduceGameKills([
+      { username: rando, p: { k: 'mod.gamekill', id: 'g1' } },
+      { username: mod, p: { k: 'mod.gamekill', id: 'g2' } },
+      { username: mod, p: { k: 'mod.gamekill', id: 'x'.repeat(65) } },  // oversized — inert
+      { username: mod, p: { k: 'mod.gamekill' } },                      // no id — inert
+      null,
+    ]);
+    assert.deepEqual({ ...kills }, { g2: true });
+  });
 });
