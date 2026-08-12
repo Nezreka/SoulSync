@@ -3722,3 +3722,55 @@ Legacy-Trackzeile für dieselbe Ansicht an, und der Rest
 `reorganize_runner`, `repair_worker`) sind `tracks.file_path`-Durchschriften.
 Alle hängen an Lesern, die noch nicht umgezogen sind. **Stufe 2 ist damit
 abgeschlossen, bis auf soulid** — was bleibt, fällt mit Stufe 3.
+
+#### 50.4.4.11 Was der Fold sonst noch stehen ließ
+
+Stand: **387/94**. Der vollständige Suite-Lauf (~13 min, den §50.4.4.8 nicht
+gemacht hatte) förderte über die vierzehn aus §50.4.4.9 hinaus weitere
+**zwölf rote Tests** zutage, und zwei davon zeigten auf echte Lücken statt auf
+Fixtures.
+
+**Die #934-Heilung war weg.** `acoustid_scanner._persist_status` schrieb den
+Prüf-Verdikt früher in drei Richtungen: den Datei-Tag, die Katalogzeile und die
+`library_history`-Zeile der Datei. Der Fold behielt die ersten beiden. Die
+Unverified-Warteschlange auf der Downloads-Seite liest aber weiterhin
+`get_library_history_unverified()` — also erreichte ein Scan-Ergebnis den
+Benutzer überhaupt nicht mehr: eine neu markierte Datei tauchte nicht zur
+Prüfung auf, und eine gerade verifizierte blieb auf „unverified" stehen. Das ist
+exakt das Symptom von #934. Die Projektion ist als `_project_status_to_history`
+wiederhergestellt — Durchschrift, die mit der Warteschlange in Stufe 3 fällt.
+Die vier Tests in `test_acoustid_history_heal.py` waren ihre Spezifikation und
+sind wieder grün.
+
+**AudioDB prüfte auf Duplikat-Ids in der falschen Tabelle.** Dreizehn Worker
+rufen `worker_support.accept_artist_match` (fragt `lib2_artists`); AudioDB rief
+als einziger noch die Legacy-Variante (`SELECT name FROM artists`). Ein
+V2-nativer Artist hat keinen Legacy-Zwilling — die Sperre sah eine leere Tabelle
+und ließ genau die Kollision durch, gegen die es sie gibt. Umgestellt, mit einem
+Test, der die Kollision in lib2 aufbaut.
+
+**Damit fallen sechs tote Helfer in `core/worker_utils.py`:**
+`accept_artist_match`, `source_id_conflict`, `_names_equivalent`,
+`set_album_api_track_count`, `priority_pending_item`, `owned_album_titles` —
+plus die Spalten-Allowlist, die nur die Konflikt-Abfrage brauchte. Alle sechs
+haben native Nachfolger *mit eigenen Tests* (`worker_support.provider_id_conflict`
+/ `accept_artist_match` / `set_expected_track_count` / `owned_album_titles`,
+`worker_queue.next_pending(pinned=…)`); ihre Legacy-Tests sind entsprechend
+zurückgeschnitten statt gelöscht — der Namens-Schwellwert-Teil des Match-Gates
+bleibt, der Konflikt-Teil ist umgezogen. Die Datei fällt von 361 auf 182 Zeilen
+und hält kein Legacy-SQL mehr.
+
+**Zwei restaurierte Verhaltensweisen und eine benannte:** die Kompilations-Regel
+(„der auf dem Track kreditierte Artist schlägt den Album-Artist") existiert
+weiter, eine Ebene tiefer — `active_file_subjects` bevorzugt
+`lib2_track_artists` und fällt auf `lib2_albums.primary_artist_id` zurück,
+dasselbe COALESCE, verschoben. Der leere String, gegen den ein Test sich
+absicherte, kann dort nicht mehr auftreten: eine Kreditierung ist eine Zeile,
+sie ist da oder nicht.
+
+**Rest, nach Größe:** `database/music_database.py` 179/49 und `web_server.py`
+79/15 — die Lesestellen-Phase. Dann `soulid` 13/4 (eigene Runde),
+`imports/side_effects` 5/7 und `library/missing_track_import` 8/4 (beide
+schreiben die Legacy-Bibliothek für den Modus „SoulSync ist der Medienserver"),
+`listening_stats_worker` 10/1 (blockiert), und die
+`tracks.file_path`-Durchschriften.

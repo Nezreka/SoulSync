@@ -482,18 +482,21 @@ class AcoustIDScannerJob(RepairJob):
             except Exception as exc:  # noqa: BLE001
                 logger.debug("verification tag write failed for %s: %s", fpath, exc)
         file_id = int((expected or {}).get("lib2_file_id") or 0)
-        if not file_id:
-            return
         conn = context.db._get_connection()
         try:
-            conn.execute(
-                "UPDATE lib2_track_files SET verification_status=?, "
-                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (status, file_id),
-            )
+            if file_id:
+                conn.execute(
+                    "UPDATE lib2_track_files SET verification_status=?, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (status, file_id),
+                )
+            self._project_status_to_history(
+                conn, fpath, db_path, status, expected or {})
             conn.commit()
         finally:
             conn.close()
+        if not file_id:
+            return
         if context.report_change:
             context.report_change(
                 finding_type="acoustid_verification",
@@ -506,6 +509,76 @@ class AcoustIDScannerJob(RepairJob):
                     "verification_status": status,
                 },
             )
+
+    def _project_status_to_history(self, conn, fpath, db_path, status, expected):
+        """Carry the verdict into the file's ``library_history`` row (#934).
+
+        The Unverified review queue on the Downloads page is still read from
+        ``library_history`` (``get_library_history_unverified``), so without this
+        a scan verdict never reaches the user: a newly flagged file never shows
+        up for review, and a file the scan just verified stays stuck
+        'unverified' — which is #934's symptom exactly. Goes when that queue
+        reads lib2 (docs §32.3.1 stage 3).
+
+        The stored path is frozen at import time while the file has since moved,
+        so an exact-path match alone misses the row — then the status lands
+        nowhere and every scan inserts another duplicate. Match exact path
+        first, then filename guarded by title, and heal the row's path so later
+        scans match cleanly.
+        """
+        try:
+            from core.downloads.history_match import (
+                like_filename_filter, pick_history_row,
+            )
+
+            cur = conn.cursor()
+            current = fpath or db_path
+            basename = os.path.basename(current) if current else ''
+            clauses, params = [], []
+            for path in {p for p in (fpath, db_path) if p}:
+                clauses.append("file_path = ?")
+                params.append(path)
+            if basename:
+                clauses.append("file_path LIKE ? ESCAPE '\\'")
+                params.append(like_filename_filter(basename))
+            row_id = None
+            if clauses:
+                cur.execute(
+                    "SELECT id, file_path, title, download_source FROM library_history "
+                    "WHERE " + " OR ".join(clauses), params)
+                row_id = pick_history_row(
+                    cur.fetchall(), current_paths=(fpath, db_path),
+                    basename=basename, title=expected.get('title') or '')
+            if row_id is not None:
+                cur.execute(
+                    "UPDATE library_history SET verification_status = ?, file_path = ? "
+                    "WHERE id = ?", (status, current, row_id))
+                # Drop the synthetic scan-created duplicates for this exact file
+                # (the #934 leftovers). Exact path → collision-free; never
+                # touches a real download row.
+                cur.execute(
+                    "DELETE FROM library_history WHERE id != ? "
+                    "AND download_source = 'acoustid_scan' AND file_path = ?",
+                    (row_id, current))
+            elif status == 'unverified':
+                # A file SoulSync never downloaded has no history row at all.
+                # Insert one so EVERY scan-flagged file lands in the review
+                # queue, not only past downloads; re-scans then match it by path.
+                cur.execute(
+                    """INSERT INTO library_history
+                       (event_type, title, artist_name, album_name, file_path,
+                        thumb_url, download_source, verification_status)
+                       VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
+                    (expected.get('title') or os.path.basename(fpath or ''),
+                     expected.get('artist') or None,
+                     expected.get('album_title') or None,
+                     db_path or fpath,
+                     expected.get('album_thumb_url') or None,
+                     status))
+        except Exception as exc:  # noqa: BLE001
+            # The native status write must never be lost to the projection —
+            # a v2-only install may have no library_history table at all.
+            logger.debug("history projection failed for %s: %s", fpath, exc)
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         tracks: Dict[str, Dict[str, Any]] = {}

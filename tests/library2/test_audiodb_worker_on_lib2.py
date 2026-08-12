@@ -249,3 +249,34 @@ def test_the_worker_holds_no_legacy_sql_at_all():
     usage = count_legacy_usage(pathlib.Path("core/audiodb_worker.py").read_text())
 
     assert (usage.reads, usage.writes) == (0, 0)
+
+
+def test_the_duplicate_id_gate_reads_lib2_not_the_legacy_twin(worker):
+    """The 'one id smeared across many artists' guard has to look where the
+    artists are.
+
+    Every other migrated worker calls ``worker_support.accept_artist_match``,
+    which asks ``lib2_artists``. AudioDB kept the legacy helper
+    (``worker_utils.accept_artist_match`` -> ``SELECT name FROM artists``), and a
+    V2-native artist has no legacy twin — so the gate saw an empty table and
+    waved through exactly the collision it exists to stop.
+    """
+    conn = worker.db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO lib2_artists(id, name, sort_name, external_ids) "
+            "VALUES(2, 'Portishead', 'Portishead', ?)",
+            (json.dumps({'audiodb': '111'}),))
+        conn.commit()
+    finally:
+        conn.close()
+
+    class _Client:
+        def search_artist(self, name):
+            return {'strArtist': 'Massive Attack', 'idArtist': '111'}
+
+    worker.client = _Client()
+    worker._process_item({'type': 'artist', 'id': 1, 'name': 'Massive Attack'})
+
+    assert _row(worker, 'lib2_artists', 1)['external_ids'] in (None, '', '{}')
+    assert worker.stats['not_found'] == 1
