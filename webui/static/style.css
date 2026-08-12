@@ -74172,6 +74172,16 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-line:hover .chat-line-reply { display: inline-block; }
 .chat-line-reply:hover { color: #1db954; border-color: rgba(29,185,84,0.45); }
+/* Cold arcade tables — a muted expandable line, not forever-cards. */
+.chat-arc-cold-line {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 1px dashed rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 8px 12px; margin-top: 10px;
+    color: rgba(255,255,255,0.35); font-size: 12px; cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+.chat-arc-cold-line:hover { color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.2); }
+
 /* Moderator-hidden message stub — collapsed for the whole room. */
 .chat-line--hidden {
     display: flex; align-items: center; gap: 8px;

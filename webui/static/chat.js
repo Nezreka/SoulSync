@@ -1595,7 +1595,7 @@
     function _arcLobbyHtml() {
         var st = _gamesState();
         var CG = window.ChatGames;
-        var mine = [], open = [], live = [], done = [];
+        var mine = [], open = [], live = [], done = [], cold = [];
         st.order.forEach(function (id) {
             var g = st.games[id];
             // A withdrawn table never had an opponent and never had a result,
@@ -1605,7 +1605,15 @@
             if (g.reason === 'cancelled') return;
             if (g.status === 'over') { done.push(g); return; }
             if (_arcSeat(g)) { mine.push(g); return; }
-            if (g.status === 'open') { open.push(g); return; }
+            if (g.status === 'open') {
+                // A table nobody joined inside the expiry window stops
+                // squatting in the lobby: carriers can't be unsent, and only
+                // the creator can withdraw — so everyone else's lobby demotes
+                // cold tables to a collapsed count instead of forever-cards.
+                // (The creator's own table sits in `mine`, Withdraw and all.)
+                (g.expired ? cold : open).push(g);
+                return;
+            }
             live.push(g);
         });
 
@@ -1738,7 +1746,15 @@
                 ? '<div class="chat-arc-blank">Nothing on the tables yet. Start ' +
                   'something and it shows up for everyone in the room.</div>'
                 : section('Your games', mine) + section('Looking for an opponent', open) +
-                  section('In progress', live) + section('Finished', done.slice(0, 10))) +
+                  section('In progress', live) + section('Finished', done.slice(0, 10)) +
+                  // Cold tables: one muted line, expandable — not forever-cards.
+                  (cold.length
+                      ? (state.arcade && state.arcade.showCold
+                          ? section('Gone cold — nobody joined', cold)
+                          : '<button class="chat-arc-cold-line" type="button" data-chat-arc-cold>' +
+                            '🧊 ' + cold.length + ' cold table' + (cold.length === 1 ? '' : 's') +
+                            ' hidden — nobody joined · show</button>')
+                      : '')) +
             _arcLadderHtml() +
         '</div>';
     }
@@ -4595,6 +4611,12 @@
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');
             if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-cold]');
+            if (t) {
+                if (state.arcade) state.arcade.showCold = !state.arcade.showCold;
+                renderArcade();
+                return;
+            }
             t = e.target.closest('[data-chat-arc-kill]');
             if (t) {
                 e.stopPropagation();     // the card click would open the board
