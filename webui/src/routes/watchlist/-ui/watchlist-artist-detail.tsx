@@ -35,14 +35,33 @@ export function pickDiscographySource(
     | 'discogs_artist_id'
     | 'musicbrainz_artist_id'
     | 'global_metadata_source'
+    | 'available_sources'
   >,
 ): { id: string; source: string } | null {
   const active = (payload.global_metadata_source || '').toLowerCase();
-  const spotify = payload.spotify_artist_id || null;
-  const itunes = payload.itunes_artist_id || null;
-  const deezer = payload.deezer_artist_id || null;
-  const discogs = payload.discogs_artist_id || null;
-  const musicbrainz = payload.musicbrainz_artist_id || null;
+
+  // Never pin a provider the user has switched off. The artist page treats a
+  // pinned source as exclusive and errors out when it can't serve ("Could not
+  // access spotify … provider is unavailable"), so an id belonging to a dead
+  // provider is worse than no link at all — that's the Discord report where
+  // the watchlist failed but Discover worked: Spotify off, artist matched
+  // only on Spotify, and this ladder happily pinned it anyway.
+  //
+  // `available_sources` comes from the server (the only thing that knows).
+  // When it is absent — older backend, or a caller that doesn't fetch it —
+  // every source stays eligible, i.e. exactly the previous behaviour.
+  const availableList = payload.available_sources;
+  const eligible = (source: string, id: string | null): string | null => {
+    if (!id) return null;
+    if (availableList && !availableList.includes(source)) return null;
+    return id;
+  };
+
+  const spotify = eligible('spotify', payload.spotify_artist_id || null);
+  const itunes = eligible('itunes', payload.itunes_artist_id || null);
+  const deezer = eligible('deezer', payload.deezer_artist_id || null);
+  const discogs = eligible('discogs', payload.discogs_artist_id || null);
+  const musicbrainz = eligible('musicbrainz', payload.musicbrainz_artist_id || null);
 
   if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
   if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };

@@ -98,4 +98,56 @@ describe('pickDiscographySource', () => {
       }),
     ).toEqual({ id: 'sp', source: 'spotify' });
   });
+
+  // ── availability (the Discord report: watchlist 503s, Discover works) ──
+  // The artist page treats a pinned source as EXCLUSIVE and errors when it
+  // can't serve, so pinning a switched-off provider is a guaranteed
+  // 'Could not access spotify ... provider is unavailable'. The server now
+  // sends which providers are alive; the ladder must respect it.
+
+  it('never pins a provider the user has switched off', () => {
+    // Lancor: Spotify auth disconnected AND no-auth unchecked, running
+    // Deezer — but this artist was only ever matched on Spotify.
+    expect(
+      pickDiscographySource({
+        ...NONE,
+        spotify_artist_id: 'sp',
+        global_metadata_source: 'deezer',
+        available_sources: ['deezer', 'itunes', 'musicbrainz'],
+      }),
+    ).toBeNull();   // button disables instead of navigating into a 503
+  });
+
+  it('falls to the next AVAILABLE provider that has an id', () => {
+    expect(
+      pickDiscographySource({
+        ...NONE,
+        spotify_artist_id: 'sp',
+        deezer_artist_id: 'dz',
+        global_metadata_source: 'deezer',
+        available_sources: ['deezer', 'itunes'],
+      }),
+    ).toEqual({ id: 'dz', source: 'deezer' });
+  });
+
+  it('still honours the active source when it IS available', () => {
+    expect(
+      pickDiscographySource({
+        ...NONE,
+        spotify_artist_id: 'sp',
+        deezer_artist_id: 'dz',
+        global_metadata_source: 'spotify',
+        available_sources: ['spotify', 'deezer'],
+      }),
+    ).toEqual({ id: 'sp', source: 'spotify' });
+  });
+
+  it('treats an absent availability list as everything eligible', () => {
+    // Older backend / callers that don't fetch it: byte-for-byte the
+    // previous behaviour, which every test above this pins.
+    expect(pickDiscographySource({ ...NONE, spotify_artist_id: 'sp' })).toEqual({
+      id: 'sp',
+      source: 'spotify',
+    });
+  });
 });

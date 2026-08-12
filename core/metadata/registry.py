@@ -794,3 +794,30 @@ def get_client_for_source(
         return get_bandcamp_client()
 
     return None
+
+
+def available_sources(candidates) -> list:
+    """Which of ``candidates`` can actually serve right now.
+
+    The UI needs this to avoid ASKING for a provider the user has switched
+    off. The strict discography path treats an explicit source request as
+    exclusive and fatal-if-unavailable — deliberately, because falling back
+    would look up a foreign provider's artist id, miss, and search by NAME,
+    which can serve a DIFFERENT artist's discography under this one's name.
+    So the honest fix is to never pin a dead provider in the first place,
+    and only this module knows which are alive.
+
+    A provider that raises while resolving counts as unavailable — this
+    feeds a UI affordance, never a correctness decision.
+    """
+    out = []
+    for source in candidates or ():
+        name = str(source or "").strip().lower()
+        if not name:
+            continue
+        try:
+            if get_client_for_source(name) is not None:
+                out.append(name)
+        except Exception as e:  # noqa: BLE001 - availability probe, never fatal
+            logger.debug("available_sources: %s probe failed: %s", name, e)
+    return out

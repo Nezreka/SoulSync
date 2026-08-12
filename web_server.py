@@ -31377,7 +31377,7 @@ def watchlist_artist_config(artist_id):
                 'quality_profile_id': int(result[21]) if len(result) > 21 and result[21] is not None else None,
             }
 
-            from core.metadata.registry import get_primary_source
+            from core.metadata.registry import available_sources, get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
@@ -31391,6 +31391,15 @@ def watchlist_artist_config(artist_id):
                 "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
+                # Which of those providers can serve RIGHT NOW. The panel's
+                # "View Discography" link pins ONE source, and pinning a
+                # switched-off provider is a guaranteed 503 on the artist page
+                # ("provider is unavailable" — the Discord report where the
+                # watchlist failed but Discover worked). Only the server knows
+                # what is alive, so it says.
+                "available_sources": available_sources(
+                    ("spotify", "itunes", "deezer", "discogs", "musicbrainz")
+                ),
                 "quality_profiles": database.list_quality_profiles(),
             })
 
