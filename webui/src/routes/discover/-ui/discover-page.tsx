@@ -779,14 +779,19 @@ export function DiscoverPage() {
             onViewRecommended={() => setRecModalOpen(true)}
             onOpenBlacklist={blacklist.openModal}
           />
-          <ArtistMapHub
-            onOpenWatchlist={() => void map.openWatchlist()}
-            onOpenGenre={() => void map.openGenre()}
-            // Explorer asks for an artist FIRST (9633) — the prompt resolves a
-            // real name, then the map explores it.
-            onOpenExplorer={() => setExplorerPromptOpen(true)}
-          />
-          <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+          {/* One row, not two stacked billboards: the hero is the page's
+              only full-width statement — the viz hubs share a line beneath
+              it so the first SHELF arrives a screen earlier. */}
+          <div className="discover-hub-row">
+            <ArtistMapHub
+              onOpenWatchlist={() => void map.openWatchlist()}
+              onOpenGenre={() => void map.openGenre()}
+              // Explorer asks for an artist FIRST (9633) — the prompt resolves
+              // a real name, then the map explores it.
+              onOpenExplorer={() => setExplorerPromptOpen(true)}
+            />
+            <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+          </div>
           {rows.map((row) =>
             row.kind === 'full' ? (
               <div key={row.id}>{renderSection(row.id)}</div>

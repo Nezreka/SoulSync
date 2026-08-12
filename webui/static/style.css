@@ -36676,6 +36676,20 @@ div.artist-hero-badge {
     margin-bottom: 24px;
     border: 1px solid rgba(255,255,255,0.06);
 }
+/* The two viz hubs share ONE row under the hero instead of stacking as two
+   full-width billboards — the first shelf lands a screen earlier. */
+.discover-hub-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: stretch;
+    margin: 0 0 28px;
+    padding: 0 20px;
+}
+.discover-hub-row .artmap-hub { margin-bottom: 0; }
+@media (max-width: 1150px) {
+    .discover-hub-row { grid-template-columns: 1fr; }
+}
 .artmap-hub-bg {
     position: absolute; inset: 0; z-index: 0;
     background: linear-gradient(135deg, #0d0d1a 0%, #1a0a2e 30%, #0a1628 60%, #0d0d1a 100%);
