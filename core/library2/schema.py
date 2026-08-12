@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
     soul_id TEXT,                                     -- deterministic content id every SoulSync node computes alike (core/soulid_worker.py); Hydrabase's key, not a provider's answer
+    server_source TEXT,                               -- media server that reported this row ('plex'|'jellyfin'|'navidrome'|'soulsync')
+    server_id TEXT,                                   -- that server's own id (Plex ratingKey, Jellyfin ItemId, ...) — the only handle play counts and scans have
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -115,6 +117,8 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     monitored INTEGER NOT NULL DEFAULT 1,
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
+    server_source TEXT,                                -- media server that reported this row
+    server_id TEXT,                                    -- that server's own id
     legacy_album_id INTEGER,                           -- source row in legacy `albums`
     legacy_import_run_id TEXT,                         -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -166,6 +170,8 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE RESTRICT,
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
+    server_source TEXT,                               -- media server that reported this row
+    server_id TEXT,                                   -- that server's own id; play counts arrive keyed by it
     legacy_track_id INTEGER,                          -- source row in legacy `tracks`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -325,6 +331,16 @@ _ALL_DDL = (
 # Columns added after the initial schema shipped — applied to existing installs via
 # a PRAGMA-probe ALTER (SQLite has no ADD COLUMN IF NOT EXISTS). (table, column, ddl).
 _ADDED_COLUMNS = (
+    # The media-server link. lib2 had no way to say "this row is the server's
+    # <id>", which is the only handle a play-count sync or an incremental scan
+    # has — see §50.4.4.25. Both halves are needed: the id is only unique
+    # within one server.
+    ("lib2_artists", "server_source", "ALTER TABLE lib2_artists ADD COLUMN server_source TEXT"),
+    ("lib2_artists", "server_id", "ALTER TABLE lib2_artists ADD COLUMN server_id TEXT"),
+    ("lib2_albums", "server_source", "ALTER TABLE lib2_albums ADD COLUMN server_source TEXT"),
+    ("lib2_albums", "server_id", "ALTER TABLE lib2_albums ADD COLUMN server_id TEXT"),
+    ("lib2_tracks", "server_source", "ALTER TABLE lib2_tracks ADD COLUMN server_source TEXT"),
+    ("lib2_tracks", "server_id", "ALTER TABLE lib2_tracks ADD COLUMN server_id TEXT"),
     ("lib2_tracks", "spotify_id", "ALTER TABLE lib2_tracks ADD COLUMN spotify_id TEXT"),
     ("lib2_albums", "expected_track_count",
      "ALTER TABLE lib2_albums ADD COLUMN expected_track_count INTEGER"),
@@ -878,6 +894,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)
     _migrate_artist_monitored_default(cursor)
+    # The media-server link (§50.4.4.25). AFTER the additive column migration,
+    # like every other index over a column an old install may not have yet.
+    for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
+        try:
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_server "
+                f"ON {table}(server_source, server_id)"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("%s server-id index skipped: %s", table, e)
     # §40 alias registry index — runs AFTER the additive column migration
     # above so it also works on installs that predate canonical_artist_id.
     try:

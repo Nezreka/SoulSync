@@ -13,6 +13,13 @@ from typing import Dict, Any
 from utils.logging_config import get_logger
 from core.worker_utils import interruptible_sleep
 
+
+def _name_key(name) -> str:
+    """The catalogue's folded artist key (indexed, and not ASCII-only)."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ''))
+
 logger = get_logger("listening_stats_worker")
 
 
@@ -192,7 +199,7 @@ class ListeningStatsWorker:
                 title_l = (ev.get('title') or '').strip().lower()
                 artist_l = (ev.get('artist') or '').strip().lower()
                 if title_l:
-                    ev['db_track_id'] = id_map.get((title_l, artist_l))
+                    ev['lib2_track_id'] = id_map.get((title_l, artist_l))
 
             inserted = self.db.insert_listening_events(events)
             self.stats['events_added'] += inserted
@@ -316,19 +323,22 @@ class ListeningStatsWorker:
                         placeholders = ','.join(['?'] * len(sub))
                         cursor.execute(
                             f"""
-                            SELECT LOWER(name), thumb_url, id, lastfm_listeners,
-                                   lastfm_playcount, soul_id
-                            FROM artists
-                            WHERE LOWER(name) IN ({placeholders})
+                            SELECT name_key, image_url,
+                                   COALESCE(canonical_artist_id, id),
+                                   json_extract(enrichment, '$.lastfm.listeners'),
+                                   json_extract(enrichment, '$.lastfm.playcount'),
+                                   soul_id
+                            FROM lib2_artists
+                            WHERE name_key IN ({placeholders})
                             """,
-                            sub,
+                            [_name_key(n) for n in sub],
                         )
                         for row in cursor.fetchall():
                             # Keep first match per lowered name (LIMIT 1 equiv).
                             artist_rows.setdefault(row[0], row)
 
                 for artist in top_artists:
-                    key = (artist.get('name') or '').lower()
+                    key = _name_key(artist.get('name'))
                     r = artist_rows.get(key)
                     if r:
                         artist['image_url'] = _fix_image(r[1]) or None
@@ -350,9 +360,11 @@ class ListeningStatsWorker:
                         placeholders = ','.join(['?'] * len(sub))
                         cursor.execute(
                             f"""
-                            SELECT LOWER(title), thumb_url, id, artist_id
-                            FROM albums
-                            WHERE LOWER(title) IN ({placeholders})
+                            SELECT LOWER(al.title), al.image_url, al.id,
+                                   COALESCE(ar.canonical_artist_id, ar.id)
+                            FROM lib2_albums al
+                            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                            WHERE LOWER(al.title) IN ({placeholders})
                             """,
                             sub,
                         )
@@ -382,15 +394,17 @@ class ListeningStatsWorker:
                     for i in range(0, len(pair_list), chunk):
                         sub = pair_list[i:i + chunk]
                         placeholders = ','.join(['(?,?)'] * len(sub))
-                        flat = [v for pair in sub for v in pair]
+                        flat = [v for title_l, artist_l in sub
+                                for v in (title_l, _name_key(artist_l))]
                         cursor.execute(
                             f"""
-                            SELECT LOWER(t.title), LOWER(ar.name),
-                                   al.thumb_url, t.id, t.artist_id
-                            FROM tracks t
-                            JOIN albums al ON al.id = t.album_id
-                            JOIN artists ar ON ar.id = t.artist_id
-                            WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                            SELECT LOWER(t.title), ar.name_key,
+                                   al.image_url, t.id,
+                                   COALESCE(ar.canonical_artist_id, ar.id)
+                            FROM lib2_tracks t
+                            JOIN lib2_albums al ON al.id = t.album_id
+                            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                            WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                             """,
                             flat,
                         )
@@ -526,11 +540,12 @@ class ListeningStatsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id FROM tracks t
-                JOIN artists ar ON ar.id = t.artist_id
-                WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
+                SELECT t.id FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
                 LIMIT 1
-            """, (title.strip(), (artist or '').strip()))
+            """, (title.strip(), _name_key(artist)))
             row = cursor.fetchone()
             return row[0] if row else None
         except Exception:
@@ -570,13 +585,17 @@ class ListeningStatsWorker:
             for i in range(0, len(pair_list), chunk_size):
                 chunk = pair_list[i:i + chunk_size]
                 placeholders = ','.join(['(?,?)'] * len(chunk))
-                flat_args = [v for pair in chunk for v in pair]
+                # The artist half is matched on the indexed, accent-preserving
+                # fold `name_key`; SQLite's LOWER() is ASCII-only (iss29-D13).
+                flat_args = [v for title_l, artist_l in chunk
+                             for v in (title_l, _name_key(artist_l))]
                 cursor.execute(
                     f"""
-                    SELECT LOWER(t.title), LOWER(ar.name), t.id
-                    FROM tracks t
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                    SELECT LOWER(t.title), ar.name_key, t.id
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                     """,
                     flat_args,
                 )
@@ -593,11 +612,13 @@ class ListeningStatsWorker:
         return result
 
     def _map_play_counts_to_db(self, server_counts, server_source):
-        """Map server track IDs to DB track IDs for play count updates.
+        """Map server track ids onto catalogue rows for play-count updates.
 
-        Looks up which server IDs exist in the tracks table. Replaces a
-        previous N+1 pattern of one SELECT per server ID with a single
-        batched IN query (chunked for safety).
+        The counts arrive keyed by the media server's own id, which the
+        catalogue stores as ``lib2_tracks.server_id`` (§50.4.4.25) — scoped by
+        ``server_source``, because that id is only unique within one server.
+        Rows the catalogue has not been told about yet are skipped, exactly as
+        before.
         """
         if not server_counts:
             return []
@@ -607,26 +628,29 @@ class ListeningStatsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            ids = list(server_counts.keys())
-            existing = set()
+            ids = [str(i) for i in server_counts.keys()]
+            by_server_id = {}
             chunk_size = 500
             for i in range(0, len(ids), chunk_size):
                 chunk = ids[i:i + chunk_size]
                 placeholders = ','.join(['?'] * len(chunk))
                 cursor.execute(
-                    f"SELECT id FROM tracks WHERE id IN ({placeholders})",
-                    chunk,
+                    f"SELECT server_id, id FROM lib2_tracks "
+                    f"WHERE server_source = ? AND server_id IN ({placeholders})",
+                    [server_source, *chunk],
                 )
-                existing.update(r[0] for r in cursor.fetchall())
+                for server_id, track_id in cursor.fetchall():
+                    by_server_id.setdefault(str(server_id), track_id)
 
             return [
                 {
                     'db_track_id': server_id,
+                    'lib2_track_id': by_server_id[str(server_id)],
                     'play_count': play_count,
                     'last_played': None,  # Could be fetched separately
                 }
                 for server_id, play_count in server_counts.items()
-                if server_id in existing
+                if str(server_id) in by_server_id
             ]
         except Exception as e:
             logger.error(f"Error mapping play counts: {e}")

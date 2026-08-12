@@ -4342,3 +4342,42 @@ einzelne Tests, jeder mit dem Grund im Diff. Der Rest der Sicherungen bleibt:
 die Backend-Hälften der Disc-/Gapfill-/ReplayGain-Tests laufen weiter. Nebenbei
 verschwinden die 57 dauerhaft roten `artist-detail-page`-Vitests: die
 webui-Suite steht jetzt bei 6458 grün / 1 rot (der bekannte `route-guard`-Fall).
+
+#### 50.4.4.25 Der Medien-Server-Link — die geparkte Frage ist beantwortet
+
+Stand: **228/77**. `core/listening_stats_worker.py` fällt von 10/0 auf **0/0**,
+`database/music_database.py` auf **137/44**. Freigabe des Nutzers: „wenn es der
+Track matchen kann, ergänze die lib2-Tabelle, mir egal wenn du die DB anpassen
+musst".
+
+**Was lib2 gefehlt hat, war eine Spalte.** `lib2_artists`, `lib2_albums` und
+`lib2_tracks` haben jetzt `server_source` + `server_id` (indiziert). Beide
+Hälften braucht es: eine Plex-`ratingKey` ist eine kleine Zahl, die es auf
+Jellyfin genauso gibt — die Id allein ist keine Identität. Das ist genau die
+Spalte, an der §50.4.4.2 hängen geblieben ist.
+
+**Kein Backfill aus Legacy.** Er wäre der naheliegende Weg und würde neue
+Legacy-Lesestellen einführen. Stattdessen heilt der Scan sich selbst: er trifft
+über `(server_source, server_id)`, und wenn er nichts findet, über die
+vorhandene Identität (Name/Titel) — und stempelt die Server-Id dann auf die
+gefundene Zeile.
+
+**`listening_history` hat jetzt zwei Ids.** `db_track_id` bleibt, was es war —
+die Id des Medien-Servers —, und `lib2_track_id` ist die Katalog-Zeile, über die
+jede Statistik-Verknüpfung läuft. Alte Zeilen tragen im `db_track_id` eine
+Legacy-Id; sie bekommen ihre Katalog-Id aus lib2s eigener Rückreferenz
+(`legacy_track_id`) — **ohne eine einzige Legacy-Tabelle zu lesen**, und die
+`WHERE`-Klausel macht die Migration idempotent. Damit geht kein einziger
+Hörverlauf verloren, was die Bedingung war.
+
+**Der Worker liest den Katalog.** Play-Counts kommen mit der Server-Id herein
+und werden über `lib2_tracks.server_id` (skopiert auf `server_source`) auf
+Katalog-Zeilen abgebildet; `update_track_play_counts` schreibt
+`lib2_tracks.play_count`. Die Namensauflösung der Verlaufsereignisse trifft über
+`name_key` statt `LOWER(name)` — dieselbe ASCII-Falle wie überall (iss29-D13) —,
+und die Anreicherung des Statistik-Caches liefert Katalog-Ids, passend zu
+§50.4.4.22.
+
+**`get_genre_breakdown`** läuft über `listening_history → lib2_tracks →
+lib2_albums → lib2_artists.genres`; in lib2 hängen Genres am Release bzw. am
+Artist, nicht am Track.

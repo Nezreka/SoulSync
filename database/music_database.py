@@ -5100,9 +5100,33 @@ class MusicDatabase:
                     duration_ms INTEGER DEFAULT 0,
                     server_source TEXT,
                     db_track_id INTEGER,
+                    lib2_track_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # The catalogue link. `db_track_id` is the media server's own id
+            # (that is what a scan and a play-count sync speak); `lib2_track_id`
+            # is the row in the catalogue, and it is what every stats join uses
+            # (§50.4.4.25). Old rows carry a legacy track id in `db_track_id`
+            # and get their catalogue id from lib2's own back-reference — no
+            # legacy table is read to do it, and the WHERE makes it idempotent.
+            cursor.execute("PRAGMA table_info(listening_history)")
+            if 'lib2_track_id' not in {r[1] for r in cursor.fetchall()}:
+                cursor.execute("ALTER TABLE listening_history ADD COLUMN lib2_track_id INTEGER")
+            try:
+                cursor.execute("""
+                    UPDATE listening_history
+                       SET lib2_track_id = (
+                           SELECT t.id FROM lib2_tracks t
+                            WHERE t.legacy_track_id = listening_history.db_track_id)
+                     WHERE lib2_track_id IS NULL
+                       AND db_track_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM lib2_tracks t
+                                    WHERE t.legacy_track_id = listening_history.db_track_id)
+                """)
+            except Exception as e:
+                logger.debug("listening_history catalogue backfill skipped: %s", e)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_lib2_track ON listening_history (lib2_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_artist ON listening_history (artist)")
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup ON listening_history (track_id, played_at, server_source)")
@@ -5143,8 +5167,9 @@ class MusicDatabase:
                 try:
                     cursor.execute("""
                         INSERT OR IGNORE INTO listening_history
-                            (track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (track_id, title, artist, album, played_at, duration_ms,
+                             server_source, db_track_id, lib2_track_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         event.get('track_id'),
                         event.get('title', ''),
@@ -5154,6 +5179,7 @@ class MusicDatabase:
                         event.get('duration_ms', 0),
                         event.get('server_source', ''),
                         event.get('db_track_id'),
+                        event.get('lib2_track_id'),
                     ))
                     if cursor.rowcount > 0:
                         inserted += 1
@@ -5185,13 +5211,6 @@ class MusicDatabase:
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                if db_id is not None:
-                    cursor.execute("""
-                        UPDATE tracks
-                        SET play_count = COALESCE(play_count, 0) + 1,
-                            last_played = ?
-                        WHERE id = ?
-                    """, (event.get('played_at'), db_id))
                 if lib2_id is not None and cursor.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_tracks'"
                 ).fetchone():
@@ -5222,10 +5241,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             for item in counts:
+                # The catalogue row, not the server's id: the caller resolved
+                # the server id through `lib2_tracks.server_id` (§50.4.4.25).
                 cursor.execute("""
-                    UPDATE tracks SET play_count = ?, last_played = ?
+                    UPDATE lib2_tracks SET play_count = ?, last_played = ?,
+                                           updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (item.get('play_count', 0), item.get('last_played'), item.get('db_track_id')))
+                """, (item.get('play_count', 0), item.get('last_played'),
+                      item.get('lib2_track_id', item.get('db_track_id'))))
             conn.commit()
         except Exception as e:
             logger.error(f"Error updating track play counts: {e}")
@@ -5389,10 +5412,11 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT a.genres, COUNT(*) as play_count
                 FROM listening_history lh
-                JOIN tracks t ON t.id = lh.db_track_id
-                JOIN artists a ON a.id = t.artist_id
+                JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
                 {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
+                AND a.genres IS NOT NULL AND a.genres != '' AND a.genres != '[]'
                 GROUP BY a.genres
                 ORDER BY play_count DESC
                 LIMIT 50
