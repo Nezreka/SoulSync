@@ -91,6 +91,46 @@ class _StubEngine:
                               "still_url": "https://img/e1.jpg"}]}
 
 
+def test_watch_library_search_is_owned_only_and_bus_safe(monkeypatch):
+    """The picker searches the user's LIBRARY (status=owned), and the poster
+    field that can ride the chat bus is TMDB-CDN-or-nothing — a raw library
+    artwork path can be a tokened Plex/Jellyfin URL and must never leak into
+    a public Soulseek room."""
+    class _LibDb(_StubDb):
+        def query_library(self, kind, **kw):
+            assert kw["status"] == "owned"          # never nominate what nobody can play
+            if kind == "movies":
+                return {"items": [
+                    {"id": 5, "tmdb_id": 603, "title": "The Matrix", "year": 1999,
+                     "rating": 8.2, "has_poster": 1},
+                    {"id": 6, "tmdb_id": None, "title": "Unmatched", "year": None,
+                     "rating": None, "has_poster": 0},   # no tmdb id → not nominate-able
+                ]}
+            return {"items": [
+                {"id": 9, "tmdb_id": 1399, "title": "Game of Thrones", "year": 2011,
+                 "rating": 9.2, "has_poster": 1, "owned_count": 50, "episode_count": 73},
+            ]}
+
+        def owned_by_tmdb_ids(self, media_type, tmdb_ids):
+            if media_type == "movie":
+                return [{"tmdb_id": 603, "poster_url": "/library/metadata/1/thumb/2"}]
+            return [{"tmdb_id": 1399, "poster_url": "https://image.tmdb.org/t/p/w300/got.jpg"}]
+
+    _stub_video_world(monkeypatch)
+    c = _client(_LibDb())
+    r = c.get("/api/video/watch/library?q=ma")
+    assert r.status_code == 200
+    rows = r.get_json()["results"]
+    assert [x["tmdb_id"] for x in rows] == [603, 1399]   # the tmdb-less row dropped
+    movie, show = rows
+    assert movie["art"] == "/api/video/poster/movie/5?w=185"   # local proxy for MY ui
+    assert movie["po"] is None                                 # Plex path never on the bus
+    assert show["po"] == "https://image.tmdb.org/t/p/w300/got.jpg"
+    assert show["owned_count"] == 50 and show["episode_count"] == 73
+    # Sub-2-char queries don't touch the db at all.
+    assert c.get("/api/video/watch/library?q=m").get_json()["results"] == []
+
+
 def test_grab_movie_hydrates_the_full_wishlist_row(monkeypatch):
     db = _StubDb()
     searches = []

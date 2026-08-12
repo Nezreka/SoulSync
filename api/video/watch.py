@@ -1,5 +1,8 @@
 """Watch-together seams (video side, isolated).
 
+  GET  /api/video/watch/library?q=...
+      → {results: [...]} — the nominate picker searches YOUR library (owned
+        titles only): movie night runs on what someone can actually play
   POST /api/video/watch/owned  {items: [{kd: "m"|"t", id, s?, e?}, ...]}
       → {owned: {"m:603": true, "t:1399:1x1": false, ...}}
   POST /api/video/watch/grab   {kd, id, s?, e?, ti?, y?, po?}
@@ -33,6 +36,53 @@ _MAX_ITEMS = 32  # the ballot caps at 12; headroom for history rows
 
 
 def register_routes(bp):
+    @bp.route("/watch/library", methods=["GET"])
+    def video_watch_library():
+        """Owned titles matching a query — the picker's data source. Rows carry
+        two poster fields with different trust levels: ``art`` is the LOCAL
+        poster proxy path (display in the nominator's own UI only), and ``po``
+        is a bus-safe TMDB CDN URL or null — a Plex/Jellyfin artwork path (or
+        any tokened server URL) must NEVER ride a public Soulseek room."""
+        from . import get_video_db
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"results": [], "query": q})
+        db = get_video_db()
+        try:
+            from core.video.sources import resolve_video_server
+            srv = resolve_video_server()
+        except Exception:
+            srv = None
+        results = []
+        for plural, kind in (("movies", "movie"), ("shows", "show")):
+            try:
+                page = db.query_library(plural, search=q, status="owned",
+                                        limit=12, server_source=srv)
+            except Exception:
+                logger.exception("watch library search failed for %s %r", plural, q)
+                continue
+            items = [it for it in (page.get("items") or []) if it.get("tmdb_id")]
+            posters = {}
+            if items:
+                try:
+                    posters = {r["tmdb_id"]: r.get("poster_url") or ""
+                               for r in db.owned_by_tmdb_ids(kind, [it["tmdb_id"] for it in items])}
+                except Exception:
+                    logger.exception("watch library poster lookup failed for %s", kind)
+            for it in items:
+                pu = posters.get(it["tmdb_id"]) or ""
+                row = {"kind": kind, "tmdb_id": it["tmdb_id"], "title": it["title"],
+                       "year": it.get("year"), "rating": it.get("rating"),
+                       "library_id": it["id"],
+                       "art": (f"/api/video/poster/{kind}/{it['id']}?w=185"
+                               if it.get("has_poster") else None),
+                       "po": pu if pu.startswith("https://image.tmdb.org/") else None}
+                if kind == "show":
+                    row["owned_count"] = it.get("owned_count")
+                    row["episode_count"] = it.get("episode_count")
+                results.append(row)
+        return jsonify({"results": results, "query": q})
+
     @bp.route("/watch/owned", methods=["POST"])
     def video_watch_owned():
         from . import get_video_db

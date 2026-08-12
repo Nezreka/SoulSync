@@ -6424,7 +6424,8 @@
     function _watchResultCards() {
         var results = state.watch.searchResults;
         if (!results.length) {
-            return '<div class="chat-watch-resnote">Type at least two letters — movies and shows appear as you type.</div>';
+            return '<div class="chat-watch-resnote">Type at least two letters — this searches YOUR library.<br>' +
+                'Movie night runs on what someone can actually press play on.</div>';
         }
         return results.map(function (r, i) {
             var isShow = r.kind === 'show';
@@ -6433,8 +6434,9 @@
             return '<div class="chat-watch-rescard' + (picking ? ' chat-watch-rescard--picking' : '') + '"' +
                 ' role="button" tabindex="0" data-chat-watch-nom="' + i + '">' +
                 '<div class="chat-watch-resposter">' +
-                    ((r.poster && /^https:\/\//.test(r.poster))
-                        ? '<img src="' + attr(r.poster) + '" alt="" loading="lazy">' : '🎬') +
+                    // r.art is OUR poster proxy path (server-built, library id) —
+                    // never a remote URL from the wire.
+                    (r.art ? '<img src="' + attr(r.art) + '" alt="" loading="lazy">' : '🎬') +
                 '</div>' +
                 '<div class="chat-watch-resmain">' +
                     '<div class="chat-watch-restitle" title="' + attr(r.title || '') + '">' + esc(r.title || '') +
@@ -6444,9 +6446,10 @@
                         '<span class="chat-watch-reskind' + (isShow ? ' chat-watch-reskind--show' : '') + '">' +
                             (isShow ? 'SHOW' : 'MOVIE') + '</span>' +
                         (rating ? '<span>★ ' + rating + '</span>' : '') +
-                        (r.library_id ? '<span class="chat-watch-own">✓ in your library</span>' : '') +
+                        (isShow && r.episode_count
+                            ? '<span>' + (r.owned_count || 0) + '/' + r.episode_count + ' episodes on hand</span>'
+                            : '') +
                     '</div>' +
-                    (r.overview ? '<div class="chat-watch-resover">' + esc(r.overview) + '</div>' : '') +
                     (picking
                         ? '<div class="chat-watch-sepick">' +
                               '<label>Season <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
@@ -6489,17 +6492,15 @@
         if (grid && !state.watch.searchResults.length) {
             grid.innerHTML = '<div class="chat-watch-resnote">Searching…</div>';
         }
-        getJSON('/api/video/search?q=' + encodeURIComponent(qtext)).then(function (res) {
+        getJSON('/api/video/watch/library?q=' + encodeURIComponent(qtext)).then(function (res) {
             if (seq !== _watchSearchSeq) return;          // a newer keystroke owns the grid
             state.watch.pickShow = -1;
-            var results = ((res.ok && res.body.results) || []).filter(function (r) {
-                return (r.kind === 'movie' || r.kind === 'show') && r.tmdb_id;
-            });
+            var results = (res.ok && res.body.results) || [];
             state.watch.searchResults = results;
             if (grid) grid.innerHTML = results.length ? _watchResultCards() :
                 '<div class="chat-watch-resnote">' +
                 (res.status === 403 ? 'Video access is disabled for this profile.'
-                                    : 'Nothing found for “' + esc(qtext) + '”.') + '</div>';
+                                    : 'Nothing in your library matches “' + esc(qtext) + '”.') + '</div>';
         }).catch(function () {
             if (seq !== _watchSearchSeq) return;
             if (grid) grid.innerHTML = '<div class="chat-watch-resnote">Search failed — try again.</div>';
@@ -6510,7 +6511,10 @@
         var p = { id: String(r.tmdb_id), kd: (s != null) ? 't' : 'm',
                   ti: String(r.title || '').slice(0, 120) };
         if (r.year) p.y = String(r.year).slice(0, 4);
-        if (r.poster && /^https:\/\//.test(r.poster)) p.po = String(r.poster).slice(0, 200);
+        // Only the server-vetted TMDB CDN poster rides the bus (r.po) — a
+        // library row's raw artwork path can be a tokened Plex/Jellyfin URL,
+        // which must never be broadcast into a public Soulseek room.
+        if (r.po && /^https:\/\/image\.tmdb\.org\//.test(r.po)) p.po = String(r.po).slice(0, 200);
         if (s != null) { p.s = s; p.e = e; }
         sendProtocol('watch.nom', p);
         _closeWatchModal();
