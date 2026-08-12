@@ -197,26 +197,46 @@ export function formatAction(
   return ACTION_LABELS[type ?? ''] ?? blockLabel?.(type ?? '') ?? humanizeType(type);
 }
 
-/** The meta line under a card name, already ordered the way the card renders it. */
+/**
+ * The facts under a card name.
+ *
+ * `paused` is the side's master switch. Without it this function computed
+ * "Next: in 3h" and "Listening" from `enabled` and the trigger type alone —
+ * so with automations paused every card advertised a countdown that would
+ * never fire and claimed to be listening for events it would ignore. The
+ * engine skips the slot (`run_automation`, the master check) but keeps the
+ * schedule alive, so the stored `next_run` is real; what is false is the
+ * implication that it will run. A paused card says paused, and says nothing
+ * about a next run.
+ *
+ * Manual Run still works while paused (it passes `skip_delay`, which bypasses
+ * the master check), so the Run button is NOT part of this lie and stays.
+ */
 export function automationMeta(
   a: Automation,
   now: number = Date.now(),
+  paused = false,
 ): {
   lastRun?: string;
   nextRun?: string;
   listening: boolean;
+  paused: boolean;
   runs?: number;
   error?: string;
   result?: { shown: string; full: string };
 } {
   const enabled = a.enabled === true || a.enabled === 1;
   const timer = isTimerTrigger(a.trigger_type);
+  // A disabled automation is already off on its own account; "paused" is only
+  // worth saying about one that WOULD otherwise be doing something.
+  const heldByMaster = paused && enabled;
   return {
     lastRun: a.last_run ? timeAgo(a.last_run, now) : undefined,
-    nextRun: a.next_run && enabled && timer ? timeUntil(a.next_run, now) : undefined,
+    nextRun: a.next_run && enabled && timer && !paused ? timeUntil(a.next_run, now) : undefined,
     // Event-driven automations advertise that they are armed; timer ones show
     // a countdown instead, so the two are mutually exclusive.
-    listening: !timer && enabled,
+    listening: !timer && enabled && !paused,
+    paused: heldByMaster,
     runs: a.run_count || undefined,
     error: a.last_error || undefined,
     // An error replaces the result summary rather than joining it.

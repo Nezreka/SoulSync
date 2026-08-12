@@ -200,3 +200,56 @@ describe('automationMeta', () => {
     expect(automationMeta({ ...base, run_count: 3 }, NOW).runs).toBe(3);
   });
 });
+
+describe('automationMeta while the side is paused', () => {
+  const base = { id: 1, name: 'a' };
+  const next = ahead(3_600_000);
+
+  it('drops the countdown — the engine is skipping that slot', () => {
+    // The stored next_run is REAL (the engine keeps the schedule alive so
+    // resuming does not cause a catch-up burst); what would be false is the
+    // implication that it is going to fire.
+    const timer = { ...base, trigger_type: 'schedule', enabled: 1, next_run: next };
+    expect(automationMeta(timer, NOW, false).nextRun).toBe('in 1h');
+    expect(automationMeta(timer, NOW, true).nextRun).toBeUndefined();
+  });
+
+  it('stops claiming to listen for events it will ignore', () => {
+    const event = { ...base, trigger_type: 'app_started', enabled: 1 };
+    expect(automationMeta(event, NOW, false).listening).toBe(true);
+    expect(automationMeta(event, NOW, true).listening).toBe(false);
+  });
+
+  it('says paused for both trigger kinds', () => {
+    expect(automationMeta({ ...base, trigger_type: 'schedule', enabled: 1 }, NOW, true).paused).toBe(
+      true,
+    );
+    expect(
+      automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW, true).paused,
+    ).toBe(true);
+  });
+
+  it('says nothing about pause for an automation that is switched off anyway', () => {
+    // It is already not running on its own account; "paused" would be a second
+    // reason for the same silence and reads as though flipping the master back
+    // on would start it.
+    expect(automationMeta({ ...base, enabled: 0 }, NOW, true).paused).toBe(false);
+  });
+
+  it('leaves the history alone — last run, run count and errors are facts', () => {
+    const meta = automationMeta(
+      { ...base, enabled: 1, last_run: '2026-08-12 09:00:00', run_count: 7, last_error: 'boom' },
+      NOW,
+      true,
+    );
+    expect(meta.runs).toBe(7);
+    expect(meta.error).toBe('boom');
+    expect(meta.lastRun).toBeTruthy();
+  });
+
+  it('defaults to not paused, so every existing caller keeps its behaviour', () => {
+    expect(automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW).listening).toBe(
+      true,
+    );
+  });
+});

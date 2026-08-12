@@ -201,7 +201,12 @@ export function AutomationsPage() {
     }
   };
 
+  const masterOn = masterQuery.data?.music !== false;
+
   const cardHandlers = {
+    // Every card needs to know the side is paused, or it goes on advertising
+    // countdowns and "Listening" for runs the engine is skipping.
+    paused: !masterOn,
     onToggle: (a: Automation) => toggle.mutate(a),
     onRun: (a: Automation) => run.mutate(a),
     onDuplicate: (a: Automation) => duplicate.mutate(a),
@@ -278,7 +283,6 @@ export function AutomationsPage() {
   const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
 
   const filtering = Boolean(search.q || search.trigger || search.action);
-  const masterOn = masterQuery.data?.music !== false;
   const isEmpty = automations.length === 0;
 
   const setSearch = (patch: Partial<typeof search>) =>

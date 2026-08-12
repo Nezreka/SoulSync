@@ -22,6 +22,11 @@ export interface AutomationCardHandlers {
   onShowHistory?: (a: Automation) => void;
   /** Label for a trigger/action type not in the static maps, from /blocks. */
   blockLabel?: (type: string) => string | undefined;
+  /**
+   * The side's master switch is off. Not a handler, but it rides this same
+   * bag because the section spreads it straight through to every card.
+   */
+  paused?: boolean;
 }
 
 interface Props extends AutomationCardHandlers {
@@ -117,12 +122,22 @@ export function AutomationCard({
   progress,
   dragProps,
   isDragging,
+  paused = false,
   ...on
 }: Props) {
   const enabled = a.enabled === true || a.enabled === 1;
   const isSystem = a.is_system === true || a.is_system === 1;
   const running = isRunning(progress);
-  const meta = automationMeta(a);
+  const meta = automationMeta(a, Date.now(), paused);
+  /**
+   * A run that ended badly is the one thing on this page worth crossing the
+   * room for, and it used to be a grey text fragment at the END of the meta
+   * line. It gets a state on the card and leads the facts.
+   *
+   * A run in flight outranks it: the error describes the LAST run, and while
+   * a new one is going the card should read as busy, not broken.
+   */
+  const errored = Boolean(meta.error) && !running;
   const thenItems = a.then_actions ?? [];
   const delay = (a.action_config as { delay?: number } | null)?.delay ?? 0;
 
@@ -131,10 +146,34 @@ export function AutomationCard({
 
   // Assembled as nodes rather than a joined string so the separator lands
   // between exactly the parts that are present, as the vanilla join did.
+  //
+  // ORDER IS THE POINT. It used to run Last · Next · Listening · Runs · Error,
+  // which put the only fact that demands action last and gave it the same
+  // weight as a run count. Worst news first, bookkeeping last.
   const metaParts: React.ReactNode[] = [];
+  if (meta.error)
+    metaParts.push(
+      <span className="auto-meta-fail" title={meta.error}>
+        ⚠ Failed: {meta.error}
+      </span>,
+    );
   if (meta.lastRun) metaParts.push(<>Last: {meta.lastRun}</>);
-  if (meta.nextRun && a.next_run) metaParts.push(<NextRun nextRun={a.next_run} />);
-  if (meta.listening) metaParts.push(<>Listening</>);
+  // Paused replaces the countdown and "Listening" rather than joining them —
+  // both would be claims about a run that is not going to happen.
+  if (meta.paused)
+    metaParts.push(
+      <span className="auto-meta-paused" title="Automations are paused for this side">
+        Paused
+      </span>,
+    );
+  else if (meta.nextRun && a.next_run) metaParts.push(<NextRun nextRun={a.next_run} />);
+  else if (meta.listening) metaParts.push(<>Listening</>);
+  if (!meta.error && meta.result)
+    metaParts.push(
+      <span className="auto-last-result" title={`Last run: ${meta.result.full}`}>
+        {meta.result.shown}
+      </span>,
+    );
   if (meta.runs)
     metaParts.push(
       <span
@@ -148,19 +187,14 @@ export function AutomationCard({
         Runs: {meta.runs}
       </span>,
     );
-  if (meta.error) metaParts.push(<>Error: {meta.error}</>);
-  else if (meta.result)
-    metaParts.push(
-      <span className="auto-last-result" title={`Last run: ${meta.result.full}`}>
-        {meta.result.shown}
-      </span>,
-    );
 
   return (
     <div
       className={`automation-card${enabled ? '' : ' disabled'}${isSystem ? ' system' : ''}${
         running ? ' running' : ''
-      }${isDragging ? ' dragging' : ''}`}
+      }${errored ? ' errored' : ''}${meta.paused ? ' paused' : ''}${
+        isDragging ? ' dragging' : ''
+      }`}
       {...dragProps}
       data-id={a.id}
       data-trigger-type={a.trigger_type ?? ''}

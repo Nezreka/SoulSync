@@ -139,3 +139,104 @@ describe('AutomationCard actions', () => {
     expect(document.querySelector('.auto-runs-link')?.textContent).toBe('Runs: 4');
   });
 });
+
+describe('the card tells the truth about whether it will run', () => {
+  const meta = () => document.querySelector('.automation-meta')!.textContent ?? '';
+
+  it('shows a countdown when the side is live', () => {
+    render(
+      <AutomationCard
+        automation={auto({
+          id: 1,
+          enabled: 1,
+          trigger_type: 'schedule',
+          next_run: new Date(Date.now() + 3_600_000).toISOString(),
+        })}
+      />,
+    );
+    expect(meta()).toContain('Next:');
+    expect(card().className).not.toContain('paused');
+  });
+
+  it('replaces the countdown with Paused when the side is paused', () => {
+    // The engine skips the slot but keeps the schedule alive, so next_run is
+    // still populated — the card must not read it as a promise.
+    render(
+      <AutomationCard
+        paused
+        automation={auto({
+          id: 1,
+          enabled: 1,
+          trigger_type: 'schedule',
+          next_run: new Date(Date.now() + 3_600_000).toISOString(),
+        })}
+      />,
+    );
+    expect(meta()).toContain('Paused');
+    expect(meta()).not.toContain('Next:');
+    expect(card().className).toContain('paused');
+  });
+
+  it('stops an event automation claiming to Listen while paused', () => {
+    render(<AutomationCard paused automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started' })} />);
+    expect(meta()).toContain('Paused');
+    expect(meta()).not.toContain('Listening');
+  });
+
+  it('says nothing about pause for an automation that is switched off', () => {
+    render(<AutomationCard paused automation={auto({ id: 1, enabled: 0, trigger_type: 'app_started' })} />);
+    expect(meta()).not.toContain('Paused');
+    expect(card().className).toContain('disabled');
+    expect(card().className).not.toContain('paused');
+  });
+
+  it('keeps Run reachable while paused — a manual run still works', () => {
+    const onRun = vi.fn();
+    render(<AutomationCard paused onRun={onRun} automation={auto({ id: 1, enabled: 1 })} />);
+    fireEvent.click(document.querySelector('.automation-run-btn')!);
+    expect(onRun).toHaveBeenCalled();
+  });
+});
+
+describe('a failed run is visible from across the room', () => {
+  const meta = () => document.querySelector('.automation-meta')!.textContent ?? '';
+
+  it('marks the card and leads the meta line with the failure', () => {
+    render(
+      <AutomationCard
+        automation={auto({ id: 1, enabled: 1, last_run: '2026-08-12 09:00:00', last_error: 'boom', run_count: 41 })}
+      />,
+    );
+    expect(card().className).toContain('errored');
+    // Worst news first: the failure used to sit LAST, after "Runs: 41".
+    expect(meta().indexOf('Failed')).toBeLessThan(meta().indexOf('Runs:'));
+    expect(document.querySelector('.auto-meta-fail')?.getAttribute('title')).toBe('boom');
+  });
+
+  it('does not mark a card that has never failed', () => {
+    render(<AutomationCard automation={auto({ id: 1, enabled: 1, run_count: 3 })} />);
+    expect(card().className).not.toContain('errored');
+  });
+
+  it('reads as busy rather than broken while a new run is in flight', () => {
+    // The error describes the LAST run; a card mid-run should not still be red.
+    render(
+      <AutomationCard
+        automation={auto({ id: 1, enabled: 1, last_error: 'boom' })}
+        progress={{ status: 'running', progress: 20, log: [] }}
+      />,
+    );
+    expect(card().className).toContain('running');
+    expect(card().className).not.toContain('errored');
+  });
+
+  it('puts the run-history link last, where bookkeeping belongs', () => {
+    render(
+      <AutomationCard
+        automation={auto({ id: 1, enabled: 1, trigger_type: 'app_started', run_count: 9 })}
+      />,
+    );
+    const text = meta();
+    expect(text.indexOf('Listening')).toBeLessThan(text.indexOf('Runs:'));
+  });
+});

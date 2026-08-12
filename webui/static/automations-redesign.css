@@ -174,10 +174,52 @@
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb), 0.4));
     box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.55);
 }
+/* A failed last run used to be a grey text fragment at the END of the meta
+   line, weighted the same as "Runs: 41". The rail carries it now, so a broken
+   automation is findable without reading a single card. A run in flight wins
+   (the component only sets .errored when not running) — the error describes
+   the LAST run, and a card mid-run should read busy, not broken. */
+.automation-card.errored::before {
+    background: linear-gradient(180deg, rgba(244, 67, 54, 0.9), rgba(244, 67, 54, 0.3));
+    box-shadow: 0 0 12px rgba(244, 67, 54, 0.4);
+}
+/* Held by the side's master switch — not disabled by the user, so it must not
+   look disabled. Desaturated rather than dimmed: it is intact and waiting. */
+.automation-card.paused::before {
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.7), rgba(245, 158, 11, 0.2));
+}
+
 .automation-card:hover {
     transform: translateY(-2px);
     border-color: rgba(255,255,255,0.13);
     box-shadow: 0 10px 30px -12px rgba(0,0,0,0.6);
+}
+
+.automation-card.errored {
+    border-color: rgba(244, 67, 54, 0.22);
+    background: rgba(244, 67, 54, 0.035);
+}
+.automation-card.paused { filter: saturate(0.75); }
+
+/* Meta-line chips. These lead the line, so they read as a state rather than
+   as another fact among five.
+
+   Scoped to .automation-card because this sheet loads after style.css for the
+   whole app — a bare class here is a global rule, which is exactly what
+   test_every_rule_is_scoped_to_automations_surfaces exists to stop. */
+.automation-card .auto-meta-fail {
+    color: #ff8a80;
+    font-weight: 600;
+    max-width: 34ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: bottom;
+}
+.automation-card .auto-meta-paused {
+    color: #f59e0b;
+    font-weight: 600;
 }
 .automation-card.disabled { opacity: .62; }
 .automation-card.disabled:hover { opacity: .85; }
