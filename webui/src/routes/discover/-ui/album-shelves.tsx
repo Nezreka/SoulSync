@@ -91,6 +91,10 @@ export function RecentReleasesShelf({ albums, loaded, onOpenAlbum }: RecentRelea
             cover={recentAlbumCover(album)}
             albumName={album.album_name ?? ''}
             artistName={album.artist_name ?? ''}
+            // The ownership chip — the same badge language Your Albums wears.
+            // Only OWNED is badged: missing is a new release's default state,
+            // and twenty 'missing' chips would be noise.
+            badge={album.in_library ? { className: 'owned', icon: '✓' } : undefined}
             // BY INDEX, not by id: the download modal resolves the album out of
             // the module's own list, and several of these albums have no id at
             // all until the source is queried.

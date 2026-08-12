@@ -23,6 +23,8 @@ export interface RecentAlbum {
   album_spotify_id?: string;
   album_deezer_id?: string;
   album_itunes_id?: string;
+  /** Stamped server-side by the library's own fuzzy matcher. */
+  in_library?: boolean;
   [key: string]: unknown;
 }
 

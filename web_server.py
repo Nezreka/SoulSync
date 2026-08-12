@@ -32593,6 +32593,18 @@ def get_discover_recent_releases():
         if blacklisted:
             albums = [a for a in albums if a.get('artist_name', '').lower() not in blacklisted]
 
+        # Ownership: which of these new releases are ALREADY in the library.
+        # The fuzzy matcher the download pipeline itself uses, so the badge
+        # agrees with what a download would decide. ~20 checks per 30-min
+        # shelf-cache fill — free at request time. Fail-soft per album.
+        for a in albums:
+            try:
+                match, _conf = database.check_album_exists(
+                    a.get('album_name') or '', a.get('artist_name') or '')
+                a['in_library'] = match is not None
+            except Exception as own_err:
+                logger.debug("recent-release ownership check failed: %s", own_err)
+
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
     except Exception as e:
