@@ -4028,3 +4028,60 @@ Mixes). Sechs neue. Die `exclude_owned`-Tests laufen jetzt gegen das echte
 lib2-Schema statt gegen eine handgeschriebene Drei-Spalten-Attrappe — der
 Fehlermodus, um den es geht, ist ein JSON-Pfad, der nichts trifft, und den kann
 eine Attrappe nicht zeigen.
+
+#### 50.4.4.18 Die Suche fragt nur noch den nativen Katalog
+
+Stand: **338/90**. `core/search/orchestrator.py` fällt von 3/0 auf **0/0**, und
+weil `MusicDatabase.search_artists` genau diesen einen Produktiv-Aufrufer hatte
+(§50.4.4.1), fällt die Methode mit — zwei weitere Lesestellen in der großen
+Datei, ohne sie anzufassen.
+
+**Das Zusammenmischen entfällt ersatzlos, wie vorhergesagt.** „In deiner
+Bibliothek" suchte zuerst Legacy, holte dann lib2-Zeilen dazu und versuchte,
+beide Seiten zu verheiraten: über `legacy_artist_id`, sonst über eine
+gemeinsame Provider-Id, sonst über einen eindeutigen normalisierten Namen — und
+weil der letzte Weg nur *innerhalb des Suchfensters* eindeutig war, schrieb ein
+eigener Thread die so gefundene Verknüpfung nach einer Voll-Tabellen-Prüfung
+zurück (`_reconcile_legacy_artist_link`, rev25-05/rev25-07). Ein Katalog braucht
+davon nichts. Rund 180 Zeilen und ein Schreibpfad aus einem Lesepfad sind weg.
+
+**Der Id-Raum ist hier ein anderer als in §50.4.4.13.** Die Statistik-Seite
+musste `legacy_artist_id` zurückgeben, weil eine bloße numerische Id per Vertrag
+gegen die Legacy-Tabelle aufgelöst wird. Die Suche nicht: ihr Frontend hat für
+genau diesen Fall ein eigenes Feld (`library_v2_id`), und `inLibraryArtistPath`
+schickt eine Karte damit auf die V2-Artist-Seite — die Seite, die den Artist
+auch verwalten kann. Also sprechen `id` und `library_v2_id` jetzt beide lib2,
+und `image_is_native` steht auf jeder Karte dieses Eimers. Das ist keine
+Vereinheitlichung um ihrer selbst willen: `/api/artist/<id>/image` reicht jede
+Id an die Provider weiter, und eine lib2-Id löste dort zu irgendeinem
+Deezer-/iTunes-Artist mit derselben Nummer auf (iss29-B04c).
+
+**`LOWER()` wieder — diesmal andersherum.** In den vier Dateien davor hatte
+Legacy den Fehler und lib2 bekam ihn beim Portieren fast mitgeliefert. Hier war
+es umgekehrt: Legacy suchte über `unidecode_lower(name)` (Akzente gefaltet,
+„Tiesto" findet „Tiësto"), die lib2-Hälfte über SQLites `LOWER()`, das nur ASCII
+kann. Ein Port, der die lib2-Zeile übernimmt, hätte also eine Fähigkeit
+*verloren*, die die Seite hatte. Übernommen ist deshalb die Legacy-Faltung:
+`normalize_for_comparison` für die Nadel, `unidecode_lower` für die Spalte — die
+Funktion ist auf jeder `MusicDatabase`-Verbindung registriert, und das ist die
+Verbindung, aus der hier gelesen wird. `name_key` (casefold) hätte hier nicht
+gereicht: er faltet Groß/Klein, aber keine Diakritika.
+
+**Ein Alias ist kein Eintrag.** §40-Alias-Zeilen falten in ihren kanonischen
+Artist — dieselbe Mitgliedschaftsprüfung wie in `library2.queries.list_artists`,
+in der Form, die ein Index bedienen kann (iss29-D04). Damit zeigt die Suche
+genau die Zeilen, die auch die Bibliotheksseite zeigt, und ein Artist erscheint
+einmal, auch wenn Anfrage und Alias beide passen.
+
+**Ohne Bild geht die Karte an den V2-Artwork-Endpunkt**, nicht an den
+Provider-Resolver: der antwortet kalt mit dem Platzhalter-Vertrag und baut das
+Bild im Hintergrund (perf25-02), der nächste Aufbau serviert von der Platte.
+Ein Platzhalter, der sich selbst repariert, ist besser als ein fremdes Gesicht.
+
+**Fünf Tests sind gelöscht, nicht umgeschrieben** — anders als in den Runden
+davor. Ihr Gegenstand war das Verheiraten selbst (Provider-Dedup, Namens-Link,
+die drei Reconcile-Fälle); ohne zwei Seiten gibt es nichts zu verheiraten.
+Sechs neue an ihrer Stelle, gegen das echte lib2-Schema: Katalog-Antwort,
+Diakritika, Alias→kanonisch, kein Doppel-Eintrag, natives Artwork, und eine
+frische Installation ohne V2-Tabellen (die stille Antwort „nichts", die früher
+der Legacy-Zweig aufgefangen hat).

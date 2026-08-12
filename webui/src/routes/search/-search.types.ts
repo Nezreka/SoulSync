@@ -147,14 +147,15 @@ export interface SearchArtist {
   source?: string;
   followers?: number;
   /**
-   * Set by `_build_db_artists` (core/search/orchestrator.py) only for a library
-   * artist that Library v2 already knows — `lib2_artists.id`, not `artists.id`.
-   * Absent while v2 is empty or the artist has not been mapped yet.
+   * `lib2_artists.id`. The "In Your Library" bucket is Library v2's catalogue
+   * (`_build_db_artists`, core/search/orchestrator.py), so every entry of that
+   * bucket carries one and its `id` is the same value. Absent on provider
+   * results, which have no library row.
    */
   library_v2_id?: number | null;
   /**
-   * iss29-B04c: this row's `id` is a LIB2 id — the artist has no legacy row at
-   * all — and its artwork is already served by Library V2. The generic
+   * iss29-B04c: this row's `id` is a LIB2 id and its artwork is already served
+   * by Library V2. The generic
    * `/api/artist/<id>/image` resolver forwards whatever id it gets to the
    * providers, so asking it about a lib2 id returned whichever Deezer/iTunes
    * artist owned that number. Cards must not lazily resolve these.

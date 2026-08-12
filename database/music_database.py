@@ -7812,50 +7812,6 @@ class MusicDatabase:
             logger.error(f"Error getting album by spotify_album_id {spotify_album_id}: {e}")
             return None
 
-    def search_artists(self, query: str, limit: int = 50, server_source: str = None) -> List[DatabaseArtist]:
-        """Search artists by name, optionally filtered by server source.
-        Uses diacritic-insensitive matching so 'Tiesto' finds 'Tiësto'."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            norm_query = f"%{self._normalize_for_comparison(query)}%"
-
-            if server_source:
-                cursor.execute("""
-                    SELECT * FROM artists
-                    WHERE unidecode_lower(name) LIKE ? AND server_source = ?
-                    ORDER BY name
-                    LIMIT ?
-                """, (norm_query, server_source, limit))
-            else:
-                cursor.execute("""
-                    SELECT * FROM artists
-                    WHERE unidecode_lower(name) LIKE ?
-                    ORDER BY name
-                    LIMIT ?
-                """, (norm_query, limit))
-            
-            rows = cursor.fetchall()
-            
-            artists = []
-            for row in rows:
-                genres = json.loads(row['genres']) if row['genres'] else None
-                artists.append(DatabaseArtist(
-                    id=row['id'],
-                    name=row['name'],
-                    thumb_url=row['thumb_url'],
-                    genres=genres,
-                    summary=row['summary'],
-                    created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                    updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
-                ))
-            
-            return artists
-            
-        except Exception as e:
-            logger.error(f"Error searching artists with query '{query}': {e}")
-            return []
-    
     def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None,
                        rank_artist: str = None) -> List[DatabaseTrack]:
         """Search tracks by title and/or artist name with Unicode-aware fuzzy matching.

@@ -306,11 +306,11 @@ export function artistDetailPath(
 /**
  * Where an "In Your Library" artist card points.
  *
- * The library is Library v2 now, so a result the search orchestrator could map
- * to a v2 artist opens there — that is the page that can actually manage it
- * (monitoring, wanted, quality profile). Everything else keeps the artist-detail
- * path unchanged: a library artist that v2 has not mapped yet has no v2 id to
- * route to, and inventing one would 404 the page.
+ * The library is Library v2 now, and so is the bucket: `_build_db_artists`
+ * reads the v2 catalogue, so every card here has a v2 id and opens the page
+ * that can actually manage the artist (monitoring, wanted, quality profile).
+ * The artist-detail fallback stays for callers that pass an artist from
+ * somewhere else — inventing a v2 id for one would 404 the page.
  */
 export function inLibraryArtistPath(artist: {
   id?: string | number;

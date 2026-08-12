@@ -118,256 +118,70 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
     return None, False
 
 
-def _search_name_key(name: Any) -> str:
-    """Normalized artist name used only as a last-resort merge key."""
-    try:
-        from core.library2.importer import normalize_name
-        return normalize_name(str(name or ''))
-    except Exception:  # noqa: BLE001 - never break search on a helper import
-        return ' '.join(str(name or '').lower().split())
-
-
-def _reconcile_legacy_artist_link(database, v2_id: int, legacy_id: int) -> None:
-    """Persist a name-resolved legacy↔lib2 link, off the request thread.
-
-    rev25-05/rev25-07: the caller only knows the pair looks unique inside its
-    own windowed search result (``LIMIT 5``/``LIMIT 10``) — not the same claim
-    as "unique in the database" — and the old code wrote on the same
-    connection a GET request reads from, risking a search blocked behind
-    another connection's ``busy_timeout`` on a busy WAL database. This opens
-    its own connection, on its own thread, re-verifies uniqueness against the
-    *whole* table (mirroring the dispatch pattern already used for the MB
-    release-group reconcile in ``api/library_v2.py``, §62.6 Stufe 3), and only
-    then persists.  Guarded on both sides like before: the lib2 row must still
-    be unlinked and no other lib2 row may already claim this legacy artist, so
-    a repair can never silently steal an existing identity.  Best effort — a
-    read-only/busy database or a pair that stopped matching leaves the
-    in-memory merge (already returned to the caller) intact.
-    """
-    try:
-        conn = database._get_connection()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("legacy↔lib2 artist link reconcile connection failed: %s", exc)
-        return
-    try:
-        legacy_row = conn.execute(
-            "SELECT name FROM artists WHERE id=?", (legacy_id,)
-        ).fetchone()
-        v2_row = conn.execute(
-            "SELECT COALESCE(c.name, a.name) AS name"
-            "  FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id"
-            " WHERE a.id=? OR c.id=?",
-            (v2_id, v2_id),
-        ).fetchone()
-        if not legacy_row or not v2_row:
-            return
-        name_key = _search_name_key(v2_row["name"])
-        if not name_key or name_key != _search_name_key(legacy_row["name"]):
-            return  # the pair drifted since the search that queued this repair
-
-        legacy_matches = {
-            int(row["id"])
-            for row in conn.execute("SELECT id, name FROM artists").fetchall()
-            if _search_name_key(row["name"]) == name_key
-        }
-        v2_matches = {
-            int(row["id"])
-            for row in conn.execute(
-                "SELECT COALESCE(c.id, a.id) AS id, COALESCE(c.name, a.name) AS name"
-                "  FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id"
-            ).fetchall()
-            if _search_name_key(row["name"]) == name_key
-        }
-        if len(legacy_matches) != 1 or len(v2_matches) != 1:
-            return
-
-        conn.execute(
-            "UPDATE lib2_artists SET legacy_artist_id=? "
-            " WHERE id=? AND legacy_artist_id IS NULL"
-            "   AND NOT EXISTS (SELECT 1 FROM lib2_artists other "
-            "                    WHERE other.legacy_artist_id=?)",
-            (legacy_id, v2_id, legacy_id),
-        )
-        conn.commit()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("legacy↔lib2 artist link reconcile skipped: %s", exc)
-    finally:
-        try:
-            conn.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("legacy↔lib2 artist link reconcile close failed: %s", exc)
-
-
-def _schedule_legacy_artist_link_reconcile(database, v2_id: int, legacy_id: int) -> None:
-    """Kick :func:`_reconcile_legacy_artist_link` off the request thread."""
-    import threading
-    threading.Thread(
-        target=_reconcile_legacy_artist_link,
-        args=(database, v2_id, legacy_id),
-        name="search-legacy-link-reconcile",
-        daemon=True,
-    ).start()
-
-
 def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
-    active_server = deps.config_manager.get_active_media_server()
-    artist_objs = deps.database.search_artists(query, limit=5, server_source=active_server)
-    out: list[dict] = []
-    for artist in artist_objs:
-        image_url = None
-        if hasattr(artist, 'thumb_url') and artist.thumb_url:
-            image_url = deps.fix_artist_image_url(artist.thumb_url)
-        out.append({
-            'id': artist.id,
-            'name': artist.name,
-            'image_url': image_url,
-        })
+    """The "In Your Library" bucket — Library v2's catalogue, and nothing else.
 
-    # Library-v2 can contain provider-native artists with no legacy ``artists``
-    # row at all. Merge them into the global-search library bucket, annotating
-    # the V2 id so clients can route to the correct detail page. Prefer the
-    # explicit legacy back-reference, then provider-qualified identity, and only
-    # then — when exactly one row on each side carries the name — an
-    # unambiguous normalized-name match (find25-search-02).
+    Every entry is a lib2 artist, so ``id`` and ``library_v2_id`` are the same
+    lib2 id and every card routes to the v2 artist page — the page that can
+    actually manage the artist (monitoring, wanted, quality profile). Before
+    this the bucket was a merge: legacy ``artists`` searched first, lib2 rows
+    folded in by back-reference, provider id or unambiguous name, with an
+    off-thread repair that wrote the name-resolved link back. One catalogue
+    needs none of it.
+
+    Two details survive from the two halves it replaces:
+
+    - **Accents fold.** Legacy searched ``unidecode_lower(name)``; the lib2
+      half searched ``LOWER(name)``, which SQLite applies to ASCII only
+      (iss29-D13), so it never answered a 'Tiesto' typed without the
+      diaeresis. The function is registered on every ``MusicDatabase``
+      connection (``database/music_database.py``), which is the connection
+      this reads from.
+    - **An alias is not an entry.** §40 alias members fold into their
+      canonical artist, spelled as ``library2.queries.list_artists`` spells it
+      (iss29-D04) so the membership test stays index-servable.
+    """
+    from core.text.normalize import normalize_for_comparison
+
+    out: list[dict] = []
     conn = None
     try:
         conn = deps.database._get_connection()
-        legacy_by_id = {int(item['id']): item for item in out}
-        legacy_by_provider: dict[tuple[str, str], dict] = {}
-        artist_columns = {
-            str(row[1]) for row in conn.execute("PRAGMA table_info(artists)").fetchall()
-        }
-        provider_columns = {
-            'spotify': 'spotify_artist_id',
-            'itunes': 'itunes_artist_id',
-            'deezer': 'deezer_id',
-            'musicbrainz': 'musicbrainz_id',
-            'amazon': 'amazon_id',
-            'tidal': 'tidal_id',
-            'qobuz': 'qobuz_id',
-        }
-        selected_provider_columns = [
-            column for column in provider_columns.values() if column in artist_columns
-        ]
-        if legacy_by_id and selected_provider_columns:
-            marks = ','.join('?' for _ in legacy_by_id)
-            fields = ', '.join(['id', *selected_provider_columns])
-            for row in conn.execute(
-                f"SELECT {fields} FROM artists WHERE id IN ({marks})",
-                tuple(legacy_by_id),
-            ).fetchall():
-                target = legacy_by_id.get(int(row['id']))
-                if target is None:
-                    continue
-                for source, column in provider_columns.items():
-                    if column in selected_provider_columns and row[column]:
-                        legacy_by_provider[(source, str(row[column]))] = target
-
-        legacy_by_name: dict[str, list[dict]] = {}
-        for item in out:
-            legacy_by_name.setdefault(_search_name_key(item['name']), []).append(item)
-
-        needle = f"%{query.strip().lower()}%"
-        v2_rows = conn.execute(
-            """SELECT a.id AS matched_id,
-                      COALESCE(c.id, a.id) AS id,
-                      COALESCE(c.name, a.name) AS name,
-                      COALESCE(c.image_url, a.image_url) AS image_url,
-                      COALESCE(c.legacy_artist_id, a.legacy_artist_id) AS legacy_artist_id,
-                      a.spotify_id, a.musicbrainz_id, a.external_ids
+        rows = conn.execute(
+            """SELECT a.id, a.name, a.image_url
                  FROM lib2_artists a
-                 LEFT JOIN lib2_artists c ON c.id=a.canonical_artist_id
-                WHERE LOWER(a.name) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
-                ORDER BY COALESCE(c.name, a.name) COLLATE NOCASE, a.id
+                WHERE a.canonical_artist_id IS NULL
+                  AND EXISTS (
+                      SELECT 1 FROM lib2_artists member
+                       WHERE (member.canonical_artist_id = a.id
+                              OR (member.canonical_artist_id IS NULL
+                                  AND member.id = a.id))
+                         AND unidecode_lower(member.name) LIKE :needle)
+                ORDER BY a.name COLLATE NOCASE, a.id
                 LIMIT 10""",
-            (needle, needle),
+            {"needle": f"%{normalize_for_comparison(query)}%"},
         ).fetchall()
-        # Only an unambiguous pair may be linked by name: if two lib2 rows carry
-        # the same normalized name, the name says nothing about which one the
-        # legacy row is.
-        v2_ids_by_name: dict[str, set[int]] = {}
-        for row in v2_rows:
-            v2_ids_by_name.setdefault(
-                _search_name_key(row['name']), set()).add(int(row['id']))
-
-        seen_v2: set[int] = set()
-        for row in v2_rows:
-            v2_id = int(row['id'])
-            if v2_id in seen_v2:
-                continue
-            seen_v2.add(v2_id)
-            target = None
-            if row['legacy_artist_id'] is not None:
-                target = legacy_by_id.get(int(row['legacy_artist_id']))
-
-            provider_ids: dict[str, str] = {}
-            if row['spotify_id']:
-                provider_ids['spotify'] = str(row['spotify_id'])
-            if row['musicbrainz_id']:
-                provider_ids['musicbrainz'] = str(row['musicbrainz_id'])
-            try:
-                provider_ids.update({
-                    str(source).strip().lower(): str(provider_id).strip()
-                    for source, provider_id in json.loads(row['external_ids'] or '{}').items()
-                    if str(source).strip() and str(provider_id).strip()
-                })
-            except (AttributeError, TypeError, ValueError):
-                pass
-            if target is None:
-                target = next((
-                    legacy_by_provider[(source, provider_id)]
-                    for source, provider_id in provider_ids.items()
-                    if (source, provider_id) in legacy_by_provider
-                ), None)
-
-            # find25-search-02: an artist that entered lib2 through a finished
-            # download carries neither ``legacy_artist_id`` nor necessarily a
-            # provider id the legacy row also has.  Without a third link the
-            # result kept pointing at the legacy detail page and the same
-            # artist showed up twice.  An unambiguous normalized-name match is
-            # accepted as that link and written back once, so the next search
-            # takes the explicit back-reference above.
-            if target is None and row['legacy_artist_id'] is None:
-                name_key = _search_name_key(row['name'])
-                candidates = legacy_by_name.get(name_key, [])
-                if (len(candidates) == 1
-                        and len(v2_ids_by_name.get(name_key, ())) == 1
-                        and 'library_v2_id' not in candidates[0]):
-                    target = candidates[0]
-                    # rev25-05/rev25-07: this window (LIMIT 5/LIMIT 10) is not
-                    # proof of uniqueness in the database, and the search read
-                    # path must not write.  The in-memory merge below stays
-                    # lenient on this window; only the persisted link needs
-                    # the full-table re-check, done off-thread.
-                    _schedule_legacy_artist_link_reconcile(
-                        deps.database, v2_id, int(target['id'])
-                    )
-
-            if target is not None:
-                target['library_v2_id'] = v2_id
-                if not target.get('image_url') and row['image_url']:
-                    target['image_url'] = deps.fix_artist_image_url(row['image_url'])
-                continue
+        for row in rows:
+            artist_id = int(row['id'])
             out.append({
-                'id': v2_id,
-                'library_v2_id': v2_id,
+                'id': artist_id,
+                'library_v2_id': artist_id,
                 'name': row['name'],
-                # iss29-B04c: a lib2-NATIVE artist has no legacy row, so `id`
-                # here is a lib2 id. The generic `/api/artist/<id>/image`
-                # resolver forwards whatever id it is given to the providers,
-                # which means a lib2 id resolved to whichever Deezer/iTunes
-                # artist happens to own that number — a confidently wrong face
-                # on the card. Library V2 serves this artist's own artwork, so
-                # point at that; when there is none, the caller must show the
-                # placeholder rather than ask the provider resolver.
+                # iss29-B04c: `id` is a lib2 id, and the generic
+                # `/api/artist/<id>/image` resolver forwards whatever id it is
+                # given to the providers — which means a lib2 id resolved to
+                # whichever Deezer/iTunes artist happens to own that number, a
+                # confidently wrong face on the card. Library V2 serves this
+                # artist's own artwork, so point at that.
                 'image_url': (
                     deps.fix_artist_image_url(row['image_url'])
-                    if row['image_url'] else f"/api/library/v2/artwork/artist/{v2_id}"
+                    if row['image_url']
+                    else f"/api/library/v2/artwork/artist/{artist_id}"
                 ),
                 'image_is_native': True,
             })
-    except Exception as exc:  # fresh/partially migrated DB: legacy search still works
-        logger.debug("Library-v2 global artist search unavailable: %s", exc)
+    except Exception as exc:  # a database without the v2 tables yet
+        logger.debug("Library-v2 artist search unavailable: %s", exc)
     finally:
         if conn is not None:
             conn.close()
