@@ -405,22 +405,30 @@ export function OperationTile({
 
       <div className="repair-tile-foot">
         {trend.length > 1 ? (
-          <svg
-            className="repair-tile-spark"
-            width="72"
-            height="18"
-            viewBox="0 0 72 18"
-            preserveAspectRatio="none"
-            aria-hidden="true"
+          // A chart with no legend is decoration. It says what it is, in the
+          // same words the health hero's trend uses.
+          <span
+            className="repair-tile-trend"
+            title={`Findings raised per run — this job's last ${trend.length} runs, oldest to newest (${trend.join(', ')})`}
           >
-            <polyline
-              points={sparklinePoints(trend, 72, 18)}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-            />
-          </svg>
+            <svg
+              className="repair-tile-spark"
+              width="64"
+              height="16"
+              viewBox="0 0 64 16"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <polyline
+                points={sparklinePoints(trend, 64, 16)}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="repair-tile-trend-label">findings / run</span>
+          </span>
         ) : (
           <span className="repair-tile-meta">{meta.join(' · ')}</span>
         )}

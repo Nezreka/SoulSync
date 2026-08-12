@@ -64955,7 +64955,22 @@ body.max-performance #page-particles-canvas {
     margin-top: 2px;
 }
 
+.repair-tile-trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    cursor: help;
+}
+
 .repair-tile-spark { color: rgba(var(--tile-glow), 0.65); flex-shrink: 0; }
+
+.repair-tile-trend-label {
+    font-size: 9px;
+    letter-spacing: 0.3px;
+    color: rgba(255, 255, 255, 0.25);
+    white-space: nowrap;
+}
 
 .repair-tile-meta {
     font-size: 10px;
