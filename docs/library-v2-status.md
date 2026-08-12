@@ -3936,3 +3936,28 @@ beide benutzen.
 Datei (ADR-03); eine Trackzeile ohne Datei bleibt besessen — das ist ein
 bekannter, ungeholter Track, und genau das hat `in_library` ohne Pfad immer
 bedeutet.
+
+#### 50.4.4.15 Der Export-Wasserfall liest lib2
+
+Stand: **357/90**. `core/exports/export_sources.py` fällt von 4/0 auf **0/0**.
+
+Zwei Suchen dort trafen dieselbe Zeile — Recording-MBID plus Dateipfad für den
+ListenBrainz-Export, Service-Track-Id für den Rückexport nach Spotify/Deezer.
+Beide gehen jetzt durch **eine** Abfrage (`_matched_track`), was den Unterschied
+sichtbar macht, den lib2 macht: Spotify steht in einer eigenen Spalte, Deezer in
+`external_ids`. Aus der Spalten-Tabelle `_SERVICE_ID_COLUMNS` wird damit eine
+Liste adressierbarer Dienste; die Spaltenwahl ist keine Konfiguration mehr,
+sondern die Struktur von lib2.
+
+**Wieder `LOWER()`, wieder derselbe Fund.** Die Artist-Hälfte des Textabgleichs
+lief über `LOWER(a.name)`. SQLites `LOWER()` ist ASCII-only — für jeden
+nicht-lateinischen Artist übersprang der Export die DB-Stufe still und schickte
+die Zeile an den ratenlimitierten MusicBrainz-Schwanz. Jetzt `ar.name_key`. Der
+Titel behält `LOWER()`: lib2 hat keinen gefalteten Titel-Schlüssel, und einen
+hier zu erfinden verschöbe die Grenze nur.
+
+Der „echtes SQL"-Test, den #945 aus gutem Grund hinterlassen hat (das breite
+`except → None` würde einen Join-Tippfehler als „kein Treffer für jeden Track"
+tarnen), läuft jetzt gegen ein echtes lib2-Schema statt gegen ein
+handgeschriebenes Legacy-Paar — plus zwei neue: der Dateipfad kommt aus der
+primären Datei, und ein nicht-lateinischer Artist erreicht die DB-Stufe.
