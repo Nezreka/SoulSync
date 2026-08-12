@@ -1812,6 +1812,10 @@
                          'Connect 4', 'four in a row, quick') +
                     tile('data-chat-arc-new="w" data-chat-arc-variant="battleship"', '🚢',
                          'Battleship', 'hidden fleets, checked at the end') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="othello"', '⚫',
+                         'Othello', 'flank and flip — corners are king') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="gomoku"', '⚪',
+                         'Gomoku', 'five stones in a row wins') +
                     tile('data-chat-arc-new="w" data-chat-arc-room="1"', '🗳',
                          'You vs the room', 'everyone else votes their move') +
                     tile('data-chat-slot-open', '🎰', 'Slots',
@@ -1867,6 +1871,8 @@
     function _arcBoardHtml(game) {
         if (game.variant === 'connect4') return _arcC4BoardHtml(game);
         if (game.variant === 'battleship') return _arcBsBoardHtml(game);
+        if (game.variant === 'othello') return _arcOthBoardHtml(game);
+        if (game.variant === 'gomoku') return _arcGmkBoardHtml(game);
         var E = window.ChessEngine;
         var CG = window.ChatGames;
         // game.fen is our OWN fold's output, not wire data — it has already
@@ -2690,6 +2696,163 @@
         }
     }
 
+    // Shared chrome for the two placed-piece boards: status line + actions.
+    function _arcCellStatus(game, verb) {
+        var CG = window.ChatGames;
+        if (game.status === 'over') {
+            return game.winner ? esc(game.winner) + ' wins — ' + esc(game.reason)
+                               : 'Draw — ' + esc(game.reason);
+        }
+        if (game.desync) {
+            return 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        }
+        if (game.status === 'open') return 'Waiting for an opponent to join.';
+        if (_arcMyMove(game)) return 'Your move — ' + verb + '.';
+        if (CG.isRoomTurn(game)) {
+            return 'The room is choosing' +
+                (_arcCanVote(game) ? ' — ' + verb + ' to vote for it.'
+                                   : '. You are playing against them, so no ballot for you.');
+        }
+        return 'Waiting on ' + esc(CG.toMove(game)) + '.';
+    }
+
+    function _arcCellActions(game) {
+        var mySeat = _arcSeat(game);
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+        return actions;
+    }
+
+    function _arcOthBoardHtml(game) {
+        var CG = window.ChatGames;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var turnChar = String(game.fen || '').split(' ')[1] || 'w';
+        var live = game.status === 'live';
+        var acting = live && _arcActive(game) && state.canSend;
+        var legal = {};
+        if (acting) {
+            CG.othelloLegal(game.fen, turnChar).forEach(function (i) { legal[i] = 1; });
+        }
+        var stuck = acting && !Object.keys(legal).length;
+        var cells = [];
+        for (var i = 0; i < 64; i++) {
+            var who = body[i] || '.';
+            var playable = !!legal[i];
+            // seat 'w' OPENS and plays the black discs (Othello's first mover)
+            cells.push('<div class="chat-arc-othcell' +
+                (playable ? ' chat-arc-othcell--live' : '') + '"' +
+                (playable ? ' data-chat-arc-cell="' + i + '"' : '') + '>' +
+                (who === 'w' ? '<span class="chat-arc-othdisc chat-arc-othdisc--dark"></span>'
+                 : who === 'b' ? '<span class="chat-arc-othdisc chat-arc-othdisc--light"></span>'
+                 : (playable ? '<span class="chat-arc-othdot"></span>' : '')) +
+            '</div>');
+        }
+        var score = CG.othelloScore(game.fen);
+        var toMove = CG.toMove(game);
+        var actions = _arcCellActions(game);
+        if (stuck) {
+            actions = '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-pass="' + attr(game.id) + '" ' +
+                'title="No legal move anywhere — the turn passes">No moves — pass</button>' + actions;
+        }
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '⚪', toMove === game.black, game.roomSeat === 'b') +
+                '<span class="chat-arc-othscore">⚫ ' + score.w + ' · ' + score.b + ' ⚪</span>' +
+            '</div>' +
+            '<div class="chat-arc-othboard' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '⚫', toMove === game.white, game.roomSeat === 'w') +
+            '</div>' +
+            (game.partial ? '<div class="chat-arc-note">Picked up mid-game — the room ' +
+                'archive had already rolled past the start.</div>' : '') +
+            _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + _arcCellStatus(game, 'pick a glowing square') + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+        '</div>';
+    }
+
+    function _arcGmkBoardHtml(game) {
+        var CG = window.ChatGames;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var live = game.status === 'live';
+        var acting = live && _arcActive(game) && state.canSend;
+        // Ring the newest stone so the board reads at a glance.
+        var last = -1;
+        if (game.moves && game.moves.length) {
+            var lm = game.moves[game.moves.length - 1];
+            var lmStr = String((lm && lm.m) != null ? lm.m : lm);
+            if (/^\d{1,3}$/.test(lmStr)) last = parseInt(lmStr, 10);
+        }
+        var cells = [];
+        for (var i = 0; i < 225; i++) {
+            var who = body[i] || '.';
+            var playable = acting && who === '.';
+            cells.push('<div class="chat-arc-gmkcell' +
+                (playable ? ' chat-arc-gmkcell--live' : '') + '"' +
+                (playable ? ' data-chat-arc-cell="' + i + '"' : '') + '>' +
+                (who !== '.'
+                    ? '<span class="chat-arc-stone chat-arc-stone--' +
+                      (who === 'w' ? 'dark' : 'light') +
+                      (i === last ? ' chat-arc-stone--last' : '') + '"></span>'
+                    : '') +
+            '</div>');
+        }
+        var toMove = CG.toMove(game);
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '⚪', toMove === game.black, game.roomSeat === 'b') +
+            '</div>' +
+            '<div class="chat-arc-gmkboard' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '⚫', toMove === game.white, game.roomSeat === 'w') +
+            '</div>' +
+            (game.partial ? '<div class="chat-arc-note">Picked up mid-game — the room ' +
+                'archive had already rolled past the start.</div>' : '') +
+            _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + _arcCellStatus(game, 'place a stone') + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = _arcCellActions(game) + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+        '</div>';
+    }
+
+    function _arcCellClick(idx) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live') return;
+        if (game.variant !== 'othello' && game.variant !== 'gomoku') return;
+        if (!_arcActive(game) || !state.canSend) return;
+        var cap = game.variant === 'othello' ? 64 : 225;
+        var n = parseInt(idx, 10);
+        if (!(n >= 0 && n < cap)) return;
+        if (_arcCanVote(game)) arcVote(game.id, String(n));
+        else arcMove(game.id, String(n));
+    }
+
     function _arcColumnClick(col) {
         var arc = state.arcade;
         var game = arc && arc.game ? _arcGame(arc.game) : null;
@@ -3234,7 +3397,8 @@
         div.innerHTML = '<span class="chat-card-challenge-label">Pick the game — ' +
             'only they can take the seat</span>' +
             '<div class="chat-card-challenge-btns">' +
-            [['chess', '♟ Chess'], ['connect4', '🔴 Connect 4'], ['battleship', '🚢 Battleship']]
+            [['chess', '♟ Chess'], ['connect4', '🔴 Connect 4'], ['battleship', '🚢 Battleship'],
+             ['othello', '⚫ Othello'], ['gomoku', '⚪ Gomoku']]
                 .map(function (v) {
                     return '<button class="chat-arc-btn" type="button" ' +
                         'data-chat-card-challenge-v="' + v[0] + '">' + v[1] + '</button>';
@@ -4689,6 +4853,17 @@
             }
             t = e.target.closest('[data-chat-arc-col]');
             if (t) { _arcColumnClick(t.getAttribute('data-chat-arc-col')); return; }
+            t = e.target.closest('[data-chat-arc-cell]');
+            if (t) { _arcCellClick(t.getAttribute('data-chat-arc-cell')); return; }
+            t = e.target.closest('[data-chat-arc-pass]');
+            if (t) {
+                var passGame = _arcGame(t.getAttribute('data-chat-arc-pass'));
+                if (passGame && passGame.variant === 'othello' && state.canSend) {
+                    if (_arcCanVote(passGame)) arcVote(passGame.id, 'p');
+                    else arcMove(passGame.id, 'p');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-arc-join]');
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');

@@ -57,7 +57,11 @@ function check(name, cond, got) {
     if (!cond) { failures++; console.error(`FAIL: ${name}\n  got: ${String(got).slice(0, 400)}`); }
 }
 
-const T0 = Date.parse('2026-07-25T12:00:00Z');
+// A LIVE clock, not a pinned date: open tables expire off the lobby once
+// they sit 24h past creation (the cold-table sweep), so a harness pinned
+// to an old date renders every open fixture as already-cold and the Join
+// checks go dark. One minute ago keeps every fixture inside the window.
+const T0 = Date.now() - 60000;
 const ev = (username, p, at = T0) => ({ username, timestamp: new Date(at).toISOString(), p });
 
 // Put a protocol log in place and point chat.js at it, the way a real room
@@ -610,7 +614,7 @@ const NASTY = '<img src=x onerror=alert(1)>';
     check('lobby: says the money is play money',
           lobby.includes('play money'), lobby);
     check('lobby: every game is offered as a tile',
-          (lobby.match(/chat-arc-tile"/g) || []).length === 5, lobby);
+          (lobby.match(/chat-arc-tile"/g) || []).length === 7, lobby);
     check('lobby: an empty room says so', lobby.includes('Nothing on the tables'), lobby);
     check('lobby: chess as black is still reachable',
           lobby.includes('data-chat-arc-new="b"'), lobby);
@@ -681,6 +685,37 @@ const NASTY = '<img src=x onerror=alert(1)>';
     try { bare._arcSidebarHtml(); } catch (e) { threw = e; }
     check('no engine: sidebar renders nothing instead of throwing', threw === null, threw);
     check('no engine: sidebar is empty', bare._arcSidebarHtml() === '', bare._arcSidebarHtml());
+}
+
+// ── the new boards: othello + gomoku ride the same lifecycle ───────────────
+{
+    const oth = [
+        ev('boulder', { k: 'gm.new', g: 'oth1', v: 'othello' }),
+        ev('kazimir', { k: 'gm.join', g: 'oth1' }, T0 + 1000),
+    ];
+    setRoom(oth, 'boulder');
+    CP._testSetState({ arcade: { game: 'oth1', sel: -1, promo: null, flip: false } });
+    const board = CP._arcBoardHtml(game(oth, 'oth1'));
+    check('othello: the felt board renders', board.includes('chat-arc-othboard'), board);
+    check('othello: the mover sees playable squares', board.includes('data-chat-arc-cell'), board);
+    check('othello: the live disc score is shown', board.includes('chat-arc-othscore'), board);
+    check('othello: the opener plays the dark discs', board.includes('chat-arc-othdisc--dark'), board);
+    // The lobby offers both new tiles.
+    setRoom([], 'boulder');
+    const lobby = CP._arcLobbyHtml();
+    check('lobby: othello tile', lobby.includes('data-chat-arc-variant="othello"'), lobby);
+    check('lobby: gomoku tile', lobby.includes('data-chat-arc-variant="gomoku"'), lobby);
+}
+{
+    const gmk = [
+        ev('boulder', { k: 'gm.new', g: 'gmk1', v: 'gomoku' }),
+        ev('kazimir', { k: 'gm.join', g: 'gmk1' }, T0 + 1000),
+    ];
+    setRoom(gmk, 'boulder');
+    CP._testSetState({ arcade: { game: 'gmk1', sel: -1, promo: null, flip: false } });
+    const board = CP._arcBoardHtml(game(gmk, 'gmk1'));
+    check('gomoku: the goban renders', board.includes('chat-arc-gmkboard'), board);
+    check('gomoku: intersections are playable for the mover', board.includes('data-chat-arc-cell'), board);
 }
 
 if (failures) {

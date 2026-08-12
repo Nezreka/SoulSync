@@ -73848,6 +73848,65 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
    the actual game looks like, so it reads instantly. */
 .chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #ffe082, #f2b90c); }
 
+/* ── Othello: green felt, black/white discs, glowing legal squares ── */
+.chat-arc-othboard {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px;
+    aspect-ratio: 1 / 1; width: 100%; padding: 8px;
+    background: #14351f; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.07);
+}
+.chat-arc-othcell {
+    display: flex; align-items: center; justify-content: center;
+    background: #1d5e33; border-radius: 4px;
+}
+.chat-arc-othcell--live { cursor: pointer; }
+.chat-arc-othcell--live:hover { background: #2a7a44; }
+.chat-arc-othdisc {
+    width: 80%; height: 80%; border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.45);
+}
+/* seat 'w' opens the game and plays the DARK discs (Othello's first mover) */
+.chat-arc-othdisc--dark { background: radial-gradient(circle at 35% 30%, #4a4a4a, #0b0b0b); }
+.chat-arc-othdisc--light { background: radial-gradient(circle at 35% 30%, #ffffff, #c9c9c9); }
+.chat-arc-othdot {
+    width: 26%; height: 26%; border-radius: 50%;
+    background: rgba(255,255,255,0.22);
+}
+.chat-arc-othcell--live:hover .chat-arc-othdot { background: rgba(255,255,255,0.45); }
+.chat-arc-othscore {
+    margin-left: auto; font-size: 12px; font-weight: 700;
+    color: rgba(255,255,255,0.75); white-space: nowrap;
+    background: rgba(255,255,255,0.06); border-radius: 8px; padding: 3px 9px;
+}
+
+/* ── Gomoku: warm goban, stones with a last-move ring ── */
+.chat-arc-gmkboard {
+    display: grid; grid-template-columns: repeat(15, 1fr); gap: 0;
+    aspect-ratio: 1 / 1; width: 100%; padding: 8px;
+    background: #b98a4e; border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.35);
+}
+.chat-arc-gmkcell {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    /* the grid LINES live on each cell's midlines, goban-style */
+    background:
+        linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)) center / 100% 1px no-repeat,
+        linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)) center / 1px 100% no-repeat;
+}
+.chat-arc-gmkcell--live { cursor: pointer; }
+.chat-arc-gmkcell--live:hover::after {
+    content: ''; position: absolute; width: 62%; height: 62%; border-radius: 50%;
+    background: rgba(0,0,0,0.18);
+}
+.chat-arc-stone {
+    width: 86%; height: 86%; border-radius: 50%; z-index: 1;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+.chat-arc-stone--dark { background: radial-gradient(circle at 35% 30%, #555, #0a0a0a); }
+.chat-arc-stone--light { background: radial-gradient(circle at 35% 30%, #fff, #d6d6d6); }
+.chat-arc-stone--last { outline: 2px solid rgba(var(--accent-rgb), 0.9); outline-offset: 1px; }
+
 /* ── ladder + the reveal (arcade P4) ── */
 .chat-arc-ladder {
     background: rgba(255,255,255,0.03); border-radius: 10px; padding: 8px 10px;
