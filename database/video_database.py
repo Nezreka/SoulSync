@@ -453,6 +453,19 @@ class VideoDatabase:
         # Recently-Added ranks shows by their newest episode's add-date — MAX(added_at)
         # per show over a 200k-episode table, so index it.
         "CREATE INDEX IF NOT EXISTS idx_episodes_show_added ON episodes(show_id, added_at)",
+        # Perf sweep (Aug 2026): movies had a tmdb_id index from day one, shows
+        # never did — every library_ids_for_tmdb/watchlist_state/calendar
+        # lookup was a full shows scan (measured 224ms EACH on a 3.4k-show
+        # library, hit once per discover rail).
+        "CREATE INDEX IF NOT EXISTS idx_shows_tmdb ON shows(tmdb_id)",
+        # The watchlist/episode roll-ups count owned episodes per show; with
+        # only idx_episodes_show every row is fetched to test has_file.
+        "CREATE INDEX IF NOT EXISTS idx_episodes_show_file ON episodes(show_id, has_file)",
+        # wishlist_owned_media_resolutions joins show→season→episode; without
+        # this SQLite builds a throwaway AUTOMATIC index over 200k episodes on
+        # every wishlist page load.
+        "CREATE INDEX IF NOT EXISTS idx_episodes_show_season_ep "
+        "ON episodes(show_id, season_number, episode_number)",
     )
 
     @classmethod
@@ -5464,12 +5477,39 @@ class VideoDatabase:
             conn.close()
 
     def watchlist_counts(self, server_source=None) -> dict:
-        """{'show': n, 'person': n, 'studio': n, 'total': n} over the EFFECTIVE watchlist."""
-        shows = self.list_watchlist("show", server_source=server_source)
-        people = self.list_watchlist("person")
-        studios = self.list_watchlist("studio")
-        return {"show": len(shows), "person": len(people), "studio": len(studios),
-                "total": len(shows) + len(people) + len(studios)}
+        """{'show': n, 'person': n, 'studio': n, 'total': n} over the EFFECTIVE watchlist.
+
+        COUNT queries, not list materialization: this used to call
+        list_watchlist() three times just for len() — and the show pass runs
+        _effective_shows with two correlated episode-count subqueries PER
+        SHOW (~3s each on a 938-airing-show library), so the sidebar badge
+        alone cost ~9s of database time per hit (perf sweep, Aug 2026). The
+        counting rules mirror _effective_shows exactly: explicit follows,
+        plus DISTINCT airing library shows that are neither followed nor
+        muted."""
+        conn = self._get_connection()
+        try:
+            def _follows(kind):
+                return conn.execute(
+                    "SELECT COUNT(*) FROM video_watchlist WHERE kind=? AND state='follow'",
+                    (kind,)).fetchone()[0]
+
+            people = _follows("person")
+            studios = _follows("studio")
+            shows = _follows("show")
+            auto_sql = ("SELECT COUNT(DISTINCT s.tmdb_id) FROM shows s "
+                        "WHERE s.tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL +
+                        " AND s.tmdb_id NOT IN (SELECT tmdb_id FROM video_watchlist "
+                        "WHERE kind='show' AND state IN ('follow', 'mute'))")
+            args: list = []
+            if server_source:
+                auto_sql += " AND s.server_source = ?"
+                args.append(server_source)
+            shows += conn.execute(auto_sql, args).fetchone()[0]
+            return {"show": shows, "person": people, "studio": studios,
+                    "total": shows + people + studios}
+        finally:
+            conn.close()
 
     def query_watchlist(self, kind: str, *, search=None, sort="default", page=1, limit=60,
                         server_source=None) -> dict:

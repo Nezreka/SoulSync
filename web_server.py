@@ -3166,7 +3166,14 @@ def _build_system_stats():
 
     if soulseek_active and not soulseek_known_down:
         try:
-            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
+            # timeout=3: this runs on the dashboard's 10s poll, and gunicorn
+            # has 8 request threads TOTAL — an unbounded wait on a hung slskd
+            # pinned one of them for up to the 120s worker timeout (perf
+            # sweep, Aug 2026). Three seconds is plenty for a local slskd;
+            # a miss just means one tick shows 0 B/s.
+            transfers_data = run_async(
+                download_orchestrator._make_request('GET', 'transfers/downloads'),
+                timeout=3)
             if transfers_data:
                 for user_data in transfers_data:
                     if 'directories' in user_data:
