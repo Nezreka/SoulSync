@@ -357,99 +357,10 @@ export function LibraryCard() {
               </button>
             </div>
           </div>
-          <div
-            className="library-status-stats"
-            id="library-status-stats"
-            style={view.statsVisible ? undefined : { display: 'none' }}
-          >
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-artists">
-                  {view.stats ? view.stats.artists : '0'}
-                </span>
-                <span className="library-status-stat-label">Artists</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-albums">
-                  {view.stats ? view.stats.albums : '0'}
-                </span>
-                <span className="library-status-stat-label">Albums</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-tracks">
-                  {view.stats ? view.stats.tracks : '0'}
-                </span>
-                <span className="library-status-stat-label">Tracks</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <ellipse cx="12" cy="5" rx="9" ry="3" />
-                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-size">
-                  {view.stats ? view.stats.size : '--'}
-                </span>
-                <span className="library-status-stat-label">DB Size</span>
-              </div>
-            </div>
-          </div>
+          {/* The four-stat row lived here until the header's hello strip
+              took tracks/artists; albums + db size moved into the subtitle.
+              The strip is now purely operational: status, scan buttons,
+              progress. */}
           <div
             className="library-status-progress"
             id="library-status-progress"

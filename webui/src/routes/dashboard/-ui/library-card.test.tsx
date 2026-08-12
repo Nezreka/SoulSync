@@ -82,11 +82,8 @@ describe('the strip shape', () => {
       'library-status-subtitle',
       'library-status-scan-btn',
       'library-status-deep-btn',
-      'library-status-stats',
-      'library-status-artists',
-      'library-status-albums',
-      'library-status-tracks',
-      'library-status-size',
+      // the four-stat row retired with the header's hello strip —
+      // albums + db size live in the subtitle now
       'library-status-progress',
       'library-status-message',
     ]) {
@@ -112,10 +109,10 @@ describe('the state machine in the DOM', () => {
     expect(view.container.querySelector('#library-status-card')!.className).toBe(
       'library-status-card has-data',
     );
-    expect(view.container.querySelector('#library-status-tracks')!.textContent).toBe(
-      (300).toLocaleString(),
+    // Albums + db size fold into the subtitle now that the stat row is gone.
+    expect(view.container.querySelector('#library-status-subtitle')!.textContent).toContain(
+      '5.5 MB db',
     );
-    expect(view.container.querySelector('#library-status-size')!.textContent).toBe('5.5 MB');
   });
 
   it('renders the empty-library CTA with the Scan Now button', async () => {

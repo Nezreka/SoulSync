@@ -40130,7 +40130,7 @@ def stats_recent():
     """Get recently played tracks."""
     try:
         limit = int(request.args.get('limit', 20))
-        tracks = _stats_queries.get_recent_tracks(get_database(), limit)
+        tracks = _stats_queries.get_recent_tracks(get_database(), limit, fix_artist_image_url)
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

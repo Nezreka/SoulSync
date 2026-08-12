@@ -214,7 +214,10 @@ export function libraryCardView(
   return {
     cardClass: 'library-status-card has-data',
     title: `${serverName} Library`,
-    subtitle: `Last refreshed ${lastRefreshText}`,
+    // The strip no longer renders its four-stat row — the header's hello
+    // strip owns tracks/artists now — so the two numbers the header does NOT
+    // show (albums, db size) fold into the subtitle instead of vanishing.
+    subtitle: `Last refreshed ${lastRefreshText} · ${albums.toLocaleString()} albums · ${formatDbSize(sizeMb)} db`,
     scanVisible: true,
     scanScanning: false,
     scanLabel: 'Quick Scan',

@@ -26,6 +26,7 @@ import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
 import { ListenBand } from './listen-band';
+import { ListeningHistoryBand } from './listening-history-band';
 import { SyncBand } from './sync-band';
 
 export function DashboardPage() {
@@ -47,6 +48,10 @@ export function DashboardPage() {
             a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
         <ContentBand />
+        {/* What you've been PLAYING — recent listens from the same
+            listening_history spine the stats page reads. Renders nothing
+            until history exists. Click-through goes to the stats page. */}
+        <ListeningHistoryBand />
         {/* The payoff band: everything above is about OWNING music, this is
             about playing it — Library Radio's front door + the Mixes
             doorway. */}
