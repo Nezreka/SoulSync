@@ -40,7 +40,7 @@ function props(over: Partial<RecommendedShelfProps> = {}): RecommendedShelfProps
 describe('the shelf', () => {
   it('titles each kind differently', () => {
     const { rerender } = render(<RecommendedShelf {...props()} />);
-    expect(screen.getByText('Recommended For You')).toBeInTheDocument();
+    expect(screen.getByText("Artists You'll Like")).toBeInTheDocument();
     rerender(<RecommendedShelf {...props({ kind: 'listening' })} />);
     expect(screen.getByText('Based On Your Listening')).toBeInTheDocument();
   });

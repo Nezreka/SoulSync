@@ -44,8 +44,8 @@ export interface RecommendedShelfProps {
 
 const TITLES: Record<RecommendedKind, { title: string; subtitle: string }> = {
   recommended: {
-    title: 'Recommended For You',
-    subtitle: 'Artists similar to ones across your library — not yet on your watchlist',
+    title: "Artists You'll Like",
+    subtitle: 'Similar to whole shelves of your library — not yet on your watchlist',
   },
   listening: {
     title: 'Based On Your Listening',

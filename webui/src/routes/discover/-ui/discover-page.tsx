@@ -507,8 +507,8 @@ export function DiscoverPage() {
         return (
           <MixShelf
             id={id}
-            title="Your Mixes"
-            subtitle="Fresh playlists built from your listening — open one to see the tracks"
+            title="Made For You"
+            subtitle="Fresh mixes built from your listening — open one to see the tracks"
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
@@ -519,8 +519,8 @@ export function DiscoverPage() {
         return (
           <MixShelf
             id={id}
-            title="Year Mixes"
-            subtitle="Jump into the sound of a decade — open one to see the tracks"
+            title="Decades"
+            subtitle="The sound of every era in your collection"
             mixes={decadeMixesHydrated}
             loaded={true}
             gridId="year-mixes-grid"

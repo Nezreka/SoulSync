@@ -76,8 +76,8 @@ export function RecentReleasesShelf({ albums, loaded, onOpenAlbum }: RecentRelea
   return (
     <DiscoverSection
       id="recent-releases"
-      title="Recent Releases"
-      subtitle="New music from artists you follow"
+      title="New Releases For You"
+      subtitle="Fresh drops from artists you follow"
       count={albums.length}
       loaded={loaded}
       // No emptyMessage: SECTION_EMPTY_POLICY already carries this section's
