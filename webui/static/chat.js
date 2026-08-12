@@ -6375,21 +6375,17 @@
         if (!entry || state.watch.grabbed[key]) return;
         state.watch.grabbed[key] = 1;
         renderWatch();
-        var addBody, searchBody;
-        if (entry.kd === 't') {
-            addBody = { show: { tmdb_id: parseInt(entry.id, 10), title: entry.ti || ('#' + entry.id),
-                                poster_url: entry.po || null },
-                        episodes: [{ season_number: entry.s, episode_number: entry.e }] };
-            searchBody = { scope: 'episode', tmdb_id: parseInt(entry.id, 10),
-                           season_number: entry.s, episode_number: entry.e };
-        } else {
-            addBody = { movie: { tmdb_id: parseInt(entry.id, 10), title: entry.ti || ('#' + entry.id),
-                                 year: entry.y ? parseInt(entry.y, 10) : null,
-                                 poster_url: entry.po || null } };
-            searchBody = { scope: 'movie', tmdb_id: parseInt(entry.id, 10) };
-        }
-        postJSON('/api/video/wishlist/add', addBody).then(function (res) {
-            if (!res.ok) {
+        // ONE hydrated call: the server enriches the bare bus context (id +
+        // title + poster) into a full wishlist row — year/detail blob for
+        // movies, episode title/still/air date/season poster for episodes —
+        // then fires the manual search. The bus fields ride along as
+        // fallbacks so the grab lands even if TMDB is unreachable.
+        var p = { kd: entry.kd === 't' ? 't' : 'm', id: entry.id, ti: entry.ti || '' };
+        if (entry.y) p.y = entry.y;
+        if (entry.po) p.po = entry.po;
+        if (entry.kd === 't') { p.s = entry.s; p.e = entry.e; }
+        postJSON('/api/video/watch/grab', p).then(function (res) {
+            if (!res.ok || !(res.body && res.body.success)) {
                 delete state.watch.grabbed[key];
                 if (typeof showToast === 'function') {
                     showToast((res.body && res.body.error) || 'Grab failed — is the video side set up?', 'error');
@@ -6397,7 +6393,6 @@
                 renderWatch();
                 return;
             }
-            postJSON('/api/video/wishlist/search', searchBody);
             if (typeof showToast === 'function') {
                 showToast('🎬 Grabbing — it\'s on the video wishlist and searching now', 'success');
             }

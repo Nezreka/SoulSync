@@ -113,7 +113,8 @@ def create_video_blueprint() -> Blueprint:
         if writing and not getattr(g, "can_download", True) and _p(
                 "/api/video/downloads/grab", "/api/video/downloads/retry",
                 "/api/video/youtube/download", "/api/video/wishlist/add",
-                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add"):
+                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
+                "/api/video/watch/grab"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
 
     from .dashboard import register_routes as reg_dashboard
