@@ -174,6 +174,18 @@ export function DiscoverHero({
                   <span className="meta-label">Popularity</span>
                 </div>
               )}
+              {artist && typeof artist.owned_album_count === 'number' && (
+                <div className="hero-meta-item">
+                  <span
+                    className={`hero-owned${artist.owned_album_count > 0 ? '' : ' hero-owned--none'}`}
+                    title="Albums by this artist in your library"
+                  >
+                    {artist.owned_album_count > 0
+                      ? `♛ ${artist.owned_album_count} album${artist.owned_album_count === 1 ? '' : 's'} in your library`
+                      : 'Not in your library yet — start here'}
+                  </span>
+                </div>
+              )}
               {artist && heroGenres(artist).length > 0 && (
                 <div className="hero-meta-item hero-genres">
                   {heroGenres(artist).map((g) => (

@@ -134,6 +134,11 @@ def get_discover_hero():
                 if hasattr(artist, 'image_url') and artist.image_url:
                     artist_data['image_url'] = artist.image_url
 
+                try:
+                    artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.artist_name)
+                except Exception:
+                    pass  # the meter is garnish — never break the hero for it
+
                 hero_artists.append(artist_data)
 
             logger.warning(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
@@ -263,6 +268,11 @@ def get_discover_hero():
                                 )
                 except Exception as img_err:
                     logger.error(f"Could not fetch artist image: {img_err}")
+
+            try:
+                artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.similar_artist_name)
+            except Exception:
+                pass  # the meter is garnish — never break the hero for it
 
             hero_artists.append(artist_data)
 

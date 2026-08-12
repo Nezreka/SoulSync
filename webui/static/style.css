@@ -35311,6 +35311,17 @@ div.artist-hero-badge {
     font-weight: 400;
 }
 
+/* The ownership meter — the one line no streaming service can render. */
+.hero-owned {
+    padding: 8px 16px; border-radius: 20px; font-size: 13.5px; font-weight: 700;
+    background: rgba(52, 211, 153, 0.16); border: 1px solid rgba(52, 211, 153, 0.35);
+    color: #6ee7b7;
+}
+.hero-owned--none {
+    background: rgba(255, 255, 255, 0.09); border-color: rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.75);
+}
+
 /* Hero Meta Section (Popularity & Genres) */
 .discover-hero-meta {
     margin-bottom: 28px;

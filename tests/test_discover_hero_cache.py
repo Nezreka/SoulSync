@@ -50,6 +50,9 @@ class _FakeDb:
     def get_watchlist_artists(self, profile_id=None):
         return []
 
+    def get_owned_album_count_by_artist_name(self, artist_name):
+        return 3 if artist_name == 'Aphex Twin' else 0
+
 
 @pytest.fixture()
 def app_ctx(monkeypatch):
@@ -68,6 +71,8 @@ def test_second_request_serves_from_cache(app_ctx, monkeypatch):
     first = hero.get_discover_hero().get_json()
     assert first['success'] is True
     assert first['artists'][0]['artist_name'] == 'Aphex Twin'
+    # The ownership meter rides the payload (and therefore the cache).
+    assert first['artists'][0]['owned_album_count'] == 3
     assert db.top_calls == 1
 
     second = hero.get_discover_hero().get_json()

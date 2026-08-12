@@ -53,6 +53,8 @@ export interface DiscoverHeroArtist {
   source?: string;
   /** Only on the watchlist-fallback branch. */
   is_watchlist?: boolean;
+  /** The ownership meter: how many of their albums are in the library. */
+  owned_album_count?: number;
   /** Conditional: present only when a cached image was found. */
   image_url?: string;
   genres?: string[];

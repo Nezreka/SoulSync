@@ -1662,6 +1662,26 @@ class MusicDatabase:
                                 'album': ('albums', 'title'),
                                 'track': ('tracks', 'title')}
 
+    def get_owned_album_count_by_artist_name(self, artist_name: str) -> int:
+        """How many of this artist's albums are IN the library — the discover
+        hero's ownership meter. Case-insensitive exact name match, riding
+        idx_artists_name + idx_albums_artist_id."""
+        if not (artist_name or '').strip():
+            return 0
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT COUNT(al.id) FROM albums al
+                       JOIN artists ar ON al.artist_id = ar.id
+                       WHERE ar.name = ? COLLATE NOCASE""",
+                (artist_name.strip(),),
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
     def degenerate_entity_ids(self) -> dict:
         """{entity_type: [ids]} of rows whose display title is DEGENERATE
         (normalizes to nothing) — the empty-normalization false-match class.
