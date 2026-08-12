@@ -6639,24 +6639,26 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 
                 if server_source:
-                    # Get counts for specific server (deduplicate by name like general count)
-                    cursor.execute("SELECT COUNT(DISTINCT name) FROM artists WHERE server_source = ?", (server_source,))
+                    # What THIS server contributed to the catalogue.
+                    cursor.execute("SELECT COUNT(DISTINCT name) FROM lib2_artists "
+                                   "WHERE server_source = ?", (server_source,))
                     artist_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM albums WHERE server_source = ?", (server_source,))
+
+                    cursor.execute("SELECT COUNT(*) FROM lib2_albums WHERE server_source = ?",
+                                   (server_source,))
                     album_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE server_source = ?", (server_source,))
+
+                    cursor.execute("SELECT COUNT(*) FROM lib2_tracks WHERE server_source = ?",
+                                   (server_source,))
                     track_count = cursor.fetchone()[0]
                 else:
-                    # Get total counts (all servers)
-                    cursor.execute("SELECT COUNT(*) FROM artists")
+                    cursor.execute("SELECT COUNT(DISTINCT name) FROM lib2_artists")
                     artist_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM albums")
+
+                    cursor.execute("SELECT COUNT(*) FROM lib2_albums")
                     album_count = cursor.fetchone()[0]
-                    
-                    cursor.execute("SELECT COUNT(*) FROM tracks")
+
+                    cursor.execute("SELECT COUNT(*) FROM lib2_tracks")
                     track_count = cursor.fetchone()[0]
                 
                 return {
@@ -6689,15 +6691,24 @@ class MusicDatabase:
                 with self._get_connection() as conn:
                     cursor = conn.cursor()
 
-                    # Delete only data from the specified server
-                    # Order matters: tracks -> albums -> artists (foreign key constraints)
-                    cursor.execute("DELETE FROM tracks WHERE server_source = ?", (server_source,))
+                    # Only what this server put there, and only the rows it
+                    # owns: a catalogue row that also came from a download or an
+                    # import keeps its files. Order matters (files -> tracks ->
+                    # albums -> artists).
+                    cursor.execute(
+                        "DELETE FROM lib2_track_files WHERE track_id IN "
+                        "(SELECT id FROM lib2_tracks WHERE server_source = ?)",
+                        (server_source,))
+                    cursor.execute("DELETE FROM lib2_tracks WHERE server_source = ?",
+                                   (server_source,))
                     tracks_deleted = cursor.rowcount
 
-                    cursor.execute("DELETE FROM albums WHERE server_source = ?", (server_source,))
+                    cursor.execute("DELETE FROM lib2_albums WHERE server_source = ?",
+                                   (server_source,))
                     albums_deleted = cursor.rowcount
 
-                    cursor.execute("DELETE FROM artists WHERE server_source = ?", (server_source,))
+                    cursor.execute("DELETE FROM lib2_artists WHERE server_source = ?",
+                                   (server_source,))
                     artists_deleted = cursor.rowcount
 
                     conn.commit()
@@ -6733,35 +6744,36 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Find orphaned artists (no tracks)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM artists 
-                    WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                """)
+                # Only rows a media server put there: a discography row has no
+                # tracks BY DESIGN (it is a release the user does not own yet),
+                # and a monitored artist may sit in the catalogue for months
+                # before its first file arrives. Deleting those would be the
+                # scan eating the wanted list.
+                orphan_artists = """
+                    SELECT id FROM lib2_artists a
+                     WHERE a.server_id IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM lib2_albums al
+                                        WHERE al.primary_artist_id = a.id)
+                       AND NOT EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                        WHERE ta.artist_id = a.id)
+                """
+                orphan_albums = """
+                    SELECT id FROM lib2_albums al
+                     WHERE al.server_id IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM lib2_tracks t
+                                        WHERE t.album_id = al.id)
+                """
+                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
                 orphaned_artists_count = cursor.fetchone()[0]
-                
-                # Find orphaned albums (no tracks)
-                cursor.execute("""
-                    SELECT COUNT(*) FROM albums 
-                    WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                """)
+                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_albums})")
                 orphaned_albums_count = cursor.fetchone()[0]
-                
-                # Delete orphaned artists
-                if orphaned_artists_count > 0:
-                    cursor.execute("""
-                        DELETE FROM artists 
-                        WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
-                    """)
-                    logger.info(f"Removed {orphaned_artists_count} orphaned artists")
-                
-                # Delete orphaned albums  
+
                 if orphaned_albums_count > 0:
-                    cursor.execute("""
-                        DELETE FROM albums 
-                        WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                    """)
+                    cursor.execute(f"DELETE FROM lib2_albums WHERE id IN ({orphan_albums})")
                     logger.info(f"Removed {orphaned_albums_count} orphaned albums")
+                if orphaned_artists_count > 0:
+                    cursor.execute(f"DELETE FROM lib2_artists WHERE id IN ({orphan_artists})")
+                    logger.info(f"Removed {orphaned_artists_count} orphaned artists")
                 
                 conn.commit()
                 
@@ -6775,116 +6787,105 @@ class MusicDatabase:
             return {'orphaned_artists_removed': 0, 'orphaned_albums_removed': 0}
     
     def merge_duplicate_artists(self) -> Dict[str, int]:
-        """
-        Find and merge duplicate artists that share the same name + server_source.
-        Keeps the artist with the most enrichment data, migrates albums/tracks,
-        and merges enrichment columns.
+        """Fold catalogue rows that are the same artist under the same server.
+
+        Duplicates are rows sharing ``name_key`` — the folded key, so "Bjork"
+        and "Björk" are one artist, which ``LOWER(name)`` never saw. The keeper
+        is the row carrying the most enrichment; the others hand over their
+        releases and their track credits and go.
+
+        §40 alias members are left alone: an alias is a deliberate second row
+        for the same artist, already folded on read.
         """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-
-                # Find duplicate artist groups (same name + server_source, different IDs)
                 cursor.execute("""
-                    SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
-                    FROM artists
-                    GROUP BY name, server_source
+                    SELECT name_key, server_source, GROUP_CONCAT(id) AS ids, COUNT(*) AS cnt
+                    FROM lib2_artists
+                    WHERE canonical_artist_id IS NULL AND name_key IS NOT NULL
+                      AND name_key <> ''
+                    GROUP BY name_key, server_source
                     HAVING cnt > 1
                 """)
                 duplicate_groups = cursor.fetchall()
-
                 if not duplicate_groups:
                     logger.debug("No duplicate artists found")
                     return {'artists_merged': 0, 'albums_migrated': 0}
 
                 total_merged = 0
                 total_albums_migrated = 0
-
-                enrichment_cols = [
-                    'musicbrainz_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
-                    'spotify_artist_id', 'spotify_match_status', 'spotify_last_attempted',
-                    'itunes_artist_id', 'itunes_match_status', 'itunes_last_attempted',
-                    'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
-                    'style', 'mood', 'label', 'banner_url',
-                    'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
-                    'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
-                ]
+                enrichment_cols = ['spotify_id', 'musicbrainz_id', 'image_url',
+                                   'summary', 'style', 'mood', 'label', 'banner_url',
+                                   'soul_id']
 
                 for group in duplicate_groups:
-                    artist_name = group['name']
-                    server_source = group['server_source']
-                    ids = group['ids'].split(',')
-
-                    logger.info(f"Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
-
-                    # Pick the keeper: the one with the most enrichment data
-                    best_id = ids[0]
-                    best_score = 0
+                    ids = [int(i) for i in str(group['ids']).split(',')]
+                    rows = {}
                     for aid in ids:
-                        cursor.execute("SELECT * FROM artists WHERE id = ?", (aid,))
+                        cursor.execute("SELECT * FROM lib2_artists WHERE id = ?", (aid,))
                         row = cursor.fetchone()
-                        if row:
-                            score = 0
-                            for col in enrichment_cols:
-                                try:
-                                    if row[col] is not None:
-                                        score += 1
-                                except (IndexError, KeyError):
-                                    continue
-                            if score > best_score:
-                                best_score = score
-                                best_id = aid
+                        if row is not None:
+                            rows[aid] = row
 
-                    # Merge enrichment data from all duplicates into the keeper
-                    for aid in ids:
+                    def _score(row):
+                        score = sum(1 for col in enrichment_cols
+                                    if row[col] not in (None, ''))
+                        if row['external_ids'] not in (None, '', '{}'):
+                            score += 1
+                        if row['genres'] not in (None, '', '[]'):
+                            score += 1
+                        return score
+
+                    best_id = max(rows, key=lambda aid: (_score(rows[aid]), -aid),
+                                  default=None)
+                    if best_id is None:
+                        continue
+                    artist_name = rows[best_id]['name']
+                    logger.info(f"Merging duplicate artist '{artist_name}': ids {ids}")
+
+                    for aid, donor in rows.items():
                         if aid == best_id:
                             continue
-                        cursor.execute("SELECT * FROM artists WHERE id = ?", (aid,))
-                        donor = cursor.fetchone()
-                        if not donor:
-                            continue
-
-                        # Fill NULL enrichment columns on keeper from this duplicate
-                        set_parts = []
-                        values = []
-                        for col in enrichment_cols:
-                            try:
-                                donor_val = donor[col]
-                                if donor_val is not None:
-                                    # Only fill if keeper's value is NULL
-                                    set_parts.append(f"{col} = COALESCE({col}, ?)")
-                                    values.append(donor_val)
-                            except (IndexError, KeyError):
+                        set_parts, values = [], []
+                        for col in [*enrichment_cols, 'external_ids', 'genres']:
+                            donor_val = donor[col]
+                            if donor_val in (None, '', '{}', '[]'):
                                 continue
-
+                            set_parts.append(f"{col} = CASE WHEN {col} IS NULL "
+                                             f"OR {col} IN ('', '{{}}', '[]') THEN ? ELSE {col} END")
+                            values.append(donor_val)
                         if set_parts:
                             values.append(best_id)
-                            cursor.execute(f"""
-                                UPDATE artists SET {', '.join(set_parts)}
-                                WHERE id = ?
-                            """, values)
+                            cursor.execute(
+                                f"UPDATE lib2_artists SET {', '.join(set_parts)} WHERE id = ?",
+                                values)
 
-                        # Migrate albums and tracks from duplicate to keeper
-                        cursor.execute("UPDATE albums SET artist_id = ? WHERE artist_id = ?", (best_id, aid))
+                        cursor.execute(
+                            "UPDATE lib2_albums SET primary_artist_id = ? WHERE primary_artist_id = ?",
+                            (best_id, aid))
                         migrated = cursor.rowcount
                         total_albums_migrated += migrated
-                        cursor.execute("UPDATE tracks SET artist_id = ? WHERE artist_id = ?", (best_id, aid))
-
-                        # Delete the duplicate artist
-                        cursor.execute("SELECT COUNT(*) FROM albums WHERE artist_id = ?", (aid,))
-                        remaining = cursor.fetchone()[0]
-                        if remaining == 0:
-                            cursor.execute("DELETE FROM artists WHERE id = ?", (aid,))
-                            total_merged += 1
-                            logger.info(f"   Merged '{artist_name}' ID {aid} → {best_id} ({migrated} albums migrated)")
-                        else:
-                            logger.warning(f"   Could not delete duplicate {aid}: {remaining} albums still reference it")
+                        cursor.execute(
+                            "UPDATE OR IGNORE lib2_album_artists SET artist_id = ? WHERE artist_id = ?",
+                            (best_id, aid))
+                        cursor.execute("DELETE FROM lib2_album_artists WHERE artist_id = ?", (aid,))
+                        cursor.execute(
+                            "UPDATE OR IGNORE lib2_track_artists SET artist_id = ? WHERE artist_id = ?",
+                            (best_id, aid))
+                        cursor.execute("DELETE FROM lib2_track_artists WHERE artist_id = ?", (aid,))
+                        cursor.execute(
+                            "UPDATE lib2_artists SET canonical_artist_id = ? "
+                            " WHERE canonical_artist_id = ?", (best_id, aid))
+                        cursor.execute("DELETE FROM lib2_artists WHERE id = ?", (aid,))
+                        total_merged += 1
+                        logger.info(f"   Merged '{artist_name}' id {aid} → {best_id} "
+                                    f"({migrated} releases migrated)")
 
                 conn.commit()
-
                 if total_merged > 0:
-                    logger.info(f"Duplicate merge complete: {total_merged} duplicates merged, {total_albums_migrated} albums migrated")
-
+                    logger.info(f"Duplicate merge complete: {total_merged} duplicates merged, "
+                                f"{total_albums_migrated} releases migrated")
                 return {'artists_merged': total_merged, 'albums_migrated': total_albums_migrated}
 
         except Exception as e:
@@ -6898,7 +6899,8 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM artists WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_artists WHERE server_source = ?"
+                               "  AND server_id IS NOT NULL", (server_source,))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
@@ -6909,7 +6911,8 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM albums WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_albums WHERE server_source = ?"
+                               "  AND server_id IS NOT NULL", (server_source,))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
@@ -6920,7 +6923,8 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM tracks WHERE server_source = ?", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_tracks WHERE server_source = ?"
+                               "  AND server_id IS NOT NULL", (server_source,))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -6941,8 +6945,17 @@ class MusicDatabase:
                     placeholders = ','.join('?' * len(batch))
                     params = batch + [server_source]
 
+                    # The file rows go with the track: a track the server no
+                    # longer lists has no file we could still point at, and a
+                    # dangling file row is what the orphan scanners hunt.
                     cursor.execute(
-                        f"DELETE FROM tracks WHERE id IN ({placeholders}) AND server_source = ?",
+                        f"DELETE FROM lib2_track_files WHERE track_id IN ("
+                        f"    SELECT id FROM lib2_tracks WHERE server_id IN ({placeholders})"
+                        f"      AND server_source = ?)",
+                        params)
+                    cursor.execute(
+                        f"DELETE FROM lib2_tracks WHERE server_id IN ({placeholders}) "
+                        f"AND server_source = ?",
                         params)
                     tracks_removed += cursor.rowcount
 
@@ -6979,28 +6992,36 @@ class MusicDatabase:
                         placeholders = ','.join('?' * len(batch))
                         params = batch + [server_source]
 
-                        # Delete tracks belonging to these artists
+                        # The ids are the SERVER's; the catalogue rows they
+                        # stand for are found through `server_id`, and their
+                        # children through the catalogue's own foreign keys.
+                        artist_scope = (
+                            f"SELECT id FROM lib2_artists "
+                            f"WHERE server_id IN ({placeholders}) AND server_source = ?")
+                        album_scope = (
+                            f"SELECT id FROM lib2_albums "
+                            f"WHERE primary_artist_id IN ({artist_scope})")
                         cursor.execute(
-                            f"SELECT COUNT(*) FROM tracks WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            f"SELECT COUNT(*) FROM lib2_tracks WHERE album_id IN ({album_scope})",
                             params)
                         tracks_removed += cursor.fetchone()[0]
                         cursor.execute(
-                            f"DELETE FROM tracks WHERE artist_id IN ({placeholders}) AND server_source = ?",
+                            f"DELETE FROM lib2_track_files WHERE track_id IN "
+                            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({album_scope}))",
+                            params)
+                        cursor.execute(
+                            f"DELETE FROM lib2_tracks WHERE album_id IN ({album_scope})",
                             params)
 
-                        # Delete albums belonging to these artists
-                        cursor.execute(
-                            f"SELECT COUNT(*) FROM albums WHERE artist_id IN ({placeholders}) AND server_source = ?",
-                            params)
+                        cursor.execute(f"SELECT COUNT(*) FROM lib2_albums "
+                                       f"WHERE primary_artist_id IN ({artist_scope})", params)
                         albums_removed += cursor.fetchone()[0]
-                        cursor.execute(
-                            f"DELETE FROM albums WHERE artist_id IN ({placeholders}) AND server_source = ?",
-                            params)
+                        cursor.execute(f"DELETE FROM lib2_albums "
+                                       f"WHERE primary_artist_id IN ({artist_scope})", params)
 
-                        # Delete the artists themselves
                         cursor.execute(
-                            f"DELETE FROM artists WHERE id IN ({placeholders}) AND server_source = ?",
-                            params)
+                            f"DELETE FROM lib2_artists WHERE server_id IN ({placeholders}) "
+                            f"AND server_source = ?", params)
                         artists_removed += cursor.rowcount
 
                 # Remove albums (not already handled by artist cascade above)
@@ -7011,19 +7032,24 @@ class MusicDatabase:
                         placeholders = ','.join('?' * len(batch))
                         params = batch + [server_source]
 
-                        # Delete tracks belonging to these albums
+                        album_scope = (
+                            f"SELECT id FROM lib2_albums "
+                            f"WHERE server_id IN ({placeholders}) AND server_source = ?")
                         cursor.execute(
-                            f"SELECT COUNT(*) FROM tracks WHERE album_id IN ({placeholders}) AND server_source = ?",
+                            f"SELECT COUNT(*) FROM lib2_tracks WHERE album_id IN ({album_scope})",
                             params)
                         tracks_removed += cursor.fetchone()[0]
                         cursor.execute(
-                            f"DELETE FROM tracks WHERE album_id IN ({placeholders}) AND server_source = ?",
+                            f"DELETE FROM lib2_track_files WHERE track_id IN "
+                            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({album_scope}))",
+                            params)
+                        cursor.execute(
+                            f"DELETE FROM lib2_tracks WHERE album_id IN ({album_scope})",
                             params)
 
-                        # Delete the albums themselves
                         cursor.execute(
-                            f"DELETE FROM albums WHERE id IN ({placeholders}) AND server_source = ?",
-                            params)
+                            f"DELETE FROM lib2_albums WHERE server_id IN ({placeholders}) "
+                            f"AND server_source = ?", params)
                         albums_removed += cursor.rowcount
 
                 conn.commit()
@@ -7049,148 +7075,28 @@ class MusicDatabase:
         return self.insert_or_update_media_artist(plex_artist, server_source='plex')
     
     def insert_or_update_media_artist(self, artist_obj, server_source: str = 'plex') -> bool:
-        """Insert or update artist from media server artist object (Plex or Jellyfin)"""
+        """Write what the media server says about an artist into the catalogue."""
+        from core.library2.media_server_sync import _genres_json, upsert_artist
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Convert artist ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
-                artist_id = str(artist_obj.ratingKey)
                 raw_name = artist_obj.title
-                # Normalize artist name to handle quote variations and other inconsistencies
                 name = self._normalize_artist_name(raw_name)
-
-                # Debug logging to see if normalization is working
                 if raw_name != name:
                     logger.info(f"Artist name normalized: '{raw_name}' -> '{name}'")
-                thumb_url = getattr(artist_obj, 'thumb', None)
-                
-                # Only preserve timestamps and flags from summary, not full biography
-                full_summary = getattr(artist_obj, 'summary', None) or ''
-                summary = None
-                if full_summary:
-                    # Extract only our tracking markers (timestamps and ignore flags)
-                    import re
-                    markers = []
-                    
-                    # Extract timestamp marker
-                    timestamp_match = re.search(r'-updatedAt\d{4}-\d{2}-\d{2}', full_summary)
-                    if timestamp_match:
-                        markers.append(timestamp_match.group(0))
-                    
-                    # Extract ignore flag
-                    if '-IgnoreUpdate' in full_summary:
-                        markers.append('-IgnoreUpdate')
-                    
-                    # Only store markers, not full biography
-                    summary = '\n\n'.join(markers) if markers else None
-                
-                # Get genres (handle both Plex and Jellyfin formats)
-                genres = []
-                if hasattr(artist_obj, 'genres') and artist_obj.genres:
-                    genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
-                             for genre in artist_obj.genres]
-                
-                genres_json = json.dumps(genres) if genres else None
-                
-                # Check if artist exists with this ID and server source
-                cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = ?", (artist_id, server_source))
-                exists = cursor.fetchone()
-
-                if exists:
-                    # Update existing artist
-                    cursor.execute("""
-                        UPDATE artists
-                        SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND server_source = ?
-                    """, (name, thumb_url, genres_json, summary, artist_id, server_source))
-                    logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
-                else:
-                    # Before inserting, check if an artist with the same name already exists
-                    # for this server source (ratingKey may have changed after a library rescan)
-                    cursor.execute("SELECT id FROM artists WHERE name = ? AND server_source = ?", (name, server_source))
-                    existing_by_name = cursor.fetchone()
-
-                    if existing_by_name:
-                        old_id = existing_by_name['id']
-                        # ratingKey changed — migrate old artist to new ID, preserving enrichment data
-                        logger.info(f"Artist ratingKey migrated: '{name}' ({old_id} → {artist_id})")
-
-                        # Step 1: Insert new artist record, copying enrichment data from old
-                        enrichment_cols = [
-                            'musicbrainz_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
-                            'spotify_artist_id', 'spotify_match_status', 'spotify_last_attempted',
-                            'itunes_artist_id', 'itunes_match_status', 'itunes_last_attempted',
-                            'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
-                            'style', 'mood', 'label', 'banner_url',
-                            'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
-                            'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
-                        ]
-
-                        # Read enrichment data from old artist
-                        cursor.execute("SELECT * FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
-                        old_row = cursor.fetchone()
-
-                        # Insert new artist with fresh server metadata + preserved created_at
-                        old_created = old_row['created_at'] if old_row else None
-                        cursor.execute("""
-                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, thumb_url, genres_json, summary, server_source, old_created))
-
-                        # Copy enrichment data from old record to new record
-                        if old_row:
-                            set_parts = []
-                            values = []
-                            for col in enrichment_cols:
-                                try:
-                                    val = old_row[col]
-                                    if val is not None:
-                                        set_parts.append(f"{col} = ?")
-                                        values.append(val)
-                                except (IndexError, KeyError):
-                                    continue  # Column doesn't exist in this DB version
-
-                            if set_parts:
-                                values.append(artist_id)
-                                cursor.execute(f"""
-                                    UPDATE artists SET {', '.join(set_parts)}
-                                    WHERE id = ?
-                                """, values)
-
-                        # Step 2: Migrate album and track references to new artist ID
-                        cursor.execute("UPDATE albums SET artist_id = ? WHERE artist_id = ?", (artist_id, old_id))
-                        migrated_albums = cursor.rowcount
-                        cursor.execute("UPDATE tracks SET artist_id = ? WHERE artist_id = ?", (artist_id, old_id))
-                        migrated_tracks = cursor.rowcount
-
-                        # Step 3: Safely delete old artist (verify no remaining references first)
-                        cursor.execute("SELECT COUNT(*) FROM albums WHERE artist_id = ?", (old_id,))
-                        remaining = cursor.fetchone()[0]
-                        if remaining == 0:
-                            cursor.execute("DELETE FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
-                        else:
-                            logger.warning(f"Could not delete old artist {old_id}: {remaining} albums still reference it")
-
-                        if migrated_albums > 0 or migrated_tracks > 0:
-                            logger.info(f"   Migrated {migrated_albums} albums, {migrated_tracks} tracks to new ID")
-                    else:
-                        # Genuinely new artist — insert fresh record
-                        cursor.execute("""
-                            INSERT INTO artists (id, name, thumb_url, genres, summary, server_source)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (artist_id, name, thumb_url, genres_json, summary, server_source))
-                        logger.debug(f"Inserted new {server_source} artist: {name} (ID: {artist_id})")
-
+                upsert_artist(
+                    cursor,
+                    server_source=server_source,
+                    server_id=str(artist_obj.ratingKey),
+                    name=name,
+                    image_url=getattr(artist_obj, 'thumb', None),
+                    genres_json=_genres_json(artist_obj),
+                )
                 conn.commit()
-                rows_affected = cursor.rowcount
-                if rows_affected == 0:
-                    logger.warning(f"Database insertion returned 0 rows affected for {server_source} artist: {name} (ID: {artist_id})")
-
                 return True
-                
         except Exception as e:
-            logger.error(f"Error inserting/updating {server_source} artist {getattr(artist_obj, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error inserting/updating {server_source} artist "
+                         f"{getattr(artist_obj, 'title', 'Unknown')}: {e}")
             return False
 
     def _normalize_artist_name(self, name: str) -> str:
@@ -7240,132 +7146,47 @@ class MusicDatabase:
         return self.insert_or_update_media_album(plex_album, artist_id, server_source='plex')
     
     def insert_or_update_media_album(self, album_obj, artist_id: str, server_source: str = 'plex') -> bool:
-        """Insert or update album from media server album object (Plex or Jellyfin)"""
+        """Write what the media server says about a release into the catalogue.
+
+        ``artist_id`` is the SERVER's artist id — the scan works in the server's
+        id space throughout — and is resolved to the catalogue row the artist
+        pass just wrote.
+        """
+        from core.library2.media_server_sync import (
+            _genres_json, resolve_artist, upsert_album,
+        )
+        conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
-            # Convert album ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
-            album_id = str(album_obj.ratingKey)
-            title = album_obj.title
-            year = getattr(album_obj, 'year', None)
-            thumb_url = getattr(album_obj, 'thumb', None)
-            
-            # Get track count and duration (handle different server attributes)
-            track_count = getattr(album_obj, 'leafCount', None) or getattr(album_obj, 'childCount', None)
-            duration = getattr(album_obj, 'duration', None)
-            
-            # Get genres (handle both Plex and Jellyfin formats)
-            genres = []
-            if hasattr(album_obj, 'genres') and album_obj.genres:
-                genres = [genre.tag if hasattr(genre, 'tag') else str(genre) 
-                         for genre in album_obj.genres]
-            
-            genres_json = json.dumps(genres) if genres else None
-            
-            # Check if album exists with this ID (PRIMARY KEY check)
-            cursor.execute("SELECT id, server_source FROM albums WHERE id = ?", (album_id,))
-            existing = cursor.fetchone()
-
-            if existing:
-                # Album exists - update it (update server_source if different)
-                cursor.execute("""
-                    UPDATE albums
-                    SET artist_id = ?, title = ?, year = ?, thumb_url = COALESCE(NULLIF(?, ''), thumb_url), genres = ?,
-                        track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
-            else:
-                # Before inserting, check if an album with the same title already exists
-                # under this artist (ratingKey may have changed after a library rescan)
-                cursor.execute(
-                    "SELECT id FROM albums WHERE title = ? AND artist_id = ? AND server_source = ?",
-                    (title, artist_id, server_source))
-                existing_by_title = cursor.fetchone()
-
-                if existing_by_title:
-                    old_id = existing_by_title['id']
-                    # ratingKey changed — migrate old album to new ID, preserving enrichment data
-                    logger.info(f"Album ratingKey migrated: '{title}' ({old_id} → {album_id})")
-
-                    enrichment_cols = [
-                        'musicbrainz_release_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
-                        'spotify_album_id', 'spotify_match_status', 'spotify_last_attempted',
-                        'itunes_album_id', 'itunes_match_status', 'itunes_last_attempted',
-                        'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
-                        'style', 'mood', 'label', 'explicit', 'record_type',
-                        'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
-                        'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
-                        'bandcamp_id', 'bandcamp_match_status', 'bandcamp_last_attempted',
-                        'bandcamp_url', 'bandcamp_tags', 'bandcamp_label',
-                        # api_track_count is metadata-source-derived enrichment cache;
-                        # losing it on a ratingKey rekey would force the next
-                        # completeness scan back to live API lookups (kettui PR #374).
-                        'api_track_count',
-                    ]
-
-                    # Read enrichment data from old album
-                    cursor.execute("SELECT * FROM albums WHERE id = ?", (old_id,))
-                    old_row = cursor.fetchone()
-                    preserved_thumb_url = thumb_url or (old_row['thumb_url'] if old_row and 'thumb_url' in old_row.keys() else None)
-
-                    # Insert new album with fresh server metadata + preserved created_at
-                    old_created = old_row['created_at'] if old_row else None
-                    cursor.execute("""
-                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres,
-                                            track_count, duration, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, title, year, preserved_thumb_url, genres_json,
-                          track_count, duration, server_source, old_created))
-
-                    # Copy enrichment data from old record to new record
-                    if old_row:
-                        set_parts = []
-                        values = []
-                        for col in enrichment_cols:
-                            try:
-                                val = old_row[col]
-                                if val is not None:
-                                    set_parts.append(f"{col} = ?")
-                                    values.append(val)
-                            except (IndexError, KeyError):
-                                continue  # Column doesn't exist in this DB version
-
-                        if set_parts:
-                            values.append(album_id)
-                            cursor.execute(f"""
-                                UPDATE albums SET {', '.join(set_parts)}
-                                WHERE id = ?
-                            """, values)
-
-                    # Migrate track references to new album ID
-                    cursor.execute("UPDATE tracks SET album_id = ? WHERE album_id = ?", (album_id, old_id))
-                    migrated_tracks = cursor.rowcount
-
-                    # Safely delete old album (verify no remaining references first)
-                    cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (old_id,))
-                    remaining = cursor.fetchone()[0]
-                    if remaining == 0:
-                        cursor.execute("DELETE FROM albums WHERE id = ?", (old_id,))
-                    else:
-                        logger.warning(f"Could not delete old album {old_id}: {remaining} tracks still reference it")
-
-                    if migrated_tracks > 0:
-                        logger.info(f"   Migrated {migrated_tracks} tracks to new album ID")
-                else:
-                    # Genuinely new album — insert fresh record
-                    cursor.execute("""
-                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count, duration, server_source)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (album_id, artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source))
-
+            catalogue_artist = resolve_artist(cursor, server_source, artist_id)
+            if catalogue_artist is None:
+                logger.warning(
+                    f"Album {getattr(album_obj, 'title', '?')} skipped: artist "
+                    f"{server_source}:{artist_id} is not in the catalogue yet")
+                return False
+            upsert_album(
+                cursor,
+                server_source=server_source,
+                server_id=str(album_obj.ratingKey),
+                artist_id=catalogue_artist,
+                title=album_obj.title,
+                year=getattr(album_obj, 'year', None),
+                image_url=getattr(album_obj, 'thumb', None),
+                genres_json=_genres_json(album_obj),
+                track_count=(getattr(album_obj, 'leafCount', None)
+                             or getattr(album_obj, 'childCount', None)),
+            )
             conn.commit()
             return True
-            
         except Exception as e:
-            logger.error(f"Error inserting/updating {server_source} album {getattr(album_obj, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error inserting/updating {server_source} album "
+                         f"{getattr(album_obj, 'title', 'Unknown')}: {e}")
             return False
-    
+        finally:
+            if conn:
+                conn.close()
+
     def get_album_title_year(self, album_id) -> Optional[Tuple[str, Any]]:
         """(title, year) for one album row, or None. Used by the download
         analysis's re-release guard to see WHICH album an owned track hit."""
@@ -7476,26 +7297,32 @@ class MusicDatabase:
         return self.insert_or_update_media_track(plex_track, album_id, artist_id, server_source='plex')
     
     def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex') -> bool:
-        """Insert or update track from media server track object (Plex or Jellyfin) with retry logic"""
+        """Write what the media server says about a track into the catalogue.
+
+        ``album_id``/``artist_id`` are the SERVER's ids; both are resolved to
+        the catalogue rows the album/artist passes wrote. The path, size and
+        bitrate go to the track's file row (ADR-03), not onto the track.
+        """
+        from core.library2.media_server_sync import (
+            resolve_album, resolve_artist, upsert_track,
+        )
         max_retries = 3
         retry_count = 0
-        
+
         while retry_count < max_retries:
+            conn = None
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                
-                # Set shorter timeout to prevent long locks
-                cursor.execute("PRAGMA busy_timeout = 10000")  # 10 second timeout
-                
-                # Convert track ID to string (handles both Plex integer IDs and Jellyfin GUIDs)
-                track_id = str(track_obj.ratingKey)
+                cursor.execute("PRAGMA busy_timeout = 10000")
+
+                server_track_id = str(track_obj.ratingKey)
                 title = track_obj.title
                 track_number = getattr(track_obj, 'trackNumber', None)
                 # Multi-disc: capture the disc number so multi-disc albums don't all
                 # collapse onto disc 1 (which mis-files disc-2+ tracks and flags them
-                # "missing"). Jellyfin/Navidrome wrappers set .discNumber; plexapi's Track
-                # exposes .parentIndex. Floor to >=1 — a missing/0 disc is disc 1.
+                # "missing"). Jellyfin/Navidrome wrappers set .discNumber; plexapi's
+                # Track exposes .parentIndex. Floor to >=1 — a missing/0 disc is 1.
                 _raw_disc = getattr(track_obj, 'discNumber', None)
                 if _raw_disc is None:
                     _raw_disc = getattr(track_obj, 'parentIndex', None)
@@ -7506,8 +7333,9 @@ class MusicDatabase:
                 except (TypeError, ValueError):
                     disc_number = 1
                 duration = getattr(track_obj, 'duration', None)
-                
-                # Get file path and media info (Plex-specific, Jellyfin may not have these)
+
+                # File path and media info (Plex-specific; the other servers put
+                # them on their wrapper class).
                 file_path = None
                 bitrate = None
                 file_size = None
@@ -7517,178 +7345,98 @@ class MusicDatabase:
                         if hasattr(media, 'parts') and media.parts:
                             part = media.parts[0]
                             file_path = getattr(part, 'file', None)
-                            # Plex's MediaPart exposes the file size in bytes
-                            # via plexapi — pull it for the Library Disk
-                            # Usage card on Stats. None when the server
-                            # didn't report a size.
                             _plex_size = getattr(part, 'size', None)
                             if isinstance(_plex_size, int) and _plex_size > 0:
                                 file_size = _plex_size
                         bitrate = getattr(media, 'bitrate', None)
-
-                # Fallback for Navidrome/Subsonic tracks
-                if file_path is None and hasattr(track_obj, 'path') and track_obj.path:
+                if file_path is None and getattr(track_obj, 'path', None):
                     file_path = track_obj.path
-                if bitrate is None and hasattr(track_obj, 'bitRate') and track_obj.bitRate:
+                if bitrate is None and getattr(track_obj, 'bitRate', None):
                     bitrate = track_obj.bitRate
-                if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
+                if file_path is None and getattr(track_obj, 'suffix', None):
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
-                # File size: Jellyfin / Navidrome / SoulSync-standalone
-                # all set track_obj.file_size on their wrapper class.
-                # Plex came in via the media.parts[0].size path above —
-                # don't clobber that.
                 if file_size is None and hasattr(track_obj, 'file_size'):
                     _wrapper_size = getattr(track_obj, 'file_size', None)
                     if isinstance(_wrapper_size, int) and _wrapper_size > 0:
                         file_size = _wrapper_size
 
-                # Extract per-track artist for compilations/DJ mixes.
-                # Only stored when it differs from the album artist.
+                catalogue_album = resolve_album(cursor, server_source, album_id)
+                catalogue_artist = resolve_artist(cursor, server_source, artist_id)
+                if catalogue_album is None or catalogue_artist is None:
+                    logger.warning(
+                        f"Track {title} skipped: album/artist "
+                        f"{server_source}:{album_id}/{artist_id} not in the catalogue")
+                    return False
+
+                # Per-track artist for compilations/DJ mixes — only stored when it
+                # differs from the album artist.
                 track_artist = None
-                # Plex: originalTitle holds the per-track artist on compilation albums
                 plex_original = getattr(track_obj, 'originalTitle', None)
                 if plex_original and plex_original.strip():
                     track_artist = plex_original.strip()
-                # Jellyfin/Emby: store ALL ArtistItems, not just [0]. A track
-                # like "Super Single" by Artist1 feat. Artist2 has both names in
-                # ArtistItems; if we kept only the first, completion checks for
-                # Artist2's discography (where the same track also appears as a
-                # single) would never find this row in the library. Joining with
-                # "; " matches Jellyfin's own UI convention and lets the search
-                # path treat each name as a separate artist credit.
+                # Jellyfin/Emby: keep ALL ArtistItems, not just [0]. A track by
+                # "Artist1 feat. Artist2" carries both; keeping only the first made
+                # Artist2's completion checks miss this row.
                 if not track_artist and hasattr(track_obj, '_data'):
                     raw = getattr(track_obj, '_data', {}) or {}
                     artist_items = raw.get('ArtistItems', [])
                     if artist_items:
-                        jf_track_artist_names = [
-                            a.get('Name', '') for a in artist_items if a.get('Name')
-                        ]
-                        jf_track_artist = '; '.join(jf_track_artist_names)
+                        jf_names = [a.get('Name', '') for a in artist_items if a.get('Name')]
+                        jf_track_artist = '; '.join(jf_names)
                         album_artists = raw.get('AlbumArtists', [])
                         jf_album_artist = album_artists[0].get('Name', '') if album_artists else ''
-                        # Store when the track has multiple artists OR when the
-                        # single-artist credit differs from the album artist.
                         if jf_track_artist and (
-                            len(jf_track_artist_names) > 1
-                            or jf_track_artist != jf_album_artist
+                            len(jf_names) > 1 or jf_track_artist != jf_album_artist
                         ):
                             track_artist = jf_track_artist
-                # Navidrome/Subsonic: artist attribute is per-track
-                if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
+                # Navidrome/Subsonic: the artist attribute is per track.
+                if not track_artist and isinstance(getattr(track_obj, 'artist', None), str):
                     nav_artist = getattr(track_obj, 'artist', '').strip()
-                    # Compare against album artist name to only store when different
-                    try:
-                        artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
-                        album_artist_name = artist_row[0] if artist_row else ''
-                        if nav_artist and nav_artist.lower() != album_artist_name.lower():
-                            track_artist = nav_artist
-                    except Exception as e:
-                        logger.debug("Failed to load album artist for track_artist comparison: %s", e)
+                    row = cursor.execute(
+                        "SELECT name FROM lib2_artists WHERE id = ?",
+                        (catalogue_artist,)).fetchone()
+                    album_artist_name = row[0] if row else ''
+                    if nav_artist and nav_artist.lower() != (album_artist_name or '').lower():
+                        track_artist = nav_artist
 
-                # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
-                mbid = getattr(track_obj, 'musicBrainzId', None) or None
-
-                # Check if track already exists — UPDATE to preserve enrichment columns,
-                # INSERT only for genuinely new tracks
-                cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
-                is_new_track = cursor.fetchone() is None
-
-                if is_new_track:
-                    cursor.execute("""
-                        INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
-                else:
-                    # Update server-provided fields only — preserves spotify_track_id, deezer_id,
-                    # isrc, bpm, and all other enrichment data. file_size uses
-                    # COALESCE(?, file_size) so a NULL from the server (e.g.
-                    # Jellyfin sometimes omits Size on first sync) doesn't wipe
-                    # an existing value.
-                    cursor.execute("""
-                        UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?,
-                            file_size = COALESCE(?, file_size),
-                            server_source = ?,
-                            track_artist = COALESCE(?, track_artist),
-                            musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
-
+                upsert_track(
+                    cursor,
+                    server_source=server_source,
+                    server_id=server_track_id,
+                    album_id=catalogue_album,
+                    artist_id=catalogue_artist,
+                    title=title,
+                    track_number=track_number,
+                    disc_number=disc_number,
+                    duration=duration,
+                    track_artist=track_artist,
+                    musicbrainz_id=getattr(track_obj, 'musicBrainzId', None) or None,
+                    file_path=file_path,
+                    file_size=file_size,
+                    bitrate=bitrate,
+                )
                 conn.commit()
-
-                # Backfill external metadata-source IDs from track_downloads
-                # provenance. SoulSync collected them at download time but the
-                # media-server scan can't see them — without this hook,
-                # tracks.spotify_track_id / itunes_track_id / etc. stay empty
-                # until the async enrichment workers eventually catch up
-                # (hours later), during which window the watchlist scanner
-                # treats freshly downloaded files as missing and re-downloads
-                # them. Idempotent COALESCE on each column preserves any value
-                # the enrichment worker already wrote.
-                try:
-                    self.backfill_track_external_ids_from_provenance(track_id, file_path)
-                except Exception as backfill_err:
-                    logger.debug(f"Provenance ID backfill skipped for track {track_id}: {backfill_err}")
-
-                # Log new imports to library history
-                if is_new_track:
-                    try:
-                        cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
-                        artist_row = cursor.fetchone()
-                        cursor.execute("SELECT title, thumb_url FROM albums WHERE id = ?", (album_id,))
-                        album_row = cursor.fetchone()
-                        self.add_library_history_entry(
-                            event_type='import',
-                            title=title,
-                            artist_name=artist_row[0] if artist_row else None,
-                            album_name=album_row[0] if album_row else None,
-                            server_source=server_source,
-                            file_path=file_path,
-                            thumb_url=album_row[1] if album_row and len(album_row) > 1 else None
-                        )
-                    except Exception as e:
-                        logger.debug("history logging: %s", e)
-
-                # Truthy on success (existing `if track_success` callers keep
-                # working); the specific value lets the scan worker tell a
-                # genuinely new row from an updated one so it can reconcile
-                # embedded IDs only for new arrivals.
-                return 'inserted' if is_new_track else 'updated'
-
-            except Exception as e:
-                error_text = str(e).lower()
-                if (
-                    'file_size' in error_text
-                    and ('no such column' in error_text or 'no column named' in error_text)
-                    and retry_count < max_retries - 1
-                ):
-                    try:
-                        repair_conn = conn if 'conn' in locals() else self._get_connection()
-                        repair_cursor = repair_conn.cursor()
-                        self._ensure_core_media_schema_columns(repair_cursor)
-                        repair_conn.commit()
-                        if repair_conn is not conn:
-                            repair_conn.close()
-                        retry_count += 1
-                        logger.info("Repaired missing file_size column while importing media track; retrying")
-                        continue
-                    except Exception as schema_error:
-                        logger.error("Failed to repair tracks.file_size during track import: %s", schema_error)
-
+                return True
+            except sqlite3.OperationalError as e:
                 retry_count += 1
-                if "database is locked" in str(e).lower() and retry_count < max_retries:
-                    logger.warning(f"Database locked on track '{getattr(track_obj, 'title', 'Unknown')}', retrying {retry_count}/{max_retries}...")
-                    time.sleep(0.1 * retry_count)  # Exponential backoff
-                    continue
-                else:
-                    logger.error(f"Error inserting/updating {server_source} track {getattr(track_obj, 'title', 'Unknown')}: {e}")
+                if retry_count >= max_retries:
+                    logger.error(
+                        f"Error inserting/updating {server_source} track "
+                        f"{getattr(track_obj, 'title', 'Unknown')}: {e}")
                     return False
-        
+                time.sleep(0.5 * retry_count)
+            except Exception as e:
+                logger.error(f"Error inserting/updating {server_source} track "
+                             f"{getattr(track_obj, 'title', 'Unknown')}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
         return False
-    
+
     def track_exists(self, track_id) -> bool:
         """Check if a track exists in the database by ID (supports both int and string IDs)"""
         try:
@@ -7697,7 +7445,8 @@ class MusicDatabase:
             
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
-            cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id_str,))
+            cursor.execute("SELECT 1 FROM lib2_tracks WHERE server_id = ? LIMIT 1",
+                           (track_id_str,))
             result = cursor.fetchone()
             
             return result is not None
@@ -7714,7 +7463,8 @@ class MusicDatabase:
             
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
-            cursor.execute("SELECT 1 FROM tracks WHERE id = ? AND server_source = ? LIMIT 1", (track_id_str, server_source))
+            cursor.execute("SELECT 1 FROM lib2_tracks WHERE server_id = ? "
+                           "AND server_source = ? LIMIT 1", (track_id_str, server_source))
             result = cursor.fetchone()
             
             return result is not None
@@ -13718,13 +13468,13 @@ class MusicDatabase:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT MAX(updated_at) as last_update 
+                SELECT MAX(updated_at) as last_update
                 FROM (
-                    SELECT updated_at FROM artists
+                    SELECT updated_at FROM lib2_artists
                     UNION ALL
-                    SELECT updated_at FROM albums
+                    SELECT updated_at FROM lib2_albums
                     UNION ALL
-                    SELECT updated_at FROM tracks
+                    SELECT updated_at FROM lib2_tracks
                 )
             """)
             

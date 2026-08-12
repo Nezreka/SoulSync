@@ -62,7 +62,7 @@ def test_clear_server_data_retries_transient_disk_io_before_commit(monkeypatch):
 
         def execute(self, query, params=None):
             self.calls.append((query, params))
-            if self.fail_first_delete and "DELETE FROM tracks" in query:
+            if self.fail_first_delete and "DELETE FROM lib2_tracks" in query:
                 self.fail_first_delete = False
                 raise sqlite3.OperationalError("disk I/O error")
             self.rowcount = 1

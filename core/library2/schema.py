@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS lib2_tracks (
     canonical_track_id INTEGER,                       -- self-ref; NULL = canonical
     server_source TEXT,                               -- media server that reported this row
     server_id TEXT,                                   -- that server's own id; play counts arrive keyed by it
+    track_artist TEXT,                                -- per-track credit when it differs from the album artist (compilations, features)
     legacy_track_id INTEGER,                          -- source row in legacy `tracks`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -341,6 +342,7 @@ _ADDED_COLUMNS = (
     ("lib2_albums", "server_id", "ALTER TABLE lib2_albums ADD COLUMN server_id TEXT"),
     ("lib2_tracks", "server_source", "ALTER TABLE lib2_tracks ADD COLUMN server_source TEXT"),
     ("lib2_tracks", "server_id", "ALTER TABLE lib2_tracks ADD COLUMN server_id TEXT"),
+    ("lib2_tracks", "track_artist", "ALTER TABLE lib2_tracks ADD COLUMN track_artist TEXT"),
     ("lib2_tracks", "spotify_id", "ALTER TABLE lib2_tracks ADD COLUMN spotify_id TEXT"),
     ("lib2_albums", "expected_track_count",
      "ALTER TABLE lib2_albums ADD COLUMN expected_track_count INTEGER"),

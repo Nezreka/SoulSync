@@ -281,8 +281,12 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
     # Seed parent rows so FK constraints are satisfied
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar2', 'Artist')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('al2', 'ar2', 'Album')")
+    artist = cur.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist', 'artist', 'jellyfin', 'ar2')").lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al2')", (artist,))
     conn.commit()
     conn.close()
 
@@ -291,7 +295,9 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'fake_track_id_1'")
+    cur.execute("SELECT f.size FROM lib2_track_files f"
+                " JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.server_id = 'fake_track_id_1'")
     row = cur.fetchone()
     conn.close()
     assert row[0] == 42_000_000
@@ -316,8 +322,12 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar3', 'Artist')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('al3', 'ar3', 'Album')")
+    artist = cur.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist', 'artist', 'jellyfin', 'ar3')").lastrowid
+    cur.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al3')", (artist,))
     conn.commit()
     conn.close()
 
@@ -331,7 +341,9 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'fake_track_id_2'")
+    cur.execute("SELECT f.size FROM lib2_track_files f"
+                " JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.server_id = 'fake_track_id_2'")
     row = cur.fetchone()
     conn.close()
     # Original size preserved

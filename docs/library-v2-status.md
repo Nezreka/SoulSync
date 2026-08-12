@@ -4381,3 +4381,57 @@ und die Anreicherung des Statistik-Caches liefert Katalog-Ids, passend zu
 **`get_genre_breakdown`** läuft über `listening_history → lib2_tracks →
 lib2_albums → lib2_artists.genres`; in lib2 hängen Genres am Release bzw. am
 Artist, nicht am Track.
+
+#### 50.4.4.26 Der Medien-Server-Scan schreibt den Katalog
+
+Stand: **189/47**. `database/music_database.py` fällt von 137/44 auf
+**98/12**. Das ist der Block, der die ganze Stufe blockiert hat: der Scan war
+der einzige Weg, auf dem überhaupt Zeilen entstanden, und er schrieb Legacy.
+
+**Die Upserts liegen jetzt in `core/library2/media_server_sync.py`** — drei
+Funktionen plus zwei Auflöser, gegen eine offene Verbindung, so wie
+`library2.queries`. `MusicDatabase.insert_or_update_media_*` bleibt als
+Einstiegspunkt (der Scan-Worker ruft weiter dieselben Namen mit denselben
+Server-Ids), parst das Server-Objekt und delegiert.
+
+**Drei Regeln, und die erste spart den meisten Code.**
+
+1. **Treffen über die Server-Id, sonst über die Identität, dann stempeln.** Ein
+   Rating-Key ist nicht stabil; ein Rescan vergibt neue. Legacy beantwortete das
+   mit einem ganzen „ratingKey migrated"-Tanz: neue Zeile anlegen, eine
+   handgepflegte Liste von Anreicherungsspalten hinüberkopieren, Alben und
+   Tracks umhängen, alte Zeile löschen. Genau diese Liste hatte Bandcamp
+   vergessen (#968). Eine Katalog-Zeile hat eine eigene Identität — ein neuer
+   Rating-Key ist nur ein neuer Stempel darauf, und es gibt nichts zu kopieren.
+   Der Test dazu heißt jetzt, was er prüft: eine Zeile, ein neuer Stempel,
+   Anreicherung unangetastet.
+2. **Der Server ist maßgeblich für das, was der Server weiß** — Titel,
+   Tracknummer, Dauer, Pfad — **und für nichts sonst.** Artwork, Genres, Bios,
+   Provider-Ids werden nur gefüllt, nie geleert: `COALESCE` beim Schreiben, und
+   gar kein Schreiben, wenn der Server nichts geschickt hat. Die Marker, die
+   Legacy in `summary` ablegte, wandern nicht mit — sie werden ohnehin vom
+   Server gelesen, nicht von uns, und in lib2 steht in `summary` die Biografie.
+3. **Eine Datei ist eine Zeile** (ADR-03). Pfad, Größe und Bitrate landen auf
+   `lib2_track_files`; ein Umzug macht die neue Datei primär, statt eine zweite
+   danebenzustellen.
+
+**Zwei neue Spalten, beide notwendig:** `lib2_tracks.track_artist` (die
+Gastcredit-Zeichenkette, die Legacy führte — sie in Artist-Zeilen aufzulösen
+wäre das Verbund-Namen-Problem, und die Vervollständigungsprüfung braucht den
+Rohtext) und der Server-Link aus §50.4.4.25.
+
+**Was der Scan jetzt *nicht* mehr löscht.** `cleanup_orphaned_records` entfernte
+„Artists und Alben ohne Tracks". In lib2 ist das die Beschreibung einer
+Discography-Zeile und eines verfolgten Artists, dessen erste Datei noch nicht da
+ist — der Scan hätte die Wunschliste aufgefressen. Er räumt deshalb nur noch
+Zeilen weg, die **er selbst** angelegt hat (`server_id IS NOT NULL`).
+
+**`merge_duplicate_artists` gruppiert über `name_key`** statt über `name`:
+„Bjork" und „Björk" waren für die alte Fassung zwei Artists. Der Sieger ist die
+Zeile mit der meisten Anreicherung, die anderen geben Releases und
+Track-Credits ab; §40-Aliase bleiben unangetastet, denn ein Alias ist eine
+gewollte zweite Zeile.
+
+Zehn neue Tests für die Upserts, dazu sind die Scan-Tests (Disc-Nummern,
+Dateigrößen, Featured-Artists, Thumb-Erhalt, Rating-Key-Wechsel,
+IO-Widerstandsfähigkeit) auf den Katalog umgeschrieben.

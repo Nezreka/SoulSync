@@ -37,14 +37,20 @@ def db_with_feat_track(tmp_path: Path):
     db = MusicDatabase(database_path=str(db_path))
     conn = db._get_connection()
     cursor = conn.cursor()
+    # Both sides on purpose: the scan half of this file writes the catalogue,
+    # while the completion matcher below still reads the legacy tracks table.
+    artist = cursor.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist1', 'artist1', 'jellyfin', 'ar-1')",
+    ).lastrowid
     cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-1", "Artist1", "jellyfin"),
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,),
     )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-1", "ar-1", "Super Album", "jellyfin"),
-    )
+    cursor.execute("INSERT INTO artists (id, name, server_source)"
+                   " VALUES ('ar-1', 'Artist1', 'jellyfin')")
+    cursor.execute("INSERT INTO albums (id, artist_id, title, server_source)"
+                   " VALUES ('al-1', 'ar-1', 'Super Album', 'jellyfin')")
     cursor.execute(
         """
         INSERT INTO tracks (
@@ -173,13 +179,13 @@ def test_jellyfin_scanner_stores_all_track_artists(tmp_path: Path) -> None:
     cursor = conn.cursor()
 
     # Seed the artist + album the track will hang off
+    artist = cursor.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist1', 'artist1', 'jellyfin', 'ar-1')",
+    ).lastrowid
     cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-1", "Artist1", "jellyfin"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-1", "ar-1", "Super Album", "jellyfin"),
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,),
     )
     conn.commit()
     conn.close()
@@ -196,7 +202,7 @@ def test_jellyfin_scanner_stores_all_track_artists(tmp_path: Path) -> None:
 
     conn = db._get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT track_artist FROM tracks WHERE id = ?", ("tr-1",))
+    cursor.execute("SELECT track_artist FROM lib2_tracks WHERE server_id = ?", ("tr-1",))
     row = cursor.fetchone()
     conn.close()
     assert row is not None

@@ -13,11 +13,18 @@ from types import SimpleNamespace
 from database.music_database import MusicDatabase
 
 
-def _db(tmp_path):
+def _db(tmp_path, server_source='jellyfin'):
+    """A catalogue that already knows the artist and album, as the scan's own
+    passes leave it — both addressed by the SERVER's ids."""
     db = MusicDatabase(database_path=str(tmp_path / "t.db"))
     with db._get_connection() as c:
-        c.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('art1', 'Evan Call')")
-        c.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('alb1', 'art1', 'Frieren OST')")
+        artist = c.execute(
+            "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+            " VALUES ('Evan Call', 'evan call', ?, 'art1')", (server_source,)).lastrowid
+        c.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source,"
+            "                         server_id)"
+            " VALUES (?, 'Frieren OST', 'library', ?, 'alb1')", (artist, server_source))
         c.commit()
     return db
 
@@ -29,7 +36,9 @@ def _track(rating_key, title, track_number, **kw):
 
 def _disc_of(db, track_id):
     with db._get_connection() as c:
-        row = c.execute("SELECT disc_number, track_number FROM tracks WHERE id = ?", (track_id,)).fetchone()
+        row = c.execute(
+            "SELECT disc_number, track_number FROM lib2_tracks WHERE server_id = ?",
+            (track_id,)).fetchone()
     return (row['disc_number'], row['track_number'])
 
 
@@ -43,7 +52,7 @@ def test_jellyfin_navidrome_disc_number_stored(tmp_path):
 
 
 def test_plex_parent_index_used_as_disc(tmp_path):
-    db = _db(tmp_path)
+    db = _db(tmp_path, 'plex')
     # plexapi Track has no .discNumber — disc comes from .parentIndex.
     db.insert_or_update_media_track(_track('t-plex', 'Disc 2 Track', 5, parentIndex=2), 'alb1', 'art1', 'plex')
     assert _disc_of(db, 't-plex') == (2, 5)
