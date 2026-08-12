@@ -2936,6 +2936,8 @@
               })() + '</button>' +
               '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
+              '<button class="chat-filter-btn" type="button" data-chat-watch-btn ' +
+              'title="Movie night — nominate something, the room votes, owners watch together">🎬 Movie night</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
