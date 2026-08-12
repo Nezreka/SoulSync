@@ -585,6 +585,16 @@
                 // nobody, so it is never filled with a username and gm.join
                 // has nothing to take. The room moves by vote instead.
                 var roomSeat = p.r ? (creatorColor === 'w' ? 'b' : 'w') : '';
+                // Optional stake in bank credits. Two-human games only — a
+                // wager against 'the room' has no one to pay it. The fold
+                // just RECORDS it; settlement is each client booking its own
+                // win/loss against its own play-money bank (the bank's
+                // philosophy: nobody to defraud but yourself — the ladder is
+                // the currency that matters).
+                var wager = 0;
+                if (!roomSeat && typeof p.w === 'number' && isFinite(p.w)) {
+                    wager = Math.max(0, Math.min(500, Math.floor(p.w)));
+                }
                 var voteK = VOTE_DEFAULT;
                 if (typeof p.kv === 'number' && isFinite(p.kv)) {
                     voteK = Math.max(1, Math.min(VOTE_MAX, Math.floor(p.kv)));
@@ -615,6 +625,7 @@
                     createdBy: user,
                     createdAt: at,
                     lastAt: at,
+                    wager: wager,
                     invited: invited,
                     isPrivate: !!invited,
                     roomSeat: roomSeat,

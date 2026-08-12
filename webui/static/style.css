@@ -74172,6 +74172,13 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-line:hover .chat-line-reply { display: inline-block; }
 .chat-line-reply:hover { color: #1db954; border-color: rgba(29,185,84,0.45); }
+/* The table-stake selector above the game tiles. */
+.chat-arc-stakes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin: 4px 0 10px; }
+.chat-arc-stakes-lab { font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: rgba(255,255,255,0.35); margin-right: 2px; }
+.chat-arc-stakes-note { font-size: 10.5px; color: rgba(255,255,255,0.3); margin-left: 4px; }
+
 /* Cold arcade tables — a muted expandable line, not forever-cards. */
 .chat-arc-cold-line {
     display: block; width: 100%; text-align: left;

@@ -1258,3 +1258,28 @@ describe('open-table expiry and the spam cap', () => {
     assert.equal(out2.games.g005.status, 'open');
   });
 });
+
+// ── Wagers ride the fold (settlement is client-local banking) ──────────────
+describe('wagers', () => {
+  const G = ctx.window.ChatGames;
+
+  test('gm.new records a bounded stake on two-human games', () => {
+    const out = G.reduceGames([
+      ev('alice', { k: 'gm.new', g: 'g001', v: 'connect4', w: 100 }),
+      ev('bob', { k: 'gm.new', g: 'g002', v: 'connect4', w: 9999 }),   // clamped
+      ev('cara', { k: 'gm.new', g: 'g003', v: 'connect4', w: -5 }),    // floored
+      ev('dave', { k: 'gm.new', g: 'g004', v: 'connect4' }),           // none
+    ], T0 + 1000);
+    assert.equal(out.games.g001.wager, 100);
+    assert.equal(out.games.g002.wager, 500);
+    assert.equal(out.games.g003.wager, 0);
+    assert.equal(out.games.g004.wager, 0);
+  });
+
+  test('a room-vs-player game never carries a stake', () => {
+    const out = G.reduceGames([
+      ev('alice', { k: 'gm.new', g: 'g001', v: 'connect4', r: 1, w: 100 }),
+    ], T0 + 1000);
+    assert.equal(out.games.g001.wager, 0);
+  });
+});

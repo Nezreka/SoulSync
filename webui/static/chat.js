@@ -1225,6 +1225,7 @@
             return _arcCache.out;
         }
         var out = window.ChatGames.reduceGames(_roomEvents(), Date.now());
+        _settleWagers(out);
         // Moderator game-kill: a killed id is erased from the fold — board,
         // cards, lifecycle, everywhere — on every client that folds the room.
         var CPk = window.ChatProtocol;
@@ -1407,7 +1408,60 @@
                   c: color === 'b' ? 'b' : 'w' };
         if (vsRoom) f.r = 1;
         if (opponent) f.o = String(opponent).slice(0, 64);
+        // The lobby's stake selector rides along (two-human games only).
+        var stake = (state.arcade && state.arcade.stake) || 0;
+        if (stake > 0 && !vsRoom) f.w = stake;
         sendProtocol('gm.new', f).then(_arcAfterSend(gid));
+    }
+
+    // ── Wager settlement ─────────────────────────────────────────────────
+    // Each client books ONLY ITS OWN result against ITS OWN bank — the
+    // fold is the referee every client shares, so both sides compute the
+    // same winner; your client applying your loss is the bank's whole
+    // philosophy (play money, nobody to defraud but yourself). Idempotent
+    // per game id across repaints AND reloads via localStorage; marked
+    // settled BEFORE the POST so a slow request can't double-book.
+    var _wagerSettled = null;
+    function _wagerSettledMap() {
+        if (_wagerSettled) return _wagerSettled;
+        try { _wagerSettled = JSON.parse(localStorage.getItem('chatWagerSettled') || '{}'); }
+        catch (e) { _wagerSettled = {}; }
+        return _wagerSettled;
+    }
+    function _wagerMarkSettled(gid) {
+        var map = _wagerSettledMap();
+        map[gid] = 1;
+        var keys = Object.keys(map);
+        if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(function (k) { delete map[k]; });
+        try { localStorage.setItem('chatWagerSettled', JSON.stringify(map)); } catch (e) { /* private mode */ }
+    }
+    function _settleWagers(st) {
+        if (!state.selfName) return;
+        var map = _wagerSettledMap();
+        (st.order || []).forEach(function (gid) {
+            var g = st.games[gid];
+            if (!g || !g.wager || g.status !== 'over' || !g.result || map[gid]) return;
+            if (g.reason === 'expired' || g.reason === 'cancelled') return;
+            var seat = _arcSeat(g);
+            if (!seat) return;                            // spectators hold no stake
+            _wagerMarkSettled(gid);
+            var delta = 0;
+            if (g.result === '1/2-1/2') delta = 0;
+            else if (g.winner === state.selfName) delta = g.wager;
+            else delta = -g.wager;
+            if (!delta) return;
+            postJSON('/api/chat/arcade/bank', { delta: delta }).then(function (r) {
+                if (r && r.ok && r.body && typeof r.body.balance === 'number') {
+                    _slotState().bank = r.body;
+                }
+                if (typeof showToast === 'function') {
+                    showToast(delta > 0
+                        ? '🪙 +' + delta + ' — you won the stake'
+                        : '🪙 ' + delta + ' — stake paid out', delta > 0 ? 'success' : 'info');
+                }
+                renderArcade();
+            }).catch(function () { /* bank floors at zero server-side; refusal = uncollectable, fine */ });
+        });
     }
 
     function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
@@ -1664,6 +1718,7 @@
                 '</span>' +
                 '<span class="chat-arc-card-sub">' +
                     esc(g.variant) + ' · move ' + (Math.floor(g.ply / 2) + 1) +
+                    (g.wager ? ' · 🪙' + g.wager + ' stake' : '') +
                     (g.isPrivate ? ' · private' : '') +
                     (g.partial ? ' · joined mid-game' : '') +
                 '</span>' +
@@ -1692,7 +1747,21 @@
         if (!sl.bank) _slotLoadBank();
         var bank = sl.bank;
 
-        function tile(attrs, icon, name, blurb) {
+        function _stakeRowHtml() {
+        var cur = (state.arcade && state.arcade.stake) || 0;
+        return '<div class="chat-arc-stakes">' +
+            '<span class="chat-arc-stakes-lab">table stake</span>' +
+            [0, 5, 25, 100, 500].map(function (s) {
+                return '<button type="button" class="chat-arc-btn' +
+                    (s === cur ? ' chat-arc-btn--go' : '') + '" ' +
+                    'data-chat-arc-stake="' + s + '">' +
+                    (s ? '🪙' + s : 'none') + '</button>';
+            }).join('') +
+            '<span class="chat-arc-stakes-note">winner takes it from the loser\'s bank</span>' +
+        '</div>';
+    }
+
+    function tile(attrs, icon, name, blurb) {
             return '<button class="chat-arc-tile" type="button" ' + attrs + '>' +
                 '<span class="chat-arc-tile-icon">' + icon + '</span>' +
                 '<span class="chat-arc-tile-name">' + esc(name) + '</span>' +
@@ -1725,7 +1794,8 @@
                     : '') +
             '</div>' +
             (state.canSend
-                ? '<div class="chat-arc-tiles">' +
+                ? _stakeRowHtml() +
+                  '<div class="chat-arc-tiles">' +
                     tile('data-chat-arc-new="w"', '♟', 'Chess',
                          'turn by turn, no clock') +
                     tile('data-chat-arc-new="w" data-chat-arc-variant="connect4"', '🔴',
@@ -4611,6 +4681,13 @@
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');
             if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-stake]');
+            if (t) {
+                state.arcade = state.arcade || {};
+                state.arcade.stake = parseInt(t.getAttribute('data-chat-arc-stake'), 10) || 0;
+                renderArcade();
+                return;
+            }
             t = e.target.closest('[data-chat-arc-cold]');
             if (t) {
                 if (state.arcade) state.arcade.showCold = !state.arcade.showCold;
