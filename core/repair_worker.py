@@ -101,6 +101,70 @@ FINDING_TYPE_META = {
 }
 
 
+# Which family each job belongs to, and the order the families are shown in.
+#
+# Thirty jobs rendered as thirty identical stacked cards is a wall: no order,
+# no organisation, and no way to answer "what looks after my files" without
+# reading every title. Grouped, the page has a shape.
+#
+# ONE table on purpose. The alternative — a `category` attribute on each of
+# the 29 job classes — spreads the taxonomy across 29 files where nobody can
+# see whether it still hangs together. A job missing from here lands in the
+# trailing bucket, which is visible rather than silent.
+JOB_CATEGORY_ORDER = [
+    'Files & storage',
+    'Audio quality',
+    'Tags & metadata',
+    'Artwork & lyrics',
+    'Collection gaps',
+    'System',
+    'Other',
+]
+
+JOB_CATEGORY_FALLBACK = 'Other'
+
+JOB_CATEGORIES = {
+    # Anything whose fix moves, converts or removes a file on disk.
+    'orphan_file_detector': 'Files & storage',
+    'dead_file_cleaner': 'Files & storage',
+    'empty_folder_cleaner': 'Files & storage',
+    'expired_download_cleaner': 'Files & storage',
+    'duplicate_detector': 'Files & storage',
+    'single_album_dedup': 'Files & storage',
+    'library_reorganize': 'Files & storage',
+    'lossy_converter': 'Files & storage',
+    'live_commentary_cleaner': 'Files & storage',
+    # Is the audio itself what it claims to be, and good enough.
+    'audio_corruption_detector': 'Audio quality',
+    'fake_lossless_detector': 'Audio quality',
+    'acoustid_scanner': 'Audio quality',
+    'quality_upgrade': 'Audio quality',
+    'quality_upgrade_scanner': 'Audio quality',
+    'replaygain_filler': 'Audio quality',
+    # What is written on and about the tracks.
+    'library_retag': 'Tags & metadata',
+    'track_number_repair': 'Tags & metadata',
+    'album_tag_consistency': 'Tags & metadata',
+    'mbid_mismatch_detector': 'Tags & metadata',
+    'genre_cleanup': 'Tags & metadata',
+    'comma_artist_splitter': 'Tags & metadata',
+    'unknown_artist_fixer': 'Tags & metadata',
+    'metadata_gap_filler': 'Tags & metadata',
+    'canonical_version_resolve': 'Tags & metadata',
+    'missing_cover_art': 'Artwork & lyrics',
+    'missing_lyrics': 'Artwork & lyrics',
+    # Filling gaps in what you own, rather than repairing what you have.
+    'album_completeness': 'Collection gaps',
+    'discography_backfill': 'Collection gaps',
+    'cache_evictor': 'System',
+}
+
+
+def job_category(job_id: str) -> str:
+    """The family a job belongs to. Unknown jobs are grouped, not hidden."""
+    return JOB_CATEGORIES.get(job_id, JOB_CATEGORY_FALLBACK)
+
+
 def _album_fill_artist_names_match(expected_artist: str, candidate_artist: str) -> bool:
     """Strict artist gate for Album Completeness auto-fill.
 
@@ -474,6 +538,10 @@ class RepairWorker:
                 'description': job.description,
                 'help_text': job.help_text,
                 'icon': job.icon,
+                # The family this job is filed under. Served rather than
+                # guessed client-side, so a new job cannot quietly acquire a
+                # different grouping in the UI than it has here.
+                'category': job_category(job_id),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
                 'interval_hours': config['interval_hours'],

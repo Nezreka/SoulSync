@@ -374,7 +374,9 @@ export function FindingsSurface({
     setTimeout(() => {
       document
         .getElementById(`repair-group-${findingType}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Optional-called: jsdom has no scrollIntoView, and scrolling is not
+        // worth throwing inside a timer nobody is awaiting.
+        ?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
     }, 60);
   }, []);
 

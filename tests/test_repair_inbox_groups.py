@@ -231,3 +231,47 @@ def test_counts_auto_fixed_as_its_own_status(worker):
     assert group['auto_fixed'] == 2
     assert group['resolved'] == 0
     assert group['total'] == 3
+
+
+# ── the job taxonomy ─────────────────────────────────────────────────────────
+
+_JOBS_DIR = Path(__file__).resolve().parents[1] / 'core/repair_jobs'
+
+
+def _registered_job_ids() -> set:
+    """Every job_id declared under core/repair_jobs, read rather than imported.
+
+    Importing the package would drag in the whole scanning stack for what is a
+    question about a string constant.
+    """
+    ids = set()
+    for path in _JOBS_DIR.glob('*.py'):
+        for match in re.finditer(r"^    job_id = '([^']+)'", path.read_text(encoding='utf-8'), re.M):
+            ids.add(match.group(1))
+    return ids
+
+
+def test_every_job_is_filed_under_a_family():
+    """An uncategorised job lands in the trailing bucket rather than a family.
+
+    That is deliberate — visible, not silent — but it should never be the
+    state we ship in, so this fails when a new job arrives without a home.
+    """
+    from core.repair_worker import JOB_CATEGORIES
+
+    homeless = sorted(_registered_job_ids() - set(JOB_CATEGORIES))
+    assert not homeless, f"no JOB_CATEGORIES entry for: {homeless}"
+
+
+def test_the_taxonomy_invents_no_jobs():
+    from core.repair_worker import JOB_CATEGORIES
+
+    ghosts = sorted(set(JOB_CATEGORIES) - _registered_job_ids())
+    assert not ghosts, f"JOB_CATEGORIES names a job that no longer exists: {ghosts}"
+
+
+def test_every_family_is_in_the_display_order():
+    from core.repair_worker import JOB_CATEGORIES, JOB_CATEGORY_ORDER
+
+    unordered = sorted(set(JOB_CATEGORIES.values()) - set(JOB_CATEGORY_ORDER))
+    assert not unordered, f"family missing from JOB_CATEGORY_ORDER: {unordered}"

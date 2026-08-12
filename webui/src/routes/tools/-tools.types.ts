@@ -60,6 +60,10 @@ export interface RepairJob {
   display_name: string;
   description?: string | null;
   help_text?: string | null;
+  /** The family the backend files this job under — served, not guessed, so a
+   *  new job cannot be grouped differently here than it is there. */
+  category?: string | null;
+  icon?: string | null;
   enabled: boolean;
   is_running: boolean;
   auto_fix?: boolean;
