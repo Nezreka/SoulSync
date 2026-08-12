@@ -3992,3 +3992,39 @@ deshalb gegen ein echtes Schema statt gegen einen gefälschten Cursor: der
 Fehlermodus, um den es geht — eine Spalte oder ein Join, den es nicht gibt —
 beantwortet die ganze Seite still mit „nichts besessen", und genau das kann ein
 Stub nicht sehen.
+
+#### 50.4.4.17 Die personalisierten Playlists fragen lib2
+
+Stand: **343/90**. `core/personalized_playlists.py` fällt von 8/0 auf **0/0** —
+wieder war die Hälfte davon Prosa (vier Kommentar- und Docstring-Zeilen), wie in
+§50.4.4.16 vorhergesagt.
+
+**Der „habe ich das schon"-Filter war die einzige Stelle mit einer echten
+Entscheidung.** Legacy verglich drei gewöhnliche Spalten. lib2 befördert nur
+Spotify in eine eigene Spalte und hält jeden anderen Provider in
+`external_ids`, also werden zwei Drittel dieser Prüfung zu einem
+JSON-Zugriff. Inline geschrieben liefe `json_extract` einmal pro
+Discovery-Kandidat über die ganze Trackliste — und der Filter steht *vor* dem
+`LIMIT`, bei 300k Tracks also die ganze Tabelle viele Male. `WITH owned AS
+MATERIALIZED` fixiert es auf einen Durchgang: das JSON wird einmal in eine
+schmale Drei-Spalten-Tabelle ausgepackt, die das `NOT EXISTS` dann abklappert.
+
+`origin='library'` ist hier nicht Kosmetik: würde eine Discography-Zeile als
+besessen zählen, verschwänden aus der Entdeckung genau die Tracks, für die es
+sie gibt.
+
+**Genres liegen in lib2 am Release.** Legacy hatte eine `genres`-Spalte auf
+`tracks`; lib2 führt die Liste auf `lib2_albums`, ein Track erbt die seines
+Albums. Damit fällt die `PRAGMA`-Sonde weg, die prüfte, ob die Spalte überhaupt
+existiert — **und mit ihr wurde ein toter Zweig sichtbar**: der Fallback „nimm
+die Top-Artists als Kategorien" hing an „Schema hat keine Genre-Spalte", was in
+lib2 nie zutrifft. Die Lage, die er abdeckte, ist aber real — eine noch nicht
+angereicherte Bibliothek braucht trotzdem Kategorien —, also löst ihn jetzt aus,
+was er immer gemeint hat: es gibt keine Genres.
+
+Über `get_top_genres_from_library` gab es keinen Test, obwohl der Daily-Mix-
+Generator seine Kategorien daraus zieht (leere Antwort = Discover-Seite ohne
+Mixes). Sechs neue. Die `exclude_owned`-Tests laufen jetzt gegen das echte
+lib2-Schema statt gegen eine handgeschriebene Drei-Spalten-Attrappe — der
+Fehlermodus, um den es geht, ist ein JSON-Pfad, der nichts trifft, und den kann
+eine Attrappe nicht zeigen.
