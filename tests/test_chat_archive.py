@@ -106,7 +106,7 @@ class TestArchiveApi:
         from tests.test_chat_api import _FakeChatClient
         client = _FakeChatClient()
         chat_api._INGEST_AT.clear()
-        chat_api.configure(client_getter=lambda: client, run_async=lambda v: v,
+        chat_api.configure(client_getter=lambda: client, run_async=lambda v, timeout=None: v,
                            config_get=lambda k, d=None: d, db_getter=lambda: mdb)
         app = Flask(__name__)
 

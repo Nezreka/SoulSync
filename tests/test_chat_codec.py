@@ -84,7 +84,7 @@ class TestApiIntegration:
         client = _FakeChatClient()
         state = {"client": client}
         chat_api.configure(client_getter=lambda: state["client"],
-                           run_async=lambda v: v,
+                           run_async=lambda v, timeout=None: v,
                            config_get=lambda k, d=None: d)
         app = Flask(__name__)
 

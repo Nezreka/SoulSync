@@ -143,7 +143,7 @@ def chat_app():
     state = {"client": client, "admin": True, "config": {}}
     chat_api.configure(
         client_getter=lambda: state["client"],
-        run_async=lambda v: v,
+        run_async=lambda v, timeout=None: v,
         config_get=lambda key, default=None: state["config"].get(key, default),
         config_set=lambda key, value: state["config"].__setitem__(key, value),
     )
@@ -155,7 +155,7 @@ def chat_app():
         g.is_admin = state["admin"]
     app.register_blueprint(chat_api.create_blueprint())
     yield app.test_client(), state
-    chat_api.configure(client_getter=lambda: None, run_async=lambda v: v,
+    chat_api.configure(client_getter=lambda: None, run_async=lambda v, timeout=None: v,
                        config_get=lambda k, d=None: d)
 
 
@@ -273,7 +273,7 @@ class TestChatSettings:
     def _wire_set(self, state):
         chat_api.configure(
             client_getter=lambda: state["client"],
-            run_async=lambda v: v,
+            run_async=lambda v, timeout=None: v,
             config_get=lambda key, default=None: state["config"].get(key, default),
             config_set=lambda key, value: state["config"].__setitem__(key, value),
         )
@@ -637,7 +637,7 @@ class TestBrowseAndGrab:
         client = _BrowsingClient()
         perms = {"admin": False, "can_download": False}
         chat_api.configure(
-            client_getter=lambda: client, run_async=lambda v: v,
+            client_getter=lambda: client, run_async=lambda v, timeout=None: v,
             config_get=lambda k, d=None: d)
         app = Flask(__name__)
 
