@@ -14871,28 +14871,38 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
 /* Tab System */
 .sync-tabs {
     display: flex;
-    gap: 2px;
+    /* FIFTEEN tabs live here. Equal-width flex:1 buttons crammed them into
+       one unreadable strip; natural-width chips that WRAP restore the brand-
+       chip design the .sync-tab-server comment already describes (#799). */
+    flex-wrap: wrap;
+    gap: 6px;
     margin-bottom: 15px;
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-    padding: 4px;
+    border-radius: 14px;
+    padding: 8px;
 }
 
 .sync-tab-button {
-    flex: 1;
-    padding: 12px;
-    background: transparent;
+    flex: 0 1 auto;
+    padding: 9px 16px;
+    background: rgba(255, 255, 255, 0.03);
     color: #b3b3b3;
     border: none;
-    border-radius: 10px;
-    font-size: 13px;
-    font-weight: bold;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 700;
+    white-space: nowrap;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
+}
+
+.sync-tab-button:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
 }
 
 .sync-tab-button.active {
