@@ -18784,9 +18784,13 @@ def get_database_stats():
 def process_wishlist_api():
     """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
     try:
-        runtime = _build_wishlist_route_runtime(
-            is_auto_processing_flag=lambda: wishlist_auto_processing,
-        )
+        # #1134: this passed is_auto_processing_flag=<raw wishlist_auto_processing
+        # lambda> — a kwarg the factory never accepted, so the route 500'd on
+        # every call. The factory's DEFAULT (is_wishlist_actually_processing)
+        # is also the better guard: it verifies the worker is really alive,
+        # while the raw flag goes stale after a crash — the same staleness
+        # that kept the reporter's auto-timer "busy" over a dead batch.
+        runtime = _build_wishlist_route_runtime()
         payload, status_code = _wishlist_process_api(
             runtime,
             start_processing=lambda: _process_wishlist_automatically(),
