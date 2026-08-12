@@ -32183,7 +32183,7 @@ def _autostart_popularity_backfill():
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
-@_discover_shelf_cache()
+@_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
 
