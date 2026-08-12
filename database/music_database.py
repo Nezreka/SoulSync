@@ -6763,14 +6763,17 @@ class MusicDatabase:
                        AND NOT EXISTS (SELECT 1 FROM lib2_tracks t
                                         WHERE t.album_id = al.id)
                 """
-                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
-                orphaned_artists_count = cursor.fetchone()[0]
+                # Albums first, then artists — an artist whose last album just
+                # went is orphaned by that deletion, and counting both up front
+                # would leave it standing until the next scan.
                 cursor.execute(f"SELECT COUNT(*) FROM ({orphan_albums})")
                 orphaned_albums_count = cursor.fetchone()[0]
-
                 if orphaned_albums_count > 0:
                     cursor.execute(f"DELETE FROM lib2_albums WHERE id IN ({orphan_albums})")
                     logger.info(f"Removed {orphaned_albums_count} orphaned albums")
+
+                cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
+                orphaned_artists_count = cursor.fetchone()[0]
                 if orphaned_artists_count > 0:
                     cursor.execute(f"DELETE FROM lib2_artists WHERE id IN ({orphan_artists})")
                     logger.info(f"Removed {orphaned_artists_count} orphaned artists")

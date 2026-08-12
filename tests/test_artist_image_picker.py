@@ -197,15 +197,6 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
     assert "_ART_OPTIONS_CACHE.pop(('artist', artist_id), None)" in apply_h
 
 
-def test_picker_grid_never_goes_silently_blank():
-    # The picker is React now (art-picker.tsx); same pin, new home.
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    # dead image URLs remove tiles — an emptied grid must SAY so
-    assert "none of the images would load" in tsx
-
-
 def test_spotify_free_mode_contributes(monkeypatch):
     """The registry gate requires FULL Spotify auth, but the wrapper serves
     artist metadata in Free mode — the picker asks the wrapper directly, so
@@ -246,15 +237,6 @@ def test_image_sniffer():
     assert ws._looks_like_image(b"") is False
 
 
-def test_picker_has_the_custom_url_row():
-    # React renders the row declaratively, so the vanilla's mount-after-reset
-    # ordering hazard is structurally impossible; only the row itself is pinned.
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    assert "paste an image URL" in tsx
-
-
 def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
     """Live finding (Boulder's box): Spotify 403s dev apps whose owner lacks
     active Premium — token refresh still works, so auth LOOKS healthy and the
@@ -289,19 +271,6 @@ def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
 # test_custom_row_check_icon_is_module_scope was retired with library.js: the
 # hazard it pinned (a function-local const referenced from another function's
 # markup — a silent ReferenceError) cannot exist in the React module system.
-
-
-def test_current_photo_leads_the_grid_as_reference():
-    """The current artist photo shows first, badged 'current', display-only —
-    it's read from the PAGE (the DB may hold a local cache path that must
-    never round-trip through the apply endpoint as a source URL)."""
-    from pathlib import Path
-    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
-           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
-    # a DIV, not a button — it can't be selected/applied
-    assert '<div className="art-picker-tile art-picker-tile--current">' in tsx
-    assert "art-picker-badge--current" in tsx
-
 
 
 def test_musicbrainz_relations_contribute_a_candidate_when_mbid_is_known(monkeypatch):

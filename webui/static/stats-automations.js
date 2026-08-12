@@ -5809,32 +5809,6 @@ const ENHANCE_TIER_MAP = {
     'unknown': { num: 999, label: 'Unknown', cssClass: 'unknown' },
 };
 
-async function checkArtistEnhanceEligibility(artistId) {
-    const btn = document.getElementById('library-artist-enhance-btn');
-    if (!btn) return;
-    btn.classList.add('hidden');
-    _enhanceArtistId = artistId;
-
-    try {
-        const resp = await fetch(`/api/library/artist/${artistId}/quality-analysis`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (!data.success || !data.tracks || data.tracks.length === 0) return;
-
-        _enhanceQualityData = data;
-
-        // Show button if any tracks are below the user's min acceptable tier
-        const minTier = data.min_acceptable_tier || 1;
-        const belowCount = data.tracks.filter(t => t.tier_num > minTier).length;
-        if (belowCount > 0) {
-            btn.classList.remove('hidden');
-            btn.querySelector('.enhance-text').textContent = `Enhance Quality (${belowCount})`;
-        }
-    } catch (e) {
-        console.debug('Enhance eligibility check failed:', e);
-    }
-}
-
 async function playArtistRadio() {
     const artistId = artistDetailPageState.currentArtistId;
     const artistName = artistDetailPageState.currentArtistName || '';
@@ -6173,15 +6147,6 @@ async function submitEnhanceQuality() {
             if (footerInfo) footerInfo.textContent = msg;
 
             showToast(msg + (result.failed_count > 0 ? ` (${result.failed_count} failed)` : ''), 'success');
-
-            // Update button count
-            const enhBtn = document.getElementById('library-artist-enhance-btn');
-            if (enhBtn && result.enhanced_count > 0) {
-                const remaining = trackIds.length - result.enhanced_count;
-                if (remaining <= 0) {
-                    enhBtn.classList.add('hidden');
-                }
-            }
 
             if (submitBtn) {
                 submitBtn.textContent = '✅ Done';

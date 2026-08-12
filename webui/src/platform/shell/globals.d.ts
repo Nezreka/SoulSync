@@ -136,7 +136,6 @@ declare global {
     showLoadingOverlay?: (message?: string) => void;
     hideLoadingOverlay?: () => void;
     /** library.js — quality-enhance eligibility probe (library artists only). */
-    checkArtistEnhanceEligibility?: (artistId: unknown) => void;
     /** stats-automations.js — the Enhance Quality modal, opened from the hero. */
     openEnhanceQualityModal?: () => void;
     /**

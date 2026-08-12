@@ -30,9 +30,8 @@ GATED = [
     ('DELETE', '/api/v1/api-keys-internal/revoke/abc'),
     ('POST', '/api/plex/clear-library'),
     ('PUT', '/api/library/clear-match'),
-    ('DELETE', '/api/library/track/123'),
-    ('DELETE', '/api/library/album/123'),
-    ('POST', '/api/library/tracks/delete-batch'),
+    # (the three legacy library-delete endpoints went with the artist-detail
+    #  page — Library V2 has its own, gated the same way)
     ('POST', '/api/database/update'),
     ('POST', '/api/database/update/stop'),
     ('POST', '/api/database/backup'),
