@@ -4529,3 +4529,28 @@ einen anderen Pfad, als wir aufgelöst und verschoben haben) wurde in Legacy
 Datei wäre verschoben und der Katalog stehen geblieben. Jetzt: exakte Datei
 zuerst (ein Track kann mehrere haben, dd28-19), dann die primäre Datei über die
 Id, dann die Pfad-Fallbacks.
+
+#### 50.4.4.30 `web_server.py` ist bei null
+
+Stand: **98/23**. `web_server.py` fällt von 29/7 auf **0/0** — die Datei, die
+zu Beginn des Tages noch 79/15 hatte.
+
+**Ein Projektionsblock statt zwanzig Umschreibungen.** Die meisten Stellen hier
+lasen „die Provider-Ids eines Artists" in genau der Feldbenennung, die die
+JSON-Antworten dieser Handler nach außen tragen. `_ARTIST_IDS_SQL` liefert
+dieselben Namen aus dem Katalog (`spotify_id AS spotify_artist_id`,
+`json_extract(external_ids,'$.deezer') AS deezer_id`, …), sodass kein einziger
+Konsument eine zweite Vokabel lernen musste.
+
+**Der SoulSync-Full-Refresh benutzt jetzt dieselben Upserts** wie Scan und
+Import — dritter Aufrufer derselben drei Funktionen. Der Deep Scan liest die
+Pfade aus den Dateizeilen und räumt verwaiste Zeilen dort weg.
+
+**Der Issue-Snapshot** (die API-only-Fläche für Fehlerberichte) trägt weiterhin
+jedes Feld, das er vorher trug; Pfad und Bitrate kommen aus der primären Datei,
+`record_type` aus `album_type`.
+
+**Eine Entscheidung, die auffiel:** die Discover-Ausschlusslisten („welche Alben
+habe ich schon", „welche Labels kenne ich") sind jetzt auf `origin='library'`
+verengt. Ohne das hätte die Diskografie eines verfolgten Artists die Entdeckung
+genau der Alben unterdrückt, für die es sie gibt.

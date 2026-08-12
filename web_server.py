@@ -933,6 +933,34 @@ def check_download_permission():
     return None
 
 # --- Docker Helper Functions ---
+# The catalogue's artist row under the field names this file's handlers (and
+# their JSON responses) already speak. v2 promotes Spotify and MusicBrainz to
+# columns and keeps the rest in `external_ids`; aliasing here means the readers
+# below did not have to learn a second vocabulary (§50.4.4.30).
+_ARTIST_IDS_SQL = """
+    spotify_id AS spotify_artist_id,
+    musicbrainz_id,
+    json_extract(external_ids, '$.itunes') AS itunes_artist_id,
+    json_extract(external_ids, '$.deezer') AS deezer_id,
+    json_extract(external_ids, '$.discogs') AS discogs_id,
+    json_extract(external_ids, '$.audiodb') AS audiodb_id,
+    json_extract(external_ids, '$.tidal') AS tidal_id,
+    json_extract(external_ids, '$.qobuz') AS qobuz_id,
+    json_extract(external_ids, '$.amazon') AS amazon_id,
+    json_extract(external_ids, '$.genius') AS genius_id,
+    json_extract(external_ids, '$.lastfm') AS lastfm_url,
+    json_extract(external_ids, '$.genius_url') AS genius_url
+"""
+
+
+def _catalogue_name_key(name):
+    """The catalogue's folded artist key. SQLite's LOWER() is ASCII-only, so a
+    stored "Björk" never answered a searched "björk" (iss29-D13)."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ""))
+
+
 def docker_resolve_path(path_str):
     """
     Resolve absolute paths for Docker container access
@@ -9035,7 +9063,10 @@ def _resolve_history_audio_path(row):
             conn = get_database()._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND LOWER(title) = LOWER(?)",
+                "SELECT f.path AS file_path FROM lib2_track_files f"
+                "  JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE f.path IS NOT NULL AND LOWER(t.title) = LOWER(?)"
+                "   AND COALESCE(f.file_state, 'active') <> 'deleted'",
                 (title,))
             return [r[0] for r in cursor.fetchall() if r[0]]
         except Exception as e:
@@ -9354,7 +9385,7 @@ def approve_verification_item(history_id):
             # The tracks row may carry either the recorded or the resolved path.
             for p in {p for p in (file_path, on_disk) if p}:
                 conn.execute(
-                    "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
+                    "UPDATE lib2_track_files SET verification_status = ? WHERE path = ?",
                     (HUMAN_VERIFIED, p))
             conn.commit()
         # iss29-E06: the lib2 update runs on its OWN transaction, after the
@@ -10171,12 +10202,13 @@ def get_artist_top_tracks_endpoint(artist_id):
             try:
                 _cur = _conn.cursor()
                 _cur.execute("""
-                    SELECT spotify_artist_id, deezer_id
-                    FROM artists
+                    SELECT spotify_id AS spotify_artist_id,
+                           json_extract(external_ids, '$.deezer') AS deezer_id
+                    FROM lib2_artists
                     WHERE id = ?
-                       OR spotify_artist_id = ?
-                       OR itunes_artist_id = ?
-                       OR deezer_id = ?
+                       OR spotify_id = ?
+                       OR json_extract(external_ids, '$.itunes') = ?
+                       OR json_extract(external_ids, '$.deezer') = ?
                        OR musicbrainz_id = ?
                     LIMIT 1
                 """, (artist_id, artist_id, artist_id, artist_id, artist_id))
@@ -10247,13 +10279,15 @@ def _resolve_artist_source_ids(artist_id) -> dict:
         try:
             _cur = _conn.cursor()
             _cur.execute("""
-                SELECT spotify_artist_id, itunes_artist_id,
-                       deezer_id, musicbrainz_id
-                FROM artists
+                SELECT spotify_id AS spotify_artist_id,
+                       json_extract(external_ids, '$.itunes') AS itunes_artist_id,
+                       json_extract(external_ids, '$.deezer') AS deezer_id,
+                       musicbrainz_id
+                FROM lib2_artists
                 WHERE id = ?
-                   OR spotify_artist_id = ?
-                   OR itunes_artist_id = ?
-                   OR deezer_id = ?
+                   OR spotify_id = ?
+                   OR json_extract(external_ids, '$.itunes') = ?
+                   OR json_extract(external_ids, '$.deezer') = ?
                    OR musicbrainz_id = ?
                 LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
@@ -10525,13 +10559,15 @@ def get_artist_discography(artist_id):
                 try:
                     cur_lib = conn_lib.cursor()
                     cur_lib.execute("""
-                        SELECT id, summary, genres, thumb_url,
-                               spotify_artist_id, musicbrainz_id, deezer_id, itunes_artist_id,
-                               audiodb_id, discogs_id, tidal_id, qobuz_id, genius_id, soul_id,
-                               lastfm_bio, lastfm_listeners, lastfm_playcount, lastfm_tags,
-                               lastfm_url, genius_url, style, mood, label
-                        FROM artists WHERE name COLLATE NOCASE = ? LIMIT 1
-                    """, (artist_name,))
+                        SELECT id, summary, genres, image_url AS thumb_url,
+                               soul_id, style, mood, label,
+                               json_extract(enrichment, '$.lastfm.bio') AS lastfm_bio,
+                               json_extract(enrichment, '$.lastfm.listeners') AS lastfm_listeners,
+                               json_extract(enrichment, '$.lastfm.playcount') AS lastfm_playcount,
+                               json_extract(enrichment, '$.lastfm.tags') AS lastfm_tags,
+                               {_ARTIST_IDS_SQL}
+                        FROM lib2_artists WHERE name_key = ? LIMIT 1
+                    """.format(_ARTIST_IDS_SQL=_ARTIST_IDS_SQL), (_catalogue_name_key(artist_name),))
                     lib_row = cur_lib.fetchone()
                     if lib_row:
                         lib = dict(lib_row)
@@ -11053,7 +11089,7 @@ def get_library_artist_thumb(artist_id):
         conn = db._get_connection()
         try:
             cur = conn.cursor()
-            row = cur.execute("SELECT thumb_url FROM artists WHERE id = ?", (artist_id,)).fetchone()
+            row = cur.execute("SELECT image_url AS thumb_url FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone()
         finally:
             conn.close()
         thumb = row['thumb_url'] if row else None
@@ -12759,20 +12795,31 @@ def _build_issue_snapshot(database, entity_type, entity_id):
         if entity_type == 'track':
             cursor.execute("""
                 SELECT t.id, t.title, t.track_number, t.duration,
-                       t.file_path, t.bitrate, t.bpm,
-                       t.spotify_track_id, t.musicbrainz_recording_id, t.deezer_id as track_deezer_id,
+                       f.path AS file_path, f.bitrate, t.bpm,
+                       t.spotify_id AS spotify_track_id,
+                       t.musicbrainz_id AS musicbrainz_recording_id,
+                       json_extract(t.external_ids, '$.deezer') as track_deezer_id,
                        a.name as artist_name, a.id as artist_id,
-                       a.spotify_artist_id, a.musicbrainz_id as artist_musicbrainz_id,
-                       a.deezer_id as artist_deezer_id, a.tidal_id as artist_tidal_id,
-                       a.qobuz_id as artist_qobuz_id, a.thumb_url as artist_thumb,
-                       al.title as album_title, al.year, al.thumb_url as album_thumb,
-                       al.id as album_id, al.spotify_album_id, al.musicbrainz_release_id,
-                       al.deezer_id as album_deezer_id, al.tidal_id as album_tidal_id,
-                       al.qobuz_id as album_qobuz_id, al.label, al.record_type,
+                       a.spotify_id AS spotify_artist_id,
+                       a.musicbrainz_id as artist_musicbrainz_id,
+                       json_extract(a.external_ids, '$.deezer') as artist_deezer_id,
+                       json_extract(a.external_ids, '$.tidal') as artist_tidal_id,
+                       json_extract(a.external_ids, '$.qobuz') as artist_qobuz_id,
+                       a.image_url as artist_thumb,
+                       al.title as album_title, al.year, al.image_url as album_thumb,
+                       al.id as album_id, al.spotify_id AS spotify_album_id,
+                       al.musicbrainz_id AS musicbrainz_release_id,
+                       json_extract(al.external_ids, '$.deezer') as album_deezer_id,
+                       json_extract(al.external_ids, '$.tidal') as album_tidal_id,
+                       json_extract(al.external_ids, '$.qobuz') as album_qobuz_id,
+                       al.label, al.album_type AS record_type,
                        al.track_count as album_track_count
-                FROM tracks t
-                JOIN artists a ON t.artist_id = a.id
-                JOIN albums al ON t.album_id = al.id
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1
+                      AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.id = ?
             """, (entity_id,))
             row = cursor.fetchone()
@@ -12796,14 +12843,18 @@ def _build_issue_snapshot(database, entity_type, entity_id):
                 SELECT al.id, al.title, al.year, al.track_count, al.thumb_url,
                        al.genres, al.label, al.record_type, al.duration,
                        al.spotify_album_id, al.musicbrainz_release_id,
-                       al.deezer_id as album_deezer_id, al.tidal_id as album_tidal_id,
-                       al.qobuz_id as album_qobuz_id, al.upc,
+                       json_extract(al.external_ids, '$.deezer') as album_deezer_id,
+                       json_extract(al.external_ids, '$.tidal') as album_tidal_id,
+                       json_extract(al.external_ids, '$.qobuz') as album_qobuz_id, al.upc,
                        a.name as artist_name, a.id as artist_id,
-                       a.spotify_artist_id, a.musicbrainz_id as artist_musicbrainz_id,
-                       a.deezer_id as artist_deezer_id, a.tidal_id as artist_tidal_id,
-                       a.qobuz_id as artist_qobuz_id, a.thumb_url as artist_thumb
-                FROM albums al
-                JOIN artists a ON al.artist_id = a.id
+                       a.spotify_id AS spotify_artist_id,
+                       a.musicbrainz_id as artist_musicbrainz_id,
+                       json_extract(a.external_ids, '$.deezer') as artist_deezer_id,
+                       json_extract(a.external_ids, '$.tidal') as artist_tidal_id,
+                       json_extract(a.external_ids, '$.qobuz') as artist_qobuz_id,
+                       a.image_url as artist_thumb
+                FROM lib2_albums al
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
                 WHERE al.id = ?
             """, (entity_id,))
             row = cursor.fetchone()
@@ -12822,9 +12873,14 @@ def _build_issue_snapshot(database, entity_type, entity_id):
                         pass
                 # Get track listing with enriched data
                 cursor.execute("""
-                    SELECT id, title, track_number, duration, file_path, bitrate,
-                           spotify_track_id, bpm
-                    FROM tracks WHERE album_id = ? ORDER BY track_number
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           f.path AS file_path, f.bitrate,
+                           t.spotify_id AS spotify_track_id, t.bpm
+                    FROM lib2_tracks t
+                    LEFT JOIN lib2_track_files f
+                           ON f.track_id = t.id AND f.is_primary = 1
+                          AND COALESCE(f.file_state, 'active') <> 'deleted'
+                    WHERE t.album_id = ? ORDER BY t.track_number
                 """, (entity_id,))
                 tracks_list = []
                 for r in cursor.fetchall():
@@ -12841,11 +12897,13 @@ def _build_issue_snapshot(database, entity_type, entity_id):
 
         elif entity_type == 'artist':
             cursor.execute("""
-                SELECT id, name, thumb_url, genres, summary,
-                       spotify_artist_id, musicbrainz_id as artist_musicbrainz_id,
-                       deezer_id as artist_deezer_id, tidal_id as artist_tidal_id,
-                       qobuz_id as artist_qobuz_id
-                FROM artists WHERE id = ?
+                SELECT id, name, image_url AS thumb_url, genres, summary,
+                       spotify_id AS spotify_artist_id,
+                       musicbrainz_id as artist_musicbrainz_id,
+                       json_extract(external_ids, '$.deezer') as artist_deezer_id,
+                       json_extract(external_ids, '$.tidal') as artist_tidal_id,
+                       json_extract(external_ids, '$.qobuz') as artist_qobuz_id
+                FROM lib2_artists WHERE id = ?
             """, (entity_id,))
             row = cursor.fetchone()
             if row:
@@ -13068,7 +13126,9 @@ def _build_library_stream_url(track_id, file_path):
                 db = get_database()
                 with db._get_connection() as conn:
                     row = conn.cursor().execute(
-                        "SELECT id FROM tracks WHERE file_path = ? AND server_source = 'navidrome' LIMIT 1",
+                        "SELECT t.id FROM lib2_tracks t JOIN lib2_track_files f"
+                        "       ON f.track_id = t.id"
+                        " WHERE f.path = ? AND t.server_source = 'navidrome' LIMIT 1",
                         (file_path,)).fetchone()
                 if row:
                     song_id = str(row[0])
@@ -13272,9 +13332,11 @@ def _get_artist_id_for_entity(database, entity_type, entity_id):
         with database._get_connection() as conn:
             cursor = conn.cursor()
             if entity_type == 'album':
-                cursor.execute("SELECT artist_id FROM albums WHERE id = ?", (entity_id,))
+                cursor.execute("SELECT primary_artist_id AS artist_id FROM lib2_albums WHERE id = ?", (entity_id,))
             elif entity_type == 'track':
-                cursor.execute("SELECT artist_id FROM tracks WHERE id = ?", (entity_id,))
+                cursor.execute(
+                    "SELECT al.primary_artist_id AS artist_id FROM lib2_tracks t"
+                    "  JOIN lib2_albums al ON al.id = t.album_id WHERE t.id = ?", (entity_id,))
             else:
                 return entity_id
             row = cursor.fetchone()
@@ -13523,9 +13585,8 @@ def _watchlist_row_matches_legacy_artist(cursor, watchlist_row_id, artist_id):
     the same normalized name; an arbitrary row id cannot be updated.
     """
     artist = cursor.execute(
-        """SELECT name, spotify_artist_id, itunes_artist_id, deezer_id,
-                  discogs_id, amazon_id, musicbrainz_id
-             FROM artists WHERE id=?""",
+        f"""SELECT name, {_ARTIST_IDS_SQL}
+              FROM lib2_artists WHERE id=?""",
         (artist_id,),
     ).fetchone()
     watchlist = cursor.execute(
@@ -17179,17 +17240,22 @@ def _run_soulsync_full_refresh():
             with db._get_connection() as conn:
                 cursor = conn.cursor()
 
+                # The same upserts every other writer uses — `soulsync` is a
+                # server_source like any other, and the stable hash ids are its
+                # server ids (§50.4.4.30).
+                from core.library2.media_server_sync import (
+                    upsert_album, upsert_artist, upsert_track,
+                )
+
                 for artist_name, albums in artists_map.items():
                     artist_id = _stable_id(artist_name.lower()) + '::soulsync'
-
-                    # Insert artist
                     try:
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
-                            VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """, (artist_id, artist_name))
+                        catalogue_artist = upsert_artist(
+                            cursor, server_source='soulsync', server_id=artist_id,
+                            name=artist_name, overwrite=False)
                     except Exception as e:
-                        logger.debug("soulsync artist insert failed: %s", e)
+                        logger.debug("soulsync artist upsert failed: %s", e)
+                        continue
 
                     for album_name, tracks in albums.items():
                         album_key = f"{artist_name.lower()}::{album_name.lower()}"
@@ -17202,26 +17268,26 @@ def _run_soulsync_full_refresh():
                                 year = t['year']
                                 break
 
-                        # Insert album
                         try:
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            """, (album_id, artist_id, album_name, year, len(tracks)))
+                            catalogue_album = upsert_album(
+                                cursor, server_source='soulsync', server_id=album_id,
+                                artist_id=catalogue_artist, title=album_name,
+                                year=year or None, track_count=len(tracks))
                         except Exception as e:
-                            logger.debug("soulsync album insert failed: %s", e)
+                            logger.debug("soulsync album upsert failed: %s", e)
+                            continue
 
-                        # Insert tracks
                         for file_path, tags in tracks:
                             track_id = _stable_id(file_path) + '::soulsync'
                             try:
-                                cursor.execute("""
-                                    INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
-                                        duration, file_path, bitrate, year, server_source, created_at, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
-                                      tags['disc_number'], tags['duration_ms'], file_path,
-                                      tags['bitrate'], tags.get('year', '')))
+                                upsert_track(
+                                    cursor, server_source='soulsync',
+                                    server_id=track_id, album_id=catalogue_album,
+                                    artist_id=catalogue_artist, title=tags['title'],
+                                    track_number=tags['track_number'],
+                                    disc_number=tags['disc_number'] or 1,
+                                    duration=tags['duration_ms'],
+                                    file_path=file_path, bitrate=tags['bitrate'])
                                 successful += 1
                             except Exception as e:
                                 failed += 1
@@ -17285,7 +17351,11 @@ def _run_soulsync_deep_scan():
         try:
             with db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT file_path FROM tracks WHERE server_source = 'soulsync' AND file_path IS NOT NULL")
+                cursor.execute(
+                    "SELECT f.path AS file_path FROM lib2_track_files f"
+                    "  JOIN lib2_tracks t ON t.id = f.track_id"
+                    " WHERE t.server_source = 'soulsync' AND f.path IS NOT NULL"
+                    "   AND COALESCE(f.file_state, 'active') <> 'deleted'")
                 for row in cursor.fetchall():
                     if row['file_path']:
                         db_paths.add(row['file_path'])
@@ -17382,20 +17452,27 @@ def _run_soulsync_deep_scan():
                 with db._get_connection() as conn:
                     cursor = conn.cursor()
                     for fp in stale_track_ids:
-                        cursor.execute("DELETE FROM tracks WHERE file_path = ? AND server_source = 'soulsync'", (fp,))
+                        cursor.execute(
+                            "DELETE FROM lib2_track_files WHERE path = ? AND track_id IN"
+                            " (SELECT id FROM lib2_tracks WHERE server_source = 'soulsync')",
+                            (fp,))
+                        cursor.execute(
+                            "DELETE FROM lib2_tracks WHERE server_source = 'soulsync'"
+                            "   AND NOT EXISTS (SELECT 1 FROM lib2_track_files f"
+                            "                    WHERE f.track_id = lib2_tracks.id)")
                     conn.commit()
 
                     # Clean up orphaned albums (no tracks left)
                     cursor.execute("""
-                        DELETE FROM albums WHERE server_source = 'soulsync'
-                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE server_source = 'soulsync')
+                        DELETE FROM lib2_albums WHERE server_source = 'soulsync'
+                        AND id NOT IN (SELECT DISTINCT album_id FROM lib2_tracks)
                     """)
                     orphan_albums = cursor.rowcount
 
                     # Clean up orphaned artists (no albums left)
                     cursor.execute("""
-                        DELETE FROM artists WHERE server_source = 'soulsync'
-                        AND id NOT IN (SELECT DISTINCT artist_id FROM albums WHERE server_source = 'soulsync')
+                        DELETE FROM lib2_artists WHERE server_source = 'soulsync'
+                        AND id NOT IN (SELECT DISTINCT primary_artist_id FROM lib2_albums)
                     """)
                     orphan_artists = cursor.rowcount
                     conn.commit()
@@ -18287,7 +18364,7 @@ def restore_backup_endpoint(filename):
         db = get_database()
         with db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM artists")
+            cursor.execute("SELECT COUNT(*) FROM lib2_artists")
             artist_count = cursor.fetchone()[0]
 
         result = {
@@ -28976,11 +29053,9 @@ def export_library_artists():
         conn = database._get_connection()
         try:
             cur = conn.cursor()
-            cur.execute("""
-                SELECT id, name, spotify_artist_id, musicbrainz_id, deezer_id,
-                       discogs_id, itunes_artist_id, tidal_id, qobuz_id, amazon_id,
-                       lastfm_url, genius_url, soul_id
-                FROM artists ORDER BY name COLLATE NOCASE
+            cur.execute(f"""
+                SELECT id, name, soul_id, {_ARTIST_IDS_SQL}
+                FROM lib2_artists ORDER BY name COLLATE NOCASE
             """)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
@@ -29070,9 +29145,9 @@ def add_to_watchlist():
             try:
                 conn = database._get_connection()
                 cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT spotify_artist_id, itunes_artist_id, deezer_id, discogs_id, musicbrainz_id
-                    FROM artists WHERE id = ? LIMIT 1
+                cursor.execute(f"""
+                    SELECT {_ARTIST_IDS_SQL}
+                    FROM lib2_artists WHERE id = ? LIMIT 1
                 """, (artist_id,))
                 row = cursor.fetchone()
                 conn.close()
@@ -30038,9 +30113,12 @@ def watchlist_artist_config(artist_id):
                 # 'no such column' on every watchlist-config GET.
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
-                    FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ?
-                          OR discogs_id = ? OR musicbrainz_id = ?
+                    FROM lib2_artists
+                    WHERE spotify_id = ?
+                       OR json_extract(external_ids, '$.itunes') = ?
+                       OR json_extract(external_ids, '$.deezer') = ?
+                       OR json_extract(external_ids, '$.discogs') = ?
+                       OR musicbrainz_id = ?
                     LIMIT 1
                 """, (
                     spotify_id or artist_id,
@@ -31577,7 +31655,8 @@ def get_discover_because_you_listen_to():
                 try:
                     conn = database._get_connection()
                     cursor = conn.cursor()
-                    cursor.execute("SELECT thumb_url FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1", (artist_name,))
+                    cursor.execute("SELECT image_url AS thumb_url FROM lib2_artists WHERE name_key = ? LIMIT 1",
+                                   (_catalogue_name_key(artist_name),))
                     row = cursor.fetchone()
                     if row and row[0]:
                         artist_image = fix_artist_image_url(row[0])
@@ -31615,7 +31694,9 @@ def get_discover_undiscovered_albums():
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT LOWER(al.title), LOWER(ar.name)
-                FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                FROM lib2_albums al
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE al.origin = 'library'
             """)
             library_keys = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
 
@@ -31651,8 +31732,8 @@ def get_discover_label_explorer():
         with database._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT label FROM albums
-                WHERE label IS NOT NULL AND label != ''
+                SELECT DISTINCT label FROM lib2_albums
+                WHERE label IS NOT NULL AND label != '' AND origin = 'library'
                 LIMIT 30
             """)
             labels = {r[0] for r in cursor.fetchall()}
@@ -31667,7 +31748,7 @@ def get_discover_label_explorer():
 
 @app.route('/api/discover/deep-cuts', methods=['GET'])
 def get_discover_deep_cuts():
-    """Low-popularity tracks from artists you listen to — from cache."""
+    """Low-popularity tracks by the artists you listen to — from cache."""
     try:
         database = get_database()
         cache = get_metadata_cache()
@@ -33100,8 +33181,10 @@ def get_your_artist_info(artist_id):
             cursor = conn.cursor()
             # Check by various ID columns
             cursor.execute("""
-                SELECT * FROM artists WHERE id = ? OR spotify_artist_id = ? OR itunes_artist_id = ?
-                OR deezer_id = ? OR discogs_id = ? LIMIT 1
+                SELECT * FROM lib2_artists WHERE id = ? OR spotify_id = ?
+                   OR json_extract(external_ids, '$.itunes') = ?
+                   OR json_extract(external_ids, '$.deezer') = ?
+                   OR json_extract(external_ids, '$.discogs') = ? LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             row = cursor.fetchone()
             if row:
