@@ -4302,3 +4302,43 @@ die Route auflöst.
 
 **Alias-Zeilen sind keine zweiten Knoten** (§40): ein zweiter Knoten für
 denselben Artist würde dessen Ähnlichkeitskanten auf beide aufteilen.
+
+#### 50.4.4.24 Die Artist-Detail-Seite ist weg — und mit ihr 64 Lesestellen
+
+Stand: **240/79**. `web_server.py` fällt von 77/15 auf **29/7**,
+`database/music_database.py` von 155/46 auf **139/46**. Freigabe des Nutzers:
+die Seite wird nicht mehr gebraucht, Entscheidungen selbst treffen, es darf
+keine Funktionalität verloren gehen.
+
+**Was gelöscht ist.** 101 Dateien unter `webui/src/routes/artist-detail/` — die
+ganze React-Seite, die seit ldp-01 unerreichbar war (die Route leitet nach
+Library V2 um, §46). Stehen geblieben sind genau vier Dinge, weil sie andere
+Seiten benutzen: die Route selbst (die Umleitung), ihr Such-Schema,
+`-artist-detail.db-record` (Library-V2-Export-Modal),
+`-artist-detail.discography-modal` samt `filters`/`gap-fill`/`-ui/portal`
+(Playlist-Explorer).
+
+**Und die Endpunkte, die nur sie hatte.** Neunzehn Routen, jede vorher gegen
+das ganze Frontend (`webui/src` *und* `webui/static`, ohne `dist`)
+gegengeprüft: Tag-Vorschau und Tag-Schreiben (einzeln und Batch), die drei
+ReplayGain-Analysen, `redownload/search-metadata`, `source-info`,
+`artist/<id>/record`, `library/track|album|tracks` (Löschen), `artist/<id>/sync`,
+`reidentify/apply`, `fix-navidrome-urls`, `debug-photos`,
+`database/incremental-update`, `test/automation`. 1548 Zeilen. Library V2 hat
+für Tags, ReplayGain und Löschen längst eigene Endpunkte — deshalb geht hier
+keine Funktion verloren, sondern eine zweite, unerreichbare Kopie davon.
+
+**`/api/artist-detail/<id>` bleibt, aber nur noch für Provider-Artists.** Die
+V2-Discovery-Ansicht ruft ihn mit `?source=<provider>` auf; das ist der einzige
+Aufrufer. Der Bibliothekszweig davor war nicht nur tot, er war **falsch**: er
+schlug die Id zuerst als Katalog-Zeile nach, und eine numerische Deezer-Id kann
+auf eine Katalog-Id treffen — dann antwortete der Endpunkt mit der Bibliothek
+eines fremden Artists (dieselbe Familie wie iss29-B04c). Ohne `source` gibt er
+jetzt 400 mit der Ansage, wo die Bibliotheksansicht wohnt. Damit fällt
+`MusicDatabase.get_artist_discography` (16/0) als toter Code mit.
+
+**Tests, deren Gegenstand gelöscht ist, sind gelöscht** — drei Dateien und fünf
+einzelne Tests, jeder mit dem Grund im Diff. Der Rest der Sicherungen bleibt:
+die Backend-Hälften der Disc-/Gapfill-/ReplayGain-Tests laufen weiter. Nebenbei
+verschwinden die 57 dauerhaft roten `artist-detail-page`-Vitests: die
+webui-Suite steht jetzt bei 6458 grün / 1 rot (der bekannte `route-guard`-Fall).

@@ -160,28 +160,3 @@ def test_library_stream_honors_per_item_source():
     assert "item.get('source')" in src
     assert "source_override=item_source" in src
 
-
-def test_gap_cards_ride_the_ownership_stream():
-    """The frontend half of the per-item source contract above.
-
-    #1071: a gap card's id is only meaningful on the source that listed it, so
-    the completion-stream payload has to carry a source PER ITEM rather than one
-    source for the request. The endpoint honours item['source'] (asserted
-    above); this pins that the client actually sends it.
-
-    Reads the React page -- artist detail moved off library.js, and the vanilla
-    _streamGapOwnership this used to read was deleted with it.
-    """
-    react = _ROOT / "webui" / "src" / "routes" / "artist-detail"
-    payload = (react / "-artist-detail.gap-fill.ts").read_text(encoding="utf-8")
-    body = payload[payload.index("export function gapStreamPayload"):]
-    body = body[:body.index("\n}\n") + 3]
-    assert "source: gap._gap_source || null" in body     # per-item source travels
-    assert "source: null" in body                        # request-level source does NOT
-
-    stream = (react / "-artist-detail.use-gap-fill.ts").read_text(encoding="utf-8")
-    assert "'/api/library/completion-stream'" in stream  # same endpoint as base cards
-    assert "gapStreamPayload(artistName, gaps)" in stream
-    # The vanilla guarded stale responses with a request sequence number; React
-    # aborts the request itself when the artist changes.
-    assert "controller.abort()" in stream

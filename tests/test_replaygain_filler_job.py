@@ -301,8 +301,10 @@ def test_untagged_tracks_still_flagged_normally_in_rescan_mode():
 
 def test_all_gain_writers_use_the_target():
     from pathlib import Path
+    # The four web_server call sites were the artist-detail page's ReplayGain
+    # endpoints; they went with the page (§50.4.4.24). What has to stay pinned
+    # is that no writer reintroduces a hard-coded reference.
     ws = Path('web_server.py').read_text(encoding='utf-8')
-    assert ws.count('_rg_get_target_lufs(config_manager)') == 4
     assert '_RG_REFERENCE_LUFS' not in ws
     pl = Path('core/imports/pipeline.py').read_text(encoding='utf-8')
     assert '_rg_target(config_manager) - lufs' in pl
