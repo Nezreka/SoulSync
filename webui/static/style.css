@@ -9076,6 +9076,12 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     flex-direction: column;
     gap: 25px;
     /* Spacing between sections; card styling comes from .page-shell */
+    /* Scroll runway past the last card: Automations is the final section, and
+       its quick-settings row lands under the fixed bottom-right cluster
+       (notifications / server activity / help), which sits ABOVE the page and
+       can't be scrolled out of the way. 100px of dead space below the shell
+       lets that row scroll clear of them (Boulder). */
+    padding-bottom: 100px;
 }
 
 .dashboard-section {
