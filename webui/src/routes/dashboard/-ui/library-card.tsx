@@ -35,7 +35,7 @@ import {
   stopLibraryScan,
 } from '../-dash.api';
 import { useDashboardDbStatsEvent, useServiceStatusEvent } from '../-dash.events';
-import { libraryCardView } from '../-dash.library';
+import { libraryCardView, publishDbStats } from '../-dash.library';
 
 interface ScanProgress {
   phase: string;
@@ -64,6 +64,10 @@ export function useLibraryCard() {
     if (!mountedRef.current) return;
     setDbStats(stats);
     setDbStatsSeen(true);
+    // The header's status strip shows these same numbers; publishing here
+    // covers every arrival path (initial fetch, socket push, post-scan
+    // refresh) without a second /api/database/stats call.
+    publishDbStats(stats);
   }, []);
 
   useDashboardDbStatsEvent(useCallback((frame) => applyDbStats(frame as DbStats), [applyDbStats]));

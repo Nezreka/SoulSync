@@ -49,6 +49,13 @@ function ownText(el: Element): string {
 const ATTRS = ['src', 'alt', 'title', 'aria-hidden'] as const;
 
 function compareTrees(vanilla: Element, ported: Element, path: string) {
+  // CARVE-OUT: the title block became the hello strip (greeting + live stats,
+  // the Aug 2026 header redesign) — the ONE region of this header that
+  // intentionally diverged from the vanilla fixture. Its behaviour is covered
+  // by -dash.hello.test.ts and the hello-strip cases below; everything else,
+  // above all the orb containers worker-orbs.js reads every frame, stays
+  // pinned 1:1.
+  if (vanilla.classList.contains('header-text')) return;
   expect(`${path} tag:${ported.tagName}`).toBe(`${path} tag:${vanilla.tagName}`);
   expect(`${path} id:${ported.id}`).toBe(`${path} id:${vanilla.id}`);
   expect(`${path} class:${Array.from(ported.classList).join('.')}`).toBe(

@@ -55,6 +55,34 @@ export interface DbStats {
   [key: string]: unknown;
 }
 
+// ── Last-known db stats, shared ──────────────────────────────────────────────
+// The header's status strip shows the same numbers this card fetches, and
+// /api/database/stats is not free on a big library — so the card PUBLISHES
+// every stats payload it applies (initial fetch, socket push, post-scan
+// refresh) and other components subscribe instead of fetching again. Shaped
+// for useSyncExternalStore: subscribe returns the unsubscriber, lastDbStats
+// is the snapshot.
+
+type DbStatsListener = () => void;
+let _lastDbStats: DbStats | null = null;
+const _dbStatsListeners = new Set<DbStatsListener>();
+
+export function publishDbStats(stats: DbStats | null): void {
+  _lastDbStats = stats;
+  for (const listener of _dbStatsListeners) listener();
+}
+
+export function subscribeDbStats(listener: DbStatsListener): () => void {
+  _dbStatsListeners.add(listener);
+  return () => {
+    _dbStatsListeners.delete(listener);
+  };
+}
+
+export function lastDbStats(): DbStats | null {
+  return _lastDbStats;
+}
+
 function capitalize(s: string | null | undefined): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }

@@ -324,7 +324,13 @@ describe('quick-nav counts', () => {
         new CustomEvent('ss:watchlist-count', { detail: { success: true, count: 8 } }),
       );
     });
-    expect(state.watchlist).toEqual({ count: 8, title: 'Next auto-scan in 1m 30s' });
+    // The bare countdown for the hello strip rides along with the same
+    // keep-on-empty semantics as the title.
+    expect(state.watchlist).toEqual({
+      count: 8,
+      title: 'Next auto-scan in 1m 30s',
+      countdown: '1m 30s',
+    });
   });
 
   it('wishlist count arrives via its socket event, count || 0', async () => {

@@ -19,9 +19,13 @@
 
 import type { CSSProperties } from 'react';
 
+import { useSyncExternalStore } from 'react';
+
 import type { HeaderPill, HeaderPillId } from '../-dash.header';
 
 import { useDashboardHeader } from '../-dash.header';
+import { buildHelloStats, countBusyWorkers, greetingForHour } from '../-dash.hello';
+import { lastDbStats, subscribeDbStats } from '../-dash.library';
 
 interface OrbChrome {
   id: HeaderPillId;
@@ -484,6 +488,54 @@ function Orb({
   );
 }
 
+/**
+ * The hello strip — what replaced the "Music Dashboard" title block. The
+ * header's words are now live facts instead of the page's own name: library
+ * size from the db stats the library card publishes, busy-worker count read
+ * straight off the orb pills, and the watchlist scan countdown the quick-nav
+ * already receives. Zero fetches of its own. Each chip is a shortcut to the
+ * place the number lives.
+ */
+function HelloStrip({
+  pills,
+  scanCountdown,
+}: {
+  pills: Record<string, { stateClass: string | null }>;
+  scanCountdown?: string;
+}) {
+  const stats = useSyncExternalStore(subscribeDbStats, lastDbStats);
+  const chips = buildHelloStats({
+    tracks: stats?.tracks ?? null,
+    artists: stats?.artists ?? null,
+    busyWorkers: countBusyWorkers(pills),
+    scanCountdown: scanCountdown ?? null,
+  });
+
+  return (
+    <div className="header-text header-hello">
+      <h2 className="hello-greeting">
+        <img src="/static/dashboard.png" className="page-header-icon" alt="" />
+        <span>{greetingForHour(new Date().getHours())}</span>
+      </h2>
+      <div className="hello-stats">
+        {chips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            className="hello-stat"
+            onClick={() => {
+              if (chip.page) void window.navigateToPage?.(chip.page);
+              else window.openEnrichmentManager?.();
+            }}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function DashboardHeader() {
   const {
     pills,
@@ -507,13 +559,7 @@ export function DashboardHeader() {
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
-      <div className="header-text">
-        <h2 className="header-title">
-          <img src="/static/dashboard.png" className="page-header-icon" alt="" />
-          <span>Music Dashboard</span>
-        </h2>
-        <p className="header-subtitle">Monitor your music system health and manage operations</p>
-      </div>
+      <HelloStrip pills={pills} scanCountdown={watchlist.countdown} />
       <div className="header-actions">
         {ORBS.map((chrome) => (
           <Orb
