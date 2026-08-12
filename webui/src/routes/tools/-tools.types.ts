@@ -48,6 +48,11 @@ export interface RepairJobRun {
   status?: string | null;
   display_name?: string | null;
   job_id?: string | null;
+  id?: number | null;
+  /** Why a run failed. Recorded since phase 1 and read by nobody until the
+   *  run history learned to expand — 'failed' with no reason is the one thing
+   *  a failed run is worth opening for. */
+  error_text?: string | null;
 }
 
 export interface RepairJob {

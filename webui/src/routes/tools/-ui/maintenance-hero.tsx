@@ -48,8 +48,6 @@ import {
   formatCacheAge,
   isRepairJobDryRun,
   prettifyRepairSettingKey,
-  repairHistoryStats,
-  repairHistoryStatusClass,
   repairJobBadge,
   repairJobCardClass,
   repairJobDot,
@@ -58,6 +56,7 @@ import {
 } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { FindingsSurface } from './findings-surface';
+import { RunHistory } from './run-history';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
 const PROGRESS_HIDE_MS = 30000;
@@ -390,35 +389,6 @@ function JobCard({ job, progress, onChanged, onHelp }: JobCardProps) {
   );
 }
 
-// ── History ──────────────────────────────────────────────────────────────────
-
-function HistoryEntry({ run }: { run: RepairJobRun }) {
-  const statusClass = repairHistoryStatusClass(run.status);
-  const duration = run.duration_seconds ? `${run.duration_seconds.toFixed(1)}s` : '-';
-  return (
-    <div className="repair-history-entry">
-      <div className="repair-history-header">
-        <div className={`repair-history-dot ${statusClass}`} />
-        <span className="repair-history-name">{run.display_name || run.job_id}</span>
-        <span className={`repair-history-status ${statusClass}`}>{run.status}</span>
-        <span className="repair-history-duration">{duration}</span>
-      </div>
-      <div className="repair-history-stats">
-        {repairHistoryStats(run).map((stat) => (
-          <span className={`repair-history-stat ${stat.kind}`.trim()} key={stat.label}>
-            <strong>{stat.count.toLocaleString()}</strong> {stat.label}
-          </span>
-        ))}
-      </div>
-      <div className="repair-history-meta">
-        {formatCacheAge(run.started_at)} &middot;{' '}
-        {run.started_at ? new Date(run.started_at).toLocaleString() : '-'} &rarr;{' '}
-        {run.finished_at ? new Date(run.finished_at).toLocaleString() : 'In progress'}
-      </div>
-    </div>
-  );
-}
-
 function EmptyState({ icon, title, text }: { icon: string; title: string; text: string }) {
   return (
     <div className="repair-empty-state">
@@ -662,6 +632,17 @@ export function MaintenanceHero() {
 
   const [helpJob, setHelpJob] = useState<RepairJob | null>(null);
 
+  /**
+   * A run row's "see this job's findings" jump. The token makes a second
+   * click on the same job re-fire — without it, clicking the same row twice
+   * after wandering off would change nothing.
+   */
+  const [jobFocus, setJobFocus] = useState<{ jobId: string; token: number } | null>(null);
+  const showJobFindings = useCallback((jobId: string) => {
+    setJobFocus((previous) => ({ jobId, token: (previous?.token || 0) + 1 }));
+    jumpToSection('repair-section-findings');
+  }, []);
+
   return (
     <div className="tools-maintenance-hero">
       <div className="tools-maintenance-header">
@@ -715,6 +696,7 @@ export function MaintenanceHero() {
         jobs={jobs || []}
         runs={history || []}
         trackCount={trackCount}
+        focusJob={jobFocus}
         onStatusChanged={refreshStatus}
       />
 
@@ -747,20 +729,13 @@ export function MaintenanceHero() {
 
       <section className="repair-section" id="repair-section-history">
         <h4 className="repair-section-title">Recent runs</h4>
-        <div className="repair-history-list" id="repair-history-list">
-          {historyError ? (
-            <div className="repair-empty">Error loading history</div>
-          ) : history === null ? (
-            <div className="repair-loading">Loading history...</div>
-          ) : history.length === 0 ? (
-            <EmptyState
-              icon="&#128337;"
-              title="No History Yet"
-              text="Job run history will appear here after maintenance jobs complete their first scan."
-            />
-          ) : (
-            history.map((run, index) => <HistoryEntry run={run} key={`${run.job_id}-${index}`} />)
-          )}
+        <div className="repair-runs-card" id="repair-history-list">
+          <RunHistory
+            runs={history}
+            error={historyError}
+            onShowFindings={showJobFindings}
+            onRefresh={() => void loadHistory()}
+          />
         </div>
       </section>
 

@@ -414,7 +414,7 @@ describe('live progress panel', () => {
   });
 });
 
-describe('history tab', () => {
+describe('the history section', () => {
   const run = {
     job_id: 'orphan_file_detector',
     display_name: 'Orphan File Detector',
@@ -432,44 +432,6 @@ describe('history tab', () => {
     render(<MaintenanceHero />);
     await flush();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/history'))).toBe(true);
-  });
-
-  it('renders a completed run with its stat pills', async () => {
-    routes({ '/api/repair/history': { runs: [run] } });
-    const { container } = render(<MaintenanceHero />);
-    await waitFor(() => expect(container.querySelector('.repair-history-entry')).not.toBeNull());
-    expect(container.querySelector('.repair-history-dot')?.className).toContain('success');
-    expect(container.querySelector('.repair-history-duration')?.textContent).toBe('12.3s');
-    const stats = [...container.querySelectorAll('.repair-history-stat')].map((s) => s.textContent);
-    expect(stats).toEqual(['1,234 scanned', '5 findings', '2 fixed']);
-  });
-
-  it('maps failed to error and anything else to running', async () => {
-    routes({ '/api/repair/history': { runs: [{ ...run, status: 'failed' }] } });
-    const { container } = render(<MaintenanceHero />);
-    await waitFor(() => expect(container.querySelector('.repair-history-dot')).not.toBeNull());
-    expect(container.querySelector('.repair-history-dot')?.className).toContain('error');
-    cleanup();
-
-    routes({ '/api/repair/history': { runs: [{ ...run, status: 'in_progress' }] } });
-    const second = render(<MaintenanceHero />);
-    await waitFor(() =>
-      expect(second.container.querySelector('.repair-history-dot')).not.toBeNull(),
-    );
-    expect(second.container.querySelector('.repair-history-dot')?.className).toContain('running');
-  });
-
-  it('says In progress when a run has not finished', async () => {
-    routes({ '/api/repair/history': { runs: [{ ...run, finished_at: null }] } });
-    const { container } = render(<MaintenanceHero />);
-    await waitFor(() => expect(container.querySelector('.repair-history-meta')).not.toBeNull());
-    expect(container.querySelector('.repair-history-meta')?.textContent).toContain('In progress');
-  });
-
-  it('shows the empty state', async () => {
-    routes({ '/api/repair/history': { runs: [] } });
-    const { container } = render(<MaintenanceHero />);
-    await waitFor(() => expect(screen.getByText('No History Yet')).toBeTruthy());
   });
 });
 

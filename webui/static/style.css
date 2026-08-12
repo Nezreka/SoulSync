@@ -64614,12 +64614,303 @@ body.max-performance #page-particles-canvas {
 
 .repair-finding-btn.reopen:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 
+/* ── Recent runs ── */
+.repair-runs-card {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+}
+
+.repair-runs-toolbar {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 13px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.repair-runs-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    flex: 1;
+    min-width: 0;
+}
+
+.repair-runs-chip,
+.repair-runs-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.repair-runs-chip:hover,
+.repair-runs-toggle:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+
+.repair-runs-chip.active {
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+/* A job with a failed run in the window says so before you click it. */
+.repair-runs-chip.has-failure { border-color: rgba(244, 67, 54, 0.35); }
+.repair-runs-chip.has-failure::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #f44336;
+}
+
+.repair-runs-toggle.active {
+    color: #ffb3ad;
+    background: rgba(244, 67, 54, 0.12);
+    border-color: rgba(244, 67, 54, 0.35);
+}
+
+.repair-runs-chip-count {
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.repair-runs-chip.active .repair-runs-chip-count { color: rgba(255, 255, 255, 0.7); }
+
+.repair-runs-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.repair-runs-refresh {
+    width: 26px;
+    height: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.repair-runs-refresh:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+
+/* Day headings are what give a log a shape — "nine today, four yesterday,
+   none since" is a rhythm you can read; fifty undifferentiated rows are not. */
+.repair-runs-day-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 13px 6px 13px;
+}
+
+.repair-runs-day-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.repair-runs-day-count {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.22);
+}
+
+.repair-runs-day-head::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.repair-run {
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.repair-run-head {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 13px;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+
+.repair-run-head:hover { background: rgba(255, 255, 255, 0.03); }
+.repair-run.open .repair-run-head { background: rgba(255, 255, 255, 0.035); }
+
+.repair-run-glyph {
+    width: 18px;
+    text-align: center;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.repair-run-glyph.success { color: #22c55e; }
+.repair-run-glyph.quiet { color: rgba(255, 255, 255, 0.25); }
+.repair-run-glyph.failed { color: #f44336; }
+.repair-run-glyph.running { color: rgba(var(--accent-rgb), 0.9); }
+
+.repair-run-clock {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+    min-width: 46px;
+}
+
+.repair-run-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    flex-shrink: 0;
+    min-width: 170px;
+}
+
+.repair-run-summary {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repair-run.failed .repair-run-summary { color: #f88; }
+
+.repair-run-age {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.22);
+    flex-shrink: 0;
+}
+
+.repair-run-chevron {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.25);
+    flex-shrink: 0;
+    transition: transform 0.18s;
+}
+
+.repair-run-chevron.open { transform: rotate(180deg); color: #fff; }
+
+.repair-run-detail {
+    padding: 4px 13px 14px 42px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+
+.repair-run-counters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.repair-run-counter {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.repair-run-counter-value {
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+}
+
+.repair-run-counter-label {
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.repair-run-error {
+    border: 1px solid rgba(244, 67, 54, 0.25);
+    border-radius: 8px;
+    background: rgba(244, 67, 54, 0.06);
+    padding: 9px 11px;
+}
+
+.repair-run-error-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #f88;
+    margin-bottom: 5px;
+}
+
+.repair-run-error-text {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.75);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.repair-run-error-text.muted {
+    font-family: inherit;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+.repair-run-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.repair-run-stamps {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.25);
+}
+
+.repair-run-link {
+    border: none;
+    background: none;
+    padding: 0;
+    color: rgba(var(--accent-rgb), 0.85);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.repair-run-link:hover { color: #fff; text-decoration: underline; }
+
 @media (max-width: 720px) {
     .repair-health { gap: 14px; }
     .repair-health-score { font-size: 40px; }
     .repair-inbox-head { flex-wrap: wrap; }
     .repair-inbox-blurb { white-space: normal; }
     .repair-inbox-actions { width: 100%; justify-content: flex-end; }
+    .repair-run-head { flex-wrap: wrap; row-gap: 3px; }
+    .repair-run-name { min-width: 0; }
+    .repair-run-summary { white-space: normal; flex-basis: 100%; padding-left: 29px; }
+    .repair-run-detail { padding-left: 13px; }
 }
 
 /* ── Tool card sections ── */

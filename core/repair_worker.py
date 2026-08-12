@@ -5113,25 +5113,34 @@ class RepairWorker:
                 conn.close()
 
     def get_history(self, job_id: str = None, limit: int = 50) -> List[dict]:
-        """Get job run history."""
+        """Get job run history.
+
+        `error_text` rides along: phase 1 started recording WHY a run failed
+        and this reader never selected it, so the history could say 'failed'
+        and nothing else — the one thing a failed run is worth opening for.
+        Guarded, because a reader that raises here shows an empty history,
+        which reads as "maintenance has never run".
+        """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            has_error_text = self._has_column(cursor, 'repair_job_runs', 'error_text')
+            columns = ("id, job_id, started_at, finished_at, duration_seconds, "
+                       "items_scanned, findings_created, auto_fixed, errors, status")
+            columns += ", error_text" if has_error_text else ", NULL"
 
             if job_id:
-                cursor.execute("""
-                    SELECT id, job_id, started_at, finished_at, duration_seconds,
-                           items_scanned, findings_created, auto_fixed, errors, status
+                cursor.execute(f"""
+                    SELECT {columns}
                     FROM repair_job_runs
                     WHERE job_id = ?
                     ORDER BY started_at DESC
                     LIMIT ?
                 """, (job_id, limit))
             else:
-                cursor.execute("""
-                    SELECT id, job_id, started_at, finished_at, duration_seconds,
-                           items_scanned, findings_created, auto_fixed, errors, status
+                cursor.execute(f"""
+                    SELECT {columns}
                     FROM repair_job_runs
                     ORDER BY started_at DESC
                     LIMIT ?
@@ -5154,6 +5163,7 @@ class RepairWorker:
                     'auto_fixed': row[7],
                     'errors': row[8],
                     'status': row[9],
+                    'error_text': row[10],
                 })
             return runs
         except Exception as e:

@@ -133,11 +133,20 @@ export interface FindingsSurfaceProps {
   runs: RepairJobRun[];
   /** Library size, for the per-1,000-tracks health normalisation. */
   trackCount: number | null;
+  /** A jump from the run history: scope the surface to one job's open
+   *  findings. The token re-fires the same job. */
+  focusJob?: { jobId: string; token: number } | null;
   /** `updateRepairStatus()` — refresh the pending badge after any mutation. */
   onStatusChanged: () => void;
 }
 
-export function FindingsSurface({ jobs, runs, trackCount, onStatusChanged }: FindingsSurfaceProps) {
+export function FindingsSurface({
+  jobs,
+  runs,
+  trackCount,
+  focusJob,
+  onStatusChanged,
+}: FindingsSurfaceProps) {
   /** job_id → display name, falling back to a de-underscored id for a job the
    *  list hasn't loaded (or one that has since been removed). */
   const jobLabel = useCallback(
@@ -320,6 +329,19 @@ export function FindingsSurface({ jobs, runs, trackCount, onStatusChanged }: Fin
   useEffect(() => {
     void loadFindings();
   }, [loadFindings]);
+
+  /** Arriving from a run row. Reset everything that could hide the rows the
+   *  user just asked for — a stale search or a dismissed-status filter would
+   *  make the jump land on an empty surface. */
+  useEffect(() => {
+    if (!focusJob) return;
+    setJobFilter(focusJob.jobId);
+    setStatusFilter('pending');
+    setSeverityFilter('');
+    setQuery('');
+    setOpenType('');
+    setPage(0);
+  }, [focusJob]);
 
   // ── Filters ────────────────────────────────────────────────────────────────
 
