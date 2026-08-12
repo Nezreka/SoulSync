@@ -555,6 +555,10 @@
             // (below) until the next event arrives; that's the trade.
             if (at) {
                 Object.keys(games).forEach(function (oid) {
+                    // The event's OWN table is exempt: a late gm.join is a
+                    // human warming the table up, and the stream clock must
+                    // not kill it in the same breath that someone sits down.
+                    if (oid === gid) return;
                     var og = games[oid];
                     if (og.status === 'open' && og.createdAt &&
                             (at - og.createdAt) >= OPEN_EXPIRY_MS) {
