@@ -4132,3 +4132,48 @@ nie lief.
 aus `external_ids`, Akzente, „kennt die Bibliothek nicht"). Die Datei-Tests
 laufen gegen lib2-Zeilen statt gegen Legacy-Zeilen, plus drei neue für die
 Faltung, die Wildcards und einen Track ohne Dateizeile.
+
+#### 50.4.4.20 Was der Watchlist-Scanner die Bibliothek fragt
+
+Stand: **328/90**. `core/watchlist_scanner.py` fällt von 5/0 auf **0/0** — vier
+echte Stellen plus eine Kommentarzeile („boost tracks from artists…"), die der
+Regex mitzählt und die umformuliert statt weggezählt wurde (dieselbe Regel wie
+§50.4.4.16/§50.4.4.17).
+
+**Drei Lesestellen, drei Fragen — und alle drei stecken tief in
+300-Zeilen-Methoden.** Sie sind deshalb als benannte Funktionen
+herausgezogen (`library_random_albums`, `library_artist_genres`,
+`library_owned_and_seed_ids`), die eine offene Verbindung nehmen, so wie
+`library2.queries` es tut. Das ist kein Aufräumen um seiner selbst willen: es
+ist die einzige Art, diese Lesestellen überhaupt zu testen, ohne den halben
+Discovery-Lauf zu simulieren.
+
+**Pool-Vielfalt liest nur Besessenes.** Die alte Abfrage nahm fünf zufällige
+Alben aus dem Katalog. In lib2 steht dort auch die Diskografie verfolgter
+Artists, also würde ohne `origin='library'` der Discovery-Pool mit Platten
+gefüttert, die der Benutzer nie bekommen hat.
+
+**Die Genre-Karte lässt Artists ohne Genres weg.** Legacy filterte
+`genres IS NOT NULL AND genres != ''`; lib2 schreibt `'[]'`, was beide Prüfungen
+besteht. Die Aufrufer fragen die Karte per Mitgliedschaft („kennen wir die
+Genres dieses Artists?"), ein leerer Eintrag antwortete also mit Ja. Der alte
+Komma-Fallback für ein kaputtes JSON ist weg: lib2 schreibt immer eine
+JSON-Liste, und eine kaputte Zeile ist ein kaputter Artist, kein Grund, den
+ganzen Lauf ohne Genres zu bewerten.
+
+**Der „owned"-Satz bleibt bewusst breit.** Er ist die Ausschlussliste der
+Empfehlungen, und eine lib2-Artist-Zeile existiert, weil der Benutzer den
+Artist hat, ihn heruntergeladen hat oder ihm folgt — drei Gründe, ihn nicht
+zurückzuempfehlen. Deshalb hier *kein* `origin`-Filter, anders als beim
+Album-Lesen darüber.
+
+**Die Seed-Ids sind Provider-Ids** — derselbe Punkt wie in §50.4.4.19, hier
+schon im alten Kommentar richtig benannt. lib2 befördert nur Spotify und
+MusicBrainz in Spalten, iTunes und Deezer stehen in `external_ids`; ohne die
+wäre ein Seed, dessen Graph auf der Deezer-Id gebaut wurde, unerreichbar.
+
+**Der einzige bestehende Test dieser Pfade lief gegen einen Cursor-Stub**, der
+das SQL gar nicht ansah (`fetchall` gab eine vorbereitete Liste zurück) — er
+wäre mit jedem Tabellennamen grün geblieben. Die Attrappe hält jetzt eine echte
+`MusicDatabase`, die Alben werden als lib2-Zeilen gesät, und acht neue Tests
+decken die drei Funktionen direkt ab.
