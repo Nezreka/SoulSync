@@ -76,6 +76,21 @@ class TestTheCounter:
         )
         assert (usage.reads, usage.writes) == (0, 0)
 
+    def test_prose_in_a_string_is_not_access_either(self):
+        """A playlist description and a log line, both real: the keyword has
+        to be upper case, which SQL in this tree always is and English never
+        is. The cost is stated in the module: lower-case SQL escapes the
+        count."""
+        usage = count_legacy_usage(
+            "SPEC = dict(description='new releases from artists you follow')\n"
+            "logger.debug('get artist image from albums failed: %s', e)\n"
+        )
+        assert (usage.reads, usage.writes) == (0, 0)
+
+    def test_the_table_name_itself_is_still_case_insensitive(self):
+        usage = count_legacy_usage("cur.execute('SELECT id FROM Tracks')")
+        assert usage.reads == 1
+
     def test_a_hash_inside_sql_does_not_hide_the_rest_of_the_statement(self):
         """The comment strip must be tokenizer-accurate: a ``#`` inside a
         string is data, and everything after it still counts."""

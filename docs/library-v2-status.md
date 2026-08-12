@@ -4684,3 +4684,39 @@ portieren. Der Zähler entfernt Kommentare jetzt über `tokenize` (nur so ist
 ein `#` in einer SQL-Zeichenkette von einem echten Kommentar zu
 unterscheiden); die Basislinie fällt in derselben Änderung um genau diese
 vier Punkte, plus einen, den `master.py` beisteuerte.
+
+#### 50.4.4.33 Der lange Schwanz
+
+Stand: **37/14**. Sieben Dateien fallen auf 0/0, keine davon größer als zwei
+Stellen — aber zusammen der Rest dessen, was überhaupt noch portierbar war.
+
+**Drei Muster, mehr nicht.** Erstens die Alias-Projektion
+(`image_url AS thumb_url`, `primary_artist_id`), zweitens der gefaltete
+Namensschlüssel statt `LOWER()`/`COLLATE NOCASE` — der Artist-Graph, die
+Playlist-Erkundung und die Liked-Artists-Ernte suchten Artists über
+ASCII-Faltungen —, drittens `provider_id_sql` für die Fremd-Id-Spalten.
+
+**`resolve_album_reference` verliert seine Spaltenprobe.** Es fragte
+`PRAGMA table_info(albums)` und nahm nur Spalten in die Auswahl, die es dort
+fand. Im Katalog braucht es das nicht mehr: ein Anbieter ohne eigene Spalte
+löst innerhalb von `external_ids` auf, und der Leser findet den Wert unter
+demselben Feldnamen wie vorher.
+
+**Zwei Löschungen statt Portierungen.** Der Acquisition-Reconciler las die
+Pfade aus `lib2_track_files` **und** zusätzlich aus `tracks` — eine
+Übergangs-Vereinigung, die keinen Zweck mehr hat, seit alle Schreiber lib2
+schreiben. Und in der Entfernungserkennung des Scan-Workers ging die
+Kaskadenabfrage über `albums.artist_id`; beide Mengen dort enthalten
+**Server**-Ids, der Weg führt also über die Katalogzeile und wieder heraus zu
+`al.server_id`.
+
+**Die Ratsche zählte auch drei Prosa-*Strings*.** „new releases from artists
+you follow" ist eine Playlist-Beschreibung. Der Zähler vergleicht das
+Schlüsselwort jetzt Groß-/Kleinschreibung-genau: SQL in diesem Baum schreibt
+`FROM` groß, Englisch nie. Der Preis steht im Modul — kleingeschriebenes SQL
+entkäme dem Zähler, und das ist der deutlich unwahrscheinlichere Fehler.
+
+**Was jetzt noch offen ist, ist keine Umschreibung mehr:** die
+Legacy-Schemaverwaltung (10), die Reorganize-Pipeline mitsamt Brücke (7), die
+Migration selbst (5), der Album-Canonical-Zeiger (2) und eine Handvoll
+Stellen, die an denselben Blöcken hängen.

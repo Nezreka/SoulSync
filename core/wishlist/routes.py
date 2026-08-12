@@ -335,8 +335,8 @@ def _enrich_wishlist_images(tracks: list[dict[str, Any]], db: Any) -> dict[str, 
         try:
             placeholders = ','.join('?' * len(artist_names))
             rows = conn.execute(
-                f"SELECT name, thumb_url FROM artists "
-                f"WHERE name IN ({placeholders}) AND thumb_url IS NOT NULL AND thumb_url != ''",
+                f"SELECT name, image_url AS thumb_url FROM lib2_artists "
+                f"WHERE name IN ({placeholders}) AND image_url IS NOT NULL AND image_url != ''",
                 list(artist_names),
             ).fetchall()
         finally:

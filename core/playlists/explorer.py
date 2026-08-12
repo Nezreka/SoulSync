@@ -225,10 +225,16 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
                 with db._get_connection() as conn:
                     cursor = conn.cursor()
                     # Find all artists in DB matching this name
-                    cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (artist_name,))
+                    from core.library2.importer import normalize_name
+                    # `name_key` is the stored fold; LOWER() folds A-Z only,
+                    # so a non-ASCII artist never matched their own albums.
+                    cursor.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
+                                   (normalize_name(artist_name),))
                     artist_rows = cursor.fetchall()
                     for ar in artist_rows:
-                        cursor.execute("SELECT title FROM albums WHERE artist_id = ?", (ar['id'],))
+                        cursor.execute(
+                            "SELECT title FROM lib2_albums WHERE primary_artist_id = ?",
+                            (ar['id'],))
                         for alb_row in cursor.fetchall():
                             owned_titles.add((alb_row['title'] or '').strip().lower())
             except Exception as e:

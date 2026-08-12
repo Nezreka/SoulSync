@@ -1171,10 +1171,16 @@ class DatabaseUpdateWorker:
                     for i in range(0, len(artist_list), batch_size):
                         batch = artist_list[i:i + batch_size]
                         placeholders = ','.join('?' * len(batch))
+                        # Both sets hold the SERVER's own ids, so the walk
+                        # goes artist server_id -> catalogue row -> its albums
+                        # -> their server ids.
                         cursor.execute(
-                            f"SELECT id FROM albums WHERE artist_id IN ({placeholders}) "
-                            f"AND server_source = ?",
-                            batch + [self.server_type])
+                            f"SELECT al.server_id FROM lib2_albums al"
+                            f"  JOIN lib2_artists ar ON ar.id = al.primary_artist_id"
+                            f" WHERE ar.server_id IN ({placeholders})"
+                            f"   AND ar.server_source = ? AND al.server_source = ?"
+                            f"   AND al.server_id IS NOT NULL",
+                            batch + [self.server_type, self.server_type])
                         cascade_album_ids.update(row[0] for row in cursor.fetchall())
                     removed_album_ids -= cascade_album_ids
             except Exception as e:

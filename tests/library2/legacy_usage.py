@@ -36,13 +36,19 @@ _TABLES = "|".join(LEGACY_TABLES)
 # `(?<![\w.])` keeps `lib2_artists` and `self.artists` out; `\b` at the end
 # keeps `artists_new` out. Both matter: the first is the whole point, and the
 # second is a migration scratch table that would otherwise inflate the figure.
+#
+# The KEYWORD is matched case-sensitively, the table name is not. Every SQL
+# statement in this tree writes its keywords in upper case, while English does
+# not: "new releases from artists you follow" is a playlist description, "get
+# artist image from albums failed" is a log line. Three such sentences were
+# being counted as legacy reads. The trade-off is stated rather than hidden —
+# lower-case SQL would escape this counter, and that is the less likely
+# mistake by a wide margin.
 _WRITE = re.compile(
     rf"\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+"
-    rf"(?<![\w.])(?:{_TABLES})\b",
-    re.IGNORECASE)
+    rf"(?<![\w.])(?i:{_TABLES})\b")
 _READ = re.compile(
-    rf"\b(?:FROM|JOIN)\s+(?<![\w.])(?:{_TABLES})\b",
-    re.IGNORECASE)
+    rf"\b(?:FROM|JOIN)\s+(?<![\w.])(?i:{_TABLES})\b")
 
 
 @dataclass(frozen=True)

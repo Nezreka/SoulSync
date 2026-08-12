@@ -16,8 +16,8 @@ from core.wishlist import routes
 class _DB:
     def __init__(self, artists):
         self._conn = sqlite3.connect(":memory:")
-        self._conn.execute("CREATE TABLE artists (name TEXT, thumb_url TEXT)")
-        self._conn.executemany("INSERT INTO artists VALUES (?, ?)", artists)
+        self._conn.execute("CREATE TABLE lib2_artists (name TEXT, image_url TEXT)")
+        self._conn.executemany("INSERT INTO lib2_artists VALUES (?, ?)", artists)
         self._conn.commit()
 
     def _get_connection(self):

@@ -100,23 +100,6 @@ def _known_index_paths(conn: Any) -> set[str]:
             resolved = resolve_lib2_path(row[0])
             if resolved:
                 paths.add(_normalized_path(resolved))
-    if _table_exists(conn, "tracks"):
-        columns = {
-            str(row[1]) for row in conn.execute("PRAGMA table_info(tracks)").fetchall()
-        }
-        if "file_path" in columns:
-            rows = conn.execute(
-                "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path<>''"
-            ).fetchall()
-            from core.library2.paths import resolve_lib2_path
-
-            for row in rows:
-                if not row[0]:
-                    continue
-                paths.add(_normalized_path(row[0]))
-                resolved = resolve_lib2_path(row[0])
-                if resolved:
-                    paths.add(_normalized_path(resolved))
     return paths
 
 

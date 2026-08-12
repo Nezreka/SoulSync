@@ -796,11 +796,11 @@ def resolve_album_reference(
     try:
         from database.music_database import get_database
 
+        from core.library2.provider_ids import provider_id_sql
+
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(albums)")
-            album_columns = {row[1] for row in cursor.fetchall()}
 
             source_chain = list(metadata_registry.get_source_priority(preferred_source or metadata_registry.get_primary_source()))
             override = (preferred_source or '').strip().lower()
@@ -809,17 +809,20 @@ def resolve_album_reference(
 
             source_columns = _album_reference_source_columns()
 
+            # Each source's id, wherever the catalogue keeps it, under the name
+            # the reader below already looks for. No column probe: a provider
+            # without a column of its own resolves inside `external_ids`.
             select_columns = ["a.title", "ar.name as artist_name"]
-            for columns in source_columns.values():
-                for column in columns:
-                    if column in album_columns:
-                        select_columns.append(f"a.{column}")
+            for source, columns in source_columns.items():
+                expression = provider_id_sql(source, alias='a')
+                if expression and columns:
+                    select_columns.append(f"{expression} AS {columns[0]}")
 
             cursor.execute(
                 """
                 SELECT {select_columns}
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
+                FROM lib2_albums a
+                JOIN lib2_artists ar ON ar.id = a.primary_artist_id
                 WHERE a.id = ?
                 """.format(select_columns=", ".join(select_columns)),
                 (album_id,),

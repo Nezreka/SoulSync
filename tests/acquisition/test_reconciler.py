@@ -21,7 +21,6 @@ def conn(tmp_path):
     ensure_acquisition_schema(connection)
     connection.executescript(
         """
-        CREATE TABLE tracks(id INTEGER PRIMARY KEY, file_path TEXT);
         CREATE TABLE lib2_track_files(
             id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT, file_state TEXT
         );
@@ -102,7 +101,8 @@ def test_apply_completes_only_when_runtime_file_is_real_and_indexed(conn, tmp_pa
     request = _grab(conn)
     final = tmp_path / "done.flac"
     final.write_bytes(b"audio")
-    conn.execute("INSERT INTO tracks(id,file_path) VALUES(1,?)", (str(final),))
+    conn.execute("INSERT INTO lib2_track_files(id,track_id,path) VALUES(1,1,?)",
+                 (str(final),))
 
     report = reconcile_persistent_grabs(
         conn,

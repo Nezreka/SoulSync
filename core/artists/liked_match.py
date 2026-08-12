@@ -169,7 +169,15 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
         try:
             conn = database._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1", (name,))
+            from core.library2.importer import normalize_name
+            from core.library2.provider_ids import ARTIST_IDS_SQL
+            # The catalogue's artist row under the per-source field names this
+            # harvest already speaks, keyed by the stored fold (COLLATE NOCASE
+            # is ASCII-only and missed every non-ASCII artist).
+            cursor.execute(
+                f"SELECT *, image_url AS thumb_url, {ARTIST_IDS_SQL}"
+                f" FROM lib2_artists WHERE name_key = ? LIMIT 1",
+                (normalize_name(name),))
             row = cursor.fetchone()
             if row:
                 r = dict(row)
