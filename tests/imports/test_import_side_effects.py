@@ -1,10 +1,12 @@
 import os
+import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
 from core.imports import side_effects
+from core.library2.schema import ensure_library_v2_schema
 
 
 class _FakeDB:
@@ -16,65 +18,34 @@ class _FakeDB:
 
 
 def _make_soulsync_db():
+    """The catalogue, as every other path sees it. SoulSync-as-media-server is
+    just another `server_source`, and its stable hash ids are its server ids
+    (§50.4.4.29)."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            genres TEXT,
-            thumb_url TEXT,
-            server_source TEXT,
-            created_at TEXT,
-            updated_at TEXT,
-            spotify_artist_id TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY,
-            artist_id TEXT,
-            title TEXT,
-            year INTEGER,
-            thumb_url TEXT,
-            genres TEXT,
-            track_count INTEGER,
-            duration INTEGER,
-            server_source TEXT,
-            created_at TEXT,
-            updated_at TEXT,
-            spotify_album_id TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY,
-            album_id TEXT,
-            artist_id TEXT,
-            title TEXT,
-            track_number INTEGER,
-            duration INTEGER,
-            file_path TEXT,
-            bitrate INTEGER,
-            file_size INTEGER,
-            track_artist TEXT,
-            musicbrainz_recording_id TEXT,
-            isrc TEXT,
-            quality_profile_id INTEGER,
-            server_source TEXT,
-            created_at TEXT,
-            updated_at TEXT,
-            spotify_track_id TEXT,
-            deezer_id TEXT
-        )
-        """
-    )
+    ensure_library_v2_schema(conn)
+    conn.commit()
     return conn
+
+
+def _artist_row(conn):
+    return conn.execute("SELECT * FROM lib2_artists").fetchone()
+
+
+def _album_row(conn):
+    return conn.execute("SELECT * FROM lib2_albums").fetchone()
+
+
+def _track_row(conn):
+    return conn.execute(
+        "SELECT t.*, f.path AS file_path, f.size AS file_size, f.bitrate AS bitrate"
+        "  FROM lib2_tracks t"
+        "  LEFT JOIN lib2_track_files f ON f.track_id = t.id AND f.is_primary = 1"
+    ).fetchone()
+
+
+def _external(row, provider):
+    return json.loads(row["external_ids"] or "{}").get(provider)
 
 
 def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, monkeypatch):
@@ -125,26 +96,26 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    artist_row = conn.execute("SELECT * FROM artists").fetchone()
-    album_row = conn.execute("SELECT * FROM albums").fetchone()
-    track_row = conn.execute("SELECT * FROM tracks").fetchone()
+    artist_row = _artist_row(conn)
+    album_row = _album_row(conn)
+    track_row = _track_row(conn)
 
     assert artist_row["name"] == "Artist One"
     assert artist_row["server_source"] == "soulsync"
-    assert artist_row["spotify_artist_id"] == "sp-artist"
+    assert artist_row["spotify_id"] == "sp-artist"
     assert artist_row["genres"] == '["ROCK", "INDIE"]'
 
     assert album_row["title"] == "Album One"
     assert album_row["server_source"] == "soulsync"
-    assert album_row["spotify_album_id"] == "sp-album"
+    assert album_row["spotify_id"] == "sp-album"
     assert album_row["year"] == 2024
     assert album_row["track_count"] == 12
     assert album_row["duration"] == 210000
-    assert album_row["artist_id"] == artist_row["id"]
+    assert album_row["primary_artist_id"] == artist_row["id"]
 
     assert track_row["title"] == "Song One"
     assert track_row["server_source"] == "soulsync"
-    assert track_row["spotify_track_id"] == "sp-track"
+    assert track_row["spotify_id"] == "sp-track"
     assert track_row["track_number"] == 7
     assert track_row["duration"] == 210000
     assert track_row["track_artist"] == "Guest Artist"
@@ -154,9 +125,10 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     # Read via os.path.getsize at insert time since SoulSync standalone is
     # the only flow where the file is local at the moment we write the row.
     assert track_row["file_size"] == os.path.getsize(str(final_path))
-    # No override on this item — NULL means "follow the app-wide default at
-    # read time" (same semantics as wishlist_tracks.quality_profile_id).
-    assert track_row["quality_profile_id"] is None
+    # No override on this item — v2 says so with `quality_profile_explicit=0`
+    # ("follow the app-wide default at read time"), the id column being a plain
+    # pointer that always has a value.
+    assert track_row["quality_profile_explicit"] == 0
 
 
 def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, monkeypatch):
@@ -167,6 +139,9 @@ def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, mon
     imported under (see `_resolve_context_quality_profile` in
     core/imports/pipeline.py)."""
     conn = _make_soulsync_db()
+    conn.execute("INSERT INTO quality_profiles(id, name, ranked_targets)"
+                 " VALUES(42, 'Imported Under This', '[]')")
+    conn.commit()
     fake_db = _FakeDB(conn)
     final_path = tmp_path / "track.flac"
     final_path.write_bytes(b"audio")
@@ -200,8 +175,9 @@ def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, mon
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    track_row = conn.execute("SELECT * FROM tracks").fetchone()
+    track_row = _track_row(conn)
     assert track_row["quality_profile_id"] == 42
+    assert track_row["quality_profile_explicit"] == 1
 
 
 def test_record_soulsync_library_entry_ignores_numeric_spotify_ids(tmp_path, monkeypatch):
@@ -251,13 +227,13 @@ def test_record_soulsync_library_entry_ignores_numeric_spotify_ids(tmp_path, mon
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    artist_row = conn.execute("SELECT * FROM artists").fetchone()
-    album_row = conn.execute("SELECT * FROM albums").fetchone()
-    track_row = conn.execute("SELECT * FROM tracks").fetchone()
+    artist_row = _artist_row(conn)
+    album_row = _album_row(conn)
+    track_row = _track_row(conn)
 
-    assert artist_row["spotify_artist_id"] is None
-    assert album_row["spotify_album_id"] is None
-    assert track_row["spotify_track_id"] is None
+    assert artist_row["spotify_id"] is None
+    assert album_row["spotify_id"] is None
+    assert track_row["spotify_id"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +289,7 @@ def test_record_soulsync_library_entry_writes_mbid_and_isrc(tmp_path, monkeypatc
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    row = conn.execute("SELECT musicbrainz_recording_id, isrc FROM tracks").fetchone()
+    row = conn.execute("SELECT musicbrainz_id AS musicbrainz_recording_id, isrc FROM lib2_tracks").fetchone()
     assert row["musicbrainz_recording_id"] == "abcd1234-mbid-uuid-form"
     assert row["isrc"] == "USABC1234567"
 
@@ -356,11 +332,11 @@ def test_record_soulsync_library_entry_handles_deezer_source(tmp_path, monkeypat
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    track_row = conn.execute("SELECT deezer_id FROM tracks").fetchone()
+    track_row = conn.execute("SELECT external_ids FROM lib2_tracks").fetchone()
     # Deezer source map writes the track's source-id onto the deezer_id
     # column (same column name the artist + album use; deezer doesn't
     # split per-entity-type ID columns the way Spotify / iTunes do).
-    assert track_row["deezer_id"] == "111213"
+    assert json.loads(track_row["external_ids"])["deezer"] == "111213"
 
 
 # ---------------------------------------------------------------------------
@@ -507,8 +483,8 @@ def test_album_duration_uses_album_total_not_single_track(tmp_path, monkeypatch)
 
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    album_row = conn.execute("SELECT duration FROM albums").fetchone()
-    track_row = conn.execute("SELECT duration FROM tracks").fetchone()
+    album_row = conn.execute("SELECT duration FROM lib2_albums").fetchone()
+    track_row = conn.execute("SELECT duration FROM lib2_tracks").fetchone()
     assert album_row["duration"] == 2_500_000, (
         f"Album duration must equal album total, got {album_row['duration']}. "
         f"Bug: it's writing the single track's duration (200_000) instead."
@@ -560,10 +536,10 @@ def test_re_import_fills_empty_artist_fields(tmp_path, monkeypatch):
         {"is_album": True, "album_name": "First Album", "track_number": 1},
     )
 
-    artist_row = conn.execute("SELECT id, thumb_url, genres FROM artists").fetchone()
+    artist_row = conn.execute("SELECT id, image_url, genres FROM lib2_artists").fetchone()
     artist_id_first = artist_row["id"]
-    assert artist_row["thumb_url"] in (None, "")
-    assert artist_row["genres"] in (None, "")
+    assert artist_row["image_url"] in (None, "")
+    assert artist_row["genres"] in (None, "", "[]")   # v2 writes an empty list
 
     # Second import — artist with thumb + genres present
     ctx2 = dict(ctx1)
@@ -579,16 +555,16 @@ def test_re_import_fills_empty_artist_fields(tmp_path, monkeypatch):
     )
 
     # Same artist row updated — empty fields filled
-    artist_row2 = conn.execute("SELECT id, thumb_url, genres FROM artists").fetchone()
+    artist_row2 = conn.execute("SELECT id, image_url, genres FROM lib2_artists").fetchone()
     assert artist_row2["id"] == artist_id_first, "Should reuse existing artist row"
-    assert artist_row2["thumb_url"] == "https://img.example/cover2.jpg", (
+    assert artist_row2["image_url"] == "https://img.example/cover2.jpg", (
         "Empty thumb_url should be filled from second import"
     )
     assert "Hip-Hop" in (artist_row2["genres"] or ""), (
         "Empty genres should be filled from second import"
     )
     # Two album rows now (different albums for same artist)
-    album_count = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+    album_count = conn.execute("SELECT COUNT(*) FROM lib2_albums").fetchone()[0]
     assert album_count == 2
 
 
@@ -642,16 +618,16 @@ def test_re_import_does_not_clobber_populated_artist_fields(tmp_path, monkeypatc
         {"is_album": True, "album_name": "A2", "track_number": 1},
     )
 
-    artist_row = conn.execute("SELECT thumb_url, genres FROM artists").fetchone()
+    artist_row = conn.execute("SELECT image_url, genres FROM lib2_artists").fetchone()
     # Original values preserved
-    assert artist_row["thumb_url"] == "https://img.example/original.jpg", (
+    assert artist_row["image_url"] == "https://img.example/original.jpg", (
         "Existing thumb_url must NOT be clobbered by re-import"
     )
     assert "Hip-Hop" in artist_row["genres"], (
         "Existing genres must NOT be clobbered by re-import"
     )
     # NEW values must NOT have replaced the originals
-    assert "replacement" not in (artist_row["thumb_url"] or "")
+    assert "replacement" not in (artist_row["image_url"] or "")
     assert "Pop" not in (artist_row["genres"] or "")
 
 
@@ -691,8 +667,8 @@ def test_re_import_fills_empty_source_id_when_missing(tmp_path, monkeypatch):
         {"is_album": True, "album_name": "A1", "track_number": 1},
     )
 
-    artist_row = conn.execute("SELECT spotify_artist_id FROM artists").fetchone()
-    assert artist_row["spotify_artist_id"] in (None, "")
+    artist_row = conn.execute("SELECT spotify_id FROM lib2_artists").fetchone()
+    assert artist_row["spotify_id"] in (None, "")
 
     # Second import — now carries a valid source ID
     ctx2 = dict(ctx1)
@@ -706,8 +682,8 @@ def test_re_import_fills_empty_source_id_when_missing(tmp_path, monkeypatch):
         {"is_album": True, "album_name": "A2", "track_number": 1},
     )
 
-    artist_row2 = conn.execute("SELECT spotify_artist_id FROM artists").fetchone()
-    assert artist_row2["spotify_artist_id"] == "sp-artist-real", (
+    artist_row2 = conn.execute("SELECT spotify_id FROM lib2_artists").fetchone()
+    assert artist_row2["spotify_id"] == "sp-artist-real", (
         "Empty spotify_artist_id should be filled by the second import. "
         "This is what makes the watchlist scanner recognise the artist "
         "as already in library by stable source ID."

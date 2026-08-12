@@ -16,8 +16,9 @@ from core.repair_worker import RepairWorker
 def _worker(tmp_path):
     db = MusicDatabase(str(tmp_path / "music.db"))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'A', 'test')")
-        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES (1, 'Alb', 1, 'test')")
+        conn.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (1, 'A', 'a')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, origin)"
+                     " VALUES (1, 1, 'Alb', 'library')")
         conn.commit()
     w = RepairWorker(database=db)
     w._config_manager = None
@@ -27,10 +28,14 @@ def _worker(tmp_path):
 
 
 def _insert_track(db, tid, path):
+    """A catalogue track and its file. The path lives on the file row (ADR-03),
+    which is what the fix has to re-point after a move."""
     with db._get_connection() as conn:
         conn.execute(
-            "INSERT INTO tracks (id, title, file_path, artist_id, album_id, server_source) "
-            "VALUES (?, 'T', ?, 1, 1, 'test')", (tid, path))
+            "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, 1, 'T')", (tid,))
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+            (tid, path))
         conn.commit()
 
 
@@ -56,7 +61,7 @@ def test_abs_paths_outside_transfer_are_moved(tmp_path):
     assert res['success'] is True, res
     assert dst.is_file() and not src.exists()
     with db._get_connection() as conn:
-        assert conn.execute("SELECT file_path FROM tracks WHERE id=10").fetchone()[0] == os.path.normpath(str(dst))
+        assert conn.execute("SELECT path FROM lib2_track_files WHERE track_id=10").fetchone()[0] == os.path.normpath(str(dst))
 
 
 def test_media_server_path_updates_db_by_track_id(tmp_path):
@@ -78,7 +83,7 @@ def test_media_server_path_updates_db_by_track_id(tmp_path):
     assert dst.is_file() and not src.exists()
     with db._get_connection() as conn:
         # Updated by id despite the stored path not matching the moved path.
-        assert conn.execute("SELECT file_path FROM tracks WHERE id=20").fetchone()[0] == os.path.normpath(str(dst))
+        assert conn.execute("SELECT path FROM lib2_track_files WHERE track_id=20").fetchone()[0] == os.path.normpath(str(dst))
 
 
 def test_legacy_finding_without_abs_outside_transfer_is_guarded(tmp_path):

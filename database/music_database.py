@@ -7191,6 +7191,7 @@ class MusicDatabase:
                 genres_json=_genres_json(album_obj),
                 track_count=(getattr(album_obj, 'leafCount', None)
                              or getattr(album_obj, 'childCount', None)),
+                duration=getattr(album_obj, 'duration', None),
             )
             conn.commit()
             return True

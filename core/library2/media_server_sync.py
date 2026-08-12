@@ -50,8 +50,15 @@ def _genres_json(obj: Any) -> Optional[str]:
 
 def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
                   image_url: Optional[str] = None,
-                  genres_json: Optional[str] = None) -> int:
-    """The catalogue id for an artist the server reported."""
+                  genres_json: Optional[str] = None,
+                  overwrite: bool = True) -> int:
+    """The catalogue id for an artist the server reported.
+
+    ``overwrite=False`` fills artwork and genres only where the row has none.
+    That is the import path's rule (SoulSync-as-media-server): a re-import must
+    not trample what a provider enriched, while a real media server IS the
+    authority on what it reports.
+    """
     row = cursor.execute(
         "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=?",
         (server_source, str(server_id)),
@@ -75,11 +82,18 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
              server_source, str(server_id)),
         ).lastrowid)
     artist_id = int(row[0])
+    image_set = ("image_url=CASE WHEN image_url IS NULL OR image_url='' "
+                 "THEN COALESCE(?, image_url) ELSE image_url END"
+                 if not overwrite else
+                 "image_url=COALESCE(NULLIF(?, ''), image_url)")
+    genres_set = ("genres=CASE WHEN genres IS NULL OR genres IN ('', '[]') "
+                  "THEN COALESCE(?, genres) ELSE genres END"
+                  if not overwrite else "genres=COALESCE(?, genres)")
     cursor.execute(
         "UPDATE lib2_artists"
         "   SET name=?, name_key=?,"
-        "       image_url=COALESCE(NULLIF(?, ''), image_url),"
-        "       genres=COALESCE(?, genres),"
+        f"       {image_set},"
+        f"       {genres_set},"
         "       server_source=?, server_id=?, updated_at=CURRENT_TIMESTAMP"
         " WHERE id=?",
         (name, _name_key(name), image_url, genres_json, server_source,
@@ -107,7 +121,7 @@ def resolve_album(cursor, server_source: str, server_id: Any) -> Optional[int]:
 def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
                  title: str, year=None, image_url: Optional[str] = None,
                  genres_json: Optional[str] = None,
-                 track_count=None) -> int:
+                 track_count=None, duration=None) -> int:
     """The catalogue id for a release the server reported.
 
     ``origin='library'`` is the point of the whole row: the server has the
@@ -129,10 +143,10 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
     if row is None:
         album_id = int(cursor.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, year, image_url,"
-            "                        genres, track_count, origin, server_source,"
-            "                        server_id)"
-            " VALUES(?,?,?,?,COALESCE(?, '[]'),?, 'library', ?, ?)",
-            (artist_id, title, year, image_url, genres_json, track_count,
+            "                        genres, track_count, duration, origin,"
+            "                        server_source, server_id)"
+            " VALUES(?,?,?,?,COALESCE(?, '[]'),?,?, 'library', ?, ?)",
+            (artist_id, title, year, image_url, genres_json, track_count, duration,
              server_source, str(server_id)),
         ).lastrowid)
     else:
@@ -143,10 +157,11 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
             "       image_url=COALESCE(NULLIF(?, ''), image_url),"
             "       genres=COALESCE(?, genres),"
             "       track_count=COALESCE(?, track_count),"
+            "       duration=COALESCE(?, duration),"
             "       origin='library', server_source=?, server_id=?,"
             "       updated_at=CURRENT_TIMESTAMP"
             " WHERE id=?",
-            (artist_id, title, year, image_url, genres_json, track_count,
+            (artist_id, title, year, image_url, genres_json, track_count, duration,
              server_source, str(server_id), album_id),
         )
     cursor.execute(

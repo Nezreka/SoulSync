@@ -2246,10 +2246,6 @@ class RepairWorker:
         if native_track_id is not None:
             conn = self.db._get_connection()
             try:
-                legacy = conn.execute(
-                    "SELECT legacy_track_id FROM lib2_tracks WHERE id=?",
-                    (native_track_id,),
-                ).fetchone()
                 cursor = conn.execute(
                     "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
                     "WHERE id=?",
@@ -2257,11 +2253,6 @@ class RepairWorker:
                 )
                 if cursor.rowcount == 0:
                     return {'success': False, 'error': 'Library-v2 track no longer exists'}
-                if legacy and legacy[0] is not None:
-                    conn.execute(
-                        "UPDATE tracks SET track_number=? WHERE id=?",
-                        (int(correct_num), legacy[0]),
-                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -2431,28 +2422,11 @@ class RepairWorker:
                         "WHERE track_id=? AND path IN (?,?)",
                         (new_path, native_track_id, file_path, resolved),
                     )
-                legacy_ids = [row[0] for row in cursor.execute(
-                    """SELECT DISTINCT COALESCE(f.legacy_track_id, t.legacy_track_id)
-                         FROM lib2_tracks t
-                    LEFT JOIN lib2_track_files f ON f.track_id=t.id
-                        WHERE t.id=?
-                          AND COALESCE(f.legacy_track_id, t.legacy_track_id) IS NOT NULL""",
-                    (native_track_id,),
-                ).fetchall()]
             else:
                 cursor.execute(
                     "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
                     "WHERE path IN (?,?)",
                     (new_path, file_path, resolved),
-                )
-                legacy_ids = [row[0] for row in cursor.execute(
-                    "SELECT DISTINCT legacy_track_id FROM lib2_track_files "
-                    "WHERE path=? AND legacy_track_id IS NOT NULL", (new_path,),
-                ).fetchall()]
-            for legacy_track_id in legacy_ids:
-                cursor.execute(
-                    "UPDATE tracks SET file_path=? WHERE id=?",
-                    (new_path, legacy_track_id),
                 )
             conn.commit()
         finally:
@@ -3357,42 +3331,56 @@ class RepairWorker:
                 # it can MISS for media-server libraries whose stored file_path differs
                 # from the resolved path we just moved, which is exactly the #978
                 # population (so without this the file moves but the DB stays stale).
+                # The finding's own subject counts as the track id too: a
+                # catalogue finding carries `lib2:<id>`, and an older one a bare
+                # integer that is now the catalogue row (§50.4.4.29).
+                lib2_track_id = details.get('lib2_track_id')
+                if lib2_track_id is None:
+                    lib2_track_id = _lib2_id(entity_id)
+                if lib2_track_id is None and entity_type == 'track':
+                    lib2_track_id = entity_id
                 try:
-                    legacy_track_id = details.get('legacy_track_id')
-                    raw_track_id = (
-                        legacy_track_id if legacy_track_id not in (None, '') else entity_id
-                    )
-                    tid = int(raw_track_id) if raw_track_id not in (None, '') else None
+                    lib2_track_id = int(lib2_track_id) if lib2_track_id is not None else None
                 except (TypeError, ValueError):
-                    tid = None
-                if tid is not None:
-                    cursor.execute("UPDATE tracks SET file_path = ? WHERE id = ?", (dst, tid))
-                if tid is None or cursor.rowcount == 0:
-                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?", (dst, src))
+                    lib2_track_id = None
+                if lib2_track_id is not None:
+                    # The exact file first — a track may own more than one, and
+                    # only the one we moved may be re-pointed (dd28-19).
+                    cursor.execute(
+                        "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE track_id=? AND (path=? OR path=?)",
+                        (dst, lib2_track_id, src, rel_from),
+                    )
+                    if cursor.rowcount == 0:
+                        # #978: a media-server library stores a path that is not
+                        # the one we resolved and moved. The id is authoritative,
+                        # so re-point that track's primary file.
+                        cursor.execute(
+                            "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                            "WHERE track_id=? AND is_primary=1",
+                            (dst, lib2_track_id),
+                        )
+                # Path matching is the fallback for a finding that carries no
+                # catalogue id at all — without it the file moves and the
+                # catalogue stays stale.
+                if lib2_track_id is None or cursor.rowcount == 0:
+                    cursor.execute(
+                        "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE path=?", (dst, src))
                 if cursor.rowcount == 0:
-                    cursor.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                                   (dst, os.path.normpath(src)))
+                    cursor.execute(
+                        "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                        "WHERE path=?", (dst, os.path.normpath(src)))
                 if cursor.rowcount == 0:
                     # Suffix match for cross-environment paths (Docker vs host)
                     try:
                         rel_suffix = os.path.relpath(src, transfer).replace('\\', '/')
                         escaped = rel_suffix.replace('^', '^^').replace('%', '^%').replace('_', '^_')
                         cursor.execute(
-                            "UPDATE tracks SET file_path = ? WHERE file_path LIKE ? ESCAPE '^'",
-                            (dst, '%/' + escaped))
+                            "UPDATE lib2_track_files SET path=?, updated_at=CURRENT_TIMESTAMP "
+                            "WHERE path LIKE ? ESCAPE '^'", (dst, '%/' + escaped))
                     except Exception as e:
                         logger.debug("Suffix-match DB path update failed: %s", e)
-                lib2_track_id = details.get('lib2_track_id')
-                try:
-                    lib2_track_id = int(lib2_track_id) if lib2_track_id is not None else None
-                except (TypeError, ValueError):
-                    lib2_track_id = None
-                if lib2_track_id is not None:
-                    cursor.execute(
-                        "UPDATE lib2_track_files SET path=? "
-                        "WHERE track_id=? AND (path=? OR path=?)",
-                        (dst, lib2_track_id, src, rel_from),
-                    )
                 conn.commit()
             except Exception as e:
                 # dd28-19/dd28-28: the file is already at `dst`. Swallowing this

@@ -323,9 +323,10 @@ def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
     assert missing in canonical_ids
 
 
-def test_native_track_number_fix_updates_legacy_and_v2_atomically(
-    legacy_db, tmp_path
-):
+def test_native_track_number_fix_updates_the_catalogue(legacy_db, tmp_path):
+    """The legacy write-through went with the legacy readers (§50.4.4.29) —
+    what has to hold is that the number and the path move together on the
+    catalogue side, which is the only side left."""
     from core.repair_worker import RepairWorker
 
     _import(legacy_db)
@@ -341,7 +342,6 @@ def test_native_track_number_fix_updates_legacy_and_v2_atomically(
         "UPDATE lib2_track_files SET path=? WHERE id=?",
         (str(original), native["file_id"]),
     )
-    conn.execute("UPDATE tracks SET file_path=? WHERE id=100", (str(original),))
     conn.commit()
     conn.close()
     worker = RepairWorker(legacy_db, transfer_folder=str(tmp_path))
@@ -366,13 +366,10 @@ def test_native_track_number_fix_updates_legacy_and_v2_atomically(
         v2_path = conn.execute(
             "SELECT path FROM lib2_track_files WHERE id=?", (native["file_id"],)
         ).fetchone()[0]
-        legacy = conn.execute(
-            "SELECT track_number, file_path FROM tracks WHERE id=100"
-        ).fetchone()
     finally:
         conn.close()
-    assert v2 == legacy["track_number"] == 2
-    assert v2_path == legacy["file_path"] == str(renamed)
+    assert v2 == 2
+    assert v2_path == str(renamed)
 
 
 def test_new_derivative_is_linked_to_same_v2_track(legacy_db, tmp_path):

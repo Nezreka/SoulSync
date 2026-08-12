@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     label TEXT,
     upc TEXT,                                          -- barcode; provider-neutral identifier like isrc on tracks
     track_count INTEGER,
+    duration INTEGER,                                  -- total runtime in ms, as the server/import reported it
     expected_track_count INTEGER,                      -- true total from metadata (for have/missing)
     tracklist_json TEXT,                               -- cached canonical tracklist (missing-track titles)
     tracklist_status TEXT NOT NULL DEFAULT 'idle',     -- idle | pending | failed | ready
@@ -340,6 +341,7 @@ _ADDED_COLUMNS = (
     ("lib2_artists", "server_id", "ALTER TABLE lib2_artists ADD COLUMN server_id TEXT"),
     ("lib2_albums", "server_source", "ALTER TABLE lib2_albums ADD COLUMN server_source TEXT"),
     ("lib2_albums", "server_id", "ALTER TABLE lib2_albums ADD COLUMN server_id TEXT"),
+    ("lib2_albums", "duration", "ALTER TABLE lib2_albums ADD COLUMN duration INTEGER"),
     ("lib2_tracks", "server_source", "ALTER TABLE lib2_tracks ADD COLUMN server_source TEXT"),
     ("lib2_tracks", "server_id", "ALTER TABLE lib2_tracks ADD COLUMN server_id TEXT"),
     ("lib2_tracks", "track_artist", "ALTER TABLE lib2_tracks ADD COLUMN track_artist TEXT"),

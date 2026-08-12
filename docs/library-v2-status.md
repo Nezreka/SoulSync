@@ -4488,3 +4488,44 @@ that key", und der Aufrufer fing das als „nichts gefunden". Jetzt ein
 Testdateien säten ihr eigenes Legacy-Trio; sie rufen jetzt `seed_library_track`
 & Co. und adressieren Zeilen weiter über die Server-Ids, die sie schon
 benutzten.
+
+#### 50.4.4.29 „SoulSync ist der Medienserver" schreibt den Katalog
+
+Stand: **127/30**. `core/imports/side_effects.py` 5/7 → **0/0**,
+`core/library/missing_track_import.py` 8/4 → **0/0**,
+`core/imports/album_grouping.py` 3/0 → **0/0**, `core/repair_worker.py` 0/6 →
+**0/0**.
+
+**Der Import benutzt dieselben Upserts wie der Scan.** `soulsync` ist nur ein
+weiterer `server_source`, und die stabilen Hash-Ids, die der Import ohnehin
+mintet, sind seine Server-Ids. Damit fällt die zweite, parallele
+Insert-Logik weg — inklusive der Hash-Kollisionsbehandlung („mint eine
+soulsync-suffixierte Id"), die es nur gab, weil die Legacy-Id ein
+Primärschlüssel über alle Server hinweg war.
+
+**Ein Unterschied musste bleiben und heißt jetzt so:** der Scan ist Autorität
+für das, was der Server meldet, der Import ist es *nicht*. `upsert_artist`
+bekommt darum ein `overwrite`-Flag; der Import ruft es mit `False`, füllt also
+Bild und Genres nur, wo noch nichts steht. Genau das war die alte
+„fill-empty, never clobber"-Regel.
+
+**Provider-Ids gehen in `external_ids`**, außer Spotify und MusicBrainz, die
+eigene Spalten haben — ein JSON-Merge, der einen vorhandenen Wert desselben
+Providers stehen lässt. Die Album-Gruppierung (§Sokhi: eine Platte, ein
+Cover) sucht dort ebenfalls, statt in einer Allowlist von Legacy-Spalten.
+
+**Zwei Fundstücke am Rand.** Erstens: `quality_profile_id` heißt in lib2
+zusätzlich `quality_profile_explicit` — „kein Override" ist dort eine 0, nicht
+ein NULL, und ein Zeiger auf ein gelöschtes Profil wird von einem Trigger
+abgelehnt. Das darf den Import nicht kosten, also ist der Stempel jetzt
+gekapselt. Zweitens: die Disc-Nummer-Spaltenmigration im Import (#927) ist
+ersatzlos weg — lib2 hat die Spalte von Anfang an.
+
+**Der Repair-Worker verliert seine Durchschriften.** Track-Nummer und Pfad
+wurden bisher zusätzlich in die Legacy-Tabelle geschrieben. Beim Pfad ist dabei
+etwas Wichtiges erhalten geblieben: der #978-Fall (ein Medien-Server speichert
+einen anderen Pfad, als wir aufgelöst und verschoben haben) wurde in Legacy
+über die Id repariert, in lib2 aber nur über den exakten Pfad — die
+Datei wäre verschoben und der Katalog stehen geblieben. Jetzt: exakte Datei
+zuerst (ein Track kann mehrere haben, dd28-19), dann die primäre Datei über die
+Id, dann die Pfad-Fallbacks.
