@@ -4435,3 +4435,21 @@ gewollte zweite Zeile.
 Zehn neue Tests für die Upserts, dazu sind die Scan-Tests (Disc-Nummern,
 Dateigrößen, Featured-Artists, Thumb-Erhalt, Rating-Key-Wechsel,
 IO-Widerstandsfähigkeit) auf den Katalog umgeschrieben.
+
+#### 50.4.4.27 Stand nach der großen Runde
+
+**189/47**, von 343/90 zu Beginn des Tages. Die verbleibenden Brocken und was
+sie noch brauchen:
+
+| Datei | offen | was fehlt |
+|---|---|---|
+| `database/music_database.py` | 98/14 | die öffentliche `api_*`-Leseschicht, die Track-Suche (`_search_tracks_*`, `check_track_exists`), `get_library_artists`, `get_artist_full_detail`, `get_radio_tracks` |
+| `web_server.py` | 29/7 | verstreute Einzelstellen (Issue-Snapshot, Discover-Endpunkte, Artist-Thumb, Watchlist-Abgleich) und die SoulSync-als-Server-Pfade |
+| `core/library/missing_track_import.py` | 8/4 | schreibt die Legacy-Bibliothek im Modus „SoulSync ist der Medienserver" |
+| `core/imports/side_effects.py` | 5/7 | dito |
+| `core/repair_worker.py` | 0/6 | Durchschriften auf `tracks.file_path` |
+| `core/library2/importer.py` | 5/0 | **die Migration selbst** — fällt mit den Legacy-Tabellen, nicht davor |
+| `core/library_reorganize.py` + `reorganize_runner` | 5/1 | die Reorganize-Pipeline ist legacy-schema-gebunden (§50.4.4.21) |
+
+Die volle Suite steht bei 14252 grün und den vier bekannten Vorab-Fehlschlägen;
+die webui-Suite bei 6458 grün und dem einen bekannten (`route-guard`).
