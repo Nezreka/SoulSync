@@ -100,6 +100,9 @@ export function heroAutoAdvances(count: number): boolean {
 }
 
 /** Copy for the "nothing to recommend" state — `showDiscoverHeroEmpty`, 1271-1272. */
+export const HERO_LOADING_TITLE = 'Finding your next favorite artist…';
+export const HERO_LOADING_SUBTITLE =
+  'Warming up your recommendations — the first visit after a restart takes a few seconds.';
 export const HERO_EMPTY_TITLE = 'No Recommendations Yet';
 export const HERO_EMPTY_SUBTITLE = 'Run a watchlist scan to generate personalized recommendations';
 

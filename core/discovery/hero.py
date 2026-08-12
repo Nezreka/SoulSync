@@ -66,7 +66,7 @@ def init(get_metadata_fallback_client_fn):
 # the featured-rotation still advances on every fresh compute, just not on
 # every reload inside the window.
 _HERO_CACHE = {}  # (profile_id, source) -> (expiry_ts, payload)
-_HERO_TTL_S = 600
+_HERO_TTL_S = 1800
 
 
 def get_discover_hero():

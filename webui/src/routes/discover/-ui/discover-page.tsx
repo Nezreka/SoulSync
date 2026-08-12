@@ -762,6 +762,7 @@ export function DiscoverPage() {
         <div className="discover-container">
           <DiscoverHero
             artist={hero.artist}
+            loading={page.hero.isPending}
             count={hero.artists.length}
             index={hero.index}
             watchlist={hero.watchlist}
