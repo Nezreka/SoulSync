@@ -707,18 +707,15 @@ def test_cover_art_scanner_flags_v2_only_album(migrated_legacy_db, tmp_path, mon
     album_id, artist_id, _track_id, _file_id = _add_v2_only_album(
         legacy_db, audio, title="Artless Album"
     )
+    # The source-priority names these used to patch belonged to the legacy
+    # projection and are gone with it; the order now travels to the adapter as
+    # an argument. The disk checks are imported inside `scan`, so they are
+    # patched where they live.
     monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.get_primary_source", lambda: "spotify"
+        "core.metadata.art_apply.file_has_embedded_art", lambda p: False
     )
     monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.get_source_priority",
-        lambda primary: ["spotify"],
-    )
-    monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.file_has_embedded_art", lambda p: False
-    )
-    monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
+        "core.metadata.art_apply.folder_has_cover_sidecar", lambda d: False
     )
     # The native scan's provider seam is the typed adapter, not the old per-source
     # methods — those belonged to the legacy projection that has since been folded
@@ -781,18 +778,15 @@ def test_cover_art_scanner_covers_v2_album_on_unmigrated_legacy_schema(
     album_id, _artist_id, _track_id, _file_id = _add_v2_only_album(
         legacy_db, audio, title="Artless Album"
     )
+    # The source-priority names these used to patch belonged to the legacy
+    # projection and are gone with it; the order now travels to the adapter as
+    # an argument. The disk checks are imported inside `scan`, so they are
+    # patched where they live.
     monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.get_primary_source", lambda: "spotify"
+        "core.metadata.art_apply.file_has_embedded_art", lambda p: False
     )
     monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.get_source_priority",
-        lambda primary: ["spotify"],
-    )
-    monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.file_has_embedded_art", lambda p: False
-    )
-    monkeypatch.setattr(
-        "core.repair_jobs.missing_cover_art.folder_has_cover_sidecar", lambda d: False
+        "core.metadata.art_apply.folder_has_cover_sidecar", lambda d: False
     )
     # The native scan's provider seam is the typed adapter, not the old per-source
     # methods — those belonged to the legacy projection that has since been folded
