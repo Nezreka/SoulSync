@@ -31830,6 +31830,52 @@ from core.discovery.hero import (
 )
 
 
+# ── Discover shelf cache ────────────────────────────────────────────────
+# Every heavy discover GET below recomputes multi-second DB/consensus work
+# per request (live: similar-artists 22s, genre-explorer 14s, hero 23s...).
+# The page is read-only and its data changes on SCAN cadence, not request
+# cadence — so each shelf caches its serialized 200 response per
+# (path+query, profile) for 30 minutes, and the warmer below recomputes
+# everything in the background so users only ever hit warm answers.
+_DISCOVER_SHELF_CACHE = {}
+_DISCOVER_SHELF_TTL_S = 1800
+
+
+def _discover_shelf_cache(key_extra=None):
+    def deco(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            import time as _t
+            extra = key_extra() if key_extra else None
+            key = (fn.__name__, request.full_path, get_current_profile_id(), extra)
+            hit = _DISCOVER_SHELF_CACHE.get(key)
+            now = _t.time()
+            if hit and now < hit[0]:
+                body, status, ctype = hit[1]
+                return app.response_class(body, status=status, content_type=ctype)
+            out = fn(*args, **kwargs)
+            resp = app.make_response(out)
+            if resp.status_code == 200:
+                _DISCOVER_SHELF_CACHE[key] = (
+                    now + _DISCOVER_SHELF_TTL_S,
+                    (resp.get_data(), resp.status_code, resp.content_type),
+                )
+            return resp
+        return wrapper
+    return deco
+
+
+def _discover_dial_key():
+    # The dial re-ranks similar-artists live; committing it must bust the key.
+    try:
+        from config.settings import config_manager
+        return str(config_manager.get('discover.adventurousness', 0.3))
+    except Exception:
+        return '0.3'
+
+
 @app.route('/api/discover/hero', methods=['GET'])
 def get_discover_hero():
     return _discover_hero_get()
@@ -31878,6 +31924,7 @@ def _discover_primary_genre(item):
 
 
 @app.route('/api/discover/similar-artists', methods=['GET'])
+@_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
     try:
@@ -32136,6 +32183,7 @@ def _autostart_popularity_backfill():
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
 
@@ -32494,6 +32542,7 @@ def refresh_spotify_library():
 
 
 @app.route('/api/discover/recent-releases', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_recent_releases():
     """Get cached recent albums from watchlist and similar artists"""
     try:
@@ -32619,6 +32668,7 @@ def get_discover_release_radar():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/because-you-listen-to', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_because_you_listen_to():
     """Get 'Because You Listen To' sections — personalized by top played artists."""
     try:
@@ -32686,6 +32736,7 @@ def get_discover_because_you_listen_to():
         return jsonify({'success': True, 'sections': []})
 
 @app.route('/api/discover/undiscovered-albums', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_undiscovered_albums():
     """Albums by artists you listen to that aren't in your library — from cache."""
     try:
@@ -32715,6 +32766,7 @@ def get_discover_undiscovered_albums():
         return jsonify({'success': True, 'albums': []})
 
 @app.route('/api/discover/genre-new-releases', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_genre_new_releases():
     """Recent releases matching your top genres — from cache."""
     try:
@@ -32732,6 +32784,7 @@ def get_discover_genre_new_releases():
         return jsonify({'success': True, 'albums': []})
 
 @app.route('/api/discover/label-explorer', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_label_explorer():
     """Popular albums from labels in your library — from cache."""
     try:
@@ -32755,6 +32808,7 @@ def get_discover_label_explorer():
         return jsonify({'success': True, 'albums': [], 'labels': []})
 
 @app.route('/api/discover/deep-cuts', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_deep_cuts():
     """Low-popularity tracks from artists you listen to — from cache."""
     try:
@@ -32781,6 +32835,7 @@ def _get_genre_allowed_sources():
     return sources
 
 @app.route('/api/discover/genre-explorer', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_genre_explorer():
     """Genre landscape from cached artists — highlights unexplored genres."""
     try:
@@ -33053,6 +33108,7 @@ def diagnose_discover_data():
 # ========================================
 
 @app.route('/api/discover/seasonal/current', methods=['GET'])
+@_discover_shelf_cache()
 def get_current_seasonal_content():
     """Auto-detect and return current season's content"""
     try:
@@ -34477,6 +34533,7 @@ def generate_custom_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/decades/available', methods=['GET'])
+@_discover_shelf_cache()
 def get_available_decades():
     """Get list of decades that have content in discovery pool"""
     try:
@@ -39622,6 +39679,59 @@ _init_connection_test(
 _init_discovery_scoring(matching_engine_obj=matching_engine)
 
 _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_client)
+
+
+def _start_discover_warmer():
+    """Pre-compute the discover page in the background, forever.
+
+    Every restart used to wipe the in-process caches, so the first person to
+    open Discover paid the full 20s+ compute — and the hero looked broken the
+    whole time. This walks every cached shelf through the real routes (a test
+    client hits the same decorators) 15s after boot and then every 25 minutes,
+    inside the shelves' 30-minute TTL, so real users only ever get warm
+    answers. Sequential on purpose: one background compute at a time instead
+    of a thundering herd on the GIL. Fail-soft everywhere."""
+    import threading
+    import time as _t
+
+    paths = [
+        '/api/discover/hero',
+        '/api/discover/similar-artists',
+        '/api/discover/listening-recommendations',
+        '/api/discover/recent-releases',
+        '/api/discover/genre-explorer',
+        '/api/discover/genre-new-releases',
+        '/api/discover/because-you-listen-to',
+        '/api/discover/undiscovered-albums',
+        '/api/discover/label-explorer',
+        '/api/discover/deep-cuts',
+        '/api/discover/seasonal/current',
+        '/api/discover/decades/available',
+    ]
+
+    def loop():
+        _t.sleep(15)  # let boot finish before the first sweep
+        while True:
+            started = _t.time()
+            with app.test_client() as client:
+                for p in paths:
+                    try:
+                        client.get(p)
+                    except Exception as e:
+                        logger.debug(f"discover warmup {p} failed: {e}")
+            logger.info(f"Discover warmup sweep finished in {_t.time() - started:.1f}s")
+            _t.sleep(1500)
+
+    threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
+
+
+# NEVER under pytest: dozens of tests import web_server, and a leaked
+# background thread touching databases mid-suite is exactly the bug class
+# behind the video-db split-brain incident (conftest locks video installs
+# for the same reason). Opt-out env for anyone who wants it off in prod.
+import sys as _sys
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
+    _start_discover_warmer()
 
 _init_download_validation(
     matching_engine_obj=matching_engine,
