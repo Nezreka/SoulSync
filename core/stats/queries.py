@@ -22,15 +22,17 @@ ImageUrlFixer = Callable[[Optional[str]], Optional[str]]
 
 # The stats page shows names the media server reported for a play; the catalogue
 # has to be found by name because there is no id in a listening-history row.
-# Three things about doing that against Library v2 (docs §50.4.4.13):
+# Three things about doing that against Library v2 (docs §50.4.4.13, corrected
+# in §50.4.4.22):
 #
-# **The id stays the legacy one.** Every id here is handed to
-# ``navigateToArtistDetail``, and a bare numeric entity id resolves against the
-# legacy table by contract — the same reason ``library2.queries`` returns
-# ``legacy_artist_id`` as ``id``. A native row has none; it is still worth
-# enriching (its artwork is real), it just has nothing navigation could open,
-# and the front end already renders a null id as plain text. The ``ORDER BY``
-# therefore prefers a linked row over a native twin of the same name.
+# **The id is the lib2 one.** Every id here is handed to the artist-detail
+# link, and that route redirects `/artist-detail/library/<id>` into Library V2
+# as `?artist=<id>` (ldp-01) — where the number is read as `lib2_artists.id`.
+# §50.4.4.13 kept the legacy id because the page it knew resolved against the
+# legacy table; that page is gone, so a legacy id there opens a different
+# artist or none at all. A row without a legacy twin is therefore no longer a
+# row without a link, and the ``ORDER BY`` prefers the canonical row (an alias
+# member folds into it anyway) rather than a linked one.
 #
 # **Artists match on ``name_key``, not ``LOWER(name)``.** It is the indexed
 # dedup key, and SQLite's ``lower()`` is ASCII-only — the old comparison missed
@@ -45,37 +47,37 @@ _ARTIST_BY_NAME_SQL = """
            json_extract(enrichment, '$.lastfm.listeners'),
            json_extract(enrichment, '$.lastfm.playcount'),
            soul_id,
-           legacy_artist_id
+           COALESCE(canonical_artist_id, id)
       FROM lib2_artists
      WHERE name_key = ?
-     ORDER BY (legacy_artist_id IS NULL), id
+     ORDER BY (canonical_artist_id IS NOT NULL), id
      LIMIT 1
 """
 
 _ALBUM_BY_TITLE_SQL = """
-    SELECT al.image_url, al.legacy_album_id, ar.legacy_artist_id
+    SELECT al.image_url, al.id, COALESCE(ar.canonical_artist_id, ar.id)
       FROM lib2_albums al
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
      WHERE LOWER(al.title) = LOWER(?)
        AND al.image_url IS NOT NULL AND al.image_url != ''
-     ORDER BY (al.legacy_album_id IS NULL), al.id
+     ORDER BY al.id
      LIMIT 1
 """
 
 _TRACK_BY_TITLE_AND_ARTIST_SQL = """
-    SELECT al.image_url, t.legacy_track_id, ar.legacy_artist_id
+    SELECT al.image_url, t.id, COALESCE(ar.canonical_artist_id, ar.id)
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
      WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
-     ORDER BY (t.legacy_track_id IS NULL), t.id
+     ORDER BY t.id
      LIMIT 1
 """
 
 _PLAYABLE_TRACK_SQL = """
-    SELECT t.legacy_track_id, t.title, f.path, f.bitrate, t.duration,
+    SELECT t.id, t.title, f.path, f.bitrate, t.duration,
            ar.name, al.title, al.image_url,
-           ar.legacy_artist_id, al.legacy_album_id
+           COALESCE(ar.canonical_artist_id, ar.id), al.id
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -288,6 +290,11 @@ def resolve_track(database, image_url_fixer: ImageUrlFixer, title: str, artist: 
         'image_url': image_url_fixer(row[7]) if row[7] else None,
         'artist_id': row[8],
         'album_id': row[9],
+        # The player takes the v2 ids by their own names (iss29-B08): its
+        # "Go to artist" button then routes straight into the Library page
+        # instead of going through the artist-detail redirect.
+        'lib2_track_id': row[0],
+        'lib2_artist_id': row[8],
     }
 
 

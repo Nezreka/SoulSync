@@ -29,12 +29,13 @@ _id_counter = {'n': 0}
 
 
 def _next_id():
-    """A legacy id. The stats rows still speak this space (docs §50.4.4.13).
+    """A legacy id, written on every seeded row and expected on none of them.
 
-    A bare numeric entity id is legacy by contract — the artist-detail page
-    resolves it against the legacy table — so the seeds keep one on every lib2
-    row and the assertions below compare against it, even though the row the
-    query reads is native.
+    §50.4.4.13 read the id contract off the old artist-detail page, which
+    resolved a bare numeric id against the legacy table. That page is gone: the
+    route redirects `/artist-detail/library/<id>` into Library V2 as
+    `?artist=<id>`, and V2 reads a lib2 id (§50.4.4.22). The seeds keep a
+    legacy id precisely so a query that still hands one out fails here.
     """
     _id_counter['n'] += 1
     return 1000 + _id_counter['n']
@@ -62,35 +63,31 @@ def _seed_artist(db, name, thumb=None, lastfm_listeners=None, lastfm_playcount=N
             enrichment['lastfm']['listeners'] = lastfm_listeners
         if lastfm_playcount is not None:
             enrichment['lastfm']['playcount'] = lastfm_playcount
-    _lib2(
+    return _lib2(
         db,
         "INSERT INTO lib2_artists (name, name_key, sort_name, image_url, enrichment, "
         "soul_id, legacy_artist_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (name, normalize_name(name), name, thumb, json.dumps(enrichment),
          soul_id, legacy),
     )
-    return legacy
 
 
-def _seed_album(db, artist_legacy_id, title, thumb=None):
-    legacy = _next_id()
-    _lib2(
+def _seed_album(db, artist_id, title, thumb=None):
+    return _lib2(
         db,
         "INSERT INTO lib2_albums (primary_artist_id, title, image_url, legacy_album_id) "
-        "SELECT id, ?, ?, ? FROM lib2_artists WHERE legacy_artist_id = ?",
-        (title, thumb, legacy, artist_legacy_id),
+        "VALUES (?, ?, ?, ?)",
+        (artist_id, title, thumb, _next_id()),
     )
-    return legacy
 
 
-def _seed_track(db, album_legacy_id, artist_legacy_id, title, file_path=None,
+def _seed_track(db, album_id, artist_id, title, file_path=None,
                 bitrate=None, duration=None):
-    legacy = _next_id()
-    _lib2(
+    track_id = _lib2(
         db,
         "INSERT INTO lib2_tracks (album_id, title, duration, legacy_track_id) "
-        "SELECT id, ?, ?, ? FROM lib2_albums WHERE legacy_album_id = ?",
-        (title, duration, legacy, album_legacy_id),
+        "VALUES (?, ?, ?, ?)",
+        (album_id, title, duration, _next_id()),
     )
     if file_path is not None:
         # The file half is a separate row in lib2 (ADR-03): a track's path and
@@ -98,10 +95,10 @@ def _seed_track(db, album_legacy_id, artist_legacy_id, title, file_path=None,
         _lib2(
             db,
             "INSERT INTO lib2_track_files (track_id, path, bitrate, is_primary) "
-            "SELECT id, ?, ?, 1 FROM lib2_tracks WHERE legacy_track_id = ?",
-            (file_path, bitrate, legacy),
+            "VALUES (?, ?, ?, 1)",
+            (track_id, file_path, bitrate),
         )
-    return legacy
+    return track_id
 
 
 def _seed_history(db, title, artist, album, played_at, duration_ms=180000):
@@ -266,16 +263,55 @@ def test_get_top_artists_matches_on_the_normalized_name_key(db, fix_url, monkeyp
     assert result[0]['id'] == aid
 
 
-def test_get_top_artists_gives_a_native_artist_art_but_no_dead_link(db, fix_url, monkeypatch):
-    """A row with no legacy twin has no id navigation can resolve. Its artwork
-    is still real, so the record is enriched with everything except the id."""
-    _seed_artist(db, "Native Only", thumb="local://native.jpg", legacy_id=None)
+def test_get_top_artists_links_a_native_artist_like_any_other(db, fix_url, monkeypatch):
+    """A row with no legacy twin used to get artwork and a null id, because the
+    id was the legacy one. The link goes to Library V2 now, which knows this
+    row — being native is no longer a reason to withhold it (§50.4.4.22)."""
+    aid = _seed_artist(db, "Native Only", thumb="local://native.jpg", legacy_id=None)
     monkeypatch.setattr(db, "get_top_artists",
                         lambda tr, lim: [{'name': 'Native Only', 'play_count': 9}])
 
     result = queries.get_top_artists(db, fix_url, time_range='all', limit=10)
     assert result[0]['image_url'] == 'FIXED::local://native.jpg'
-    assert result[0].get('id') is None
+    assert result[0]['id'] == aid
+
+
+def test_top_rows_never_hand_out_a_legacy_id(db, fix_url, monkeypatch):
+    """The one assertion that would have caught the drift: every id in this
+    payload is the id `/library?artist=` resolves, and a legacy id there opens
+    a different artist or none at all."""
+    aid = _seed_artist(db, "Pink Floyd")
+    alb = _seed_album(db, aid, "DSOTM", thumb="local://a.jpg")
+    _seed_track(db, alb, aid, "Time", file_path="/m/time.flac")
+    legacy_ids = set()
+    conn = db._get_connection()
+    try:
+        for table, column in (('lib2_artists', 'legacy_artist_id'),
+                              ('lib2_albums', 'legacy_album_id'),
+                              ('lib2_tracks', 'legacy_track_id')):
+            legacy_ids.update(
+                row[0] for row in conn.execute(f"SELECT {column} FROM {table}")
+                if row[0] is not None)
+    finally:
+        conn.close()
+    monkeypatch.setattr(db, "get_top_artists",
+                        lambda tr, lim: [{'name': 'Pink Floyd', 'play_count': 1}])
+    monkeypatch.setattr(db, "get_top_albums",
+                        lambda tr, lim: [{'name': 'DSOTM', 'play_count': 1}])
+    monkeypatch.setattr(db, "get_top_tracks",
+                        lambda tr, lim: [{'name': 'Time', 'artist': 'Pink Floyd',
+                                          'play_count': 1}])
+
+    handed_out = set()
+    for row in queries.get_top_artists(db, fix_url, 'all', 10):
+        handed_out.add(row.get('id'))
+    for row in queries.get_top_albums(db, fix_url, 'all', 10):
+        handed_out.update((row.get('id'), row.get('artist_id')))
+    for row in queries.get_top_tracks(db, fix_url, 'all', 10):
+        handed_out.update((row.get('id'), row.get('artist_id')))
+
+    assert legacy_ids, 'the seeds must carry legacy ids for this to prove anything'
+    assert handed_out & legacy_ids == set()
 
 
 def test_get_top_albums_enriches_with_album_thumb(db, fix_url, monkeypatch):

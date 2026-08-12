@@ -4249,3 +4249,35 @@ Diagnose noch einmal stellt):
   iss29-B04c). Der ehrliche Port ist „bei gesetztem `source` über die
   Provider-Id auflösen, sonst über die Katalog-Id", und das ist eine
   Produktentscheidung, keine Umschreibung.
+
+#### 50.4.4.22 Korrektur an §50.4.4.13: die Statistik-Seite sprach den falschen Id-Raum
+
+Gefunden beim Durchgehen von `web_server.py`, und es ist ein echter Fehler, kein
+Schönheitsmakel: **die Statistik-Seite gab Legacy-Ids aus, die das Frontend als
+lib2-Ids liest.**
+
+§50.4.4.13 begründete `legacy_artist_id` damit, dass „eine bloße numerische
+Entity-Id per Vertrag gegen die Legacy-Tabelle aufgelöst wird". Das stimmte, als
+`/artist-detail/library/<id>` noch die alte Artist-Seite rendert hat. Seit
+ldp-01 leitet genau diese Route in Library V2 um — `/library?artist=<id>` —, und
+dort ist die Zahl eine `lib2_artists.id`. Eine Legacy-Id öffnet damit einen
+*anderen* Artist oder gar keinen. Betroffen war jeder Link der Seite: Top-Artists
+(`artist.id`), Top-Alben und Top-Tracks (`artist_id`).
+
+Das ist die Lehre, die über diesen Fall hinausgeht: **ein Id-Vertrag ist eine
+Eigenschaft der Route, nicht der Tabelle.** Die Route hatte sich geändert, die
+Begründung nicht — und die Tests haben die alte Begründung mit festgenagelt
+(„die Seeds tragen eine Legacy-Id, und die Assertions vergleichen dagegen"), was
+den Fehler grün aussehen ließ. Der neue Test dreht das um: er sammelt alle
+Legacy-Ids der Seeds ein und behauptet, dass **keine** davon in der Antwort
+auftaucht.
+
+Ein Nebeneffekt, der die Sache bestätigt: der Test „ein nativer Artist bekommt
+Bild, aber keinen toten Link" ist jetzt „ein nativer Artist wird verlinkt wie
+jeder andere". Nativ zu sein war nur deshalb ein Grund, die Id wegzulassen,
+*weil* die Id die Legacy-Id war. Im lib2-Raum hat jede Zeile eine.
+
+`resolve_track` (die Wiedergabe aus der Statistik heraus) gibt die v2-Ids
+zusätzlich unter ihren eigenen Namen zurück (`lib2_track_id`,
+`lib2_artist_id`), weil der Player sie so kennt (iss29-B08) und dann direkt in
+die Bibliotheksseite verlinkt, statt über die Umleitung zu gehen.
