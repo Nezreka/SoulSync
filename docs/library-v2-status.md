@@ -4085,3 +4085,50 @@ Sechs neue an ihrer Stelle, gegen das echte lib2-Schema: Katalog-Antwort,
 Diakritika, Alias→kanonisch, kein Doppel-Eintrag, natives Artwork, und eine
 frische Installation ohne V2-Tabellen (die stille Antwort „nichts", die früher
 der Legacy-Zweig aufgefangen hat).
+
+#### 50.4.4.19 Der Chat teilt Dateien aus dem nativen Katalog
+
+Stand: **333/90**. `api/chat.py` fällt von 5/0 auf **0/0**. Drei Stellen, zwei
+davon ein Paar, die dritte ein Fund.
+
+**Suche und Upload gehören zusammen.** `/files/library-search` ist der einzige
+Produzent der `track_id`, die `/files/upload` konsumiert (`chat.js`
+`attachSendTrack`) — deshalb wechseln beide den Id-Raum gemeinsam und niemand
+sonst merkt es. Der Pfad hängt in lib2 nicht mehr am Track, sondern an dessen
+primärer Dateizeile (ADR-03, `primary_file_row` / `primary_order`); „hat eine
+Datei" ist damit ein Join gegen die nicht-gelöschten Dateien statt
+`file_path IS NOT NULL`. Ein Track ohne Dateizeile ist genau das, was „den
+haben wir nie bekommen" in V2 aussieht — 404, wie vorher.
+
+**Der Interpret eines Tracks steht in der Junction.** Legacy nahm
+`COALESCE(tracks.track_artist, artists.name)`; lib2 hält die Gastcredits in
+`lib2_track_artists` (nach `role`/`position`) und den Album-Interpreten am
+Release. Beide Namen bleiben durchsuchbar, wie vorher.
+
+**`%` und `_` sind Buchstaben.** Die alte Abfrage escapte `%` — aber ohne
+`ESCAPE '\'`-Klausel, also war der Backslash bloß ein weiteres Zeichen im
+Muster; `_` war nie escapt. Jetzt beides, mit Klausel, plus dieselbe
+Akzent-Faltung wie in §50.4.4.18 (`unidecode_lower` gegen
+`normalize_for_comparison`): ein gespeichertes „Björk" antwortet jetzt auf
+„bjork".
+
+**Der Fund: die dritte Sprosse des Radios war praktisch tot.** Die lokale
+Ähnlichkeits-Sprosse las
+`similar_artists sa JOIN artists a ON a.id = sa.source_artist_id`. Aber
+`source_artist_id` ist **keine** Katalog-Id, sondern eine **Provider-Id** —
+`similar_artists_worker.pick_source_artist_id` wählt Spotify/MusicBrainz/…,
+und der Watchlist-Scan fällt allenfalls auf die Id der *Watchlist*-Zeile
+zurück. Der Join traf also nur, wenn eine Legacy-`artists.id` zufällig genau so
+hieß wie eine Provider-Id. Für die allermeisten Installationen hat diese
+Sprosse nie gefeuert; das Radio ging still auf „no similar data", sobald
+Last.fm nichts hergab. Jetzt schlägt die Bibliothek den Artist über den
+gefalteten Namen nach und reicht **seine Provider-Ids** an den Graphen weiter —
+Spalten plus `external_ids`, weil nur Spotify und MusicBrainz eigene Spalten
+haben. Gleiche Familie wie die toten `_fix_*`-Gabeln aus §50.4.4.9 und der
+unerreichbare Genre-Fallback aus §50.4.4.17: eine Portierung deckt auf, was
+nie lief.
+
+Über diese Sprosse gab es keinen Test — vier neue (Provider-Id, Long-Tail-Id
+aus `external_ids`, Akzente, „kennt die Bibliothek nicht"). Die Datei-Tests
+laufen gegen lib2-Zeilen statt gegen Legacy-Zeilen, plus drei neue für die
+Faltung, die Wildcards und einen Track ohne Dateizeile.
