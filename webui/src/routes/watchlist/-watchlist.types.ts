@@ -265,11 +265,14 @@ export interface WatchlistArtistConfigResponse {
    *  provider's current name — the linking panel compares against this. */
   watchlist_name?: string | null;
   global_metadata_source?: string;
-  /** Providers that can actually serve right now (server-computed). The
-   *  discography link must not pin one that's missing from this list — the
-   *  artist page treats a pinned source as exclusive and 503s when it can't
-   *  serve. Optional so an older backend simply keeps every source eligible. */
+  /** Providers that can actually serve right now (server-computed). */
   available_sources?: string[];
+  /** Providers whose id resolves to a library artist by the id column alone
+   *  (server-computed). A source is safe to pin on the discography link iff it
+   *  appears in at least one of these two lists — the artist page treats a
+   *  pinned source as exclusive and 503s when neither holds. Both optional so
+   *  an older backend simply keeps every source eligible. */
+  library_resolvable_sources?: string[];
   quality_profiles?: QualityProfileSummary[];
 }
 

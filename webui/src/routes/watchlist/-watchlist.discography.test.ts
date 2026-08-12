@@ -100,27 +100,44 @@ describe('pickDiscographySource', () => {
   });
 
   // ── availability (the Discord report: watchlist 503s, Discover works) ──
-  // The artist page treats a pinned source as EXCLUSIVE and errors when it
-  // can't serve, so pinning a switched-off provider is a guaranteed
-  // 'Could not access spotify ... provider is unavailable'. The server now
-  // sends which providers are alive; the ladder must respect it.
+  // A pinned source is safe iff its provider is alive (available_sources)
+  // OR its id resolves to a library artist (library_resolvable_sources —
+  // the artist page upgrades off the id column with no provider call).
+  // Anything else navigates into 'Could not access spotify ... provider is
+  // unavailable'. Both lists come from the server; with neither present
+  // (older backend) every source stays eligible.
 
-  it('still links a dead provider as a LAST resort (owned artists resolve locally)', () => {
-    // The artist page resolves a LIBRARY artist straight off the source-id
-    // column with no provider call, so an owned artist matched only on a
-    // switched-off Spotify still renders. Dropping the link would break
-    // pages that work today — availability is a preference, not a filter.
+  it('never pins a dead provider whose id is not in the library (Lancor)', () => {
+    // Spotify auth disconnected AND no-auth unchecked, running Deezer; the
+    // artist was only ever matched on Spotify and is not owned. The old
+    // ladder pinned spotify → guaranteed 503. Now the button disables and
+    // its tooltip names the fix (re-match via provider links).
     expect(
       pickDiscographySource({
         ...NONE,
         spotify_artist_id: 'sp',
         global_metadata_source: 'deezer',
         available_sources: ['deezer', 'itunes', 'musicbrainz'],
+        library_resolvable_sources: [],
+      }),
+    ).toBeNull();
+  });
+
+  it('still links a dead provider when its id resolves in the library', () => {
+    // Owned artists render the rich library view with no provider call, so
+    // a dead-source id that the server vouches for stays a valid link.
+    expect(
+      pickDiscographySource({
+        ...NONE,
+        spotify_artist_id: 'sp',
+        global_metadata_source: 'deezer',
+        available_sources: ['deezer', 'itunes', 'musicbrainz'],
+        library_resolvable_sources: ['spotify'],
       }),
     ).toEqual({ id: 'sp', source: 'spotify' });
   });
 
-  it('falls to the next AVAILABLE provider that has an id', () => {
+  it('falls to the next SAFE provider that has an id', () => {
     expect(
       pickDiscographySource({
         ...NONE,
@@ -128,6 +145,7 @@ describe('pickDiscographySource', () => {
         deezer_artist_id: 'dz',
         global_metadata_source: 'deezer',
         available_sources: ['deezer', 'itunes'],
+        library_resolvable_sources: [],
       }),
     ).toEqual({ id: 'dz', source: 'deezer' });
   });
@@ -140,13 +158,14 @@ describe('pickDiscographySource', () => {
         deezer_artist_id: 'dz',
         global_metadata_source: 'spotify',
         available_sources: ['spotify', 'deezer'],
+        library_resolvable_sources: [],
       }),
     ).toEqual({ id: 'sp', source: 'spotify' });
   });
 
-  it('treats an absent availability list as everything eligible', () => {
-    // Older backend / callers that don't fetch it: byte-for-byte the
-    // previous behaviour, which every test above this pins.
+  it('treats absent server knowledge as everything eligible', () => {
+    // Older backend: byte-for-byte the previous behaviour, which every
+    // test above this block pins.
     expect(pickDiscographySource({ ...NONE, spotify_artist_id: 'sp' })).toEqual({
       id: 'sp',
       source: 'spotify',

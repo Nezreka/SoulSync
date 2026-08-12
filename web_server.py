@@ -9533,6 +9533,7 @@ from core.artist_source_lookup import (
     SOURCE_ID_FIELD as _SOURCE_ID_FIELD,
     SOURCE_ONLY_ARTIST_SOURCES as _SOURCE_ONLY_ARTIST_SOURCES,
     find_library_artist_for_source as _core_find_library_artist_for_source,
+    sources_resolvable_in_library as _core_sources_resolvable_in_library,
 )
 
 
@@ -31391,14 +31392,27 @@ def watchlist_artist_config(artist_id):
                 "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
-                # Which of those providers can serve RIGHT NOW. The panel's
-                # "View Discography" link pins ONE source, and pinning a
-                # switched-off provider is a guaranteed 503 on the artist page
-                # ("provider is unavailable" — the Discord report where the
-                # watchlist failed but Discover worked). Only the server knows
-                # what is alive, so it says.
+                # Which of those providers can serve RIGHT NOW, and which ids
+                # resolve straight to a LIBRARY artist. The panel's "View
+                # Discography" link pins ONE source; a pinned source is safe
+                # exactly when its provider is alive OR its id lands on a
+                # library record (the artist page upgrades to the library view
+                # off the id column with no provider call). Anything else is a
+                # guaranteed 503 ("provider is unavailable" — the Discord
+                # report where the watchlist failed but Discover worked). Only
+                # the server knows either fact, so it says both.
                 "available_sources": available_sources(
                     ("spotify", "itunes", "deezer", "discogs", "musicbrainz")
+                ),
+                "library_resolvable_sources": _core_sources_resolvable_in_library(
+                    database,
+                    {
+                        "spotify": spotify_id,
+                        "itunes": itunes_id,
+                        "deezer": deezer_id,
+                        "discogs": discogs_id,
+                        "musicbrainz": musicbrainz_id,
+                    },
                 ),
                 "quality_profiles": database.list_quality_profiles(),
             })

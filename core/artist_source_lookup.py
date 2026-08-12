@@ -102,3 +102,25 @@ def find_library_artist_for_source(
             f"Library upgrade lookup failed for {source}:{source_artist_id}: {e}"
         )
     return None
+
+def sources_resolvable_in_library(database, id_map):
+    """Which of ``id_map``'s sources resolve to a library artist by ID alone.
+
+    ``id_map`` is ``{source: source_artist_id}``. A source counts only when
+    its id matches EXACTLY ONE library artist — the same bar the artist-
+    detail route applies before upgrading to the library view.
+
+    Deliberately no name matching: this feeds the watchlist panel's
+    discography link, whose navigation carries source+id and nothing else,
+    and the route's own name-retry needs the source's CLIENT to resolve a
+    name — exactly what a switched-off provider doesn't have. Mirroring
+    anything more optimistic than the id-column step would promise a page
+    the route can't deliver.
+    """
+    out = []
+    for source, source_id in (id_map or {}).items():
+        if not source_id:
+            continue
+        if find_library_artist_for_source(database, source, str(source_id)) is not None:
+            out.append(source)
+    return out

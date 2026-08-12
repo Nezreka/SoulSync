@@ -36,56 +36,49 @@ export function pickDiscographySource(
     | 'musicbrainz_artist_id'
     | 'global_metadata_source'
     | 'available_sources'
+    | 'library_resolvable_sources'
   >,
 ): { id: string; source: string } | null {
   const active = (payload.global_metadata_source || '').toLowerCase();
 
-  // Never pin a provider the user has switched off. The artist page treats a
-  // pinned source as exclusive and errors out when it can't serve ("Could not
-  // access spotify … provider is unavailable"), so an id belonging to a dead
-  // provider is worse than no link at all — that's the Discord report where
-  // the watchlist failed but Discover worked: Spotify off, artist matched
-  // only on Spotify, and this ladder happily pinned it anyway.
+  // A pinned source is safe in exactly two cases, and the server reports both:
+  // its provider is alive (`available_sources`), or its id resolves straight
+  // to a LIBRARY artist (`library_resolvable_sources` — the artist page
+  // upgrades to the library view off the id column, no provider call). Pinning
+  // anything else navigates into a guaranteed 503 ("Could not access spotify …
+  // provider is unavailable") — the Discord report where the watchlist failed
+  // but Discover worked: Spotify fully off, artist matched only on Spotify,
+  // not in the library, and the old ladder pinned it anyway.
   //
-  // `available_sources` comes from the server (the only thing that knows).
-  // When it is absent — older backend, or a caller that doesn't fetch it —
-  // every source stays eligible, i.e. exactly the previous behaviour.
-  const availableList = payload.available_sources;
-
-  const ladder = (onlyAvailable: boolean): { id: string; source: string } | null => {
-    const pick = (source: string, id: string | null | undefined): string | null => {
-      if (!id) return null;
-      if (onlyAvailable && availableList && !availableList.includes(source)) return null;
-      return id;
-    };
-    const spotify = pick('spotify', payload.spotify_artist_id);
-    const itunes = pick('itunes', payload.itunes_artist_id);
-    const deezer = pick('deezer', payload.deezer_artist_id);
-    const discogs = pick('discogs', payload.discogs_artist_id);
-    const musicbrainz = pick('musicbrainz', payload.musicbrainz_artist_id);
-
-    if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
-    if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };
-    if (active.includes('deezer') && deezer) return { id: deezer, source: 'deezer' };
-    if (active.includes('musicbrainz') && musicbrainz)
-      return { id: musicbrainz, source: 'musicbrainz' };
-    if (itunes) return { id: itunes, source: 'itunes' };
-
-    if (spotify) return { id: spotify, source: 'spotify' };
-    if (discogs) return { id: discogs, source: 'discogs' };
-    if (deezer) return { id: deezer, source: 'deezer' };
-    if (musicbrainz) return { id: musicbrainz, source: 'musicbrainz' };
-    return null;
+  // With no server knowledge at all (older backend, callers that don't fetch
+  // it) every source stays eligible — exactly the previous behaviour.
+  const available = payload.available_sources;
+  const resolvable = payload.library_resolvable_sources;
+  const serverKnows = available != null || resolvable != null;
+  const pick = (source: string, id: string | null | undefined): string | null => {
+    if (!id) return null;
+    if (!serverKnows) return id;
+    return available?.includes(source) || resolvable?.includes(source) ? id : null;
   };
 
-  // A live provider's id first. Then — and this is why it's a LAST resort, not
-  // a hard filter — the original ladder unchanged: a dead provider's id is
-  // still worth linking, because the artist page resolves a LIBRARY artist
-  // straight off the source-id column (artist_source_lookup.py) with no
-  // provider call at all. Dropping the link outright would break owned
-  // artists that render fine today. Strictly monotonic: better when a live
-  // provider has an id, identical to before when none does.
-  return ladder(true) ?? ladder(false);
+  const spotify = pick('spotify', payload.spotify_artist_id);
+  const itunes = pick('itunes', payload.itunes_artist_id);
+  const deezer = pick('deezer', payload.deezer_artist_id);
+  const discogs = pick('discogs', payload.discogs_artist_id);
+  const musicbrainz = pick('musicbrainz', payload.musicbrainz_artist_id);
+
+  if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
+  if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };
+  if (active.includes('deezer') && deezer) return { id: deezer, source: 'deezer' };
+  if (active.includes('musicbrainz') && musicbrainz)
+    return { id: musicbrainz, source: 'musicbrainz' };
+  if (itunes) return { id: itunes, source: 'itunes' };
+
+  if (spotify) return { id: spotify, source: 'spotify' };
+  if (discogs) return { id: discogs, source: 'discogs' };
+  if (deezer) return { id: deezer, source: 'deezer' };
+  if (musicbrainz) return { id: musicbrainz, source: 'musicbrainz' };
+  return null;
 }
 
 interface Props {
@@ -269,9 +262,20 @@ export function WatchlistArtistDetail({ profileId, artistId, onClose, onOpenSett
             className="watchlist-detail-discog-btn"
             disabled={!discography}
             aria-disabled={!discography}
-            style={
-              discography ? undefined : { pointerEvents: 'none', opacity: 0.5, color: 'inherit' }
+            // Disabled means every provider this artist is matched on is
+            // switched off AND none of those ids are in the library — say so,
+            // and name the way out, instead of a silent grey button (the old
+            // behaviour navigated into a "provider is unavailable" error).
+            title={
+              payload && !discography
+                ? 'This artist is only matched on disabled metadata sources. ' +
+                  'Use Settings → Provider Links to match it to your active source.'
+                : undefined
             }
+            // No pointerEvents:'none' here — `disabled` already blocks the
+            // click (the vanilla rule was for an <a>), and it would swallow
+            // the hover that shows the title above.
+            style={discography ? undefined : { opacity: 0.5, color: 'inherit' }}
             onClick={() => {
               if (!discography) return;
               onClose();
