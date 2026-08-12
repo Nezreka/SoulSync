@@ -7,9 +7,22 @@ from pathlib import Path
 _JS = (Path(__file__).resolve().parent.parent / "webui" / "static" / "api-monitor.js").read_text(encoding="utf-8")
 
 
+def _function_body(source: str, name: str) -> str:
+    """Slice ONE top-level function out of the file. The boundary must accept
+    both `function` and `async function` openers — slicing only to the next
+    bare `\nfunction ` silently swallowed the async neighbours below the
+    target, and this guard then failed on THEIR contents (the CI break where
+    _navigateToArtistFromWishlist's metadata-search fallback — a legitimate
+    use of the preserved #enhanced-search-input contract — was blamed on
+    _searchWishlistTrackManually)."""
+    fn = source[source.index(name):]
+    ends = [i for i in (fn.find("\nfunction ", 10), fn.find("\nasync function ", 10))
+            if i != -1]
+    return fn[:min(ends)] if ends else fn
+
+
 def test_manual_search_jump_targets_soulseek_surface():
-    fn = _JS[_JS.index("function _searchWishlistTrackManually"):]
-    fn = fn[:fn.index("\nfunction ", 10)]
+    fn = _function_body(_JS, "function _searchWishlistTrackManually")
     assert '[data-source="soulseek"]' in fn                   # clicks the Soulseek source icon
     assert "enhanced-search-input" not in fn                  # no longer lands on metadata search
 
