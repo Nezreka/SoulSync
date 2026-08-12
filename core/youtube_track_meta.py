@@ -72,13 +72,19 @@ def strip_topic_suffix(name: Any) -> str:
 
 
 def _first_music_field(entry: Mapping[str, Any]) -> str:
-    """First non-empty value from yt-dlp's music-metadata fields."""
-    artists = entry.get('artists')
-    if isinstance(artists, (list, tuple)):
-        for a in artists:
-            s = str(a or '').strip()
-            if s:
-                return s
+    """First non-empty value from yt-dlp's music-metadata fields.
+
+    ``creators`` (plural) rides alongside ``artists``: current yt-dlp emits it
+    as a key on flat entries — always None today, but only the plural form
+    will carry a value if upstream ever populates it (PR #1136's author
+    caught the singular-only lookup silently missing it)."""
+    for list_key in ('artists', 'creators'):
+        values = entry.get(list_key)
+        if isinstance(values, (list, tuple)):
+            for a in values:
+                s = str(a or '').strip()
+                if s:
+                    return s
     for key in ('artist', 'creator'):
         v = entry.get(key)
         if isinstance(v, str) and v.strip():

@@ -184,3 +184,17 @@ def test_strip_topic_suffix_helper():
     assert strip_topic_suffix('- Topic') == '- Topic'
     assert strip_topic_suffix('') == ''
     assert strip_topic_suffix(None) == ''
+
+
+def test_plural_creators_field_is_read():
+    # yt-dlp emits `creators` (plural) on flat entries — always None today,
+    # but only the plural key will carry the value if upstream populates it.
+    # The singular-only lookup silently missed it (flagged in PR #1136).
+    artist, title = derive_artist_and_title(
+        {'title': 'Worlds Apart', 'creators': ['Koven', '']})
+    assert artist == 'Koven'
+    assert title == 'Worlds Apart'
+    # artists (plural) still outranks creators when both are present.
+    artist, _ = derive_artist_and_title(
+        {'title': 'X', 'artists': ['Primary'], 'creators': ['Secondary']})
+    assert artist == 'Primary'
