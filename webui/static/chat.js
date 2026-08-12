@@ -72,6 +72,16 @@
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
         arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
+        watch: {                 // movie night (reduced from watch.* on the bus)
+            searchResults: [],   //   picker modal TMDB results
+            searching: false,    //   picker fetch in flight
+            pickShow: -1,        //   result index awaiting a season/episode pick
+            owned: {},           //   nomination key → true/false (MY library's answer)
+            ownedFetching: '',   //   in-flight probe signature (dedupe)
+            ownedRetryAt: 0,     //   backoff after a failed/denied probe (ms)
+            ownedDenied: false,  //   403 = music-only profile: hide ownership UI
+            grabbed: {},         //   keys we already sent to the grab pipeline
+        },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
     try {
@@ -4973,6 +4983,68 @@
                 renderJukebox();
                 return;
             }
+            // ── movie night ──
+            t = e.target.closest('[data-chat-watch-btn]');
+            if (t) { _openWatchModal(); return; }
+            t = e.target.closest('[data-chat-watch-searchclose]');
+            if (t) { _closeWatchModal(); return; }
+            var watchOv = e.target.closest('[data-chat-watch-modal]');
+            if (watchOv && e.target === watchOv) { _closeWatchModal(); return; }
+            t = e.target.closest('[data-chat-watch-nomshow]');
+            if (t) {
+                var wsr = state.watch.searchResults[parseInt(t.getAttribute('data-chat-watch-nomshow'), 10)];
+                var sEl = q('[data-chat-watch-se-s]'), eEl = q('[data-chat-watch-se-e]');
+                var ws = sEl ? parseInt(sEl.value, 10) : NaN;
+                var we = eEl ? parseInt(eEl.value, 10) : NaN;
+                if (wsr && ws >= 0 && we >= 0) _watchNominate(wsr, ws, we);
+                return;
+            }
+            t = e.target.closest('[data-chat-watch-nom]');
+            if (t && !e.target.closest('.chat-watch-sepick')) {
+                var wi = parseInt(t.getAttribute('data-chat-watch-nom'), 10);
+                var wr = state.watch.searchResults[wi];
+                if (!wr) return;
+                if (wr.kind === 'show') {
+                    // an episode nomination needs S+E — expand the card
+                    state.watch.pickShow = (state.watch.pickShow === wi) ? -1 : wi;
+                    var wgrid = q('[data-chat-watch-searchgrid]');
+                    if (wgrid) wgrid.innerHTML = _watchResultCards();
+                    var wse = q('[data-chat-watch-se-s]');
+                    if (wse) wse.focus();
+                } else {
+                    _watchNominate(wr, null, null);
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-watch-vote]');
+            if (t) { sendProtocol('watch.vote', { o: t.getAttribute('data-chat-watch-vote') }); return; }
+            t = e.target.closest('[data-chat-watch-start]');
+            if (t) { sendProtocol('watch.start', { o: t.getAttribute('data-chat-watch-start') }); return; }
+            t = e.target.closest('[data-chat-watch-unnom]');
+            if (t) { sendProtocol('watch.unnom', { o: t.getAttribute('data-chat-watch-unnom') }); return; }
+            t = e.target.closest('[data-chat-watch-grab]');
+            if (t) { _watchGrab(t.getAttribute('data-chat-watch-grab')); return; }
+            t = e.target.closest('[data-chat-watch-pause]');
+            if (t) { sendProtocol('watch.pause', {}); return; }
+            t = e.target.closest('[data-chat-watch-resume]');
+            if (t) { sendProtocol('watch.resume', {}); return; }
+            t = e.target.closest('[data-chat-watch-end]');
+            if (t) {
+                var wst = _watchState();
+                if (wst.now && wst.now.by !== state.selfName && _selfIsMod() &&
+                        typeof showConfirmDialog === 'function') {
+                    // a moderator ending someone ELSE's party deserves a beat
+                    showConfirmDialog({
+                        title: 'End the party?',
+                        message: 'This ends ' + wst.now.by + '\'s showing for the whole room.',
+                        confirmText: 'End it',
+                        destructive: true,
+                    }).then(function (okd) { if (okd !== false) sendProtocol('watch.end', {}); });
+                } else {
+                    sendProtocol('watch.end', {});
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-search-btn]');
             if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
             t = e.target.closest('[data-chat-search-exit]');
@@ -5092,6 +5164,8 @@
         if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
         var jbxSearchForm = q('[data-chat-jbx-searchform]');
         if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
+        var watchSearchForm = q('[data-chat-watch-searchform]');
+        if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -5447,6 +5521,7 @@
         _bsTick();               // answer shots at us, and reveal when sunk
         renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
+        renderWatch();
         renderPinbar();
         renderPoll();
         // topic lives in the head sub-line — but search mode freezes the
@@ -6154,6 +6229,260 @@
         if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
         state.jukebox.results = [];
         if (typeof showToast === 'function') showToast('♫ Added to the room queue', 'success');
+    }
+
+    // ── movie night (watch-together — a pure fold over watch.* carriers) ──
+    // The ballot/party state lives on the bus (chat-protocol.js reduceWatch):
+    // every client folds the same nominations, votes and party clock.
+    // OWNERSHIP is the one personal ingredient — each SoulSync probes its own
+    // video library (/api/video/watch/owned) and renders "you have this" or a
+    // GRAB into the wishlist pipeline. Phase 1 = ballot + ownership + grab;
+    // the in-page video panel is phase 2.
+    function _watchState() {
+        var CP = window.ChatProtocol;
+        return (CP && CP.reduceWatch) ? CP.reduceWatch(_roomEvents())
+                                      : { noms: [], now: null, tally: { total: 0 }, history: [] };
+    }
+
+    function _watchLabel(e) {
+        return esc(e.ti || ('#' + e.id)) +
+            (e.y ? ' <span class="chat-jbx-meta">(' + esc(e.y) + ')</span>' : '') +
+            (e.kd === 't' ? ' <span class="chat-watch-se">S' + e.s + 'E' + e.e + '</span>' : '');
+    }
+
+    function _watchPoster(e, cls) {
+        // po rides the bus (hostile) — render only an https URL, never a path.
+        return (e.po && /^https:\/\//.test(e.po))
+            ? '<img class="' + cls + '" src="' + attr(e.po) + '" alt="" loading="lazy">'
+            : '<div class="' + cls + ' chat-watch-poster--ph">🎬</div>';
+    }
+
+    function _watchOwnChip(key, entry) {
+        if (state.watch.ownedDenied) return '';
+        var own = state.watch.owned[key];
+        if (own === true) return '<span class="chat-watch-own">✓ you have this</span>';
+        if (own !== false) return '';                      // probe still out
+        if (state.watch.grabbed[key]) return '<span class="chat-watch-own chat-watch-own--want">grabbing…</span>';
+        return '<button class="chat-arc-btn chat-watch-grab" type="button" ' +
+            'data-chat-watch-grab="' + attr(key) + '" ' +
+            'title="You don\'t have this — send it to the video wishlist and search now">Grab</button>';
+    }
+
+    function renderWatch() {
+        var host = q('[data-chat-watch]');
+        if (!host) return;
+        var st = (state.view === 'room') ? _watchState() : null;
+        var show = !!(st && (st.noms.length || st.now));
+        host.hidden = !show;
+        if (!show) { host.innerHTML = ''; return; }
+        _watchFetchOwned(st);
+        var can = state.canSend;
+        var html = '<div class="chat-watch-headrow">🎬 <b>Movie night</b>' +
+            '<span class="chat-jbx-meta">' +
+                (st.now ? 'showing now' : st.noms.length + ' nominated · ' +
+                    st.tally.total + ' vote' + (st.tally.total === 1 ? '' : 's')) + '</span>' +
+            (can ? '<button class="chat-fmt-btn chat-watch-nombtn" type="button" ' +
+                       'data-chat-watch-btn>+ Nominate</button>' : '') +
+        '</div>';
+
+        if (st.now) {
+            var CP = window.ChatProtocol;
+            var pos = CP.watchPosition(st.now, Date.now());
+            var mine = st.now.by === state.selfName;
+            var boss = can && (mine || _selfIsMod());
+            html += '<div class="chat-watch-now">' +
+                _watchPoster(st.now, 'chat-watch-poster') +
+                '<div class="chat-watch-now-main">' +
+                    '<div class="chat-watch-now-ti">' + _watchLabel(st.now) + '</div>' +
+                    '<div class="chat-jbx-meta">' +
+                        (st.now.paused ? '⏸ paused at ' : '🔴 live · ') +
+                        _fmtSecs(Math.floor((pos || 0) / 1000)) +
+                        ' · started by ' + esc(st.now.by) + '</div>' +
+                    '<div class="chat-watch-now-acts">' +
+                        (boss ? '<button class="chat-arc-btn" type="button" data-chat-watch-' +
+                                (st.now.paused ? 'resume">▶ Resume' : 'pause">⏸ Pause') + '</button>' +
+                                '<button class="chat-arc-btn" type="button" data-chat-watch-end>⏹ End</button>'
+                              : '') +
+                        _watchOwnChip(st.now.key, st.now) +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        html += st.noms.map(function (n) {
+            var canPull = can && (n.by === state.selfName || _selfIsMod());
+            return '<div class="chat-watch-row">' +
+                _watchPoster(n, 'chat-watch-thumb') +
+                '<div class="chat-watch-row-main">' +
+                    '<div class="chat-watch-row-ti">' + _watchLabel(n) + '</div>' +
+                    '<div class="chat-jbx-meta">by ' + esc(n.by) +
+                        (n.votes ? ' · ' + n.votes + ' vote' + (n.votes === 1 ? '' : 's') : '') +
+                    '</div>' +
+                '</div>' +
+                _watchOwnChip(n.key, n) +
+                (can ? '<button class="chat-arc-btn" type="button" title="Vote for this one" ' +
+                           'data-chat-watch-vote="' + attr(n.key) + '">👍' +
+                           (n.votes ? ' ' + n.votes : '') + '</button>' +
+                       '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                           'title="Start the party with this" ' +
+                           'data-chat-watch-start="' + attr(n.key) + '">▶</button>'
+                     : (n.votes ? '<span class="chat-jbx-meta">👍 ' + n.votes + '</span>' : '')) +
+                (canPull ? '<button class="chat-pin-del" type="button" title="Withdraw this nomination" ' +
+                               'data-chat-watch-unnom="' + attr(n.key) + '">×</button>' : '') +
+            '</div>';
+        }).join('');
+        host.innerHTML = html;
+    }
+
+    function _watchFetchOwned(st) {
+        if (state.watch.ownedDenied || Date.now() < state.watch.ownedRetryAt) return;
+        var entries = (st.noms || []).slice();
+        if (st.now) entries.push(st.now);
+        var need = entries.filter(function (e) { return !(e.key in state.watch.owned); });
+        if (!need.length) return;
+        var sig = need.map(function (e) { return e.key; }).sort().join(',');
+        if (state.watch.ownedFetching === sig) return;
+        state.watch.ownedFetching = sig;
+        postJSON('/api/video/watch/owned', {
+            items: need.map(function (e) {
+                return e.kd === 't' ? { kd: 't', id: e.id, s: e.s, e: e.e }
+                                    : { kd: 'm', id: e.id };
+            }),
+        }).then(function (res) {
+            state.watch.ownedFetching = '';
+            if (res.ok && res.body && res.body.owned) {
+                Object.assign(state.watch.owned, res.body.owned);
+                renderWatch();
+            } else if (res.status === 403) {
+                state.watch.ownedDenied = true;    // music-only profile: no video side
+            } else {
+                state.watch.ownedRetryAt = Date.now() + 60000;
+            }
+        }).catch(function () {
+            state.watch.ownedFetching = '';
+            state.watch.ownedRetryAt = Date.now() + 60000;
+        });
+    }
+
+    function _watchGrab(key) {
+        var st = _watchState();
+        var entry = null;
+        (st.noms || []).concat(st.now ? [st.now] : []).forEach(function (e) {
+            if (e.key === key) entry = e;
+        });
+        if (!entry || state.watch.grabbed[key]) return;
+        state.watch.grabbed[key] = 1;
+        renderWatch();
+        var addBody, searchBody;
+        if (entry.kd === 't') {
+            addBody = { show: { tmdb_id: parseInt(entry.id, 10), title: entry.ti || ('#' + entry.id),
+                                poster_url: entry.po || null },
+                        episodes: [{ season_number: entry.s, episode_number: entry.e }] };
+            searchBody = { scope: 'episode', tmdb_id: parseInt(entry.id, 10),
+                           season_number: entry.s, episode_number: entry.e };
+        } else {
+            addBody = { movie: { tmdb_id: parseInt(entry.id, 10), title: entry.ti || ('#' + entry.id),
+                                 year: entry.y ? parseInt(entry.y, 10) : null,
+                                 poster_url: entry.po || null } };
+            searchBody = { scope: 'movie', tmdb_id: parseInt(entry.id, 10) };
+        }
+        postJSON('/api/video/wishlist/add', addBody).then(function (res) {
+            if (!res.ok) {
+                delete state.watch.grabbed[key];
+                if (typeof showToast === 'function') {
+                    showToast((res.body && res.body.error) || 'Grab failed — is the video side set up?', 'error');
+                }
+                renderWatch();
+                return;
+            }
+            postJSON('/api/video/wishlist/search', searchBody);
+            if (typeof showToast === 'function') {
+                showToast('🎬 Grabbing — it\'s on the video wishlist and searching now', 'success');
+            }
+        }).catch(function () { delete state.watch.grabbed[key]; renderWatch(); });
+    }
+
+    // ── movie night picker (TMDB search via the video side) ─────────────
+    function _openWatchModal() {
+        var ov = q('[data-chat-watch-modal]');
+        if (!ov) return;
+        ov.hidden = false;
+        var inp = q('[data-chat-watch-searchinput]');
+        if (inp) inp.focus();
+    }
+
+    function _closeWatchModal() {
+        var ov = q('[data-chat-watch-modal]');
+        if (ov) ov.hidden = true;
+        state.watch.searchResults = [];
+        state.watch.pickShow = -1;
+    }
+
+    function _watchResultCards() {
+        var results = state.watch.searchResults;
+        if (!results.length) return '<div class="chat-jbx-meta">Search for a movie or a show to nominate.</div>';
+        return results.map(function (r, i) {
+            var isShow = r.kind === 'show';
+            var picking = state.watch.pickShow === i;
+            return '<div class="chat-jbx-vcard chat-watch-vcard' + (picking ? ' chat-watch-vcard--picking' : '') + '"' +
+                ' role="button" tabindex="0" data-chat-watch-nom="' + i + '">' +
+                '<div class="chat-jbx-vthumb chat-watch-vthumb">' +
+                    ((r.poster && /^https:\/\//.test(r.poster))
+                        ? '<img src="' + attr(r.poster) + '" alt="" loading="lazy">'
+                        : '<div class="chat-watch-poster--ph">🎬</div>') +
+                '</div>' +
+                '<div class="chat-jbx-vinfo">' +
+                    '<div class="chat-jbx-vtitle" title="' + attr(r.title || '') + '">' + esc(r.title || '') + '</div>' +
+                    '<div class="chat-jbx-vchannel">' + (isShow ? 'Show' : 'Movie') +
+                        (r.year ? ' · ' + esc(String(r.year)) : '') +
+                        (r.library_id ? ' · <span class="chat-watch-own">✓ in your library</span>' : '') +
+                    '</div>' +
+                    (picking
+                        ? '<div class="chat-watch-sepick">' +
+                              '<label>S <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
+                              '<label>E <input class="chat-input chat-watch-sein" data-chat-watch-se-e type="number" min="0" max="9999" value="1"></label>' +
+                              '<button class="chat-send-btn" type="button" data-chat-watch-nomshow="' + i + '">Nominate</button>' +
+                          '</div>'
+                        : '') +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    function _watchSearchSubmit() {
+        var inp = q('[data-chat-watch-searchinput]');
+        var grid = q('[data-chat-watch-searchgrid]');
+        if (!inp || state.watch.searching) return;
+        var qtext = String(inp.value || '').trim();
+        if (!qtext) return;
+        state.watch.searching = true;
+        state.watch.pickShow = -1;
+        if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Searching…</div>';
+        getJSON('/api/video/search?q=' + encodeURIComponent(qtext)).then(function (res) {
+            state.watch.searching = false;
+            var results = ((res.ok && res.body.results) || []).filter(function (r) {
+                return (r.kind === 'movie' || r.kind === 'show') && r.tmdb_id;
+            });
+            state.watch.searchResults = results;
+            if (grid) grid.innerHTML = results.length ? _watchResultCards() :
+                '<div class="chat-jbx-meta">' +
+                (res.status === 403 ? 'Video access is disabled for this profile.'
+                                    : 'Nothing found — try different words.') + '</div>';
+        }).catch(function () {
+            state.watch.searching = false;
+            if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Search failed — try again.</div>';
+        });
+    }
+
+    function _watchNominate(r, s, e) {
+        var p = { id: String(r.tmdb_id), kd: (s != null) ? 't' : 'm',
+                  ti: String(r.title || '').slice(0, 120) };
+        if (r.year) p.y = String(r.year).slice(0, 4);
+        if (r.poster && /^https:\/\//.test(r.poster)) p.po = String(r.poster).slice(0, 200);
+        if (s != null) { p.s = s; p.e = e; }
+        sendProtocol('watch.nom', p);
+        _closeWatchModal();
+        if (typeof showToast === 'function') showToast('🎬 Nominated — the room votes', 'success');
     }
 
     function onRoomMessages(d) {

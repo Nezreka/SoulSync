@@ -392,3 +392,137 @@ describe('moderation', () => {
     assert.deepEqual({ ...kills }, { g2: true });
   });
 });
+
+describe('reduceWatch — movie night as a pure fold', () => {
+    // Stream timestamps are the party clock — ms numbers here, exactly what
+    // the fold sees after chat.js normalizes slskd timestamps.
+    const ev = (user, p, at) => ({ username: user, timestamp: at ?? 1000, p });
+    const nom = (user, id, extra) =>
+        ev(user, { k: 'watch.nom', id, kd: 'm', ti: 'T' + id, ...extra });
+
+    test('nominations dedupe by key, cap at 12, keep first attribution', () => {
+        const evs = [nom('alice', '603'), nom('bob', '603')];
+        for (let i = 0; i < 15; i++) evs.push(nom('carl', String(700 + i)));
+        const st = P.reduceWatch(evs);
+        assert.equal(st.noms.length, 12);
+        assert.equal(st.noms[0].by, 'alice');
+        // Garbage ids and kinds never enter the ballot.
+        const bad = P.reduceWatch([
+            nom('x', 'not-a-number'),
+            ev('x', { k: 'watch.nom', id: '5', kd: 'z' }),
+            ev('x', { k: 'watch.nom', id: '5', kd: 't', s: 1 }),   // episode sans e
+        ]);
+        assert.equal(bad.noms.length, 0);
+    });
+
+    test('episodes key on show:SxE; votes count latest per user', () => {
+        const st = P.reduceWatch([
+            ev('a', { k: 'watch.nom', id: '1399', kd: 't', s: 1, e: 1, ti: 'GoT' }),
+            nom('b', '603'),
+            ev('c', { k: 'watch.vote', o: 'm:603' }),
+            ev('c', { k: 'watch.vote', o: 't:1399:1x1' }),   // c changed their mind
+            ev('d', { k: 'watch.vote', o: 't:1399:1x1' }),
+        ]);
+        assert.equal(st.noms[0].key, 't:1399:1x1');
+        assert.equal(st.noms[0].votes, 2);
+        assert.equal(st.noms[1].votes, 0);
+        assert.equal(st.tally.winner, 't:1399:1x1');
+    });
+
+    test('unnom: nominator or moderator only, and its votes evaporate', () => {
+        const base = [nom('alice', '603'), ev('bob', { k: 'watch.vote', o: 'm:603' })];
+        const stranger = P.reduceWatch([...base, ev('bob', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(stranger.noms.length, 1);
+        const owner = P.reduceWatch([...base, ev('alice', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(owner.noms.length, 0);
+        assert.equal(owner.tally.total, 0);
+        const mod = P.reduceWatch([...base, ev('boulderbadgedad', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(mod.noms.length, 0);
+    });
+
+    test('start consumes the nomination, anchors the stream clock, resets votes', () => {
+        const st = P.reduceWatch([
+            nom('alice', '603'),
+            nom('bob', '604'),
+            ev('c', { k: 'watch.vote', o: 'm:603' }),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 5000),
+        ]);
+        assert.equal(st.now.key, 'm:603');
+        assert.equal(st.now.at, 5000);
+        assert.equal(st.now.by, 'alice');
+        assert.equal(st.noms.length, 1);            // 604 still on the ballot
+        assert.equal(st.tally.total, 0);            // new round
+        // A start naming a dead key is inert.
+        const noop = P.reduceWatch([ev('x', { k: 'watch.start', o: 'm:99' }, 5000)]);
+        assert.equal(noop.now, null);
+    });
+
+    test('latest start wins; the replaced showing lands in history', () => {
+        const st = P.reduceWatch([
+            nom('a', '1'), nom('b', '2'),
+            ev('a', { k: 'watch.start', o: 'm:1' }, 1000),
+            ev('b', { k: 'watch.start', o: 'm:2' }, 2000),
+        ]);
+        assert.equal(st.now.key, 'm:2');
+        assert.equal(st.history[0].key, 'm:1');
+    });
+
+    test('pause/resume: starter or moderator only, position math is exact', () => {
+        const play = [
+            nom('alice', '603'),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 10000),
+        ];
+        // A stranger's pause is inert.
+        const heckled = P.reduceWatch([...play, ev('bob', { k: 'watch.pause' }, 20000)]);
+        assert.equal(heckled.now.paused, false);
+        // Starter pauses at +10s → position freezes at 10000ms.
+        const paused = P.reduceWatch([...play, ev('alice', { k: 'watch.pause' }, 20000)]);
+        assert.equal(paused.now.paused, true);
+        assert.equal(P.watchPosition(paused.now, 99999), 10000);
+        // Moderator resumes at 30s; at stream-time 35s the party is at 15s.
+        const resumed = P.reduceWatch([
+            ...play,
+            ev('alice', { k: 'watch.pause' }, 20000),
+            ev('boulderbadgedad', { k: 'watch.resume' }, 30000),
+        ]);
+        assert.equal(P.watchPosition(resumed.now, 35000), 15000);
+        // Playing, never paused: pure elapsed stream time.
+        const live = P.reduceWatch(play);
+        assert.equal(P.watchPosition(live.now, 15000), 5000);
+    });
+
+    test('end: starter or moderator; the showing retires to history', () => {
+        const play = [
+            nom('alice', '603'),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 1000),
+        ];
+        const heckled = P.reduceWatch([...play, ev('bob', { k: 'watch.end' })]);
+        assert.notEqual(heckled.now, null);
+        const done = P.reduceWatch([...play, ev('boulderbadgedad', { k: 'watch.end' })]);
+        assert.equal(done.now, null);
+        assert.equal(done.history[0].key, 'm:603');
+        assert.equal(P.watchPosition(null, 5000), null);
+    });
+});
+
+describe('reduceWatch — stream-clock normalization', () => {
+    test('ISO-string timestamps (raw slskd) anchor the clock too', () => {
+        const st = P.reduceWatch([
+            { username: 'a', timestamp: '2026-08-11T05:00:00.000Z',
+              p: { k: 'watch.nom', id: '603', kd: 'm', ti: 'Matrix' } },
+            { username: 'a', timestamp: '2026-08-11T05:00:10.000Z',
+              p: { k: 'watch.start', o: 'm:603' } },
+        ]);
+        assert.equal(st.now.at, Date.parse('2026-08-11T05:00:10.000Z'));
+        // +25s of stream time → 25000ms into the film.
+        assert.equal(P.watchPosition(st.now, st.now.at + 25000), 25000);
+        // An UNCLOCKED start (garbage timestamp) must stay inert, never NaN.
+        const junk = P.reduceWatch([
+            { username: 'a', timestamp: '??',
+              p: { k: 'watch.nom', id: '603', kd: 'm', ti: 'Matrix' } },
+            { username: 'a', timestamp: '??', p: { k: 'watch.start', o: 'm:603' } },
+        ]);
+        assert.equal(junk.now, null);
+        assert.equal(junk.noms.length, 1);
+    });
+});

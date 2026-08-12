@@ -140,6 +140,7 @@ def create_video_blueprint() -> Blueprint:
     from .requests import register_routes as reg_requests
     from .notifications import register_routes as reg_notifications
     from .backups import register_routes as reg_backups
+    from .watch import register_routes as reg_watch
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -164,5 +165,6 @@ def create_video_blueprint() -> Blueprint:
     reg_requests(bp)
     reg_notifications(bp)
     reg_backups(bp)
+    reg_watch(bp)
 
     return bp

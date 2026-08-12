@@ -299,6 +299,131 @@
         return poll;
     }
 
+    // ── Watch-together reducer ──────────────────────────────────────────
+    // Movie night as a pure fold, same discipline as the jukebox. ONE party
+    // per room. Nominations form a ballot; votes ride tallyVotes; a start
+    // consumes a live nomination and anchors the party clock to the STREAM
+    // timestamp (the shared clock every client already agrees on — no client
+    // wall time on the wire). Playback position is derived state:
+    //   pos = offsetMs + (streamNow - basisAt)   while playing
+    //   pos = offsetMs                            while paused
+    // Carriers:
+    //   watch.nom  {id, kd, ti, y, s, e, po} → ballot entry (dedupe by
+    //              kd:id[:SxE], cap 12, first nominator keeps attribution)
+    //   watch.unnom {o}   → nominator (or a moderator) pulls a nomination
+    //   watch.vote {o}    → latest vote per user among LIVE nominations
+    //   watch.start {o}   → a live nomination becomes the showing; ballot
+    //              entry leaves, votes reset; latest start wins (a new
+    //              start replaces the current showing → history)
+    //   watch.pause / watch.resume {} → starter or moderator only
+    //   watch.end {}      → starter or moderator; showing → history
+    var _TMDB_ID_RE = /^[0-9]{1,10}$/;
+
+    // slskd stream timestamps arrive as ISO strings OR ms numbers depending
+    // on the transport hop (chat-games learned this the hard way — its _ts()
+    // twin). Null = unclocked; clock-bearing carriers ignore such events.
+    function _streamTs(ev) {
+        var t = ev && ev.timestamp;
+        if (typeof t === 'number' && isFinite(t)) return t;
+        var ms = Date.parse(t);
+        return isFinite(ms) ? ms : null;
+    }
+
+    function _watchKey(p) {
+        var id = String(p.id || '');
+        if (!_TMDB_ID_RE.test(id)) return null;
+        var kd = p.kd === 't' ? 't' : (p.kd === 'm' ? 'm' : null);
+        if (!kd) return null;
+        if (kd === 't') {
+            var s = parseInt(p.s, 10), e = parseInt(p.e, 10);
+            if (!(s >= 0 && s <= 999 && e >= 0 && e <= 9999)) return null;
+            return 't:' + id + ':' + s + 'x' + e;
+        }
+        return 'm:' + id;
+    }
+
+    function reduceWatch(events) {
+        var noms = [];        // [{key, id, kd, s, e, ti, y, po, by}]
+        var byKey = {};
+        var votes = [];
+        var now = null;       // {key, id, kd, s, e, ti, y, po, by, at, paused, basisAt, offsetMs}
+        var history = [];     // finished showings, newest first (cap 5)
+
+        function _retire(showing) {
+            history.unshift({ key: showing.key, ti: showing.ti, by: showing.by });
+            if (history.length > 5) history.pop();
+        }
+
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            var ts = _streamTs(ev);
+            if (p.k === 'watch.nom') {
+                var key = _watchKey(p);
+                if (!key || byKey[key]) return;
+                if (now && now.key === key) return;        // already showing
+                if (noms.length >= 12) return;             // no ballot bombs
+                var entry = { key: key, id: String(p.id), kd: p.kd,
+                              ti: String(p.ti || '').slice(0, 120),
+                              y: String(p.y || '').slice(0, 4),
+                              po: String(p.po || '').slice(0, 200),
+                              by: ev.username };
+                if (p.kd === 't') { entry.s = parseInt(p.s, 10); entry.e = parseInt(p.e, 10); }
+                noms.push(entry);
+                byKey[key] = entry;
+            } else if (p.k === 'watch.unnom') {
+                var uo = String(p.o || '');
+                var ent = byKey[uo];
+                if (ent && (ent.by === ev.username || isModerator(ev.username))) {
+                    noms = noms.filter(function (n) { return n.key !== uo; });
+                    delete byKey[uo];
+                }
+            } else if (p.k === 'watch.vote') {
+                var o = String(p.o || '');
+                if (byKey[o]) votes.push({ username: ev.username, option: o });
+            } else if (p.k === 'watch.start') {
+                var so = String(p.o || '');
+                var pick = byKey[so];
+                if (!pick || ts === null) return;          // unclocked events can't anchor
+                if (now) _retire(now);                     // latest start wins
+                now = { key: pick.key, id: pick.id, kd: pick.kd, s: pick.s, e: pick.e,
+                        ti: pick.ti, y: pick.y, po: pick.po, by: ev.username,
+                        at: ts, paused: false, basisAt: ts, offsetMs: 0 };
+                noms = noms.filter(function (n) { return n.key !== so; });
+                delete byKey[so];
+                votes = [];                                // new ballot round
+            } else if (p.k === 'watch.pause') {
+                if (!now || now.paused || ts === null) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                now.offsetMs += Math.max(0, ts - now.basisAt);
+                now.paused = true;
+            } else if (p.k === 'watch.resume') {
+                if (!now || !now.paused || ts === null) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                now.basisAt = ts;
+                now.paused = false;
+            } else if (p.k === 'watch.end') {
+                if (!now) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                _retire(now);
+                now = null;
+            }
+        });
+
+        votes = votes.filter(function (v) { return byKey[v.option]; });
+        var tally = tallyVotes(votes);
+        noms.forEach(function (n) { n.votes = tally.counts[n.key] || 0; });
+        return { noms: noms, now: now, tally: tally, history: history };
+    }
+
+    // The party's playback position in ms at stream-time nowMs — derived,
+    // never stored, so every client that agrees on the fold agrees on it.
+    function watchPosition(now, nowMs) {
+        if (!now) return null;
+        if (now.paused) return now.offsetMs;
+        return now.offsetMs + Math.max(0, nowMs - now.basisAt);
+    }
+
     // topic.set {t} → latest wins; empty clears.
     function reduceTopic(events) {
         var topic = null;
@@ -380,6 +505,8 @@
         reduceGameKills: reduceGameKills,
         reducePins: reducePins,
         reducePoll: reducePoll,
+        reduceWatch: reduceWatch,
+        watchPosition: watchPosition,
         reduceTopic: reduceTopic,
         reduceTuned: reduceTuned,
     };
