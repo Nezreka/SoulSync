@@ -51,30 +51,41 @@ export function pickDiscographySource(
   // When it is absent — older backend, or a caller that doesn't fetch it —
   // every source stays eligible, i.e. exactly the previous behaviour.
   const availableList = payload.available_sources;
-  const eligible = (source: string, id: string | null): string | null => {
-    if (!id) return null;
-    if (availableList && !availableList.includes(source)) return null;
-    return id;
+
+  const ladder = (onlyAvailable: boolean): { id: string; source: string } | null => {
+    const pick = (source: string, id: string | null | undefined): string | null => {
+      if (!id) return null;
+      if (onlyAvailable && availableList && !availableList.includes(source)) return null;
+      return id;
+    };
+    const spotify = pick('spotify', payload.spotify_artist_id);
+    const itunes = pick('itunes', payload.itunes_artist_id);
+    const deezer = pick('deezer', payload.deezer_artist_id);
+    const discogs = pick('discogs', payload.discogs_artist_id);
+    const musicbrainz = pick('musicbrainz', payload.musicbrainz_artist_id);
+
+    if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
+    if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };
+    if (active.includes('deezer') && deezer) return { id: deezer, source: 'deezer' };
+    if (active.includes('musicbrainz') && musicbrainz)
+      return { id: musicbrainz, source: 'musicbrainz' };
+    if (itunes) return { id: itunes, source: 'itunes' };
+
+    if (spotify) return { id: spotify, source: 'spotify' };
+    if (discogs) return { id: discogs, source: 'discogs' };
+    if (deezer) return { id: deezer, source: 'deezer' };
+    if (musicbrainz) return { id: musicbrainz, source: 'musicbrainz' };
+    return null;
   };
 
-  const spotify = eligible('spotify', payload.spotify_artist_id || null);
-  const itunes = eligible('itunes', payload.itunes_artist_id || null);
-  const deezer = eligible('deezer', payload.deezer_artist_id || null);
-  const discogs = eligible('discogs', payload.discogs_artist_id || null);
-  const musicbrainz = eligible('musicbrainz', payload.musicbrainz_artist_id || null);
-
-  if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
-  if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };
-  if (active.includes('deezer') && deezer) return { id: deezer, source: 'deezer' };
-  if (active.includes('musicbrainz') && musicbrainz)
-    return { id: musicbrainz, source: 'musicbrainz' };
-  if (itunes) return { id: itunes, source: 'itunes' };
-
-  if (spotify) return { id: spotify, source: 'spotify' };
-  if (discogs) return { id: discogs, source: 'discogs' };
-  if (deezer) return { id: deezer, source: 'deezer' };
-  if (musicbrainz) return { id: musicbrainz, source: 'musicbrainz' };
-  return null;
+  // A live provider's id first. Then — and this is why it's a LAST resort, not
+  // a hard filter — the original ladder unchanged: a dead provider's id is
+  // still worth linking, because the artist page resolves a LIBRARY artist
+  // straight off the source-id column (artist_source_lookup.py) with no
+  // provider call at all. Dropping the link outright would break owned
+  // artists that render fine today. Strictly monotonic: better when a live
+  // provider has an id, identical to before when none does.
+  return ladder(true) ?? ladder(false);
 }
 
 interface Props {

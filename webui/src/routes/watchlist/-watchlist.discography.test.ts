@@ -105,9 +105,11 @@ describe('pickDiscographySource', () => {
   // 'Could not access spotify ... provider is unavailable'. The server now
   // sends which providers are alive; the ladder must respect it.
 
-  it('never pins a provider the user has switched off', () => {
-    // Lancor: Spotify auth disconnected AND no-auth unchecked, running
-    // Deezer — but this artist was only ever matched on Spotify.
+  it('still links a dead provider as a LAST resort (owned artists resolve locally)', () => {
+    // The artist page resolves a LIBRARY artist straight off the source-id
+    // column with no provider call, so an owned artist matched only on a
+    // switched-off Spotify still renders. Dropping the link would break
+    // pages that work today — availability is a preference, not a filter.
     expect(
       pickDiscographySource({
         ...NONE,
@@ -115,7 +117,7 @@ describe('pickDiscographySource', () => {
         global_metadata_source: 'deezer',
         available_sources: ['deezer', 'itunes', 'musicbrainz'],
       }),
-    ).toBeNull();   // button disables instead of navigating into a 503
+    ).toEqual({ id: 'sp', source: 'spotify' });
   });
 
   it('falls to the next AVAILABLE provider that has an id', () => {
