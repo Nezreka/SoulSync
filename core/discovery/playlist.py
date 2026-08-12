@@ -211,7 +211,13 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                             'matched_data': cached_match,
                         }
                         db.update_mirrored_track_extra_data(track_id, extra_data)
-                        db.adopt_discovered_artist(track_id, _matched_primary_artist(cached_match))
+                        # Best-effort (see the fresh-match path): raising here
+                        # would abort the cache hit and fall through to a fresh
+                        # search — a double write for an already-matched track.
+                        try:
+                            db.adopt_discovered_artist(track_id, _matched_primary_artist(cached_match))
+                        except Exception as e:
+                            logger.debug("artist adoption failed for track %s: %s", track_id, e)
                         total_discovered += 1
                         logger.info(f"CACHE [{i+1}/{len(undiscovered_tracks)}]: {track_name} → {cached_match.get('name', '?')}")
                         deps.update_automation_progress(automation_id,
@@ -368,7 +374,12 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     # A match on an "Unknown Artist" row should FIX the row —
                     # matched_data alone leaves the mirror displaying (and
                     # searching as) Unknown Artist forever (#1136 review).
-                    db.adopt_discovered_artist(track_id, _matched_primary_artist(matched_data))
+                    # Best-effort: a failure here must not skip the cache save,
+                    # counters, or the completion event below.
+                    try:
+                        db.adopt_discovered_artist(track_id, _matched_primary_artist(matched_data))
+                    except Exception as e:
+                        logger.debug("artist adoption failed for track %s: %s", track_id, e)
                     total_discovered += 1
 
                     # Save to discovery cache

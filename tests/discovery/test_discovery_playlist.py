@@ -72,6 +72,7 @@ class _FakeDB:
         self._cache_match = cache_match
         self.extra_data_writes = []
         self.cache_saves = []
+        self.artist_adoptions = []
 
     def get_mirrored_playlist_tracks(self, pl_id):
         return self._tracks.get(pl_id, [])
@@ -81,6 +82,9 @@ class _FakeDB:
 
     def update_mirrored_track_extra_data(self, track_id, extra_data):
         self.extra_data_writes.append((track_id, extra_data))
+
+    def adopt_discovered_artist(self, track_id, artist_name):
+        self.artist_adoptions.append((track_id, artist_name))
 
     def save_discovery_cache_match(self, title, artist, source, conf, data, raw_t, raw_a):
         self.cache_saves.append((title, artist, source, conf))
