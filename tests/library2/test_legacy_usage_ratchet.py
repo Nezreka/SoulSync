@@ -66,6 +66,28 @@ class TestTheCounter:
         usage = count_legacy_usage("'INSERT INTO artists_new (id) VALUES (?)'")
         assert usage.writes == 0
 
+    def test_prose_in_a_comment_is_not_access(self):
+        """"Get artist from tracks" is a sentence, not a query. Four such
+        comments were being counted, which would have left the ratchet stuck
+        four above zero with no code left to port."""
+        usage = count_legacy_usage(
+            "# Try to determine artist from tracks or path\n"
+            "artist = self._determine_album_artist(tracks, path)\n"
+        )
+        assert (usage.reads, usage.writes) == (0, 0)
+
+    def test_a_hash_inside_sql_does_not_hide_the_rest_of_the_statement(self):
+        """The comment strip must be tokenizer-accurate: a ``#`` inside a
+        string is data, and everything after it still counts."""
+        usage = count_legacy_usage(
+            "cur.execute('SELECT id FROM artists WHERE name = \"#1 Hits\"')\n"
+        )
+        assert usage.reads == 1
+
+    def test_source_that_does_not_tokenize_is_still_measured(self):
+        usage = count_legacy_usage("cur.execute('DELETE FROM tracks WHERE (')\n")
+        assert usage.writes == 1
+
     def test_every_legacy_table_is_actually_watched(self):
         for table in LEGACY_TABLES:
             usage = count_legacy_usage(f"'UPDATE {table} SET x=1'")

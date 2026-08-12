@@ -101,13 +101,11 @@ def test_history_rows_fetch_and_delete(tmp_path):
 
 
 def test_delete_track_by_file_path(tmp_path):
+    from tests.support.catalogue_seed import seed_library_track
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('a1', 'A')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES ('al1', 'Al', 'a1')")
-    cur.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path)
-                   VALUES ('t1', 'al1', 'a1', 'Song', '/music/k/squabble.flac')""")
+    seed_library_track(conn, artist='A', album='Al', title='Song',
+                       file_path='/music/k/squabble.flac')
     conn.commit()
     conn.close()
 

@@ -197,6 +197,39 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
+def track_id_for_path(conn, file_path: Any) -> Optional[int]:
+    """The catalogue track that owns a file path, or ``None``.
+
+    Exact path first, then the basename — a media server and SoulSync often
+    disagree about the prefix of the same file (server mount vs. container
+    mount), and the filename is what survives that. The basename step is a
+    guess by nature, so it only accepts an unambiguous one: two files sharing
+    a filename in different albums return ``None`` rather than a coin flip.
+
+    Live files win over deleted ones: a deleted row is history (ADR-03) and
+    must not out-vote the file that actually sits at that path today.
+    """
+    file_path = str(file_path or "")
+    if not file_path:
+        return None
+    row = conn.execute(
+        f"SELECT track_id FROM lib2_track_files"
+        f" WHERE path = ? AND track_id IS NOT NULL"
+        f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
+    if row:
+        return int(row[0])
+    name = os.path.basename(file_path.replace('\\', '/'))
+    if not name:
+        return None
+    escaped = name.replace('^', '^^').replace('%', '^%').replace('_', '^_')
+    rows = conn.execute(
+        "SELECT DISTINCT track_id FROM lib2_track_files"
+        " WHERE track_id IS NOT NULL"
+        "   AND (path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')"
+        " LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
+    return int(rows[0][0]) if len(rows) == 1 else None
+
+
 def repoint_file_path(conn, old_path: str, new_path: str) -> int:
     """Follow a file that moved on disk, matched by the path we stored for it.
 

@@ -58,12 +58,23 @@ class _NonClosingConn:
 
 
 class _InMemoryDB(MusicDatabase):
+    """The catalogue tables this method reads, and the history table it heals.
+
+    Hand-built rather than a full schema-ensure so the test stays a unit test:
+    the verification verdict sits on the FILE row (ADR-03), the title on the
+    track, which is exactly the join under test.
+    """
+
     def __init__(self):
         self._conn = sqlite3.connect(":memory:")
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(
-            "CREATE TABLE tracks (id INTEGER PRIMARY KEY, file_path TEXT, "
-            "title TEXT, verification_status TEXT)"
+            "CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, "
+            "title TEXT)"
+        )
+        self._conn.execute(
+            "CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "track_id INTEGER, path TEXT, verification_status TEXT)"
         )
         self._conn.execute(
             "CREATE TABLE library_history ("
@@ -78,8 +89,11 @@ class _InMemoryDB(MusicDatabase):
 
     def _add_track(self, tid, path, status, title="Song"):
         self._conn.execute(
-            "INSERT INTO tracks (id, file_path, title, verification_status) VALUES (?,?,?,?)",
-            (tid, path, title, status))
+            "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,1,?)",
+            (tid, title))
+        self._conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, verification_status) "
+            "VALUES (?,?,?)", (tid, path, status))
         self._conn.commit()
 
     def _add_history(self, path, status, title="Song"):

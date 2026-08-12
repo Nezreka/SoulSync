@@ -160,35 +160,6 @@ def test_delete_repoints_wishlist_references_to_null(db):
     assert row["quality_profile_id"] is None
 
 
-def test_delete_repoints_library_track_references_to_null(db):
-    """Same as the wishlist case, but for tracks.quality_profile_id — added
-    later than the wishlist column, and easy to forget to wire into the same
-    cleanup (caught in review: it was)."""
-    pid = db.create_quality_profile("Doomed Library", {"ranked_targets": []})
-    conn = db._get_connection()
-    try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, quality_profile_id) "
-            "VALUES (1, 1, 1, 'Track', ?)",
-            (pid,),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    ok, reason = db.delete_quality_profile(pid)
-    assert ok is True and reason == ""
-
-    conn = db._get_connection()
-    try:
-        row = conn.execute("SELECT quality_profile_id FROM tracks WHERE id=1").fetchone()
-    finally:
-        conn.close()
-    assert row["quality_profile_id"] is None
-
-
 def _seed_lib2_quality_references(db, profile_id):
     conn = db._get_connection()
     try:
@@ -235,6 +206,12 @@ def _lib2_quality_references(db, ids):
 
 
 def test_delete_repoints_lib2_references_to_current_default(db):
+    """The library's own assignments — the counterpart of the wishlist case.
+    A library reference is easy to forget to wire into the same cleanup
+    (caught in review once: it was). Note the difference from the wishlist:
+    there "no profile" is NULL, in the catalogue it is the current default
+    plus `quality_profile_explicit = 0`, because the column is NOT NULL and a
+    trigger rejects a pointer to a profile that no longer exists."""
     pid = db.create_quality_profile("Doomed Lib2", {"ranked_targets": []})
     ids = _seed_lib2_quality_references(db, pid)
     default_id = next(p["id"] for p in db.list_quality_profiles() if p["is_default"])

@@ -4609,3 +4609,78 @@ nicht gab.
 ist TEXT". Der Katalog vergibt eigene Integer-Ids und hält die des Servers in
 `server_id` — die Regel („eine Id aus der URL ist opak, sie wird nie geparst")
 überlebt die Begründung.
+
+#### 50.4.4.32 Die Datei-Pfad-Auflösung, die Fremd-Id-Joins und der Rest
+
+Stand: **55/14**. `database/music_database.py` fällt von 33/8 auf **11/5** —
+und was dort übrig bleibt, ist genau dreierlei: die Legacy-Schemaverwaltung
+selbst (`_initialize_database`, `_migrate_id_columns_to_text`, `_add_*`, 10
+Stellen, fällt mit den Tabellen), das Reorganize-Brückenpaar (4, §50.4.4.21)
+und der Album-Canonical-Zeiger (2, s.u.).
+
+**„Welcher Track gehört zu dieser Datei" gibt es jetzt einmal.** Drei Stellen
+hatten es eigenständig gebaut — der Manual-Match-Auflöser, der
+Download-Rekorder, der Cleaner —, jede mit ihrem eigenen Fallback.
+`core/library2/track_files.track_id_for_path` ist die eine Fassung: exakter
+Pfad, dann der Dateiname. Zwei Verschärfungen dabei, beide gewollt:
+
+- Der Dateiname zählt nur **mit Trennzeichen** — `%/song.flac`, nicht
+  `%song.flac`. Vorher fand „song.flac" auch „my-song.flac".
+- Ein **mehrdeutiger** Dateiname liefert nichts. Legacy nahm die erste Zeile;
+  bei zwei Alben mit einer `01 - Intro.flac` war das ein Münzwurf darüber,
+  welcher Song den Download-Datensatz bekommt. Dieselbe Haltung wie beim
+  Basename-Guard des Verifizierungs-Abgleichs und bei der
+  Mehrdeutigkeits-Verweigerung der Quellensuche.
+
+Eine lebende Datei sticht dabei eine gelöschte am selben Pfad — sonst
+antwortet der Track, der die Datei *hatte*, statt dem, der sie hat.
+
+**Der Verifizierungs-Abgleich (#934) liest jetzt die Dateizeile.** Das Urteil
+gehört in v2 der Datei (ADR-03), nicht dem Song — es ist eine Aussage über die
+Bytes auf der Platte.
+
+**`name_key(…)` gibt es jetzt auch in SQL.** Ein Join gegen eine Tabelle ohne
+diese Spalte (Watchlist, Playlists) musste sonst `LOWER()` nehmen, und das
+faltet nur A–Z. Die als SQL-Funktion registrierte Fassung ist dieselbe, die
+beim Schreiben die Spalte füllt — der Watchlist-MBID-Abgleich findet damit
+„BJÖRK" ↔ „Björk".
+
+**Die Fremd-Id-Joins** (Watchlist-Backfill, Similar-Artists-Ausschluss,
+Empfehlungsquellen) gehen über `provider_id_sql`/`ARTIST_IDS_SQL` statt über
+je vier hartkodierte Spaltennamen. Der Watchlist-Backfill hatte sein
+Vergleichsprädikat zweimal wortgleich im Statement stehen; es wird jetzt
+einmal gebaut und zweimal eingesetzt.
+
+**Der Provenienz-Backfill** verteilt die Ids auf beide Ablagen: Spotify,
+MusicBrainz, ISRC und `soul_id` in ihre Spalten, der Rest über
+`merge_provider_id` in `external_ids` — was dort schon steht, bleibt stehen,
+genau wie das „nur leere Spalten füllen" der alten Fassung.
+
+**Eine Löschung statt einer Portierung:** `delete_quality_profile` schrieb noch
+`UPDATE tracks SET quality_profile_id=NULL`. Die lib2-Behandlung darunter
+(Ersatzprofil setzen, `quality_profile_explicit` zurücksetzen, danach die
+Vererbung neu projizieren) macht dasselbe vollständiger — die Legacy-Zeile war
+nur noch ein Duplikat.
+
+**Offen und begründet:** `set_album_canonical`/`get_album_canonical` (#758/#765)
+brauchen fünf Spalten, die `lib2_albums` nicht hat (`canonical_source`,
+`canonical_album_id`, `canonical_score`, `canonical_resolved_at`,
+`canonical_locked`). Das ist eine Schemaerweiterung, keine Umschreibung, und
+gehört in ihre eigene Runde.
+
+**Ein Id-Vertrag, der dabei auffiel.** `manual_library_track_matches.
+library_track_id` wurde gegen die Track-Ids geprüft, die der Medien-Server für
+*diese* Playlist meldet — das ging, solange die Legacy-Zeile den Rating-Key
+*war*. Der Picker und die Anreicherung dieser Zeilen sprechen aber längst
+Katalog-Ids. Also: die Spalte ist eine Katalog-Id, und die Playlist-Prüfung
+geht über `MusicDatabase.server_track_id()`. Ein gespeicherter Wert, der schon
+in der Playlist steht, gilt weiterhin unverändert — so überleben Zuordnungen
+aus der Zeit vor dem Katalog.
+
+**Die Ratsche zählte vier Kommentare mit.** „Get artist from tracks" ist ein
+Satz, keine Abfrage — aber `FROM tracks` steht drin. Vier solche Stellen in
+vier Dateien hätten die Ratsche bei 4 stehen lassen, mit nichts mehr zu
+portieren. Der Zähler entfernt Kommentare jetzt über `tokenize` (nur so ist
+ein `#` in einer SQL-Zeichenkette von einem echten Kommentar zu
+unterscheiden); die Basislinie fällt in derselben Änderung um genau diese
+vier Punkte, plus einen, den `master.py` beisteuerte.

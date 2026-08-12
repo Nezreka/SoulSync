@@ -1,4 +1,5 @@
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_artist
 
 
 def _names(artists):
@@ -45,19 +46,22 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
     )
 
     with db._get_connection() as conn:
-        conn.executemany(
-            """
-            INSERT INTO artists (name, server_source, spotify_artist_id, deezer_id, musicbrainz_id)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                ("Library Alias", "navidrome", "sp-owned", None, None),
-                ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
-                ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
-                ("owned by name", "navidrome", None, None, None),
-                ("Different Server Artist", "plex", "sp-other-server", None, None),
-            ],
-        )
+        library = [
+            ("Library Alias", "navidrome", "sp-owned", None, None),
+            ("Library Deezer Alias", "navidrome", None, "dz-owned", None),
+            ("Library MusicBrainz Alias", "navidrome", None, None, "mb-owned"),
+            ("owned by name", "navidrome", None, None, None),
+            ("Different Server Artist", "plex", "sp-other-server", None, None),
+        ]
+        for index, (name, server, spotify, deezer, mbid) in enumerate(library):
+            artist_id = seed_artist(conn, server_id=f"lib-{index}", name=name,
+                                    server_source=server)
+            conn.execute(
+                "UPDATE lib2_artists SET spotify_id=?, musicbrainz_id=?,"
+                "       external_ids=CASE WHEN ? IS NULL THEN external_ids"
+                "                         ELSE json_set(external_ids,'$.deezer',?) END"
+                " WHERE id=?",
+                (spotify, mbid, deezer, deezer, artist_id))
         conn.commit()
 
     artists = db.get_top_similar_artists(

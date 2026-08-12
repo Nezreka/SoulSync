@@ -291,6 +291,13 @@ class MusicDatabase:
                     connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
                 except ImportError:
                     connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
+                # The catalogue's stored `name_key` fold, available to SQL. A
+                # join against a table that has no such column (watchlist,
+                # playlists) would otherwise have to use LOWER(), which folds
+                # A-Z only and so never matched a non-ASCII artist.
+                from core.library2.importer import normalize_name as _name_key
+                connection.create_function(
+                    "name_key", 1, lambda x: _name_key(x) if x else "")
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
@@ -6121,7 +6128,7 @@ class MusicDatabase:
             return False
 
     def find_track_id_by_file_path(self, file_path: str) -> Optional[str]:
-        """Return the current tracks.id for a file path, or None.
+        """Return the current catalogue track id for a file path, or None.
 
         Used to re-resolve a manual match whose stored library_track_id went
         stale after a rescan re-keyed the track. Exact path first, then a
@@ -6129,22 +6136,33 @@ class MusicDatabase:
         if not file_path:
             return None
         try:
+            from core.library2.track_files import track_id_for_path
+
             conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
-            row = cursor.fetchone()
-            if row:
-                return str(row[0])
-            import os as _os
-            fname = _os.path.basename(str(file_path).replace('\\', '/'))
-            if fname:
-                cursor.execute("SELECT id FROM tracks WHERE file_path LIKE ? LIMIT 1", (f"%{fname}",))
-                row = cursor.fetchone()
-                if row:
-                    return str(row[0])
-            return None
+            track_id = track_id_for_path(conn, file_path)
+            return str(track_id) if track_id is not None else None
         except Exception as e:
             logger.error(f"find_track_id_by_file_path error: {e}")
+            return None
+
+    def server_track_id(self, track_id) -> Optional[str]:
+        """The media server's own id for a catalogue track, or None.
+
+        The two used to be the same value — a legacy row's id WAS the server's
+        rating key. They are separate columns now, so anything that has to
+        speak to a server (playlist membership, play counts) asks for the
+        translation instead of assuming it.
+        """
+        if track_id is None:
+            return None
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT server_id FROM lib2_tracks WHERE id = ?",
+                    (track_id,)).fetchone()
+            return str(row[0]) if row and row[0] else None
+        except Exception as e:
+            logger.debug(f"server_track_id lookup failed for {track_id}: {e}")
             return None
 
     def get_manual_library_match(self, profile_id: int, source: str,
@@ -7629,9 +7647,9 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT albums.*, artists.name as artist_name
-                FROM albums
-                JOIN artists ON albums.artist_id = artists.id
-                WHERE albums.spotify_album_id = ?
+                FROM lib2_albums albums
+                JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
+                WHERE albums.spotify_id = ?
                 LIMIT 1
             """, (spotify_album_id,))
             row = cursor.fetchone()
@@ -7639,11 +7657,11 @@ class MusicDatabase:
                 return None
             genres = json.loads(row['genres']) if row['genres'] else None
             album = DatabaseAlbum(
-                id=row['id'], artist_id=row['artist_id'], title=row['title'],
-                year=row['year'], thumb_url=row['thumb_url'], genres=genres,
+                id=row['id'], artist_id=row['primary_artist_id'], title=row['title'],
+                year=row['year'], thumb_url=row['image_url'], genres=genres,
                 track_count=row['track_count'], duration=row['duration'],
-                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None,
+                created_at=_as_datetime(row['added_at']),
+                updated_at=_as_datetime(row['updated_at']),
             )
             album.artist_name = row['artist_name']
             return album
@@ -7743,9 +7761,15 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            sql = ("SELECT tracks.title AS title, artists.name AS artist_name, tracks.file_path AS file_path "
-                   "FROM tracks JOIN artists ON tracks.artist_id = artists.id "
-                   "WHERE tracks.file_path IS NOT NULL AND tracks.file_path != ''")
+            sql = ("SELECT tracks.title AS title, artists.name AS artist_name, "
+                   "       files.path AS file_path "
+                   "FROM lib2_tracks tracks "
+                   "JOIN lib2_albums albums ON albums.id = tracks.album_id "
+                   "JOIN lib2_artists artists ON artists.id = albums.primary_artist_id "
+                   "JOIN lib2_track_files files ON files.track_id = tracks.id "
+                   "     AND files.is_primary = 1 "
+                   "     AND COALESCE(files.file_state, 'active') <> 'deleted' "
+                   "WHERE files.path IS NOT NULL AND files.path != ''")
             params: list = []
             if server_source:
                 sql += " AND tracks.server_source = ?"
@@ -9872,10 +9896,6 @@ class MusicDatabase:
             )
             conn.execute(
                 "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
-                (profile_id,),
-            )
-            conn.execute(
-                "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
             )
             for table in ('watchlist_artists', 'mirrored_playlists'):
@@ -12328,72 +12348,43 @@ class MusicDatabase:
         bridge lets existing enriched library matches show up as watchlist
         MusicBrainz matches without waiting for a separate watchlist scan.
         """
+        from core.library2.provider_ids import provider_id_sql
+
+        # The watchlist keeps each provider's id under its own suffixed name;
+        # the catalogue keeps two in columns and the rest in `external_ids`.
+        # One predicate, written once and used in both halves of the statement.
+        watchlist_columns = {
+            'spotify': 'spotify_artist_id',
+            'itunes': 'itunes_artist_id',
+            'deezer': 'deezer_artist_id',
+            'discogs': 'discogs_artist_id',
+        }
+        by_provider = ' '.join(
+            f"""OR (watchlist_artists.{column} IS NOT NULL
+                    AND watchlist_artists.{column} != ''
+                    AND {provider_id_sql(source, alias='a')} = watchlist_artists.{column})"""
+            for source, column in watchlist_columns.items()
+        )
+        matches = f"""
+            a.musicbrainz_id IS NOT NULL
+            AND a.musicbrainz_id != ''
+            AND (a.name_key = name_key(watchlist_artists.artist_name) {by_provider})
+        """
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(f"""
                     UPDATE watchlist_artists
                     SET musicbrainz_artist_id = (
-                            SELECT a.musicbrainz_id
-                            FROM artists a
-                            WHERE a.musicbrainz_id IS NOT NULL
-                              AND a.musicbrainz_id != ''
-                              AND (
-                                  LOWER(a.name) = LOWER(watchlist_artists.artist_name)
-                                  OR (
-                                      watchlist_artists.spotify_artist_id IS NOT NULL
-                                      AND watchlist_artists.spotify_artist_id != ''
-                                      AND a.spotify_artist_id = watchlist_artists.spotify_artist_id
-                                  )
-                                  OR (
-                                      watchlist_artists.itunes_artist_id IS NOT NULL
-                                      AND watchlist_artists.itunes_artist_id != ''
-                                      AND a.itunes_artist_id = watchlist_artists.itunes_artist_id
-                                  )
-                                  OR (
-                                      watchlist_artists.deezer_artist_id IS NOT NULL
-                                      AND watchlist_artists.deezer_artist_id != ''
-                                      AND a.deezer_id = watchlist_artists.deezer_artist_id
-                                  )
-                                  OR (
-                                      watchlist_artists.discogs_artist_id IS NOT NULL
-                                      AND watchlist_artists.discogs_artist_id != ''
-                                      AND a.discogs_id = watchlist_artists.discogs_artist_id
-                                  )
-                              )
-                            LIMIT 1
+                            SELECT a.musicbrainz_id FROM lib2_artists a
+                            WHERE {matches} LIMIT 1
                         ),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE profile_id = ?
                       AND (musicbrainz_artist_id IS NULL OR musicbrainz_artist_id = '')
                       AND EXISTS (
-                          SELECT 1
-                          FROM artists a
-                          WHERE a.musicbrainz_id IS NOT NULL
-                            AND a.musicbrainz_id != ''
-                            AND (
-                                LOWER(a.name) = LOWER(watchlist_artists.artist_name)
-                                OR (
-                                    watchlist_artists.spotify_artist_id IS NOT NULL
-                                    AND watchlist_artists.spotify_artist_id != ''
-                                    AND a.spotify_artist_id = watchlist_artists.spotify_artist_id
-                                )
-                                OR (
-                                    watchlist_artists.itunes_artist_id IS NOT NULL
-                                    AND watchlist_artists.itunes_artist_id != ''
-                                    AND a.itunes_artist_id = watchlist_artists.itunes_artist_id
-                                )
-                                OR (
-                                    watchlist_artists.deezer_artist_id IS NOT NULL
-                                    AND watchlist_artists.deezer_artist_id != ''
-                                    AND a.deezer_id = watchlist_artists.deezer_artist_id
-                                )
-                                OR (
-                                    watchlist_artists.discogs_artist_id IS NOT NULL
-                                    AND watchlist_artists.discogs_artist_id != ''
-                                    AND a.discogs_id = watchlist_artists.discogs_artist_id
-                                )
-                            )
+                          SELECT 1 FROM lib2_artists a WHERE {matches}
                       )
                 """, (profile_id,))
                 conn.commit()
@@ -12901,9 +12892,10 @@ class MusicDatabase:
                 library_artist_keys = None
                 sql_limit = limit
                 if exclude_library_server:
-                    cursor.execute("""
-                        SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, musicbrainz_id
-                        FROM artists
+                    from core.library2.provider_ids import ARTIST_IDS_SQL
+                    cursor.execute(f"""
+                        SELECT name, {ARTIST_IDS_SQL}
+                        FROM lib2_artists
                         WHERE server_source = ?
                     """, (exclude_library_server,))
                     library_rows = cursor.fetchall()
@@ -13055,11 +13047,11 @@ class MusicDatabase:
                     SELECT sa.similar_artist_name AS rec_name,
                            COALESCE(a.name, wa.artist_name) AS source_name
                     FROM similar_artists sa
-                    LEFT JOIN artists a ON (
-                        (a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id = sa.source_artist_id)
-                        OR (a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id = sa.source_artist_id)
-                        OR (a.deezer_id IS NOT NULL AND a.deezer_id = sa.source_artist_id)
+                    LEFT JOIN lib2_artists a ON (
+                        (a.spotify_id IS NOT NULL AND a.spotify_id = sa.source_artist_id)
                         OR (a.musicbrainz_id IS NOT NULL AND a.musicbrainz_id = sa.source_artist_id)
+                        OR EXISTS (SELECT 1 FROM json_each(a.external_ids)
+                                   WHERE json_each.value = sa.source_artist_id)
                     )
                     LEFT JOIN watchlist_artists wa ON (
                         wa.profile_id = ? AND (
@@ -13618,13 +13610,13 @@ class MusicDatabase:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT MAX(updated_at) as last_update 
+                SELECT MAX(updated_at) as last_update
                 FROM (
-                    SELECT updated_at FROM artists WHERE server_source = ?
+                    SELECT updated_at FROM lib2_artists WHERE server_source = ?
                     UNION ALL
-                    SELECT updated_at FROM albums WHERE server_source = ?
+                    SELECT updated_at FROM lib2_albums WHERE server_source = ?
                     UNION ALL
-                    SELECT updated_at FROM tracks WHERE server_source = ?
+                    SELECT updated_at FROM lib2_tracks WHERE server_source = ?
                 )
             """, (server_source, server_source, server_source))
             
@@ -15081,20 +15073,11 @@ class MusicDatabase:
 
             # Try to link to existing library track by file path if track_id not given
             if not track_id and file_path:
-                cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
-                row = cursor.fetchone()
-                if not row:
-                    # Fallback: match by filename suffix (handles server path vs local path differences)
-                    import os as _os
-                    fname = _os.path.basename(file_path.replace('\\', '/'))
-                    if fname:
-                        cursor.execute(
-                            "SELECT id FROM tracks WHERE file_path LIKE ? OR file_path LIKE ? LIMIT 1",
-                            (f'%/{fname}', f'%\\{fname}')
-                        )
-                        row = cursor.fetchone()
-                if row:
-                    track_id = str(row[0])
+                from core.library2.track_files import track_id_for_path
+
+                linked = track_id_for_path(conn, file_path)
+                if linked is not None:
+                    track_id = str(linked)
 
             cursor.execute("""
                 INSERT INTO track_downloads
@@ -15155,7 +15138,7 @@ class MusicDatabase:
             return None
 
     def backfill_track_external_ids_from_provenance(self, track_id: str, file_path: Optional[str]) -> int:
-        """Copy external IDs from ``track_downloads`` onto a ``tracks`` row.
+        """Copy external IDs from ``track_downloads`` onto a catalogue track.
 
         Idempotent: only writes columns that are currently NULL/empty on
         the tracks row AND have a value in the provenance row. Returns the
@@ -15170,45 +15153,56 @@ class MusicDatabase:
         if not prov:
             return 0
 
-        # Map provenance column -> tracks column. Different naming
-        # conventions because tracks.* uses shorter names (``deezer_id``,
-        # ``tidal_id``, ``qobuz_id``) while track_downloads uses the
-        # explicit ``_track_id`` suffix to avoid ambiguity.
-        prov_to_tracks = {
-            'spotify_track_id': 'spotify_track_id',
-            'itunes_track_id': 'itunes_track_id',
-            'deezer_track_id': 'deezer_id',
-            'tidal_track_id': 'tidal_id',
-            'qobuz_track_id': 'qobuz_id',
-            'musicbrainz_recording_id': 'musicbrainz_recording_id',
-            'audiodb_id': 'audiodb_id',
+        # Where each provenance column lands on the catalogue's track row.
+        # ``track_downloads`` uses the explicit ``_track_id`` suffix to avoid
+        # ambiguity; the catalogue keeps three identifiers in columns of their
+        # own and every provider's id in ``external_ids``.
+        prov_to_column = {
+            'spotify_track_id': 'spotify_id',
+            'musicbrainz_recording_id': 'musicbrainz_id',
             'soul_id': 'soul_id',
             'isrc': 'isrc',
         }
+        prov_to_provider = {
+            'itunes_track_id': 'itunes',
+            'deezer_track_id': 'deezer',
+            'tidal_track_id': 'tidal',
+            'qobuz_track_id': 'qobuz',
+            'audiodb_id': 'audiodb',
+        }
 
-        updates: Dict[str, str] = {}
-        for prov_col, track_col in prov_to_tracks.items():
-            val = prov.get(prov_col)
-            if not val:
-                continue
-            updates[track_col] = str(val)
-        if not updates:
+        columns = {column: str(prov[key]) for key, column in prov_to_column.items()
+                   if prov.get(key)}
+        providers = {provider: str(prov[key])
+                     for key, provider in prov_to_provider.items() if prov.get(key)}
+        if not columns and not providers:
             return 0
 
         try:
+            from core.library2.provider_ids import merge_provider_id
+
             conn = self._get_connection()
             cursor = conn.cursor()
-            # Coalesce-update: only fill empty columns. Preserves any IDs
-            # the enrichment worker already populated (those are usually
-            # more reliable than provenance for non-primary sources).
-            set_clauses = []
-            params = []
-            for track_col, val in updates.items():
-                set_clauses.append(f"{track_col} = COALESCE(NULLIF({track_col}, ''), ?)")
-                params.append(val)
+            # Only fill what is empty. IDs the enrichment worker already wrote
+            # are usually more reliable than provenance for non-primary
+            # sources — that is why `merge_provider_id` keeps them too.
+            set_clauses = [f"{column} = COALESCE(NULLIF({column}, ''), ?)"
+                           for column in columns]
+            params: list = list(columns.values())
+            if providers:
+                row = cursor.execute(
+                    "SELECT external_ids FROM lib2_tracks WHERE id = ?",
+                    (track_id,)).fetchone()
+                if row is None:
+                    return 0
+                merged = row[0]
+                for provider, value in providers.items():
+                    merged = merge_provider_id(merged, provider, value)
+                set_clauses.append("external_ids = ?")
+                params.append(merged)
             params.append(track_id)
             cursor.execute(
-                f"UPDATE tracks SET {', '.join(set_clauses)} WHERE id = ?",
+                f"UPDATE lib2_tracks SET {', '.join(set_clauses)} WHERE id = ?",
                 params,
             )
             conn.commit()
@@ -15982,11 +15976,13 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT lh.id, lh.origin, lh.origin_context, lh.created_at,
                        lh.file_path, lh.title, lh.artist_name,
-                       COALESCE(t.play_count, 0) AS play_count
+                       COALESCE(MAX(t.play_count), 0) AS play_count
                 FROM library_history lh
-                LEFT JOIN tracks t ON t.file_path = lh.file_path
+                LEFT JOIN lib2_track_files f ON f.path = lh.file_path
+                LEFT JOIN lib2_tracks t ON t.id = f.track_id
                 WHERE lh.event_type = 'download'
                   AND lh.origin IN ('watchlist', 'playlist')
+                GROUP BY lh.id
             """)
             cols = ['id', 'origin', 'origin_context', 'created_at',
                     'file_path', 'title', 'artist_name', 'play_count']
@@ -16140,13 +16136,21 @@ class MusicDatabase:
                 conn.close()
 
     def delete_track_by_file_path(self, file_path):
-        """Delete a library track row whose stored path matches. Returns count."""
+        """Delete the library track whose stored path matches. Returns count.
+
+        In v2 the path belongs to the file row, so this deletes the track the
+        file belongs to — and the file rows go with it (ON DELETE CASCADE),
+        which is what the legacy single-row delete amounted to.
+        """
         if not file_path:
             return 0
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM tracks WHERE file_path = ?", (file_path,))
+            cursor.execute(
+                "DELETE FROM lib2_tracks WHERE id IN ("
+                "  SELECT track_id FROM lib2_track_files"
+                "  WHERE path = ? AND track_id IS NOT NULL)", (file_path,))
             conn.commit()
             return cursor.rowcount
         except Exception as e:
@@ -16249,10 +16253,14 @@ class MusicDatabase:
             rank = {'verified': 1, 'human_verified': 2}
             by_path = {}   # exact path -> status (unambiguous; no title guard)
             by_base = {}   # basename -> list of (norm_title, status)
+            # The verification verdict belongs to the FILE in v2 (ADR-03) —
+            # it is a statement about the bytes on disk, not about the song.
             cursor.execute(
-                "SELECT file_path, verification_status, title FROM tracks "
-                "WHERE verification_status IN ('verified', 'human_verified') "
-                "AND file_path IS NOT NULL AND file_path != ''")
+                "SELECT f.path, f.verification_status, t.title "
+                "FROM lib2_track_files f "
+                "JOIN lib2_tracks t ON t.id = f.track_id "
+                "WHERE f.verification_status IN ('verified', 'human_verified') "
+                "AND f.path IS NOT NULL AND f.path != ''")
             for fp, st, ttitle in cursor.fetchall():
                 if not fp:
                     continue
@@ -16294,7 +16302,7 @@ class MusicDatabase:
                 healed += 1
             if healed:
                 conn.commit()
-                logger.info("Reconciled %d unverified history rows from tracks truth", healed)
+                logger.info("Reconciled %d unverified history rows from catalogue truth", healed)
         except Exception as e:
             logger.error("Error reconciling unverified history: %s", e)
         finally:
@@ -17368,15 +17376,16 @@ class MusicDatabase:
                     logger.debug(f"Batch wishlist counts failed: {e}")
 
                 # In-library counts in one shot. Case-sensitive join so
-                # idx_artists_name + idx_tracks_title kick in.
+                # the name and title indexes kick in.
                 try:
                     cursor.execute("""
                         SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                        JOIN artists a ON a.name = mpt.artist_name
-                        JOIN tracks t ON t.artist_id = a.id
-                                     AND t.title = mpt.track_name
+                        JOIN lib2_artists a ON a.name = mpt.artist_name
+                        JOIN lib2_albums al ON al.primary_artist_id = a.id
+                        JOIN lib2_tracks t ON t.album_id = al.id
+                                          AND t.title = mpt.track_name
                         WHERE mp.profile_id = ?
                         GROUP BY mpt.playlist_id
                     """, (profile_id,))
@@ -17426,9 +17435,9 @@ class MusicDatabase:
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
-                # In-library: case-sensitive equality so SQLite can use
-                # `idx_artists_name` and `idx_tracks_title`. COLLATE NOCASE on
-                # the join columns prevents index usage and takes ~18s per
+                # In-library: case-sensitive equality so SQLite can use the
+                # artist-name and track-title indexes. COLLATE NOCASE on the
+                # join columns prevents index usage and takes ~18s per
                 # playlist on a 300k-track library; the case-sensitive variant
                 # is ~6ms. Misses purely-case-different matches (rare — Spotify
                 # canonicalizes artist/track names that match library imports).
@@ -17436,9 +17445,10 @@ class MusicDatabase:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
-                        JOIN artists a ON a.name = mpt.artist_name
-                        JOIN tracks t ON t.artist_id = a.id
-                                     AND t.title = mpt.track_name
+                        JOIN lib2_artists a ON a.name = mpt.artist_name
+                        JOIN lib2_albums al ON al.primary_artist_id = a.id
+                        JOIN lib2_tracks t ON t.album_id = al.id
+                                          AND t.title = mpt.track_name
                         WHERE mpt.playlist_id = ?
                     """, (playlist_id,))
                     result['in_library'] = cursor.fetchone()['in_library'] or 0

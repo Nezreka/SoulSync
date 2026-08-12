@@ -12,8 +12,10 @@ always means a change in the code.
 
 from __future__ import annotations
 
+import io
 import pathlib
 import re
+import tokenize
 from dataclasses import dataclass
 from typing import Dict, Iterable, Tuple
 
@@ -61,6 +63,24 @@ class TreeUsage:
     by_file: Dict[str, Usage]
 
 
+def _without_comments(source: str) -> str:
+    """The same source with ``#`` comments removed.
+
+    English prose is full of "from tracks" and "from artists" — four such
+    comments were being counted as legacy reads, which would have left the
+    ratchet unable to reach zero however much code was ported. Tokenizing is
+    the only way to tell a comment from a ``#`` inside a SQL string; source
+    that does not tokenize (there is none, but a syntax error must not take
+    the measurement down with it) is measured as-is.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError, IndentationError):
+        return source
+    return tokenize.untokenize(
+        [token for token in tokens if token.type != tokenize.COMMENT])
+
+
 def count_legacy_usage(source: str) -> Usage:
     """Reads and writes in one blob of source.
 
@@ -68,6 +88,7 @@ def count_legacy_usage(source: str) -> Usage:
     ``DELETE FROM tracks`` contains ``FROM tracks``, and counting it as both
     would let a write be moved around without the write figure changing.
     """
+    source = _without_comments(source)
     write_spans = [match.span() for match in _WRITE.finditer(source)]
     reads = 0
     for match in _READ.finditer(source):
