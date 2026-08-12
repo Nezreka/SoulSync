@@ -41,6 +41,11 @@ function TrackRow({
 }) {
   return (
     <div className={`wl-list-track${track.failing ? ' wl-list-track--failing' : ''}`}>
+      {track.image ? (
+        <img className="wl-list-cover" src={track.image} alt="" loading="lazy" />
+      ) : (
+        <div className="wl-list-cover wl-list-cover--ph">♪</div>
+      )}
       <span className="wl-list-track-name" title={track.track}>
         {track.track}
       </span>
@@ -84,8 +89,9 @@ export function WishlistList({
   onRemoveAlbum,
   onRemoveTrack,
 }: {
+  /** Keyed by LOWERCASED artist name — buildArtistImageMap's contract. */
+  artistImages: Map<string, string>;
   groups: WishlistArtistGroup[];
-  artistImages: Record<string, string>;
   onRemoveAlbum: (albumName: string) => void;
   onRemoveTrack: (trackId: string) => void;
 }) {
@@ -113,8 +119,13 @@ export function WishlistList({
       {sorted.map((group) => (
         <div className="wl-list-group" key={group.name}>
           <div className="wl-list-artist">
-            {artistImages[group.name] ? (
-              <img className="wl-list-avatar" src={artistImages[group.name]} alt="" loading="lazy" />
+            {artistImages.get(group.name.toLowerCase()) ? (
+              <img
+                className="wl-list-avatar"
+                src={artistImages.get(group.name.toLowerCase())}
+                alt=""
+                loading="lazy"
+              />
             ) : (
               <div className="wl-list-avatar wl-list-avatar--ph">♪</div>
             )}
@@ -137,6 +148,9 @@ export function WishlistList({
           {group.albums.map((album) => (
             <div className="wl-list-album" key={album.name}>
               <div className="wl-list-album-head">
+                {album.image ? (
+                  <img className="wl-list-album-art" src={album.image} alt="" loading="lazy" />
+                ) : null}
                 <span className="wl-list-album-name" title={album.name}>
                   {album.name}
                 </span>

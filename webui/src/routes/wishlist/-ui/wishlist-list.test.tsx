@@ -18,7 +18,7 @@ function track(over: Partial<ParsedWishlistTrack>): ParsedWishlistTrack {
     track: 'Xtal',
     artist: 'Aphex Twin',
     album: 'SAW 85-92',
-    image: '',
+    image: 'https://img/cover.jpg',
     type: 'album',
     id: 't1',
     retry: 0,
@@ -56,13 +56,18 @@ describe('WishlistList', () => {
     render(
       <WishlistList
         groups={GROUPS}
-        artistImages={{}}
+        artistImages={new Map([['stuck artist', 'https://img/stuck.jpg']])}
         onRemoveAlbum={vi.fn()}
         onRemoveTrack={vi.fn()}
       />,
     );
     const names = screen.getAllByTitle('Open artist').map((el) => el.textContent);
     expect(names).toEqual(['Stuck Artist', 'Calm Artist']);
+    // The avatar map is keyed by LOWERCASED name — the group name must be
+    // normalized on lookup or no avatar ever renders (the shipped v1 bug).
+    const avatars = document.querySelectorAll('img.wl-list-avatar');
+    expect(avatars).toHaveLength(1);
+    expect((avatars[0] as HTMLImageElement).src).toBe('https://img/stuck.jpg');
     expect(screen.getByText('⚠ 1 failing')).toBeInTheDocument();
     expect(screen.getByText('⚠ 7 tries')).toBeInTheDocument();
   });
@@ -71,7 +76,7 @@ describe('WishlistList', () => {
     render(
       <WishlistList
         groups={GROUPS}
-        artistImages={{}}
+        artistImages={new Map()}
         onRemoveAlbum={vi.fn()}
         onRemoveTrack={vi.fn()}
       />,
@@ -92,7 +97,7 @@ describe('WishlistList', () => {
     render(
       <WishlistList
         groups={GROUPS}
-        artistImages={{}}
+        artistImages={new Map()}
         onRemoveAlbum={onRemoveAlbum}
         onRemoveTrack={onRemoveTrack}
       />,
