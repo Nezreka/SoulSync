@@ -7386,6 +7386,7 @@ class VideoDatabase:
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
+                      include_size=True,
                       status="all", genre=None, resolution=None, page=1, limit=75,
                       server_source=None) -> dict:
         """One page of movies/shows with search + A–Z + sort + owned/wanted/
@@ -7494,9 +7495,15 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             total = conn.execute(f"SELECT COUNT(*) FROM {tbl} {alias}{where_sql}", params).fetchone()[0]
-            total_size = conn.execute(
-                f"SELECT COALESCE(SUM({size_sub}), 0) FROM {tbl} {alias}{where_sql}",
-                params).fetchone()[0]
+            # The size-on-disk total sums a correlated media_files subquery
+            # over the WHOLE filtered set — measured 3-3.7s on the shows tab
+            # (perf sweep, Aug 2026). Callers that only want rows (the chat
+            # movie-night type-ahead re-queries per keystroke) opt out.
+            total_size = 0
+            if include_size:
+                total_size = conn.execute(
+                    f"SELECT COALESCE(SUM({size_sub}), 0) FROM {tbl} {alias}{where_sql}",
+                    params).fetchone()[0]
             rows = conn.execute(
                 f"{select}{where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
                 params + [limit, (page - 1) * limit]).fetchall()

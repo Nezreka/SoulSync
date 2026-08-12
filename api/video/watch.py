@@ -56,8 +56,12 @@ def register_routes(bp):
         results = []
         for plural, kind in (("movies", "movie"), ("shows", "show")):
             try:
+                # include_size=False: this runs per debounced KEYSTROKE, and
+                # the library-wide size aggregate it doesn't need costs
+                # seconds on a big shows table (perf sweep, Aug 2026).
                 page = db.query_library(plural, search=q, status="owned",
-                                        limit=12, server_source=srv)
+                                        limit=12, server_source=srv,
+                                        include_size=False)
             except Exception:
                 logger.exception("watch library search failed for %s %r", plural, q)
                 continue
