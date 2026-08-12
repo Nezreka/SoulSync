@@ -109,8 +109,9 @@ describe('WishlistList', () => {
     fireEvent.click(screen.getAllByTitle('Search manually')[0]);
     expect(search).toHaveBeenCalledWith('Aphex Twin', 'Ghost');
 
-    fireEvent.click(screen.getByTitle('Remove all tracks from "Lost Album"'));
-    expect(onRemoveAlbum).toHaveBeenCalledWith('Lost Album');
+    // The album remove lives on the row's album cell now (flat table).
+    fireEvent.click(screen.getByTitle('Remove all tracks from "SAW 85-92"'));
+    expect(onRemoveAlbum).toHaveBeenCalledWith('SAW 85-92');
 
     fireEvent.click(screen.getAllByTitle('Remove from wishlist')[0]);
     expect(onRemoveTrack).toHaveBeenCalledWith('f1');

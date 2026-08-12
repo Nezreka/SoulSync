@@ -35,9 +35,12 @@ function sortGroups(groups: WishlistArtistGroup[], sort: WishlistListSort): Wish
 function TrackRow({
   track,
   onRemoveTrack,
+  onRemoveAlbum,
 }: {
   track: ParsedWishlistTrack;
   onRemoveTrack: (trackId: string) => void;
+  /** Present only on album rows — the ✕ on the album cell removes the set. */
+  onRemoveAlbum?: (albumName: string) => void;
 }) {
   return (
     <div className={`wl-list-track${track.failing ? ' wl-list-track--failing' : ''}`}>
@@ -51,6 +54,16 @@ function TrackRow({
       </span>
       <span className="wl-list-track-album" title={track.album}>
         {track.type === 'single' ? 'Single' : track.album}
+        {track.type !== 'single' && onRemoveAlbum ? (
+          <button
+            type="button"
+            className="wl-list-album-x"
+            title={`Remove all tracks from "${track.album}"`}
+            onClick={() => onRemoveAlbum(track.album)}
+          >
+            ✕
+          </button>
+        ) : null}
       </span>
       <span
         className={`wl-list-tries${track.failing ? ' wl-list-tries--failing' : ''}`}
@@ -116,9 +129,13 @@ export function WishlistList({
         ))}
       </div>
 
+      {/* ONE flat table. Artist grouping is a slim separator row, never a
+          box — at 100 tracks nested cards read as an outline document, not a
+          track list (Boulder: 'looks wack'). Album context lives IN each row;
+          removing a whole album is the ✕ on its album cell. */}
       {sorted.map((group) => (
-        <div className="wl-list-group" key={group.name}>
-          <div className="wl-list-artist">
+        <div className="wl-list-section" key={group.name}>
+          <div className="wl-list-sep">
             {artistImages.get(group.name.toLowerCase()) ? (
               <img
                 className="wl-list-avatar"
@@ -145,40 +162,19 @@ export function WishlistList({
             )}
           </div>
 
-          {group.albums.map((album) => (
-            <div className="wl-list-album" key={album.name}>
-              <div className="wl-list-album-head">
-                {album.image ? (
-                  <img className="wl-list-album-art" src={album.image} alt="" loading="lazy" />
-                ) : null}
-                <span className="wl-list-album-name" title={album.name}>
-                  {album.name}
-                </span>
-                <button
-                  type="button"
-                  className="wl-list-btn wl-list-btn--x"
-                  title={`Remove all tracks from "${album.name}"`}
-                  onClick={() => onRemoveAlbum(album.name)}
-                >
-                  Remove album
-                </button>
-              </div>
-              {album.tracks.map((track) => (
-                <TrackRow key={track.id} track={track} onRemoveTrack={onRemoveTrack} />
-              ))}
-            </div>
-          ))}
-
-          {group.singles.length > 0 && (
-            <div className="wl-list-album">
-              <div className="wl-list-album-head">
-                <span className="wl-list-album-name">Singles</span>
-              </div>
-              {group.singles.map((track) => (
-                <TrackRow key={track.id} track={track} onRemoveTrack={onRemoveTrack} />
-              ))}
-            </div>
+          {group.albums.flatMap((album) =>
+            album.tracks.map((track) => (
+              <TrackRow
+                key={track.id}
+                track={track}
+                onRemoveTrack={onRemoveTrack}
+                onRemoveAlbum={onRemoveAlbum}
+              />
+            )),
           )}
+          {group.singles.map((track) => (
+            <TrackRow key={track.id} track={track} onRemoveTrack={onRemoveTrack} />
+          ))}
         </div>
       ))}
     </div>
