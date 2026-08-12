@@ -96,6 +96,8 @@
     // An open challenge nobody took is not a game, it is litter. Derived, not
     // a state change -- see `expired` at the bottom of the fold.
     var OPEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
+    // How many tables one player may have open at once (stream-enforced).
+    var OPEN_CAP = 3;
     var VOTE_DEFAULT = 2, VOTE_MAX = 9;
     // How many INDEPENDENT clients must report the same position before it can
     // overrule ours. Every SoulSync client in the room folds every game, so the
@@ -542,6 +544,27 @@
             var at = _ts(ev);
             var user = ev.username;
 
+            // ── Stream-clock expiry ──────────────────────────────────────
+            // Wall clocks disagree, but the STREAM is a clock every client
+            // shares: message timestamps come from the server, and the fold
+            // walks them in the same order everywhere. So 'an open table
+            // dies once any later game event sits OPEN_EXPIRY past its
+            // creation' is fully deterministic — the smart self-removal a
+            // wall-clock rule could never be. Tables in a room that goes
+            // completely silent keep their presentation-only `expired` flag
+            // (below) until the next event arrives; that's the trade.
+            if (at) {
+                Object.keys(games).forEach(function (oid) {
+                    var og = games[oid];
+                    if (og.status === 'open' && og.createdAt &&
+                            (at - og.createdAt) >= OPEN_EXPIRY_MS) {
+                        og.status = 'over';
+                        og.reason = 'expired';
+                        og.lastAt = og.createdAt + OPEN_EXPIRY_MS;
+                    }
+                });
+            }
+
             if (k === 'gm.new') {
                 if (games[gid]) return;                      // id already taken
                 var variant = String(p.v || 'chess');
@@ -561,6 +584,22 @@
                 var voteK = VOTE_DEFAULT;
                 if (typeof p.kv === 'number' && isFinite(p.kv)) {
                     voteK = Math.max(1, Math.min(VOTE_MAX, Math.floor(p.kv)));
+                }
+
+                // ── The spam cap ─────────────────────────────────────────
+                // One player, three open tables, tops: the fourth gm.new
+                // expires their OLDEST still-open table in the same breath.
+                // Fold-order deterministic, so every client agrees which one
+                // died. (Boulder: 'one player with 10 cold open games is
+                // spammy' — now the pile can never form.)
+                var mineOpen = Object.keys(games).map(function (oid) { return games[oid]; })
+                    .filter(function (og) { return og.status === 'open' && og.createdBy === user; })
+                    .sort(function (a, b) { return a.createdAt - b.createdAt; });
+                while (mineOpen.length >= OPEN_CAP) {
+                    var oldest = mineOpen.shift();
+                    oldest.status = 'over';
+                    oldest.reason = 'expired';
+                    oldest.lastAt = at;
                 }
 
                 states[gid] = st;

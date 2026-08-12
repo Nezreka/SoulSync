@@ -1205,3 +1205,56 @@ describe('toMove — what drives the "your move" badge', () => {
         assert.equal(G.toMove(null), '');
     });
 });
+
+// ── Stream-clock lifecycle: cold tables end THEMSELVES (Boulder) ────────────
+describe('open-table expiry and the spam cap', () => {
+  const G = ctx.window.ChatGames;
+  const DAY = 24 * 60 * 60 * 1000;
+
+  test('an open table dies once any later game event sits a day past it', () => {
+    const out = G.reduceGames([
+      ev('alice', { k: 'gm.new', g: 'g001', v: 'connect4' }, T0),
+      // any game event a day later is the stream's own clock striking
+      ev('bob', { k: 'gm.new', g: 'g002', v: 'connect4' }, T0 + DAY + 1000),
+    ], T0 + DAY + 2000);
+    assert.equal(out.games.g001.status, 'over');
+    assert.equal(out.games.g001.reason, 'expired');
+    assert.equal(out.games.g002.status, 'open');   // the newcomer lives
+  });
+
+  test('expiry is judged on stream time, so every client folds the same answer', () => {
+    const evs = [
+      ev('alice', { k: 'gm.new', g: 'g001', v: 'connect4' }, T0),
+      ev('bob', { k: 'gm.new', g: 'g002', v: 'connect4' }, T0 + DAY + 1000),
+    ];
+    // Two clients with wildly different wall clocks — identical folds.
+    const a = G.reduceGames(evs, T0);
+    const b = G.reduceGames(evs, T0 + 30 * DAY);
+    assert.equal(a.games.g001.reason, 'expired');
+    assert.equal(b.games.g001.reason, 'expired');
+  });
+
+  test('a joined table does NOT expire — expiry is for tables nobody sat at', () => {
+    const out = G.reduceGames([
+      ev('alice', { k: 'gm.new', g: 'g001', v: 'connect4' }, T0),
+      ev('bob', { k: 'gm.join', g: 'g001' }, T0 + 1000),
+      ev('cara', { k: 'gm.new', g: 'g002', v: 'connect4' }, T0 + 2 * DAY),
+    ], T0 + 2 * DAY);
+    assert.equal(out.games.g001.status, 'live');
+  });
+
+  test('the fourth open table expires the creator\'s oldest — the spam cap', () => {
+    const evs = [];
+    for (let i = 1; i <= 4; i++) {
+      evs.push(ev('spammer', { k: 'gm.new', g: 'g00' + i, v: 'connect4' }, T0 + i * 1000));
+    }
+    const out = G.reduceGames(evs, T0 + 60000);
+    assert.equal(out.games.g001.reason, 'expired');   // oldest died
+    assert.equal(out.games.g002.status, 'open');
+    assert.equal(out.games.g003.status, 'open');
+    assert.equal(out.games.g004.status, 'open');
+    // Someone ELSE's table is untouched by spammer's cap.
+    const out2 = G.reduceGames([...evs, ev('alice', { k: 'gm.new', g: 'g005', v: 'connect4' }, T0 + 70000)], T0 + 80000);
+    assert.equal(out2.games.g005.status, 'open');
+  });
+});
