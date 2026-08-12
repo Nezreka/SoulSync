@@ -29,7 +29,7 @@ export type RecToast = { message: string; level: 'success' | 'info' | 'error' };
 export interface RecommendedController {
   watchingIds: Set<string>;
   images: Record<string, string>;
-  toggleWatchlist: (artistId: string, artistName: string) => Promise<void>;
+  toggleWatchlist: (artistId: string, artistName: string, source?: string) => Promise<void>;
   /** Ask the enrich endpoint about the image-less cards of one shelf. */
   enrichImages: (items: RecommendedArtist[], source: string) => Promise<void>;
   /** Batch-confirm which cards are already watched (1173-1195). */
@@ -43,9 +43,9 @@ export function useRecommended(onToast: (toast: RecToast) => void): RecommendedC
   const [images, setImages] = useState<Record<string, string>>({});
 
   const toggleWatchlist = useCallback(
-    async (artistId: string, artistName: string) => {
+    async (artistId: string, artistName: string, source = '') => {
       const watching = watchingIds.has(artistId);
-      const req = watchlistRequest(watching, { sourceId: artistId, artistName, source: '' });
+      const req = watchlistRequest(watching, { sourceId: artistId, artistName, source });
       try {
         const res = await fetch(req.url, {
           method: 'POST',

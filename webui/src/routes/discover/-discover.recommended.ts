@@ -103,6 +103,10 @@ export interface WhyChip {
 
 export interface RecommendedCard {
   artistId: string;
+  /** Which service watchId belongs to — '' when artistId is the active source's. */
+  watchSource: string;
+  /** The id the watchlist button SENDS: active-source id, else any other. */
+  watchId: string;
   artistName: string;
   /** LOWERCASED — the search filter matches against this, not the display name. */
   filterName: string;
@@ -132,8 +136,24 @@ export function recommendedCard(
     label: w.label ?? '',
     icon: whyIcon(w.type ?? ''),
   }));
+  // The active source's id first, then ANY id the payload carries — a
+  // listening-rec artist often lacks the ACTIVE source's id, and an empty
+  // artist_id 400s at /api/watchlist/add (Boulder's report). The source
+  // travels with the fallback id because numeric Deezer/iTunes ids are
+  // ambiguous server-side without it (P1-05).
+  const watch = artist.artist_id
+    ? { id: String(artist.artist_id), source: '' }
+    : artist.spotify_artist_id
+      ? { id: String(artist.spotify_artist_id), source: 'spotify' }
+      : artist.deezer_artist_id
+        ? { id: String(artist.deezer_artist_id), source: 'deezer' }
+        : artist.itunes_artist_id
+          ? { id: String(artist.itunes_artist_id), source: 'itunes' }
+          : { id: '', source: '' };
   return {
     artistId: artist.artist_id ?? '',
+    watchId: watch.id,
+    watchSource: watch.source,
     artistName: artist.artist_name ?? '',
     filterName: (artist.artist_name ?? '').toLowerCase(),
     source: artist.source || sectionSource || '',

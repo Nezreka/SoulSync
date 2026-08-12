@@ -551,8 +551,8 @@ export function DiscoverPage() {
             watchingIds={rec.watchingIds}
             images={rec.images}
             buildDetailPath={detailPath}
-            onAddToWatchlist={(artistId, artistName) =>
-              void rec.toggleWatchlist(artistId, artistName)
+            onAddToWatchlist={(artistId, artistName, source) =>
+              void rec.toggleWatchlist(artistId, artistName, source)
             }
             onViewAll={kind === 'recommended' ? () => setRecModalOpen(true) : undefined}
           />

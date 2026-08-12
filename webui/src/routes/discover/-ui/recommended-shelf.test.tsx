@@ -217,11 +217,13 @@ describe('the card', () => {
     expect(container.querySelector('.ya-card-sub')!.textContent).not.toBe(first);
   });
 
-  it('adds to the watchlist with the id and the name', () => {
+  it('adds to the watchlist with the id, the name and the id source', () => {
     const p = props();
     const { container } = render(<RecommendedShelf {...p} />);
     fireEvent.click(container.querySelector('.recommended-card-watchlist-btn')!);
-    expect(p.onAddToWatchlist).toHaveBeenCalledWith('sp1', 'Aphex Twin');
+    // '' source = the id IS the active source's; the fallback-id path sends
+    // the id's own service so numeric ids stay unambiguous server-side.
+    expect(p.onAddToWatchlist).toHaveBeenCalledWith('sp1', 'Aphex Twin', '');
   });
 
   it('marks an already-watched artist and stops re-adding them', () => {
