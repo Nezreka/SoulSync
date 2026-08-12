@@ -64773,7 +64773,7 @@ body.max-performance #page-particles-canvas {
 
 .repair-family-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr));
     gap: 11px;
     margin-top: 12px;
 }
@@ -65274,17 +65274,6 @@ body.max-performance #page-particles-canvas {
 
 .repair-run-link:hover { color: #fff; text-decoration: underline; }
 
-@media (max-width: 720px) {
-    .repair-health { gap: 14px; }
-    .repair-health-score { font-size: 40px; }
-    .repair-inbox-head { flex-wrap: wrap; }
-    .repair-inbox-blurb { white-space: normal; }
-    .repair-inbox-actions { width: 100%; justify-content: flex-end; }
-    .repair-run-head { flex-wrap: wrap; row-gap: 3px; }
-    .repair-run-name { min-width: 0; }
-    .repair-run-summary { white-space: normal; flex-basis: 100%; padding-left: 29px; }
-    .repair-run-detail { padding-left: 13px; }
-}
 
 /* ── Tool card sections ── */
 .tools-section {

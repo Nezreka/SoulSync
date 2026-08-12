@@ -3656,3 +3656,192 @@
         display: none !important;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOOLS PAGE REDESIGN — phone + tablet
+   Health hero, findings inbox, operation tiles, recent runs, tool containers.
+   The base rules live in style.css; everything responsive lives here, on the
+   house 768/480 breakpoints.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+    /* Tablet: two tile columns at most, so a tile never gets so narrow that
+       its cadence editor and action row fight for the same line. */
+    .repair-family-grid {
+        grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    /* THE important one. The hero is its own scroll container on desktop so
+       the section nav can stick to it — on a phone that is a scroll-within-a-
+       scroll, and the findings list nests a THIRD one inside it. Release both
+       and let the page scroll like a page. */
+    .tools-maintenance-hero {
+        max-height: none;
+        overflow: visible;
+    }
+    /* The hero clipped its own 3px top edge to the rounded corner. Released,
+       nothing clips it, so it rounds itself. */
+    .tools-maintenance-hero::before {
+        border-radius: 16px 16px 0 0;
+    }
+
+    .repair-inbox-body {
+        max-height: none;
+        overflow: visible;
+        padding: 0 10px 12px 10px;
+    }
+
+    /* Sticky needs a scroll container to stick to; with the hero released it
+       would pin against the app chrome instead. Let it scroll away — it is
+       four buttons and the sections are a swipe apart. */
+    .repair-section-nav {
+        position: static;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 6px 0;
+    }
+    .repair-section-nav::-webkit-scrollbar { display: none; }
+    .repair-section-link { flex-shrink: 0; }
+
+    /* ── Health hero ── */
+    .repair-health {
+        gap: 14px;
+        padding: 14px;
+    }
+    .repair-health-score-block {
+        min-width: 0;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 10px;
+    }
+    .repair-health-score { font-size: 42px; }
+    .repair-health-band { margin-top: 0; }
+    .repair-health-body { flex: 1 1 100%; }
+    .repair-health-actions-note { flex-basis: 100%; }
+    .repair-health-fix-safe { min-height: 40px; }
+
+    /* ── Filters ── */
+    .repair-findings-toolbar { gap: 8px; }
+    .repair-status-segments {
+        display: flex;
+        width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .repair-status-segments::-webkit-scrollbar { display: none; }
+    .repair-status-seg { flex: 1 0 auto; justify-content: center; min-height: 38px; }
+    .repair-findings-search { flex: 1 1 100%; min-height: 38px; }
+    .repair-findings-filters { flex: 1 1 100%; }
+    .repair-findings-filters select { flex: 1 1 45%; min-height: 38px; }
+    .repair-clear-btn { flex: 1 1 100%; min-height: 38px; }
+
+    /* ── Findings inbox ── */
+    .repair-inbox-head {
+        flex-wrap: wrap;
+        row-gap: 6px;
+        padding: 11px 12px;
+    }
+    .repair-inbox-blurb { white-space: normal; }
+    .repair-inbox-actions {
+        width: 100%;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+    .repair-inbox-btn { min-height: 36px; }
+    .repair-list-controls { gap: 8px; }
+    .repair-list-controls select { flex: 1 1 45%; min-height: 36px; }
+
+    /* ── Operation tiles ── */
+    .repair-family { padding: 12px 11px 13px 11px; }
+    .repair-family-head { flex-wrap: wrap; row-gap: 4px; }
+    .repair-family-summary { flex-basis: 100%; order: 3; white-space: normal; }
+    .repair-family-grid { grid-template-columns: 1fr; }
+
+    /* Number + unit + Save + Cancel do not fit one line in a full-width
+       tile on a phone, and a clipped Save is a schedule you cannot change. */
+    .repair-tile-schedule { row-gap: 6px; }
+    .repair-tile-cadence-edit { flex-wrap: wrap; row-gap: 6px; }
+    .repair-tile-cadence,
+    .repair-tile-cadence-save,
+    .repair-tile-cadence-cancel { min-height: 34px; }
+    .repair-tile-cadence-edit input,
+    .repair-tile-cadence-edit select { min-height: 34px; }
+
+    /* ── Recent runs ── */
+    .repair-runs-toolbar { flex-direction: column; align-items: stretch; }
+    .repair-runs-tools { justify-content: flex-end; }
+    .repair-runs-chip,
+    .repair-runs-toggle { min-height: 32px; }
+    .repair-run-head { flex-wrap: wrap; row-gap: 3px; padding: 10px 12px; }
+    .repair-run-name { min-width: 0; }
+    /* Order 3 drops the summary onto its own line UNDER the row, leaving the
+       clock, name, age and chevron together on the first — without it the
+       summary splits the row and pushes age + chevron onto a third line. */
+    .repair-run-summary {
+        order: 3;
+        white-space: normal;
+        flex-basis: 100%;
+        padding-left: 29px;
+    }
+    .repair-run-age { margin-left: auto; }
+    .repair-run-detail { padding: 4px 12px 13px 12px; }
+    .repair-run-counters { gap: 14px; }
+    .repair-run-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+    /* ── Tool containers ── */
+    .tools-container { padding: 12px 11px 13px 11px; }
+    .tools-container-head { gap: 6px; }
+    .tools-container-blurb { flex-basis: 100%; }
+}
+
+@media (max-width: 480px) {
+    /* The trend line is the first thing to go: it is context, and the score
+       and the bar underneath it are the point. */
+    .repair-health-trend { display: none; }
+    .repair-health-score { font-size: 36px; }
+    .repair-health-actions { gap: 8px; }
+
+    .repair-section-link { padding: 6px 11px; }
+
+    .repair-inbox-count { min-width: 44px; font-size: 20px; }
+    .repair-inbox-head { gap: 9px; }
+    .repair-inbox-label { font-size: 13px; flex-wrap: wrap; row-gap: 4px; }
+    /* Two lines of explanation beats one line of ellipsis. */
+    .repair-inbox-blurb { font-size: 11px; }
+
+    .repair-tile { padding: 11px; }
+    .repair-tile-desc { -webkit-line-clamp: 3; }
+    .repair-tile-foot { flex-wrap: wrap; row-gap: 8px; }
+    .repair-tile .repair-job-actions { margin-left: auto; }
+
+    .repair-run-clock { min-width: 40px; }
+    .repair-run-counter-value { font-size: 15px; }
+    /* A stack trace does not need to eat the screen on a phone. */
+    .repair-run-error-text { max-height: 120px; font-size: 10px; }
+}
+
+@media (hover: none) {
+    /* Icon-only controls at desktop sizes are a miss on a fingertip. */
+    .repair-run-btn,
+    .repair-stop-btn,
+    .repair-settings-btn,
+    .repair-help-btn,
+    .repair-inbox-expand,
+    .repair-runs-refresh,
+    .repair-finding-expand-btn {
+        min-width: 34px;
+        min-height: 34px;
+    }
+
+    /* The cadence pill reads as editable on hover; on touch there is no
+       hover, so it carries its affordance all the time. */
+    .repair-tile-cadence {
+        border-style: solid;
+        border-color: rgba(var(--tile-glow), 0.35);
+    }
+
+    /* Same for the health bar segments — they are buttons. */
+    .repair-health-seg { min-width: 10px; }
+}
