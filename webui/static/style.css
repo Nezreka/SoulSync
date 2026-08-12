@@ -64654,7 +64654,8 @@ body.max-performance #page-particles-canvas {
 /* ── Wishlist LIST view — the nebula's operational twin. Same data, same
    actions, sortable rows with retry status visible. ── */
 .wl-view-toggle { display: inline-flex; gap: 6px; margin-left: 4px; }
-.wl-list { display: flex; flex-direction: column; gap: 0; padding: 4px 2px 20px; }
+.wl-list { display: flex; flex-direction: column; gap: 0; padding: 4px 2px 20px;
+    max-width: 1500px; margin: 0 auto; width: 100%; }
 .wl-list-sortbar { display: flex; gap: 8px; margin-bottom: 14px; }
 .wl-list-section { display: flex; flex-direction: column; }
 .wl-list-sep { display: flex; align-items: center; gap: 10px; padding: 14px 10px 8px;
@@ -64675,18 +64676,19 @@ body.max-performance #page-particles-canvas {
     opacity: 0; transition: opacity 0.15s ease, color 0.15s ease; }
 .wl-list-track:hover .wl-list-album-x { opacity: 1; }
 .wl-list-album-x:hover { color: #f87171; }
-.wl-list-cover { width: 30px; height: 30px; border-radius: 4px; object-fit: cover;
+.wl-list-cover { width: 38px; height: 38px; border-radius: 5px; object-fit: cover;
     box-shadow: 0 2px 6px rgba(0,0,0,0.35); }
 .wl-list-cover--ph { display: flex; align-items: center; justify-content: center;
     background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.3); font-size: 13px; }
-.wl-list-track { display: grid; grid-template-columns: 30px minmax(160px, 1.4fr) minmax(120px, 1fr) 92px 110px auto;
-    gap: 12px; align-items: center; padding: 5px 10px; border-radius: 8px; font-size: 13px;
+.wl-list-track { display: grid; grid-template-columns: 38px minmax(0, 1fr) 92px 130px auto;
+    gap: 14px; align-items: center; padding: 6px 10px; border-radius: 8px; font-size: 13px;
     transition: background 0.15s ease; }
+.wl-list-track-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wl-list-track:hover { background: rgba(255,255,255,0.05); }
-.wl-list-track--failing { background: rgba(251,191,36,0.04); }
+.wl-list-track--failing { box-shadow: inset 2px 0 0 #fbbf24; border-radius: 4px 8px 8px 4px; }
 .wl-list-track-name { color: rgba(255,255,255,0.92); font-weight: 500; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
-.wl-list-track-album { color: rgba(255,255,255,0.45); font-size: 12px; white-space: nowrap;
+.wl-list-track-album { color: rgba(255,255,255,0.42); font-size: 11.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-tries { font-size: 11.5px; color: rgba(255,255,255,0.4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wl-list-tries--failing { color: #fbbf24; font-weight: 600; }
@@ -64702,8 +64704,8 @@ body.max-performance #page-particles-canvas {
 .wl-list-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .wl-list-btn--x:hover { color: #f87171; border-color: rgba(248,113,113,0.4); }
 @media (max-width: 700px) {
-    .wl-list-track { grid-template-columns: 30px 1fr 80px auto; }
-    .wl-list-track-album, .wl-list-last { display: none; }
+    .wl-list-track { grid-template-columns: 38px 1fr 80px auto; }
+    .wl-list-last { display: none; }
     .wl-list-album { margin-left: 0; }
 }
 

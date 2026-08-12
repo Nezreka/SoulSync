@@ -49,21 +49,26 @@ function TrackRow({
       ) : (
         <div className="wl-list-cover wl-list-cover--ph">♪</div>
       )}
-      <span className="wl-list-track-name" title={track.track}>
-        {track.track}
-      </span>
-      <span className="wl-list-track-album" title={track.album}>
-        {track.type === 'single' ? 'Single' : track.album}
-        {track.type !== 'single' && onRemoveAlbum ? (
-          <button
-            type="button"
-            className="wl-list-album-x"
-            title={`Remove all tracks from "${track.album}"`}
-            onClick={() => onRemoveAlbum(track.album)}
-          >
-            ✕
-          </button>
-        ) : null}
+      {/* Title with the album stacked beneath — ONE flexible cell, so wide
+          screens read as left cluster + right cluster instead of columns
+          adrift in a void (Boulder's image 8). */}
+      <span className="wl-list-track-main">
+        <span className="wl-list-track-name" title={track.track}>
+          {track.track}
+        </span>
+        <span className="wl-list-track-album" title={track.album}>
+          {track.type === 'single' ? 'Single' : track.album}
+          {track.type !== 'single' && onRemoveAlbum ? (
+            <button
+              type="button"
+              className="wl-list-album-x"
+              title={`Remove all tracks from "${track.album}"`}
+              onClick={() => onRemoveAlbum(track.album)}
+            >
+              ✕
+            </button>
+          ) : null}
+        </span>
       </span>
       <span
         className={`wl-list-tries${track.failing ? ' wl-list-tries--failing' : ''}`}
