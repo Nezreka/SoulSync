@@ -52,6 +52,16 @@ export interface ToolCardProps {
   progress?: ReactNode;
   children?: ReactNode;
   hidden?: boolean;
+  /**
+   * What KIND of thing this is.
+   *
+   * Eleven cards with identical chrome read as filler, because they were not
+   * eleven of the same thing: five of them just open a modal, four are
+   * long-running operations with progress, two are one-shot server actions.
+   * A modal-opener given the Database Updater's footprint is what made the
+   * whole strip look undifferentiated.
+   */
+  variant?: 'operation' | 'launcher';
 }
 
 export function ToolCard({
@@ -67,10 +77,11 @@ export function ToolCard({
   progress,
   children,
   hidden,
+  variant = 'operation',
 }: ToolCardProps) {
   return (
     <div
-      className="tool-card"
+      className={`tool-card${variant === 'launcher' ? ' tool-card--launcher' : ''}`}
       id={id}
       // The vanilla hides the Plex-only cards with an inline style rather than a
       // class, and `checkAndShowMediaScanForPlex` sets display:flex to show them
@@ -165,14 +176,31 @@ export function ToolProgress({
 
 export interface ToolsSectionProps {
   title: string;
+  /** One line on what the section is FOR. A title alone is a taxonomy; this
+   *  is a reason to look. */
+  blurb?: string;
+  /** `R,G,B` for `--tile-glow` — the same device the job families and the
+   *  arcade tiles use, so the whole page reads as one system. */
+  glow?: string;
   children: ReactNode;
 }
 
-/** `.tools-section` > title + `.tools-grid`. */
-export function ToolsSection({ title, children }: ToolsSectionProps) {
+/**
+ * A container of tools, on the same chassis as the maintenance job families.
+ *
+ * The class and the title node are unchanged so the existing style.css and
+ * mobile.css rules keep applying; the container chrome is additive.
+ */
+export function ToolsSection({ title, blurb, glow, children }: ToolsSectionProps) {
   return (
-    <div className="tools-section">
-      <h3 className="tools-section-title">{title}</h3>
+    <div
+      className="tools-section tools-container"
+      style={glow ? ({ ['--tile-glow' as string]: glow } as React.CSSProperties) : undefined}
+    >
+      <div className="tools-container-head">
+        <h3 className="tools-section-title">{title}</h3>
+        {blurb ? <span className="tools-container-blurb">{blurb}</span> : null}
+      </div>
       <div className="tools-grid">{children}</div>
     </div>
   );

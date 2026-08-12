@@ -64614,6 +64614,67 @@ body.max-performance #page-particles-canvas {
 
 .repair-finding-btn.reopen:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 
+/* ── Tool sections as containers ──
+   Same chassis as the maintenance job families: a glow edge, a header that
+   explains itself, and a grid inside. Eleven identical boxes in a row was
+   what made the strip read as filler. */
+.tools-container {
+    --tile-glow: 148, 163, 184;
+    position: relative;
+    padding: 13px 14px 15px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    background:
+        radial-gradient(90% 120% at 0% 0%, rgba(var(--tile-glow), 0.06), transparent 55%),
+        rgba(255, 255, 255, 0.012);
+    overflow: hidden;
+}
+
+.tools-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--tile-glow), 0.5),
+        rgba(var(--tile-glow), 0.8),
+        rgba(var(--tile-glow), 0.5),
+        transparent);
+}
+
+.tools-container-head {
+    display: flex;
+    align-items: baseline;
+    gap: 11px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.tools-container .tools-section-title { margin: 0; }
+
+.tools-container-blurb {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.28);
+}
+
+/* A modal-opener is not the same kind of thing as the Database Updater, and
+   giving it the same footprint is what made them all look alike. */
+.tool-card--launcher {
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.tool-card--launcher .tool-card-info {
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.tool-card--launcher:hover { border-style: solid; border-color: rgba(var(--tile-glow), 0.35); }
+
 /* ── Operations: families of job tiles ──
    Thirty identical stacked cards had no order and no organisation. Each
    family is a container carrying its own glow, on the same chassis the

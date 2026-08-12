@@ -55,20 +55,36 @@ export function ToolsPage() {
 
       <MaintenanceHero />
 
-      <ToolsSection title="Database & Scanning">
+      {/* Same container chassis as the maintenance job families, and the same
+          glow device, so the page reads as one system rather than a hero
+          followed by a strip of unrelated boxes. The blurbs answer "why would
+          I open this section", which a taxonomy title does not. */}
+      <ToolsSection
+        title="Database &amp; Scanning"
+        blurb="Reading your media server into SoulSync, and keeping the two in step."
+        glow="56,189,248"
+      >
         <DbUpdaterCard />
         <ReconcileIdsCard />
         <DuplicateCleanerCard />
         <MediaScanCard />
       </ToolsSection>
 
-      <ToolsSection title="Metadata & Cache">
+      <ToolsSection
+        title="Metadata &amp; Cache"
+        blurb="Enriching what SoulSync knows, and fixing what it got wrong."
+        glow="168,85,247"
+      >
         <MetadataUpdaterCard />
         <DiscoveryPoolCard />
         <ManualLibraryMatchCard />
       </ToolsSection>
 
-      <ToolsSection title="Management">
+      <ToolsSection
+        title="Management"
+        blurb="Backups, moving install, and the lists you have told SoulSync to respect."
+        glow="245,158,11"
+      >
         <BackupManagerCard />
         <ConfigMigrationCard />
         <MetadataCacheCard />
