@@ -206,3 +206,18 @@ describe('ResultSection', () => {
     expect(document.querySelector('.enh-section-title')?.textContent).toBe('Albums');
   });
 });
+
+describe('keyboard activation vs the media player', () => {
+  it('Space on a focused card does not reach document-level listeners', () => {
+    // media-player.js treats Space on any non-input focus as play/pause;
+    // without stopPropagation, activating a card also toggles playback.
+    const onClick = vi.fn();
+    const docSpy = vi.fn();
+    document.addEventListener('keydown', docSpy);
+    const card = renderItem({ onClick });
+    fireEvent.keyDown(card, { key: ' ' });
+    expect(onClick).toHaveBeenCalledOnce();
+    expect(docSpy).not.toHaveBeenCalled();
+    document.removeEventListener('keydown', docSpy);
+  });
+});

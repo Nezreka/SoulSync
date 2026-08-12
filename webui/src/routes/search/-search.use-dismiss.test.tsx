@@ -62,6 +62,17 @@ describe('shouldDismiss', () => {
     );
     expect(shouldDismiss(target)).toBe(false);
   });
+  it('keeps it open for the overlays stacked ABOVE the download modal', () => {
+    // The candidates picker and the track-detail overlay are reachable from
+    // the download modal but are appended to <body> as siblings, so the
+    // modal exemption does not cover them.
+    expect(
+      shouldDismiss(targetInside('<div id="candidates-modal-overlay"><b id="t"></b></div>', '#t')),
+    ).toBe(false);
+    expect(
+      shouldDismiss(targetInside('<div id="track-detail-overlay"><b id="t"></b></div>', '#t')),
+    ).toBe(false);
+  });
   it('dismisses when the target is not an element at all', () => {
     // A click reported against the document itself is still a click outside.
     expect(shouldDismiss(document)).toBe(true);

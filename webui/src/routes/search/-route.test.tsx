@@ -159,6 +159,20 @@ describe('the search route', () => {
   });
 });
 
+describe('the download bubbles handoff', () => {
+  it('asks vanilla to repaint the bubbles on mount', async () => {
+    // The bubble store and painter are vanilla; this page recreates the
+    // #enhanced-main-results-area container with a static placeholder on
+    // every mount, so without this call in-flight downloads vanish after
+    // navigating away and back.
+    const repaint = vi.fn();
+    window.showSearchDownloadBubbles = repaint;
+    renderRoute('/search');
+    await waitFor(() => expect(repaint).toHaveBeenCalled());
+    delete window.showSearchDownloadBubbles;
+  });
+});
+
 describe('the dropdown state machine', () => {
   /** Type into the real input the way a keystroke does. */
   function type(value: string) {

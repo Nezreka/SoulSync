@@ -29,6 +29,12 @@ export const DISMISS_EXEMPT_SELECTORS = [
   '.enhanced-search-input-wrapper',
   '#enh-source-row',
   '.download-missing-modal',
+  // Reachable FROM the download modal but appended to <body> as siblings, so
+  // the modal exemption doesn't cover them: the candidates picker
+  // (downloads.js showCandidatesModal) and the track-detail overlay
+  // (track-detail.js) — clicking either must not eat the results underneath.
+  '#candidates-modal-overlay',
+  '#track-detail-overlay',
   '#media-player',
   '#np-modal-overlay',
 ] as const;

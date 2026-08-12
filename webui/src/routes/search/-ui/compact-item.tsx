@@ -208,6 +208,11 @@ export function CompactItem({
         if (!onClick) return;
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
+          // The media player's document-level keydown treats Space on
+          // anything that isn't an input as play/pause (media-player.js:2591)
+          // — without this, activating a focused card also toggles playback.
+          // Vanilla cards weren't focusable, so only this path can collide.
+          event.stopPropagation();
           onClick(event);
         }
       }}

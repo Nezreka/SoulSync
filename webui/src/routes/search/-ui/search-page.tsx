@@ -255,6 +255,20 @@ export function SearchPage() {
     };
   }, []);
 
+  /**
+   * Repaint the download bubbles on mount. The bubble STORE and painter are
+   * vanilla (shared-helpers.js showSearchDownloadBubbles → innerHTML into
+   * #enhanced-main-results-area); the vanilla page never unmounted, so
+   * painting only on download events was enough. This page recreates the
+   * container with a static placeholder every mount — without this ask,
+   * in-flight downloads vanish after navigating away and back, and the boot
+   * hydrate (init.js) paints into a container that doesn't exist yet when the
+   * app starts on any other page.
+   */
+  useEffect(() => {
+    window.showSearchDownloadBubbles?.();
+  }, []);
+
   const served = state.fallbacks[state.activeSource];
 
   /**

@@ -286,6 +286,15 @@ function _handleShellLinkClick(event) {
         _handleArtistDetailLinkClick(event, pathname, anchor);
         return;
     }
+
+    // Label cards render plain /label-detail/<id> hrefs (search results,
+    // watchlist). Left to the browser that's a FULL page reload — app
+    // reboot, in-memory search gone — and it skips navigateToLabelDetail,
+    // so the label page's Back button loses its return target.
+    if (pathname.startsWith('/label-detail/')) {
+        _handleLabelDetailLinkClick(event, pathname, anchor);
+        return;
+    }
 }
 
 function _handleArtistDetailLinkClick(event, pathname, anchor) {
@@ -314,6 +323,21 @@ function _handleArtistDetailLinkClick(event, pathname, anchor) {
         artistName,
         forceReload: true,
     });
+}
+
+function _handleLabelDetailLinkClick(event, pathname, anchor) {
+    const parts = pathname.split('/').filter(Boolean);
+    if (parts.length < 2) return;
+
+    const labelId = decodeURIComponent(parts.slice(1).join('/'));
+    if (!labelId) return;
+    // Without the navigator the default navigation is still a working page
+    // — just the slow one — so only claim the click when we can do better.
+    if (typeof navigateToLabelDetail !== 'function') return;
+
+    const name = new URLSearchParams(anchor?.search || '').get('name') || null;
+    event.preventDefault();
+    navigateToLabelDetail(labelId, name);
 }
 
 function _isModifiedLinkClick(event) {

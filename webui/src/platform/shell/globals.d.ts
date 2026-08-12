@@ -449,6 +449,10 @@ declare global {
     startAudioPlayback?: () => void | Promise<void>;
     /** media-player.js — starts streaming a search result in the player. */
     startStream?: (searchResult: unknown) => void | Promise<void>;
+    /** Repaints the search download bubbles from the vanilla bubble store into
+     *  #enhanced-main-results-area (shared-helpers.js). The React search page
+     *  calls it on mount because it recreates that container each visit. */
+    showSearchDownloadBubbles?: () => void;
     /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */
     getFileExtension?: (filename: string) => string;
     /** media-player.js — can this browser play that file at all? */
