@@ -526,3 +526,81 @@ describe('reduceWatch — stream-clock normalization', () => {
         assert.equal(junk.noms.length, 1);
     });
 });
+
+// Node's sha256 emits the same lowercase hex as chat-hash.js, so the trivia
+// tests exercise the REAL hash path, not a toy stand-in.
+const { createHash } = await import('node:crypto');
+
+describe('reduceTrivia — the stream is the buzzer', () => {
+    const sha = s => createHash('sha256').update(s, 'utf8').digest('hex');
+    const norm = P.normalizeTriviaAnswer;
+    const ev = (user, p, at) => ({ username: user, timestamp: at ?? 1000, p });
+    const ask = (user, answer, extra) => ev(user, {
+        k: 'trv.ask', id: 'quiz0001', q: 'What city?',
+        h: sha(norm(answer)), pot: 50, ...extra,
+    });
+
+    test('normalization forgives caps, punctuation and articles', () => {
+        assert.equal(norm('  The PARIS!  '), 'paris');
+        assert.equal(norm('selected ambient works 85-92'), norm('Selected Ambient Works 85–92'));
+        assert.equal(norm('An Answer'), 'answer');
+        assert.notEqual(norm('paris'), norm('london'));
+    });
+
+    test('a malformed ask never becomes a question', () => {
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { id: 'BAD ID' })], sha), null);
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { h: 'not-hex!' })], sha), null);
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { q: '' })], sha), null);
+    });
+
+    test('first correct guess in stream order wins; the door then shuts', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('alice', { k: 'trv.guess', id: 'quiz0001', a: 'London' }),
+            ev('bob', { k: 'trv.guess', id: 'quiz0001', a: 'The PARIS!' }),   // normalized hit
+            ev('carl', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),      // too late
+        ], sha);
+        assert.equal(t.winner, 'bob');
+        assert.equal(t.closed, true);
+        assert.equal(t.pot, 50);
+        assert.equal(t.guesses.length, 2, 'the late guess never entered');
+        assert.equal(t.guesses[0].ok, false);
+    });
+
+    test('the asker cannot win their own pot', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('quizzer', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),
+        ], sha);
+        assert.equal(t.winner, '');
+        assert.equal(t.guesses.length, 0);
+    });
+
+    test('a newer ask replaces the live question (poll discipline)', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('other', { k: 'trv.ask', id: 'quiz0002', q: 'Second?', h: sha(norm('two')) }),
+            ev('alice', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),   // dead question
+            ev('alice', { k: 'trv.guess', id: 'quiz0002', a: 'two' }),
+        ], sha);
+        assert.equal(t.id, 'quiz0002');
+        assert.equal(t.winner, 'alice');
+    });
+
+    test('end: asker or moderator only, reveal verified against the hash', () => {
+        const base = [ask('quizzer', 'paris')];
+        const stranger = P.reduceTrivia([...base,
+            ev('mallory', { k: 'trv.end', id: 'quiz0001', ans: 'paris' })], sha);
+        assert.equal(stranger.closed, false);
+        const honest = P.reduceTrivia([...base,
+            ev('quizzer', { k: 'trv.end', id: 'quiz0001', ans: 'Paris' })], sha);
+        assert.equal(honest.closed, true);
+        assert.equal(honest.verified, true, 'the reveal matches the commitment');
+        const liar = P.reduceTrivia([...base,
+            ev('quizzer', { k: 'trv.end', id: 'quiz0001', ans: 'london' })], sha);
+        assert.equal(liar.verified, false, 'a lying reveal is flagged');
+        const mod = P.reduceTrivia([...base,
+            ev('boulderbadgedad', { k: 'trv.end', id: 'quiz0001', ans: '' })], sha);
+        assert.equal(mod.closed, true);
+    });
+});

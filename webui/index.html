@@ -6483,6 +6483,31 @@
                                  inline: a live poll SHOULD interrupt the room's attention. -->
                             <div class="chat-pinbar" data-chat-pinbar hidden></div>
                             <div class="chat-pollcard" data-chat-poll hidden></div>
+                            <!-- room trivia (trv.* on the bus): first correct answer in
+                                 STREAM ORDER wins the pot — the room itself is the buzzer -->
+                            <div class="chat-pollcard chat-trivcard" data-chat-triv hidden></div>
+                            <!-- trivia ask modal (opened from the Arcade's Trivia tile) -->
+                            <div class="chat-settings-overlay" data-chat-triv-modal hidden>
+                                <div class="chat-settings-modal">
+                                    <h3 class="chat-settings-title">🎓 Ask the room</h3>
+                                    <label class="chat-settings-label">Question
+                                        <input class="chat-input" data-chat-triv-q type="text" maxlength="200"
+                                               placeholder="Which album did Aphex Twin release in 1992?" autocomplete="off">
+                                    </label>
+                                    <label class="chat-settings-label">Answer <span class="chat-settings-hint">kept secret — only its fingerprint is shared; spelling and caps don't matter</span>
+                                        <input class="chat-input" data-chat-triv-a type="text" maxlength="120"
+                                               placeholder="Selected Ambient Works 85-92" autocomplete="off">
+                                    </label>
+                                    <label class="chat-settings-label">Pot <span class="chat-settings-hint">🪙 from your bank to the winner (0–500, optional)</span>
+                                        <input class="chat-input" data-chat-triv-pot type="number" min="0" max="500"
+                                               placeholder="0" autocomplete="off">
+                                    </label>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-triv-close>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-triv-start>Ask the room</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- user popover card (click any username) -->
                             <div class="chat-settings-overlay" data-chat-user-card hidden>
                                 <div class="chat-settings-modal chat-user-card">

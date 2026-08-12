@@ -424,6 +424,72 @@
         return now.offsetMs + Math.max(0, nowMs - now.basisAt);
     }
 
+    // ── Trivia reducer ──────────────────────────────────────────────────
+    // The stream is an unforgeable buzzer: everyone sees the same guesses in
+    // the same order, so "first correct answer" needs no judge. The asker
+    // posts trv.ask with the sha256 of the NORMALIZED answer — every client
+    // checks every guess against it locally (the hash is deliberately
+    // unsalted: checkability by all is the point; a determined player could
+    // hash-test candidates offline, which is just… playing, quietly).
+    //   trv.ask   {id, q, h, pot} → one live question per room, latest wins
+    //   trv.guess {id, a}         → first hash match in stream order takes it;
+    //                               the asker's own guesses never count
+    //   trv.end   {id, ans}       → asker (or a moderator) closes unanswered;
+    //                               ans is displayed, verified against h
+    // The hash function is INJECTED (this file stays dependency-free);
+    // chat.js passes ChatHash.sha256. Both sides of the wire must hash the
+    // same normalization — normalizeTriviaAnswer is that single definition.
+    function normalizeTriviaAnswer(s) {
+        return String(s || '')
+            .toLowerCase()
+            .replace(/[''"".,!?;:()\[\]\-–—_/\\]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^(the|a|an) /, '');
+    }
+
+    var TRIV_ID_RE = /^[a-z0-9]{4,16}$/;
+
+    function reduceTrivia(events, hashFn) {
+        var t = null;
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k === 'trv.ask') {
+                var id = String(p.id || '');
+                if (!TRIV_ID_RE.test(id)) return;
+                var q = String(p.q || '').trim().slice(0, 200);
+                var h = String(p.h || '');
+                if (!q || !/^[0-9a-f]{16,64}$/.test(h)) return;
+                var pot = 0;
+                if (typeof p.pot === 'number' && isFinite(p.pot)) {
+                    pot = Math.max(0, Math.min(500, Math.floor(p.pot)));
+                }
+                t = { id: id, q: q, h: h, pot: pot, by: ev.username,
+                      at: _streamTs(ev), guesses: [], winner: '', winAnswer: '',
+                      closed: false, answer: '', verified: false };
+            } else if (p.k === 'trv.guess' && t && !t.closed) {
+                if (String(p.id || '') !== t.id) return;
+                if (ev.username === t.by) return;      // no winning your own pot
+                var a = String(p.a || '').slice(0, 120);
+                if (!a.trim()) return;
+                var ok = typeof hashFn === 'function' &&
+                         hashFn(normalizeTriviaAnswer(a)) === t.h;
+                t.guesses.push({ u: ev.username, a: a, ok: ok });
+                if (t.guesses.length > 200) t.guesses.shift();
+                if (ok) { t.winner = ev.username; t.winAnswer = a; t.closed = true; }
+            } else if (p.k === 'trv.end' && t && !t.closed) {
+                if (String(p.id || '') !== t.id) return;
+                if (ev.username !== t.by && !isModerator(ev.username)) return;
+                t.closed = true;
+                t.answer = String(p.ans || '').slice(0, 120);
+                t.verified = typeof hashFn === 'function' &&
+                             hashFn(normalizeTriviaAnswer(t.answer)) === t.h;
+            }
+        });
+        return t;
+    }
+
     // topic.set {t} → latest wins; empty clears.
     function reduceTopic(events) {
         var topic = null;
@@ -507,6 +573,8 @@
         reducePoll: reducePoll,
         reduceWatch: reduceWatch,
         watchPosition: watchPosition,
+        reduceTrivia: reduceTrivia,
+        normalizeTriviaAnswer: normalizeTriviaAnswer,
         reduceTopic: reduceTopic,
         reduceTuned: reduceTuned,
     };

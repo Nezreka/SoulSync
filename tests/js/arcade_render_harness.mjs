@@ -614,7 +614,7 @@ const NASTY = '<img src=x onerror=alert(1)>';
     check('lobby: says the money is play money',
           lobby.includes('play money'), lobby);
     check('lobby: every game is offered as a tile',
-          (lobby.match(/chat-arc-tile"/g) || []).length === 7, lobby);
+          (lobby.match(/chat-arc-tile"/g) || []).length === 8, lobby);
     check('lobby: an empty room says so', lobby.includes('Nothing on the tables'), lobby);
     check('lobby: chess as black is still reachable',
           lobby.includes('data-chat-arc-new="b"'), lobby);

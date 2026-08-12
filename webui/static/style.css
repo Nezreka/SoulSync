@@ -73848,6 +73848,16 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
    the actual game looks like, so it reads instantly. */
 .chat-arc-disc--b { background: radial-gradient(circle at 35% 30%, #ffe082, #f2b90c); }
 
+/* ── trivia card (rides the pollcard chrome) ── */
+.chat-trivcard .chat-triv-row { display: flex; gap: 8px; margin-top: 8px; }
+.chat-triv-in { flex: 1 1 auto; min-width: 0; padding: 8px 12px; font-size: 13px; }
+.chat-triv-tail {
+    display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 7px;
+    font-size: 11.5px; color: rgba(255,255,255,0.45);
+}
+.chat-triv-guess--win { color: #6ee7a0; font-weight: 700; }
+.chat-triv-winline { margin-top: 8px; font-size: 13px; color: rgba(255,255,255,0.85); }
+
 /* ── Othello: green felt, black/white discs, glowing legal squares ── */
 .chat-arc-othboard {
     display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px;

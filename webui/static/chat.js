@@ -71,6 +71,7 @@
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
+        trivDismissedAt: null,   // locally-dismissed closed trivia (its ask ts)
         arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
         watch: {                 // movie night (reduced from watch.* on the bus)
             searchResults: [],   //   picker modal TMDB results
@@ -1818,6 +1819,8 @@
                          'Gomoku', 'five stones in a row wins') +
                     tile('data-chat-arc-new="w" data-chat-arc-room="1"', '🗳',
                          'You vs the room', 'everyone else votes their move') +
+                    tile('data-chat-triv-open', '🎓', 'Trivia',
+                         'first right answer takes the pot') +
                     tile('data-chat-slot-open', '🎰', 'Slots',
                          'solo, against your own luck') +
                   '</div>' +
@@ -5071,6 +5074,35 @@
                 renderMessages(state.msgs || []);
                 return;
             }
+            t = e.target.closest('[data-chat-triv-send]');
+            if (t) { _trivGuess(); return; }
+            t = e.target.closest('[data-chat-triv-end]');
+            if (t) {
+                var tEnd = _trivState();
+                if (tEnd && !tEnd.closed) {
+                    sendProtocol('trv.end', { id: tEnd.id, ans: _trivAnsStore(tEnd.id) });
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-dismiss]');
+            if (t) {
+                var tDis = _trivState();
+                state.trivDismissedAt = tDis ? tDis.at : null;
+                renderTrivia();
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-open]');
+            if (t) {
+                var trivOv = q('[data-chat-triv-modal]');
+                if (trivOv) { trivOv.hidden = false; var tq = q('[data-chat-triv-q]'); if (tq) tq.focus(); }
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-close]');
+            if (t) { var trivOv2 = q('[data-chat-triv-modal]'); if (trivOv2) trivOv2.hidden = true; return; }
+            var trivOvBg = e.target.closest('[data-chat-triv-modal]');
+            if (trivOvBg && e.target === trivOvBg) { trivOvBg.hidden = true; return; }
+            t = e.target.closest('[data-chat-triv-start]');
+            if (t) { _trivAsk(); return; }
             t = e.target.closest('[data-chat-poll-btn]');
             if (t) { togglePollPop(); return; }
             t = e.target.closest('[data-chat-poll-start]');
@@ -5345,6 +5377,18 @@
         if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
         var watchSearchIn = q('[data-chat-watch-searchinput]');
         if (watchSearchIn) watchSearchIn.addEventListener('input', _watchQueueSearch);
+        // The trivia answer input is re-rendered with its card, so Enter is
+        // caught by delegation on the page rather than a per-render listener.
+        var chatPageEl = document.getElementById('chat-page');
+        if (chatPageEl) {
+            chatPageEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && e.target && e.target.matches &&
+                        e.target.matches('[data-chat-triv-guess]')) {
+                    e.preventDefault();
+                    _trivGuess();
+                }
+            });
+        }
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -5703,6 +5747,7 @@
         renderWatch();
         renderPinbar();
         renderPoll();
+        renderTrivia();
         // topic lives in the head sub-line — but search mode freezes the
         // head (its input would be clobbered mid-typing by a socket event)
         if (!state.searchMode) renderHead();
@@ -5791,6 +5836,150 @@
             .forEach(function (el) { if (el) el.value = ''; });
         togglePollPop(true);
         state.pollDismissedAt = null;
+    }
+
+    // ── trivia (trv.ask / trv.guess / trv.end — the stream is the buzzer) ──
+    // State is a pure fold (chat-protocol.js reduceTrivia) with ChatHash
+    // injected; every client checks every guess against the asker's hash and
+    // the FIRST correct one in stream order wins the pot. Fingerprint-gated
+    // repaint: the card holds a text input, and a poll-tick innerHTML rewrite
+    // would eat whatever you were typing.
+    var _trivLastPaint = '';
+
+    function _trivState() {
+        var CP = window.ChatProtocol;
+        if (!CP || !CP.reduceTrivia) return null;
+        var H = window.ChatHash;
+        return CP.reduceTrivia(_roomEvents(), H ? H.sha256 : null);
+    }
+
+    function _trivAnsStore(id, ans) {
+        try {
+            var map = JSON.parse(localStorage.getItem('chatTrivAns') || '{}');
+            if (ans !== undefined) {
+                map[id] = ans;
+                var keys = Object.keys(map);
+                while (keys.length > 20) { delete map[keys.shift()]; }
+                localStorage.setItem('chatTrivAns', JSON.stringify(map));
+            }
+            return map[id] || '';
+        } catch (e) { return ''; }
+    }
+
+    function _settleTrivia(t) {
+        // Same client-local idempotent booking as the wagers: winner books
+        // +pot, asker books -pot, each against their OWN play-money bank,
+        // marked settled BEFORE the POST so a retry can never double-pay.
+        if (!t || !t.winner || !t.pot || !state.selfName) return;
+        if (state.selfName !== t.winner && state.selfName !== t.by) return;
+        var key = t.id;
+        try {
+            var done = JSON.parse(localStorage.getItem('chatTrivSettled') || '{}');
+            if (done[key]) return;
+            done[key] = 1;
+            var ks = Object.keys(done);
+            while (ks.length > 100) { delete done[ks.shift()]; }
+            localStorage.setItem('chatTrivSettled', JSON.stringify(done));
+        } catch (e) { return; }
+        var delta = state.selfName === t.winner ? t.pot : -t.pot;
+        postJSON('/api/chat/arcade/bank', { delta: delta });
+    }
+
+    function renderTrivia() {
+        var host = q('[data-chat-triv]');
+        if (!host) return;
+        var t = _trivState();
+        // Settlement is independent of what you're LOOKING at — a pot won
+        // while you sat in a PM still books when the fold next runs.
+        _settleTrivia(t);
+        var show = !!(t && state.view === 'room' &&
+                      !(t.closed && state.trivDismissedAt === t.at));
+        if (!show) {
+            host.hidden = true;
+            if (host.innerHTML) host.innerHTML = '';
+            _trivLastPaint = '';
+            return;
+        }
+        var paint = [t.id, t.at, t.guesses.length, t.closed ? 1 : 0, t.winner,
+                     state.canSend ? 1 : 0].join('|');
+        if (paint === _trivLastPaint && !host.hidden) return;   // keep the input alive
+        _trivLastPaint = paint;
+        host.hidden = false;
+        var mine = t.by === state.selfName;
+        var tail = t.guesses.slice(-4).map(function (g) {
+            return '<span class="chat-triv-guess' + (g.ok ? ' chat-triv-guess--win' : '') + '">' +
+                esc(g.u) + ': ' + esc(g.a) + (g.ok ? ' ✓' : ' ✗') + '</span>';
+        }).join('');
+        var footer;
+        if (t.winner) {
+            footer = '<div class="chat-triv-winline">🏆 <b>' + esc(t.winner) + '</b> takes ' +
+                (t.pot ? 'the 🪙' + t.pot + ' pot' : 'it') + ' — “' + esc(t.winAnswer) + '”</div>';
+        } else if (t.closed) {
+            footer = '<div class="chat-triv-winline">Nobody got it' +
+                (t.answer ? ' — the answer was “' + esc(t.answer) + '”' +
+                    (t.verified ? '' : ' <span class="chat-jbx-meta">(unverified)</span>') : '') +
+                '.</div>';
+        } else if (state.canSend && !mine) {
+            footer = '<div class="chat-triv-row">' +
+                '<input class="chat-input chat-triv-in" data-chat-triv-guess type="text" ' +
+                    'maxlength="120" placeholder="Your answer…" autocomplete="off">' +
+                '<button class="chat-send-btn" type="button" data-chat-triv-send>Answer</button>' +
+            '</div>';
+        } else {
+            footer = '<div class="chat-jbx-meta">' +
+                (mine ? 'Your question — you can\'t win your own pot.'
+                      : 'Watching only — sending is admin-only here.') + '</div>';
+        }
+        host.innerHTML =
+            '<div class="chat-poll-head">🎓 <b>' + esc(t.q) + '</b>' +
+                '<span class="chat-jbx-meta">' +
+                    (t.pot ? '🪙' + t.pot + ' pot · ' : '') + 'asked by ' + esc(t.by) + '</span>' +
+                (!t.closed && state.canSend && (mine || _selfIsMod())
+                    ? '<button class="chat-fmt-btn" type="button" data-chat-triv-end>End &amp; reveal</button>'
+                    : '') +
+                (t.closed
+                    ? '<button class="chat-pin-del" type="button" title="Dismiss" data-chat-triv-dismiss>×</button>'
+                    : '') +
+            '</div>' +
+            (tail ? '<div class="chat-triv-tail">' + tail + '</div>' : '') +
+            footer;
+    }
+
+    function _trivGuess() {
+        var t = _trivState();
+        var inp = q('[data-chat-triv-guess]');
+        if (!t || t.closed || !inp) return;
+        var a = String(inp.value || '').trim();
+        if (!a) return;
+        inp.value = '';
+        sendProtocol('trv.guess', { id: t.id, a: a.slice(0, 120) });
+    }
+
+    function _trivAsk() {
+        var qEl = q('[data-chat-triv-q]'), aEl = q('[data-chat-triv-a]'), pEl = q('[data-chat-triv-pot]');
+        var H = window.ChatHash, CP = window.ChatProtocol;
+        if (!qEl || !aEl || !H || !CP) return;
+        var question = String(qEl.value || '').trim();
+        var answer = String(aEl.value || '').trim();
+        if (!question || !answer) {
+            if (typeof showToast === 'function') showToast('A question and its answer are both required', 'error');
+            return;
+        }
+        var pot = Math.max(0, Math.min(500, parseInt((pEl && pEl.value) || '0', 10) || 0));
+        var id = '';
+        for (var i = 0; i < 10; i++) id += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)];
+        _trivAnsStore(id, answer);              // for End & reveal later
+        sendProtocol('trv.ask', {
+            id: id, q: question.slice(0, 200),
+            h: H.sha256(CP.normalizeTriviaAnswer(answer)), pot: pot,
+        });
+        qEl.value = ''; aEl.value = ''; if (pEl) pEl.value = '';
+        var ov = q('[data-chat-triv-modal]');
+        if (ov) ov.hidden = true;
+        state.trivDismissedAt = null;
+        if (typeof showToast === 'function') {
+            showToast('🎓 Question is live in the room' + (pot ? ' — 🪙' + pot + ' on the line' : ''), 'success');
+        }
     }
 
     function togglePollPop(forceClose) {
