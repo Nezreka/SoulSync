@@ -136,8 +136,9 @@ def get_discover_hero():
 
                 try:
                     artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.artist_name)
-                except Exception:
-                    pass  # the meter is garnish — never break the hero for it
+                except Exception as count_err:
+                    # The meter is garnish — never break the hero for it.
+                    logger.debug(f"owned-album count failed for {artist.artist_name}: {count_err}")
 
                 hero_artists.append(artist_data)
 
@@ -271,8 +272,9 @@ def get_discover_hero():
 
             try:
                 artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.similar_artist_name)
-            except Exception:
-                pass  # the meter is garnish — never break the hero for it
+            except Exception as count_err:
+                # The meter is garnish — never break the hero for it.
+                logger.debug(f"owned-album count failed for {artist.similar_artist_name}: {count_err}")
 
             hero_artists.append(artist_data)
 
