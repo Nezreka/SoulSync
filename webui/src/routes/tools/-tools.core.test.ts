@@ -24,6 +24,7 @@ import {
   cacheSourceLabel,
   findingFilePath,
   findingFixLabel,
+  findingSeverityClass,
   findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
@@ -160,8 +161,22 @@ describe('finding labels', () => {
     expect(findingSeverityIcon(null)).toBe('ℹ️');
   });
 
+  it('maps the emitted severities onto the stylesheet classes', () => {
+    // The CSS has .critical and no .error, so `error` renders through it
+    // rather than churning the stylesheet (and losing styling for rows
+    // already stored under either word).
+    expect(findingSeverityClass('error')).toBe('critical');
+    expect(findingSeverityClass('critical')).toBe('critical');
+    expect(findingSeverityClass('warning')).toBe('warning');
+    expect(findingSeverityClass('info')).toBe('info');
+    expect(findingSeverityClass(null)).toBe('info');
+    expect(findingSeverityIcon('error')).toBe('🔴');
+  });
   it('carries the full severity/type/fixable/action tables', () => {
-    expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(3);
+    // 4, not 3: the jobs emit `error` (corrupt audio) and the table used to
+    // know only `critical`, which nothing has ever emitted. Both map to the
+    // same icon and the same CSS class while old rows exist.
+    expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(22);
     expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(20);
     expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(12);

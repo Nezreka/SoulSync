@@ -23,7 +23,12 @@ export type RepairTab = 'jobs' | 'findings' | 'history';
 
 export type RepairFindingStatus = 'pending' | 'resolved' | 'dismissed';
 
-export type RepairSeverity = 'info' | 'warning' | 'critical';
+/** What the JOBS actually emit. `critical` was in this union for a long time
+ *  and nothing ever produced it, while `error` — the corruption detector's
+ *  severity, the most urgent findings in the system — was missing, so those
+ *  rows were unreachable by every severity filter and count. The CSS class is
+ *  still `.critical`; see `findingSeverityClass`. */
+export type RepairSeverity = 'info' | 'warning' | 'error';
 
 /** One row of a job's editable settings. `_section_*` keys are group headers,
  *  and `_interval_hours` is synthesised by the UI rather than sent by the API. */

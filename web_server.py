@@ -22162,12 +22162,23 @@ def get_server_playlist_tracks(playlist_id):
                 if _src_ids:
                     _mm_ids = set(_db_for_overrides.find_manual_library_matches_bulk(
                         _ov_profile, _src_ids, active_server) or {})
+            # A saved match the lookup could NOT apply by any route is dead —
+            # its file was deleted, or the library row vanished. Flagging those
+            # rows "already matched" is what stranded #1138: the UI then offers
+            # neither Find & Add nor a download, so reprocessing the playlist
+            # skipped the track silently, run after run. Mark them stale
+            # instead, so they render as the missing tracks they are.
+            _dead_ids = getattr(_override_lookup, 'dead_match_source_ids', None) or set()
             if _mm_ids:
                 for _row in combined:
                     if _row.get('override'):
                         continue   # already applied — the row shows as matched
                     _sid = str((_row.get('source_track') or {}).get('source_track_id') or '')
-                    if _sid and _sid in _mm_ids:
+                    if not _sid or _sid not in _mm_ids:
+                        continue
+                    if _sid in _dead_ids:
+                        _row['manual_match_stale'] = True
+                    else:
                         _row['has_manual_match'] = True
         except Exception as _mm_err:   # noqa: BLE001 - a badge must never fail the view
             logger.debug("manual-match flagging failed: %s", _mm_err)
@@ -40496,12 +40507,13 @@ def repair_findings_list():
         job_id = request.args.get('job_id')
         status = request.args.get('status')
         severity = request.args.get('severity')
+        finding_type = request.args.get('finding_type')
         page = int(request.args.get('page', 0))
         limit = int(request.args.get('limit', 50))
 
         result = repair_worker.get_findings(
             job_id=job_id, status=status, severity=severity,
-            page=page, limit=limit
+            page=page, limit=limit, finding_type=finding_type
         )
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
@@ -40528,6 +40540,22 @@ def repair_findings_counts():
         return jsonify(counts), 200
     except Exception as e:
         logger.error(f"Error getting findings counts: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/finding-types', methods=['GET'])
+def repair_finding_types():
+    """The finding-type catalog: label, verb, fixable, destructive, job_ids.
+
+    One source of truth for what the UI may offer per type. The client used
+    to carry its own list, which drifted: nine backend-fixable types had no
+    button and two unfixable ones had a button that could only ever fail.
+    """
+    try:
+        if repair_worker is None:
+            return jsonify({'types': []}), 200
+        return jsonify({'types': repair_worker.get_finding_type_catalog()}), 200
+    except Exception as e:
+        logger.error(f"Error getting finding type catalog: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/repair/cache-health', methods=['GET'])
@@ -40629,7 +40657,13 @@ def repair_findings_bulk_fix_start():
             severity=data.get('severity') or None,
             finding_ids=data.get('ids') or None,
             fix_action=data.get('fix_action') or None,
+            finding_type=data.get('finding_type') or None,
+            safe_only=bool(data.get('safe_only')),
         )
+        # An unscoped fix_action is a caller bug, not a transient failure —
+        # 400 so it can never look like "nothing matched".
+        if result.get('invalid'):
+            return jsonify(result), 400
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error starting background bulk fix: {e}")

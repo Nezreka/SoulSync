@@ -177,11 +177,23 @@ export function isRepairJobDryRun(job: Pick<RepairJob, 'settings'>): boolean {
 export const FINDING_SEVERITY_ICONS: Record<string, string> = {
   info: 'ℹ️',
   warning: '⚠️',
+  // The backend's top severity is `error`; `critical` stays mapped because
+  // older rows and the CSS class both use that word.
+  error: '🔴',
   critical: '🔴',
 };
 
 export function findingSeverityIcon(severity: string | null | undefined): string {
   return FINDING_SEVERITY_ICONS[severity as string] || FINDING_SEVERITY_ICONS.info;
+}
+
+/** CSS modifier for a severity. The stylesheet has `.repair-finding-card.critical`
+ *  and no `.error`, so the emitted `error` maps onto it rather than churning
+ *  the stylesheet (and losing the styling for rows already stored either way). */
+export function findingSeverityClass(severity: string | null | undefined): string {
+  const value = String(severity || 'info');
+  if (value === 'error' || value === 'critical') return 'critical';
+  return value === 'warning' ? 'warning' : 'info';
 }
 
 export const FINDING_TYPE_LABELS: Record<string, string> = {

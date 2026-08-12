@@ -5802,7 +5802,12 @@ class MusicDatabase:
         try:
             cursor.execute("SELECT value FROM metadata WHERE key = 'repair_worker_v2' LIMIT 1")
             if cursor.fetchone():
-                return  # Already migrated
+                # Tables exist — but LATER columns/indexes still have to reach
+                # this database. The marker only guards the CREATE below; the
+                # migrations run on every boot (they self-check) so a DB made
+                # before this release is not stranded on the old shape.
+                self._migrate_repair_worker_columns(cursor)
+                return
 
             logger.info("Creating repair worker v2 tables...")
 
@@ -5850,10 +5855,55 @@ class MusicDatabase:
 
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('repair_worker_v2', '1')")
 
+            # Fresh DBs take the same migration path, so the column set is
+            # defined in exactly one place.
+            self._migrate_repair_worker_columns(cursor)
+
             logger.info("Repair worker v2 tables created successfully")
 
         except Exception as e:
             logger.error(f"Error creating repair worker v2 tables: {e}")
+
+    def _migrate_repair_worker_columns(self, cursor):
+        """Columns + indexes added to the repair tables after v2 shipped.
+
+        Idempotent and cheap (PRAGMA + CREATE INDEX IF NOT EXISTS), and it runs
+        on EVERY boot rather than behind the repair_worker_v2 marker — that
+        marker is set once, so anything gated by it never reaches an existing
+        install.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(repair_findings)")
+            finding_cols = {c[1] for c in cursor.fetchall()}
+            if 'last_error' not in finding_cols:
+                # Why a fix failed, kept ON the finding. Bulk runs used to hold
+                # errors only in memory (capped at 20), so a finding that
+                # refused to fix just sat there pending with no reason anywhere.
+                cursor.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
+                logger.info("Added last_error column to repair_findings")
+
+            cursor.execute("PRAGMA table_info(repair_job_runs)")
+            run_cols = {c[1] for c in cursor.fetchall()}
+            if 'error_text' not in run_cols:
+                # Why a RUN failed. Runs were hardcoded 'completed', so the
+                # history tab could not distinguish a clean scan from a crash.
+                cursor.execute("ALTER TABLE repair_job_runs ADD COLUMN error_text TEXT")
+                logger.info("Added error_text column to repair_job_runs")
+
+            # The dedup lookup filters on (entity_type, entity_id) and on
+            # file_path once per candidate item of every scan; both were full
+            # scans of an unbounded, never-GC'd table.
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_entity "
+                "ON repair_findings (entity_type, entity_id)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_path ON repair_findings (file_path)")
+            # The findings inbox groups by type and filters by status.
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_type_status "
+                "ON repair_findings (finding_type, status)")
+        except Exception as e:
+            logger.error(f"Error migrating repair worker columns: {e}")
 
     def _init_manual_library_match_table(self):
         """Create manual_library_track_matches table and indexes."""
