@@ -35237,6 +35237,15 @@ div.artist-hero-badge {
     background-size: cover;
     background-position: center;
     filter: blur(0px);
+    /* While the hero payload is still on its way the fallback BREATHES —
+       a dead-static dark panel reads as broken during a slow first load.
+       Once the artist image lands (inline background-image) it covers this. */
+    animation: discoverHeroBreathe 3.2s ease-in-out infinite;
+}
+
+@keyframes discoverHeroBreathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.75; }
 }
 
 .discover-hero-overlay {
