@@ -69,6 +69,9 @@ describe('WishlistList', () => {
     expect(avatars).toHaveLength(1);
     expect((avatars[0] as HTMLImageElement).src).toBe('https://img/stuck.jpg');
     expect(screen.getByText('⚠ 1 failing')).toBeInTheDocument();
+    // Collapsed by default: the index shows, the rows don't — until expanded.
+    expect(screen.queryByText('⚠ 7 tries')).toBeNull();
+    fireEvent.click(screen.getByText('Expand all'));
     expect(screen.getByText('⚠ 7 tries')).toBeInTheDocument();
   });
 
@@ -105,6 +108,10 @@ describe('WishlistList', () => {
 
     fireEvent.click(screen.getByText('Stuck Artist'));
     expect(nav).toHaveBeenCalledWith('Stuck Artist');
+    // The name click NAVIGATES without toggling; rows appear via the
+    // separator (collapsed by default) — expand both groups for the rest.
+    fireEvent.click(screen.getAllByTitle('Expand')[0]);
+    fireEvent.click(screen.getAllByTitle('Expand')[0]);
 
     fireEvent.click(screen.getAllByTitle('Search manually')[0]);
     expect(search).toHaveBeenCalledWith('Aphex Twin', 'Ghost');

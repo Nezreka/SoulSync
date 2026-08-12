@@ -64656,7 +64656,12 @@ body.max-performance #page-particles-canvas {
 .wl-view-toggle { display: inline-flex; gap: 6px; margin-left: 4px; }
 .wl-list { display: flex; flex-direction: column; gap: 0; padding: 4px 2px 20px;
     max-width: 1500px; margin: 0 auto; width: 100%; }
-.wl-list-sortbar { display: flex; gap: 8px; margin-bottom: 14px; }
+.wl-list-sortbar { display: flex; gap: 8px; margin-bottom: 14px; justify-content: space-between; }
+.wl-list-sorts { display: flex; gap: 8px; }
+.wl-list-sep { cursor: pointer; }
+.wl-list-sep:hover { background: rgba(255,255,255,0.04); }
+.wl-list-chevron { font-size: 11px; color: rgba(255,255,255,0.35); transition: transform 0.18s ease; }
+.wl-list-chevron.open { transform: rotate(90deg); }
 .wl-list-section { display: flex; flex-direction: column; }
 .wl-list-sep { display: flex; align-items: center; gap: 10px; padding: 14px 10px 8px;
     border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 4px;

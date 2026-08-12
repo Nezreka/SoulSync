@@ -106,32 +106,57 @@ export function WishlistList({
   artistImages,
   onRemoveAlbum,
   onRemoveTrack,
+  filterActive = false,
 }: {
   /** Keyed by LOWERCASED artist name — buildArtistImageMap's contract. */
   artistImages: Map<string, string>;
   groups: WishlistArtistGroup[];
   onRemoveAlbum: (albumName: string) => void;
   onRemoveTrack: (trackId: string) => void;
+  /** A live text filter auto-expands matches — collapsed search hits confuse. */
+  filterActive?: boolean;
 }) {
   const [sort, setSort] = useState<WishlistListSort>('failing');
   const sorted = useMemo(() => sortGroups(groups, sort), [groups, sort]);
+  // Collapsed by default: the page opens as a compact artist INDEX (name,
+  // count, failing badge) instead of a hundred-row scroll. null = the
+  // explicit all-expanded state.
+  const [openArtists, setOpenArtists] = useState<Set<string> | null>(new Set());
+  const allOpen = openArtists === null;
+  const isOpen = (name: string) => filterActive || allOpen || openArtists.has(name);
+  const toggleArtist = (name: string) =>
+    setOpenArtists((current) => {
+      const next = new Set(current ?? sorted.map((g) => g.name));
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
 
   return (
     <div className="wl-list" data-testid="wishlist-list">
-      <div className="wl-list-sortbar" role="tablist" aria-label="Sort wishlist">
-        {SORTS.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            role="tab"
-            aria-selected={sort === s.key}
-            className={`wl-chip${sort === s.key ? ' active' : ''}`}
-            title={s.title}
-            onClick={() => setSort(s.key)}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="wl-list-sortbar">
+        <div role="tablist" aria-label="Sort wishlist" className="wl-list-sorts">
+          {SORTS.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              role="tab"
+              aria-selected={sort === s.key}
+              className={`wl-chip${sort === s.key ? ' active' : ''}`}
+              title={s.title}
+              onClick={() => setSort(s.key)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="wl-chip wl-list-expand-all"
+          onClick={() => setOpenArtists(allOpen ? new Set() : null)}
+        >
+          {allOpen ? 'Collapse all' : 'Expand all'}
+        </button>
       </div>
 
       {/* ONE flat table. Artist grouping is a slim separator row, never a
@@ -140,7 +165,21 @@ export function WishlistList({
           removing a whole album is the ✕ on its album cell. */}
       {sorted.map((group) => (
         <div className="wl-list-section" key={group.name}>
-          <div className="wl-list-sep">
+          <div
+            className="wl-list-sep"
+            role="button"
+            tabIndex={0}
+            aria-expanded={isOpen(group.name)}
+            title={isOpen(group.name) ? 'Collapse' : 'Expand'}
+            onClick={() => toggleArtist(group.name)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleArtist(group.name);
+              }
+            }}
+          >
+            <span className={`wl-list-chevron${isOpen(group.name) ? ' open' : ''}`}>▸</span>
             {artistImages.get(group.name.toLowerCase()) ? (
               <img
                 className="wl-list-avatar"
@@ -155,7 +194,10 @@ export function WishlistList({
               type="button"
               className="wl-list-artist-name"
               title="Open artist"
-              onClick={() => window._navigateToArtistFromWishlist?.(group.name)}
+              onClick={(event) => {
+                event.stopPropagation();
+                window._navigateToArtistFromWishlist?.(group.name);
+              }}
             >
               {group.name}
             </button>
@@ -167,19 +209,21 @@ export function WishlistList({
             )}
           </div>
 
-          {group.albums.flatMap((album) =>
-            album.tracks.map((track) => (
-              <TrackRow
-                key={track.id}
-                track={track}
-                onRemoveTrack={onRemoveTrack}
-                onRemoveAlbum={onRemoveAlbum}
-              />
-            )),
-          )}
-          {group.singles.map((track) => (
-            <TrackRow key={track.id} track={track} onRemoveTrack={onRemoveTrack} />
-          ))}
+          {isOpen(group.name) &&
+            group.albums.flatMap((album) =>
+              album.tracks.map((track) => (
+                <TrackRow
+                  key={track.id}
+                  track={track}
+                  onRemoveTrack={onRemoveTrack}
+                  onRemoveAlbum={onRemoveAlbum}
+                />
+              )),
+            )}
+          {isOpen(group.name) &&
+            group.singles.map((track) => (
+              <TrackRow key={track.id} track={track} onRemoveTrack={onRemoveTrack} />
+            ))}
         </div>
       ))}
     </div>

@@ -289,6 +289,7 @@ export function WishlistPage() {
               <WishlistList
                 groups={visibleGroups}
                 artistImages={artistImages}
+                filterActive={Boolean(search.q?.trim()) || search.failing}
                 onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
                 onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
               />
