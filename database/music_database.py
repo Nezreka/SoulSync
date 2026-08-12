@@ -24,6 +24,18 @@ _LIVE_FILE = "COALESCE(f.file_state, 'active') <> 'deleted'"
 _OWNED_TRACK = ("EXISTS (SELECT 1 FROM lib2_albums al "
                 "WHERE al.id = t.album_id AND al.origin = 'library')")
 
+def _as_datetime(value):
+    """A timestamp column as a datetime, or None. v2 stores ISO strings."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
@@ -7196,7 +7208,7 @@ class MusicDatabase:
         conn = None
         try:
             conn = self._get_connection()
-            row = conn.execute("SELECT title, year FROM albums WHERE id = ?",
+            row = conn.execute("SELECT title, year FROM lib2_albums WHERE id = ?",
                                (album_id,)).fetchone()
             return (row["title"], row["year"]) if row else None
         except Exception as e:
@@ -7485,14 +7497,16 @@ class MusicDatabase:
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
             cursor.execute("""
-                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
-                       t.duration, t.created_at, t.updated_at,
-                       a.name as artist_name, al.title as album_title
-                FROM tracks t
-                JOIN artists a ON t.artist_id = a.id
-                JOIN albums al ON t.album_id = al.id
-                WHERE t.id = ?
-            """, (track_id_str,))
+                SELECT t.id, t.album_id, al.primary_artist_id AS artist_id, t.title,
+                       t.track_number, t.duration, t.added_at AS created_at,
+                       t.updated_at,
+                       COALESCE(t.track_artist, a.name) as artist_name,
+                       al.title as album_title
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
+                WHERE t.id = ? OR t.server_id = ?
+            """, (track_id, track_id_str))
             
             row = cursor.fetchone()
             if row:
@@ -7795,10 +7809,16 @@ class MusicDatabase:
         params.append(limit)
 
         cursor.execute(f"""
-            SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
-            FROM tracks
-            JOIN artists ON tracks.artist_id = artists.id
-            JOIN albums ON tracks.album_id = albums.id
+            SELECT tracks.*, albums.primary_artist_id AS artist_id,
+                   artists.name as artist_name, albums.title as album_title,
+                   albums.image_url as album_thumb_url,
+                   files.path AS file_path, files.bitrate AS bitrate
+            FROM lib2_tracks tracks
+            JOIN lib2_albums albums ON albums.id = tracks.album_id
+            JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
+            LEFT JOIN lib2_track_files files
+                   ON files.track_id = tracks.id AND files.is_primary = 1
+                  AND COALESCE(files.file_state, 'active') <> 'deleted'
             WHERE {where_clause}
             ORDER BY {order_by}
             LIMIT ?
@@ -7846,10 +7866,16 @@ class MusicDatabase:
         params.append(limit * 3)
 
         cursor.execute(f"""
-            SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
-            FROM tracks
-            JOIN artists ON tracks.artist_id = artists.id
-            JOIN albums ON tracks.album_id = albums.id
+            SELECT tracks.*, albums.primary_artist_id AS artist_id,
+                   artists.name as artist_name, albums.title as album_title,
+                   albums.image_url as album_thumb_url,
+                   files.path AS file_path, files.bitrate AS bitrate
+            FROM lib2_tracks tracks
+            JOIN lib2_albums albums ON albums.id = tracks.album_id
+            JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
+            LEFT JOIN lib2_track_files files
+                   ON files.track_id = tracks.id AND files.is_primary = 1
+                  AND COALESCE(files.file_state, 'active') <> 'deleted'
             WHERE {where_clause}
             ORDER BY tracks.title, artists.name
             LIMIT ?
@@ -7887,8 +7913,10 @@ class MusicDatabase:
                 duration=row['duration'],
                 file_path=row['file_path'],
                 bitrate=row['bitrate'],
-                created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
-                updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+                created_at=_as_datetime(row['added_at'] if 'added_at' in row.keys()
+                                        else None),
+                updated_at=_as_datetime(row['updated_at'] if 'updated_at' in row.keys()
+                                        else None),
             )
             # Add artist and album info for compatibility with Plex responses
             track.artist_name = row['artist_name']
@@ -7934,9 +7962,11 @@ class MusicDatabase:
             params.append(limit)
 
             cursor.execute(f"""
-                SELECT albums.*, artists.name as artist_name
-                FROM albums
-                JOIN artists ON albums.artist_id = artists.id
+                SELECT albums.*, albums.primary_artist_id AS artist_id,
+                       albums.image_url AS thumb_url, albums.added_at AS created_at,
+                       artists.name as artist_name
+                FROM lib2_albums albums
+                JOIN lib2_artists artists ON artists.id = albums.primary_artist_id
                 WHERE {where_clause}
                 ORDER BY albums.title, artists.name
                 LIMIT ?
@@ -7946,7 +7976,10 @@ class MusicDatabase:
             
             albums = []
             for row in rows:
-                genres = json.loads(row['genres']) if row['genres'] else None
+                try:
+                    genres = json.loads(row['genres']) if row['genres'] else None
+                except (TypeError, ValueError):
+                    genres = None
                 album = DatabaseAlbum(
                     id=row['id'],
                     artist_id=row['artist_id'],
@@ -7955,7 +7988,7 @@ class MusicDatabase:
                     thumb_url=row['thumb_url'],
                     genres=genres,
                     track_count=row['track_count'],
-                    duration=row['duration'],
+                    duration=None,
                     created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
                     updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
                 )
@@ -8089,10 +8122,15 @@ class MusicDatabase:
                         source_filter = "AND t.server_source = ?" if server_source else ""
                         params = [album_candidate.id] + ([server_source] if server_source else [])
                         cursor.execute(f"""
-                            SELECT t.*, a.name as artist_name, al.title as album_title
-                            FROM tracks t
-                            JOIN artists a ON a.id = t.artist_id
-                            JOIN albums al ON al.id = t.album_id
+                            SELECT t.*, al.primary_artist_id AS artist_id,
+                                   a.name as artist_name, al.title as album_title,
+                                   f.path AS file_path, f.bitrate AS bitrate
+                            FROM lib2_tracks t
+                            JOIN lib2_albums al ON al.id = t.album_id
+                            JOIN lib2_artists a ON a.id = al.primary_artist_id
+                            LEFT JOIN lib2_track_files f
+                                   ON f.track_id = t.id AND f.is_primary = 1
+                                  AND COALESCE(f.file_state, 'active') <> 'deleted'
                             WHERE t.album_id = ? {source_filter}
                         """, params)
 
@@ -8258,7 +8296,9 @@ class MusicDatabase:
             cursor = conn.cursor()
 
             # Look up this album's title, year, and artist to find all sibling entries
-            cursor.execute("SELECT title, year, artist_id FROM albums WHERE id = ?", (album_id,))
+            cursor.execute(
+                "SELECT title, year, primary_artist_id AS artist_id FROM lib2_albums "
+                "WHERE id = ?", (album_id,))
             album_info = cursor.fetchone()
 
             if not album_info:
@@ -8267,8 +8307,9 @@ class MusicDatabase:
             # Find all album IDs that share the same title, year, and artist
             # This merges split albums (e.g. Navidrome splitting one album into multiple entries)
             cursor.execute("""
-                SELECT id FROM albums
-                WHERE title = ? AND artist_id = ? AND (year IS ? OR (year IS NULL AND ? IS NULL))
+                SELECT id FROM lib2_albums
+                WHERE title = ? AND primary_artist_id = ?
+                  AND (year IS ? OR (year IS NULL AND ? IS NULL))
             """, (album_info['title'], album_info['artist_id'], album_info['year'], album_info['year']))
             sibling_ids = [row['id'] for row in cursor.fetchall()]
 
@@ -8278,14 +8319,20 @@ class MusicDatabase:
             placeholders = ','.join('?' for _ in sibling_ids)
             cursor.execute(f"""
                 SELECT COUNT(*) FROM (
-                    SELECT DISTINCT LOWER(title), track_number FROM tracks
-                    WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL AND file_path != ''
+                    SELECT DISTINCT LOWER(t.title), t.track_number
+                      FROM lib2_tracks t
+                      JOIN lib2_track_files f ON f.track_id = t.id
+                     WHERE t.album_id IN ({placeholders})
+                       AND COALESCE(f.file_state, 'active') <> 'deleted'
+                       AND f.path IS NOT NULL AND f.path != ''
                 )
             """, sibling_ids)
             owned_tracks = cursor.fetchone()[0]
 
             # Get the max track_count from sibling albums (not SUM — avoids inflating from duplicates)
-            cursor.execute(f"SELECT MAX(track_count) FROM albums WHERE id IN ({placeholders})", sibling_ids)
+            cursor.execute(
+                f"SELECT MAX(track_count) FROM lib2_albums WHERE id IN ({placeholders})",
+                sibling_ids)
             result = cursor.fetchone()
             stored_track_count = result[0] if result and result[0] else 0
 
@@ -8326,8 +8373,11 @@ class MusicDatabase:
         try:
             placeholders = ','.join('?' for _ in sibling_ids)
             cursor.execute(f"""
-                SELECT file_path, bitrate FROM tracks
-                WHERE album_id IN ({placeholders}) AND file_path IS NOT NULL
+                SELECT f.path AS file_path, f.bitrate
+                  FROM lib2_track_files f
+                  JOIN lib2_tracks t ON t.id = f.track_id
+                 WHERE t.album_id IN ({placeholders}) AND f.path IS NOT NULL
+                   AND COALESCE(f.file_state, 'active') <> 'deleted'
             """, sibling_ids)
 
             format_set = set()
@@ -8429,10 +8479,16 @@ class MusicDatabase:
             cursor = conn.cursor()
             placeholders = ','.join('?' for _ in album_ids)
             cursor.execute(f"""
-                SELECT t.*, a.name as artist_name, al.title as album_title, al.thumb_url as album_thumb_url
-                FROM tracks t
-                JOIN artists a ON a.id = t.artist_id
-                JOIN albums al ON al.id = t.album_id
+                SELECT t.*, al.primary_artist_id AS artist_id,
+                       a.name as artist_name, al.title as album_title,
+                       al.image_url as album_thumb_url,
+                       f.path AS file_path, f.bitrate AS bitrate
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1
+                      AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.album_id IN ({placeholders})
             """, list(album_ids))
             rows = cursor.fetchall()
@@ -8479,19 +8535,33 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(albums)")
-            have = {row[1] for row in cursor.fetchall()}
-            cols = [c for c in self.ALBUM_SOURCE_ID_COLUMNS if c in have]
-            if not cols:
-                return {}
+            # v2 promotes Spotify and MusicBrainz to columns and keeps every
+            # other provider in `external_ids`. The keys stay the legacy column
+            # names, because that is the vocabulary the ownership proof and its
+            # callers speak.
+            from core.library2.provider_ids import parse_external_ids
+
             placeholders = ','.join(['?'] * len(album_ids))
             cursor.execute(
-                f"SELECT id, {', '.join(cols)} FROM albums WHERE id IN ({placeholders})",
-                [str(a) for a in album_ids])
+                f"SELECT id, spotify_id, musicbrainz_id, external_ids "
+                f"  FROM lib2_albums WHERE id IN ({placeholders})",
+                [a for a in album_ids])
+            legacy_name = {
+                'deezer': 'deezer_id', 'itunes': 'itunes_album_id',
+                'qobuz': 'qobuz_id', 'tidal': 'tidal_id', 'amazon': 'amazon_id',
+                'audiodb': 'audiodb_id', 'jiosaavn': 'jiosaavn_id',
+            }
             out = {}
             for row in cursor.fetchall():
-                vals = {c: str(row[c]).strip() for c in cols
-                        if row[c] is not None and str(row[c]).strip()}
+                vals = {}
+                if row['spotify_id']:
+                    vals['spotify_album_id'] = str(row['spotify_id']).strip()
+                if row['musicbrainz_id']:
+                    vals['musicbrainz_release_id'] = str(row['musicbrainz_id']).strip()
+                for provider, value in parse_external_ids(row['external_ids']).items():
+                    column = legacy_name.get(provider)
+                    if column and value:
+                        vals[column] = str(value).strip()
                 if vals:
                     out[row['id']] = vals
             return out
@@ -13567,248 +13637,140 @@ class MusicDatabase:
             }
 
     def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
-        """
-        Get artists for the library page with search, filtering, and pagination
+        """Artists for the public library API: search, filter, paginate.
 
-        Args:
-            search_query: Search term to filter artists by name
-            letter: Filter by first letter (a-z, #, or "" for all)
-            page: Page number (1-based)
-            limit: Number of results per page
-            watchlist_filter: Filter by watchlist status ("all", "watched", "unwatched")
-            source_filter: Filter by metadata source match (e.g. "spotify", "!spotify" for unmatched)
-
-        Returns:
-            Dict containing artists list, pagination info, and total count
+        Reads the catalogue. Two things the legacy version had to do fall away
+        with it: the same-name dedup (v2 has `canonical_artist_id`, so an alias
+        member is folded, not guessed at with `MIN(id)`), and the active-server
+        filter (a catalogue row is the library, whoever reported it).
         """
+        from core.library2.provider_ids import parse_external_ids
+
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Build WHERE clause
-                where_conditions = []
-                params = []
+                where_conditions = ["a.canonical_artist_id IS NULL"]
+                params: list = []
 
                 if search_query:
-                    where_conditions.append("LOWER(name) LIKE LOWER(?)")
+                    where_conditions.append("LOWER(a.name) LIKE LOWER(?)")
                     params.append(f"%{search_query}%")
 
                 if letter and letter != "all":
                     if letter == "#":
-                        # Numbers and special characters
-                        where_conditions.append("SUBSTR(UPPER(name), 1, 1) NOT GLOB '[A-Z]'")
+                        where_conditions.append("SUBSTR(UPPER(a.name), 1, 1) NOT GLOB '[A-Z]'")
                     else:
-                        # Specific letter
-                        where_conditions.append("UPPER(SUBSTR(name, 1, 1)) = UPPER(?)")
+                        where_conditions.append("UPPER(SUBSTR(a.name, 1, 1)) = UPPER(?)")
                         params.append(letter)
 
-                # Metadata source filter — match or exclude by enrichment source
+                # Enrichment-source filter. Spotify and MusicBrainz have their
+                # own columns; every other provider lives in `external_ids`.
                 if source_filter:
-                    _source_columns = {
-                        'spotify': 'a.spotify_artist_id',
-                        'musicbrainz': 'a.musicbrainz_id',
-                        'deezer': 'a.deezer_id',
-                        'discogs': 'a.discogs_id',
-                        'audiodb': 'a.audiodb_id',
-                        'itunes': 'a.itunes_artist_id',
-                        'lastfm': 'a.lastfm_url',
-                        'genius': 'a.genius_url',
-                        'tidal': 'a.tidal_id',
-                        'qobuz': 'a.qobuz_id',
-                    }
                     negate = source_filter.startswith('!')
                     key = source_filter.lstrip('!')
-                    col = _source_columns.get(key)
-                    if col:
-                        if negate:
-                            where_conditions.append(f"({col} IS NULL OR {col} = '')")
-                        else:
-                            where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
+                    if key in ('spotify', 'musicbrainz'):
+                        col = f"a.{key}_id"
+                        present = f"({col} IS NOT NULL AND {col} != '')"
+                    else:
+                        present = (f"(json_extract(a.external_ids, '$.{key}') IS NOT NULL "
+                                   f"AND json_extract(a.external_ids, '$.{key}') != '')")
+                    where_conditions.append(f"NOT {present}" if negate else present)
 
-                # Get active server for filtering
-                from config.settings import config_manager
-                active_server = config_manager.get_active_media_server()
-
-                # Add active server filter to where conditions
-                where_conditions.append("a.server_source = ?")
-                params.append(active_server)
-
-                where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
-
-                # Pre-fetch watchlist data for this profile (small table, single fast query)
-                cursor.execute("SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower FROM watchlist_artists WHERE profile_id = ?", (profile_id,))
+                cursor.execute(
+                    "SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower "
+                    "FROM watchlist_artists WHERE profile_id = ?", (profile_id,))
                 watchlist_rows = cursor.fetchall()
                 wl_spotify = {r['spotify_artist_id'] for r in watchlist_rows if r['spotify_artist_id']}
                 wl_itunes = {r['itunes_artist_id'] for r in watchlist_rows if r['itunes_artist_id']}
                 wl_names = {r['name_lower'] for r in watchlist_rows if r['name_lower']}
 
-                # Apply watchlist filter as WHERE conditions using IN clauses
                 if watchlist_filter in ("watched", "unwatched"):
-                    match_parts = []
-                    match_params = []
+                    match_parts, match_params = [], []
                     if wl_spotify:
-                        match_parts.append(f"(a.spotify_artist_id IS NOT NULL AND a.spotify_artist_id IN ({','.join('?' * len(wl_spotify))}))")
+                        match_parts.append(
+                            f"(a.spotify_id IS NOT NULL AND a.spotify_id IN "
+                            f"({','.join('?' * len(wl_spotify))}))")
                         match_params.extend(wl_spotify)
                     if wl_itunes:
-                        match_parts.append(f"(a.itunes_artist_id IS NOT NULL AND a.itunes_artist_id IN ({','.join('?' * len(wl_itunes))}))")
+                        match_parts.append(
+                            f"(json_extract(a.external_ids, '$.itunes') IN "
+                            f"({','.join('?' * len(wl_itunes))}))")
                         match_params.extend(wl_itunes)
                     if wl_names:
-                        match_parts.append(f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
+                        match_parts.append(
+                            f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
                         match_params.extend(wl_names)
-
                     if match_parts:
                         combined = ' OR '.join(match_parts)
-                        if watchlist_filter == "watched":
-                            where_clause += f" AND ({combined})"
-                        else:
-                            where_clause += f" AND NOT ({combined})"
+                        where_conditions.append(
+                            f"({combined})" if watchlist_filter == "watched"
+                            else f"NOT ({combined})")
                         params.extend(match_params)
                     elif watchlist_filter == "watched":
-                        # Empty watchlist, no artists can match
-                        where_clause += " AND 0"
+                        where_conditions.append("0")
 
-                # Step 1: Fast count query — no joins, just filter canonical artists
-                count_query = f"""
-                    SELECT COUNT(*) as total_count
-                    FROM artists a
-                    WHERE {where_clause}
-                        AND a.id = (SELECT MIN(a2.id) FROM artists a2
-                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
-                """
-                cursor.execute(count_query, params)
+                where_clause = " AND ".join(where_conditions)
+
+                cursor.execute(
+                    f"SELECT COUNT(*) as total_count FROM lib2_artists a WHERE {where_clause}",
+                    params)
                 total_count = cursor.fetchone()['total_count']
 
-                # Step 2: Get paginated artist rows (no album/track joins — fast)
                 offset = (page - 1) * limit
-                artists_query = f"""
-                    SELECT
-                        a.id,
-                        a.name,
-                        a.thumb_url,
-                        a.genres,
-                        a.musicbrainz_id,
-                        a.spotify_artist_id,
-                        a.itunes_artist_id,
-                        a.deezer_id,
-                        a.audiodb_id,
-                        a.discogs_id,
-                        a.lastfm_url,
-                        a.genius_url,
-                        a.tidal_id,
-                        a.qobuz_id,
-                        a.soul_id,
-                        a.amazon_id,
-                        a.server_source
-                    FROM artists a
-                    WHERE {where_clause}
-                        AND a.id = (SELECT MIN(a2.id) FROM artists a2
-                                    WHERE a2.name = a.name AND a2.server_source = a.server_source)
-                    ORDER BY a.name COLLATE NOCASE
-                    LIMIT ? OFFSET ?
-                """
-                query_params = params + [limit, offset]
-                cursor.execute(artists_query, query_params)
+                cursor.execute(f"""
+                    SELECT a.id, a.name, a.image_url, a.genres, a.spotify_id,
+                           a.musicbrainz_id, a.external_ids, a.soul_id,
+                           a.server_source,
+                           (SELECT COUNT(*) FROM lib2_albums al
+                             WHERE al.primary_artist_id = a.id) AS album_count,
+                           (SELECT COUNT(*) FROM lib2_tracks t
+                             JOIN lib2_albums al2 ON al2.id = t.album_id
+                            WHERE al2.primary_artist_id = a.id) AS track_count
+                      FROM lib2_artists a
+                     WHERE {where_clause}
+                     ORDER BY a.name COLLATE NOCASE
+                     LIMIT ? OFFSET ?
+                """, params + [limit, offset])
                 artist_rows = cursor.fetchall()
 
-                # Step 3: Batch-fetch album/track counts only for the 75 artists on this page
-                artist_ids_on_page = [row['id'] for row in artist_rows]
-                counts_map = {}
-                if artist_ids_on_page:
-                    # Get all artist IDs that share names with the page artists (for dedup merging)
-                    name_pairs = [(row['name'], row['server_source']) for row in artist_rows]
-                    # Build counts query using artist IDs directly
-                    # Get all artist IDs sharing names with page artists
-                    id_placeholders = ','.join(['?'] * len(artist_ids_on_page))
-                    cursor.execute(f"""
-                        SELECT id, name, server_source FROM artists
-                        WHERE id IN ({id_placeholders})
-                    """, artist_ids_on_page)
-                    page_info = cursor.fetchall()
-
-                    # Find all related artist IDs (same name+server) for count merging
-                    or_clauses = []
-                    or_params = []
-                    for pi in page_info:
-                        or_clauses.append("(ar.name = ? AND ar.server_source = ?)")
-                        or_params.extend([pi['name'], pi['server_source']])
-
-                    cursor.execute(f"""
-                        SELECT
-                            ar.name as artist_name, ar.server_source as artist_source,
-                            COUNT(DISTINCT al.id) as album_count,
-                            COUNT(DISTINCT t.id) as track_count
-                        FROM artists ar
-                        LEFT JOIN albums al ON al.artist_id = ar.id
-                        LEFT JOIN tracks t ON t.album_id = al.id
-                        WHERE {' OR '.join(or_clauses)}
-                        GROUP BY ar.name, ar.server_source
-                    """, or_params)
-                    # Map back to canonical IDs
-                    name_to_canonical = {(pi['name'], pi['server_source']): pi['id'] for pi in page_info}
-                    for crow in cursor.fetchall():
-                        cid = name_to_canonical.get((crow['artist_name'], crow['artist_source']))
-                        if cid:
-                            counts_map[cid] = (crow['album_count'], crow['track_count'])
-
-                rows = artist_rows
-
-                # Convert to artist objects
                 artists = []
-                for row in rows:
-                    # Parse genres from GROUP_CONCAT result
-                    genres_str = row['genres'] or ''
-                    genres = []
-                    if genres_str:
-                        # Split by comma and clean up duplicates
-                        genre_set = set()
-                        for genre in genres_str.split(','):
-                            if genre and genre.strip():
-                                genre_set.update(g.strip() for g in genre.split(',') if g.strip())
-                        genres = list(genre_set)
-
-                    artist = DatabaseArtist(
-                        id=row['id'],
-                        name=row['name'],
-                        thumb_url=row['thumb_url'] if row['thumb_url'] else None,
-                        genres=genres
-                    )
-
-                    # Determine watchlist status via set lookups
+                for row in artist_rows:
+                    try:
+                        genres = json.loads(row['genres'] or '[]')
+                        if not isinstance(genres, list):
+                            genres = []
+                    except (TypeError, ValueError):
+                        genres = []
+                    ids = parse_external_ids(row['external_ids'])
                     is_watched = (
-                        (row['spotify_artist_id'] and row['spotify_artist_id'] in wl_spotify)
-                        or (row['itunes_artist_id'] and row['itunes_artist_id'] in wl_itunes)
+                        (row['spotify_id'] and row['spotify_id'] in wl_spotify)
+                        or (ids.get('itunes') and ids['itunes'] in wl_itunes)
                         or (row['name'] and row['name'].lower() in wl_names)
                     )
-
-                    # Add stats
-                    artist_data = {
-                        'id': artist.id,
-                        'name': artist.name,
-                        'image_url': artist.thumb_url,
-                        'genres': artist.genres,
+                    artists.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'image_url': row['image_url'],
+                        'genres': genres,
                         'musicbrainz_id': row['musicbrainz_id'],
-                        'spotify_artist_id': row['spotify_artist_id'],
-                        'itunes_artist_id': row['itunes_artist_id'],
-                        'deezer_id': row['deezer_id'],
-                        'audiodb_id': row['audiodb_id'],
-                        'discogs_id': row['discogs_id'],
-                        'lastfm_url': row['lastfm_url'],
-                        'genius_url': row['genius_url'],
-                        'tidal_id': row['tidal_id'],
-                        'qobuz_id': row['qobuz_id'],
+                        'spotify_artist_id': row['spotify_id'],
+                        'itunes_artist_id': ids.get('itunes'),
+                        'deezer_id': ids.get('deezer'),
+                        'audiodb_id': ids.get('audiodb'),
+                        'discogs_id': ids.get('discogs'),
+                        'lastfm_url': ids.get('lastfm'),
+                        'genius_url': ids.get('genius'),
+                        'tidal_id': ids.get('tidal'),
+                        'qobuz_id': ids.get('qobuz'),
                         'soul_id': row['soul_id'],
-                        'amazon_id': row['amazon_id'],
-                        'album_count': counts_map.get(row['id'], (0, 0))[0],
-                        'track_count': counts_map.get(row['id'], (0, 0))[1],
-                        'is_watched': bool(is_watched)
-                    }
-                    artists.append(artist_data)
+                        'amazon_id': ids.get('amazon'),
+                        'album_count': row['album_count'],
+                        'track_count': row['track_count'],
+                        'is_watched': bool(is_watched),
+                    })
 
-                # Calculate pagination info
                 total_pages = (total_count + limit - 1) // limit
-                has_prev = page > 1
-                has_next = page < total_pages
-
                 return {
                     'artists': artists,
                     'pagination': {
@@ -13816,8 +13778,8 @@ class MusicDatabase:
                         'limit': limit,
                         'total_count': total_count,
                         'total_pages': total_pages,
-                        'has_prev': has_prev,
-                        'has_next': has_next
+                        'has_prev': page > 1,
+                        'has_next': page < total_pages,
                     }
                 }
 
@@ -13831,7 +13793,7 @@ class MusicDatabase:
                     'total_count': 0,
                     'total_pages': 0,
                     'has_prev': False,
-                    'has_next': False
+                    'has_next': False,
                 }
             }
 
@@ -15653,7 +15615,7 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM artists WHERE id = ?", (artist_id,))
+            cursor.execute("SELECT * FROM lib2_artists WHERE id = ?", (artist_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
@@ -15665,7 +15627,7 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM albums WHERE id = ?", (album_id,))
+            cursor.execute("SELECT * FROM lib2_albums WHERE id = ?", (album_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
@@ -15678,10 +15640,15 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.*, a.name as artist_name, al.title as album_title
-                FROM tracks t
-                LEFT JOIN artists a ON t.artist_id = a.id
-                LEFT JOIN albums al ON t.album_id = al.id
+                SELECT t.*, COALESCE(t.track_artist, a.name) AS artist_name,
+                       al.title AS album_title, f.path AS file_path,
+                       f.bitrate AS bitrate
+                FROM lib2_tracks t
+                LEFT JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1
+                      AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.id = ?
             """, (track_id,))
             row = cursor.fetchone()
@@ -15696,7 +15663,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM albums WHERE artist_id = ? ORDER BY year, title",
+                "SELECT * FROM lib2_albums WHERE primary_artist_id = ? "
+                "ORDER BY year, title",
                 (artist_id,),
             )
             return [dict(row) for row in cursor.fetchall()]
@@ -15710,9 +15678,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.*, a.name as artist_name
-                FROM tracks t
-                LEFT JOIN artists a ON t.artist_id = a.id
+                SELECT t.*, COALESCE(t.track_artist, a.name) AS artist_name,
+                       f.path AS file_path, f.bitrate AS bitrate
+                FROM lib2_tracks t
+                LEFT JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1
+                      AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.album_id = ?
                 ORDER BY t.track_number, t.title
             """, (album_id,))
@@ -15730,10 +15703,15 @@ class MusicDatabase:
             cursor = conn.cursor()
             placeholders = ",".join("?" * len(track_ids))
             cursor.execute(f"""
-                SELECT t.*, a.name as artist_name, al.title as album_title
-                FROM tracks t
-                LEFT JOIN artists a ON t.artist_id = a.id
-                LEFT JOIN albums al ON t.album_id = al.id
+                SELECT t.*, COALESCE(t.track_artist, a.name) AS artist_name,
+                       al.title AS album_title, f.path AS file_path,
+                       f.bitrate AS bitrate
+                FROM lib2_tracks t
+                LEFT JOIN lib2_albums al ON al.id = t.album_id
+                LEFT JOIN lib2_artists a ON a.id = al.primary_artist_id
+                LEFT JOIN lib2_track_files f
+                       ON f.track_id = t.id AND f.is_primary = 1
+                      AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.id IN ({placeholders})
             """, track_ids)
             return [dict(row) for row in cursor.fetchall()]
@@ -15782,25 +15760,38 @@ class MusicDatabase:
         }
         if table not in column_map or provider not in column_map[table]:
             return None
-        column = column_map[table][provider]
+        # v2 promotes only Spotify and MusicBrainz to columns; every other
+        # provider lives in `external_ids`, so the lookup is a column compare
+        # for those two and a JSON path for the rest.
+        promoted = {"spotify": "spotify_id", "musicbrainz": "musicbrainz_id"}
+        if table == "tracks" and provider == "musicbrainz":
+            promoted["musicbrainz"] = "musicbrainz_id"
+        catalogue_table = {"artists": "lib2_artists", "albums": "lib2_albums",
+                           "tracks": "lib2_tracks"}[table]
+        if provider in promoted:
+            where = f"{promoted[provider]} = ?"
+        else:
+            where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM {table} WHERE {column} = ?", (external_id,))
+            cursor.execute(
+                f"SELECT * FROM {catalogue_table} WHERE {where}", (external_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:
-            logger.error(f"API: External lookup {table}.{column}={external_id}: {e}")
+            logger.error(f"API: External lookup {table}.{provider}={external_id}: {e}")
             return None
 
     def api_get_genres(self, table: str = "artists") -> List[Dict[str, Any]]:
         """Get all unique genres with counts from the given table."""
         if table not in ("artists", "albums"):
             return []
+        catalogue_table = "lib2_artists" if table == "artists" else "lib2_albums"
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT genres FROM {table}")
+            cursor.execute(f"SELECT genres FROM {catalogue_table}")
             genre_counts: Dict[str, int] = {}
             for row in cursor.fetchall():
                 raw = row["genres"]
@@ -16559,7 +16550,7 @@ class MusicDatabase:
                 where_parts.append("LOWER(al.title) LIKE LOWER(?)")
                 params.append(f"%{search}%")
             if artist_id is not None:
-                where_parts.append("al.artist_id = ?")
+                where_parts.append("al.primary_artist_id = ?")
                 params.append(artist_id)
             if year is not None:
                 where_parts.append("al.year = ?")
@@ -16568,15 +16559,16 @@ class MusicDatabase:
             where_clause = " AND ".join(where_parts) if where_parts else "1=1"
 
             # Count
-            cursor.execute(f"SELECT COUNT(*) as cnt FROM albums al WHERE {where_clause}", params)
+            cursor.execute(
+                f"SELECT COUNT(*) as cnt FROM lib2_albums al WHERE {where_clause}", params)
             total = cursor.fetchone()["cnt"]
 
             # Fetch page
             offset = (page - 1) * limit
             cursor.execute(
                 f"""SELECT al.*, a.name as artist_name
-                    FROM albums al
-                    LEFT JOIN artists a ON al.artist_id = a.id
+                    FROM lib2_albums al
+                    LEFT JOIN lib2_artists a ON a.id = al.primary_artist_id
                     WHERE {where_clause}
                     ORDER BY al.title COLLATE NOCASE
                     LIMIT ? OFFSET ?""",

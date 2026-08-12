@@ -83,13 +83,17 @@ def lib_db(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
     c = conn.cursor()
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES ('a1', 'M-Clan', 'jellyfin')")
-    c.execute("""INSERT INTO albums (id, title, artist_id, server_source)
-                 VALUES ('al1', 'Usar y tirar', 'a1', 'jellyfin')""")
-    c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source)
-                 VALUES ('t1', 'al1', 'a1', 'Llamando a la tierra', '/m/llamando.mp3', 'jellyfin')""")
-    c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source)
-                 VALUES ('t2', 'al1', 'a1', 'Carolina', '/m/carolina.mp3', 'jellyfin')""")
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+    artist = seed_artist(c, server_id='a1', name='M-Clan', server_source='jellyfin')
+    album = seed_album(c, server_id='al1', title='Usar y tirar', artist_id=artist,
+                       server_source='jellyfin')
+    seed_track(c, server_id='t1', title='Llamando a la tierra', album_id=album,
+               artist_id=artist, server_source='jellyfin',
+               file_path='/m/llamando.mp3')
+    seed_track(c, server_id='t2', title='Carolina', album_id=album,
+               artist_id=artist, server_source='jellyfin',
+               file_path='/m/carolina.mp3')
     conn.commit()
     conn.close()
     return db
@@ -111,8 +115,12 @@ def test_825_reverse_direction_matches(lib_db):
     bare one — both directions must match."""
     conn = lib_db._get_connection()
     c = conn.cursor()
-    c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source)
-                 VALUES ('t3', 'al1', 'a1', 'Maggie (despierta)', '/m/maggie.mp3', 'jellyfin')""")
+    from tests.support.catalogue_seed import seed_track
+
+    album = c.execute("SELECT id FROM lib2_albums WHERE server_id='al1'").fetchone()[0]
+    artist = c.execute("SELECT id FROM lib2_artists WHERE server_id='a1'").fetchone()[0]
+    seed_track(c, server_id='t3', title='Maggie (despierta)', album_id=album,
+               artist_id=artist, server_source='jellyfin', file_path='/m/maggie.mp3')
     conn.commit()
     conn.close()
     match, conf = lib_db.check_track_exists(

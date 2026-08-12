@@ -47,20 +47,18 @@ def db_with_feat_track(tmp_path: Path):
         "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
         " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,),
     )
-    cursor.execute("INSERT INTO artists (id, name, server_source)"
-                   " VALUES ('ar-1', 'Artist1', 'jellyfin')")
-    cursor.execute("INSERT INTO albums (id, artist_id, title, server_source)"
-                   " VALUES ('al-1', 'ar-1', 'Super Album', 'jellyfin')")
+    from tests.support.catalogue_seed import seed_track
+
     cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("tr-1", "al-1", "ar-1", "Super Single", 3, 200000,
-         "/m/super.mp3", 320, "jellyfin", "Artist1; Artist2"),
-    )
+        "INSERT INTO lib2_track_files(track_id, path, bitrate, is_primary)"
+        " SELECT ?, '/m/super.mp3', 320, 1", (
+            seed_track(cursor, server_id='tr-1', title='Super Single',
+                       album_id=cursor.execute(
+                           "SELECT id FROM lib2_albums WHERE server_id='al-1'"
+                       ).fetchone()[0],
+                       artist_id=artist, server_source='jellyfin',
+                       track_number=3, duration=200000,
+                       track_artist='Artist1; Artist2'),))
     conn.commit()
     conn.close()
     return db

@@ -4453,3 +4453,38 @@ sie noch brauchen:
 
 Die volle Suite steht bei 14252 grün und den vier bekannten Vorab-Fehlschlägen;
 die webui-Suite bei 6458 grün und dem einen bekannten (`route-guard`).
+
+#### 50.4.4.28 Die öffentliche API und die Track-Suche lesen den Katalog
+
+Stand: **143/47**. `database/music_database.py` fällt von 98/14 auf **52/14**.
+
+**Die `api_*`-Schicht** (`/api/library/...` mit API-Key — SoulSyncs öffentliche
+REST-Fläche, kein totes Zeug) liest lib2: Artist, Album, Track, Tracks nach
+Album/Ids, Album-Liste, Genre-Aufstellung, `get_library_artists` und die
+Fremd-Id-Suche. Zwei Dinge fallen dabei weg, weil lib2 sie anders löst: die
+`MIN(id)`-Dedup nach gleichem Namen (v2 hat `canonical_artist_id`) und der
+Aktiv-Server-Filter (eine Katalog-Zeile ist die Bibliothek, egal wer sie
+gemeldet hat). Die Provider-Ids kommen aus den Spalten für Spotify und
+MusicBrainz und aus `external_ids` für den Rest — die *Schlüssel* der Antwort
+bleiben die alten (`itunes_artist_id`, `deezer_id`, …), denn das ist der
+Vertrag, den externe Konsumenten kennen.
+
+**Die Track-Suche** — `_search_tracks_basic_rows`, `_search_tracks_fuzzy_rows`,
+der album-bewusste Fallback in `check_track_exists`,
+`get_candidate_tracks_for_albums`, `get_track_by_id`, `search_albums`,
+`check_album_completeness`, `_get_album_formats`, `get_album_source_ids`,
+`get_album_title_year`. Das ist der „habe ich das schon"-Kern mit den meisten
+Aufrufern im Projekt; die Zeilenform bleibt exakt gleich (`DatabaseTrack` mit
+angehängtem `artist_name`/`album_title`/`album_thumb_url`), nur kommen
+`file_path` und `bitrate` jetzt aus der primären Dateizeile und `artist_id` vom
+Release.
+
+**Eine Falle beim Zeilen-Mapper:** `_rows_to_tracks` las `row['created_at']` —
+in lib2 heißt die Spalte `added_at`. Ein `sqlite3.Row` wirft dafür „No item with
+that key", und der Aufrufer fing das als „nichts gefunden". Jetzt ein
+`_as_datetime`-Helfer plus Spaltenprüfung.
+
+**Die Test-Saat liegt jetzt zentral** (`tests/support/catalogue_seed.py`): elf
+Testdateien säten ihr eigenes Legacy-Trio; sie rufen jetzt `seed_library_track`
+& Co. und adressieren Zeilen weiter über die Server-Ids, die sie schon
+benutzten.

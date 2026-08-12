@@ -42,23 +42,17 @@ def db_with_soundtrack(tmp_path: Path):
     conn = db._get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("artist-1", "Lin-Manuel Miranda", "plex"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("album-1", "artist-1", "Vaiana (English Version/Original Motion Picture Soundtrack)", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("track-1", "album-1", "artist-1", "Where You Are", 4, 210000,
-         "/music/where_you_are.mp3", 320, "plex", "Christopher Jackson"),
+    from tests.support.catalogue_seed import seed_library_track
+
+    seed_library_track(
+        conn,
+        artist="Lin-Manuel Miranda",
+        album="Vaiana (English Version/Original Motion Picture Soundtrack)",
+        title="Where You Are",
+        artist_server_id="artist-1", album_server_id="album-1",
+        track_server_id="track-1", track_number=4, duration=210000,
+        file_path="/music/where_you_are.mp3", bitrate=320,
+        track_artist="Christopher Jackson", server_source="plex",
     )
     conn.commit()
     conn.close()
@@ -218,23 +212,15 @@ def test_album_aware_fallback_actually_works(tmp_path: Path) -> None:
 
     conn = db._get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-x", "Various Artists", "plex"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-x", "ar-x", "Awesome Mix Vol. 1", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("tr-x", "al-x", "ar-x", "Hooked on a Feeling", 2, 175000,
-         "/m/hooked.mp3", 320, "plex", None),  # No per-track artist set
+    from tests.support.catalogue_seed import seed_library_track
+
+    seed_library_track(
+        conn,
+        artist="Various Artists", album="Awesome Mix Vol. 1",
+        title="Hooked on a Feeling",
+        artist_server_id="ar-x", album_server_id="al-x", track_server_id="tr-x",
+        track_number=2, duration=175000, file_path="/m/hooked.mp3", bitrate=320,
+        server_source="plex",   # no per-track artist set
     )
     conn.commit()
     conn.close()
