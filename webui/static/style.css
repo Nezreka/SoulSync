@@ -64171,8 +64171,23 @@ body.max-performance #page-particles-canvas {
     margin-bottom: 16px;
 }
 
+/* The tab body had only a min-height, so it grew to the height of its
+   content: 30 findings ~2,500px, 100 ~8,400px, with the filters and the
+   bulk bar scrolled off the top and unreachable. Bound it and let the
+   LIST scroll inside, with its controls pinned. */
 .tools-maintenance-hero .repair-tab-content {
     min-height: 200px;
+    max-height: min(72vh, 900px);
+    overflow-y: auto;
+}
+/* Sticky inside that scroller — the filters, Select All and the bulk bar
+   (all children of the toolbar) follow the rows they act on instead of
+   scrolling away after a few. Opaque, or rows ghost through them. */
+.tools-maintenance-hero .repair-findings-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: #17171b;
 }
 
 /* ── Tool card sections ── */

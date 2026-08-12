@@ -110,6 +110,13 @@ export interface FindingsTabProps {
 }
 
 export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps) {
+  /** job_id → display name, falling back to a de-underscored id for a job the
+   *  list hasn't loaded (or one that has since been removed). */
+  const jobLabel = useCallback(
+    (jobId: string) =>
+      jobs.find((job) => job.job_id === jobId)?.display_name || (jobId || '').replace(/_/g, ' '),
+    [jobs],
+  );
   const [jobFilter, setJobFilter] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -318,8 +325,14 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
     async (id: number) => {
       try {
         await dismissFinding(id);
-      } catch {
-        // The vanilla logs and does nothing else — no toast, no refresh skip.
+      } catch (error) {
+        // Was a bare `return`: the row stayed put with no toast and no
+        // refresh, so a failed dismiss was indistinguishable from a missed
+        // click, and people clicked it again and again.
+        window.showToast?.(
+          `Could not dismiss finding: ${(error as Error).message}`,
+          'error',
+        );
         return;
       }
       refreshAll();
@@ -720,8 +733,12 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
             }}
           >
             <option value="">All Severity</option>
-            <option value="info">Info</option>
+            {/* `error` is what the corruption detector emits — the most urgent
+                findings in the system, and they had no filter at all. Labelled
+                Critical because that is the word the rest of the UI uses. */}
+            <option value="error">Critical</option>
             <option value="warning">Warning</option>
+            <option value="info">Info</option>
           </select>
           <select
             id="repair-findings-status-filter"
@@ -852,6 +869,7 @@ export function FindingsTab({ jobs, active, onStatusChanged }: FindingsTabProps)
               fixing={busyFix.has(finding.id)}
               onToggleSelect={toggleSelect}
               onToggleDetail={toggleDetail}
+              jobLabel={jobLabel}
               onFix={fixOne}
               onDismiss={dismissOne}
               onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
@@ -1039,6 +1057,7 @@ function FindingCard({
   fixing,
   onToggleSelect,
   onToggleDetail,
+  jobLabel,
   onFix,
   onDismiss,
   onKeepDuplicate,
@@ -1050,6 +1069,7 @@ function FindingCard({
   fixing: boolean;
   onToggleSelect: (id: number, checked: boolean) => void;
   onToggleDetail: (id: number) => void;
+  jobLabel: (jobId: string) => string;
   onFix: (finding: RepairFinding) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string) => void;
@@ -1089,7 +1109,10 @@ function FindingCard({
           <div className="repair-finding-desc">{finding.description || ''}</div>
           {filePath ? <div className="repair-finding-path">{filePath}</div> : null}
           <div className="repair-finding-meta">
-            <span>{finding.job_id.replace(/_/g, ' ')}</span>
+            {/* The display name the filter dropdown and dashboard chips
+                use — a row showing the raw snake_case id meant the same
+                job went by two different names on one screen. */}
+            <span>{jobLabel(finding.job_id)}</span>
             <span>&middot;</span>
             <span>{finding.entity_type || 'file'}</span>
             {finding.entity_id ? (
@@ -1132,7 +1155,15 @@ function FindingCard({
             className={`repair-finding-expand-btn${expanded ? ' open' : ''}`}
             type="button"
             data-finding={finding.id}
-            title="Details"
+            title={expanded ? 'Hide details' : 'Details'}
+            aria-expanded={expanded}
+            onClick={(event) => {
+              // This chevron was decorative — the row body was the only way to
+              // expand, so the one control that LOOKS like the expander did
+              // nothing. stopPropagation, or the row toggle undoes this click.
+              event.stopPropagation();
+              onToggleDetail(finding.id);
+            }}
           >
             &#9660;
           </button>
@@ -1143,11 +1174,17 @@ function FindingCard({
         id={`repair-detail-${finding.id}`}
       >
         <div className="repair-finding-detail-inner">
-          <FindingDetail
-            finding={finding}
-            onKeepDuplicate={onKeepDuplicate}
-            onApplyCoverArt={onApplyCoverArt}
-          />
+          {/* Mounted ONLY while open. Every collapsed row used to build its
+              full 20-branch detail tree and fetch its album/artist art, hidden
+              behind max-height:0 — so a 100-row page rendered 100 invisible
+              panels and hammered the thumbnail endpoints for them. */}
+          {expanded ? (
+            <FindingDetail
+              finding={finding}
+              onKeepDuplicate={onKeepDuplicate}
+              onApplyCoverArt={onApplyCoverArt}
+            />
+          ) : null}
         </div>
       </div>
     </div>

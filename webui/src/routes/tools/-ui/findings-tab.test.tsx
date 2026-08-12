@@ -428,7 +428,10 @@ describe('the finding list', () => {
     expect(document.querySelector('.repair-finding-type-badge')?.textContent).toBe('Orphan');
     expect(document.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
     const meta = document.querySelector('.repair-finding-meta')?.textContent || '';
-    expect(meta).toContain('orphan file detector');
+    // The job's DISPLAY name, matching the filter dropdown and the
+    // dashboard chips — the raw snake_case id meant one job went by two
+    // names on the same screen.
+    expect(meta).toContain('Orphan File Detector');
     expect(meta).toContain('track');
     expect(meta).toContain('ID: abc123');
   });
@@ -495,14 +498,49 @@ describe('the finding list', () => {
     expect(panel.className).not.toContain('open');
   });
 
-  it('leaves the panel shut when the expand chevron is clicked (the vanilla quirk)', async () => {
-    // `.repair-finding-actions` stops propagation and the chevron has no handler
-    // of its own, so it is decorative. Preserved deliberately — see the note in
-    // findings-tab.tsx.
+  it('mounts a row detail ONLY while it is open', async () => {
+    // Every collapsed row used to build its full 20-branch detail tree and
+    // fetch its album/artist art, hidden behind max-height:0 — so a 100-row
+    // page rendered 100 invisible panels and hammered the thumbnail
+    // endpoints for content nobody had asked to see.
     routes({ [FINDINGS]: page([finding({ id: 5 })]) });
     renderTab();
     await flush();
 
+    const panel = () => document.getElementById('repair-detail-5') as HTMLElement;
+    expect(panel().querySelector('.repair-finding-detail-inner')?.children.length).toBe(0);
+
+    fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
+    await flush();
+    expect(
+      (panel().querySelector('.repair-finding-detail-inner')?.children.length || 0),
+    ).toBeGreaterThan(0);
+  });
+
+  it('offers the critical severity the jobs actually emit', async () => {
+    // `error` is the corruption detector's severity — the most urgent
+    // findings in the system, and they had no filter option at all.
+    renderTab();
+    await flush();
+    const options = Array.from(
+      document.querySelectorAll('#repair-findings-severity-filter option'),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(options).toContain('error');
+  });
+  it('expands when the chevron is clicked', async () => {
+    // It used to be decorative: `.repair-finding-actions` stops propagation
+    // and the chevron carried no handler, so the ONE control that looks like
+    // an expander did nothing and only the row body worked. It has its own
+    // handler now (and still stops propagation, or the row toggle would
+    // immediately undo it).
+    routes({ [FINDINGS]: page([finding({ id: 5 })]) });
+    renderTab();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
+    expect((document.getElementById('repair-detail-5') as HTMLElement).className).toContain(
+      'open',
+    );
     fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
     expect((document.getElementById('repair-detail-5') as HTMLElement).className).not.toContain(
       'open',
