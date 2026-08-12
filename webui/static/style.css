@@ -74489,13 +74489,81 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-watch-own { font-size: 10.5px; font-weight: 700; white-space: nowrap;
     color: #6ee7a0; }
 .chat-watch-own--want { color: rgba(var(--accent-light-rgb), 0.9); }
-/* the picker modal reuses the jukebox vcard look; posters are portrait */
-.chat-watch-vthumb { aspect-ratio: 2 / 3; max-width: 92px; }
-.chat-watch-vcard--picking { outline: 1px solid rgba(var(--accent-rgb), 0.5); }
-.chat-watch-sepick { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-.chat-watch-sepick label { display: flex; align-items: center; gap: 4px;
-    font-size: 11px; color: rgba(255,255,255,0.6); }
-.chat-watch-sein { width: 64px; padding: 5px 8px; font-size: 12.5px; }
+/* ── movie night picker modal — its OWN design. The jukebox's landscape
+   video-card grid (minmax(180px) columns, 16:9 thumbs) cannot hold 2:3
+   posters; these are row cards: poster left, title/meta/overview right. ── */
+.chat-watch-modal { width: min(720px, 94%); max-height: 88%; }
+.chat-watch-searchgrid {
+    margin: 14px 24px 0;
+    display: flex; flex-direction: column; gap: 8px;
+    overflow-y: auto; min-height: 140px; align-content: start;
+}
+.chat-watch-rescard {
+    display: flex; align-items: stretch; gap: 12px;
+    cursor: pointer; text-align: left;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px; padding: 10px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.chat-watch-rescard:hover {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255,255,255,0.05);
+}
+.chat-watch-rescard--picking {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background: rgba(var(--accent-rgb), 0.07);
+}
+.chat-watch-resposter {
+    flex: 0 0 auto; width: 58px; height: 87px;
+    border-radius: 8px; overflow: hidden;
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; opacity: 0.95;
+}
+.chat-watch-resposter img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-watch-resmain {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; flex-direction: column; gap: 4px; justify-content: center;
+}
+.chat-watch-restitle {
+    font-size: 13.5px; font-weight: 700; color: rgba(255,255,255,0.94);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-watch-resyear { font-weight: 500; font-size: 12px; color: rgba(255,255,255,0.45); margin-left: 6px; }
+.chat-watch-resmeta { display: flex; align-items: center; gap: 8px; font-size: 11px;
+    color: rgba(255,255,255,0.5); flex-wrap: wrap; }
+.chat-watch-reskind {
+    font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em;
+    padding: 2px 7px; border-radius: 5px;
+    background: rgba(var(--accent-rgb), 0.18); color: rgba(var(--accent-light-rgb), 0.95);
+}
+.chat-watch-reskind--show { background: rgba(151, 117, 250, 0.16); color: #c9b8ff; }
+.chat-watch-resover {
+    font-size: 11.5px; line-height: 1.45; color: rgba(255,255,255,0.42);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* the affordance whispers until you hover — the whole row is the button */
+.chat-watch-resact {
+    flex: 0 0 auto; align-self: center; white-space: nowrap;
+    font-size: 11.5px; font-weight: 600; color: rgba(var(--accent-light-rgb), 0.9);
+    opacity: 0; transition: opacity 0.15s ease;
+}
+.chat-watch-rescard:hover .chat-watch-resact,
+.chat-watch-rescard--picking .chat-watch-resact { opacity: 1; }
+.chat-watch-sepick {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+.chat-watch-sepick label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: rgba(255,255,255,0.55);
+}
+.chat-watch-sein { width: 70px; padding: 7px 10px; font-size: 13px; text-align: center; }
+.chat-watch-resnote { padding: 30px 0; text-align: center; font-size: 12.5px;
+    color: rgba(255,255,255,0.4); }
 /* the jukebox control bar rides the page header's right side */
 .chat-page-head { display: flex; align-items: center; justify-content: space-between;
     gap: 18px; flex-wrap: wrap; }

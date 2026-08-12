@@ -5168,6 +5168,8 @@
         if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
         var watchSearchForm = q('[data-chat-watch-searchform]');
         if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
+        var watchSearchIn = q('[data-chat-watch-searchinput]');
+        if (watchSearchIn) watchSearchIn.addEventListener('input', _watchQueueSearch);
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -6404,70 +6406,103 @@
         var ov = q('[data-chat-watch-modal]');
         if (!ov) return;
         ov.hidden = false;
+        var grid = q('[data-chat-watch-searchgrid]');
+        if (grid && !state.watch.searchResults.length) grid.innerHTML = _watchResultCards();
         var inp = q('[data-chat-watch-searchinput]');
-        if (inp) inp.focus();
+        if (inp) { inp.focus(); inp.select(); }
     }
 
     function _closeWatchModal() {
         var ov = q('[data-chat-watch-modal]');
         if (ov) ov.hidden = true;
+        if (_watchSearchTimer) { clearTimeout(_watchSearchTimer); _watchSearchTimer = null; }
+        _watchSearchSeq += 1;                  // orphan any in-flight response
         state.watch.searchResults = [];
         state.watch.pickShow = -1;
     }
 
     function _watchResultCards() {
         var results = state.watch.searchResults;
-        if (!results.length) return '<div class="chat-jbx-meta">Search for a movie or a show to nominate.</div>';
+        if (!results.length) {
+            return '<div class="chat-watch-resnote">Type at least two letters — movies and shows appear as you type.</div>';
+        }
         return results.map(function (r, i) {
             var isShow = r.kind === 'show';
             var picking = state.watch.pickShow === i;
-            return '<div class="chat-jbx-vcard chat-watch-vcard' + (picking ? ' chat-watch-vcard--picking' : '') + '"' +
+            var rating = (typeof r.rating === 'number' && r.rating > 0) ? r.rating.toFixed(1) : '';
+            return '<div class="chat-watch-rescard' + (picking ? ' chat-watch-rescard--picking' : '') + '"' +
                 ' role="button" tabindex="0" data-chat-watch-nom="' + i + '">' +
-                '<div class="chat-jbx-vthumb chat-watch-vthumb">' +
+                '<div class="chat-watch-resposter">' +
                     ((r.poster && /^https:\/\//.test(r.poster))
-                        ? '<img src="' + attr(r.poster) + '" alt="" loading="lazy">'
-                        : '<div class="chat-watch-poster--ph">🎬</div>') +
+                        ? '<img src="' + attr(r.poster) + '" alt="" loading="lazy">' : '🎬') +
                 '</div>' +
-                '<div class="chat-jbx-vinfo">' +
-                    '<div class="chat-jbx-vtitle" title="' + attr(r.title || '') + '">' + esc(r.title || '') + '</div>' +
-                    '<div class="chat-jbx-vchannel">' + (isShow ? 'Show' : 'Movie') +
-                        (r.year ? ' · ' + esc(String(r.year)) : '') +
-                        (r.library_id ? ' · <span class="chat-watch-own">✓ in your library</span>' : '') +
+                '<div class="chat-watch-resmain">' +
+                    '<div class="chat-watch-restitle" title="' + attr(r.title || '') + '">' + esc(r.title || '') +
+                        (r.year ? '<span class="chat-watch-resyear">' + esc(String(r.year)) + '</span>' : '') +
                     '</div>' +
+                    '<div class="chat-watch-resmeta">' +
+                        '<span class="chat-watch-reskind' + (isShow ? ' chat-watch-reskind--show' : '') + '">' +
+                            (isShow ? 'SHOW' : 'MOVIE') + '</span>' +
+                        (rating ? '<span>★ ' + rating + '</span>' : '') +
+                        (r.library_id ? '<span class="chat-watch-own">✓ in your library</span>' : '') +
+                    '</div>' +
+                    (r.overview ? '<div class="chat-watch-resover">' + esc(r.overview) + '</div>' : '') +
                     (picking
                         ? '<div class="chat-watch-sepick">' +
-                              '<label>S <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
-                              '<label>E <input class="chat-input chat-watch-sein" data-chat-watch-se-e type="number" min="0" max="9999" value="1"></label>' +
-                              '<button class="chat-send-btn" type="button" data-chat-watch-nomshow="' + i + '">Nominate</button>' +
+                              '<label>Season <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
+                              '<label>Episode <input class="chat-input chat-watch-sein" data-chat-watch-se-e type="number" min="0" max="9999" value="1"></label>' +
+                              '<button class="chat-send-btn" type="button" data-chat-watch-nomshow="' + i + '">Nominate S·E</button>' +
                           '</div>'
                         : '') +
                 '</div>' +
+                '<span class="chat-watch-resact">' +
+                    (picking ? '' : (isShow ? 'Pick episode ▸' : 'Nominate ▸')) + '</span>' +
             '</div>';
         }).join('');
     }
 
+    // Live search: debounced as-you-type, with a sequence token so a slow
+    // early response can never clobber the results of a later keystroke.
+    var _watchSearchTimer = null;
+    var _watchSearchSeq = 0;
+
+    function _watchQueueSearch() {
+        if (_watchSearchTimer) clearTimeout(_watchSearchTimer);
+        _watchSearchTimer = setTimeout(_watchSearchSubmit, 300);
+    }
+
     function _watchSearchSubmit() {
+        if (_watchSearchTimer) { clearTimeout(_watchSearchTimer); _watchSearchTimer = null; }
         var inp = q('[data-chat-watch-searchinput]');
         var grid = q('[data-chat-watch-searchgrid]');
-        if (!inp || state.watch.searching) return;
+        if (!inp) return;
         var qtext = String(inp.value || '').trim();
-        if (!qtext) return;
-        state.watch.searching = true;
-        state.watch.pickShow = -1;
-        if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Searching…</div>';
+        var seq = ++_watchSearchSeq;
+        if (qtext.length < 2) {
+            state.watch.searchResults = [];
+            state.watch.pickShow = -1;
+            if (grid) grid.innerHTML = _watchResultCards();
+            return;
+        }
+        // Empty grid gets a searching note; existing results stay put until
+        // the fresh ones land (no flicker while typing).
+        if (grid && !state.watch.searchResults.length) {
+            grid.innerHTML = '<div class="chat-watch-resnote">Searching…</div>';
+        }
         getJSON('/api/video/search?q=' + encodeURIComponent(qtext)).then(function (res) {
-            state.watch.searching = false;
+            if (seq !== _watchSearchSeq) return;          // a newer keystroke owns the grid
+            state.watch.pickShow = -1;
             var results = ((res.ok && res.body.results) || []).filter(function (r) {
                 return (r.kind === 'movie' || r.kind === 'show') && r.tmdb_id;
             });
             state.watch.searchResults = results;
             if (grid) grid.innerHTML = results.length ? _watchResultCards() :
-                '<div class="chat-jbx-meta">' +
+                '<div class="chat-watch-resnote">' +
                 (res.status === 403 ? 'Video access is disabled for this profile.'
-                                    : 'Nothing found — try different words.') + '</div>';
+                                    : 'Nothing found for “' + esc(qtext) + '”.') + '</div>';
         }).catch(function () {
-            state.watch.searching = false;
-            if (grid) grid.innerHTML = '<div class="chat-jbx-meta">Search failed — try again.</div>';
+            if (seq !== _watchSearchSeq) return;
+            if (grid) grid.innerHTML = '<div class="chat-watch-resnote">Search failed — try again.</div>';
         });
     }
 
