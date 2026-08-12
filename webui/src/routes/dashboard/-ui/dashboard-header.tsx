@@ -19,7 +19,7 @@
 
 import type { CSSProperties } from 'react';
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { HeaderPill, HeaderPillId } from '../-dash.header';
 
@@ -511,11 +511,23 @@ function HelloStrip({
     scanCountdown: scanCountdown ?? null,
   });
 
+  // The active profile's name, mirrored by init.js (set before the app
+  // mounts, so the plain read is fresh); the event re-reads it on an
+  // in-session profile switch. The greeting's text-transform lowercases it
+  // into the strip's voice.
+  const [profileName, setProfileName] = useState((window._currentProfileName ?? '').trim());
+  useEffect(() => {
+    const onProfileChange = () => setProfileName((window._currentProfileName ?? '').trim());
+    window.addEventListener('ss:webui-profile-context-changed', onProfileChange);
+    return () => window.removeEventListener('ss:webui-profile-context-changed', onProfileChange);
+  }, []);
+
+  const greeting = greetingForHour(new Date().getHours());
   return (
     <div className="header-text header-hello">
       <h2 className="hello-greeting">
         <img src="/static/dashboard.png" className="page-header-icon" alt="" />
-        <span>{greetingForHour(new Date().getHours())}</span>
+        <span>{profileName ? `${greeting}, ${profileName}` : greeting}</span>
       </h2>
       <div className="hello-stats">
         {chips.map((chip) => (

@@ -5,6 +5,7 @@ import {
   fetchFreshReleases,
   fetchRecentlyAdded,
   fileBadge,
+  openArtistFromRail,
   openFreshRelease,
   relativeAge,
 } from './-dash.content';
@@ -222,5 +223,45 @@ describe('fetchers', () => {
     });
     expect(toast).toHaveBeenCalledWith(expect.stringContaining('No spotify album ID'), 'error');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('openArtistFromRail', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as { navigateToPage?: unknown }).navigateToPage;
+  });
+
+  it('a known library id jumps straight to the artist page — no fetch', async () => {
+    const nav = vi.fn();
+    window.navigateToPage = nav as never;
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    await openArtistFromRail({ name: 'Aphex Twin', libraryArtistId: 'art_1' });
+    expect(nav).toHaveBeenCalledWith('artist-detail', { artistId: 'art_1', artistName: 'Aphex Twin' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolves an exact library name match (case-insensitive)', async () => {
+    const nav = vi.fn();
+    window.navigateToPage = nav as never;
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({ artists: [{ id: 7, name: 'Aphex Twin' }] }),
+    })));
+    await openArtistFromRail({ name: 'aphex twin' });
+    expect(nav).toHaveBeenCalledWith('artist-detail', { artistId: 7, artistName: 'Aphex Twin' });
+  });
+
+  it('falls to the provider id when the library misses', async () => {
+    const nav = vi.fn();
+    window.navigateToPage = nav as never;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ artists: [] }) })));
+    await openArtistFromRail({ name: 'Fresh Face', spotifyArtistId: 'sp9' });
+    expect(nav).toHaveBeenCalledWith('artist-detail', {
+      artistId: 'sp9',
+      artistSource: 'spotify',
+      artistName: 'Fresh Face',
+      forceReload: true,
+    });
   });
 });

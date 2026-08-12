@@ -28,6 +28,15 @@ describe('sourceLabel', () => {
 });
 
 describe('toRecentPlays', () => {
+  it('carries the library artist id through when the play was matched', () => {
+    const plays = toRecentPlays(
+      [{ title: 'T', artist: 'A', played_at: '2026-08-12 11:00:00', artist_db_id: 'art_9' }],
+      NOW,
+      5,
+    );
+    expect(plays[0].artistDbId).toBe('art_9');
+  });
+
   it('shapes rows, drops untitled ones, and respects the limit', () => {
     const rows = [
       { title: 'Windowlicker', artist: 'Aphex Twin', played_at: '2026-08-12 11:00:00', server_source: 'plex', image_url: '/art/1' },
@@ -44,6 +53,7 @@ describe('toRecentPlays', () => {
       imageUrl: '/art/1',
       ago: '1h ago',
       source: 'Plex',
+      artistDbId: null,
     });
     // The blank-titled row is dropped, so Flim is second despite the limit.
     expect(plays[1].title).toBe('Flim');

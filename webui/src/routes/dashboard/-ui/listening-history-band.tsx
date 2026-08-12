@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
+import { openArtistFromRail } from '../-dash.content';
 import { toRecentPlays } from '../-dash.listening';
 
 const LIMIT = 12;
@@ -81,7 +82,24 @@ export function ListeningHistoryBand() {
             {play.ago && <div className="dash-rail-caption">{play.ago}</div>}
             <div className="ya-card-info">
               <div className="ya-card-name">{play.title}</div>
-              <div className="ya-card-sub">{play.artist}</div>
+              {play.artist ? (
+                <button
+                  type="button"
+                  className="ya-card-sub ya-card-sub--link"
+                  title={`Open ${play.artist}`}
+                  onClick={(event) => {
+                    // The card body goes to the stats page; the artist
+                    // line goes to the ARTIST — never both.
+                    event.stopPropagation();
+                    void openArtistFromRail({
+                      name: play.artist,
+                      libraryArtistId: play.artistDbId,
+                    });
+                  }}
+                >
+                  {play.artist}
+                </button>
+              ) : null}
             </div>
           </div>
         ))}

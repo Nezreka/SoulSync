@@ -505,6 +505,10 @@ function notifyProfileContextChanged() {
 
 function setCurrentProfile(profile) {
     currentProfile = profile;
+    // Script-scoped let — unreachable from React modules, so the name is
+    // mirrored (the window._socketConnected pattern). The dashboard's
+    // hello strip greets by it.
+    window._currentProfileName = (profile && profile.name) || '';
     updateProfileIndicator();
     notifyProfileContextChanged();
 }

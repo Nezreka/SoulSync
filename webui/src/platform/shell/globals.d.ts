@@ -453,6 +453,10 @@ declare global {
      *  #enhanced-main-results-area (shared-helpers.js). The React search page
      *  calls it on mount because it recreates that container each visit. */
     showSearchDownloadBubbles?: () => void;
+    /** Active profile's display name, mirrored by init.js setCurrentProfile
+     *  (the script-scoped `currentProfile` is unreachable from modules).
+     *  Updated on profile switch alongside ss:webui-profile-context-changed. */
+    _currentProfileName?: string;
     /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */
     getFileExtension?: (filename: string) => string;
     /** media-player.js — can this browser play that file at all? */

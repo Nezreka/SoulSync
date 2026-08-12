@@ -198,7 +198,7 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
         cursor.execute(
             """
             SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
-                   lh.server_source, al.thumb_url
+                   lh.server_source, al.thumb_url, t.artist_id
             FROM listening_history lh
             LEFT JOIN tracks t ON t.id = lh.db_track_id
             LEFT JOIN albums al ON al.id = t.album_id
@@ -220,6 +220,9 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
             'duration_ms': row[4],
             'server_source': row[5],
             'image_url': (image_url_fixer(row[6]) if image_url_fixer else row[6]) if row[6] else None,
+            # The library artist PK when the play was matched — lets the
+            # dashboard band jump straight to the artist page, no name lookup.
+            'artist_db_id': row[7],
         }
         for row in rows
     ]

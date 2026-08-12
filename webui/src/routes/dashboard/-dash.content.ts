@@ -51,6 +51,62 @@ interface RecentlyAddedRow {
   play_file_path?: string;
 }
 
+/**
+ * Open an artist from a rail card's name line.
+ *
+ * The ladder mirrors api-monitor's _navigateToArtistFromWishlist: a known
+ * LIBRARY id wins (the rich page, no provider needed); otherwise resolve the
+ * name against the library and jump on an exact match; otherwise a provider
+ * id (fresh releases carry them) opens the source-only artist page; the
+ * pre-filled Search is strictly the last resort.
+ */
+export async function openArtistFromRail(input: {
+  name: string;
+  libraryArtistId?: number | string | null;
+  spotifyArtistId?: string | null;
+}): Promise<void> {
+  const name = (input.name ?? '').trim();
+  if (input.libraryArtistId != null && input.libraryArtistId !== '') {
+    void window.navigateToPage?.('artist-detail', {
+      artistId: input.libraryArtistId,
+      artistName: name,
+    });
+    return;
+  }
+  if (name) {
+    try {
+      const response = await fetch(`/api/library/artists?search=${encodeURIComponent(name)}&limit=5`);
+      const data = (await response.json()) as { artists?: Array<{ id?: number | string; name?: string }> };
+      const lower = name.toLowerCase();
+      const exact = (data.artists ?? []).find((a) => (a.name ?? '').toLowerCase() === lower);
+      if (exact && exact.id != null) {
+        void window.navigateToPage?.('artist-detail', { artistId: exact.id, artistName: exact.name });
+        return;
+      }
+    } catch {
+      // library unreachable — the ladder keeps descending
+    }
+  }
+  if (input.spotifyArtistId) {
+    void window.navigateToPage?.('artist-detail', {
+      artistId: input.spotifyArtistId,
+      artistSource: 'spotify',
+      artistName: name,
+      forceReload: true,
+    });
+    return;
+  }
+  // Last resort: the pre-filled Search (the wishlist resolver's fallback).
+  void window.navigateToPage?.('search');
+  setTimeout(() => {
+    const searchInput = document.getElementById('enhanced-search-input') as HTMLInputElement | null;
+    if (searchInput && name) {
+      searchInput.value = name;
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }, 350);
+}
+
 export async function fetchRecentlyAdded(limit = 20): Promise<RecentlyAddedAlbum[]> {
   try {
     const response = await fetch(`/api/library/recently-added?limit=${limit}`);

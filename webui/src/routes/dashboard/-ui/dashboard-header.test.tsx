@@ -121,6 +121,21 @@ describe('the artefact differential', () => {
   });
 });
 
+describe('the hello strip', () => {
+  it('greets by the mirrored profile name, and plainly without one', async () => {
+    window._currentProfileName = 'BoulderBadgeDad';
+    const view = await mountHeader();
+    const greeting = view.container.querySelector('.hello-greeting span')!;
+    expect(greeting.textContent).toMatch(/^(good (morning|afternoon|evening)|up late\?), BoulderBadgeDad$/);
+    view.unmount();
+
+    delete window._currentProfileName;
+    const bare = await mountHeader();
+    expect(bare.container.querySelector('.hello-greeting span')!.textContent).toMatch(
+      /^(good (morning|afternoon|evening)|up late\?)$/,
+    );
+  });
+});
 describe('state rendering', () => {
   it('writes the pill state class onto the button and the strings into the tooltip', async () => {
     const view = await mountHeader();

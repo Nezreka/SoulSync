@@ -148,6 +148,7 @@ def test_get_recent_tracks_returns_full_shape(db):
         'server_source': "plex",
         # No db_track_id on the row -> the album-art join misses -> None.
         'image_url': None,
+        'artist_db_id': None,
     }]
 
 
@@ -163,6 +164,7 @@ def test_get_recent_tracks_joins_album_art_through_db_track_id(db, fix_url):
                   db_track_id=tid)
     rows = queries.get_recent_tracks(db, limit=1, image_url_fixer=fix_url)
     assert rows[0]['image_url'] == "FIXED::local://thumb.jpg"
+    assert rows[0]['artist_db_id'] == aid
 
 
 # ---------------------------------------------------------------------------

@@ -9455,6 +9455,19 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
     display: inline-block;
 }
 
+/* Artist line on rail cards — its own hit-target straight to the artist
+   page. A <button> now, so undo the UA chrome and keep the sub's look;
+   the underline on hover is the only tell. */
+.ya-card-sub--link {
+    background: none; border: none; padding: 0; margin: 0;
+    font: inherit; color: inherit; text-align: left; cursor: pointer;
+    display: block; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ya-card-sub--link:hover { text-decoration: underline; color: #fff; }
+/* Six buttons now — they wrap instead of crushing the title. */
+.library-status-actions { flex-wrap: wrap; row-gap: 6px; }
+
 .header-actions {
     display: flex;
     gap: 10px;

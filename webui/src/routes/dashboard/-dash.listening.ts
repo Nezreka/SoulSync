@@ -17,6 +17,7 @@ export interface RecentPlayRow {
   played_at?: string | null;
   server_source?: string | null;
   image_url?: string | null;
+  artist_db_id?: number | string | null;
 }
 
 export interface RecentPlay {
@@ -27,6 +28,8 @@ export interface RecentPlay {
   /** '' until the timestamp parses — the row renders without a time. */
   ago: string;
   source: string;
+  /** Library artist PK when the play was matched; null → resolve by name. */
+  artistDbId: number | string | null;
 }
 
 /** "just now" → "3h ago" → "2d ago". Coarse on purpose: the band is a vibe,
@@ -70,6 +73,7 @@ export function toRecentPlays(rows: RecentPlayRow[], now: Date, limit: number): 
       imageUrl: row.image_url || null,
       ago: timeAgo(row.played_at, now),
       source: sourceLabel(row.server_source),
+      artistDbId: row.artist_db_id ?? null,
     });
     if (out.length >= limit) break;
   }

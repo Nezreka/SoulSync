@@ -82,6 +82,10 @@ describe('the strip shape', () => {
       'library-status-subtitle',
       'library-status-scan-btn',
       'library-status-deep-btn',
+      'library-status-browse-btn',
+      'library-status-verify-btn',
+      'library-status-repair-btn',
+      'library-status-backup-btn',
       // the four-stat row retired with the header's hello strip —
       // albums + db size live in the subtitle now
       'library-status-progress',

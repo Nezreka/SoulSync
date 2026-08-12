@@ -27,6 +27,7 @@ import {
   fetchFreshReleases,
   fetchRecentlyAdded,
   fileBadge,
+  openArtistFromRail,
   openFreshRelease,
   relativeAge,
 } from '../-dash.content';
@@ -44,10 +45,12 @@ interface RailCardProps {
   /** Bottom file line ("FLAC · soulseek"). */
   badge?: string;
   titleAttr?: string;
+  /** Makes the sub (artist) line its own hit-target — straight to the artist page. */
+  onArtistClick?: () => void;
   onOpen: () => void;
 }
 
-function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titleAttr, onOpen }: RailCardProps) {
+function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titleAttr, onOpen, onArtistClick }: RailCardProps) {
   // Fallback ladder, one rung per failure: cover -> the artist's art -> ♫.
   // History thumb URLs can be stale or media-server-authed and die in the
   // browser even when they exist, so the second image matters as much as the
@@ -72,7 +75,23 @@ function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titl
       {caption && <div className="dash-rail-caption">{caption}</div>}
       <div className="ya-card-info">
         <div className="ya-card-name">{name}</div>
-        <div className="ya-card-sub">{sub}</div>
+        {onArtistClick ? (
+          <button
+            type="button"
+            className="ya-card-sub ya-card-sub--link"
+            title={`Open ${sub}`}
+            onClick={(event) => {
+              // The card's own onOpen plays/opens the ALBUM — the artist
+              // line must not trigger both.
+              event.stopPropagation();
+              onArtistClick();
+            }}
+          >
+            {sub}
+          </button>
+        ) : (
+          <div className="ya-card-sub">{sub}</div>
+        )}
         {badge && <div className="dash-rail-badge">{badge}</div>}
       </div>
     </div>
@@ -155,6 +174,7 @@ export function ContentBand() {
               caption={relativeAge(album.addedAt, now)}
               badge={fileBadge(album.quality, album.source)}
               titleAttr={`Play ${album.albumName} — ${album.artistName}`}
+              onArtistClick={() => void openArtistFromRail({ name: album.artistName })}
               onOpen={() => {
                 if (!album.playFilePath) return;
                 // id -1 is truthy, so playLibraryTrack canonicalises against
@@ -179,6 +199,12 @@ export function ContentBand() {
               sub={release.artistName}
               caption={release.releaseDate}
               badge={release.trackCount ? `${release.trackCount} tracks` : undefined}
+              onArtistClick={() =>
+                void openArtistFromRail({
+                  name: release.artistName,
+                  spotifyArtistId: release.spotifyArtistId || null,
+                })
+              }
               onOpen={() => void openFreshRelease(release)}
             />
           ))}

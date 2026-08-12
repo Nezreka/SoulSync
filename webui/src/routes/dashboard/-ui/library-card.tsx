@@ -275,6 +275,27 @@ function SettingsLink() {
   );
 }
 
+/** One-click db backup — the same POST the Tools backup manager makes, with
+ *  the strip's own confirm + toasts. Never window.confirm (house rule). */
+async function backupNow(): Promise<void> {
+  const confirmed = await window.showConfirmDialog?.({
+    title: 'Back Up Database',
+    message:
+      'Creates a snapshot of the SoulSync database (library, wishlist, history, enrichment).\n\n' +
+      'Backups are managed on the Tools page. Continue?',
+  });
+  if (!confirmed) return;
+  window.showToast?.('Backup started...', 'info');
+  try {
+    const response = await fetch('/api/database/backup', { method: 'POST' });
+    const data = (await response.json()) as { success?: boolean; error?: string };
+    if (data.success) window.showToast?.('Database backup created', 'success');
+    else window.showToast?.(data.error || 'Backup failed', 'error');
+  } catch (error) {
+    window.showToast?.(`Backup failed: ${(error as Error).message}`, 'error');
+  }
+}
+
 export function LibraryCard() {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
@@ -354,6 +375,55 @@ export function LibraryCard() {
                   <line x1="8" y1="11" x2="14" y2="11" />
                 </svg>
                 Deep Scan
+              </button>
+              {/* The strip went purely operational — these are the rest of the
+                  library's verbs (Boulder picked all four): go there, check
+                  the matches, repair it, back it up. */}
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-browse-btn"
+                onClick={() => void window.navigateToPage?.('library')}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18M3 12h18M3 18h18" />
+                </svg>
+                Browse
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-verify-btn"
+                title="Open the enrichment manager's Verify Matches repair flow"
+                onClick={() => window.openEnrichmentManager?.()}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                Verify Matches
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-repair-btn"
+                title="Open the Tools maintenance center"
+                onClick={() => void window.navigateToPage?.('tools')}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                </svg>
+                Repair
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-backup-btn"
+                title="Back up the SoulSync database now"
+                onClick={() => void backupNow()}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <ellipse cx="12" cy="5" rx="9" ry="3" />
+                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                </svg>
+                Backup
               </button>
             </div>
           </div>
