@@ -41883,6 +41883,13 @@ def _emit_rate_monitor_loop():
             logger.debug(f"Error emitting rate monitor: {e}")
 
 
+# Idle-worker stats cache for the enrichment socket loop: name → (monotonic,
+# status). Emits still happen every 2s (the UI heartbeat is untouched) — this
+# only spaces out the DATABASE reads behind them for workers that are idle.
+_enrich_stats_cache: dict = {}
+_ENRICH_IDLE_STATS_TTL = 30.0
+
+
 def _emit_enrichment_status_loop():
     """Background thread that pushes all enrichment worker statuses every 2 seconds.
     Also auto-pauses rate-limited enrichment workers during active downloads."""
@@ -41960,10 +41967,34 @@ def _emit_enrichment_status_loop():
                 worker = get_worker()
                 if worker is None:
                     continue
-                status = worker.get_stats()
+                # Idle workers don't earn fresh aggregates every 2s: each
+                # get_stats() is ~6 whole-table scans of the (10 GB) library
+                # db, and 18 workers made this loop ~108 scans per tick,
+                # forever, while any tab was open (perf sweep, Aug 2026). A
+                # RUNNING worker's numbers actually move, so it stays on the
+                # 2s beat; an idle one re-reads every 30s. Transitions are
+                # caught instantly via the worker's IN-MEMORY running/paused
+                # attributes (free to read), so starting or pausing a worker
+                # never shows stale for even one tick.
+                now_mono = time.monotonic()
+                hit = _enrich_stats_cache.get(name)
+                fresh_needed = (
+                    hit is None
+                    or hit[1].get('running')
+                    or getattr(worker, 'running', False) != bool(hit[1].get('running'))
+                    or getattr(worker, 'paused', False) != bool(hit[1].get('paused'))
+                    or now_mono - hit[0] >= _ENRICH_IDLE_STATS_TTL
+                )
+                if fresh_needed:
+                    status = worker.get_stats()
+                    _enrich_stats_cache[name] = (now_mono, status)
+                else:
+                    status = hit[1]
                 # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
+                else:
+                    status.pop('yield_reason', None)
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")

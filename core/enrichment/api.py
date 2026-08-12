@@ -103,6 +103,13 @@ def _add_yield_override(service: EnrichmentService) -> None:
 # them. A short per-service cache caps the cost at one stats read per service
 # per window no matter how many polls pile up. Time source injectable for tests.
 _STATUS_TTL_SECONDS = 2.0
+# Idle services keep their answer far longer: get_stats() runs ~6 whole-table
+# aggregates against a multi-GB library db, and the dashboard's 10s fallback
+# poll re-collected all ~18 services through this cache with a 2s TTL — i.e.
+# always cold (perf sweep, Aug 2026). A RUNNING service's numbers move, so it
+# keeps the short TTL; pause/resume still reflect instantly because those
+# endpoints call _invalidate_status_cache.
+_STATUS_IDLE_TTL_SECONDS = 30.0
 _status_cache: dict = {}          # service_id -> (monotonic_ts, stats_dict)
 _status_cache_lock = threading.Lock()
 
@@ -111,8 +118,10 @@ def _cached_stats(service: EnrichmentService, now: Optional[float] = None) -> di
     t = time.monotonic() if now is None else now
     with _status_cache_lock:
         hit = _status_cache.get(service.id)
-        if hit and t - hit[0] < _STATUS_TTL_SECONDS:
-            return hit[1]
+        if hit:
+            ttl = _STATUS_TTL_SECONDS if hit[1].get('running') else _STATUS_IDLE_TTL_SECONDS
+            if t - hit[0] < ttl:
+                return hit[1]
     worker = service.get_worker()
     stats = service.fallback_status() if worker is None else worker.get_stats()
     with _status_cache_lock:
