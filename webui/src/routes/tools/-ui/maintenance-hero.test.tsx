@@ -65,29 +65,38 @@ afterEach(() => {
 });
 
 describe('hero shell', () => {
-  it('renders the three tabs with Jobs active', async () => {
+  it('offers the four section anchors in scroll order', async () => {
     const { container } = render(<MaintenanceHero />);
     await flush();
-    const tabs = [...container.querySelectorAll('.repair-tab')];
-    expect(tabs.map((tab) => tab.getAttribute('data-tab'))).toEqual([
-      'jobs',
+    const links = [...container.querySelectorAll('.repair-section-link')];
+    expect(links.map((link) => link.getAttribute('data-section'))).toEqual([
+      'health',
       'findings',
+      'operations',
       'history',
     ]);
-    expect(tabs[0].classList.contains('active')).toBe(true);
   });
 
-  it('shows only the active tab panel', async () => {
+  it('renders every section at once — the nav jumps, it does not hide', async () => {
+    // Tabs made the findings you came for a room you had to know to enter,
+    // and nothing on screen told you whether the library was alright at all.
     const { container } = render(<MaintenanceHero />);
     await flush();
-    const panel = (id: string) => container.querySelector(`#${id}`) as HTMLElement;
-    expect(panel('repair-tab-jobs').style.display).toBe('');
-    expect(panel('repair-tab-history').style.display).toBe('none');
+    expect(container.querySelector('#repair-section-health')).not.toBeNull();
+    expect(container.querySelector('#repair-section-findings')).not.toBeNull();
+    expect(container.querySelector('#repair-section-operations')).not.toBeNull();
+    expect(container.querySelector('#repair-section-history')).not.toBeNull();
+  });
 
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
+  it('a nav button scrolls its section into view', async () => {
+    const scrollSpy = vi.fn();
+    const { container } = render(<MaintenanceHero />);
     await flush();
-    expect(panel('repair-tab-jobs').style.display).toBe('none');
-    expect(panel('repair-tab-history').style.display).toBe('');
+    const section = container.querySelector('#repair-section-history') as HTMLElement;
+    section.scrollIntoView = scrollSpy;
+
+    fireEvent.click(container.querySelector('[data-section="history"]') as Element);
+    expect(scrollSpy).toHaveBeenCalled();
   });
 
   it('reflects the master toggle from the status payload', async () => {
@@ -418,12 +427,9 @@ describe('history tab', () => {
     finished_at: '2026-08-03T09:01:00',
   };
 
-  it('loads only when the tab is opened', async () => {
+  it('loads on mount — the hero needs the runs for its trend line too', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    const { container } = render(<MaintenanceHero />);
-    await flush();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/history'))).toBe(false);
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
+    render(<MaintenanceHero />);
     await flush();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/history'))).toBe(true);
   });
@@ -431,8 +437,6 @@ describe('history tab', () => {
   it('renders a completed run with its stat pills', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
     const { container } = render(<MaintenanceHero />);
-    await flush();
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
     await waitFor(() => expect(container.querySelector('.repair-history-entry')).not.toBeNull());
     expect(container.querySelector('.repair-history-dot')?.className).toContain('success');
     expect(container.querySelector('.repair-history-duration')?.textContent).toBe('12.3s');
@@ -443,16 +447,12 @@ describe('history tab', () => {
   it('maps failed to error and anything else to running', async () => {
     routes({ '/api/repair/history': { runs: [{ ...run, status: 'failed' }] } });
     const { container } = render(<MaintenanceHero />);
-    await flush();
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
     await waitFor(() => expect(container.querySelector('.repair-history-dot')).not.toBeNull());
     expect(container.querySelector('.repair-history-dot')?.className).toContain('error');
     cleanup();
 
     routes({ '/api/repair/history': { runs: [{ ...run, status: 'in_progress' }] } });
     const second = render(<MaintenanceHero />);
-    await flush();
-    fireEvent.click(second.container.querySelector('[data-tab="history"]') as Element);
     await waitFor(() =>
       expect(second.container.querySelector('.repair-history-dot')).not.toBeNull(),
     );
@@ -462,8 +462,6 @@ describe('history tab', () => {
   it('says In progress when a run has not finished', async () => {
     routes({ '/api/repair/history': { runs: [{ ...run, finished_at: null }] } });
     const { container } = render(<MaintenanceHero />);
-    await flush();
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
     await waitFor(() => expect(container.querySelector('.repair-history-meta')).not.toBeNull());
     expect(container.querySelector('.repair-history-meta')?.textContent).toContain('In progress');
   });
@@ -471,8 +469,6 @@ describe('history tab', () => {
   it('shows the empty state', async () => {
     routes({ '/api/repair/history': { runs: [] } });
     const { container } = render(<MaintenanceHero />);
-    await flush();
-    fireEvent.click(container.querySelector('[data-tab="history"]') as Element);
     await waitFor(() => expect(screen.getByText('No History Yet')).toBeTruthy());
   });
 });

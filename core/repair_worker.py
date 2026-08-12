@@ -1220,10 +1220,14 @@ class RepairWorker:
         for finding_type, status, severity, count, last_seen in rows:
             group = groups.setdefault(finding_type, {
                 'finding_type': finding_type,
-                'pending': 0, 'resolved': 0, 'dismissed': 0, 'total': 0,
+                'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0,
+                'total': 0,
                 'severity_max': 'info', 'last_seen': None, 'job_ids': [],
             })
-            if status in ('pending', 'resolved', 'dismissed'):
+            # auto_fixed is its own STATUS, not a flavour of resolved — leaving
+            # it out of the buckets made the inbox render an empty group for
+            # every finding the worker had already dealt with itself.
+            if status in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
                 group[status] += count
             group['total'] += count
             # Severity of the group = the worst PENDING row in it. A cleared
@@ -4804,6 +4808,40 @@ class RepairWorker:
         """Ask a running background bulk fix to stop after its current fix."""
         self._bulk_fix_stop_event.set()
         return True
+
+    def dismiss_findings_by_type(self, finding_type: str) -> int:
+        """Dismiss every PENDING finding of one type. Returns count updated.
+
+        The inbox works a whole group at a time, and "dismiss this group" had
+        no honest implementation: the id-based bulk endpoint would have meant
+        paging thousands of ids to the client purely to send them back.
+
+        Pending only. A resolved row is a record of work that actually
+        happened — rewriting it to 'dismissed' would falsify the history the
+        recurrence grace and the run counters both read.
+        """
+        if not finding_type:
+            return 0
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE finding_type = ? AND status = 'pending'
+            """, (finding_type,))
+            conn.commit()
+            count = cursor.rowcount
+            logger.info("Dismissed %d pending findings of type %s", count, finding_type)
+            return count
+        except Exception as e:
+            logger.error("Error dismissing findings of type %s: %s", finding_type, e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
 
     def bulk_update_findings(self, finding_ids: List[int], action: str) -> int:
         """Bulk resolve or dismiss findings. Returns count updated."""

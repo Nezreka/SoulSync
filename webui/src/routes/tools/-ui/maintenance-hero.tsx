@@ -1,10 +1,17 @@
 /**
- * The Library Maintenance hero — master toggle, three tabs, the job list, the run
- * history and (via FindingsTab) the findings pane.
+ * The Library Maintenance hero — master toggle, the four sections (health,
+ * findings, operations, history) and the job list they share.
  *
- * The hero owns the job list because two tabs need it: the Jobs tab renders it,
- * and the Findings tab's filter dropdown is populated from it — which is exactly
- * why the vanilla filled that `<select>` from inside `loadRepairJobs`.
+ * The three tabs are gone. Tabs made the page a set of rooms you had to know
+ * to walk into: the findings you needed to act on were behind a tab that
+ * looked identical to the two you didn't want, and nothing on screen told you
+ * whether your library was actually alright. It is one scroll surface now,
+ * ordered by what you came here to learn: how healthy am I → what is wrong →
+ * what is running → what happened. The nav jumps; it doesn't hide.
+ *
+ * The hero owns the job list because two sections need it: operations renders
+ * it, and the findings filter is populated from it — which is exactly why the
+ * vanilla filled that `<select>` from inside `loadRepairJobs`.
  *
  * Two contracts from the P0 that outlive this file:
  *
@@ -22,9 +29,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { RepairJob, RepairJobProgress, RepairJobRun, RepairTab } from '../-tools.types';
+import type { RepairJob, RepairJobProgress, RepairJobRun, RepairSection } from '../-tools.types';
 
 import {
+  fetchDatabaseStats,
   fetchRepairHistory,
   fetchRepairJobs,
   fetchRepairProgress,
@@ -49,10 +57,16 @@ import {
   repairSettingInput,
 } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
-import { FindingsTab } from './findings-tab';
+import { FindingsSurface } from './findings-surface';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
 const PROGRESS_HIDE_MS = 30000;
+
+/** Optional-called: jsdom has no scrollIntoView, and a nav button is not
+ *  worth failing a render over. */
+function jumpToSection(anchor: string) {
+  document.getElementById(anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+}
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -518,8 +532,15 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
 
 // ── The hero ─────────────────────────────────────────────────────────────────
 
+/** The nav. Jumping, not hiding — every section is on the page already. */
+const SECTIONS: Array<{ id: RepairSection; label: string; anchor: string }> = [
+  { id: 'health', label: 'Health', anchor: 'repair-section-health' },
+  { id: 'findings', label: 'Findings', anchor: 'repair-section-findings' },
+  { id: 'operations', label: 'Operations', anchor: 'repair-section-operations' },
+  { id: 'history', label: 'History', anchor: 'repair-section-history' },
+];
+
 export function MaintenanceHero() {
-  const [tab, setTab] = useState<RepairTab>('jobs');
   const [enabled, setEnabled] = useState(false);
   // Driven by the same /api/repair/status payload as the master toggle. Hidden
   // at zero rather than showing a "0" pill, matching updateRepairStatusFromData.
@@ -528,6 +549,9 @@ export function MaintenanceHero() {
   const [jobsError, setJobsError] = useState(false);
   const [history, setHistory] = useState<RepairJobRun[] | null>(null);
   const [historyError, setHistoryError] = useState(false);
+  /** Library size — the health score is per 1,000 tracks, so 200 orphans in a
+   *  2,000-track library and in a 200,000-track one don't score the same. */
+  const [trackCount, setTrackCount] = useState<number | null>(null);
   const [progress, setProgress] = useState<Record<string, RepairJobProgress>>({});
   const hideTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -588,14 +612,14 @@ export function MaintenanceHero() {
       setFindingsPending(status.findings_pending || 0);
     });
     void loadJobs();
+    void loadHistory();
+    void fetchDatabaseStats().then((stats) => {
+      if (stats) setTrackCount(stats.tracks || 0);
+    });
     void fetchRepairProgress().then((frames) => {
       if (Object.keys(frames).length) setProgress(frames);
     });
-  }, [loadJobs]);
-
-  useEffect(() => {
-    if (tab === 'history') void loadHistory();
-  }, [loadHistory, tab]);
+  }, [loadHistory, loadJobs]);
 
   // A finished panel hides itself after 30s and the list reloads for fresh
   // stats — same contract as the vanilla's _repairProgressHideTimers.
@@ -664,17 +688,17 @@ export function MaintenanceHero() {
         </label>
       </div>
 
-      <div className="repair-tabs">
-        {(['jobs', 'findings', 'history'] as const).map((name) => (
+      <nav className="repair-section-nav" aria-label="Maintenance sections">
+        {SECTIONS.map((section) => (
           <button
-            className={`repair-tab${tab === name ? ' active' : ''}`}
+            className="repair-section-link"
             type="button"
-            data-tab={name}
-            key={name}
-            onClick={() => setTab(name)}
+            data-section={section.id}
+            key={section.id}
+            onClick={() => jumpToSection(section.anchor)}
           >
-            {name === 'jobs' ? 'Jobs' : name === 'findings' ? 'Findings' : 'History'}
-            {name === 'findings' ? (
+            {section.label}
+            {section.id === 'findings' ? (
               <span
                 className="repair-tab-badge"
                 id="repair-findings-tab-badge"
@@ -685,13 +709,17 @@ export function MaintenanceHero() {
             ) : null}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <div
-        className="repair-tab-content"
-        id="repair-tab-jobs"
-        style={{ display: tab === 'jobs' ? '' : 'none' }}
-      >
+      <FindingsSurface
+        jobs={jobs || []}
+        runs={history || []}
+        trackCount={trackCount}
+        onStatusChanged={refreshStatus}
+      />
+
+      <section className="repair-section" id="repair-section-operations">
+        <h4 className="repair-section-title">Maintenance jobs</h4>
         <div className="repair-jobs-list" id="repair-jobs-list">
           {jobsError ? (
             <div className="repair-empty">Error loading jobs</div>
@@ -715,25 +743,10 @@ export function MaintenanceHero() {
             ))
           )}
         </div>
-      </div>
+      </section>
 
-      <div
-        className="repair-tab-content"
-        id="repair-tab-findings"
-        style={{ display: tab === 'findings' ? '' : 'none' }}
-      >
-        <FindingsTab
-          jobs={jobs || []}
-          active={tab === 'findings'}
-          onStatusChanged={refreshStatus}
-        />
-      </div>
-
-      <div
-        className="repair-tab-content"
-        id="repair-tab-history"
-        style={{ display: tab === 'history' ? '' : 'none' }}
-      >
+      <section className="repair-section" id="repair-section-history">
+        <h4 className="repair-section-title">Recent runs</h4>
         <div className="repair-history-list" id="repair-history-list">
           {historyError ? (
             <div className="repair-empty">Error loading history</div>
@@ -749,7 +762,7 @@ export function MaintenanceHero() {
             history.map((run, index) => <HistoryEntry run={run} key={`${run.job_id}-${index}`} />)
           )}
         </div>
-      </div>
+      </section>
 
       {helpJob ? <JobHelpOverlay job={helpJob} onClose={() => setHelpJob(null)} /> : null}
     </div>

@@ -19,7 +19,10 @@ export type LiteralUnion<T extends string> = T | (string & Record<never, never>)
 
 // ── Library Maintenance ──────────────────────────────────────────────────────
 
-export type RepairTab = 'jobs' | 'findings' | 'history';
+/** The four anchors of the maintenance surface, in scroll order. They were
+ *  tabs; tabs hid the findings you came for behind a room you had to know to
+ *  enter, and hid whether the library was alright at all. */
+export type RepairSection = 'health' | 'findings' | 'operations' | 'history';
 
 export type RepairFindingStatus = 'pending' | 'resolved' | 'dismissed';
 
@@ -117,7 +120,10 @@ export interface RepairFindingCounts {
   pending?: number;
   resolved?: number;
   dismissed?: number;
+  /** Its own STATUS, not a flavour of resolved — a sum of the other three
+   *  misses these rows entirely, which is why `total` exists. */
   auto_fixed?: number;
+  total?: number;
   by_job?: Record<
     string,
     { total: number; warning?: number; info?: number; display_name?: string }

@@ -40736,6 +40736,16 @@ def repair_findings_bulk():
         data = request.get_json(silent=True) or {}
         finding_ids = data.get('ids', [])
         action = data.get('action', 'dismiss')
+        finding_type = data.get('finding_type')
+
+        # Whole-group dismiss from the findings inbox. Scoped by TYPE rather
+        # than by id, because the alternative is shipping thousands of ids to
+        # the browser only to post them straight back.
+        if not finding_ids and finding_type:
+            if action != 'dismiss':
+                return jsonify({'error': 'Only dismiss is supported for a type-scoped bulk'}), 400
+            count = repair_worker.dismiss_findings_by_type(finding_type)
+            return jsonify({'success': True, 'updated': count}), 200
 
         if not finding_ids:
             return jsonify({'error': 'No finding IDs provided'}), 400

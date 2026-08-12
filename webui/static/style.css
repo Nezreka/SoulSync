@@ -64166,28 +64166,460 @@ body.max-performance #page-particles-canvas {
     font-weight: 500;
 }
 
-/* Repair tabs on the tools page */
-.tools-maintenance-hero .repair-tabs {
-    margin-bottom: 16px;
+/* ── The maintenance surface: one scroll, four sections ──
+   The three tabs are gone. The hero itself is the scroll container so the
+   section nav can stick to the top of it — and so the page below (the tool
+   cards) stays reachable however much maintenance work is outstanding. */
+.tools-maintenance-hero {
+    max-height: min(84vh, 1040px);
+    overflow: hidden auto;
+    scroll-behavior: smooth;
 }
 
-/* The tab body had only a min-height, so it grew to the height of its
-   content: 30 findings ~2,500px, 100 ~8,400px, with the filters and the
-   bulk bar scrolled off the top and unreachable. Bound it and let the
-   LIST scroll inside, with its controls pinned. */
-.tools-maintenance-hero .repair-tab-content {
-    min-height: 200px;
-    max-height: min(72vh, 900px);
-    overflow-y: auto;
-}
-/* Sticky inside that scroller — the filters, Select All and the bulk bar
-   (all children of the toolbar) follow the rows they act on instead of
-   scrolling away after a few. Opaque, or rows ghost through them. */
-.tools-maintenance-hero .repair-findings-toolbar {
+.repair-section-nav {
     position: sticky;
     top: 0;
-    z-index: 3;
+    z-index: 5;
+    display: flex;
+    gap: 6px;
+    padding: 8px 0;
+    margin-bottom: 14px;
     background: #17171b;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.repair-section-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 13px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.repair-section-link:hover {
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.repair-section {
+    margin-top: 26px;
+    scroll-margin-top: 52px;   /* clear the sticky nav when jumped to */
+}
+
+.repair-section-title {
+    margin: 0 0 12px 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Library health hero ── */
+.repair-health {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    flex-wrap: wrap;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 14px;
+    background:
+        radial-gradient(120% 160% at 0% 0%, rgba(var(--accent-rgb), 0.09), transparent 60%),
+        rgba(255, 255, 255, 0.02);
+    scroll-margin-top: 52px;
+}
+
+.repair-health-score-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 96px;
+}
+
+.repair-health-score {
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -2px;
+    font-variant-numeric: tabular-nums;
+    background: linear-gradient(120deg, #fff 20%, rgba(255, 255, 255, 0.55) 50%, #fff 80%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: page-title-shimmer 6s ease-in-out infinite;
+}
+
+.repair-health-band {
+    margin-top: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.repair-health-band.healthy { color: #22c55e; }
+.repair-health-band.attention { color: #f59e0b; }
+.repair-health-band.unhealthy { color: #f44336; }
+
+.repair-health-body {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.repair-health-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 9px;
+}
+
+/* Each segment is one finding type, sized by its WEIGHTED share — otherwise
+   three corrupt files vanish behind four hundred missing covers. */
+.repair-health-bar {
+    display: flex;
+    gap: 2px;
+    height: 12px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.repair-health-seg {
+    min-width: 6px;
+    height: 100%;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: filter 0.15s, transform 0.15s;
+}
+
+.repair-health-seg:hover { filter: brightness(1.35); }
+.repair-health-seg.error { background: #f44336; }
+.repair-health-seg.warning { background: #f59e0b; }
+.repair-health-seg.info { background: rgba(var(--accent-rgb), 0.45); }
+
+.repair-health-bar-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.3);
+    font-style: italic;
+}
+
+.repair-health-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 11px;
+}
+
+.repair-health-fix-safe {
+    padding: 7px 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.repair-health-fix-safe:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.24); }
+.repair-health-fix-safe:disabled { opacity: 0.35; cursor: default; }
+
+.repair-health-actions-note {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.repair-health-trend {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: rgba(var(--accent-rgb), 0.7);
+}
+
+.repair-health-trend-label {
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Status segmented control ── */
+.repair-status-segments {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.repair-status-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.repair-status-seg:hover { color: #fff; }
+
+.repair-status-seg.active {
+    background: rgba(var(--accent-rgb), 0.14);
+    color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+}
+
+.repair-status-seg-count {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.repair-status-seg.active .repair-status-seg-count { color: rgba(255, 255, 255, 0.75); }
+
+.repair-findings-search {
+    flex: 1 1 180px;
+    min-width: 140px;
+    padding: 6px 11px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    font-size: 12px;
+}
+
+.repair-findings-search::placeholder { color: rgba(255, 255, 255, 0.28); }
+
+.repair-search-note {
+    padding: 9px 13px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.07);
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+/* ── The findings inbox ── */
+.repair-inbox {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.repair-inbox-group {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-left: 3px solid rgba(255, 255, 255, 0.12);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+    scroll-margin-top: 60px;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.repair-inbox-group.critical { border-left-color: #f44336; }
+.repair-inbox-group.warning { border-left-color: #f59e0b; }
+.repair-inbox-group.info { border-left-color: rgba(var(--accent-rgb), 0.5); }
+.repair-inbox-group.open { background: rgba(255, 255, 255, 0.035); }
+
+.repair-inbox-head {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 15px;
+    cursor: pointer;
+}
+
+.repair-inbox-head:hover { background: rgba(255, 255, 255, 0.02); }
+
+.repair-inbox-sev {
+    font-size: 15px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.repair-inbox-count {
+    min-width: 58px;
+    font-size: 24px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.8px;
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.repair-inbox-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.repair-inbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.repair-inbox-risk {
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    background: rgba(244, 67, 54, 0.1);
+    color: #f88;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.repair-inbox-blurb {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repair-inbox-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+}
+
+.repair-inbox-btn {
+    padding: 6px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.13);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.repair-inbox-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.22); }
+.repair-inbox-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Destructive verbs are outlined, not filled — they should never be the
+   most clickable thing in the row. */
+.repair-inbox-btn.destructive {
+    border-color: rgba(244, 67, 54, 0.4);
+    background: rgba(244, 67, 54, 0.08);
+    color: #ffb3ad;
+}
+
+.repair-inbox-btn.destructive:hover:not(:disabled) { background: rgba(244, 67, 54, 0.16); }
+
+.repair-inbox-btn.ghost {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.repair-inbox-btn.ghost:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+
+.repair-inbox-expand {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 10px;
+    cursor: pointer;
+    transition: transform 0.18s, color 0.15s;
+}
+
+.repair-inbox-expand:hover { color: #fff; }
+.repair-inbox-expand.open { transform: rotate(180deg); color: #fff; }
+
+/* The open group hosts the finding list, bounded so the inbox below it
+   stays reachable without scrolling past hundreds of rows. */
+.repair-inbox-body {
+    max-height: 480px;
+    overflow-y: auto;
+    padding: 0 15px 14px 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.repair-list-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 11px 0;
+}
+
+.repair-list-controls select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    padding: 5px 9px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.repair-list-controls select option { background: #1a1a1a; }
+
+/* A run in flight sits at surface level, above the inbox — it belongs to the
+   library, not to whichever group happens to be open. */
+.repair-findings-bulk.running {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 14px;
+    margin-bottom: 12px;
+    border-radius: 9px;
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    background: rgba(var(--accent-rgb), 0.09);
+}
+
+.repair-finding-btn.reopen {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.repair-finding-btn.reopen:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+@media (max-width: 720px) {
+    .repair-health { gap: 14px; }
+    .repair-health-score { font-size: 40px; }
+    .repair-inbox-head { flex-wrap: wrap; }
+    .repair-inbox-blurb { white-space: normal; }
+    .repair-inbox-actions { width: 100%; justify-content: flex-end; }
 }
 
 /* ── Tool card sections ── */

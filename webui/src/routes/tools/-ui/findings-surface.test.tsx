@@ -1,6 +1,7 @@
 /**
- * The Findings tab — dashboard, filters, list, pagination, bulk paths, and the
- * per-type detail renderer.
+ * The findings surface — health hero, filters, the grouped inbox, the list
+ * inside an open group, pagination, bulk paths, and the per-type detail
+ * renderer.
  *
  * The safety-critical assertions here are the mass-orphan gate (a fix-all that
  * would delete files must go through the type-the-phrase dialog) and the
@@ -13,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { RepairFinding, RepairJob } from '../-tools.types';
 
-import { FindingsTab } from './findings-tab';
+import { FindingsSurface } from './findings-surface';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -83,10 +84,58 @@ const JOBS: RepairJob[] = [
   } as RepairJob,
 ];
 
-function renderTab(jobs: RepairJob[] = JOBS) {
+const GROUPS = '/api/repair/findings/groups';
+const TYPES = '/api/repair/finding-types';
+
+const group = (over: Record<string, unknown> = {}) => ({
+  finding_type: 'orphan_file',
+  pending: 3,
+  resolved: 0,
+  dismissed: 0,
+  total: 3,
+  severity_max: 'warning',
+  last_seen: null,
+  job_ids: ['orphan_file_detector'],
+  ...over,
+});
+
+const typeInfo = (over: Record<string, unknown> = {}) => ({
+  type: 'orphan_file',
+  label: 'Orphan Files',
+  verb: 'Review & Move',
+  fixable: true,
+  destructive: true,
+  job_ids: ['orphan_file_detector'],
+  ...over,
+});
+
+function renderSurface(jobs: RepairJob[] = JOBS) {
   const onStatusChanged = vi.fn();
-  const result = render(<FindingsTab jobs={jobs} active onStatusChanged={onStatusChanged} />);
+  const result = render(
+    <FindingsSurface
+      jobs={jobs}
+      runs={[]}
+      trackCount={10000}
+      onStatusChanged={onStatusChanged}
+    />,
+  );
   return { ...result, onStatusChanged };
+}
+
+/**
+ * Most of what follows is about the finding LIST, which only renders inside an
+ * open group or a search. Searching is the cheaper of the two: it needs no
+ * groups payload and scopes to no type, so the list behaves exactly as the
+ * flat list always did.
+ */
+async function renderList(jobs: RepairJob[] = JOBS) {
+  const result = renderSurface(jobs);
+  await flush();
+  fireEvent.change(document.getElementById('repair-findings-search') as HTMLElement, {
+    target: { value: 'a' },
+  });
+  await flush();
+  return result;
 }
 
 /** The JSON body of the request whose URL matches `match`. */
@@ -128,113 +177,166 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// ── Dashboard ────────────────────────────────────────────────────────────────
+// ── Health hero + status control ─────────────────────────────────────────────
 
-describe('dashboard', () => {
-  it('renders the three always-on pills and hides auto-fixed at zero', async () => {
-    routes({ [COUNTS]: { pending: 12, resolved: 3, dismissed: 4, auto_fixed: 0 } });
-    renderTab();
+describe('the health hero', () => {
+  it('scores a clean library 100 and says so', async () => {
+    routes({ [COUNTS]: { pending: 0 }, [GROUPS]: { groups: [] } });
+    renderSurface();
     await flush();
-
-    expect(document.querySelector('.repair-dashboard-stat.pending')?.textContent).toContain('12');
-    expect(document.querySelector('.repair-dashboard-stat.resolved')?.textContent).toContain('3');
-    expect(document.querySelector('.repair-dashboard-stat.dismissed')?.textContent).toContain('4');
-    expect(document.querySelector('.repair-dashboard-stat.auto-fixed')).toBeNull();
+    expect(document.querySelector('.repair-health-score')?.textContent).toBe('100');
+    expect(document.querySelector('.repair-health-band')?.textContent).toBe('healthy');
+    expect(document.querySelector('.repair-health-bar-empty')).not.toBeNull();
   });
 
-  it('shows the auto-fixed pill once it is non-zero', async () => {
-    routes({ [COUNTS]: { pending: 0, auto_fixed: 9 } });
-    renderTab();
-    await flush();
-    expect(document.querySelector('.repair-dashboard-stat.auto-fixed')?.textContent).toContain('9');
-  });
-
-  it('sorts the job chips by total, descending', async () => {
+  it('weights errors far above info, and the bar segments follow the weighting', async () => {
     routes({
-      [COUNTS]: {
-        by_job: {
-          small: { total: 2, display_name: 'Small' },
-          big: { total: 40, display_name: 'Big' },
-          mid: { total: 9, display_name: 'Mid' },
-        },
+      [COUNTS]: { pending: 403 },
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'corrupt_audio', pending: 3, severity_max: 'error' }),
+          group({ finding_type: 'missing_cover_art', pending: 400, severity_max: 'info' }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({ type: 'corrupt_audio', label: 'Corrupt Audio', destructive: true }),
+          typeInfo({ type: 'missing_cover_art', label: 'Missing Cover Art', destructive: false }),
+        ],
       },
     });
-    renderTab();
+    renderSurface();
     await flush();
 
-    const names = [...document.querySelectorAll('.repair-dashboard-chip-name')].map(
+    // 3 errors weigh 3.0; 400 info rows weigh 8.0. Three broken files are a
+    // QUARTER of the bar next to four hundred missing covers — which is the
+    // whole point of weighting it.
+    const segments = [...document.querySelectorAll('.repair-health-seg')];
+    expect(segments).toHaveLength(2);
+    expect(segments[0].className).toContain('info');
+    expect(segments[0].getAttribute('title')).toContain('Missing Cover Art');
+    expect(segments[1].className).toContain('error');
+  });
+
+  it('a bar segment opens that group in the inbox', async () => {
+    routes({
+      [COUNTS]: { pending: 3 },
+      [GROUPS]: { groups: [group()] },
+      [TYPES]: { types: [typeInfo()] },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-health-seg') as HTMLElement);
+    await flush();
+    expect(document.querySelector('.repair-inbox-group.open')).not.toBeNull();
+  });
+
+  it('offers Fix all safe only for fixable, non-destructive pending rows', async () => {
+    routes({
+      [COUNTS]: { pending: 30 },
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'orphan_file', pending: 20 }),
+          group({ finding_type: 'missing_cover_art', pending: 10, severity_max: 'info' }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({ type: 'orphan_file', destructive: true }),
+          typeInfo({ type: 'missing_cover_art', label: 'Missing Cover Art', destructive: false }),
+        ],
+      },
+    });
+    renderSurface();
+    await flush();
+    // The 20 orphans move files; only the 10 art rows are safe.
+    expect(document.querySelector('.repair-health-fix-safe')?.textContent).toBe('Fix all safe (10)');
+  });
+
+  it('sends safe_only — never a fix_action — when Fix all safe runs', async () => {
+    routes({
+      [COUNTS]: { pending: 10 },
+      [GROUPS]: { groups: [group({ finding_type: 'missing_cover_art', pending: 10 })] },
+      [TYPES]: { types: [typeInfo({ type: 'missing_cover_art', destructive: false })] },
+      '/bulk-fix-start': { started: true, total: 10 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-health-fix-safe') as HTMLElement);
+    await flush();
+    expect(bodyOf('/bulk-fix-start')).toEqual({ safe_only: true });
+  });
+
+  it('disables Fix all safe when nothing is safe to fix', async () => {
+    routes({
+      [COUNTS]: { pending: 3 },
+      [GROUPS]: { groups: [group()] },
+      [TYPES]: { types: [typeInfo({ destructive: true })] },
+    });
+    renderSurface();
+    await flush();
+    expect((document.querySelector('.repair-health-fix-safe') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+});
+
+describe('the status segmented control', () => {
+  it('shows a count per status so an empty list explains itself', async () => {
+    routes({ [COUNTS]: { pending: 0, resolved: 5, dismissed: 2, total: 7 } });
+    renderSurface();
+    await flush();
+    const segments = [...document.querySelectorAll('.repair-status-seg')].map(
       (node) => node.textContent,
     );
-    expect(names).toEqual(['Big', 'Mid', 'Small']);
+    expect(segments).toEqual(['Open0', 'Fixed5', 'Dismissed2', 'All7']);
   });
 
-  it('falls back to the spaced job id when a chip has no display name', async () => {
-    routes({ [COUNTS]: { by_job: { orphan_file_detector: { total: 1 } } } });
-    renderTab();
+  it('grows an Auto-fixed segment only once the worker has fixed something', async () => {
+    // auto_fixed is its OWN status, so it is neither in the resolved count nor
+    // reachable from the other three segments — an install where it is always
+    // zero should not carry a control that always reads zero either.
+    routes({ [COUNTS]: { pending: 1, resolved: 0, dismissed: 0, auto_fixed: 9, total: 10 } });
+    renderSurface();
     await flush();
-    expect(document.querySelector('.repair-dashboard-chip-name')?.textContent).toBe(
-      'orphan file detector',
+    const segments = [...document.querySelectorAll('.repair-status-seg')].map(
+      (node) => node.textContent,
     );
+    expect(segments).toEqual(['Open1', 'Fixed0', 'Dismissed0', 'Auto-fixed9', 'All10']);
   });
 
-  it('clicking a chip filters by that job, and clicking it again clears it', async () => {
-    routes({
-      [COUNTS]: { by_job: { dead_file_cleaner: { total: 3, display_name: 'Dead File Cleaner' } } },
-      [FINDINGS]: page([]),
-    });
-    renderTab();
+  it('never changes the filter by itself', async () => {
+    // The old surface flipped to All Status on your behalf when pending was
+    // empty, then explained itself in a notice it never removed. The counts
+    // above make the flip unnecessary; the filter is the user's alone.
+    routes({ [COUNTS]: { pending: 0, dismissed: 9 }, [FINDINGS]: page([]) });
+    renderSurface();
     await flush();
-
-    fireEvent.click(document.querySelector('.repair-dashboard-chip') as HTMLElement);
-    await flush();
-    expect((document.getElementById('repair-findings-job-filter') as HTMLSelectElement).value).toBe(
-      'dead_file_cleaner',
-    );
-    expect(document.querySelector('.repair-dashboard-chip')?.className).toContain('active');
-
-    fireEvent.click(document.querySelector('.repair-dashboard-chip') as HTMLElement);
-    await flush();
-    expect((document.getElementById('repair-findings-job-filter') as HTMLSelectElement).value).toBe(
-      '',
-    );
+    expect(document.querySelector('.repair-status-seg.active')?.textContent).toContain('Open');
+    expect(document.querySelector('.repair-auto-switch-notice')).toBeNull();
   });
 
-  it('renders severity dots only for the non-zero severities', async () => {
-    routes({ [COUNTS]: { by_job: { j: { total: 5, warning: 5, info: 0 } } } });
-    renderTab();
-    await flush();
-    expect(document.querySelectorAll('.repair-dashboard-chip-severity.warning')).toHaveLength(1);
-    expect(document.querySelectorAll('.repair-dashboard-chip-severity.info')).toHaveLength(0);
-  });
+  it('scopes the list to the chosen status', async () => {
+    routes({ [COUNTS]: { dismissed: 9 }, [FINDINGS]: page([]) });
+    await renderList();
 
-  it('drops the whole dashboard when the counts call fails', async () => {
-    fetchMock.mockImplementation((url: string) => {
-      if (url.includes(COUNTS)) return Promise.reject(new Error('nope'));
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never);
-    });
-    renderTab();
+    fireEvent.click(screen.getByText('Dismissed').closest('button') as HTMLElement);
     await flush();
-    expect(document.querySelector('.repair-dashboard-summary')).toBeNull();
+    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    expect(url).toContain('status=dismissed');
   });
+});
 
-  it('never asks for cache health when the counts call failed', async () => {
-    // The vanilla only reaches `_loadCacheHealthStats` on the success path — a
-    // dashboard that blanked itself does not then go fetch a bar to put in it.
-    fetchMock.mockImplementation((url: string) => {
-      if (url.includes(COUNTS)) return Promise.reject(new Error('nope'));
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never);
-    });
-    renderTab();
-    await flush();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/cache-health'))).toBe(false);
-  });
-
+describe('cache health', () => {
   it('shows the cache health bar with its scored dot', async () => {
     routes({
       [COUNTS]: { pending: 1 },
       '/api/repair/cache-health': { total_entities: 1200, junk_entities: 80, stale_mb_nulls: 0 },
     });
-    renderTab();
+    renderSurface();
     await flush();
     expect(document.querySelector('.repair-cache-health-dot')?.className).toContain('poor');
     expect(document.querySelector('.repair-cache-health-summary')?.textContent).toContain(
@@ -249,11 +351,23 @@ describe('dashboard', () => {
       [COUNTS]: { pending: 1 },
       '/api/repair/cache-health': { total_entities: 10, junk_entities: 0, stale_mb_nulls: 0 },
     });
-    renderTab();
+    renderSurface();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-cache-health-bar') as HTMLElement);
     expect(openHealth).toHaveBeenCalled();
+  });
+
+  it('never asks for cache health when the counts call failed', async () => {
+    // The vanilla only reaches `_loadCacheHealthStats` on the success path — a
+    // dashboard that blanked itself does not then go fetch a bar to put in it.
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes(COUNTS)) return Promise.reject(new Error('nope'));
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never);
+    });
+    renderSurface();
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/cache-health'))).toBe(false);
   });
 
   it('hides the cache health bar when the cache is empty', async () => {
@@ -261,9 +375,210 @@ describe('dashboard', () => {
       [COUNTS]: { pending: 1 },
       '/api/repair/cache-health': { total_entities: 0, total_searches: 0 },
     });
-    renderTab();
+    renderSurface();
     await flush();
     expect(document.querySelector('.repair-cache-health')).toBeNull();
+  });
+});
+
+// ── The inbox ────────────────────────────────────────────────────────────────
+
+describe('the findings inbox', () => {
+  it('orders worst-first, with destructive types last inside a severity band', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'missing_cover_art', pending: 400, severity_max: 'info' }),
+          group({ finding_type: 'orphan_file', pending: 9, severity_max: 'warning' }),
+          group({ finding_type: 'metadata_gap', pending: 2, severity_max: 'warning' }),
+          group({ finding_type: 'corrupt_audio', pending: 1, severity_max: 'error' }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({ type: 'missing_cover_art', destructive: false }),
+          typeInfo({ type: 'orphan_file', destructive: true }),
+          typeInfo({ type: 'metadata_gap', destructive: false }),
+          typeInfo({ type: 'corrupt_audio', destructive: true }),
+        ],
+      },
+    });
+    renderSurface();
+    await flush();
+
+    const order = [...document.querySelectorAll('.repair-inbox-group')].map((node) =>
+      node.getAttribute('data-finding-type'),
+    );
+    // metadata_gap (2 rows) beats orphan_file (9) inside the warning band
+    // because orphan_file moves files — the safe decision comes first.
+    expect(order).toEqual(['corrupt_audio', 'metadata_gap', 'orphan_file', 'missing_cover_art']);
+  });
+
+  it('shows the blurb and the served verb, and no fix button for an unfixable type', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'fake_lossless', pending: 4 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'fake_lossless',
+            label: 'Fake Lossless',
+            verb: null,
+            fixable: false,
+            destructive: false,
+          }),
+        ],
+      },
+    });
+    renderSurface();
+    await flush();
+
+    expect(document.querySelector('.repair-inbox-blurb')?.textContent).toContain('upscaled');
+    expect(document.querySelector('.repair-inbox-btn')?.textContent).toBe('Dismiss all');
+  });
+
+  it('opens exactly one group at a time and scopes the list to its type', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'orphan_file' }),
+          group({ finding_type: 'metadata_gap', severity_max: 'warning' }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({ type: 'orphan_file' }),
+          typeInfo({ type: 'metadata_gap', destructive: false }),
+        ],
+      },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+
+    const heads = [...document.querySelectorAll('.repair-inbox-head')];
+    fireEvent.click(heads[0]);
+    await flush();
+    expect(
+      fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?')),
+    ).toContain('finding_type=metadata_gap');
+
+    fireEvent.click(heads[1]);
+    await flush();
+    expect(document.querySelectorAll('.repair-inbox-group.open')).toHaveLength(1);
+  });
+
+  it('does not fetch any findings while the inbox is collapsed', async () => {
+    routes({ [GROUPS]: { groups: [group()] }, [TYPES]: { types: [typeInfo()] } });
+    renderSurface();
+    await flush();
+    // The list used to load 30 rows nobody had asked to see, on every open.
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/findings?'))).toBe(false);
+  });
+
+  it('a group fix is scoped to its finding type, never to a job', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'missing_cover_art', pending: 12 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'missing_cover_art',
+            label: 'Missing Cover Art',
+            verb: 'Apply Art',
+            destructive: false,
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 12 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByText('Apply Art all (12)'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ destructive: false, confirmText: 'Apply Art' }),
+    );
+    expect(bodyOf('/bulk-fix-start')).toEqual({ finding_type: 'missing_cover_art' });
+  });
+
+  it('marks a destructive group fix destructive and says files are touched', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'empty_folder', pending: 4 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'empty_folder',
+            label: 'Empty Folders',
+            verb: 'Delete Folder',
+            destructive: true,
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 4 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByText('Delete Folder…'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destructive: true,
+        message: expect.stringContaining('deletes files on disk'),
+      }),
+    );
+  });
+
+  it('still gates a mass orphan delete behind the witness-me phrase', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 120 })] },
+      [TYPES]: { types: [typeInfo()] },
+      '/bulk-fix-start': { started: true, total: 120 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByText('Review & Move…'));
+    await flush();
+    clickPrompt('_orphan-delete');
+    await flush();
+
+    const input = document.getElementById('witness-me-input') as HTMLInputElement;
+    expect(input, 'the witness-me dialog must appear for a mass delete').not.toBeNull();
+    fireEvent.change(input, { target: { value: 'Witness Me' } });
+    fireEvent.click(document.getElementById('witness-confirm') as HTMLElement);
+    await flush();
+    expect(bodyOf('/bulk-fix-start')).toEqual({
+      finding_type: 'orphan_file',
+      fix_action: 'delete',
+    });
+  });
+
+  it('dismisses a whole group by type rather than by shipping ids', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ pending: 900 })] },
+      [TYPES]: { types: [typeInfo()] },
+      '/api/repair/findings/bulk': { success: true, updated: 900 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(screen.getByText('Dismiss all'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('never raised again') }),
+    );
+    expect(bodyOf('/api/repair/findings/bulk')).toEqual({
+      finding_type: 'orphan_file',
+      action: 'dismiss',
+    });
+  });
+
+  it('says All Clear when no group survives the filters', async () => {
+    routes({ [GROUPS]: { groups: [] } });
+    renderSurface();
+    await flush();
+    expect(screen.getByText('All Clear')).toBeTruthy();
   });
 });
 
@@ -272,28 +587,47 @@ describe('dashboard', () => {
 describe('filters', () => {
   it('sends only the non-empty filters, plus page and limit', async () => {
     routes({ [FINDINGS]: page([]) });
-    renderTab();
-    await flush();
+    await renderList();
 
     fireEvent.change(document.getElementById('repair-findings-severity-filter') as HTMLElement, {
       target: { value: 'warning' },
     });
     await flush();
 
-    const url = fetchMock.mock.calls
-      .map((call) => String(call[0]))
-      .findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
     expect(url).toContain('severity=warning');
     expect(url).toContain('status=pending');
+    expect(url).toContain('sort=newest');
+    expect(url).toContain('q=a');
     expect(url).toContain('page=0');
     expect(url).toContain('limit=30');
     expect(url).not.toContain('job_id=');
+    // A search deliberately escapes the grouping — it looks everywhere.
+    expect(url).not.toContain('finding_type=');
+  });
+
+  it('a search replaces the inbox rather than filtering it', async () => {
+    routes({ [GROUPS]: { groups: [group()] }, [TYPES]: { types: [typeInfo()] }, [FINDINGS]: page([]) });
+    await renderList();
+    expect(document.querySelector('.repair-inbox')).toBeNull();
+    expect(document.querySelector('.repair-search-note')).not.toBeNull();
+  });
+
+  it('passes the chosen sort through to the server', async () => {
+    routes({ [FINDINGS]: page([]) });
+    await renderList();
+
+    fireEvent.change(document.getElementById('repair-findings-sort') as HTMLElement, {
+      target: { value: 'path' },
+    });
+    await flush();
+    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    expect(url).toContain('sort=path');
   });
 
   it('persists the page size and resets to page one', async () => {
     routes({ [FINDINGS]: page([]) });
-    renderTab();
-    await flush();
+    await renderList();
 
     fireEvent.change(document.getElementById('repair-page-size-select') as HTMLElement, {
       target: { value: '100' },
@@ -301,25 +635,21 @@ describe('filters', () => {
     await flush();
 
     expect(localStorage.getItem('repairFindingsPageSize')).toBe('100');
-    const url = fetchMock.mock.calls
-      .map((call) => String(call[0]))
-      .findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
     expect(url).toContain('limit=100');
   });
 
   it('reads the stored page size on mount, ignoring a value not on the menu', async () => {
     localStorage.setItem('repairFindingsPageSize', '60');
     routes({ [FINDINGS]: page([]) });
-    renderTab();
-    await flush();
+    await renderList();
     expect((document.getElementById('repair-page-size-select') as HTMLSelectElement).value).toBe(
       '60',
     );
 
     cleanup();
     localStorage.setItem('repairFindingsPageSize', '999');
-    renderTab();
-    await flush();
+    await renderList();
     expect((document.getElementById('repair-page-size-select') as HTMLSelectElement).value).toBe(
       '30',
     );
@@ -327,70 +657,42 @@ describe('filters', () => {
 
   it('builds the job dropdown from the job list', async () => {
     routes({ [FINDINGS]: page([]) });
-    renderTab();
+    renderSurface();
     await flush();
     const options = [
       ...(document.getElementById('repair-findings-job-filter') as HTMLSelectElement).options,
     ].map((option) => option.textContent);
     expect(options).toEqual(['All Jobs', 'Orphan File Detector', 'Dead File Cleaner']);
   });
-});
 
-// ── The auto-switch fallback ─────────────────────────────────────────────────
-
-describe('the pending → all-status auto-switch', () => {
-  it('switches once and explains itself when only carry-over rows exist', async () => {
-    let call = 0;
-    fetchMock.mockImplementation((url: string) => {
-      const json = async () => {
-        if (url.includes(COUNTS)) return { resolved: 5, dismissed: 2, auto_fixed: 0 };
-        if (url.includes(FINDINGS)) {
-          call += 1;
-          // First (pending) load is empty; the re-load after the switch has rows.
-          return call === 1 ? page([]) : page([finding()], 7);
-        }
-        return {};
-      };
-      return Promise.resolve({ ok: true, status: 200, json } as never);
+  it('filters the inbox by job without a round trip', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'orphan_file', job_ids: ['orphan_file_detector'] }),
+          group({ finding_type: 'dead_file', job_ids: ['dead_file_cleaner'] }),
+        ],
+      },
+      [TYPES]: {
+        types: [typeInfo({ type: 'orphan_file' }), typeInfo({ type: 'dead_file' })],
+      },
     });
-
-    renderTab();
-    await waitFor(() =>
-      expect(document.querySelector('.repair-auto-switch-notice')).not.toBeNull(),
-    );
-
-    expect(document.querySelector('.repair-auto-switch-notice')?.textContent).toContain(
-      '7 carry-over',
-    );
-    expect(
-      (document.getElementById('repair-findings-status-filter') as HTMLSelectElement).value,
-    ).toBe('');
-    // The re-load is a SECOND round trip — the notice lands with the filter
-    // change, before its rows arrive.
-    await waitFor(() => expect(document.querySelectorAll('.repair-finding-card')).toHaveLength(1));
-  });
-
-  it('stays on the empty state when there are no carry-over rows either', async () => {
-    routes({ [COUNTS]: { resolved: 0, dismissed: 0, auto_fixed: 0 }, [FINDINGS]: page([]) });
-    renderTab();
+    renderSurface();
     await flush();
-    expect(document.querySelector('.repair-auto-switch-notice')).toBeNull();
-    expect(screen.getByText('All Clear')).toBeTruthy();
-  });
+    const before = fetchMock.mock.calls.length;
 
-  it('does not fire after the user has touched the status filter', async () => {
-    routes({ [COUNTS]: { dismissed: 9 }, [FINDINGS]: page([]) });
-    renderTab();
-    await flush();
-    // The auto-switch already ran once on mount; reset to pending BY HAND and
-    // confirm it does not run a second time.
-    fireEvent.change(document.getElementById('repair-findings-status-filter') as HTMLElement, {
-      target: { value: 'pending' },
+    fireEvent.change(document.getElementById('repair-findings-job-filter') as HTMLElement, {
+      target: { value: 'dead_file_cleaner' },
     });
     await flush();
-    expect(
-      (document.getElementById('repair-findings-status-filter') as HTMLSelectElement).value,
-    ).toBe('pending');
+
+    const shown = [...document.querySelectorAll('.repair-inbox-group')].map((node) =>
+      node.getAttribute('data-finding-type'),
+    );
+    expect(shown).toEqual(['dead_file']);
+    // Tens of group rows, not thousands — re-querying the server for a
+    // dropdown change would buy nothing.
+    expect(fetchMock.mock.calls.length).toBe(before);
   });
 });
 
@@ -399,7 +701,7 @@ describe('the pending → all-status auto-switch', () => {
 describe('the finding list', () => {
   it('carries the id, job and mass-orphan flag the safety gate reads', async () => {
     routes({ [FINDINGS]: page([finding({ id: 42, details: { mass_orphan: true } })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     const card = document.querySelector('.repair-finding-card') as HTMLElement;
@@ -411,7 +713,7 @@ describe('the finding list', () => {
 
   it('writes data-mass-orphan="false" rather than omitting it', async () => {
     routes({ [FINDINGS]: page([finding()]) });
-    renderTab();
+    await renderList();
     await flush();
     expect((document.querySelector('.repair-finding-card') as HTMLElement).dataset.massOrphan).toBe(
       'false',
@@ -422,7 +724,7 @@ describe('the finding list', () => {
     routes({
       [FINDINGS]: page([finding({ entity_id: 'abc123', entity_type: 'track' })]),
     });
-    renderTab();
+    await renderList();
     await flush();
 
     expect(document.querySelector('.repair-finding-type-badge')?.textContent).toBe('Orphan');
@@ -440,7 +742,7 @@ describe('the finding list', () => {
     routes({
       [FINDINGS]: page([finding({ status: 'resolved', user_action: 'deleted_file' })]),
     });
-    renderTab();
+    await renderList();
     await flush();
 
     expect(document.querySelector('.repair-finding-status-badge')?.textContent).toBe(
@@ -454,14 +756,14 @@ describe('the finding list', () => {
     routes({
       [FINDINGS]: page([finding({ status: 'dismissed', user_action: 'something_new' })]),
     });
-    renderTab();
+    await renderList();
     await flush();
     expect(document.querySelector('.repair-finding-status-badge')?.textContent).toBe('dismissed');
   });
 
   it('omits the fix button for a type with no automated fix', async () => {
     routes({ [FINDINGS]: page([finding({ finding_type: 'path_mismatch' })]) });
-    renderTab();
+    await renderList();
     await flush();
     expect(document.querySelector('.repair-finding-btn.fix')).toBeNull();
     expect(document.querySelector('.repair-finding-btn.dismiss')).not.toBeNull();
@@ -469,25 +771,25 @@ describe('the finding list', () => {
 
   it('shows the empty state when nothing matches', async () => {
     routes({ [FINDINGS]: page([]) });
-    renderTab();
+    await renderList();
     await flush();
-    expect(screen.getByText('All Clear')).toBeTruthy();
+    expect(screen.getByText('Nothing here matches your filters.')).toBeTruthy();
   });
 
   it('shows an error row when the list call fails', async () => {
     fetchMock.mockImplementation((url: string) =>
-      url.includes(FINDINGS) && !url.includes(COUNTS)
+      url.includes(`${FINDINGS}?`)
         ? Promise.reject(new Error('boom'))
         : Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never),
     );
-    renderTab();
+    await renderList();
     await flush();
     expect(screen.getByText('Error loading findings')).toBeTruthy();
   });
 
   it('toggles the detail panel from the row body', async () => {
     routes({ [FINDINGS]: page([finding({ id: 5 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     const panel = document.getElementById('repair-detail-5') as HTMLElement;
@@ -504,7 +806,7 @@ describe('the finding list', () => {
     // page rendered 100 invisible panels and hammered the thumbnail
     // endpoints for content nobody had asked to see.
     routes({ [FINDINGS]: page([finding({ id: 5 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     const panel = () => document.getElementById('repair-detail-5') as HTMLElement;
@@ -520,7 +822,7 @@ describe('the finding list', () => {
   it('offers the critical severity the jobs actually emit', async () => {
     // `error` is the corruption detector's severity — the most urgent
     // findings in the system, and they had no filter option at all.
-    renderTab();
+    await renderList();
     await flush();
     const options = Array.from(
       document.querySelectorAll('#repair-findings-severity-filter option'),
@@ -534,7 +836,7 @@ describe('the finding list', () => {
     // handler now (and still stops propagation, or the row toggle would
     // immediately undo it).
     routes({ [FINDINGS]: page([finding({ id: 5 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
@@ -549,7 +851,7 @@ describe('the finding list', () => {
 
   it('does not toggle the detail when the checkbox is clicked', async () => {
     routes({ [FINDINGS]: page([finding({ id: 5 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-select input') as HTMLElement);
@@ -567,7 +869,7 @@ describe('per-finding actions', () => {
       [FINDINGS]: page([finding({ id: 1 })]),
       '/api/repair/findings/1/fix': { success: true, message: 'Moved' },
     });
-    const { onStatusChanged } = renderTab();
+    const { onStatusChanged } = await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -584,7 +886,7 @@ describe('per-finding actions', () => {
 
   it('sends nothing when the prompt is cancelled', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -599,7 +901,7 @@ describe('per-finding actions', () => {
     routes({
       [FINDINGS]: page([finding({ id: 3, finding_type: 'quality_upgrade' })]),
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -621,7 +923,7 @@ describe('per-finding actions', () => {
         }),
       ]),
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -643,7 +945,7 @@ describe('per-finding actions', () => {
       ]),
       '/api/repair/findings/4/fix': { success: true },
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -659,7 +961,7 @@ describe('per-finding actions', () => {
       [FINDINGS]: page([finding({ id: 1, finding_type: 'empty_folder', job_id: 'x' })]),
       '/api/repair/findings/1/fix': { success: false, error: 'folder not empty' },
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -674,12 +976,12 @@ describe('per-finding actions', () => {
         ok: true,
         status: 200,
         json: async () =>
-          String(url).includes(FINDINGS) && !String(url).includes(COUNTS)
+          String(url).includes(`${FINDINGS}?`)
             ? page([finding({ id: 1, finding_type: 'empty_folder', job_id: 'x' })])
             : {},
       } as never);
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
@@ -700,7 +1002,7 @@ describe('per-finding actions', () => {
       if (target.endsWith('/1/fix')) {
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
       }
-      if (target.includes(FINDINGS) && !target.includes(COUNTS)) {
+      if (target.includes(`${FINDINGS}?`)) {
         listCalls += 1;
         if (listCalls > 1) {
           // Hold the reload open so the in-flight state stays observable.
@@ -718,13 +1020,13 @@ describe('per-finding actions', () => {
         ok: true,
         status: 200,
         json: async () =>
-          target.includes(FINDINGS) && !target.includes(COUNTS)
+          target.includes(`${FINDINGS}?`)
             ? page([finding({ id: 1, finding_type: 'empty_folder' })])
             : {},
       });
     });
 
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
     await flush();
@@ -743,7 +1045,7 @@ describe('per-finding actions', () => {
 
   it('dismisses a finding and refreshes', async () => {
     routes({ [FINDINGS]: page([finding({ id: 8 })]) });
-    const { onStatusChanged } = renderTab();
+    const { onStatusChanged } = await renderList();
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-btn.dismiss') as HTMLElement);
@@ -758,21 +1060,19 @@ describe('per-finding actions', () => {
 describe('bulk selection', () => {
   it('reveals the bulk bar and counts the selection', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
-    expect((document.getElementById('repair-findings-bulk') as HTMLElement).style.display).toBe(
-      'none',
-    );
+    expect(document.getElementById('repair-findings-selection')).toBeNull();
     fireEvent.click(document.querySelectorAll('.repair-finding-select input')[0]);
     await flush();
-    expect((document.getElementById('repair-findings-bulk') as HTMLElement).style.display).toBe('');
-    expect(document.getElementById('repair-bulk-count')?.textContent).toBe('1 selected');
+    expect(document.getElementById('repair-findings-selection')).not.toBeNull();
+    expect(document.querySelector('.repair-bulk-count')?.textContent).toBe('1 selected');
   });
 
   it('select-all is indeterminate on a partial page and checked on a full one', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     const selectAll = document.getElementById('repair-select-all-cb') as HTMLInputElement;
@@ -787,22 +1087,23 @@ describe('bulk selection', () => {
     expect(selectAll.checked).toBe(true);
   });
 
-  it('shows Fix All only when the page is fully selected and more findings exist', async () => {
+  it('no longer offers a filter-wide Fix All from the selection bar', async () => {
+    // A cross-type Fix All could not carry a fix_action safely — 'delete'
+    // removes an orphan's file and names the track to KEEP for a duplicate.
+    // The whole-group button replaced it, and the backend refuses an action
+    // that spans more than one type.
     routes({ [FINDINGS]: page([finding({ id: 1 })], 90) });
-    renderTab();
+    await renderList();
     await flush();
 
-    const fixAll = document.getElementById('repair-fix-all-btn') as HTMLElement;
-    expect(fixAll.style.display).toBe('none');
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
     await flush();
-    expect(fixAll.style.display).toBe('');
-    expect(fixAll.textContent).toBe('Fix All 90');
+    expect(document.getElementById('repair-fix-all-btn')).toBeNull();
   });
 
   it('bulk-dismisses the selection', async () => {
     routes({ [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]) });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -828,7 +1129,7 @@ describe('bulk selection', () => {
       '/api/repair/findings/2/fix': { success: true },
       '/api/repair/findings/3/fix': { success: true },
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -851,11 +1152,11 @@ describe('bulk selection', () => {
   it('aborts the whole bulk run if any prompt is cancelled', async () => {
     routes({
       [FINDINGS]: page([
-        finding({ id: 1, job_id: 'orphan_file_detector' }),
-        finding({ id: 3, job_id: 'dead_file_cleaner' }),
+        finding({ id: 1, finding_type: 'orphan_file' }),
+        finding({ id: 3, finding_type: 'dead_file', job_id: 'dead_file_cleaner' }),
       ]),
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -875,7 +1176,7 @@ describe('bulk selection', () => {
       finding({ id: index + 1, details: { mass_orphan: true } }),
     );
     routes({ [FINDINGS]: page(items, 25) });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -905,7 +1206,7 @@ describe('bulk selection', () => {
       finding({ id: index + 1, details: { mass_orphan: true } }),
     );
     routes({ [FINDINGS]: page(items, 25) }, { success: true });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -921,7 +1222,7 @@ describe('bulk selection', () => {
   it('does not gate a delete when no finding carries the mass-orphan flag', async () => {
     const items = Array.from({ length: 25 }, (_, index) => finding({ id: index + 1 }));
     routes({ [FINDINGS]: page(items, 25) }, { success: true });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
@@ -935,66 +1236,157 @@ describe('bulk selection', () => {
   });
 });
 
-// ── Fix All ──────────────────────────────────────────────────────────────────
+// ── The background bulk run ──────────────────────────────────────────────────
 
-describe('fix all', () => {
-  /**
-   * `fixAllMatchingFindings` chooses its prompt from the JOB FILTER, not from
-   * the findings on screen — so a test that only sets a finding's job_id gets
-   * the generic confirm and no prompt at all.
-   */
-  async function openFixAll(
-    total: number,
-    items: RepairFinding[],
+describe('the background bulk run', () => {
+  /** Start a run the way the surface now offers one: from a group. */
+  async function fixGroup(
+    findingType: string,
+    pending: number,
+    info: Record<string, unknown>,
     extra: Record<string, unknown> = {},
-    jobFilter = '',
   ) {
-    routes({ [FINDINGS]: page(items, total), ...extra });
-    const jobs =
-      jobFilter && !JOBS.some((existing) => existing.job_id === jobFilter)
-        ? [...JOBS, { job_id: jobFilter, display_name: jobFilter } as RepairJob]
-        : JOBS;
-    const result = renderTab(jobs);
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: findingType, pending })] },
+      [TYPES]: { types: [typeInfo({ type: findingType, ...info })] },
+      ...extra,
+    });
+    const result = renderSurface();
     await flush();
-    if (jobFilter) {
-      fireEvent.change(document.getElementById('repair-findings-job-filter') as HTMLElement, {
-        target: { value: jobFilter },
-      });
-      await flush();
-    }
-    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    fireEvent.click(document.querySelector('.repair-inbox-btn') as HTMLElement);
+    // The confirm, the start call and its toast are each a microtask hop
+    // apart; one flush only gets as far as the dialog.
     await flush();
-    fireEvent.click(document.getElementById('repair-fix-all-btn') as HTMLElement);
+    await flush();
     await flush();
     return result;
   }
 
-  it('confirms, then starts the background run and polls it', async () => {
-    await openFixAll(200, [finding({ id: 1, job_id: 'metadata_gap_filler' })], {
+  it('starts the run and polls its progress', async () => {
+    // The status route starts idle: a run already in flight disables every
+    // group button (below), so a fixture that reported one would let this
+    // test pass without the click ever landing.
+    const status: Record<string, unknown> = { running: false };
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'metadata_gap', pending: 200 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'metadata_gap',
+            label: 'Metadata Gaps',
+            verb: 'Auto-Fill',
+            destructive: false,
+          }),
+        ],
+      },
       '/api/repair/findings/bulk-fix-start': { started: true, total: 200 },
-      '/api/repair/bulk-fix/status': { running: true, done: 12, total: 200 },
+      '/api/repair/bulk-fix/status': status,
     });
+    renderSurface();
+    await flush();
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Fix All Findings', destructive: true }),
-    );
+    fireEvent.click(document.querySelector('.repair-inbox-btn') as HTMLElement);
+    status.running = true;
+    status.done = 12;
+    status.total = 200;
+    await flush();
+    await flush();
+    await flush();
+
+    expect(toastSpy).toHaveBeenCalledWith('Fixing 200 metadata gaps in the background…', 'info');
     await waitFor(() =>
       expect(document.getElementById('repair-bulk-count')?.textContent).toContain(
         'Fixing 12 / 200',
       ),
     );
-    expect(toastSpy).toHaveBeenCalledWith('Fixing 200 findings in the background...', 'info');
   });
 
-  it('re-checks for an outside bulk run on every dashboard refresh', async () => {
-    // `_checkBulkFixResume` sits at the top of loadRepairFindingsDashboard, so a
-    // run started in another tab is picked up by the next refresh — not only by
-    // a re-entry into the tab.
+  it('shows the run bar with no group open — a run is surface-level', async () => {
+    routes({
+      [GROUPS]: { groups: [group()] },
+      [TYPES]: { types: [typeInfo()] },
+      '/api/repair/bulk-fix/status': { running: true, done: 4, total: 9 },
+    });
+    renderSurface();
+    await waitFor(() =>
+      expect(document.getElementById('repair-bulk-count')?.textContent).toContain('Fixing 4 / 9'),
+    );
+    // …and every group button is held while it runs, so a second run cannot
+    // be started on top of the first.
+    expect((document.querySelector('.repair-inbox-btn') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('picks up a run that is already going', async () => {
+    const status: Record<string, unknown> = { running: false };
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'metadata_gap', pending: 200 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'metadata_gap',
+            label: 'Metadata Gaps',
+            verb: 'Auto-Fill',
+            destructive: false,
+          }),
+        ],
+      },
+      '/api/repair/findings/bulk-fix-start': { already_running: true },
+      '/api/repair/bulk-fix/status': status,
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-inbox-btn') as HTMLElement);
+    status.running = true;
+    status.done = 1;
+    status.total = 5;
+    await flush();
+    await flush();
+    await flush();
+
+    expect(toastSpy).toHaveBeenCalledWith(
+      'A bulk fix is already running — showing its progress',
+      'info',
+    );
+  });
+
+  it('reports a start failure', async () => {
+    await fixGroup(
+      'metadata_gap',
+      200,
+      { label: 'Metadata Gaps', verb: 'Auto-Fill', destructive: false },
+      { '/api/repair/findings/bulk-fix-start': { started: false, error: 'worker busy' } },
+    );
+    expect(toastSpy).toHaveBeenCalledWith('worker busy', 'error');
+  });
+
+  it('stops a run through the stop endpoint', async () => {
+    await fixGroup(
+      'metadata_gap',
+      200,
+      { label: 'Metadata Gaps', verb: 'Auto-Fill', destructive: false },
+      {
+        '/api/repair/findings/bulk-fix-start': { started: true, total: 200 },
+        '/api/repair/bulk-fix/status': { running: true, done: 3, total: 200 },
+      },
+    );
+    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Stop'));
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/bulk-fix/stop'))).toBe(true);
+    expect(toastSpy).toHaveBeenCalledWith('Stopping after the current fix...', 'info');
+  });
+
+  it('re-checks for an outside bulk run on every refresh', async () => {
+    // `_checkBulkFixResume` sits at the top of the counts load, so a run
+    // started in another tab is picked up by the next refresh — not only by a
+    // re-entry into the page.
     routes({
       [FINDINGS]: page([finding({ id: 8 })]),
       '/api/repair/bulk-fix/status': { running: false },
     });
-    renderTab();
+    await renderList();
     await flush();
     const before = fetchMock.mock.calls.filter((c) =>
       String(c[0]).includes('/bulk-fix/status'),
@@ -1009,46 +1401,8 @@ describe('fix all', () => {
     expect(after).toBeGreaterThan(before);
   });
 
-  it('picks up a run that is already going', async () => {
-    await openFixAll(200, [finding({ id: 1, job_id: 'metadata_gap_filler' })], {
-      '/api/repair/findings/bulk-fix-start': { already_running: true },
-      '/api/repair/bulk-fix/status': { running: true, done: 1, total: 5 },
-    });
-    expect(toastSpy).toHaveBeenCalledWith(
-      'A bulk fix is already running — showing its progress',
-      'info',
-    );
-  });
-
-  it('reports a start failure', async () => {
-    await openFixAll(200, [finding({ id: 1, job_id: 'metadata_gap_filler' })], {
-      '/api/repair/findings/bulk-fix-start': { started: false, error: 'worker busy' },
-    });
-    expect(toastSpy).toHaveBeenCalledWith('worker busy', 'error');
-  });
-
-  it('stops a run through the stop endpoint', async () => {
-    await openFixAll(200, [finding({ id: 1, job_id: 'metadata_gap_filler' })], {
-      '/api/repair/findings/bulk-fix-start': { started: true, total: 200 },
-      '/api/repair/bulk-fix/status': { running: true, done: 3, total: 200 },
-    });
-    await waitFor(() => expect(screen.getByText('Stop')).toBeTruthy());
-
-    fireEvent.click(screen.getByText('Stop'));
-    await flush();
-    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/bulk-fix/stop'))).toBe(true);
-    expect(toastSpy).toHaveBeenCalledWith('Stopping after the current fix...', 'info');
-  });
-
-  it('gates a filter-wide orphan delete over 50 behind witness-me', async () => {
-    await openFixAll(51, [finding({ id: 1 })], {}, 'orphan_file_detector');
-    clickPrompt('_orphan-delete');
-    await flush();
-    expect(document.getElementById('witness-me-input')).not.toBeNull();
-  });
-
   it('uses the ordinary confirm for a smaller orphan delete', async () => {
-    await openFixAll(30, [finding({ id: 1 })], {}, 'orphan_file_detector');
+    await fixGroup('orphan_file', 30, {});
     clickPrompt('_orphan-delete');
     await flush();
     expect(document.getElementById('witness-me-input')).toBeNull();
@@ -1058,7 +1412,7 @@ describe('fix all', () => {
   });
 
   it('confirms a staging move without marking it destructive', async () => {
-    await openFixAll(30, [finding({ id: 1 })], {}, 'orphan_file_detector');
+    await fixGroup('orphan_file', 30, {});
     clickPrompt('_orphan-staging');
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
@@ -1067,50 +1421,38 @@ describe('fix all', () => {
   });
 
   it('sends discography "Just Clear" through the clear endpoint, never bulk-fix', async () => {
-    await openFixAll(
+    await fixGroup(
+      'missing_discography_track',
       40,
-      [finding({ id: 1 })],
+      { label: 'Missing Discography', verb: 'Add to Wishlist', destructive: false },
       { '/api/repair/findings/clear': { success: true, deleted: 40 } },
-      'discography_backfill',
     );
     clickPrompt('_dbf-dismiss');
     await flush();
 
     expect(bodyOf('/findings/clear')).toEqual({
-      job_id: 'discography_backfill',
+      job_id: 'orphan_file_detector',
       status: 'pending',
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('bulk-fix-start'))).toBe(false);
     expect(toastSpy).toHaveBeenCalledWith('Cleared 40 findings', 'success');
   });
 
-  it('passes the job and severity filters to the background run', async () => {
-    routes({
-      [FINDINGS]: page([finding({ id: 1, job_id: 'dead_file_cleaner' })], 80),
-      '/api/repair/findings/bulk-fix-start': { started: true, total: 80 },
-    });
-    renderTab();
+  it('routes the quality-upgrade "Ignore" choice to a group dismiss', async () => {
+    await fixGroup(
+      'quality_upgrade',
+      12,
+      { label: 'Quality Upgrades', verb: 'Upgrade' },
+      { '/api/repair/findings/bulk': { success: true, updated: 12 } },
+    );
+    clickPrompt('_qual-ignore');
     await flush();
 
-    fireEvent.change(document.getElementById('repair-findings-job-filter') as HTMLElement, {
-      target: { value: 'dead_file_cleaner' },
+    expect(bodyOf('/api/repair/findings/bulk')).toEqual({
+      finding_type: 'quality_upgrade',
+      action: 'dismiss',
     });
-    fireEvent.change(document.getElementById('repair-findings-severity-filter') as HTMLElement, {
-      target: { value: 'warning' },
-    });
-    await flush();
-    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
-    await flush();
-    fireEvent.click(document.getElementById('repair-fix-all-btn') as HTMLElement);
-    await flush();
-    clickPrompt('_dead-redownload');
-    await flush();
-
-    expect(bodyOf('bulk-fix-start')).toEqual({
-      job_id: 'dead_file_cleaner',
-      severity: 'warning',
-      fix_action: 'redownload',
-    });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('bulk-fix-start'))).toBe(false);
   });
 });
 
@@ -1122,7 +1464,7 @@ describe('clear findings', () => {
       [FINDINGS]: page([finding()]),
       '/api/repair/findings/clear': { success: true, deleted: 6 },
     });
-    renderTab();
+    await renderList();
     await flush();
 
     fireEvent.change(document.getElementById('repair-findings-job-filter') as HTMLElement, {
@@ -1134,7 +1476,7 @@ describe('clear findings', () => {
 
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Delete all findings for dead file cleaner (pending)? This cannot be undone.',
+        message: 'Delete all findings for Dead File Cleaner (pending)? This cannot be undone.',
       }),
     );
     expect(bodyOf('/findings/clear')).toEqual({
@@ -1145,7 +1487,7 @@ describe('clear findings', () => {
 
   it('says "all jobs" when no job filter is set', async () => {
     routes({ [FINDINGS]: page([finding()]) });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(screen.getByText('Clear Findings'));
     await flush();
@@ -1157,7 +1499,7 @@ describe('clear findings', () => {
   it('sends nothing when the confirm is declined', async () => {
     confirmSpy.mockResolvedValue(false);
     routes({ [FINDINGS]: page([finding()]) });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(screen.getByText('Clear Findings'));
     await flush();
@@ -1170,7 +1512,7 @@ describe('clear findings', () => {
 describe('pagination', () => {
   it('renders no pagination for a single page', async () => {
     routes({ [FINDINGS]: page([finding()], 10) });
-    renderTab();
+    await renderList();
     await flush();
     expect(document.querySelectorAll('.repair-page-btn')).toHaveLength(0);
   });
@@ -1179,7 +1521,7 @@ describe('pagination', () => {
     // The vanilla paginates on `data.page`. A backend that clamps an
     // out-of-range request must move the highlight with it.
     routes({ [FINDINGS]: { items: [finding()], total: 300, page: 4 } });
-    renderTab();
+    await renderList();
     await flush();
     const pagination = document.getElementById('repair-findings-pagination') as HTMLElement;
     expect(pagination.querySelector('.repair-page-btn.active')?.textContent).toBe('5');
@@ -1187,7 +1529,7 @@ describe('pagination', () => {
 
   it('renders the window, the total, and moves pages', async () => {
     routes({ [FINDINGS]: page([finding()], 300) });
-    renderTab();
+    await renderList();
     await flush();
 
     const pagination = document.getElementById('repair-findings-pagination') as HTMLElement;
@@ -1208,7 +1550,7 @@ describe('pagination', () => {
 /** Render one finding and open its detail panel. */
 async function openDetail(over: Partial<RepairFinding>) {
   routes({ [FINDINGS]: page([finding({ id: 1, ...over })]) });
-  renderTab();
+  await renderList();
   await flush();
   fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
   return document.querySelector('.repair-finding-detail-inner') as HTMLElement;
@@ -1356,7 +1698,7 @@ describe('the detail renderer', () => {
       ]),
       '/api/repair/findings/1/fix': { success: true, message: 'kept' },
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
@@ -1416,7 +1758,7 @@ describe('the detail renderer', () => {
       ]),
       '/api/repair/findings/1/fix': { success: true },
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
@@ -1531,7 +1873,7 @@ describe('the detail renderer', () => {
         ],
       },
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
@@ -1551,7 +1893,7 @@ describe('the detail renderer', () => {
       ]),
       '/api/library/artists': { artists: [{ id: 3, name: 'Below' }] },
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
@@ -1571,7 +1913,7 @@ describe('the detail renderer', () => {
         }),
       ]),
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
@@ -1593,7 +1935,7 @@ describe('the detail renderer', () => {
         }),
       ]),
     });
-    renderTab();
+    await renderList();
     await flush();
     fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
 
