@@ -250,8 +250,18 @@ async function _mlmLoadMatches() {
 }
 
 async function _mlmDeleteMatch(id) {
+    // #1138: the server now says whether a row was actually removed. Silently
+    // reloading either way is what made a failed delete look like a UI that
+    // simply refused to work.
     try {
-        await fetch(`/api/manual-library-matches/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/manual-library-matches/${id}`, { method: 'DELETE' });
+        let data = {};
+        try { data = await res.json(); } catch (_) { /* non-JSON error page */ }
+        if (!res.ok || data.success === false) {
+            if (typeof showToast === 'function') {
+                showToast(data.error || 'Could not remove that match', 'error');
+            }
+        }
         await _mlmLoadMatches();
     } catch (e) {
         if (typeof showToast === 'function') showToast('Failed to remove match', 'error');

@@ -57,6 +57,67 @@ def get_match(
     return getter(profile_id, source, source_track_id, server_source)
 
 
+def match_is_live(db, match: Optional[dict]) -> bool:
+    """Does this saved manual match still point at something that EXISTS?
+
+    #1138 (carlosjfcasero): a user matched a track to a library file, deleted
+    the file, then reprocessed the playlist. The download analysis asked only
+    whether a match ROW existed — never whether it still resolved — so it
+    marked the track found, removed it from the wishlist, and skipped the
+    download. The track then vanished from every subsequent run: not synced,
+    not downloaded, not wishlisted, with only a WARNING in the log.
+
+    "Exists" is answered against the library DATABASE, not the filesystem, and
+    that is deliberate: ``library_file_path`` is the path as the MEDIA SERVER
+    sees it (``/music/library/...`` in the report), which SoulSync may mount
+    elsewhere or not at all. An ``os.path.exists`` check would call live
+    matches dead on every split-container install and trigger a storm of
+    re-downloads — a far worse bug than the one being fixed.
+
+    Mirrors the resolution order the sync compare view already uses
+    (``match_overrides.build_bulk_override_lookup``): the stored library id
+    first, then the stored path, so a rescan that merely re-keyed the row
+    still counts as live. A match with no id and no path is not evidence of
+    anything, so it is treated as dead.
+    """
+    if not isinstance(match, dict):
+        return False
+
+    lib_id = match.get("library_track_id")
+    if lib_id:
+        getter = getattr(db, "api_get_tracks_by_ids", None)
+        if getter is None:
+            # Cannot check is not the same as gone. A db object without the
+            # readers (a stub, a narrowed facade) would otherwise have EVERY
+            # saved match declared dead, and the guard would re-download the
+            # user's whole library — the opposite failure, and a worse one.
+            return True
+        try:
+            if getter([lib_id]):
+                return True
+        except Exception as exc:   # noqa: BLE001
+            # Same reasoning for a transient DB error.
+            logger.debug("match_is_live id lookup failed for %s: %s", lib_id, exc)
+            return True
+
+    file_path = match.get("library_file_path")
+    if file_path:
+        resolver = getattr(db, "find_track_id_by_file_path", None)
+        if resolver is None:
+            return True
+        try:
+            if resolver(file_path):
+                return True
+        except Exception as exc:   # noqa: BLE001
+            logger.debug("match_is_live path lookup failed for %r: %s", file_path, exc)
+            return True
+
+    # Every check that COULD run, ran, and none of them found the track. A row
+    # carrying neither an id nor a path lands here too: it is not evidence of
+    # anything, so it cannot justify skipping a download.
+    return False
+
+
 def _first_artist_name(track: dict[str, Any]) -> str:
     artists = track.get("artists") or []
     if isinstance(artists, list) and artists:

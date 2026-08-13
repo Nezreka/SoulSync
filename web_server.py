@@ -22782,12 +22782,23 @@ def mlm_save():
 
 @app.route('/api/manual-library-matches/<int:match_id>', methods=['DELETE'])
 def mlm_delete(match_id):
-    """Delete a manual library match by ID."""
+    """Delete a manual library match by ID.
+
+    Reports whether a row was actually removed (#1138): the delete is scoped to
+    the CURRENT profile, so a match saved under another one silently matches
+    nothing. Answering "success" to that left the user clicking the same button
+    on the same row forever, with no way to tell the difference between "gone"
+    and "wouldn't go"."""
     try:
         from core.library import manual_library_match as mlm
         db = get_database()
         profile_id = get_current_profile_id()
-        mlm.delete_match(db, match_id, profile_id)
+        if not mlm.delete_match(db, match_id, profile_id):
+            return jsonify({
+                "success": False,
+                "error": "No matching entry for this profile — it may already be "
+                         "removed, or it was saved under a different profile.",
+            }), 404
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"mlm_delete error: {e}")

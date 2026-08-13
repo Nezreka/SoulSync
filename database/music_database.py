@@ -6080,13 +6080,20 @@ class MusicDatabase:
             return None
 
     def delete_manual_library_match(self, match_id: int, profile_id: int) -> bool:
-        """Delete match by PK id, scoped to profile_id."""
+        """Delete match by PK id, scoped to profile_id.
+
+        Returns whether a row was ACTUALLY removed (#1138). This used to return
+        True whenever the statement didn't raise, so a delete that matched
+        nothing — wrong id, or a match saved under a different profile — was
+        reported to the UI as a success. The row then reappeared on the next
+        load with no explanation, which is what "I tried to remove it but I
+        couldn't" looks like from the outside."""
         try:
             with self._get_connection() as conn:
-                conn.execute("""
+                cursor = conn.execute("""
                     DELETE FROM manual_library_track_matches WHERE id = ? AND profile_id = ?
                 """, (match_id, profile_id))
-                return True
+                return bool(cursor.rowcount)
         except Exception as e:
             logger.error(f"delete_manual_library_match error: {e}")
             return False
