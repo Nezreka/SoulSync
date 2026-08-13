@@ -122,20 +122,26 @@ def server_stream_target(db, kind: str, tmdb_id: Any, season: Any = None,
     if src == "plex":
         cfg = video_plex_config(db)
         if not cfg.get("base_url") or not cfg.get("token"):
-            return None
+            return {"error": "Plex isn't configured for the video side"}
         part = _plex_part_key(cfg["base_url"], cfg["token"], ref["server_id"],
                               want_size=want_size, want_path=want_path)
         if not part:
-            return None
+            # Distinguishing this from "not configured" and "not owned" matters:
+            # the commonest cause is a STALE ratingKey — Plex re-added the item
+            # and renumbered it, so our stored id points at nothing. The music
+            # side hit exactly this (#1047 P2) and answered it with a live
+            # re-search; the same fix belongs here.
+            return {"error": "Plex didn't return a file for this — its id may be "
+                             "stale (re-scan the library), or the item was removed"}
         return {"url": plex_part_url(cfg["base_url"], part, cfg["token"]), "server": "plex"}
 
     if src in ("jellyfin", "emby"):
         cfg = video_jellyfin_config(db)
         if not cfg.get("base_url") or not cfg.get("api_key"):
-            return None
+            return {"error": "Jellyfin isn't configured for the video side"}
         return {"url": jellyfin_stream_url(cfg["base_url"], ref["server_id"], cfg["api_key"]),
                 "server": src}
-    return None
+    return {"error": "This item came from %r, which can't stream" % (src or "no server")}
 
 
 __all__ = ["server_stream_target", "jellyfin_stream_url", "plex_part_url"]

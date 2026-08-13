@@ -96,6 +96,12 @@ def register_routes(bp):
             return jsonify({"error": "items must be a list"}), 400
         db = get_video_db()
         owned = {}
+        # Art is personal for the same reason ownership is. The bus only carries
+        # a poster when it is a TMDB CDN URL — a library row's artwork path can
+        # be a tokened Plex/Jellyfin URL and must never be broadcast into a
+        # public Soulseek room — so an OWNED title almost never has one and the
+        # card fell back to a 🎬 placeholder. Each client resolves its own.
+        art = {}
         for it in items[:_MAX_ITEMS]:
             if not isinstance(it, dict):
                 continue
@@ -123,7 +129,17 @@ def register_routes(bp):
             else:
                 continue
             owned[key] = bool(hit)
-        return jsonify({"owned": owned})
+            # The local poster proxy for whichever library row backs this key.
+            # Movies key off the movie row; an episode shows its SHOW's poster,
+            # which is what the ballot wants anyway.
+            try:
+                lib_id = db.owned_library_id("movie" if kd == "m" else "show", tmdb_id)
+                if lib_id:
+                    art[key] = "/api/video/poster/%s/%s?w=185" % (
+                        "movie" if kd == "m" else "show", lib_id)
+            except Exception:   # noqa: BLE001 - art is decoration, never a 500
+                logger.debug("watch art lookup failed for %s", key, exc_info=True)
+        return jsonify({"owned": owned, "art": art})
 
     def _party_file(args):
         """Resolve a party item to a real local file, or (None, error, status).
@@ -172,10 +188,12 @@ def register_routes(bp):
                                       season=args.get("s"), episode=args.get("e"),
                                       want_size=hit.get("size_bytes"),
                                       want_path=hit.get("path"))
-        if remote:
+        if remote and remote.get("url"):
             return {"remote": remote["url"], "server": remote["server"], "row": hit}, None, 200
-        return None, ("That file is in your library but neither this server nor your "
-                      "media server could serve it"), 404
+        # Say WHICH failure. Collapsing "not configured", "stale id" and "wrong
+        # server kind" into one sentence sent Boulder hunting the wrong thing.
+        why = (remote or {}).get("error") or "your media server had no file for it"
+        return None, "This server can't reach the file, and %s" % why, 404
 
     @bp.route("/watch/playable", methods=["GET"])
     def video_watch_playable():

@@ -4885,6 +4885,26 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def owned_library_id(self, media_type: str, tmdb_id):
+        """The local library row id for an owned title, or None.
+
+        Used to build this box's OWN poster-proxy path. Art can't ride the chat
+        bus — a library row's artwork URL may carry a media-server token — so
+        each client resolves its own, the same way it resolves ownership."""
+        if not tmdb_id:
+            return None
+        table = "movies" if media_type == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT id FROM %s WHERE tmdb_id=? ORDER BY id LIMIT 1" % table,
+                (int(tmdb_id),)).fetchone()
+            return r["id"] if r else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def video_server_ref(self, kind: str, *, tmdb_id=None, season=None, episode=None) -> dict:
         """The MEDIA SERVER's own handle for an owned item:
         ``{"server_source", "server_id"}``, or {} when it isn't owned.

@@ -169,7 +169,10 @@ def test_an_unreachable_file_says_so_rather_than_404ing_blankly():
     import inspect
     from pathlib import Path
     src = Path(inspect.getfile(__import__("api.video.watch", fromlist=["x"]))).read_text(encoding="utf-8")
-    assert "neither this server nor your" in src
+    assert "This server can't reach the file, and %s" in src, (
+        "the media server's OWN reason must be carried through, not replaced by "
+        "a generic sentence — 'stale Plex id' and 'Plex not configured' send you "
+        "to completely different places")
     assert "You don't have a file for this" in src
 
 

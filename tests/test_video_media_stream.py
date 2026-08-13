@@ -87,8 +87,12 @@ def test_a_row_without_a_server_id_has_no_target():
 
 
 def test_an_unknown_server_source_is_not_guessed_at(monkeypatch):
-    db = _DB({"server_source": "kodi", "server_id": "5"})
-    assert server_stream_target(db, "movie", 603) is None
+    """No URL — but it must SAY so. Every non-streamable outcome carries a
+    reason now, because collapsing 'not configured', 'stale id' and 'wrong
+    server kind' into one sentence sends the user hunting the wrong thing."""
+    out = server_stream_target(_DB({"server_source": "kodi", "server_id": "5"}), "movie", 603)
+    assert not (out or {}).get("url")
+    assert "kodi" in (out or {}).get("error", "")
 
 
 def test_jellyfin_target_is_built_from_the_stored_id(monkeypatch):
@@ -105,8 +109,10 @@ def test_an_unconfigured_server_yields_nothing_rather_than_a_broken_url(monkeypa
     import core.video.sources as sources
     monkeypatch.setattr(sources, "video_jellyfin_config",
                         lambda db=None: {"base_url": "", "api_key": ""})
-    assert server_stream_target(_DB({"server_source": "jellyfin", "server_id": "x"}),
-                                "movie", 603) is None
+    out = server_stream_target(_DB({"server_source": "jellyfin", "server_id": "x"}),
+                               "movie", 603)
+    assert not (out or {}).get("url")
+    assert "isn't configured" in (out or {}).get("error", "")
 
 
 def test_a_db_that_raises_degrades_to_no_target():

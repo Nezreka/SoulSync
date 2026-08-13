@@ -91,6 +91,7 @@
             autoJoin: '',        //   showing key to join the moment it goes live
             autoStart: '',       //   nomination to start as soon as the fold sees it
             playAhead: {},       //   key → verdict, probed BEFORE joining
+            art: {},             //   key → OUR poster-proxy path (never off the bus)
             vol: 100,            //   local playback volume (persisted, like the jukebox's)
         },
     };
@@ -6671,6 +6672,13 @@
     }
 
     function _watchPoster(e, cls) {
+        // OUR OWN library art first. The bus only ever carries a TMDB CDN
+        // poster (a library row's artwork can be a tokened Plex/Jellyfin URL
+        // and must never be broadcast), so an owned title usually arrives with
+        // no `po` at all and every card fell back to the 🎬 placeholder. The
+        // local proxy path comes from our own ownership probe and is safe.
+        var mine = state.watch.art[e.key];
+        if (mine) return '<img class="' + cls + '" src="' + attr(mine) + '" alt="" loading="lazy">';
         // po rides the bus (hostile) — render only an https URL, never a path.
         return (e.po && /^https:\/\//.test(e.po))
             ? '<img class="' + cls + '" src="' + attr(e.po) + '" alt="" loading="lazy">'
@@ -6992,6 +7000,7 @@
             state.watch.ownedFetching = '';
             if (res.ok && res.body && res.body.owned) {
                 Object.assign(state.watch.owned, res.body.owned);
+                if (res.body.art) Object.assign(state.watch.art, res.body.art);
                 renderWatch();
             } else if (res.status === 403) {
                 state.watch.ownedDenied = true;    // music-only profile: no video side
