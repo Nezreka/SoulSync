@@ -51,7 +51,8 @@ def _run(items, searches, enqueue, media_type="movie", root="/movies", recorded=
         fetch_items=lambda mt: items, active_keys=lambda mt: set(),
         target_dir=lambda mt: root, search=lambda it, mt: searches,
         enqueue=enqueue,
-        record_outcome=(lambda it, mt, ok: recorded.append((display_name(it, mt), ok)))
+        record_outcome=(lambda it, mt, ok, refusal=None:
+                        recorded.append((display_name(it, mt), ok)))
         if recorded is not None else (lambda *a: None))
     return res, deps
 
@@ -231,3 +232,30 @@ def test_the_episode_refusal_message_carries_the_episode_name():
                      media_type="episode", root="/tv")
     assert res["refused"] == 1
     assert "Aussie Shore S02E04" in _logs(deps)
+
+
+# ── the receipt reaches record_outcome ───────────────────────────────────────
+
+def test_the_drain_hands_over_the_best_refused_release():
+    """The whole point: the drain already judged every candidate and was about to
+    discard the verdicts. This is the seam where the evidence survives."""
+    seen = []
+    cands = [
+        _cand("a", accepted=False, resolution="480p", quality_label="480p WEB",
+              rejected="480p WEB isn't in your enabled tiers"),
+        _cand("b", accepted=False, resolution="720p", quality_label="720p WEB",
+              rejected="720p WEB isn't in your enabled tiers"),
+        _cand("c", accepted=False, resolution="1080p", quality_label="1080p WEB",
+              rejected="Wrong season"),
+    ]
+    auto_video_process_wishlist(
+        {"_automation_id": "a", "max_concurrent": 1}, _Deps(), media_type="movie",
+        fetch_items=lambda mt: [{"tmdb_id": 7, "title": "Stuck"}],
+        active_keys=lambda mt: set(), target_dir=lambda mt: "/movies",
+        search=lambda it, mt: cands,
+        enqueue=lambda *a, **k: {"ok": False, "error": "no"},
+        record_outcome=(lambda it, mt, ok, refusal=None: seen.append(refusal)))
+    assert seen, "an outcome must be recorded for a fruitless search"
+    got = seen[0]
+    assert got and got["quality_label"] == "720p WEB", "the best AVAILABILITY refusal"
+    assert got["seen"] == 2, "the wrong-season hit is noise, not evidence"

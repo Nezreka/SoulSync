@@ -450,13 +450,20 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
 _running: Dict[str, bool] = {"movie": False, "episode": False}
 
 
-def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool) -> None:
+def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool,
+                            refusal: Optional[Dict[str, Any]] = None) -> None:
     """Persist the drain search outcome on the wishlist row (#liveleak-failing-hub):
     a grab resets search_attempts, a fruitless search increments it. Callers skip
     this entirely when the search never ran (slskd down) — that's not evidence
-    the release doesn't exist. Best-effort: a db hiccup never breaks the drain."""
+    the release doesn't exist. Best-effort: a db hiccup never breaks the drain.
+
+    ``refusal`` is the receipt from :func:`core.video.wishlist_evidence.
+    summarize_refusals` — the best release that WAS found and the rule that turned
+    it down. Without it a row on its fortieth fruitless search is indistinguishable
+    from one waiting for next week's episode."""
     try:
         from api.video import get_video_db
+        from core.video.wishlist_evidence import refusal_line
         # episode drain items alias the show id as show_tmdb_id (movie items
         # carry plain tmdb_id) — read both or episodes silently never record
         tmdb = item.get('tmdb_id') or item.get('show_tmdb_id')
@@ -466,7 +473,9 @@ def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool
             'movie' if media_type == 'movie' else 'episode',
             tmdb, grabbed,
             season_number=item.get('season_number'),
-            episode_number=item.get('episode_number'))
+            episode_number=item.get('episode_number'),
+            refusal=refusal_line(refusal),
+            refusal_quality=(refusal or {}).get('quality_label'))
     except Exception:   # noqa: BLE001 - visibility must never break acquisition
         logger.debug("record_wishlist_search_outcome failed", exc_info=True)
 
@@ -608,7 +617,12 @@ def auto_video_process_wishlist(
             # that as a fruitless search is how a row reached 133 "attempts"
             # while its release was available the whole time.
             if not didnt_run and not (usable and not ok):
-                record_outcome(it, media_type, ok)
+                # Keep the receipt. Every candidate was just judged and is about to
+                # be discarded; the best one refused for a reason about
+                # AVAILABILITY (not "wrong season", which is only search noise) is
+                # what turns "why is this stuck" into a decision the user can make.
+                from core.video.wishlist_evidence import summarize_refusals
+                record_outcome(it, media_type, ok, summarize_refusals(cands))
             with lock:
                 searched[0] += 1
                 if ok:
