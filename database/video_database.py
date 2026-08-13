@@ -5132,6 +5132,39 @@ class VideoDatabase:
             by_movie.setdefault(r["movie_id"], []).append(dict(r))
         return {"rows": list(by_tmdb.values()), "files": list(by_movie.values())}
 
+    def repair_duplicate_episodes(self) -> list:
+        """Episodes holding 2+ video files, newest-largest first — the TV half of
+        the duplicate signal. Movies had this since the job shipped; episodes never
+        did, so a season that upgraded and forked showed nothing anywhere.
+
+        Returns [[file-row, …]] grouped per episode, each row carrying the show and
+        SxxExx so a finding can name itself without a second lookup."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
+                "e.title AS episode_title, s.id AS show_id, s.title AS show_title, "
+                "s.tmdb_id, f.id AS file_id, f.relative_path, f.size_bytes, "
+                "f.resolution, f.quality, f.video_codec "
+                "FROM episodes e "
+                "JOIN seasons se ON se.id = e.season_id "
+                "JOIN shows s ON s.id = se.show_id "
+                "JOIN media_files f ON f.episode_id = e.id "
+                "WHERE e.id IN ("
+                "  SELECT episode_id FROM media_files WHERE episode_id IS NOT NULL "
+                "  GROUP BY episode_id HAVING COUNT(*)>1) "
+                "ORDER BY s.title, e.season_number, e.episode_number, f.size_bytes DESC"
+            ).fetchall()
+        except sqlite3.Error:
+            logger.exception("repair_duplicate_episodes failed")
+            return []
+        finally:
+            conn.close()
+        by_ep: dict = {}
+        for r in rows:
+            by_ep.setdefault(r["episode_id"], []).append(dict(r))
+        return list(by_ep.values())
+
     def repair_watched_movies(self) -> list:
         """Every OWNED movie with its watch state + largest file — the
         watched-cleanup job's source (age filtering happens in the job)."""
