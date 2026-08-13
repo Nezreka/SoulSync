@@ -27,6 +27,8 @@ import { blockLabelLookup, formatAction, formatTrigger } from '../-automations.f
 import {
   automationHealth,
   buildAutomationsView,
+  sectionGlow,
+  sectionSummary,
   filterAutomations,
   filterOptions,
   forMusicSide,
@@ -442,6 +444,8 @@ export function AutomationsPage() {
           <AutomationsSection
             id="auto-section-system"
             label="System"
+            summary={sectionSummary(view.system)}
+            glow={sectionGlow('system')}
             automations={keep.system}
             totalCount={view.system.length}
             allAutomations={view.system}
@@ -461,6 +465,8 @@ export function AutomationsPage() {
             key={group.name}
             id={groupSectionId(group.name)}
             label={`📁 ${group.name}`}
+            summary={sectionSummary(group.automations)}
+            glow={sectionGlow('group', group.name)}
             automations={keep.groups.find((g) => g.name === group.name)?.automations ?? []}
             totalCount={group.automations.length}
             allAutomations={group.automations}
@@ -496,6 +502,8 @@ export function AutomationsPage() {
           <AutomationsSection
             id="auto-section-custom"
             label="My Automations"
+            summary={sectionSummary(view.ungrouped)}
+            glow={sectionGlow('ungrouped')}
             automations={keep.ungrouped}
             totalCount={view.ungrouped.length}
             allAutomations={view.ungrouped}

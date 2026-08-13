@@ -949,3 +949,38 @@
     color: rgb(134, 239, 172);
 }
 .automations-stats .auto-stat-allgood::before { content: '✓'; }
+
+/* ── Families ──
+   Sections were bare headers over a grid: no order, no organisation, and a
+   collapsed one told you nothing. Same container chassis as the tools page's
+   job families — a glow per family, and a header that summarises itself. */
+.automations-section {
+    --tile-glow: 148, 163, 184;
+    position: relative;
+    padding: 12px 14px 14px;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px;
+    background:
+        radial-gradient(90% 130% at 0% 0%, rgba(var(--tile-glow), 0.05), transparent 55%),
+        rgba(255,255,255,0.012);
+    overflow: hidden;
+}
+.automations-section::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--tile-glow), 0.5),
+        rgba(var(--tile-glow), 0.75),
+        rgba(var(--tile-glow), 0.5),
+        transparent);
+}
+.automations-section .section-count {
+    background: rgba(var(--tile-glow), 0.16);
+    color: #fff;
+    border-color: rgba(var(--tile-glow), 0.28);
+}
+.automations-section-header .section-summary {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

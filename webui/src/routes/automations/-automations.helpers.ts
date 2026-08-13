@@ -165,3 +165,51 @@ export function filterOptions(automations: Automation[]): {
   actions.sort();
   return { triggers, actions };
 }
+
+/**
+ * A section's one-line status, so a COLLAPSED family still says something.
+ *
+ * Reads left to right in the order you would ask: is anything broken, is
+ * anything running blind, is anything switched off. A family with none of
+ * those says so rather than printing three zeros.
+ */
+export function sectionSummary(automations: Automation[]): string {
+  if (automations.length === 0) return 'empty';
+  const failing = automations.filter((a) => Boolean(a.last_error)).length;
+  const off = automations.filter((a) => !truthy(a.enabled)).length;
+  const neverRun = automations.filter((a) => truthy(a.enabled) && !a.last_run).length;
+  const parts: string[] = [];
+  if (failing) parts.push(`${failing} failing`);
+  if (neverRun) parts.push(`${neverRun} never run`);
+  if (off) parts.push(`${off} off`);
+  if (parts.length === 0) parts.push('all healthy');
+  return parts.join(' · ');
+}
+
+/**
+ * The glow a family carries, as `R,G,B` for `--tile-glow`.
+ *
+ * System and My Automations are fixed — they are the same two families on
+ * every install, and a colour that moved between installs would be noise.
+ * User groups hash their NAME into the palette, so a group keeps its colour
+ * across reloads and across machines without anything being stored.
+ */
+const FAMILY_PALETTE = [
+  '56,189,248',
+  '168,85,247',
+  '34,197,94',
+  '245,158,11',
+  '244,114,182',
+  '20,184,166',
+];
+
+export function sectionGlow(kind: 'system' | 'ungrouped' | 'group', name = ''): string {
+  if (kind === 'system') return '148,163,184';
+  // Indirection is legal in a custom property: --tile-glow: var(--accent-rgb)
+  // resolves before rgba() reads it, so the user's own automations always
+  // carry the accent they picked.
+  if (kind === 'ungrouped') return 'var(--accent-rgb)';
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return FAMILY_PALETTE[hash % FAMILY_PALETTE.length];
+}

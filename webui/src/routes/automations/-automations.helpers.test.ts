@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAutomationsView,
   automationHealth,
+  sectionGlow,
+  sectionSummary,
   filterByHealth,
   filterAutomations,
   filterOptions,
@@ -240,5 +242,50 @@ describe('filterAutomations with a health lens', () => {
     ];
     const out = filterAutomations(rows, { q: 'night', health: 'failing' }, labels);
     expect(out.map((r) => (r as { id: number }).id)).toEqual([1]);
+  });
+});
+
+
+describe('sectionSummary — a collapsed family still says something', () => {
+  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
+
+  it('leads with what is broken', () => {
+    expect(
+      sectionSummary([
+        a({ enabled: 1, last_error: 'boom', last_run: 'x' }),
+        a({ enabled: 1, last_run: 'x' }),
+        a({ enabled: 0 }),
+      ]),
+    ).toBe('1 failing · 1 off');
+  });
+
+  it('says all healthy rather than printing three zeros', () => {
+    expect(sectionSummary([a({ enabled: 1, last_run: 'x' })])).toBe('all healthy');
+  });
+
+  it('counts never-run only among enabled rows', () => {
+    expect(sectionSummary([a({ enabled: 1 }), a({ enabled: 0 })])).toBe('1 never run · 1 off');
+  });
+
+  it('has a word for an empty family', () => {
+    expect(sectionSummary([])).toBe('empty');
+  });
+});
+
+describe('sectionGlow', () => {
+  it('pins the two families that exist on every install', () => {
+    expect(sectionGlow('system')).toBe('148,163,184');
+    // The user's own automations carry the accent they chose.
+    expect(sectionGlow('ungrouped')).toBe('var(--accent-rgb)');
+  });
+
+  it('gives a group the same colour every time, without storing anything', () => {
+    expect(sectionGlow('group', 'Nightly')).toBe(sectionGlow('group', 'Nightly'));
+    expect(sectionGlow('group', 'Nightly')).toMatch(/^\d+,\d+,\d+$/);
+  });
+
+  it('does not collapse every group onto one colour', () => {
+    const names = ['Nightly', 'Weekend', 'Imports', 'Cleanup', 'Radio'];
+    expect(new Set(names.map((n) => sectionGlow('group', n))).size).toBeGreaterThan(1);
   });
 });

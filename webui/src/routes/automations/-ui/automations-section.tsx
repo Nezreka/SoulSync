@@ -62,6 +62,10 @@ interface Props extends AutomationCardHandlers, GroupActions {
 
   id: string;
   label: string;
+  /** One line of status, so a collapsed family still says something. */
+  summary?: string;
+  /** `R,G,B` (or a var() indirection) for this family's --tile-glow. */
+  glow?: string;
   automations: Automation[];
   /**
    * Size of the section BEFORE filtering, for the header count.
@@ -81,6 +85,8 @@ interface Props extends AutomationCardHandlers, GroupActions {
 export function AutomationsSection({
   id,
   label,
+  summary,
+  glow,
   automations,
   isProtected = false,
   groupName,
@@ -146,6 +152,7 @@ export function AutomationsSection({
       }${isProtected && isDragActive ? ' no-drop' : ''}`}
       id={id}
       data-group-name={groupName}
+      style={glow ? ({ ['--tile-glow' as string]: glow } as React.CSSProperties) : undefined}
     >
       {/* Matches the vanilla header: the whole bar toggles, except clicks that
           land inside .section-actions. */}
@@ -183,6 +190,9 @@ export function AutomationsSection({
           </span>
         )}
         <span className="section-count">{totalCount ?? automations.length}</span>
+        {/* The family's own status, so collapsing one does not hide whether it
+            is healthy — the whole reason to group was to be able to collapse. */}
+        {summary ? <span className="section-summary">{summary}</span> : null}
         {showGroupActions ? (
           <div className="section-actions" onClick={(e) => e.stopPropagation()}>
             <button
