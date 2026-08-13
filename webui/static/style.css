@@ -75779,10 +75779,19 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     border-top: 1px solid rgba(255, 176, 32, 0.25);
 }
 .chat-watch-stage-warn[hidden] { display: none !important; }
-.chat-watch-headrow { display: flex; align-items: center; gap: 8px; font-size: 13px;
-    color: rgba(255,255,255,0.9); }
-.chat-watch-headrow .chat-jbx-meta { flex: 1 1 auto; }
-.chat-watch-nombtn { white-space: nowrap; }
+/* The header was wrapping "Movie night" onto two lines AND clipping the
+   + Nominate button off the panel edge (screenshots, Aug 13). The title must
+   never wrap, the meta may shrink to nothing, and the button keeps its width. */
+.chat-watch-headrow {
+    display: flex; align-items: center; gap: 6px; font-size: 13px;
+    color: rgba(255,255,255,0.9); min-width: 0;
+}
+.chat-watch-headrow > b { white-space: nowrap; flex: 0 0 auto; }
+.chat-watch-headrow .chat-jbx-meta {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-watch-nombtn { white-space: nowrap; flex: 0 0 auto; padding: 3px 8px; font-size: 11px; }
 .chat-watch-now {
     display: flex; gap: 10px; align-items: flex-start;
     padding: 8px; border-radius: 10px;
@@ -75831,12 +75840,33 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
     color: #6ee7a0; }
 .chat-watch-own--want { color: rgba(var(--accent-light-rgb), 0.9); }
 .chat-watch-own--wait { color: rgba(255,255,255,0.45); font-weight: 600; font-style: italic; }
-/* The showing block has the same crowding problem once Join/Pause/End/own-chip
-   all land in it, so its action row wraps too. */
-.chat-watch-now-acts > * { flex: 0 0 auto; }
+/* The showing block. The screenshots showed Pause / End / ✓ you have this /
+   Leave each taking a WHOLE line — the buttons were full-size in a rail this
+   narrow, so every one of them wrapped. Compact them and they sit two or three
+   to a row instead of four stacked. */
 .chat-watch-now { min-width: 0; }
 .chat-watch-now-main { flex: 1 1 auto; min-width: 0; }
 .chat-watch-now-ti { overflow: hidden; text-overflow: ellipsis; }
+.chat-watch-now-acts > * { flex: 0 0 auto; }
+.chat-watch-now-acts .chat-arc-btn {
+    padding: 3px 8px; font-size: 11px; line-height: 1.4; white-space: nowrap;
+}
+/* The stage's own volume row — the browser hides its native volume control
+   when the audio track can't decode, which is exactly when you reach for it. */
+.chat-watch-stage-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 10px 7px;
+    background: rgba(0,0,0,0.35);
+}
+.chat-watch-volic { font-size: 12px; opacity: 0.75; flex: 0 0 auto; }
+.chat-watch-vol { flex: 1 1 auto; min-width: 0; }
+/* A 'no' verdict is louder than a 'maybe' — it means it genuinely won't work. */
+.chat-watch-stage-warn--hard {
+    color: rgba(255, 170, 170, 0.98);
+    background: rgba(220, 60, 60, 0.16);
+    border-top-color: rgba(220, 60, 60, 0.35);
+}
+.chat-watch-own--bad { color: rgba(255,150,150,0.95); }
 /* Picker: "Start now" beside the nominate affordance, without stacking. */
 .chat-watch-resact { display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
     align-self: center; white-space: nowrap; }

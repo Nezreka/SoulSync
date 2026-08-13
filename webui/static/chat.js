@@ -90,6 +90,8 @@
             err: '',             //   the browser refused the file (element error)
             autoJoin: '',        //   showing key to join the moment it goes live
             autoStart: '',       //   nomination to start as soon as the fold sees it
+            playAhead: {},       //   key → verdict, probed BEFORE joining
+            vol: 100,            //   local playback volume (persisted, like the jukebox's)
         },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
@@ -101,6 +103,8 @@
         state.jukebox.videoHidden = localStorage.getItem('chat_jbx_audio') === '1';
         var _v = parseInt(localStorage.getItem('chat_jbx_vol') || '100', 10);
         if (_v >= 0 && _v <= 100) state.jukebox.vol = _v;
+        var _wv = parseInt(localStorage.getItem('chat_watch_vol') || '100', 10);
+        if (_wv >= 0 && _wv <= 100) state.watch.vol = _wv;
     } catch (e) { /* ignore */ }
 
     function q(sel) {
@@ -5486,6 +5490,17 @@
                 state.userFilter = e.target.value.trim();
                 renderUsersList();
             }
+            if (e.target && e.target.matches('[data-chat-watch-vol]')) {
+                // Mirrors the jukebox's: local only, persisted, never on the bus.
+                var wv = parseInt(e.target.value, 10);
+                if (wv >= 0 && wv <= 100) {
+                    state.watch.vol = wv;
+                    try { localStorage.setItem('chat_watch_vol', String(wv)); } catch (err) { /* ignore */ }
+                    var wvid = q('[data-chat-watch-video]');
+                    if (wvid) wvid.volume = wv / 100;
+                }
+                return;
+            }
             if (e.target && e.target.matches('[data-chat-jbx-vol]')) {
                 var vv = parseInt(e.target.value, 10);
                 if (vv >= 0 && vv <= 100) {
@@ -6701,8 +6716,18 @@
             return '<button class="chat-arc-btn" type="button" data-chat-watch-leave ' +
                 'title="Stop playing here — the party carries on without you">⏏ Leave</button>';
         }
-        return '<button class="chat-arc-btn chat-arc-btn--go" type="button" data-chat-watch-join ' +
-            'title="Play your copy, synced to the room">▶ Join party</button>';
+        // Probe BEFORE the click so the verdict can be on the button itself.
+        // Finding out your copy is AC3 after joining is finding out too late.
+        if (!(now.key in state.watch.playAhead)) _watchProbePlayable(now, true);
+        var ahead = state.watch.playAhead[now.key];
+        var bad = ahead && ahead.verdict === 'no';
+        return '<button class="chat-arc-btn' + (bad ? '' : ' chat-arc-btn--go') + '" type="button" ' +
+            'data-chat-watch-join title="' +
+            attr(bad ? (ahead.reasons || []).join(' · ') + ' — you can still try'
+                     : 'Play your copy, synced to the room') + '">' +
+            (bad ? '▶ Join anyway' : '▶ Join party') + '</button>' +
+            (bad ? '<span class="chat-watch-own chat-watch-own--bad" title="' +
+                       attr((ahead.reasons || []).join(' · ')) + '">⚠ won\'t play here</span>' : '');
     }
 
     // The screen is mounted ONCE per showing and then left alone. Re-rendering it
@@ -6719,9 +6744,18 @@
         host.innerHTML =
             '<video class="chat-watch-video" data-chat-watch-video playsinline controls ' +
                 'preload="metadata" src="' + attr(_watchStreamUrl(now)) + '"></video>' +
+            // Its own volume, like the jukebox's — persisted, and independent of
+            // the room. The browser's native control disappears when the audio
+            // track can't decode, which is exactly when you go looking for it.
+            '<div class="chat-watch-stage-bar">' +
+                '<span class="chat-watch-volic">🔊</span>' +
+                '<input class="chat-jbx-vol chat-watch-vol" data-chat-watch-vol type="range" ' +
+                    'min="0" max="100" value="' + state.watch.vol + '" title="Volume (just yours)">' +
+            '</div>' +
             '<div class="chat-watch-stage-warn" data-chat-watch-warn hidden></div>';
         var v = host.querySelector('[data-chat-watch-video]');
         if (v) {
+            v.volume = Math.max(0, Math.min(100, state.watch.vol)) / 100;
             v.addEventListener('error', function () {
                 // The browser is the final authority on playability — when it
                 // refuses, say so plainly instead of leaving a black rectangle.
@@ -6737,11 +6771,19 @@
         var el = q('[data-chat-watch-warn]');
         if (!el) return;
         var p = state.watch.play;
-        var text = state.watch.err
-            ? ('Your browser refused this file. ' + state.watch.err)
-            : (p && p.verdict === 'maybe' && (p.reasons || []).length ? p.reasons.join(' · ') : '');
+        // 'no' MUST be shown. It used to be suppressed — only 'maybe' rendered —
+        // which meant the single worst case was the silent one: Austin Powers
+        // (1997) is h264 + AC3, so the picture played and the sound never could,
+        // and the UI said nothing at all. A verdict nobody sees is not a verdict.
+        var text = '';
+        if (state.watch.err) {
+            text = 'Your browser refused this file. ' + state.watch.err;
+        } else if (p && (p.verdict === 'no' || p.verdict === 'maybe') && (p.reasons || []).length) {
+            text = (p.verdict === 'no' ? '⚠ ' : '') + p.reasons.join(' · ');
+        }
         el.textContent = text;
         el.hidden = !text;
+        el.classList.toggle('chat-watch-stage-warn--hard', !!(p && p.verdict === 'no' && !state.watch.err));
     }
 
     function _watchTeardown() {
@@ -6767,8 +6809,21 @@
         _watchArm();
     }
 
-    function _watchProbePlayable(now) {
+    function _watchProbePlayable(now, ahead) {
         var sig = now.key;
+        if (ahead) {
+            // Pre-join probe: cache under playAhead so the Join button can carry
+            // the verdict. Marked immediately so a re-render can't refire it.
+            if (sig in state.watch.playAhead) return;
+            state.watch.playAhead[sig] = null;
+            fetch('/api/video/watch/playable?kd=' + encodeURIComponent(now.kd) +
+                  '&id=' + encodeURIComponent(now.id) +
+                  (now.kd === 't' ? '&s=' + now.s + '&e=' + now.e : ''))
+                .then(function (r) { return r.json(); })
+                .then(function (d) { state.watch.playAhead[sig] = d || null; renderWatch(); })
+                .catch(function () { delete state.watch.playAhead[sig]; });
+            return;
+        }
         if (state.watch.playFetching === sig) return;
         state.watch.playFetching = sig;
         var u = '/api/video/watch/playable?kd=' + encodeURIComponent(now.kd) +

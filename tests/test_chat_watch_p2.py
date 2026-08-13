@@ -256,3 +256,74 @@ def test_controls_keep_their_intrinsic_width():
     compress below their content no matter what the container does."""
     assert ".chat-watch-row-acts > * { flex: 0 0 auto; }" in _CSS
     assert ".chat-watch-now-acts > * { flex: 0 0 auto; }" in _CSS
+
+
+# ── the silent picture ───────────────────────────────────────────────────────
+# Boulder played Austin Powers (1997) — h264 + AC3 in his library — and got a
+# picture with no sound and no explanation. The verdict was computed correctly
+# and then suppressed: only 'maybe' rendered, so 'no', the case that actually
+# matters, said nothing.
+
+def test_a_no_verdict_is_shown_not_swallowed():
+    warn = _fn("_watchStageWarn")
+    assert "p.verdict === 'no'" in warn, (
+        "suppressing 'no' hides the one verdict that means it genuinely will "
+        "not work — a verdict nobody sees is not a verdict")
+
+
+def test_a_hard_verdict_reads_differently_from_a_soft_one():
+    warn = _fn("_watchStageWarn")
+    assert "chat-watch-stage-warn--hard" in warn
+    assert ".chat-watch-stage-warn--hard" in _CSS
+
+
+def test_the_verdict_is_probed_before_joining_not_after():
+    """Finding out your copy is AC3 after you have joined is finding out too
+    late — the Join button itself carries the answer."""
+    chip = _fn("_watchJoinChip")
+    assert "state.watch.playAhead" in chip
+    # NB the apostrophe is backslash-escaped in the JS string literal, so match
+    # around it rather than on the rendered text.
+    assert "Join anyway" in chip and "play here" in chip
+
+
+def test_the_pre_join_probe_cannot_refire_on_every_render():
+    """renderWatch runs on every room event; an unguarded probe would be a
+    request storm."""
+    probe = _fn("_watchProbePlayable")
+    assert "if (sig in state.watch.playAhead) return;" in probe
+    assert "state.watch.playAhead[sig] = null;" in probe
+
+
+# ── volume ───────────────────────────────────────────────────────────────────
+
+def test_the_stage_has_its_own_volume_like_the_jukebox():
+    mount = _fn("_watchMountStage")
+    assert "data-chat-watch-vol" in mount
+    assert "v.volume =" in mount, "the element must honour the stored level on mount"
+
+
+def test_volume_is_local_and_persisted_and_never_published():
+    handler = _JS[_JS.index("[data-chat-watch-vol]"):][:700]
+    assert "localStorage.setItem('chat_watch_vol'" in handler
+    assert "sendProtocol" not in handler, "one viewer's volume is not the room's"
+
+
+def test_the_stored_volume_is_restored_at_startup():
+    assert "localStorage.getItem('chat_watch_vol')" in _JS
+
+
+# ── the layout the screenshots showed ────────────────────────────────────────
+
+def test_the_header_cannot_wrap_or_clip():
+    """'Movie night' was breaking across two lines and + Nominate was being cut
+    off the panel edge."""
+    assert ".chat-watch-headrow > b { white-space: nowrap; flex: 0 0 auto; }" in _CSS
+    assert ".chat-watch-nombtn { white-space: nowrap; flex: 0 0 auto;" in _CSS
+
+
+def test_the_showing_controls_are_compact_enough_to_share_a_row():
+    """Pause / End / own-chip / Leave each took a whole line at full button
+    size in a rail this narrow."""
+    assert ".chat-watch-now-acts .chat-arc-btn" in _CSS
+    assert "font-size: 11px" in _CSS.split(".chat-watch-now-acts .chat-arc-btn")[1][:200]
