@@ -156,7 +156,12 @@ def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = 
 
 
 def _project(r: Any, url: str, want_proto: str) -> dict:
-    """One Prowlarr result → the slskd-shaped hit ``_evaluate_hits`` consumes."""
+    """One Prowlarr result → the slskd-shaped hit ``_evaluate_hits`` consumes.
+
+    ``magnet_uri`` rides along beside ``download_url`` (#1139, video side). The
+    URL is now preferred so SoulSync can fetch the real .torrent server-side and
+    push the file; the magnet is what ``add_torrent_smart`` falls back to when
+    that fetch fails, so preferring the URL is never a downgrade."""
     size = int(getattr(r, "size", 0) or 0)
     seeders = getattr(r, "seeders", None)
     return {
@@ -169,6 +174,7 @@ def _project(r: Any, url: str, want_proto: str) -> dict:
         "filename": r.title,                 # the grab uses the URL carriers below, not this
         "files": [], "file_count": 0, "folder_size_bytes": size,
         "download_url": url,
+        "magnet_uri": getattr(r, "magnet_uri", None),
         "protocol": getattr(r, "protocol", want_proto),
         "indexer_id": getattr(r, "indexer_id", None),
         "guid": getattr(r, "guid", None),
@@ -216,7 +222,10 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
         for r in res:
             if getattr(r, "protocol", "") != want_proto:
                 continue
-            url = getattr(r, "magnet_uri", None) or getattr(r, "download_url", None)
+            # .torrent URL first, magnet second (#1139): a magnet hands the
+            # client an info-hash and nothing else, and one that cannot reach
+            # the swarm parks on "downloading metadata" indefinitely.
+            url = getattr(r, "download_url", None) or getattr(r, "magnet_uri", None)
             if not url:
                 continue
             keyv = getattr(r, "guid", None) or url

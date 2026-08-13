@@ -109,6 +109,7 @@
             } else {
                 // torrent / usenet — the magnet/NZB carriers the backend hands to the client
                 payload.download_url = best.download_url; payload.protocol = best.protocol;
+            payload.magnet_uri = best.magnet_uri;   // #1139 fallback if the .torrent fetch fails
                 payload.indexer_id = best.indexer_id; payload.guid = best.guid;
                 payload.username = best.username; payload.filename = best.filename || best.title;
                 payload.candidates = [];

@@ -32,16 +32,24 @@ def _usenet_category() -> str:
     return str(config_manager.get("usenet_client.category", "") or "soulsync")
 
 
-def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None) -> dict:
+def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
+                 fallback_magnet: Optional[str] = None) -> dict:
     """Add a magnet/.torrent URL to the active torrent client. Returns
-    ``{ok, ref}`` (ref = the info-hash to poll) or ``{ok: False, error}``."""
+    ``{ok, ref}`` (ref = the info-hash to poll) or ``{ok: False, error}``.
+
+    ``fallback_magnet`` is the same release's magnet, carried from the search
+    hit. Callers now hand over the .torrent URL first (#1139) so it can be
+    fetched server-side and pushed as a file; without the magnet to fall back
+    on, a URL this process cannot reach would be a dead end where the magnet
+    would have worked."""
     from core.torrent_clients import get_active_adapter
     adapter = get_active_adapter()
     if adapter is None or not adapter.is_configured():
         return {"ok": False, "error": "No torrent client configured — set it on Settings → Downloads."}
     try:
         from core.torrent_clients.base import add_torrent_smart
-        ref = _run(add_torrent_smart(adapter, url_or_magnet, category=_torrent_category(), save_path=save_path))
+        ref = _run(add_torrent_smart(adapter, url_or_magnet, category=_torrent_category(),
+                                     save_path=save_path, fallback_magnet=fallback_magnet))
     except Exception as e:   # noqa: BLE001 - surface the client error to the grab handler
         logger.warning("torrent add failed: %s", e, exc_info=True)
         return {"ok": False, "error": "Torrent client: " + str(e)}
@@ -67,10 +75,15 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> dict:
     return {"ok": True, "ref": str(ref)}
 
 
-def grab(source: str, url: Any, *, save_path: Optional[str] = None) -> dict:
-    """Dispatch a grab by source (torrent | usenet)."""
+def grab(source: str, url: Any, *, save_path: Optional[str] = None,
+         fallback_magnet: Optional[str] = None) -> dict:
+    """Dispatch a grab by source (torrent | usenet).
+
+    ``fallback_magnet`` is torrent-only and ignored for usenet, which has no
+    such thing — keeping it on the shared signature means callers don't have
+    to branch on the source just to pass it."""
     if str(source).lower() == "torrent":
-        return grab_torrent(url, save_path=save_path)
+        return grab_torrent(url, save_path=save_path, fallback_magnet=fallback_magnet)
     if str(source).lower() == "usenet":
         return grab_usenet(url, save_path=save_path)
     return {"ok": False, "error": "Unsupported source %r" % source}
