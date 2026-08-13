@@ -165,9 +165,13 @@ def register_routes(bp):
         # matters a lot: a library spread across a dozen mount roots is mostly
         # invisible to a SoulSync that only knows one share.
         from core.video.media_stream import server_stream_target
+        # Hand over the file we actually JUDGED — an item with several versions
+        # must not be judged on one and streamed from another.
         remote = server_stream_target(db, "movie" if kd == "m" else "episode",
                                       tmdb_id=tmdb_id,
-                                      season=args.get("s"), episode=args.get("e"))
+                                      season=args.get("s"), episode=args.get("e"),
+                                      want_size=hit.get("size_bytes"),
+                                      want_path=hit.get("path"))
         if remote:
             return {"remote": remote["url"], "server": remote["server"], "row": hit}, None, 200
         return None, ("That file is in your library but neither this server nor your "

@@ -168,3 +168,96 @@ def test_the_upstream_response_is_always_closed():
     leaking one per party would exhaust the pool."""
     stream = _route("stream")
     assert "finally:" in stream and "up.close()" in stream
+
+
+# ── multi-version items: judge and play the SAME file ────────────────────────
+# 2,199 movies in the live library carry more than one media file (up to five).
+# video_stored_file_path picks the LARGEST and the codec verdict is computed
+# from that row, so taking Plex's first part would judge one version and stream
+# another — and the "your browser won't like this" warning would describe a copy
+# nobody is watching.
+
+class _Part:
+    def __init__(self, key, size=0, file=""):
+        self.key, self.size, self.file = key, size, file
+
+
+class _Media:
+    def __init__(self, parts):
+        self.parts = parts
+
+
+class _Item:
+    def __init__(self, media):
+        self.media = media
+
+
+def _fake_plex(monkeypatch, item):
+    import core.video.media_stream as ms
+
+    class _Srv:
+        def __init__(self, *a, **k):
+            pass
+
+        def fetchItem(self, _key):
+            return item
+
+    import sys, types
+    mod = types.ModuleType("plexapi.server")
+    mod.PlexServer = _Srv
+    monkeypatch.setitem(sys.modules, "plexapi.server", mod)
+    return ms
+
+
+def test_the_part_is_matched_by_size(monkeypatch):
+    ms = _fake_plex(monkeypatch, _Item([_Media([
+        _Part("/library/parts/1/small.mkv", size=700_000_000),
+        _Part("/library/parts/2/big.mkv", size=8_000_000_000),
+    ])]))
+    got = ms._plex_part_key("http://p", "T", 1, want_size=8_000_000_000)
+    assert got == "/library/parts/2/big.mkv"
+
+
+def test_the_part_falls_back_to_the_stored_filename(monkeypatch):
+    ms = _fake_plex(monkeypatch, _Item([_Media([
+        _Part("/library/parts/1/a.mkv", size=1, file="/mnt/x/A Movie (2020) 720p.mkv"),
+        _Part("/library/parts/2/b.mkv", size=2, file="/mnt/x/A Movie (2020) 1080p.mkv"),
+    ])]))
+    got = ms._plex_part_key("http://p", "T", 1, want_size=None,
+                            want_path="/mnt/other/A Movie (2020) 1080p.mkv")
+    assert got == "/library/parts/2/b.mkv"
+
+
+def test_a_windows_stored_path_still_matches_a_posix_part(monkeypatch):
+    ms = _fake_plex(monkeypatch, _Item([_Media([
+        _Part("/library/parts/9/f.mkv", size=5, file="/mnt/easystore4/Film.mkv"),
+    ])]))
+    assert ms._plex_part_key("http://p", "T", 1,
+                             want_path="\\\\nas\\share\\Film.mkv") == "/library/parts/9/f.mkv"
+
+
+def test_no_match_degrades_to_the_first_part_rather_than_nothing(monkeypatch):
+    """Playing the wrong version beats playing nothing — but it is logged,
+    because a silent mismatch is how the verdict starts lying."""
+    ms = _fake_plex(monkeypatch, _Item([_Media([
+        _Part("/library/parts/1/a.mkv", size=1),
+        _Part("/library/parts/2/b.mkv", size=2),
+    ])]))
+    assert ms._plex_part_key("http://p", "T", 1, want_size=999) == "/library/parts/1/a.mkv"
+
+
+def test_a_single_version_item_is_unaffected(monkeypatch):
+    ms = _fake_plex(monkeypatch, _Item([_Media([_Part("/library/parts/7/only.mkv", size=42)])]))
+    assert ms._plex_part_key("http://p", "T", 1, want_size=None) == "/library/parts/7/only.mkv"
+
+
+def test_an_item_with_no_parts_yields_nothing(monkeypatch):
+    ms = _fake_plex(monkeypatch, _Item([_Media([])]))
+    assert ms._plex_part_key("http://p", "T", 1) is None
+
+
+def test_the_endpoint_hands_over_the_file_it_judged():
+    src = _watch_src()
+    body = src[src.index("def _party_file("):src.index('@bp.route("/watch/playable"')]
+    assert "want_size=hit.get(\"size_bytes\")" in body
+    assert "want_path=hit.get(\"path\")" in body
