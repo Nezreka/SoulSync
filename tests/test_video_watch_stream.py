@@ -159,13 +159,17 @@ def test_the_stream_endpoint_serves_range_requests():
 
 
 def test_an_unreachable_file_says_so_rather_than_404ing_blankly():
-    """The split-mount case the path resolver exists for: the row is real, the
-    file is not reachable from this box. That is a different sentence from
-    'you don't own this' and the user needs to be able to tell them apart."""
+    """Three outcomes the user must be able to tell apart: you don't own it,
+    you own it and it is playing, and you own it but NOBODY could serve it.
+
+    The last message changed when playback stopped depending on a local mount:
+    it used to blame this server alone, which was misleading once the media
+    server became the primary route — on a library spread over eleven mount
+    roots, 'this server can't reach it' was true and useless."""
     import inspect
     from pathlib import Path
     src = Path(inspect.getfile(__import__("api.video.watch", fromlist=["x"]))).read_text(encoding="utf-8")
-    assert "this server can't reach it" in src
+    assert "neither this server nor your" in src
     assert "You don't have a file for this" in src
 
 

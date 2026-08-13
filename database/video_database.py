@@ -4885,6 +4885,37 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_server_ref(self, kind: str, *, tmdb_id=None, season=None, episode=None) -> dict:
+        """The MEDIA SERVER's own handle for an owned item:
+        ``{"server_source", "server_id"}``, or {} when it isn't owned.
+
+        This is what lets playback go through Plex/Jellyfin instead of the
+        filesystem. The server knows where every file actually lives — it
+        reported the path in the first place — so asking it for the bytes
+        sidesteps the whole question of whether SoulSync can reach the mount
+        (on a library spread across eleven mount roots, usually it cannot)."""
+        if not tmdb_id:
+            return {}
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                r = conn.execute(
+                    "SELECT server_source, server_id FROM movies "
+                    "WHERE tmdb_id=? AND has_file=1 AND server_id IS NOT NULL LIMIT 1",
+                    (int(tmdb_id),)).fetchone()
+            else:
+                r = conn.execute(
+                    "SELECT e.server_source, e.server_id FROM episodes e "
+                    "JOIN shows s ON s.id = e.show_id "
+                    "WHERE s.tmdb_id=? AND e.season_number=? AND e.episode_number=? "
+                    "AND e.has_file=1 AND e.server_id IS NOT NULL LIMIT 1",
+                    (int(tmdb_id), int(season), int(episode))).fetchone()
+            return {"server_source": r["server_source"], "server_id": r["server_id"]} if r else {}
+        except (sqlite3.Error, ValueError, TypeError):
+            return {}
+        finally:
+            conn.close()
+
     def video_file_codecs(self, relative_path) -> dict:
         """The codecs the scanner recorded for a stored file:
         ``{"video_codec", "audio_codec"}``, or {} when unknown.

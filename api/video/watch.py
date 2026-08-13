@@ -156,12 +156,22 @@ def register_routes(bp):
             return None, "You don't have a file for this", 404
         local = resolve_video_file_path(hit.get("path"), video_base_dirs(db),
                                         size_bytes=hit.get("size_bytes"))
-        if not local:
-            # The library row exists but the file isn't reachable from HERE —
-            # the split-mount case the resolver exists for. Saying so beats a
-            # dead <video> element.
-            return None, "That file is in your library but this server can't reach it", 404
-        return {"path": local, "row": hit}, None, 200
+        if local:
+            return {"path": local, "row": hit}, None, 200
+        # No local file — but SoulSync doesn't need one. The media server knows
+        # exactly where every file lives (it reported the path in the first
+        # place) and we already hold its URL, token and this item's server_id.
+        # Asking IT for the bytes sidesteps the mount question entirely, which
+        # matters a lot: a library spread across a dozen mount roots is mostly
+        # invisible to a SoulSync that only knows one share.
+        from core.video.media_stream import server_stream_target
+        remote = server_stream_target(db, "movie" if kd == "m" else "episode",
+                                      tmdb_id=tmdb_id,
+                                      season=args.get("s"), episode=args.get("e"))
+        if remote:
+            return {"remote": remote["url"], "server": remote["server"], "row": hit}, None, 200
+        return None, ("That file is in your library but neither this server nor your "
+                      "media server could serve it"), 404
 
     @bp.route("/watch/playable", methods=["GET"])
     def video_watch_playable():
@@ -174,14 +184,18 @@ def register_routes(bp):
         if err:
             return jsonify({"playable": False, "verdict": "no", "reasons": [err]}), status
         db = get_video_db()
+        # Judge the STORED path, not the resolved one: it is the row the codecs
+        # are keyed by, it carries the same extension, and it is the only one
+        # that exists when the bytes are coming from the media server rather
+        # than a local file.
+        stored = (found.get("row") or {}).get("path")
         codecs = {}
         try:
-            codecs = db.video_file_codecs(found["row"].get("path")) or {}
+            codecs = db.video_file_codecs(stored) or {}
         except Exception:   # noqa: BLE001 - a codec lookup must never block playback
             logger.debug("codec lookup failed for the watch party", exc_info=True)
-        v = direct_play_verdict(found["path"], codecs.get("video_codec"),
-                                codecs.get("audio_codec"))
-        return jsonify({"playable": v["verdict"] != "no", **v})
+        v = direct_play_verdict(stored, codecs.get("video_codec"), codecs.get("audio_codec"))
+        return jsonify({"playable": v["verdict"] != "no", "via": found.get("server") or "local", **v})
 
     @bp.route("/watch/stream", methods=["GET"])
     def video_watch_stream():
@@ -191,17 +205,50 @@ def register_routes(bp):
         download: Werkzeug answers Range requests with 206 partial content, so
         the browser can seek — and seeking is not a nicety here, it is how a
         latecomer joins a showing already in progress."""
-        from flask import send_file
+        from flask import Response, send_file, stream_with_context
         from core.video.direct_play import mime_for
         found, err, status = _party_file(request.args)
         if err:
             return jsonify({"error": err}), status
+
+        if found.get("path"):
+            try:
+                return send_file(found["path"], mimetype=mime_for(found["path"]),
+                                 conditional=True, as_attachment=False)
+            except OSError:
+                logger.exception("watch stream failed to open %s", found["path"])
+                return jsonify({"error": "That file could not be opened for playback"}), 404
+
+        # Proxied from the media server. The browser must NEVER see the upstream
+        # URL — it carries the server's token — so SoulSync relays the bytes and
+        # passes the Range header both ways, keeping the stream seekable.
+        import requests
+        head = {}
+        if request.headers.get("Range"):
+            head["Range"] = request.headers["Range"]
         try:
-            return send_file(found["path"], mimetype=mime_for(found["path"]),
-                             conditional=True, as_attachment=False)
-        except OSError:
-            logger.exception("watch stream failed to open %s", found["path"])
-            return jsonify({"error": "That file could not be opened for playback"}), 404
+            up = requests.get(found["remote"], headers=head, stream=True, timeout=(10, 60))
+        except requests.RequestException:
+            logger.exception("watch stream: %s did not answer", found.get("server"))
+            return jsonify({"error": "Your %s server didn't answer" % (found.get("server") or "media")}), 502
+        if up.status_code >= 400:
+            up.close()
+            return jsonify({"error": "Your %s server refused the stream (HTTP %d)"
+                            % (found.get("server") or "media", up.status_code)}), 502
+        passthru = {k: v for k, v in up.headers.items()
+                    if k.lower() in ("content-type", "content-length", "content-range",
+                                     "accept-ranges", "last-modified")}
+        passthru.setdefault("Accept-Ranges", "bytes")
+
+        def _relay():
+            try:
+                for chunk in up.iter_content(chunk_size=256 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                up.close()
+
+        return Response(stream_with_context(_relay()), status=up.status_code, headers=passthru)
 
     @bp.route("/watch/grab", methods=["POST"])
     def video_watch_grab():
