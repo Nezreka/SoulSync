@@ -25,6 +25,7 @@ import { useVanillaBuilder } from '../-automations.builder';
 import { useAutomationDnd } from '../-automations.dnd';
 import { blockLabelLookup, formatAction, formatTrigger } from '../-automations.format';
 import {
+  automationHealth,
   buildAutomationsView,
   filterAutomations,
   filterOptions,
@@ -282,7 +283,8 @@ export function AutomationsPage() {
   } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
 
-  const filtering = Boolean(search.q || search.trigger || search.action);
+  const health = useMemo(() => automationHealth(automations, !masterOn), [automations, masterOn]);
+  const filtering = Boolean(search.q || search.trigger || search.action || search.health);
   const isEmpty = automations.length === 0;
 
   const setSearch = (patch: Partial<typeof search>) =>
@@ -339,15 +341,52 @@ export function AutomationsPage() {
         </button>
         {isEmpty ? null : (
           <>
-            <span className="auto-stat">
-              <strong>{view.stats.active}</strong> Active
-            </span>
-            <span className="auto-stat">
-              <strong>{view.stats.system}</strong> System
-            </span>
-            <span className="auto-stat">
-              <strong>{view.stats.custom}</strong> Custom
-            </span>
+            {/* The verdict, not an inventory. Active/System/Custom counted rows
+                in a table; these answer "is automation working", and each one
+                is a lens rather than a number you can only look at. */}
+            <button
+              type="button"
+              className={`auto-stat auto-stat-lens${search.health === '' ? ' active' : ''}`}
+              onClick={() => setSearch({ health: '' })}
+              title="Show every automation"
+            >
+              <strong>{health.armed}</strong> Armed
+            </button>
+            {health.failing > 0 ? (
+              <button
+                type="button"
+                className={`auto-stat auto-stat-lens failing${
+                  search.health === 'failing' ? ' active' : ''
+                }`}
+                onClick={() => setSearch({ health: 'failing' })}
+                title="Automations whose last run failed"
+              >
+                <strong>{health.failing}</strong> Failing
+              </button>
+            ) : null}
+            {health.neverRun > 0 ? (
+              <button
+                type="button"
+                className={`auto-stat auto-stat-lens waiting${
+                  search.health === 'never' ? ' active' : ''
+                }`}
+                onClick={() => setSearch({ health: 'never' })}
+                title="Enabled, but has not run yet"
+              >
+                <strong>{health.neverRun}</strong> Never run
+              </button>
+            ) : null}
+            {view.stats.total - health.armed > 0 ? (
+              <button
+                type="button"
+                className={`auto-stat auto-stat-lens${search.health === 'off' ? ' active' : ''}`}
+                onClick={() => setSearch({ health: 'off' })}
+                title="Switched off"
+              >
+                <strong>{view.stats.total - health.armed}</strong> Off
+              </button>
+            ) : null}
+            {health.ok ? <span className="auto-stat-allgood">All good</span> : null}
           </>
         )}
       </div>
@@ -417,13 +456,6 @@ export function AutomationsPage() {
           />
         ) : null}
 
-        {/* The Hub sits between System and the user groups, as loadAutomations
-            ordered it, and is static content so the filter does not touch it.
-            Hidden on an EMPTY list: loadAutomations returns before appending it,
-            so a fresh install sees the empty state alone rather than the empty
-            state plus a wall of reference material. */}
-        {isEmpty ? null : <AutomationHub />}
-
         {view.groups.map((group) => (
           <AutomationsSection
             key={group.name}
@@ -456,6 +488,10 @@ export function AutomationsPage() {
           />
         ))}
 
+        {/* The Hub is reference material, so it sits BELOW the user's own
+            automations rather than between them and System. Hidden on an empty
+            list: a fresh install should see the empty state alone, not the
+            empty state plus a wall of documentation. */}
         {view.ungrouped.length > 0 ? (
           <AutomationsSection
             id="auto-section-custom"
@@ -473,6 +509,7 @@ export function AutomationsPage() {
             {...cardHandlers}
           />
         ) : null}
+        {isEmpty ? null : <AutomationHub />}
       </div>
 
       {isEmpty ? (

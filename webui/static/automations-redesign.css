@@ -908,3 +908,44 @@
     border-color: rgba(var(--accent-rgb), 0.45);
     color: #fff; transform: translateY(-1px);
 }
+
+/* ── The verdict strip ──
+   Active/System/Custom counted rows in a table. These answer "is automation
+   working", and each is a lens: clicking one filters the page to exactly the
+   rows it counted. */
+.automations-stats .auto-stat-lens {
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+.automations-stats .auto-stat-lens:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.16); }
+.automations-stats .auto-stat-lens.active {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: #fff;
+}
+.automations-stats .auto-stat-lens.failing {
+    border-color: rgba(244, 67, 54, 0.3);
+    background: rgba(244, 67, 54, 0.07);
+    color: #ff8a80;
+}
+.automations-stats .auto-stat-lens.failing strong {
+    background: none; -webkit-text-fill-color: #ff8a80; color: #ff8a80;
+}
+.automations-stats .auto-stat-lens.failing.active {
+    border-color: rgba(244, 67, 54, 0.55);
+    background: rgba(244, 67, 54, 0.14);
+}
+.automations-stats .auto-stat-lens.waiting {
+    border-color: rgba(245, 158, 11, 0.28);
+    color: #f59e0b;
+}
+.automations-stats .auto-stat-lens.waiting strong {
+    background: none; -webkit-text-fill-color: #f59e0b; color: #f59e0b;
+}
+.automations-stats .auto-stat-allgood {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; letter-spacing: .03em;
+    color: rgb(134, 239, 172);
+}
+.automations-stats .auto-stat-allgood::before { content: '✓'; }

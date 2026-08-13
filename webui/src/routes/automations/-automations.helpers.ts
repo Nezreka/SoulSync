@@ -70,6 +70,48 @@ export function buildAutomationsView(automations: Automation[]): AutomationsView
 }
 
 /**
+ * The verdict the page opens with.
+ *
+ * The stats bar counted Active / System / Custom — how many rows are in a
+ * table, which is a question nobody has. What a person comes to this page to
+ * learn is whether automation is WORKING, and that has exactly three bad
+ * answers: something failed, something has never run, or the whole side is
+ * paused so nothing is running at all.
+ *
+ * `failing` counts the LAST run, not history: `last_error` is cleared on the
+ * next successful run (update_automation_run writes it every time), so this
+ * is "currently broken", not "has ever broken".
+ *
+ * `neverRun` deliberately excludes disabled rows. An automation you switched
+ * off has not run because you did not want it to; calling that out as a
+ * problem would train people to ignore the number.
+ */
+export function automationHealth(
+  automations: Automation[],
+  paused: boolean,
+): { failing: number; neverRun: number; armed: number; paused: boolean; ok: boolean } {
+  const enabled = automations.filter((a) => truthy(a.enabled));
+  const failing = automations.filter((a) => Boolean(a.last_error)).length;
+  const neverRun = enabled.filter((a) => !a.last_run).length;
+  return {
+    failing,
+    neverRun,
+    armed: enabled.length,
+    paused,
+    ok: failing === 0 && neverRun === 0 && !paused,
+  };
+}
+
+/** Rows matching a health lens. Kept beside the counter so the number and the
+ *  filter can never disagree about what they mean. */
+export function filterByHealth(automations: Automation[], lens: string): Automation[] {
+  if (lens === 'failing') return automations.filter((a) => Boolean(a.last_error));
+  if (lens === 'never') return automations.filter((a) => truthy(a.enabled) && !a.last_run);
+  if (lens === 'off') return automations.filter((a) => !truthy(a.enabled));
+  return automations;
+}
+
+/**
  * The three filter-bar controls, applied together.
  *
  * The text box matches the RENDERED labels, not the raw types: _filterAutomations
@@ -84,15 +126,20 @@ export function buildAutomationsView(automations: Automation[]): AutomationsView
  */
 export function filterAutomations(
   automations: Automation[],
-  filters: { q?: string; trigger?: string; action?: string },
+  filters: { q?: string; trigger?: string; action?: string; health?: string },
   labelFor: (a: Automation) => { trigger: string; action: string },
 ): Automation[] {
   const q = (filters.q ?? '').toLowerCase().trim();
   const trigger = filters.trigger ?? '';
   const action = filters.action ?? '';
-  if (!q && !trigger && !action) return automations;
+  const health = filters.health ?? '';
+  if (!q && !trigger && !action && !health) return automations;
 
-  return automations.filter((a) => {
+  // The health lens runs first and through the same helper the counter uses,
+  // so a chip that says "3 failing" can never open onto a different three.
+  const scoped = health ? filterByHealth(automations, health) : automations;
+
+  return scoped.filter((a) => {
     const labels = labelFor(a);
     const matchesQuery =
       !q ||
