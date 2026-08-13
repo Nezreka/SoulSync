@@ -7088,9 +7088,12 @@ async function initializeToolsPage() {
     await checkAndUpdateDbProgress();
     await checkAndUpdateDuplicateCleanProgress();
 
-    // Initialize library maintenance section
+    // Initialize library maintenance section. switchRepairTab('jobs') was here
+    // and its renderer is gone: 'tools' is a React route, this whole function
+    // has had no callers since that flip, and the vanilla repair-tab renderers
+    // it was the sole path to were deleted with it. updateRepairStatus stays —
+    // it is still reached from openRepairModal.
     updateRepairStatus();
-    switchRepairTab('jobs');
 
     toolsPageState.isInitialized = true;
 }
