@@ -69,6 +69,19 @@ def _parse_text(hit) -> str:
     return title
 
 
+def _external_ids(body) -> dict:
+    """The tvdb/imdb/tmdb ids a manual search may carry, as prowlarr_search kwargs.
+
+    Prowlarr routes each id to the indexers that can resolve it, which is how the
+    *arr apps stop depending on a title matching scene spelling. Absent keys are
+    dropped rather than passed as None so the strategy builder sees exactly what
+    the caller actually knew."""
+    body = body if isinstance(body, dict) else {}
+    ids = {"imdb_id": body.get("imdb_id"), "tmdb_id": body.get("tmdb_id"),
+           "tvdb_id": body.get("tvdb_id")}
+    return {k: v for k, v in ids.items() if v}
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -104,10 +117,16 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     for hit in raw:
         parsed = parse_release(_parse_text(hit))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
+        # Swarm health is a TORRENT concept. Usenet and Soulseek hits have no
+        # seeders (Prowlarr leaves the field None for usenet), and a defensive 0
+        # from an indexer must not be read as a dead swarm for them — so the
+        # count only reaches the judge when the hit is actually a torrent.
+        proto = str(hit.get("protocol") or "").lower()
+        seeders = hit.get("seeders") if proto == "torrent" else None
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title, want_date=want_date,
-                                   want_absolute=want_absolute)
+                                   want_absolute=want_absolute, seeders=seeders)
         # Custom formats: matched formats ADD their (per-profile) score; a
         # summed score under the profile's floor hard-rejects (Radarr's
         # min custom format score).
@@ -647,7 +666,8 @@ def register_routes(bp):
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
                                 "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
@@ -692,7 +712,8 @@ def register_routes(bp):
             # (no polling id), so the client renders immediately.
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
             if pres.get("error"):

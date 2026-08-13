@@ -33,9 +33,10 @@ logger = get_logger("automation.video_process_wishlist")
 
 
 # ── pure helpers ──────────────────────────────────────────────────────────────
-def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[Dict[str, Any]]:
-    """The best ACCEPTED release from a ranked candidate list. ``_evaluate_hits`` already
-    sorts best-first (accepted, score, availability), so the first accepted is the pick.
+def acceptable_candidates(candidates: List[Dict[str, Any]],
+                          min_rank: int = 0) -> List[Dict[str, Any]]:
+    """Every release worth trying, best first. ``_evaluate_hits`` already sorts
+    best-first (accepted, score, availability), so this just filters.
 
     ``min_rank`` > 0 = an UPGRADE pick for an owned item: only releases with a
     resolution STRICTLY better than the current copy qualify (a same-quality
@@ -43,13 +44,54 @@ def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[D
     loop). Unknown-resolution releases can't prove they're better, so they
     don't qualify either."""
     from core.video.quality_eval import resolution_rank
+    out = []
     for c in candidates or []:
         if not c.get("accepted"):
             continue
         if min_rank and resolution_rank(c.get("resolution")) <= min_rank:
             continue
-        return c
-    return None
+        out.append(c)
+    return out
+
+
+def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[Dict[str, Any]]:
+    """The single best acceptable release, or None. Kept as the one-shot form of
+    :func:`acceptable_candidates` for callers that only ever grab once."""
+    top = acceptable_candidates(candidates, min_rank)
+    return top[0] if top else None
+
+
+# How many releases one drain pass will offer the download client for a single
+# item before giving up on this run. The top pick being refused (already in the
+# client, a magnet it won't parse, a dead tracker) used to abandon the item
+# entirely and re-offer the SAME release an hour later, forever — a live row hit
+# 133 identical refusals that way. Walking a few keeps one bad release from
+# blocking an item without turning a stuck item into an indexer hammer.
+MAX_GRAB_ATTEMPTS = 3
+
+
+def display_name(item: Dict[str, Any], media_type: str) -> str:
+    """The human name for an item in logs and progress lines. Movie rows carry
+    ``title``; episode rows carry ``show_title`` — reading only ``title`` is why
+    every episode grab-refusal in the log said "refused for None"."""
+    name = item.get("title") or item.get("show_title") or "?"
+    if media_type == "episode":
+        return "%s S%02dE%02d" % (name, int(item.get("season_number") or 0),
+                                  int(item.get("episode_number") or 0))
+    return str(name)
+
+
+def enqueue_outcome(result: Any) -> Dict[str, Any]:
+    """Normalise whatever the enqueue seam returned to ``{ok, error}``.
+
+    The seam used to answer a bare bool and several callers/tests still do, so
+    both shapes are accepted — but a bool cannot say WHY, and 'why' is the whole
+    point: a client refusing a release is not the same event as the quality
+    profile rejecting one, and conflating them is what made a stuck item report
+    "none met your quality profile" about releases it had actually accepted."""
+    if isinstance(result, dict):
+        return {"ok": bool(result.get("ok")), "error": result.get("error")}
+    return {"ok": bool(result), "error": None}
 
 
 def annotate_upgrades(items: List[Dict[str, Any]], cutoff_rank: int,
@@ -187,6 +229,15 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
     if len(titles) > 1:
         ctx["titles"] = titles
+    # External ids for the indexer search. Prowlarr's structured tvsearch/movie
+    # queries take tvdbid/imdbid/tmdbid and route each to the indexers that can
+    # resolve it — the id-aware path Sonarr/Radarr rely on so they never depend on
+    # a title matching scene spelling. The plumbing accepted these from day one;
+    # nothing ever filled them, so every automated search was free text.
+    ids = {"tmdb_id": tmdb_id, "imdb_id": item.get("imdb_id")}
+    if media_type != "movie":
+        ids["tvdb_id"] = item.get("tvdb_id")
+    ctx.update({k: v for k, v in ids.items() if v})
     return ctx
 
 
@@ -299,7 +350,9 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
         pres = prowlarr_search(ctx["scope"], ctx["title"], year=ctx.get("year"),
                                season=ctx.get("season"), episode=ctx.get("episode"), source=source,
                                air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
-                               series_type=ctx.get("series_type"))
+                               series_type=ctx.get("series_type"),
+                               imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
+                               tvdb_id=ctx.get("tvdb_id"))
         if not pres.get("configured"):
             return None, "Prowlarr not configured"
         if pres.get("error"):
@@ -351,32 +404,37 @@ def _default_search(item: Dict[str, Any], media_type: str):
 
 
 def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
-                     media_type: str, target_dir: str) -> bool:
+                     media_type: str, target_dir: str) -> Dict[str, Any]:
     """Start the slskd transfer + write the download row (exactly like the manual flow),
-    then ensure the monitor is running. Returns True if slskd accepted it."""
+    then ensure the monitor is running.
+
+    Returns ``{ok, error}``. The error matters: the caller uses it to tell the
+    user (and the wishlist row) apart a client that refused this release from a
+    search that found nothing — they used to read identically."""
     from api.video import get_video_db
     from core.video import disk_guard, organization
     from core.video.download_monitor import ensure_started
     from core.video.slskd_search import build_query
+    name = display_name(item, media_type)
     ok_room, free = disk_guard.has_room(target_dir, organization.load(get_video_db()))
     if not ok_room:
         logger.warning("disk guard: %.1f GB free on %s — skipping grab of %s",
-                       free or 0, target_dir, item.get("title"))
-        return False
+                       free or 0, target_dir, name)
+        return {"ok": False, "error": "Only %.1f GB free on %s" % (free or 0, target_dir)}
     source = str(best.get("source") or "soulseek").lower()
     if source == "soulseek":
         from core.video.slskd_download import start_download
         started = start_download(best.get("username"), best.get("filename"), best.get("size_bytes") or 0)
         if not started.get("ok"):
-            return False
+            return {"ok": False, "error": started.get("error") or "Soulseek refused the transfer"}
     else:
         # torrent / usenet — hand off to the shared client; carry the returned ref into the row.
         from core.video.client_grab import grab
         res = grab(source, best.get("download_url"),
                    fallback_magnet=best.get("magnet_uri"))
         if not res.get("ok"):
-            logger.warning("video hybrid: %s grab refused for %s: %s", source, item.get("title"), res.get("error"))
-            return False
+            logger.warning("video hybrid: %s grab refused for %s: %s", source, name, res.get("error"))
+            return {"ok": False, "error": res.get("error") or "the download client refused it"}
         best = {**best, "_client_ref": res["ref"]}
     ctx = search_context(item, media_type)
     query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
@@ -385,7 +443,7 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
         build_download_record(item, best, candidates, media_type=media_type,
                               target_dir=target_dir, query=query))
     ensure_started(get_video_db)
-    return True
+    return {"ok": True, "error": None}
 
 
 # ── guard: keep an in-progress drain from overlapping the next tick ───────────
@@ -486,6 +544,7 @@ def auto_video_process_wishlist(
         noresults = [0]    # search came back empty (the source had nothing)
         rejected = [0]     # source had hits, but none passed the quality profile
         notrun = [0]       # the search never ran (slskd didn't accept it)
+        refused = [0]      # releases passed the profile; the download client said no
         total = len(todo)
         lock = threading.Lock()
 
@@ -495,12 +554,18 @@ def auto_video_process_wishlist(
             cands, err = found if isinstance(found, tuple) else (found, None)
             didnt_run = cands is None       # slskd not configured / errored / rate-limited
             cands = cands or []
-            best = pick_best(cands, it.get("_min_rank") or 0)
-            ok = bool(best) and bool(enqueue(it, best, cands, media_type, root))
-            name = it.get('title') or it.get('show_title') or '?'
-            if media_type == 'episode':
-                name = "%s S%02dE%02d" % (name, int(it.get('season_number') or 0),
-                                          int(it.get('episode_number') or 0))
+            # Offer the client more than one release. Abandoning the item the
+            # moment its top pick is refused is what let a single bad release
+            # block an item indefinitely — the next-best one is usually fine.
+            usable = acceptable_candidates(cands, it.get("_min_rank") or 0)
+            ok, refusal = False, None
+            for cand in usable[:MAX_GRAB_ATTEMPTS]:
+                out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
+                if out["ok"]:
+                    ok = True
+                    break
+                refusal = out["error"] or refusal
+            name = display_name(it, media_type)
             # tell apart: grabbed / search-didn't-run / source-empty / hits-but-all-rejected.
             # `err` alongside RESULTS is a non-fatal note (a chain source was skipped,
             # e.g. 'torrent skipped — Prowlarr not configured') — always show it, or a
@@ -510,6 +575,17 @@ def auto_video_process_wishlist(
             elif didnt_run:
                 msg = ("Search didn't run for '%s' — %s" % (name, err)) if err \
                     else ("Search didn't run for '%s' — slskd not responding?" % name)
+                lt = 'warning'
+            elif usable:
+                # Releases PASSED the profile and the download client turned them
+                # down. Saying "none met your quality profile" here (which is what
+                # this branch used to fall through to) points the user at the one
+                # setting that is not the problem, and leaves the real reason —
+                # sitting right there in the client's own error — unsaid.
+                msg = ("Found %d release(s) for '%s' but the download client "
+                       "refused %s — %s" % (len(usable), name,
+                                            "them" if len(usable) > 1 else "it",
+                                            refusal or "no reason given"))
                 lt = 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'
@@ -525,10 +601,13 @@ def auto_video_process_wishlist(
                 if err:
                     msg, lt = msg + " · " + str(err), 'warning'
             # Failing visibility (#liveleak-failing-hub): record the outcome on
-            # the wishlist row — but only when the search actually RAN. A search
-            # that never ran (slskd down / rate-limited) says nothing about
-            # whether the release exists and must not push a row toward failing.
-            if not didnt_run:
+            # the wishlist row — but only when the search actually RAN, and only
+            # when its verdict says something about whether the release EXISTS.
+            # A search that never ran (slskd down / rate-limited) says nothing;
+            # neither does a client refusing a release we did find, and counting
+            # that as a fruitless search is how a row reached 133 "attempts"
+            # while its release was available the whole time.
+            if not didnt_run and not (usable and not ok):
                 record_outcome(it, media_type, ok)
             with lock:
                 searched[0] += 1
@@ -536,6 +615,8 @@ def auto_video_process_wishlist(
                     grabbed[0] += 1
                 elif didnt_run:
                     notrun[0] += 1
+                elif usable:
+                    refused[0] += 1
                 elif not cands:
                     noresults[0] += 1
                 else:
@@ -557,6 +638,8 @@ def auto_video_process_wishlist(
             tail.append('%d had no results' % noresults[0])
         if rejected[0]:
             tail.append('%d rejected on quality' % rejected[0])
+        if refused[0]:
+            tail.append('%d refused by the download client' % refused[0])
         breakdown = (' · ' + ', '.join(tail)) if tail else ''
         done = ('Grabbed %d %s(s) of %d searched%s' % (grabbed[0], label, searched[0], breakdown)) if grabbed[0] \
             else ('Searched %d %s(s), grabbed 0%s' % (searched[0], label, breakdown))
@@ -564,7 +647,7 @@ def auto_video_process_wishlist(
                              log_line=done, log_type='success' if grabbed[0] else 'info')
         return {'status': 'completed', 'searched': searched[0], 'grabbed': grabbed[0],
                 'noresults': noresults[0], 'rejected': rejected[0], 'notrun': notrun[0],
-                '_manages_own_progress': True}
+                'refused': refused[0], '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

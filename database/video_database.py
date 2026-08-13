@@ -4885,6 +4885,26 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_file_codecs(self, relative_path) -> dict:
+        """The codecs the scanner recorded for a stored file:
+        ``{"video_codec", "audio_codec"}``, or {} when unknown.
+
+        Movie night asks this before streaming — a browser cannot decode HEVC
+        or AC3, and "your copy is AC3, you'd get a silent picture" is a far
+        better answer than a video element that plays a mute image."""
+        if not relative_path:
+            return {}
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT video_codec, audio_codec FROM media_files "
+                "WHERE relative_path=? LIMIT 1", (str(relative_path),)).fetchone()
+            return {"video_codec": r["video_codec"], "audio_codec": r["audio_codec"]} if r else {}
+        except (sqlite3.Error, ValueError, TypeError):
+            return {}
+        finally:
+            conn.close()
+
     # ── repair-job source queries (movie-side jobs) ───────────────────────────
     def repair_movie_franchises(self) -> dict:
         """Owned movies grouped by TMDB collection:
@@ -5644,7 +5664,12 @@ class VideoDatabase:
                 "  JOIN media_files f ON f.movie_id=m.id "
                 "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT m.quality_profile_id FROM movies m "
-                "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id "
+                "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id, "
+                # External ids for the indexer search. Prowlarr routes an imdbid to
+                # the indexers that can resolve it exactly, which is how the *arrs
+                # avoid title-matching entirely; without them every search is a
+                # free-text guess. NULL for a film that isn't in the library yet.
+                "(SELECT m.imdb_id FROM movies m WHERE m.tmdb_id=w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w "
                 "WHERE w.kind='movie' AND w.status='wanted' AND w.tmdb_id IS NOT NULL "
                 # release-window gate: only search once within a week of release (early scene
@@ -5728,7 +5753,13 @@ class VideoDatabase:
                 # series type (P8): daily/anime shows QUERY differently (air date /
                 # absolute number). NULL for shows not in the library = standard.
                 # MAX = a type set on ANY server's row wins over a NULL sibling.
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type "
+                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                # External ids for the indexer search. A tvdbid is what Sonarr hands
+                # Newznab so id-aware indexers resolve the series exactly instead of
+                # matching on a title that scene naming may spell differently. MAX
+                # picks a populated id over a NULL sibling row, same as series_type.
+                "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL "
                 # release-window gate: search an episode only once it's within a week of air
                 # (early scene releases show up a few days out) — a further-off episode stays on
@@ -5759,7 +5790,8 @@ class VideoDatabase:
                     "  JOIN media_files f ON f.movie_id=m.id "
                     "  WHERE m.tmdb_id=w.tmdb_id AND m.has_file=1) AS owned_resolutions, "
                     "COALESCE(w.quality_profile_id, (SELECT m.quality_profile_id FROM movies m "
-                    "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id "
+                    "  WHERE m.tmdb_id=w.tmdb_id)) AS quality_profile_id, "
+                    "(SELECT m.imdb_id FROM movies m WHERE m.tmdb_id=w.tmdb_id) AS imdb_id "
                     "FROM video_wishlist w "
                     "WHERE w.kind='movie' AND w.tmdb_id=?", (int(tmdb_id),))]
             where, args = "", [int(tmdb_id)]
@@ -5782,7 +5814,9 @@ class VideoDatabase:
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
                 "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type "
+                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id=?" + where +
                 " ORDER BY w.season_number, w.episode_number", args)]
         finally:

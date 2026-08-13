@@ -3725,6 +3725,14 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Minimum seeders <span class="vq-hint" id="vq-seeders-label">At least 1 seeder</span></div>
+                                    <input type="range" id="vq-min-seeders" class="vq-slider" min="0" max="100" step="1" value="1">
+                                    <div class="setting-help-text">
+                                        A torrent nobody is seeding never finishes — it parks on "downloading metadata" or stalls at 0% and quietly fills your client with dead entries.
+                                        Set 0 to grab regardless. Usenet and Soulseek have no seeders and are never affected.
+                                    </div>
+                                </div>
                             </div>
                             <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
                             <div class="settings-group" data-stg="quality" data-video-only>
@@ -6722,6 +6730,12 @@
                                  Fully repainted by renderWatch; the video panel itself
                                  is phase 2. -->
                             <div class="chat-watch" data-chat-watch hidden></div>
+                            <!-- The party's screen lives OUTSIDE the card on purpose: the card's
+                                 innerHTML is rebuilt on every room event, and a <video> inside it
+                                 would be destroyed and re-created several times a minute — the film
+                                 restarting each time. This host is only touched when the showing
+                                 itself changes. -->
+                            <div class="chat-watch-stagehost" data-chat-watch-stage hidden></div>
                             <aside class="chat-users" data-chat-users></aside>
                         </div>
                     </div>
