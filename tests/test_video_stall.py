@@ -207,3 +207,31 @@ def test_the_column_rides_the_migration_list():
     start = db.index("_COLUMN_MIGRATIONS = [")
     end = db.index("]", db.index('("shows", "tvdb_match_status"'))
     assert '("video_downloads", "progress_at", "TEXT")' in db[start:end]
+
+
+# ── retrying the right things ────────────────────────────────────────────────
+
+def test_the_unfindable_file_case_does_not_go_back_out_to_search():
+    """Observed on the live install: a stalled download requeries, and the requery
+    path CLEARS the error on its way through — so the six torrents ended up saying
+    "No working release found after retries", which points at the indexer when the
+    swarm was the problem.
+
+    For a download that already finished, that is worse than unhelpful: the bytes
+    are on disk, re-downloading changes nothing, and the message naming the real
+    cause (the path mapping) would be overwritten by a generic one. So the
+    completion case skips the retry ladder and keeps its diagnosis."""
+    src = _monitor_src()
+    assert "allow_retry=not _at_completion" in src
+    fn = src[src.index("def _fail_or_retry("):src.index("def _search_for_retry(")]
+    assert "allow_retry: bool = True" in fn, "ordinary failures must still retry"
+    assert 'if allow_retry else {"action": "fail"}' in fn
+
+
+def test_an_ordinary_stall_still_gets_its_retries():
+    """The change must not disarm the retry ladder for the case it exists for — a
+    dead swarm genuinely does deserve another release."""
+    src = _monitor_src()
+    tick = src[src.index("def _tick("):]
+    assert "allow_retry=not _at_completion" in tick
+    assert "allow_retry=False" not in tick, "never unconditionally off"

@@ -626,12 +626,21 @@ def _blocked_users(db):
         return frozenset()
 
 
-def _fail_or_retry(db, dl, error_msg) -> None:
+def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
-    put it back on the wishlist so it isn't silently lost."""
+    put it back on the wishlist so it isn't silently lost.
+
+    ``allow_retry=False`` skips straight to the terminal state. Retrying is the
+    right reflex for a bad release and exactly the wrong one when the download
+    ALREADY SUCCEEDED and only the file could not be located: re-downloading fixes
+    nothing, and — because the requery path clears the error on its way through —
+    it would replace a message naming the real cause with "No working release found
+    after retries", pointing the user at their indexer instead of at the path
+    mapping that actually broke."""
     from core.video.retry import plan_retry
-    plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
+    plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
+        if allow_retry else {"action": "fail"}
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
         return
     if plan["action"] in ("candidate", "requery"):
@@ -847,7 +856,11 @@ def _tick(db) -> None:
                 dl.get("progress"), upd.get("progress"), dl.get("progress_at"),
                 time.time(), timeout_seconds=_STALL_TIMEOUT)
             if _verdict == stall.STALLED:
-                _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion))
+                # A stalled DOWNLOAD deserves another release; a download that
+                # finished and then couldn't be found does not — the bytes are
+                # already on disk, and searching again just repeats the same import.
+                _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion),
+                               allow_retry=not _at_completion)
                 continue
             if _verdict in (stall.MOVED, stall.SEEDED):
                 upd["progress_at"] = _now()      # restart (or start) the clock
