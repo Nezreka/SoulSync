@@ -216,3 +216,105 @@ def test_a_timeout_is_reported_rather_than_swallowed():
     def runner(cmd, timeout):
         raise subprocess.TimeoutExpired(cmd, timeout)
     assert run_update(NIGHTLY, python="/py", runner=runner)["ok"] is False
+
+
+# ── the Settings tile ────────────────────────────────────────────────────────
+# The tile lives in the shared settings shell with no side marker, so it renders
+# on the music side (YouTube-sourced audio) and the video side (YouTube
+# downloads) from one definition — it is one package.
+
+def _html() -> str:
+    from pathlib import Path
+    return Path("webui/index.html").read_text(encoding="utf-8")
+
+
+def _settings_js() -> str:
+    from pathlib import Path
+    return Path("webui/static/settings.js").read_text(encoding="utf-8")
+
+
+def _tile() -> str:
+    """Just the yt-dlp tile. Slicing a fixed width from its start reads whatever
+    markup follows, which turns 'the tile must not say X' into 'no later tile may
+    say X' — a false pass or a false failure depending on the day."""
+    h = _html()
+    start = h.index("<!-- yt-dlp updater")
+    end = h.index("<!-- end yt-dlp body -->", start)
+    return h[start:end]
+
+
+def test_the_tile_renders_on_both_sides():
+    """Boulder asked for it on both. A data-video-only marker here would silently
+    hide it from the music side, where YouTube is also a download source."""
+    tile = _tile()
+    assert "data-video-only" not in tile and "data-music-only" not in tile
+    assert 'data-stg="advanced"' in tile
+
+
+def test_the_tile_states_the_restart_requirement_in_the_markup():
+    """Not only in the API response — the user reads this BEFORE clicking, which
+    is when it changes what they expect to happen."""
+    assert "restart SoulSync" in _tile()
+
+
+def test_nightly_is_the_preselected_channel():
+    tile = _tile()
+    assert 'value="nightly" selected' in tile
+    assert 'value="stable"' in tile, "stable must remain a choice"
+
+
+def test_every_element_the_script_touches_exists_in_the_markup():
+    """The classic silent break: a renamed id leaves the button doing nothing at
+    all, with no error anyone would notice."""
+    import re
+    h, js = _html(), _settings_js()
+    ids = set(re.findall(r"getElementById\('(ytdlp-[a-z-]+)'\)", js))
+    assert ids, "the script should address the tile by id"
+    assert [i for i in ids if 'id="%s"' % i in h] == list(ids)
+
+
+def test_the_handlers_the_markup_calls_are_defined():
+    import re
+    tile, js = _tile(), _settings_js()
+    for fn in set(re.findall(r'on(?:click|change)="([a-zA-Z_$][\w$]*)\(', tile)):
+        assert ("function %s" % fn) in js or fn == "toggleSettingHelp", fn
+
+
+def test_opening_the_advanced_tab_loads_the_version_panel():
+    js = _settings_js()
+    assert "typeof loadYtdlpStatus === 'function'" in js
+
+
+def test_a_pypi_outage_does_not_read_as_up_to_date():
+    """'Unknown' and 'newest available' are different facts. Showing the latter
+    when we could not look would tell the user their 403s are something else."""
+    assert "Couldn't check" in _settings_js()
+
+
+def test_the_toast_is_guarded_like_the_rest_of_the_codebase():
+    """showToast is a global owned by downloads.js; chat.js guards it the same
+    way. This tile renders on the video side too, so an unguarded call would throw
+    and abandon the rest of the handler — leaving the button stuck on 'Updating...'
+    after an update that actually succeeded."""
+    js = _settings_js()
+    start = js.index("async function runYtdlpUpdate")
+    end = js.index("\n}", start)
+    lines = js[start:end].split("\n")
+    guard = "typeof showToast === 'function'"
+    unguarded, open_guard = [], False
+    for ln in lines:
+        if guard in ln:
+            open_guard = ln.rstrip().endswith("{")     # block guard stays open
+            continue
+        if "showToast(" in ln and not open_guard:
+            unguarded.append(ln.strip())
+        if open_guard and ln.strip() == "}":
+            open_guard = False
+    assert not unguarded, "unguarded showToast call(s): %s" % unguarded
+    assert "showToast(" in js[start:end], "the handler should still toast"
+
+
+def test_pip_s_own_output_is_kept_available():
+    """Each failure mode needs a different action and the output is what says
+    which — so it is shown, not swallowed into a generic message."""
+    assert "ytdlp-detail" in _tile() and "d.detail" in _settings_js()

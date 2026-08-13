@@ -598,6 +598,9 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
+    if (tab === 'advanced' && typeof loadYtdlpStatus === 'function') {
+        try { loadYtdlpStatus(); } catch (e) { }
+    }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
@@ -6590,5 +6593,93 @@ async function selectNavidromeMusicFolder() {
     } catch (error) {
         console.error('Error selecting Navidrome music folder:', error);
         showToast('Error selecting music folder. Please try again.', 'error', 'set-media');
+    }
+}
+
+
+// ============================================================
+// == YT-DLP UPDATER (Advanced tab, both sides)              ==
+// ============================================================
+// YouTube changes how it serves video far faster than yt-dlp cuts a stable
+// release, so a copy a few weeks old starts answering "403 Forbidden" on videos
+// that worked yesterday. Without an in-app update, those downloads quietly burn
+// their retry budget and get abandoned for an entirely fixable reason.
+
+async function loadYtdlpStatus() {
+    const chanEl = document.getElementById('ytdlp-channel');
+    const instEl = document.getElementById('ytdlp-installed');
+    const latEl = document.getElementById('ytdlp-latest');
+    const badge = document.getElementById('ytdlp-hint-badge');
+    if (!instEl || !latEl) return;
+    const channel = (chanEl && chanEl.value) || 'nightly';
+    instEl.textContent = 'Loading...';
+    latEl.textContent = 'Loading...';
+    try {
+        const resp = await fetch('/api/ytdlp/status?channel=' + encodeURIComponent(channel));
+        const d = await resp.json();
+        instEl.textContent = d.installed || 'Not installed';
+        // A PyPI outage must not read as "you are up to date" — say we could not
+        // look, which is a different fact from "nothing newer exists".
+        latEl.textContent = d.latest || (d.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown');
+        latEl.style.color = d.behind ? '#ffb300' : '';
+        if (badge) {
+            badge.hidden = !d.behind;
+            badge.style.color = '#ffb300';
+            badge.title = d.behind ? 'A newer yt-dlp is available' : '';
+        }
+    } catch (e) {
+        instEl.textContent = 'Unknown';
+        latEl.textContent = 'Unknown';
+        console.error('yt-dlp status failed:', e);
+    }
+}
+
+async function runYtdlpUpdate() {
+    const btn = document.getElementById('ytdlp-update-btn');
+    const status = document.getElementById('ytdlp-status');
+    const detail = document.getElementById('ytdlp-detail');
+    const chanEl = document.getElementById('ytdlp-channel');
+    const channel = (chanEl && chanEl.value) || 'nightly';
+    if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
+    if (detail) { detail.style.display = 'none'; detail.textContent = ''; }
+    if (status) {
+        status.style.display = 'block';
+        status.style.background = 'rgba(255,255,255,0.04)';
+        status.style.color = 'rgba(255,255,255,0.6)';
+        status.textContent = 'Installing the newest ' + channel + ' build — this can take a minute...';
+    }
+    try {
+        const resp = await fetch('/api/ytdlp/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: channel })
+        });
+        const d = await resp.json();
+        if (status) {
+            status.style.color = d.success ? (d.restart_required ? '#ffb300' : '#4caf50') : '#ff5252';
+            status.textContent = d.message || (d.success ? 'Done.' : 'Update failed.');
+        }
+        // pip's own words, kept available but out of the way — every failure mode
+        // here (read-only container, distro-managed Python, wrong user, dead
+        // network) needs a different action, and the output is what says which.
+        if (detail && d.detail) { detail.style.display = 'block'; detail.textContent = d.detail; }
+        // Guarded the way chat.js guards it: showToast is a global owned by
+        // downloads.js, and this tile renders on the video side too.
+        if (typeof showToast === 'function') {
+            if (d.success) {
+                showToast(d.restart_required
+                    ? 'yt-dlp updated — restart SoulSync to use it'
+                    : (d.message || 'Already up to date'),
+                    d.restart_required ? 'info' : 'success');
+            } else {
+                showToast('yt-dlp update failed — see Settings for details', 'error');
+            }
+        }
+        loadYtdlpStatus();
+    } catch (e) {
+        if (status) { status.style.color = '#ff5252'; status.textContent = 'Update request failed: ' + e; }
+        if (typeof showToast === 'function') showToast('yt-dlp update failed', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Update yt-dlp'; }
     }
 }

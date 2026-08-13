@@ -5953,6 +5953,47 @@
                             </div>
                             </div><!-- end Database Maintenance body -->
 
+                            <!-- yt-dlp updater. Deliberately NOT marked video-only: it is one
+                                 package, used by YouTube downloads on the video side and by
+                                 YouTube-sourced audio on the music side, so both sides get it. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>yt-dlp</h3>
+                                <span class="settings-section-hint">Version &amp; one-click update <span id="ytdlp-hint-badge" hidden>&#9679;</span></span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group" data-stg="advanced">
+
+                                <div class="form-group">
+                                    <label>Installed:</label>
+                                    <span id="ytdlp-installed" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Newest available:</label>
+                                    <span id="ytdlp-latest" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Release channel:</label>
+                                    <select id="ytdlp-channel" onchange="loadYtdlpStatus()">
+                                        <option value="nightly" selected>Nightly (recommended)</option>
+                                        <option value="stable">Stable</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly.</div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="ytdlp-update-btn" onclick="runYtdlpUpdate()">Update yt-dlp</button>
+                                </div>
+                                <div class="help-text">
+                                    When YouTube downloads start failing with <strong>403 Forbidden</strong>, an out-of-date yt-dlp is nearly always the cause.
+                                    <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the running process keeps using the version it loaded at startup.
+                                </div>
+                                <div id="ytdlp-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                                <pre id="ytdlp-detail" style="display: none; margin-top: 8px; max-height: 220px; overflow: auto; font-size: 0.75em; white-space: pre-wrap;"></pre>
+                            </div>
+                            </div><!-- end yt-dlp body -->
+
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
