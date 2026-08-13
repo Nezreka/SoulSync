@@ -190,3 +190,108 @@ def test_the_button_is_re_enabled_on_both_outcomes():
 def test_the_whole_file_still_parses():
     out = subprocess.run([_node(), "--check", str(_SRC)], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
+
+
+# ── the OTHER Grab season (video-grab.js, used by the detail page) ───────────
+# Boulder found this the honest way: the modal's button showed "Looking for a
+# season pack…" and the detail page's identical-looking button still searched
+# three episodes at a time. They are two separate implementations — video-grab.js
+# says so in its own header ("Kept separate for now so wiring the detail page
+# can't regress the working modal") — and the first pass only fixed the modal.
+#
+# So this half is driven END TO END in node against a stubbed backend rather than
+# grepped, because grepping is what missed it.
+
+_GRAB = Path("webui/static/video/video-grab.js")
+
+_HARNESS = r"""
+const fs = require('fs');
+const src = fs.readFileSync('webui/static/video/video-grab.js', 'utf8');
+function run(hasPack) {
+  const calls = { search: [], grab: [] };
+  global.window = {}; global.document = { dispatchEvent() {} };
+  global.CustomEvent = function () {};
+  global.fetch = (url, opt) => {
+    const body = opt && opt.body ? JSON.parse(opt.body) : null;
+    if (url.indexOf('/downloads/config') >= 0)
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(
+        { download_mode: 'hybrid', hybrid_order: ['soulseek', 'torrent'] }) });
+    if (url.indexOf('/search/start') >= 0) {
+      calls.search.push(body.scope + ':' + body.source);
+      const hit = [{ accepted: true, username: 'idx', title: 'Show.S03' }];
+      const want = hasPack ? 'season' : 'episode';
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(
+        { results: body.scope === want ? hit : [] }) });
+    }
+    if (url.indexOf('/downloads/grab') >= 0) {
+      calls.grab.push(body.search_ctx.scope);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, id: 99 }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  };
+  eval(src);
+  return { VideoGrab: global.window.VideoGrab, calls };
+}
+(async () => {
+  const out = {};
+  let { VideoGrab, calls } = run(true);
+  out.pack = await VideoGrab.season({ title: 'Show', season: 3, episodes: [1, 2, 3, 4, 5] });
+  out.packSearches = calls.search; out.packGrabs = calls.grab;
+  ({ VideoGrab, calls } = run(false));
+  out.eps = await VideoGrab.season({ title: 'Show', season: 3, episodes: [1, 2, 3] });
+  out.epSearches = calls.search; out.epGrabs = calls.grab;
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+def _drive():
+    out = subprocess.run([_node(), "-e", _HARNESS], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip())
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_the_detail_page_helper_grabs_a_pack_when_one_exists():
+    d = _drive()
+    assert d["pack"]["pack"] is True and d["pack"]["grabbed"] == 5
+    assert d["packGrabs"] == ["season"], "one grab, scoped to the season"
+    assert d["packSearches"] == ["season:soulseek"], "stops at the first source that has it"
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_it_asks_every_source_for_a_pack_before_giving_up():
+    d = _drive()
+    assert d["epSearches"][:2] == ["season:soulseek", "season:torrent"]
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_no_pack_still_falls_back_to_per_episode():
+    d = _drive()
+    assert d["eps"]["grabbed"] == 3 and not d["eps"].get("pack")
+    assert d["epGrabs"] == ["episode", "episode", "episode"]
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_the_episode_fallback_spreads_across_sources():
+    """`pump()` used to call launch(eps[idx++]) with one argument; adding a source
+    index without threading it through would have made every episode use
+    sources[undefined % n] — silently NaN, and one source again."""
+    d = _drive()
+    eps = [s for s in d["epSearches"] if s.startswith("episode:")]
+    assert eps == ["episode:soulseek", "episode:torrent", "episode:soulseek"]
+
+
+def test_pick_source_still_returns_one_for_callers_that_want_one():
+    js = _GRAB.read_text(encoding="utf-8")
+    assert "function pickSource()" in js and "function allSources()" in js
+
+
+def test_the_detail_page_no_longer_pins_the_season_to_one_source():
+    """Passing pickSource() into season() would restore the single-source bug even
+    with everything else correct."""
+    js = Path("webui/static/video/video-detail.js").read_text(encoding="utf-8")
+    fn = js[js.index("function grabSeasonInline("):js.index("function wishSeasonInline(")]
+    assert "VideoGrab.pickSource()" not in fn
+    assert "Looking for a season pack" in fn
+    assert "res.pack" in fn, "a pack must not report as 'grabbing N of N episodes'"
