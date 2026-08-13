@@ -313,6 +313,9 @@
 /* Plain inline text — truncation is done in JS at a fixed length, so no
    layout-dependent trimming can misfire. Full facts in the hover tooltip. */
 .automation-card .auto-last-result { color: rgba(255,255,255,0.30); cursor: default; }
+/* A skip is neither success nor failure — the run did not happen, so it reads
+   as an aside rather than as a result. */
+.automation-card .auto-last-result.skipped { color: rgba(255,255,255,0.22); font-style: italic; }
 
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {

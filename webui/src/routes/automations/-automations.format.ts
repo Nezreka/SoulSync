@@ -88,6 +88,115 @@ export function lastResultFacts(lastResult: unknown): { shown: string; full: str
   return { shown, full };
 }
 
+/**
+ * What the last run actually accomplished, in a sentence.
+ *
+ * `lastResultFacts` prints the handler's own dict keys — "tracks added: 4 ·
+ * playlists: 2". Honest, but it is the internals leaking: those keys were
+ * named for the code that sets them, not for the person reading the card.
+ *
+ * Only these action types get a sentence, and each one is built ONLY from
+ * keys its handler verifiably returns (see the key list beside each entry;
+ * `tests/test_automation_result_keys.py` fails if a handler stops returning
+ * one). Everything else falls through to the generic facts — inventing a
+ * sentence for a handler whose shape I had not read would be worse than the
+ * raw keys, because it would read as authoritative.
+ */
+const num = (v: unknown): number => {
+  // Several handlers stringify their counters ('refreshed': str(n)).
+  const n = typeof v === 'number' ? v : Number.parseFloat(String(v ?? ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+type Sentence = (r: Record<string, unknown>) => string | null;
+
+const ACTION_SENTENCES: Record<string, Sentence> = {
+  // artists_scanned / new_tracks_found / tracks_added_to_wishlist
+  scan_watchlist: (r) => {
+    const artists = num(r.artists_scanned);
+    const wishlisted = num(r.tracks_added_to_wishlist);
+    const found = num(r.new_tracks_found);
+    if (!artists && !wishlisted && !found) return null;
+    const parts = [`Checked ${plural(artists, 'artist')}`];
+    if (wishlisted) parts.push(`wishlisted ${plural(wishlisted, 'track')}`);
+    else if (found) parts.push(`found ${plural(found, 'new track')}`);
+    else parts.push('nothing new');
+    return parts.join(', ');
+  },
+  // files_scanned / duplicates_found / files_deleted / space_freed_mb
+  run_duplicate_cleaner: (r) => {
+    const scanned = num(r.files_scanned);
+    const removed = num(r.files_deleted);
+    const found = num(r.duplicates_found);
+    if (!scanned && !found) return null;
+    if (!found) return `Checked ${plural(scanned, 'file')}, no duplicates`;
+    const freed = num(r.space_freed_mb);
+    const tail = removed ? `removed ${plural(removed, 'file')}` : `${found} to review`;
+    return freed ? `Found ${found} duplicates, ${tail} (${freed} MB)` : `Found ${found} duplicates, ${tail}`;
+  },
+  // refreshed / errors
+  refresh_mirrored: (r) => {
+    const refreshed = num(r.refreshed);
+    const errors = num(r.errors);
+    if (!refreshed && !errors) return null;
+    const base = `Refreshed ${plural(refreshed, 'playlist')}`;
+    return errors ? `${base}, ${plural(errors, 'error')}` : base;
+  },
+  // artists / albums / tracks
+  start_database_update: (r) => {
+    const tracks = num(r.tracks);
+    const artists = num(r.artists);
+    if (!tracks && !artists) return null;
+    return `Library now ${plural(artists, 'artist')}, ${plural(tracks, 'track')}`;
+  },
+};
+
+export interface AutomationOutcome {
+  text: string;
+  /** Drives the tone: a skip is neither success nor failure. */
+  kind: 'ok' | 'skipped';
+}
+
+/**
+ * The last-run line for a card.
+ *
+ * A non-completed status is handled first and explicitly. It used to fall into
+ * the generic facts, where a skip rendered as "reason: Duplicate cleaner is
+ * already running" — the word "reason" is a dict key, not something a person
+ * would say.
+ */
+export function automationOutcome(
+  actionType: string | null | undefined,
+  lastResult: unknown,
+): AutomationOutcome | null {
+  if (!lastResult || typeof lastResult !== 'object' || Array.isArray(lastResult)) return null;
+  const result = lastResult as Record<string, unknown>;
+  const status = String(result.status ?? '');
+
+  if (status === 'skipped') {
+    const why = String(result.reason ?? '').trim();
+    return { text: why ? `Skipped — ${why}` : 'Skipped', kind: 'skipped' };
+  }
+  // 'started'/'running' mean the handler handed off to a worker and the real
+  // outcome lands later; claiming a result would be a guess.
+  if (status === 'started' || status === 'running') {
+    return { text: 'Handed off — still working', kind: 'skipped' };
+  }
+
+  const sentence = ACTION_SENTENCES[actionType ?? '']?.(result);
+  if (sentence) return { text: sentence, kind: 'ok' };
+
+  const facts = lastResultFacts(lastResult);
+  return facts ? { text: facts.shown, kind: 'ok' } : null;
+}
+
+/** The action types that get a hand-written sentence. Exported for the
+ *  cross-language test that checks their handlers still return those keys. */
+export const SENTENCE_ACTION_TYPES = Object.keys(ACTION_SENTENCES);
+
 /** Triggers driven by a timer — these are the only ones that show "Next:". */
 export const TIMER_TRIGGERS = ['schedule', 'daily_time', 'weekly_time', 'monthly_time'] as const;
 
@@ -223,7 +332,7 @@ export function automationMeta(
   paused: boolean;
   runs?: number;
   error?: string;
-  result?: { shown: string; full: string };
+  result?: AutomationOutcome;
 } {
   const enabled = a.enabled === true || a.enabled === 1;
   const timer = isTimerTrigger(a.trigger_type);
@@ -242,7 +351,8 @@ export function automationMeta(
     // An error replaces the result summary rather than joining it.
     // `?? undefined` because lastResultFacts returns null for "nothing worth
     // showing", while every other field here uses undefined for absent.
-    result: a.last_error ? undefined : (lastResultFacts(a.last_result) ?? undefined),
+    // Prefer a sentence over the handler's raw dict keys; falls back to them.
+    result: a.last_error ? undefined : (automationOutcome(a.action_type, a.last_result) ?? undefined),
   };
 }
 

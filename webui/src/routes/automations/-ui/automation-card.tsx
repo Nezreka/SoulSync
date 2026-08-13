@@ -170,8 +170,11 @@ export function AutomationCard({
   else if (meta.listening) metaParts.push(<>Listening</>);
   if (!meta.error && meta.result)
     metaParts.push(
-      <span className="auto-last-result" title={`Last run: ${meta.result.full}`}>
-        {meta.result.shown}
+      <span
+        className={`auto-last-result${meta.result.kind === 'skipped' ? ' skipped' : ''}`}
+        title={`Last run: ${meta.result.text}`}
+      >
+        {meta.result.text}
       </span>,
     );
   if (meta.runs)

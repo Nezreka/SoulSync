@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   automationMeta,
+  automationOutcome,
   formatAction,
   formatTrigger,
   humanizeType,
@@ -251,5 +252,106 @@ describe('automationMeta while the side is paused', () => {
     expect(automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW).listening).toBe(
       true,
     );
+  });
+});
+
+
+describe('automationOutcome — the handler stops speaking its own dialect', () => {
+  it('says what a watchlist scan accomplished', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 42,
+        new_tracks_found: 9,
+        tracks_added_to_wishlist: 7,
+      }),
+    ).toEqual({ text: 'Checked 42 artists, wishlisted 7 tracks', kind: 'ok' });
+  });
+
+  it('distinguishes found-but-not-wishlisted from nothing at all', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 5,
+        new_tracks_found: 3,
+        tracks_added_to_wishlist: 0,
+      })?.text,
+    ).toBe('Checked 5 artists, found 3 new tracks');
+    expect(
+      automationOutcome('scan_watchlist', { status: 'completed', artists_scanned: 5 })?.text,
+    ).toBe('Checked 5 artists, nothing new');
+  });
+
+  it('singularises rather than printing "1 artists"', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 1,
+        tracks_added_to_wishlist: 1,
+      })?.text,
+    ).toBe('Checked 1 artist, wishlisted 1 track');
+  });
+
+  it('reports the duplicate cleaner in files, not keys', () => {
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'completed',
+        files_scanned: 12000,
+        duplicates_found: 8,
+        files_deleted: 8,
+        space_freed_mb: 240.5,
+      })?.text,
+    ).toBe('Found 8 duplicates, removed 8 files (240.5 MB)');
+    // A clean library is the common case and deserves a sentence of its own.
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'completed',
+        files_scanned: 12000,
+        duplicates_found: 0,
+      })?.text,
+    ).toBe('Checked 12,000 files, no duplicates');
+  });
+
+  it('reads counters the handler stringified', () => {
+    // refresh_mirrored returns str(n) for both of these.
+    expect(
+      automationOutcome('refresh_mirrored', { status: 'completed', refreshed: '3', errors: '0' })
+        ?.text,
+    ).toBe('Refreshed 3 playlists');
+    expect(
+      automationOutcome('refresh_mirrored', { status: 'completed', refreshed: '3', errors: '1' })
+        ?.text,
+    ).toBe('Refreshed 3 playlists, 1 error');
+  });
+
+  it('explains a skip instead of printing the word "reason"', () => {
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'skipped',
+        reason: 'Duplicate cleaner already running',
+      }),
+    ).toEqual({ text: 'Skipped — Duplicate cleaner already running', kind: 'skipped' });
+    expect(automationOutcome('anything', { status: 'skipped' })?.text).toBe('Skipped');
+  });
+
+  it('does not claim a result for a run that handed off to a worker', () => {
+    // discover_playlist returns status:'started' — the real outcome lands later.
+    expect(automationOutcome('discover_playlist', { status: 'started', playlist_count: '4' })).toEqual(
+      { text: 'Handed off — still working', kind: 'skipped' },
+    );
+  });
+
+  it('falls back to the generic facts for an action with no sentence', () => {
+    expect(automationOutcome('some_future_action', { status: 'completed', widgets: 3 })).toEqual({
+      text: 'widgets: 3',
+      kind: 'ok',
+    });
+  });
+
+  it('says nothing when there is nothing worth saying', () => {
+    expect(automationOutcome('process_wishlist', { status: 'completed' })).toBeNull();
+    expect(automationOutcome('process_wishlist', null)).toBeNull();
+    // Arrays are not results; index-keyed nonsense must not reach a card.
+    expect(automationOutcome('process_wishlist', [1, 2])).toBeNull();
   });
 });
