@@ -21,6 +21,7 @@ import time
 
 from utils.logging_config import get_logger
 
+from core.video import stall
 from core.video.download_pipeline import dest_path_for, find_completed_file
 from core.video.slskd_download import (
     classify_state,
@@ -358,7 +359,10 @@ def _walk(root: str):
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
 _STALL_TIMEOUT = 1800    # seconds of zero % movement (queued or frozen) before giving up
-_stall: dict = {}        # download id -> (last_pct, monotonic time of last progress)
+# NB: the stall clock is NOT kept here any more — it lives on the row as
+# `progress_at`. A module dict keyed off process uptime was wiped by every
+# restart, so the longer a download had been stuck the less likely it was to be
+# caught (see core.video.stall).
 _db_provider = None      # set by ensure_started; used by the requery worker thread
 _requerying: set = set()  # download ids with a requery thread in flight
 
@@ -824,20 +828,29 @@ def _tick(db) -> None:
             _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
             continue
         # Stall/queue timeout — a transfer sitting with no % movement for too long
-        # (queued behind a dead peer, or frozen mid-download) is treated like a
-        # disappeared one: try alternates/requery, then fail + wishlist it.
+        # (queued behind a dead peer, frozen mid-download, or finished with its file
+        # nowhere SoulSync can see) is treated like a disappeared one: try
+        # alternates/requery, then fail + wishlist it.
+        #
+        # The clock lives ON THE ROW, in wall-clock. It used to be a module dict keyed
+        # off process uptime, which meant a restart wiped it — six torrents sat at the
+        # same percentage for 199 minutes against a 30-minute timeout, because the
+        # server had restarted inside the window. The longer something was stuck, the
+        # less likely the old design was to catch it.
         _st = upd.get("status")
-        if _st in ("queued", "downloading"):
-            _pct = upd.get("progress") or 0
-            _prev = _stall.get(dl["id"])
-            if _prev is None or _pct > _prev[0]:
-                _stall[dl["id"]] = (_pct, time.monotonic())   # progress (or first sight) → reset clock
-            elif time.monotonic() - _prev[1] > _STALL_TIMEOUT:
-                _stall.pop(dl["id"], None)
-                _fail_or_retry(db, dl, "Stalled — no progress for %d min" % (_STALL_TIMEOUT // 60))
+        if stall.tracks_stall(_st):
+            # A completed-but-unplaceable row carries progress and NO status; the old
+            # branch only looked at queued/downloading, so it fell through every guard
+            # and spun at 100% forever. That is what a path-mapping failure looks like.
+            _at_completion = _st is None and (upd.get("progress") or 0) >= 100
+            _verdict, _idle = stall.classify(
+                dl.get("progress"), upd.get("progress"), dl.get("progress_at"),
+                time.time(), timeout_seconds=_STALL_TIMEOUT)
+            if _verdict == stall.STALLED:
+                _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion))
                 continue
-        else:
-            _stall.pop(dl["id"], None)
+            if _verdict in (stall.MOVED, stall.SEEDED):
+                upd["progress_at"] = _now()      # restart (or start) the clock
         # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
         # episode, not an upgrade, …). Terminal + needs manual import — NOT a download
         # failure, so don't burn the retry budget re-downloading the same good file.
@@ -863,8 +876,6 @@ def _tick(db) -> None:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
-    for k in [k for k in _stall if k not in live_ids]:
-        _stall.pop(k, None)
     # Batch complete: we finished ≥1 download this tick AND nothing is left in
     # flight (queued/downloading/searching). Fires once, on the transition to
     # empty — the next tick early-returns. Publishes to the event bridge so the

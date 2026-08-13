@@ -190,6 +190,12 @@ _COLUMN_MIGRATIONS = [
     # torrent/usenet client tracking id (qBittorrent hash / SAB nzo_id) so the monitor can
     # poll the shared torrent/usenet client for a non-Soulseek grab's progress + completion.
     ("video_downloads", "client_ref", "TEXT"),
+    # when this download's progress last MOVED (not when the row was last touched —
+    # updated_at bumps every poll). The stall clock used to live in memory keyed off
+    # process uptime, so a restart wiped it and a torrent dead for days looked brand
+    # new; six of them sat 199 minutes against a 30-minute timeout. Stored with the
+    # row, it is measured in wall-clock and survives restarts.
+    ("video_downloads", "progress_at", "TEXT"),
     # the ratingKey of the overlay poster we last uploaded to Plex, so a re-apply can delete
     # THAT one before uploading the new render (Plex accumulates uploads otherwise).
     ("overlay_apply", "plex_poster_key", "TEXT"),
