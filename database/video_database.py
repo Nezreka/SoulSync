@@ -2035,18 +2035,46 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def youtube_failed_counts(self) -> dict:
-        """{video_id: failed-attempt count} from the permanent history — so the processor
-        can stop re-grabbing a video that keeps failing (deleted / private / geo- or
-        age-gated) instead of retrying it every run forever."""
+    def youtube_recent_failure_errors(self, days: int = 3) -> list:
+        """Raw failure texts from the last few days — the input to the 'is yt-dlp
+        out of date?' check. Recent only: a cluster across a couple of days is a
+        broken extractor, whereas the same count spread over a year is not."""
         conn = self._get_connection()
         try:
-            return {r["media_id"]: r["n"] for r in conn.execute(
-                "SELECT media_id, COUNT(*) AS n FROM video_download_history "
-                "WHERE source='youtube' AND outcome='failed' AND media_id IS NOT NULL "
-                "GROUP BY media_id")}
+            return [r["error"] for r in conn.execute(
+                "SELECT error FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' AND error IS NOT NULL "
+                "AND COALESCE(completed_at, grabbed_at) >= datetime('now', ?)",
+                ("-%d days" % max(1, int(days)),))]
         finally:
             conn.close()
+
+    def youtube_failed_counts(self, max_fail: int = 3) -> dict:
+        """{video_id: strike count} from the permanent history — so the processor can
+        stop re-grabbing a video that keeps failing instead of retrying it forever.
+
+        Strikes are WEIGHTED by what the failure actually was, not counted raw. A
+        members-only video spends the whole budget on its first attempt (retrying a
+        paywall hourly learns nothing), and a video that simply hasn't been released
+        yet spends none of it — counting "Premieres in 3 days" as a failure is what
+        permanently skipped a video that then aired two days later. The weighting
+        reads the stored error text, so it also repairs history already on disk."""
+        from core.video.youtube_errors import strikes_for
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT media_id, error, "
+                "  julianday('now') - julianday(COALESCE(completed_at, grabbed_at)) AS days_ago "
+                "FROM video_download_history "
+                "WHERE source='youtube' AND outcome='failed' AND media_id IS NOT NULL"
+            ).fetchall()
+        finally:
+            conn.close()
+        by_video: dict = {}
+        for r in rows:
+            by_video.setdefault(r["media_id"], []).append(
+                {"error": r["error"], "days_ago": r["days_ago"]})
+        return {vid: strikes_for(rs, max_fail=max_fail) for vid, rs in by_video.items()}
 
     def youtube_video_detail(self, youtube_id) -> dict | None:
         """Cached metadata for one YouTube video (title / thumbnail / duration / views) — the
