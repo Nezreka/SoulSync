@@ -234,3 +234,68 @@ export const WATCHLIST_SOURCE_BADGES: Record<
   musicbrainz_artist_id: { label: 'MusicBrainz', className: 'watchlist-source-musicbrainz' },
   amazon_artist_id: { label: 'Amazon', className: 'watchlist-source-amazon' },
 };
+
+// ---------------------------------------------------------------------------
+// Auto-download: a global default an artist can override
+// ---------------------------------------------------------------------------
+
+/**
+ * The three states an artist's auto-download preference can hold. `null` — the
+ * artist has no opinion and follows the global — is the one the old boolean
+ * column could not express, and the reason a global switch was powerless
+ * against a watchlist of artists nobody had ever touched (swiftpawpaw, 225).
+ *
+ * Mirrors `core/watchlist_auto_download.py`; the server is the authority and
+ * resolves this again at scan time. These exist so the modal can SHOW what will
+ * happen without a round trip.
+ */
+export const AUTO_DOWNLOAD_INHERIT = null;
+export const AUTO_DOWNLOAD_ALWAYS = 1;
+export const AUTO_DOWNLOAD_NEVER = 0;
+
+export type AutoDownloadChoice = 'inherit' | 'always' | 'never';
+
+/** Which `<select>` option a stored preference corresponds to. */
+export function autoDownloadSelectValue(pref: number | null | undefined): AutoDownloadChoice {
+  if (pref === AUTO_DOWNLOAD_ALWAYS) return 'always';
+  if (pref === AUTO_DOWNLOAD_NEVER) return 'never';
+  return 'inherit';
+}
+
+/** …and back. Anything unrecognised inherits rather than guessing a side. */
+export function autoDownloadPrefFromSelect(value: string): number | null {
+  if (value === 'always') return AUTO_DOWNLOAD_ALWAYS;
+  if (value === 'never') return AUTO_DOWNLOAD_NEVER;
+  return AUTO_DOWNLOAD_INHERIT;
+}
+
+/** Whether this artist auto-downloads right now. The artist beats the global. */
+export function effectiveAutoDownload(
+  pref: number | null | undefined,
+  globalDefault: boolean,
+): boolean {
+  if (pref === AUTO_DOWNLOAD_ALWAYS) return true;
+  if (pref === AUTO_DOWNLOAD_NEVER) return false;
+  return Boolean(globalDefault);
+}
+
+/**
+ * What the modal says under the control.
+ *
+ * "Off" is ambiguous between "I set this" and "the global is off", and a user
+ * who cannot tell which will go and toggle the wrong one.
+ */
+export function describeAutoDownload(
+  pref: number | null | undefined,
+  globalDefault: boolean,
+): string {
+  if (pref === AUTO_DOWNLOAD_ALWAYS) {
+    return 'Set on this artist — downloads even when the global default is off.';
+  }
+  if (pref === AUTO_DOWNLOAD_NEVER) {
+    return 'Set on this artist — follow only, even when the global default is on.';
+  }
+  return globalDefault
+    ? 'Following the global default, which is currently ON — new releases download.'
+    : 'Following the global default, which is currently OFF — nothing downloads automatically.';
+}

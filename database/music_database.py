@@ -106,6 +106,10 @@ class WatchlistArtist:
     # releases for this artist but does NOT auto-add them to the wishlist (so they
     # don't auto-download). Default True = current behaviour.
     auto_download: bool = True
+    # Three-state preference behind auto_download: None = follow the global
+    # default, 0 = never, 1 = always. The scanner resolves the pair into
+    # `auto_download` (core.watchlist_auto_download).
+    auto_download_pref: Optional[int] = None
     # App-wide quality_profiles row used for every release queued by this
     # artist.  Stored on the Watchlist itself so consumers do not need to know
     # about Library v2 (or any other UI that created the watch).
@@ -661,6 +665,8 @@ class MusicDatabase:
             # from an explicit column list, so any column added before them gets
             # dropped. Adding it here (after the last recreate) makes it stick.
             self._add_watchlist_auto_download_column(cursor)
+            # Same ordering rule: must land AFTER the recreates, or it is dropped.
+            self._add_watchlist_auto_download_pref_column(cursor)
             self._add_watchlist_quality_profile_column(cursor)
 
             # Spotify library cache
@@ -2796,6 +2802,40 @@ class MusicDatabase:
                 logger.info("Added auto_download column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
+
+    def _add_watchlist_auto_download_pref_column(self, cursor):
+        """Add the three-state auto-download preference (swiftpawpaw's request).
+
+        ``auto_download`` is ``NOT NULL DEFAULT 1``, so every untouched artist
+        already reads 1 and nothing can tell "the user chose this" from "nobody
+        ever set it". A global default would be powerless against those rows —
+        which is exactly the problem: 225 artists, all reading 1, no way to turn
+        them off but one at a time.
+
+        ``auto_download_pref`` is NULLABLE and carries the third state:
+            NULL -> follow the global default
+            0    -> never, whatever the global says
+            1    -> always, whatever the global says
+
+        The backfill is lossless: rows already at ``auto_download=0`` are
+        deliberate follow-only choices and become an explicit 0; everything else
+        stays NULL and inherits. Nothing is discarded, because today "explicitly
+        on" and "on by default" behave identically — the difference was never
+        expressible."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'auto_download_pref' in columns:
+                return
+            cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN auto_download_pref INTEGER")
+            if 'auto_download' in columns:
+                # Preserve every deliberate follow-only; leave the rest inheriting.
+                cursor.execute("UPDATE watchlist_artists SET auto_download_pref = 0 "
+                               "WHERE auto_download = 0")
+            logger.info("Added auto_download_pref column to watchlist_artists "
+                        "(explicit follow-only rows preserved)")
+        except Exception as e:
+            logger.error(f"Error adding auto_download_pref to watchlist_artists: {e}")
 
     def _add_watchlist_quality_profile_column(self, cursor):
         """Add the native per-artist Quality Profile assignment.
@@ -11946,7 +11986,7 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'quality_profile_id']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -11985,6 +12025,8 @@ class MusicDatabase:
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
+                    auto_download_pref = (row['auto_download_pref']
+                                          if 'auto_download_pref' in existing_columns else None)
                     quality_profile_id = (
                         int(row['quality_profile_id'])
                         if 'quality_profile_id' in existing_columns
@@ -12016,6 +12058,7 @@ class MusicDatabase:
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
+                        auto_download_pref=auto_download_pref,
                         quality_profile_id=quality_profile_id,
                         profile_id=profile_id
                     ))

@@ -31304,7 +31304,7 @@ def watchlist_artist_config(artist_id):
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
                        amazon_artist_id, musicbrainz_artist_id, auto_download,
-                       quality_profile_id
+                       quality_profile_id, auto_download_pref
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -31438,6 +31438,12 @@ def watchlist_artist_config(artist_id):
                 # follow-only toggle (default True/auto-download when column absent)
                 'auto_download': bool(result[20]) if len(result) > 20 and result[20] is not None else True,
                 'quality_profile_id': int(result[21]) if len(result) > 21 and result[21] is not None else None,
+                # Three-state preference: null = follow the global, 0/1 = this
+                # artist decides. The global travels with it so the UI can say
+                # WHICH way "follow the global" currently resolves.
+                'auto_download_pref': (int(result[22])
+                                       if len(result) > 22 and result[22] is not None else None),
+                'global_auto_download': bool(config_manager.get('watchlist.global_auto_download', True)),
             }
 
             from core.metadata.registry import available_sources, get_primary_source
@@ -31497,7 +31503,7 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles, include_live,
                        include_remixes, include_acoustic, include_compilations,
                        include_instrumentals, lookback_days, preferred_metadata_source,
-                       auto_download, quality_profile_id
+                       auto_download, quality_profile_id, auto_download_pref
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -31567,13 +31573,32 @@ def watchlist_artist_config(artist_id):
             else:
                 preferred_metadata_source = old_row['preferred_metadata_source']
 
-            # Follow-only toggle: default True so an older client that omits the
-            # field keeps auto-downloading.
-            try:
-                auto_download = _field('auto_download', True)
-            except _BadBool as bad:
-                conn.close()
-                return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
+            # Follow-only toggle. `auto_download_pref` is the real setting (three
+            # states: null = follow the global); the boolean column is kept in
+            # step only so an older reader still sees an explicit choice. A
+            # request that mentions neither field leaves BOTH alone -- an
+            # untouched artist must not pin itself out of future global flips.
+            from core.watchlist_auto_download import (
+                legacy_column_value as _legacy_auto_download,
+                resolve_pref as _resolve_auto_download_pref,
+            )
+            if 'auto_download_pref' in data:
+                auto_download_pref = _resolve_auto_download_pref(
+                    sent_pref=data.get('auto_download_pref'))
+                auto_download = _legacy_auto_download(auto_download_pref)
+            elif 'auto_download' in data:
+                # Legacy shape. Parse it strictly first -- the string "false" is
+                # truthy, and _field is what already knows that.
+                try:
+                    legacy = _field('auto_download', True)
+                except _BadBool as bad:
+                    conn.close()
+                    return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
+                auto_download_pref = _resolve_auto_download_pref(sent_legacy=legacy)
+                auto_download = _legacy_auto_download(auto_download_pref)
+            else:
+                auto_download_pref = old_row['auto_download_pref']
+                auto_download = old_row['auto_download']
 
             if 'quality_profile_id' in data and data.get('quality_profile_id') is not None:
                 quality_profile_id = parse_strict_int(data.get('quality_profile_id'))
@@ -31599,7 +31624,7 @@ def watchlist_artist_config(artist_id):
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
-                    auto_download = ?, quality_profile_id = ?,
+                    auto_download = ?, auto_download_pref = ?, quality_profile_id = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE profile_id = ? AND (
@@ -31609,7 +31634,7 @@ def watchlist_artist_config(artist_id):
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download),
-                  quality_profile_id, lookback_changed, active_profile_id,
+                  auto_download_pref, quality_profile_id, lookback_changed, active_profile_id,
                   artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
@@ -31633,7 +31658,10 @@ def watchlist_artist_config(artist_id):
                     'include_acoustic': include_acoustic,
                     'include_compilations': include_compilations,
                     'include_instrumentals': include_instrumentals,
-                    'auto_download': auto_download,
+                    # bool, not the raw column int: the echo has always been a
+                    # boolean and the clients are typed against that.
+                    'auto_download': bool(auto_download),
+                    'auto_download_pref': auto_download_pref,
                     'quality_profile_id': quality_profile_id,
                 }
             })
@@ -31742,6 +31770,11 @@ def watchlist_global_config():
                 'include_compilations': config_manager.get('watchlist.global_include_compilations', False),
                 'include_instrumentals': config_manager.get('watchlist.global_include_instrumentals', False),
                 'exclude_terms': config_manager.get('watchlist.exclude_terms', ''),
+                # Auto-download is a DEFAULT, not an override: an artist's own
+                # setting beats it. Separate from global_override_enabled on
+                # purpose -- folding it in would force auto-download on for
+                # everyone already using that switch for formats.
+                'global_auto_download': config_manager.get('watchlist.global_auto_download', True),
             }
             return jsonify({"success": True, "config": config})
 
@@ -31775,6 +31808,8 @@ def watchlist_global_config():
             config_manager.set('watchlist.global_include_compilations', include_compilations)
             config_manager.set('watchlist.global_include_instrumentals', include_instrumentals)
             config_manager.set('watchlist.exclude_terms', exclude_terms)
+            global_auto_download = bool(data.get('global_auto_download', True))
+            config_manager.set('watchlist.global_auto_download', global_auto_download)
 
             logger.info(f"Updated global watchlist config: override={global_override_enabled}, "
                   f"albums={include_albums}, eps={include_eps}, singles={include_singles}, "
@@ -31796,6 +31831,7 @@ def watchlist_global_config():
                     'include_compilations': include_compilations,
                     'include_instrumentals': include_instrumentals,
                     'exclude_terms': exclude_terms,
+                    'global_auto_download': global_auto_download,
                 }
             })
 

@@ -48,6 +48,13 @@ interface StubOptions {
   scanCompletedAt?: string | null;
   /** false = an artist matched on no provider at all, which the server allows. */
   configProviderIds?: boolean;
+  /** The global auto-download default the server reports. */
+  globalAutoDownload?: boolean;
+  /** The artist's stored three-state auto-download preference. */
+  autoDownloadPref?: number | null;
+  /** Collects what was POSTed, for tests that care about the payload and not
+   *  just that a request happened. */
+  bodies?: { url: string; body: Record<string, unknown> }[];
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -59,15 +66,29 @@ function stubFetch(options: StubOptions = {}) {
     labels = [],
     scanCompletedAt = null,
     configProviderIds = true,
+    globalAutoDownload = true,
+    autoDownloadPref = null,
+    bodies,
   } = options;
 
   const calls: string[] = [];
 
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       calls.push(url);
+      if (bodies) {
+        // ky hands fetch a Request, so the payload is on the Request and NOT in
+        // init.body — reading only init.body silently records nothing.
+        const raw =
+          input instanceof Request
+            ? await input.clone().text()
+            : typeof init?.body === 'string'
+              ? init.body
+              : '';
+        if (raw) bodies.push({ url, body: JSON.parse(raw) as Record<string, unknown> });
+      }
 
       if (url.includes('/api/watchlist/count')) {
         return createResponse({ success: true, count, next_run_in_seconds: nextRunInSeconds });
@@ -99,6 +120,7 @@ function stubFetch(options: StubOptions = {}) {
             include_compilations: false,
             include_instrumentals: false,
             exclude_terms: '',
+            global_auto_download: globalAutoDownload,
           },
         });
       }
@@ -123,6 +145,8 @@ function stubFetch(options: StubOptions = {}) {
             lookback_days: 90,
             preferred_metadata_source: null,
             auto_download: true,
+            auto_download_pref: autoDownloadPref,
+            global_auto_download: globalAutoDownload,
             quality_profile_id: null,
           },
           artist: {
@@ -669,6 +693,93 @@ describe('watchlist route', () => {
     await waitFor(() => {
       expect(calls.filter((url) => url.includes('/config')).length).toBeGreaterThan(1);
     });
+  });
+
+  // ── auto-download: a global default an artist can override ────────────────
+  // swiftpawpaw: the Global Override only picked release formats, so turning
+  // auto-download off meant opening all 225 artists one at a time.
+
+  it('saves the global auto-download default without touching the format override', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies });
+    renderWatchlistRoute(['/watchlist?settings=true']);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('checkbox', { name: /Auto-download new releases by default/ }),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /Auto-download new releases by default/ }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('global-config'))).toBe(true);
+    });
+    const saved = bodies.find((call) => call.url.includes('global-config'))!.body;
+    expect(saved.global_auto_download).toBe(false);
+    // The format override is a SEPARATE switch and must not have moved: folding
+    // the two together would force auto-download on for everyone using it.
+    expect(saved.global_override_enabled).toBe(false);
+  });
+
+  it('shows an untouched artist as following the global, and says which way', async () => {
+    stubFetch({ autoDownloadPref: null, globalAutoDownload: false });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('New releases from this artist')).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText('New releases from this artist')).toHaveValue('inherit');
+    // "Off" alone is ambiguous between "I set this" and "the global is off".
+    expect(screen.getByText(/currently OFF/)).toBeInTheDocument();
+  });
+
+  it('posts the three-state preference, never the legacy boolean', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('New releases from this artist')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('New releases from this artist'), {
+      target: { value: 'never' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    const saved = bodies.find((call) => call.url.includes('/config'))!.body;
+    expect(saved.auto_download_pref).toBe(0);
+    // The server reads a sent `auto_download` as a deliberate choice, so posting
+    // it on every save would pin every artist the user ever opened.
+    expect('auto_download' in saved).toBe(false);
+  });
+
+  it('leaves an artist inheriting when the user saves without touching auto-download', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, autoDownloadPref: null });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    // Still null: editing release types must not silently opt this artist out of
+    // every future global flip.
+    expect(bodies.find((call) => call.url.includes('/config'))!.body.auto_download_pref).toBe(null);
   });
 
   it('refuses to save an artist with no release type', async () => {
