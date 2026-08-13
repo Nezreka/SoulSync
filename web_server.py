@@ -19564,6 +19564,46 @@ def download_backup_endpoint(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
+# == YT-DLP UPDATER            ==
+# ===============================
+# YouTube changes how it serves video faster than any release schedule, so a
+# yt-dlp a few weeks old starts answering "HTTP Error 403: Forbidden" on videos
+# that worked yesterday — 22 of them on this install, one already given up on
+# permanently. Shared by both sides because it is one package.
+
+@app.route('/api/ytdlp/status', methods=['GET'])
+def ytdlp_status():
+    """Installed vs newest available, so 'might be out of date' is a fact rather
+    than a guess. The PyPI lookup is best-effort — no network must never mean no
+    version panel."""
+    from core.ytdlp_update import (PYPI_URL, installed_version, is_behind,
+                                   normalize_channel, parse_pypi)
+    channel = normalize_channel(request.args.get('channel'))
+    installed = installed_version()
+    latest, err = None, None
+    try:
+        import requests as _rq
+        latest = parse_pypi(_rq.get(PYPI_URL, timeout=8).text, channel)
+    except Exception as e:      # noqa: BLE001 - offline is a state, not an error page
+        err = str(e)
+    return jsonify({'success': True, 'installed': installed, 'latest': latest,
+                    'channel': channel, 'behind': is_behind(installed, latest),
+                    'lookup_error': err})
+
+
+@app.route('/api/ytdlp/update', methods=['POST'])
+def ytdlp_update():
+    """Install the newest yt-dlp. Admin only — this runs a package install."""
+    if not bool(getattr(g, 'is_admin', True)):
+        return jsonify({'success': False, 'error': 'Only an admin can update yt-dlp.'}), 403
+    from core.ytdlp_update import run_update
+    body = request.get_json(silent=True) or {}
+    res = run_update(body.get('channel'))
+    logger.info("yt-dlp update (%s): %s", res.get('channel'), res.get('message'))
+    return jsonify({'success': bool(res.get('ok')), **res})
+
+
+# ===============================
 # == DATABASE MAINTENANCE      ==
 # ===============================
 
