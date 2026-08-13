@@ -62,6 +62,47 @@ def test_extras_and_featurettes_are_skipped():
         assert classify_file(p, _BIG) is not None, p
 
 
+def test_a_show_whose_title_contains_a_junk_word_is_still_importable():
+    """A bare-substring test reads these as extras and refuses every episode. All
+    three are real shows, and 'Bonus Family' has six seasons of them."""
+    for p in ("/d/Bonus.Family.S01E01.1080p.WEB.mkv",
+              "/d/Extras.S02E03.720p.HDTV.mkv",
+              "/d/The.Trailer.Park.Boys.S05E01.mkv",
+              "/d/Sample.This.S01E04.1080p.mkv"):
+        assert classify_file(p, _BIG) is None, p
+
+
+def test_a_library_folder_named_extras_does_not_condemn_its_contents():
+    """The path above the release is the user's own layout — Boulder's library spans
+    eleven mount roots, any one of which could be spelled this way. That protection
+    is the ROOT scoping in map_pack, not classify_file, which reads whatever path it
+    is handed; both halves are asserted here so neither can be dropped alone."""
+    assert classify_file("/mnt/extras/downloads/Show.S01E01.mkv", _BIG) is not None
+    out = map_pack([_f("/mnt/extras/downloads/Show.S01/Show.S01E01.mkv")],
+                   want_season=1, root="/mnt/extras/downloads/Show.S01")
+    assert sorted(out["claimed"]) == [(1, 1)] and out["skipped"] == []
+
+
+def test_the_marker_still_bites_when_it_follows_the_episode_number():
+    """Position is the whole discriminator: before the numbering it is the title,
+    after it, it is release detail — and 'sample' there means sample."""
+    assert classify_file("/d/Bonus.Family.S01E01.sample.mkv", _BIG) is not None
+    assert classify_file("/d/Show.S01E01.1080p.trailer.mkv", _BIG) is not None
+
+
+def test_a_file_with_no_numbering_is_read_whole():
+    """No numbering means no title/detail boundary to respect, so the old broad
+    read still applies — that is what catches a bare 'trailer.mkv'."""
+    assert classify_file("/d/trailer.mkv", _BIG) is not None
+    assert classify_file("/d/behind the scenes.mkv", _BIG) is not None
+
+
+def test_only_an_exact_directory_name_counts_as_a_junk_folder():
+    assert classify_file("/d/Sample/Show.S01E01.mkv", _BIG) is not None
+    assert classify_file("/d/Samples/Show.S01E01.mkv", _BIG) is not None
+    assert classify_file("/d/Sampled Shows/Show.S01E01.mkv", _BIG) is None
+
+
 def test_a_tiny_video_is_rejected_however_it_is_named():
     why = classify_file("/d/Show.S01E01.1080p.mkv", 4 * 1024 * 1024)
     assert why and "too small" in why
@@ -148,6 +189,41 @@ def test_every_skip_carries_a_reason():
                     _f("/d/tiny.mkv", 1024)], want_season=1)
     assert len(out["skipped"]) == 4
     assert all(s["why"] for s in out["skipped"]), out["skipped"]
+
+
+def test_the_junk_check_stops_at_the_pack_folder():
+    """The folders ABOVE the pack are the user's own layout and say nothing about
+    the release. Reading them means a download dir at /mnt/extras marks every
+    episode an extra — and the Netflix show *Bonus Family* can never be imported
+    at all, because 'bonus' is in its name."""
+    root = "/mnt/extras/downloads/Bonus.Family.S01.1080p"
+    out = map_pack([_f(root + "/Bonus.Family.S01E01.1080p.mkv")], want_season=1, root=root)
+    assert sorted(out["claimed"]) == [(1, 1)]
+    assert out["skipped"] == []
+
+
+def test_a_sample_inside_the_pack_is_still_caught():
+    """Scoping the check must not disarm it — 'Sample/' INSIDE the pack still means
+    what it always did."""
+    root = "/dl/Show.S01"
+    out = map_pack([_f(root + "/Show.S01E01.mkv", 20 * _BIG),
+                    _f(root + "/Sample/Show.S01E01.mkv", 40 * 1024 * 1024)],
+                   want_season=1, root=root)
+    assert out["claimed"][(1, 1)]["path"] == root + "/Show.S01E01.mkv"
+    assert any("sample" in s["why"] for s in out["skipped"])
+
+
+def test_a_windows_style_root_is_scoped_the_same_way():
+    root = r"C:\Downloads\Extras Drive\Show.S01"
+    out = map_pack([_f(root + r"\Show.S01E02.mkv")], want_season=1, root=root)
+    assert sorted(out["claimed"]) == [(1, 2)]
+
+
+def test_without_a_root_the_whole_path_is_still_read():
+    """Callers that pass no root keep the old, broader behaviour — the scoping is
+    an addition, not a silent relaxation of the sample guard."""
+    out = map_pack([_f("/d/Sample/Show.S01E01.mkv")], want_season=1)
+    assert out["claimed"] == {} and "sample" in out["skipped"][0]["why"]
 
 
 def test_a_pack_with_no_season_hint_still_maps():

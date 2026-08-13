@@ -135,6 +135,138 @@ def _make_organizer(db):
     return organize
 
 
+def pack_file_list(root, walker=None, sizer=None):
+    """Every file under a pack folder as ``{"path", "size_bytes"}``. Split out from
+    the importer so the mapping can be exercised without a real download on disk."""
+    walker = walker or _walk
+    if sizer is None:
+        def sizer(p):
+            try:
+                return os.path.getsize(p)
+            except OSError:
+                return None
+    return [{"path": p, "size_bytes": sizer(p)} for p in walker(root)]
+
+
+def _episode_row(dl, season, episode, path, size):
+    """The pack row re-cast as the single-episode row it stands in for. The importer
+    reads its identity from ``search_ctx`` and its release name from ``release_title``,
+    so both have to name THIS episode — a row still carrying the pack's name
+    ('Show.S01.1080p.WEB-GROUP') parses to no episode at all, which silently disables
+    the wrong-episode gate that keeps E04 out of E03's slot."""
+    ctx = dict(_pack_ctx(dl))
+    ctx.update({"scope": "episode", "season": season, "episode": episode})
+    base = os.path.basename(str(path))
+    return {**dl, "kind": "show", "release_title": base, "filename": base,
+            "size_bytes": int(size or 0), "search_ctx": json.dumps(ctx)}
+
+
+def _pack_ctx(dl):
+    try:
+        ctx = json.loads((dl or {}).get("search_ctx") or "{}")
+        return ctx if isinstance(ctx, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _record_pack_episode(db, ep_dl, patch):
+    """Give an imported pack episode its own completed download row, so it appears on
+    the Downloads page and in history exactly like an individually-grabbed episode.
+    The pack row is the BATCH — mirroring the music album bundle, where the bundle
+    stages and the per-track rows do the importing. Best-effort: a bookkeeping failure
+    must never undo a file that is already correctly in the library."""
+    try:
+        child = db.add_video_download({
+            k: ep_dl.get(k) for k in
+            ("kind", "title", "release_title", "source", "username", "filename",
+             "size_bytes", "quality_label", "target_dir", "media_id", "media_source",
+             "year", "poster_url", "search_ctx", "quality_profile_id")
+        } | {"status": "completed", "attempts": 0})
+        db.update_video_download(child, dest_path=patch.get("dest_path"),
+                                 progress=100.0, completed_at=_now(),
+                                 quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
+        row = {**ep_dl, "id": child}
+        _archive_history(db, row, patch)
+        _publish_terminal(row, patch)
+        return child
+    except Exception:
+        logger.exception("pack: failed to record the row for %s", ep_dl.get("filename"))
+        return None
+
+
+def _make_pack_importer(db, organize):
+    """Import a finished season pack by fanning its folder out to the ORDINARY
+    per-episode import, one episode at a time.
+
+    This is the music album bundle's shape (``core.downloads.staging`` +
+    ``album_bundle_dispatch``): the pack download itself places nothing — it hands each
+    file to the same importer a single-episode grab uses, so there is one import path
+    (parse → ffprobe verify → template rename → replace/upgrade → sidecars) rather than
+    a second one that drifts.
+
+    Returns None when the job is not a folder, so a 'pack' that turned out to be a
+    single file falls back to the normal single-file path."""
+    from core.video.client_download import find_content_dir
+    from core.video.season_pack import map_pack, want_season_of
+
+    def import_pack(dl, root, name):
+        folder = find_content_dir(root, name)
+        if not folder:
+            return None
+        want = want_season_of(dl)
+        out = map_pack(pack_file_list(folder), want_season=want, root=folder)
+        claimed, skipped = out["claimed"], out["skipped"]
+        # #706/#708: on the music side a staged file that silently failed to match
+        # produced "download it, stage it, never claim it, re-add to the wishlist" —
+        # a loop nobody could diagnose from logs. Every skip says why, at INFO.
+        for s in skipped:
+            logger.info("pack %s: skipped %s — %s", dl.get("id"),
+                        os.path.basename(s["path"]), s["why"])
+        if not claimed:
+            return {"status": "import_failed", "progress": 100.0,
+                    "error": "Nothing in this pack looked like an episode (%d file%s checked)"
+                             % (len(skipped), "" if len(skipped) == 1 else "s")}
+
+        imported, failed = [], []
+        for (season, episode), info in sorted(claimed.items()):
+            ep_dl = _episode_row(dl, season, episode, info["path"], info.get("size_bytes"))
+            try:
+                patch = organize(ep_dl, info["path"])
+            except Exception:   # noqa: BLE001 - one bad episode must not abandon the rest
+                logger.exception("pack %s: S%02dE%02d import raised", dl.get("id"), season, episode)
+                failed.append((season, episode, "the import raised"))
+                continue
+            if patch.get("status") != "completed":
+                failed.append((season, episode, patch.get("error") or "import refused"))
+                logger.info("pack %s: S%02dE%02d not imported — %s", dl.get("id"),
+                            season, episode, patch.get("error") or "import refused")
+                continue
+            imported.append((season, episode, patch))
+            _record_pack_episode(db, ep_dl, patch)
+            # Per EPISODE, not per pack: the row that just landed is the only one this
+            # file satisfies, and a below-cutoff episode still keeps its row so the
+            # upgrade-until-cutoff sweep can better it later.
+            _wishlist_obtained(db, ep_dl, patch)
+
+        if not imported:
+            return {"status": "import_failed", "progress": 100.0,
+                    "error": "The pack held %d episode%s but none could be imported (%s)"
+                             % (len(claimed), "" if len(claimed) == 1 else "s",
+                                failed[0][2] if failed else "no reason given")}
+        logger.info("pack %s: imported %d of %d episode%s%s", dl.get("id"), len(imported),
+                    len(claimed), "" if len(claimed) == 1 else "s",
+                    "" if not failed else " (%d refused)" % len(failed))
+        # The pack row is the batch: it reports the outcome and points at the first
+        # episode. The episodes NOT in this pack keep their wishlist rows untouched,
+        # so the ordinary hourly drain chases them — one click never becomes twenty
+        # immediate searches.
+        return {"status": "completed", "progress": 100.0,
+                "dest_path": imported[0][2].get("dest_path"),
+                "_pack_imported": len(imported), "_pack_failed": len(failed)}
+
+    return import_pack
+
+
 def _media_ids(db, dl):
     """(tmdb_id, imdb_id) for a download's title — taken directly when it was grabbed
     from TMDB, or looked up from the LIBRARY row for an owned re-grab (whose ``media_id``
@@ -450,6 +582,12 @@ def _publish_terminal(dl, upd) -> None:
     """Relay a terminal outcome to the automation event bus (best-effort).
     completed → 'video_download_completed' (+ 'video_upgrade_completed' when the
     import REPLACED a library copy); import_failed → 'video_import_failed'."""
+    # A season pack already published one event per episode it imported — which is
+    # the useful granularity ("S01E04 landed"), and what a notification rule can
+    # actually match on. Publishing the batch row too would just add an eleventh
+    # message naming no episode at all.
+    if (upd or {}).get("_pack_imported"):
+        return
     try:
         from core.video.download_events import publish
         st = upd.get("status")
@@ -657,6 +795,7 @@ def _tick(db) -> None:
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads()
     organizer = _make_organizer(db)
+    pack_importer = _make_pack_importer(db, organizer)
     live_ids = set()
     completed_now = 0
     from core.video.client_download import process_active_client_download
@@ -664,7 +803,8 @@ def _tick(db) -> None:
         live_ids.add(dl["id"])
         if dl.get("source") in ("torrent", "usenet"):
             # torrent/usenet grabs are tracked via the shared client (by client_ref), not slskd.
-            upd = process_active_client_download(dl, organizer=organizer)
+            upd = process_active_client_download(dl, organizer=organizer,
+                                                 import_pack=pack_importer)
         else:
             upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move,
                                    organizer=organizer)

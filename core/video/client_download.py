@@ -13,6 +13,7 @@ import asyncio
 import os
 from typing import Any, Callable, Optional
 
+from core.video.season_pack import is_pack_download
 from core.video.slskd_search import _is_video
 from utils.logging_config import get_logger
 
@@ -34,12 +35,19 @@ def _norm_state(status: Any) -> str:
 def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
                             resolve_path: Callable[[Any], Any],
                             find_video: Callable[[Any, Any], Any],
-                            organizer: Optional[Callable] = None) -> dict:
+                            organizer: Optional[Callable] = None,
+                            import_pack: Optional[Callable] = None) -> dict:
     """Next-state patch for a torrent/usenet download. ``get_status(source, ref)`` returns the
     client's status object (or None if it forgot the job), ``resolve_path`` maps its reported
     save_path to a locally-readable one, ``find_video(root, name)`` returns the main video file
     for THIS job — scoped to its own content (``name`` = the torrent/nzb job name), never the
-    largest file in a shared download folder."""
+    largest file in a shared download folder.
+
+    ``import_pack(dl, root, name)`` handles the season-pack case, and exists because
+    ``find_video`` is the wrong shape for it: a pack finishes as a FOLDER of episodes, and
+    narrowing it to one file means one episode is judged and the rest are abandoned on disk.
+    It returns None when the job turns out not to be a folder after all (some 'packs' are a
+    single file), so the ordinary path still runs."""
     ref = dl.get("client_ref")
     if not ref:
         return {"_missing": True}
@@ -81,12 +89,20 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     content = getattr(status, "content_path", None)
     if content:
         save = resolve_path(content)
-        src = find_video(save, None) if save else None       # already this job's own content
+        name = None                                          # already this job's own content
     else:
         reported = getattr(status, "save_path", None) or getattr(status, "incomplete_path", None)
         save = resolve_path(reported)
         name = getattr(status, "name", None)
-        src = find_video(save, name) if save else None
+    # A season pack is a FOLDER of episodes. Falling through to find_video here would pick
+    # its largest file, hand that one episode to the importer, and leave the rest on disk —
+    # and since a pack row carries no single episode identity, the importer then rejects it
+    # outright ("Season/complete packs need manual import"), stranding the whole download.
+    if save and import_pack is not None and is_pack_download(dl):
+        packed = import_pack(dl, save, name)
+        if packed is not None:
+            return packed
+    src = find_video(save, name) if save else None
     if not src:
         if dl.get("dest_path"):
             return {"status": "completed", "progress": 100.0, "dest_path": dl.get("dest_path")}
@@ -178,7 +194,18 @@ def find_video_file(root, name=None) -> Optional[str]:
     return _largest_video(root)
 
 
-def process_active_client_download(dl: dict, organizer=None) -> dict:
+def find_content_dir(root, name=None) -> Optional[str]:
+    """This job's own content as a DIRECTORY, or None when it is a single file. The pack
+    path needs the folder, not the file inside it, and must never widen to ``root`` — that
+    is the shared download dir holding every concurrent grab."""
+    if not root:
+        return None
+    scoped = _scoped_content(root, name) if name else str(root)
+    return scoped if scoped and os.path.isdir(scoped) else None
+
+
+def process_active_client_download(dl: dict, organizer=None, import_pack=None) -> dict:
     """Production entry: poll the real client + resolve + find the video for one torrent/usenet row."""
     return process_client_download(dl, get_status=_get_status, resolve_path=_resolve_path,
-                                   find_video=find_video_file, organizer=organizer)
+                                   find_video=find_video_file, organizer=organizer,
+                                   import_pack=import_pack)

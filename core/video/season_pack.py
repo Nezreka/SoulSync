@@ -32,7 +32,9 @@ Pure: no filesystem, no DB, no network. The caller supplies the file list.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from typing import Any, Dict, Iterable, List, Optional
 
 # Containers worth importing. Anything else in a pack (nfo, jpg, txt, srt) is
@@ -40,19 +42,67 @@ from typing import Any, Dict, Iterable, List, Optional
 # sidecar handling, not through here.
 VIDEO_EXTS = frozenset({".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".wmv", ".mpg", ".mpeg"})
 
-# Path fragments that mean "not the episode". 'sample' is the classic trap: a
-# 30-second sample sits beside the real file, parses to the same SxxExx, and is
-# smaller — so without this the pack would import the sample and call it done.
-_JUNK_PARTS = ("sample", "extras", "featurette", "trailer", "behind the scenes",
-               "deleted scenes", "bonus", "proof", "screens")
+# Names that mean "not the episode". 'sample' is the classic trap: a 30-second
+# sample sits beside the real file, parses to the same SxxExx, and is smaller — so
+# without this the pack would import the sample and call it done.
+#
+# These are matched STRUCTURALLY, never as bare substrings, because several of them
+# are also ordinary English that shows are named in: a substring test refuses every
+# episode of *Bonus Family* and of Ricky Gervais's *Extras*, and refuses everything
+# under a download dir called /mnt/extras. See _dir_is_junk / _name_is_junk.
+_JUNK_PARTS = ("sample", "samples", "extra", "extras", "featurette", "featurettes",
+               "trailer", "trailers", "behind the scenes", "deleted scenes",
+               "bonus", "bonus features", "proof", "screens")
 
 # Below this a "video file" is a sample or a stub, whatever it claims to be.
 MIN_EPISODE_BYTES = 32 * 1024 * 1024      # 32 MB
 
+# Where the episode number sits in a name — everything AFTER it is release detail
+# ('.1080p.WEB.sample'), everything before is the show's own title.
+_EPISODE_TOKEN = re.compile(r"(?i)s\d{1,3}[\s._-]?e\d{1,4}")
+_SEGMENT_SPLIT = re.compile(r"[.\s_\-\[\]()]+")
 
-def _is_junk(path: str) -> bool:
-    low = str(path or "").replace("\\", "/").lower()
-    return any(part in low for part in _JUNK_PARTS)
+
+def _segments(text: str) -> set:
+    return {s for s in _SEGMENT_SPLIT.split(str(text or "").lower()) if s}
+
+
+def _dir_is_junk(path: str) -> Optional[str]:
+    """A junk marker as a WHOLE directory name. Releases label these folders exactly
+    — 'Sample', 'Extras', 'Featurettes', 'Behind The Scenes' — so an exact match is
+    both sufficient and safe. Matching loosely here would condemn every file under a
+    library folder that merely happens to contain the word."""
+    parts = str(path or "").replace("\\", "/").split("/")[:-1]
+    for d in parts:
+        low = d.strip().lower()
+        if low in _JUNK_PARTS:
+            return low
+    return None
+
+
+def _name_is_junk(path: str) -> Optional[str]:
+    """A junk marker in the FILENAME, read only AFTER the episode number.
+
+    Position is the whole discriminator. 'Show.S01E01.sample.mkv' carries the marker
+    in the release detail that follows the numbering — that is a sample. 'Bonus.
+    Family.S01E01.mkv' carries it in the title that precedes the numbering — that is
+    the show's name. A file with no numbering at all ('trailer.mkv') is read whole,
+    since there is no title/detail boundary to respect."""
+    stem = os.path.splitext(os.path.basename(str(path or "")))[0]
+    hit = _EPISODE_TOKEN.search(stem)
+    tail = stem[hit.end():] if hit else stem
+    segs, low = _segments(tail), tail.lower()
+    for marker in _JUNK_PARTS:
+        if " " in marker:
+            if marker in low:
+                return marker
+        elif marker in segs:
+            return marker
+    return None
+
+
+def _is_junk(path: str) -> Optional[str]:
+    return _dir_is_junk(path) or _name_is_junk(path)
 
 
 def _ext(path: str) -> str:
@@ -69,8 +119,9 @@ def classify_file(path: Any, size_bytes: Any = None) -> Optional[str]:
         return "empty path"
     if _ext(p) not in VIDEO_EXTS:
         return "not a video file (%s)" % (_ext(p) or "no extension")
-    if _is_junk(p):
-        return "looks like a sample or extra"
+    junk = _is_junk(p)
+    if junk:
+        return "looks like a sample or extra ('%s')" % junk
     try:
         if size_bytes is not None and int(size_bytes) < MIN_EPISODE_BYTES:
             return "only %.1f MB — too small to be an episode" % (int(size_bytes) / 1048576.0)
@@ -114,13 +165,28 @@ def episode_keys_for(filename: Any, *, want_season: Any = None,
     return []
 
 
-def map_pack(files: Iterable[Any], *, want_season: Any = None,
+def _inside(path: Any, root: Any) -> str:
+    """The part of ``path`` that belongs to the PACK — everything above the pack
+    folder is the user's own directory layout and must not be read for junk
+    markers. Without this a download dir at ``/mnt/extras`` marks every episode an
+    extra, and the show *Bonus Family* can never be imported at all."""
+    p = str(path or "")
+    if not root:
+        return p
+    r = str(root).replace("\\", "/").rstrip("/")
+    norm = p.replace("\\", "/")
+    return norm[len(r) + 1:] if norm.startswith(r + "/") else p
+
+
+def map_pack(files: Iterable[Any], *, want_season: Any = None, root: Any = None,
              air_dates: Optional[Dict[str, tuple]] = None,
              absolute_map: Optional[Dict[int, tuple]] = None) -> Dict[str, Any]:
     """Assign a pack's files to episodes.
 
     ``files`` = [{"path", "size_bytes"}, ...]. Returns
-    ``{"claimed": {(s, e): {...}}, "skipped": [{"path", "why"}]}``.
+    ``{"claimed": {(s, e): {...}}, "skipped": [{"path", "why"}]}``. ``root`` is the
+    pack folder; the sample/extras check is scoped inside it, because the folders
+    ABOVE it are the user's own layout and say nothing about the release.
 
     Two rules earn their place:
 
@@ -140,7 +206,7 @@ def map_pack(files: Iterable[Any], *, want_season: Any = None,
             path, size = entry.get("path"), entry.get("size_bytes")
         else:
             path, size = entry, None
-        why = classify_file(path, size)
+        why = classify_file(_inside(path, root), size)
         if why:
             skipped.append({"path": str(path or ""), "why": why})
             continue
@@ -192,5 +258,57 @@ def unclaimed_episodes(claimed: Dict[tuple, Any], wanted: Iterable[tuple]) -> Li
     return [k for k in (wanted or []) if k not in have]
 
 
+def _ctx_of(dl: Any) -> Dict[str, Any]:
+    ctx = (dl or {}).get("search_ctx")
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx or "{}")
+        except (ValueError, TypeError):
+            ctx = {}
+    return ctx if isinstance(ctx, dict) else {}
+
+
+def is_pack_download(dl: Any) -> bool:
+    """Whether this download row is a PACK — one grab that lands as a folder of
+    episodes rather than a single file.
+
+    This matters because the torrent path narrows a finished job to its single
+    largest video file before importing. For a pack that means one episode is
+    judged and the rest are left on disk, so the row's own importer verdict
+    ("Season/complete packs need manual import" / "Missing season/episode info")
+    is the only thing standing between a stranded pack and a mis-filed one.
+
+    A row qualifies when it asked for a season or a series, or when it is a show
+    grab carrying no episode identity at all — in every one of those cases there
+    is no single episode the file could be."""
+    dl = dl or {}
+    ctx = _ctx_of(dl)
+    scope = str(ctx.get("scope") or "").lower()
+    kind = str(dl.get("kind") or "").lower()
+    if scope in ("season", "series", "pack"):
+        return True
+    if scope in ("movie", "episode"):
+        return False          # an explicit single-item grab is never a pack
+    if kind in ("season", "series"):
+        return True
+    if kind in ("show", "tv"):
+        # A show grab with a season but no episode is a season pack; one with
+        # neither is a whole-series grab. Either way there is no single episode
+        # this file could be, so the folder must be mapped rather than narrowed.
+        return ctx.get("episode") is None
+    return False
+
+
+def want_season_of(dl: Any) -> Optional[int]:
+    """The season a pack row asked for, or None for a whole-series grab (which
+    filters nothing). Kept beside :func:`is_pack_download` so the two always read
+    the row the same way."""
+    try:
+        season = _ctx_of(dl).get("season")
+        return None if season is None else int(season)
+    except (TypeError, ValueError):
+        return None
+
+
 __all__ = ["map_pack", "episode_keys_for", "classify_file", "unclaimed_episodes",
-           "VIDEO_EXTS", "MIN_EPISODE_BYTES"]
+           "is_pack_download", "want_season_of", "VIDEO_EXTS", "MIN_EPISODE_BYTES"]
