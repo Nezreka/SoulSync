@@ -15,7 +15,6 @@ import os
 import re
 import time
 import platform
-import asyncio
 import uuid
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ except ImportError as exc:
     raise ImportError("yt-dlp is required. Install with: pip install yt-dlp") from exc
 
 from utils.logging_config import get_logger
+from core.async_utils import run_blocking
 from core.matching_engine import MusicMatchingEngine
 from core.spotify_client import Track as SpotifyTrack
 
@@ -347,8 +347,6 @@ class YouTubeClient(DownloadSourcePlugin):
         """
         try:
             # Run in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-
             def _check():
                 ydl_opts = {
                     'quiet': True,
@@ -363,7 +361,7 @@ class YouTubeClient(DownloadSourcePlugin):
                     info = ydl.extract_info("https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=False)
                     return info is not None
 
-            return await loop.run_in_executor(None, _check)
+            return await run_blocking(_check)
 
         except Exception as e:
             logger.error(f"YouTube connection check failed: {e}")
@@ -738,8 +736,6 @@ class YouTubeClient(DownloadSourcePlugin):
         """
         logger.info(f"Searching YouTube videos for: {query}")
         try:
-            loop = asyncio.get_event_loop()
-
             def _search():
                 ydl_opts = {
                     'quiet': True,
@@ -792,7 +788,7 @@ class YouTubeClient(DownloadSourcePlugin):
                         ))
                     return results
 
-            return await loop.run_in_executor(None, _search)
+            return await run_blocking(_search)
         except Exception as e:
             logger.error(f"YouTube video search failed: {e}")
             return []
@@ -813,8 +809,6 @@ class YouTubeClient(DownloadSourcePlugin):
 
         try:
             # Run yt-dlp in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
-
             def _search():
                 ydl_opts = {
                     'quiet': True,
@@ -838,7 +832,7 @@ class YouTubeClient(DownloadSourcePlugin):
                     return search_results['entries']
 
             # Run search in thread pool
-            entries = await loop.run_in_executor(None, _search)
+            entries = await run_blocking(_search)
 
             if not entries:
                 logger.warning(f"No YouTube results found for: {query}")

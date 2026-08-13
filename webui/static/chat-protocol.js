@@ -199,12 +199,58 @@
 
     // pin.add {u, ts, x} / pin.del {u, ts} → rolling board of pinned
     // messages (dedupe by author|timestamp, cap 8 — oldest falls off).
+    // ── Moderators ────────────────────────────────────────────────────
+    // The RESERVED_AVATARS trust model extended to ACTIONS: the slskd
+    // sender name on a room message cannot be forged, so every client can
+    // verify a moderator event locally, and non-moderator copies of the
+    // same event are ignored by everyone. Mirrored nowhere — this list is
+    // the single source both reducers and chat.js UI gating read.
+    var CHAT_MODERATORS = ['boulderbadgedad'];
+
+    function isModerator(username) {
+        return CHAT_MODERATORS.indexOf(String(username || '').trim().toLowerCase()) !== -1;
+    }
+
+    // mod.hide {u, ts} / mod.unhide {u, ts} → { 'u|ts': true } of messages
+    // every SoulSync client renders collapsed. Moderator-only by fold rule.
+    function reduceHidden(events) {
+        var hidden = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k !== 'mod.hide' && p.k !== 'mod.unhide') return;
+            if (!isModerator(ev.username)) return;
+            var u = String(p.u || ''), ts = String(p.ts || '');
+            if (!u || !ts || u.length > 64 || ts.length > 64) return;
+            if (p.k === 'mod.hide') hidden[u + '|' + ts] = true;
+            else delete hidden[u + '|' + ts];
+        });
+        return hidden;
+    }
+
+    // mod.gamekill {id} → { id: true }. A killed game vanishes from the
+    // arcade fold on every client. Moderator-only by fold rule.
+    function reduceGameKills(events) {
+        var kills = {};
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            if (ev.p.k !== 'mod.gamekill') return;
+            if (!isModerator(ev.username)) return;
+            var id = String(ev.p.id || '');
+            if (id && id.length <= 64) kills[id] = true;
+        });
+        return kills;
+    }
+
     function reducePins(events) {
         var pins = [];
         (events || []).forEach(function (ev) {
             if (!ev || !ev.p || typeof ev.username !== 'string') return;
             var p = ev.p;
             if (p.k !== 'pin.add' && p.k !== 'pin.del') return;
+            // Owner-only pins (Boulder): the board folds moderator events
+            // exclusively, so anyone else's pin.add is inert on every client.
+            if (!isModerator(ev.username)) return;
             var u = String(p.u || ''), ts = String(p.ts || '');
             if (!u || !ts || u.length > 64 || ts.length > 64) return;
             var key = u + '|' + ts;
@@ -251,6 +297,197 @@
         if (!poll) return null;
         poll.tally = tallyVotes(votes);
         return poll;
+    }
+
+    // ── Watch-together reducer ──────────────────────────────────────────
+    // Movie night as a pure fold, same discipline as the jukebox. ONE party
+    // per room. Nominations form a ballot; votes ride tallyVotes; a start
+    // consumes a live nomination and anchors the party clock to the STREAM
+    // timestamp (the shared clock every client already agrees on — no client
+    // wall time on the wire). Playback position is derived state:
+    //   pos = offsetMs + (streamNow - basisAt)   while playing
+    //   pos = offsetMs                            while paused
+    // Carriers:
+    //   watch.nom  {id, kd, ti, y, s, e, po} → ballot entry (dedupe by
+    //              kd:id[:SxE], cap 12, first nominator keeps attribution)
+    //   watch.unnom {o}   → nominator (or a moderator) pulls a nomination
+    //   watch.vote {o}    → latest vote per user among LIVE nominations
+    //   watch.start {o}   → a live nomination becomes the showing; ballot
+    //              entry leaves, votes reset; latest start wins (a new
+    //              start replaces the current showing → history)
+    //   watch.pause / watch.resume {} → starter or moderator only
+    //   watch.end {}      → starter or moderator; showing → history
+    var _TMDB_ID_RE = /^[0-9]{1,10}$/;
+
+    // slskd stream timestamps arrive as ISO strings OR ms numbers depending
+    // on the transport hop (chat-games learned this the hard way — its _ts()
+    // twin). Null = unclocked; clock-bearing carriers ignore such events.
+    function _streamTs(ev) {
+        var t = ev && ev.timestamp;
+        if (typeof t === 'number' && isFinite(t)) return t;
+        var ms = Date.parse(t);
+        return isFinite(ms) ? ms : null;
+    }
+
+    function _watchKey(p) {
+        var id = String(p.id || '');
+        if (!_TMDB_ID_RE.test(id)) return null;
+        var kd = p.kd === 't' ? 't' : (p.kd === 'm' ? 'm' : null);
+        if (!kd) return null;
+        if (kd === 't') {
+            var s = parseInt(p.s, 10), e = parseInt(p.e, 10);
+            if (!(s >= 0 && s <= 999 && e >= 0 && e <= 9999)) return null;
+            return 't:' + id + ':' + s + 'x' + e;
+        }
+        return 'm:' + id;
+    }
+
+    function reduceWatch(events) {
+        var noms = [];        // [{key, id, kd, s, e, ti, y, po, by}]
+        var byKey = {};
+        var votes = [];
+        var now = null;       // {key, id, kd, s, e, ti, y, po, by, at, paused, basisAt, offsetMs}
+        var history = [];     // finished showings, newest first (cap 5)
+
+        function _retire(showing) {
+            history.unshift({ key: showing.key, ti: showing.ti, by: showing.by });
+            if (history.length > 5) history.pop();
+        }
+
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            var ts = _streamTs(ev);
+            if (p.k === 'watch.nom') {
+                var key = _watchKey(p);
+                if (!key || byKey[key]) return;
+                if (now && now.key === key) return;        // already showing
+                if (noms.length >= 12) return;             // no ballot bombs
+                var entry = { key: key, id: String(p.id), kd: p.kd,
+                              ti: String(p.ti || '').slice(0, 120),
+                              y: String(p.y || '').slice(0, 4),
+                              po: String(p.po || '').slice(0, 200),
+                              by: ev.username };
+                if (p.kd === 't') { entry.s = parseInt(p.s, 10); entry.e = parseInt(p.e, 10); }
+                noms.push(entry);
+                byKey[key] = entry;
+            } else if (p.k === 'watch.unnom') {
+                var uo = String(p.o || '');
+                var ent = byKey[uo];
+                if (ent && (ent.by === ev.username || isModerator(ev.username))) {
+                    noms = noms.filter(function (n) { return n.key !== uo; });
+                    delete byKey[uo];
+                }
+            } else if (p.k === 'watch.vote') {
+                var o = String(p.o || '');
+                if (byKey[o]) votes.push({ username: ev.username, option: o });
+            } else if (p.k === 'watch.start') {
+                var so = String(p.o || '');
+                var pick = byKey[so];
+                if (!pick || ts === null) return;          // unclocked events can't anchor
+                if (now) _retire(now);                     // latest start wins
+                now = { key: pick.key, id: pick.id, kd: pick.kd, s: pick.s, e: pick.e,
+                        ti: pick.ti, y: pick.y, po: pick.po, by: ev.username,
+                        at: ts, paused: false, basisAt: ts, offsetMs: 0 };
+                noms = noms.filter(function (n) { return n.key !== so; });
+                delete byKey[so];
+                votes = [];                                // new ballot round
+            } else if (p.k === 'watch.pause') {
+                if (!now || now.paused || ts === null) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                now.offsetMs += Math.max(0, ts - now.basisAt);
+                now.paused = true;
+            } else if (p.k === 'watch.resume') {
+                if (!now || !now.paused || ts === null) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                now.basisAt = ts;
+                now.paused = false;
+            } else if (p.k === 'watch.end') {
+                if (!now) return;
+                if (ev.username !== now.by && !isModerator(ev.username)) return;
+                _retire(now);
+                now = null;
+            }
+        });
+
+        votes = votes.filter(function (v) { return byKey[v.option]; });
+        var tally = tallyVotes(votes);
+        noms.forEach(function (n) { n.votes = tally.counts[n.key] || 0; });
+        return { noms: noms, now: now, tally: tally, history: history };
+    }
+
+    // The party's playback position in ms at stream-time nowMs — derived,
+    // never stored, so every client that agrees on the fold agrees on it.
+    function watchPosition(now, nowMs) {
+        if (!now) return null;
+        if (now.paused) return now.offsetMs;
+        return now.offsetMs + Math.max(0, nowMs - now.basisAt);
+    }
+
+    // ── Trivia reducer ──────────────────────────────────────────────────
+    // The stream is an unforgeable buzzer: everyone sees the same guesses in
+    // the same order, so "first correct answer" needs no judge. The asker
+    // posts trv.ask with the sha256 of the NORMALIZED answer — every client
+    // checks every guess against it locally (the hash is deliberately
+    // unsalted: checkability by all is the point; a determined player could
+    // hash-test candidates offline, which is just… playing, quietly).
+    //   trv.ask   {id, q, h, pot} → one live question per room, latest wins
+    //   trv.guess {id, a}         → first hash match in stream order takes it;
+    //                               the asker's own guesses never count
+    //   trv.end   {id, ans}       → asker (or a moderator) closes unanswered;
+    //                               ans is displayed, verified against h
+    // The hash function is INJECTED (this file stays dependency-free);
+    // chat.js passes ChatHash.sha256. Both sides of the wire must hash the
+    // same normalization — normalizeTriviaAnswer is that single definition.
+    function normalizeTriviaAnswer(s) {
+        return String(s || '')
+            .toLowerCase()
+            .replace(/[''"".,!?;:()\[\]\-–—_/\\]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^(the|a|an) /, '');
+    }
+
+    var TRIV_ID_RE = /^[a-z0-9]{4,16}$/;
+
+    function reduceTrivia(events, hashFn) {
+        var t = null;
+        (events || []).forEach(function (ev) {
+            if (!ev || !ev.p || typeof ev.username !== 'string') return;
+            var p = ev.p;
+            if (p.k === 'trv.ask') {
+                var id = String(p.id || '');
+                if (!TRIV_ID_RE.test(id)) return;
+                var q = String(p.q || '').trim().slice(0, 200);
+                var h = String(p.h || '');
+                if (!q || !/^[0-9a-f]{16,64}$/.test(h)) return;
+                var pot = 0;
+                if (typeof p.pot === 'number' && isFinite(p.pot)) {
+                    pot = Math.max(0, Math.min(500, Math.floor(p.pot)));
+                }
+                t = { id: id, q: q, h: h, pot: pot, by: ev.username,
+                      at: _streamTs(ev), guesses: [], winner: '', winAnswer: '',
+                      closed: false, answer: '', verified: false };
+            } else if (p.k === 'trv.guess' && t && !t.closed) {
+                if (String(p.id || '') !== t.id) return;
+                if (ev.username === t.by) return;      // no winning your own pot
+                var a = String(p.a || '').slice(0, 120);
+                if (!a.trim()) return;
+                var ok = typeof hashFn === 'function' &&
+                         hashFn(normalizeTriviaAnswer(a)) === t.h;
+                t.guesses.push({ u: ev.username, a: a, ok: ok });
+                if (t.guesses.length > 200) t.guesses.shift();
+                if (ok) { t.winner = ev.username; t.winAnswer = a; t.closed = true; }
+            } else if (p.k === 'trv.end' && t && !t.closed) {
+                if (String(p.id || '') !== t.id) return;
+                if (ev.username !== t.by && !isModerator(ev.username)) return;
+                t.closed = true;
+                t.answer = String(p.ans || '').slice(0, 120);
+                t.verified = typeof hashFn === 'function' &&
+                             hashFn(normalizeTriviaAnswer(t.answer)) === t.h;
+            }
+        });
+        return t;
     }
 
     // topic.set {t} → latest wins; empty clears.
@@ -329,8 +566,15 @@
         reduceAvatars: reduceAvatars,
         reduceJukebox: reduceJukebox,
         nextTrack: nextTrack,
+        isModerator: isModerator,
+        reduceHidden: reduceHidden,
+        reduceGameKills: reduceGameKills,
         reducePins: reducePins,
         reducePoll: reducePoll,
+        reduceWatch: reduceWatch,
+        watchPosition: watchPosition,
+        reduceTrivia: reduceTrivia,
+        normalizeTriviaAnswer: normalizeTriviaAnswer,
         reduceTopic: reduceTopic,
         reduceTuned: reduceTuned,
     };

@@ -68,6 +68,33 @@ def test_show_history_includes_episode_grabs(client):
     _archive(db, kind="episode", title="Severance", media_id="95396",
              season_number=1, episode_number=7, release_title="Severance S01E07 WEB")
     out = c.get("/api/video/detail/show/%d/history" % sid).get_json()
+    if "history" not in out:
+        # Went red on CI (2026-07-28) with KeyError: 'history' and has never
+        # reproduced locally. The endpoint only omits the key on its 404 branch,
+        # which means show_detail() did not find the show that query_library()
+        # just handed us the id for — the video-db family signature: the test's
+        # own handle sees the row, the endpoint's does not.
+        #
+        # Self-describing rather than another 45-minute re-roll: the next red
+        # run says WHICH of those it is instead of costing a repro attempt.
+        import api.video as videoapi
+        direct = db.show_detail(sid)
+        raise AssertionError(
+            "history endpoint answered %r\n"
+            "  library id       : %r\n"
+            "  show_detail(id)  : %s\n"
+            "  query_library    : %r\n"
+            "  test handle      : id=%s path=%s\n"
+            "  api.video global : id=%s path=%s\n"
+            "  same handle      : %s"
+            % (out, sid,
+               "FOUND on this handle" if direct else "NOT found on this handle either",
+               db.query_library("shows")["items"],
+               hex(id(db)), db.database_path,
+               hex(id(videoapi._video_db)) if videoapi._video_db else None,
+               getattr(videoapi._video_db, "database_path", None),
+               videoapi._video_db is db)
+        )
     assert len(out["history"]) == 1
     assert out["history"][0]["episode_number"] == 7
 

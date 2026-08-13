@@ -280,6 +280,30 @@ describe('lying about a shot is caught at the reveal', () => {
     });
 });
 
+describe('previewMove requires the actor', () => {
+    // The UI's send gate previews every action before it goes on the bus.
+    // Battleship's apply() refuses to judge a move without knowing who made
+    // it, so a caller that omits the seat gets null for EVERY action —
+    // chat.js did exactly that, and it silently killed the whole battleship
+    // send path (commit, fire, answer, reveal). Pinned from both sides.
+    test('with the seat, a commit previews fine', () => {
+        const evs = [newGame(), join()];
+        const next = G.previewMove(one(evs), 'c:' + H.commit(SALT_A, FLEET_A), 'w');
+        assert.ok(next && next.fen);
+    });
+    test('without the seat, every battleship action is rejected', () => {
+        const evs = [newGame(), join()];
+        assert.equal(G.previewMove(one(evs), 'c:' + H.commit(SALT_A, FLEET_A)), null);
+        const live = setup();
+        assert.equal(G.previewMove(one(live), 's:a1'), null);
+    });
+    test('with the seat, a shot previews fine on a live game', () => {
+        const live = setup();
+        const next = G.previewMove(one(live), 's:a1', 'w');
+        assert.ok(next && next.fen);
+    });
+});
+
 describe('the lifecycle still applies', () => {
     test('a spectator cannot fire', () => {
         let evs = setup();

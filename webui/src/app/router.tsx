@@ -37,7 +37,18 @@ export function createAppRouter(
     context,
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
-    scrollRestoration: true,
+    /**
+     * Restoring scroll is right for the long list pages — go back to the
+     * library and you are where you left off. It reads wrong on artist detail:
+     * the similar-artist bubbles are at the very bottom, so the position it
+     * saves is the footer, and going back drops you there instead of at the
+     * artist you just returned to.
+     *
+     * Returning false makes the router leave scroll ALONE for that route (it
+     * bails before both the restore and the scroll-to-top), so the page can own
+     * it with no race between the two.
+     */
+    scrollRestoration: ({ location }) => !location.pathname.startsWith('/artist-detail'),
     defaultErrorComponent: DefaultErrorComponent,
     defaultNotFoundComponent: DefaultNotFoundComponent,
   });

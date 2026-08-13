@@ -495,6 +495,45 @@ def test_no_missing_marks_batch_complete(monkeypatch):
     assert db.sync_history_calls  # sync history written
 
 
+def test_completion_clears_the_album_bundle_progress_mirror(monkeypatch):
+    """A finished album must stop rendering a bundle row.
+
+    album_bundle_state is a LIVE MIRROR of the plugin's progress — _emit writes
+    whatever the last payload said — and it has no completion value: only
+    'searching', 'fallback', 'staged' and 'failed' are ever assigned. Nothing
+    cleared it, and _build_album_bundle_status emits a bundle row whenever the
+    field is truthy, so a finished album showed "downloading release 42%" on the
+    Downloads page forever, frozen at the last tick.
+
+    Cleared at completion and NOT earlier: task_worker reads
+    `album_bundle_state == 'staged'` while the per-track flow runs.
+    """
+    db = _FakeDB(found_tracks={('t1', 'a'): 0.9})
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    deps = _build_deps()
+    _seed_batch(
+        'B5b',
+        album_bundle_state='downloading',
+        album_bundle_progress=0.42,
+        album_bundle_speed=2048,
+        album_bundle_source='torrent',
+        album_bundle_release='The Life of a Showgirl [FLAC]',
+    )
+
+    mw.run_full_missing_tracks_process('B5b', 'P1', [{'name': 'T1', 'artists': ['A']}], deps)
+
+    batch = download_batches['B5b']
+    assert batch['phase'] == 'complete'
+    # Falsy state is what makes _build_album_bundle_status return {} — no row.
+    assert not batch['album_bundle_state']
+    assert 'album_bundle_progress' not in batch
+    assert 'album_bundle_speed' not in batch
+    # The provenance stays: how the album arrived is still reportable.
+    assert batch['album_bundle_source'] == 'torrent'
+    assert batch['album_bundle_release'] == 'The Life of a Showgirl [FLAC]'
+
+
 def test_no_missing_updates_youtube_playlist_state(monkeypatch):
     """YouTube playlist phase set to 'download_complete' on no-missing."""
     db = _FakeDB(found_tracks={('t1', 'a'): 0.9})

@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 
-import { getProfileHomePath } from '@/platform/shell/bridge';
+import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
   issueCountsQueryOptions,
@@ -13,11 +13,7 @@ import { IssuesPage } from './-ui/issues-page';
 export const Route = createFileRoute('/issues')({
   validateSearch: issueSearchSchema,
   beforeLoad: ({ context }) => {
-    const { bridge } = context.shell;
-
-    if (!bridge.isPageAllowed('issues')) {
-      throw redirect({ href: getProfileHomePath(bridge), replace: true });
-    }
+    guardPageAccess(context.shell.bridge, 'issues');
   },
   loaderDeps: ({ search }) => ({
     status: search.status,
@@ -27,7 +23,12 @@ export const Route = createFileRoute('/issues')({
   loader: async ({ context, deps }) => {
     const { profile } = context.shell;
 
-    await Promise.all([
+    // allSettled, not all: this loader WARMS the cache for the first paint, it
+    // does not gate the route. A rejection here would hand the page to
+    // defaultErrorComponent ("Something went wrong") on any backend hiccup,
+    // where the vanilla page stayed usable. The components read the same
+    // failures through useQuery and render their own error states.
+    await Promise.allSettled([
       context.queryClient.ensureQueryData(issueCountsQueryOptions(profile.profileId)),
       context.queryClient.ensureQueryData(issueListQueryOptions(profile.profileId, deps)),
       deps.issueId

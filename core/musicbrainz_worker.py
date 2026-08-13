@@ -219,7 +219,7 @@ class MusicBrainzWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE musicbrainz_match_status = 'not_found' AND musicbrainz_last_attempted < ?
+                WHERE musicbrainz_match_status IN ('not_found', 'error') AND musicbrainz_last_attempted < ?
                 ORDER BY musicbrainz_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -233,7 +233,7 @@ class MusicBrainzWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.musicbrainz_match_status = 'not_found' AND a.musicbrainz_last_attempted < ?
+                WHERE a.musicbrainz_match_status IN ('not_found', 'error') AND a.musicbrainz_last_attempted < ?
                 ORDER BY a.musicbrainz_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -246,7 +246,7 @@ class MusicBrainzWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.musicbrainz_match_status = 'not_found' AND t.musicbrainz_last_attempted < ?
+                WHERE t.musicbrainz_match_status IN ('not_found', 'error') AND t.musicbrainz_last_attempted < ?
                 ORDER BY t.musicbrainz_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))

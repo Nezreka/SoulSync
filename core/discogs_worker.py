@@ -210,7 +210,7 @@ class DiscogsWorker:
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
             cursor.execute("""
                 SELECT id, name FROM artists
-                WHERE discogs_match_status = 'not_found' AND discogs_last_attempted < ?
+                WHERE discogs_match_status IN ('not_found', 'error') AND discogs_last_attempted < ?
                 ORDER BY discogs_last_attempted ASC LIMIT 1
             """, (not_found_cutoff,))
             row = cursor.fetchone()
@@ -222,7 +222,7 @@ class DiscogsWorker:
                 SELECT a.id, a.title, ar.name AS artist_name, ar.discogs_id AS artist_discogs_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.discogs_match_status = 'not_found' AND a.discogs_last_attempted < ?
+                WHERE a.discogs_match_status IN ('not_found', 'error') AND a.discogs_last_attempted < ?
                 ORDER BY a.discogs_last_attempted ASC LIMIT 1
             """, (not_found_cutoff,))
             row = cursor.fetchone()
@@ -264,6 +264,13 @@ class DiscogsWorker:
         """Check if Discogs result name matches our query with fuzzy matching."""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         return similarity >= self.name_similarity_threshold
 

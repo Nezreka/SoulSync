@@ -34,6 +34,136 @@ logger = get_logger("repair_worker")
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
+# How long a RESOLVED finding keeps suppressing its own recurrence. See
+# RepairWorker._within_recurrence_grace for why the window exists at all.
+RESOLVED_RECURRENCE_GRACE_DAYS = 7
+
+# Fixing these MOVES OR DELETES files, or throws away a copy the user may
+# still want. Membership is judged by a type's DEFAULT action — the one a
+# bulk run takes when nobody chose anything — not by its worst-case action.
+# The UI never one-clicks these: they go through the preview + confirm path,
+# and "Fix all safe" skips them entirely.
+DESTRUCTIVE_FINDING_TYPES = frozenset({
+    'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
+    'dead_file',              # 'remove' drops the library row + file
+    'corrupt_audio',          # deletes and re-wishlists
+    'unwanted_content',       # deletes/quarantines live + spoken content
+    'short_preview_track',    # deletes the clip, re-wishlists the real track
+    'expired_download',       # deletes the aged download
+    'empty_folder',           # removes the folder
+    'duplicate_tracks',       # keeps one copy, deletes the others
+    'single_album_redundant', # deletes the redundant single
+    'quality_upgrade',        # 'delete' variant removes the below-profile file
+    'acoustid_mismatch',      # 'delete'/'relocate' both touch files
+})
+
+# Display metadata for every finding type the jobs can emit. The UI used to
+# keep its own copy of this (20 types) while the backend had 29 handlers, so
+# nine working fixes had no button and two dead-end types had one that could
+# never succeed. Served by /api/repair/finding-types; the client copy is now
+# only an offline fallback.
+#   verb: the button label — say what will HAPPEN, not "Fix"
+#   dry_run_capable: the owning job supports a dry-run/preview mode
+FINDING_TYPE_META = {
+    'dead_file':                {'label': 'Dead Files', 'verb': 'Re-download'},
+    'orphan_file':              {'label': 'Orphan Files', 'verb': 'Review & Move'},
+    'track_number_mismatch':    {'label': 'Track Number Mismatch', 'verb': 'Apply'},
+    'missing_cover_art':        {'label': 'Missing Cover Art', 'verb': 'Apply Art'},
+    'missing_lyrics':           {'label': 'Missing Lyrics', 'verb': 'Apply Lyrics'},
+    'missing_replaygain':       {'label': 'Missing ReplayGain', 'verb': 'Apply RG'},
+    'replaygain_retag':         {'label': 'ReplayGain Retag', 'verb': 'Apply RG'},
+    'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
+    'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
+    'metadata_gap':             {'label': 'Metadata Gaps', 'verb': 'Auto-Fill'},
+    'duplicate_tracks':         {'label': 'Duplicate Tracks', 'verb': 'Keep Best'},
+    'single_album_redundant':   {'label': 'Redundant Singles', 'verb': 'Remove Single'},
+    'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
+    'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
+    'album_tag_inconsistency':  {'label': 'Album Tag Drift', 'verb': 'Unify Tags'},
+    'incomplete_album':         {'label': 'Incomplete Albums', 'verb': 'Fill Album'},
+    'path_mismatch':            {'label': 'Path Mismatch', 'verb': 'Reorganize'},
+    'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
+    'unwanted_content':         {'label': 'Unwanted Content', 'verb': 'Remove'},
+    'unknown_artist':           {'label': 'Unknown Artist', 'verb': 'Identify'},
+    'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
+    'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
+    'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
+    'library_retag':            {'label': 'Library Retag', 'verb': 'Apply Tags'},
+    'short_preview_track':      {'label': 'Preview Clips', 'verb': 'Re-download'},
+    'corrupt_audio':            {'label': 'Corrupt Audio', 'verb': 'Re-download'},
+    'canonical_version':        {'label': 'Canonical Version', 'verb': 'Pin Version'},
+    'genre_cleanup':            {'label': 'Genre Cleanup', 'verb': 'Clean Genres'},
+    'comma_artist_split':       {'label': 'Combined Artists', 'verb': 'Split Artists'},
+    # Emitted, but no handler exists — the UI must show review-only, never a
+    # button that can only fail.
+    'fake_lossless':            {'label': 'Fake Lossless', 'verb': None},
+    'album_needs_enrichment':   {'label': 'Needs Enrichment', 'verb': None},
+}
+
+
+# Which family each job belongs to, and the order the families are shown in.
+#
+# Thirty jobs rendered as thirty identical stacked cards is a wall: no order,
+# no organisation, and no way to answer "what looks after my files" without
+# reading every title. Grouped, the page has a shape.
+#
+# ONE table on purpose. The alternative — a `category` attribute on each of
+# the 29 job classes — spreads the taxonomy across 29 files where nobody can
+# see whether it still hangs together. A job missing from here lands in the
+# trailing bucket, which is visible rather than silent.
+JOB_CATEGORY_ORDER = [
+    'Files & storage',
+    'Audio quality',
+    'Tags & metadata',
+    'Artwork & lyrics',
+    'Collection gaps',
+    'System',
+    'Other',
+]
+
+JOB_CATEGORY_FALLBACK = 'Other'
+
+JOB_CATEGORIES = {
+    # Anything whose fix moves, converts or removes a file on disk.
+    'orphan_file_detector': 'Files & storage',
+    'dead_file_cleaner': 'Files & storage',
+    'empty_folder_cleaner': 'Files & storage',
+    'expired_download_cleaner': 'Files & storage',
+    'duplicate_detector': 'Files & storage',
+    'single_album_dedup': 'Files & storage',
+    'library_reorganize': 'Files & storage',
+    'lossy_converter': 'Files & storage',
+    'live_commentary_cleaner': 'Files & storage',
+    # Is the audio itself what it claims to be, and good enough.
+    'audio_corruption_detector': 'Audio quality',
+    'fake_lossless_detector': 'Audio quality',
+    'acoustid_scanner': 'Audio quality',
+    'quality_upgrade': 'Audio quality',
+    'quality_upgrade_scanner': 'Audio quality',
+    'replaygain_filler': 'Audio quality',
+    # What is written on and about the tracks.
+    'library_retag': 'Tags & metadata',
+    'track_number_repair': 'Tags & metadata',
+    'album_tag_consistency': 'Tags & metadata',
+    'mbid_mismatch_detector': 'Tags & metadata',
+    'genre_cleanup': 'Tags & metadata',
+    'comma_artist_splitter': 'Tags & metadata',
+    'unknown_artist_fixer': 'Tags & metadata',
+    'metadata_gap_filler': 'Tags & metadata',
+    'canonical_version_resolve': 'Tags & metadata',
+    'missing_cover_art': 'Artwork & lyrics',
+    'missing_lyrics': 'Artwork & lyrics',
+    # Filling gaps in what you own, rather than repairing what you have.
+    'album_completeness': 'Collection gaps',
+    'discography_backfill': 'Collection gaps',
+    'cache_evictor': 'System',
+}
+
+
+def job_category(job_id: str) -> str:
+    """The family a job belongs to. Unknown jobs are grouped, not hidden."""
+    return JOB_CATEGORIES.get(job_id, JOB_CATEGORY_FALLBACK)
+
 
 def _album_fill_artist_names_match(expected_artist: str, candidate_artist: str) -> bool:
     """Strict artist gate for Album Completeness auto-fill.
@@ -408,6 +538,10 @@ class RepairWorker:
                 'description': job.description,
                 'help_text': job.help_text,
                 'icon': job.icon,
+                # The family this job is filed under. Served rather than
+                # guessed client-side, so a new job cannot quietly acquire a
+                # different grouping in the UI than it has here.
+                'category': job_category(job_id),
                 'auto_fix': job.auto_fix,
                 'enabled': config['enabled'],
                 'interval_hours': config['interval_hours'],
@@ -453,6 +587,9 @@ class RepairWorker:
         self.running = True
         self.should_stop = False
         self._stop_event.clear()
+        # Before the loop picks anything: close out runs a previous process
+        # left mid-scan, or their NULL finished_at reads as "never run".
+        self._heal_stuck_runs()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Repair worker started")
@@ -751,12 +888,21 @@ class RepairWorker:
 
         start_time = time.time()
         result = JobResult()
+        run_status = 'completed'
+        run_error = None
 
         try:
             result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
+            run_status = 'failed'
+            run_error = f"{type(e).__name__}: {e}"[:500]
+
+        # A user-requested stop is not a failure — record it as its own state
+        # so history can say "you stopped this" instead of implying a crash.
+        if run_status == 'completed' and self._cancel_current_job.is_set():
+            run_status = 'cancelled'
 
         duration = time.time() - start_time
 
@@ -767,7 +913,8 @@ class RepairWorker:
         self.stats['errors'] += result.errors
 
         # Record job completion
-        self._record_job_finish(run_id, job_id, result, duration)
+        self._record_job_finish(run_id, job_id, result, duration,
+                                status=run_status, error_text=run_error)
 
         _emit = getattr(self, '_event_emit', None)
         if _emit:
@@ -838,36 +985,113 @@ class RepairWorker:
     # ------------------------------------------------------------------
     # Findings
     # ------------------------------------------------------------------
+    @staticmethod
+    def _has_column(cursor, table: str, column: str) -> bool:
+        """Is ``column`` present on ``table``?
+
+        Columns added after a table shipped can be absent on a database the
+        migration has not reached yet (or in a test that builds the old
+        shape). Statements that name them must ASK rather than assume — the
+        surrounding handlers turn a raise into "no findings" / "no run
+        recorded", which reads as good news and is the worst possible lie.
+        """
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            return any(row[1] == column for row in cursor.fetchall())
+        except Exception:
+            return False
+
+    def _within_recurrence_grace(self, resolved_at) -> bool:
+        """Is a resolved finding recent enough that re-raising it would be noise?
+
+        A fix often lands asynchronously — a re-download is queued, a wishlist
+        entry is added, a retag waits on the next media-server scan — so the
+        very next sweep would legitimately still see the problem and re-raise
+        the row the user just cleared. The grace window covers that gap; past
+        it, a problem that is STILL there is real news and deserves a fresh
+        pending row.
+
+        Unparseable or missing timestamps count as INSIDE the window: the
+        conservative direction is silence, not a flood of re-raised findings
+        on the first scan after an upgrade.
+        """
+        if not resolved_at:
+            return True
+        try:
+            dt = datetime.fromisoformat(str(resolved_at))
+        except (TypeError, ValueError):
+            return True
+        if dt.tzinfo is None:      # SQLite CURRENT_TIMESTAMP is naive UTC
+            dt = dt.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+        return age_days < RESOLVED_RECURRENCE_GRACE_DAYS
+
     def _create_finding(self, job_id: str, finding_type: str, severity: str,
                         entity_type: str, entity_id: str, file_path: str,
-                        title: str, description: str, details: dict = None) -> bool:
+                        title: str, description: str, details: dict = None,
+                        supersede: bool = False) -> bool:
         """Create a repair finding in the database.
+
+        Recurrence contract (the dedup used to be "any row in pending,
+        resolved OR dismissed suppresses forever", which meant a problem you
+        acted on could never be reported again even when it came BACK, and a
+        pending row's snapshot could never be refreshed):
+
+          * pending row exists   → REFRESH it in place (severity, title,
+            description, details) and report no new finding. Acting on a
+            weeks-stale snapshot was its own class of bug.
+          * dismissed row exists → stay silent, permanently. Dismiss means
+            "never tell me about this again" and the UI now says exactly that.
+          * resolved row exists  → silent inside the grace window
+            (``_within_recurrence_grace``), a NEW pending row after it. The
+            resolved row is left alone as history.
+          * ``supersede=True``   → the caller KNOWS the world changed (e.g. a
+            quality profile was edited) and asks for the finding to be raised
+            again regardless. Replaces the raw DELETEs two jobs used to run
+            against this table behind the worker's back.
 
         Returns:
             True  — a NEW pending row was inserted.
-            False — dedup-skipped (an equivalent row already exists with
-                    status pending/resolved/dismissed) OR a DB error
-                    occurred. Callers should only increment their
-                    ``findings_created`` counter when this returns True
-                    so the badge / scan log reports REAL new findings,
-                    not silently-skipped duplicates.
+            False — refreshed / suppressed / DB error. Callers only increment
+                    ``findings_created`` on True, so the badge and scan log
+                    report REAL new findings.
         """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Dedup check: skip if same finding already exists (pending, resolved, OR dismissed)
+            # Prefer a pending row when several exist for one entity (a
+            # superseded finding leaves its resolved/dismissed ancestor
+            # behind), so the refresh path always lands on the live row.
             cursor.execute("""
-                SELECT id FROM repair_findings
+                SELECT id, status, resolved_at FROM repair_findings
                 WHERE job_id = ? AND finding_type = ?
                   AND status IN ('pending', 'resolved', 'dismissed')
                   AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
+                ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'resolved' THEN 1 ELSE 2 END,
+                         id DESC
                 LIMIT 1
             """, (job_id, finding_type, entity_type, entity_id, file_path))
 
-            if cursor.fetchone():
-                return False  # Already exists or was already fixed
+            existing = cursor.fetchone()
+            if existing:
+                existing_id, existing_status, resolved_at = existing[0], existing[1], existing[2]
+                if existing_status == 'pending':
+                    cursor.execute("""
+                        UPDATE repair_findings
+                        SET severity = ?, title = ?, description = ?, details_json = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (severity, title, description,
+                          json.dumps(details) if details else '{}', existing_id))
+                    conn.commit()
+                    return False
+                if not supersede:
+                    if existing_status == 'dismissed':
+                        return False
+                    if self._within_recurrence_grace(resolved_at):
+                        return False
 
             cursor.execute("""
                 INSERT INTO repair_findings
@@ -898,9 +1122,29 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    # Sort keys the inbox offers. Severity-first is the triage default; a flat
+    # newest-first list buries three corrupt files under four hundred missing
+    # lyrics. Whitelisted rather than interpolated — this lands in ORDER BY.
+    _FINDING_SORTS = {
+        'newest': 'created_at DESC',
+        'oldest': 'created_at ASC',
+        'severity': ("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 "
+                     "ELSE 2 END, created_at DESC"),
+        'path': 'file_path IS NULL, file_path ASC, created_at DESC',
+    }
+
     def get_findings(self, job_id: str = None, status: str = None,
-                     severity: str = None, page: int = 0, limit: int = 50) -> dict:
-        """Get paginated findings with optional filters."""
+                     severity: str = None, page: int = 0, limit: int = 50,
+                     finding_type: str = None, sort: str = None,
+                     q: str = None) -> dict:
+        """Get paginated findings with optional filters.
+
+        ``finding_type`` is what the grouped inbox pages through: one type at
+        a time, so the user acts on a coherent set instead of a flat list
+        that interleaves "delete this file" with "add cover art". ``q``
+        searches title and path — with thousands of rows, "where is that one
+        album" had no answer but paging.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -918,27 +1162,60 @@ class RepairWorker:
             if severity:
                 where_parts.append("severity = ?")
                 params.append(severity)
+            if finding_type:
+                where_parts.append("finding_type = ?")
+                params.append(finding_type)
+            if q and str(q).strip():
+                needle = f"%{str(q).strip()}%"
+                where_parts.append("(title LIKE ? OR file_path LIKE ?)")
+                params.extend([needle, needle])
 
             where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+            order_by = self._FINDING_SORTS.get(sort or 'newest',
+                                               self._FINDING_SORTS['newest'])
 
             # Count total
             cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
             total = cursor.fetchone()[0]
+
+            # last_error arrived after this table shipped. Selecting it blindly
+            # would raise on a database the migration hasn't reached, and the
+            # handler below turns ANY raise into an empty page — i.e. one
+            # missing column would tell the user their library is spotless.
+            # Ask, then substitute a NULL so the row shape never changes.
+            error_col = 'last_error' if self._has_column(
+                cursor, 'repair_findings', 'last_error') else 'NULL'
 
             # Fetch page
             offset = page * limit
             cursor.execute(f"""
                 SELECT id, job_id, finding_type, severity, status, entity_type,
                        entity_id, file_path, title, description, details_json,
-                       user_action, resolved_at, created_at, updated_at
+                       user_action, resolved_at, created_at, updated_at, {error_col}
                 FROM repair_findings
                 {where}
-                ORDER BY created_at DESC
+                ORDER BY {order_by}
                 LIMIT ? OFFSET ?
             """, params + [limit, offset])
 
             items = []
             for row in cursor.fetchall():
+                # One unreadable details_json must not cost the whole page. This
+                # loop used to json.loads() straight into the dict, so a single
+                # malformed row raised and the outer handler returned an EMPTY
+                # page — the user saw "All Clear" over findings that were really
+                # there, or an error they could neither read nor act on. Degrade
+                # the one row instead, and say which id was bad.
+                try:
+                    details = json.loads(row[10]) if row[10] else {}
+                    if not isinstance(details, dict):
+                        raise ValueError(f"details_json is {type(details).__name__}, not an object")
+                except Exception as exc:  # noqa: BLE001 - one row, not the page
+                    logger.warning(
+                        "Finding %s has unreadable details_json (%s); showing it without details",
+                        row[0], exc)
+                    details = {'_details_error': str(exc)}
+
                 items.append({
                     'id': row[0],
                     'job_id': row[1],
@@ -950,11 +1227,15 @@ class RepairWorker:
                     'file_path': row[7],
                     'title': row[8],
                     'description': row[9],
-                    'details': json.loads(row[10]) if row[10] else {},
+                    'details': details,
                     'user_action': row[11],
                     'resolved_at': row[12],
                     'created_at': row[13],
                     'updated_at': row[14],
+                    # Why the last fix attempt failed. A finding that refuses
+                    # to fix used to sit pending with the reason living only
+                    # in a log line and a capped in-memory bulk list.
+                    'last_error': row[15],
                 })
 
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
@@ -962,6 +1243,100 @@ class RepairWorker:
         except Exception as e:
             logger.error("Error fetching findings: %s", e, exc_info=True)
             return {'items': [], 'total': 0, 'page': page, 'limit': limit}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_finding_groups(self) -> List[dict]:
+        """One row per finding TYPE — the unit the inbox works in.
+
+        The flat list made a user page 30-at-a-time through thousands of rows
+        with no way to see that 90% of them were one boring, safe, one-click
+        type. Grouping is what turns "3,000 findings" into "four decisions".
+
+        Counts every status in one GROUP BY (the type/status index carries
+        it), so a group can show what is left AND what has already been dealt
+        with without a second round trip.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT finding_type, status, severity, COUNT(*), MAX(created_at)
+                FROM repair_findings
+                GROUP BY finding_type, status, severity
+            """)
+            rows = cursor.fetchall()
+
+            # Which jobs feed each type — a group shows its source without
+            # the user having to cross-reference the jobs list.
+            cursor.execute(
+                "SELECT DISTINCT finding_type, job_id FROM repair_findings")
+            jobs_by_type: Dict[str, set] = {}
+            for finding_type, job_id in cursor.fetchall():
+                jobs_by_type.setdefault(finding_type, set()).add(job_id)
+        except Exception as e:
+            logger.error("Error grouping findings: %s", e, exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+        rank = {'error': 0, 'warning': 1, 'info': 2}
+        groups: Dict[str, dict] = {}
+        for finding_type, status, severity, count, last_seen in rows:
+            group = groups.setdefault(finding_type, {
+                'finding_type': finding_type,
+                'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0,
+                'total': 0,
+                'severity_max': 'info', 'last_seen': None, 'job_ids': [],
+            })
+            # auto_fixed is its own STATUS, not a flavour of resolved — leaving
+            # it out of the buckets made the inbox render an empty group for
+            # every finding the worker had already dealt with itself.
+            if status in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
+                group[status] += count
+            group['total'] += count
+            # Severity of the group = the worst PENDING row in it. A cleared
+            # error must not keep a group flagged red forever.
+            if status == 'pending' and rank.get(severity, 2) < rank.get(group['severity_max'], 2):
+                group['severity_max'] = severity or 'info'
+            if last_seen and (group['last_seen'] is None or last_seen > group['last_seen']):
+                group['last_seen'] = last_seen
+
+        for finding_type, group in groups.items():
+            group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
+
+        # Worst first, then biggest — the order you would actually work in.
+        return sorted(
+            groups.values(),
+            key=lambda g: (rank.get(g['severity_max'], 2), -g['pending'], g['finding_type']),
+        )
+
+    def reopen_finding(self, finding_id: int) -> bool:
+        """Put a resolved/dismissed finding back to pending.
+
+        The undo half of dismiss. Dismiss is permanent by design (the dedup
+        never raises that finding again), which is only safe to offer freely
+        if it can be taken back. Clears resolved_at so the recurrence grace
+        does not then suppress the very row we just revived.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'pending', user_action = NULL, resolved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status IN ('resolved', 'dismissed')
+            """, (finding_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error reopening finding %s: %s", finding_id, e)
+            return False
         finally:
             if conn:
                 conn.close()
@@ -1026,6 +1401,12 @@ class RepairWorker:
 
             if result.get('success'):
                 self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+                self._set_finding_error(finding_id, None)
+            else:
+                # Keep the reason ON the row: the finding stays pending, and
+                # without this the user is left with a row that silently
+                # refuses to fix and no way to learn why.
+                self._set_finding_error(finding_id, result.get('error'))
 
             return result
 
@@ -1035,6 +1416,66 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _set_finding_error(self, finding_id: int, error: Optional[str]) -> None:
+        """Record (or clear) why a finding's last fix attempt failed."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE repair_findings SET last_error = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (str(error)[:500] if error else None, finding_id))
+            conn.commit()
+        except Exception as e:
+            logger.debug("Could not record fix error for finding %s: %s", finding_id, e)
+        finally:
+            if conn:
+                conn.close()
+
+    def get_finding_type_catalog(self) -> List[dict]:
+        """Every finding type the system knows, with how the UI should treat it.
+
+        One source of truth for fixability. The client kept its own list of 20
+        types while this process had 29 handlers, so nine working fixes had no
+        button (reachable only by a blanket Fix All) and two types that can
+        NEVER be fixed still showed one. ``job_ids`` comes from the findings
+        actually on record, so it reflects this install rather than a guess.
+        """
+        handlers = self._fix_handlers()
+        jobs_by_type: Dict[str, List[str]] = {}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT finding_type, job_id FROM repair_findings")
+            for finding_type, job_id in cursor.fetchall():
+                jobs_by_type.setdefault(finding_type, []).append(job_id)
+        except Exception as e:
+            logger.debug("Could not resolve job ids for finding types: %s", e)
+        finally:
+            if conn:
+                conn.close()
+
+        # Union of what we have metadata for, what we can fix, and what is
+        # actually on record — a type missing from the meta table must still
+        # be listed rather than vanish from the UI.
+        slugs = set(FINDING_TYPE_META) | set(handlers) | set(jobs_by_type)
+        catalog = []
+        for slug in sorted(slugs):
+            meta = FINDING_TYPE_META.get(slug, {})
+            fixable = slug in handlers
+            catalog.append({
+                'type': slug,
+                'label': meta.get('label') or slug.replace('_', ' ').title(),
+                'verb': (meta.get('verb') or 'Fix') if fixable else None,
+                'fixable': fixable,
+                'destructive': slug in DESTRUCTIVE_FINDING_TYPES,
+                'job_ids': sorted(jobs_by_type.get(slug, [])),
+            })
+        return catalog
 
     def _fix_handlers(self) -> dict:
         """Single source of truth for finding_type → fix handler.
@@ -1118,7 +1559,7 @@ class RepairWorker:
                 conn.close()
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
-        """Split a comma-joined artist tag into properly separated artists (jadux).
+        """Split a separator-joined artist tag into properly separated artists (jadux).
 
         Re-tags every file still under the combined artist: display artist
         becomes "A; B", the per-artist list goes into the multi-value Artists
@@ -1130,8 +1571,8 @@ class RepairWorker:
 
         Stale-finding guard: a file whose CURRENT artist tag no longer matches
         the combined string (user edited it, or it's already split) is left
-        untouched. The file list comes fresh from the DB, not from the
-        finding's display-capped sample.
+        untouched. The file list comes from the finding details, which scanned
+        the actual file metadata (not the database).
         """
         parts = details.get('split_artists')
         combined = details.get('combined_name') or details.get('artist_name')
@@ -1143,20 +1584,20 @@ class RepairWorker:
         display = details.get('new_display_artist') or '; '.join(parts)
         primary = details.get('primary_artist') or parts[0]
 
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT file_path FROM tracks WHERE artist_id = ? "
-                "AND file_path IS NOT NULL AND file_path != ''", (entity_id,))
-            files = [r[0] for r in cursor.fetchall()]
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-        finally:
-            if conn:
-                conn.close()
+        # Get file list from finding details
+        file_infos = details.get('all_files') or details.get('files') or []
+        files = [f.get('file_path') if isinstance(f, dict) else f for f in file_infos]
         if not files:
+            files = self._comma_split_files_from_db(entity_id, details)
+        if not files:
+            # No list in the finding AND the DB fallback found nothing under
+            # this artist: the files are gone, so there is nothing left to
+            # split. This must stay a SUCCESS — only success resolves the
+            # finding (fix_finding checks result['success'] before calling
+            # resolve_finding), so returning an error here left a finding for
+            # deleted files permanently stuck: the Fix button errored with
+            # "re-run the scan", and a rescan is exactly the thing that can't
+            # find files that no longer exist. Restores the pre-#1081 return.
             return {'success': True, 'action': 'already_gone',
                     'message': 'No files under this artist anymore'}
 
@@ -1258,7 +1699,7 @@ class RepairWorker:
             if extras:
                 msg += f' ({", ".join(extras)})'
             logger.info("Comma-artist split: %s → %s — %s", combined, parts, msg)
-            return {'success': True, 'action': 'artists_split', 'message': msg}
+            return {'success': True, 'action': 'artists_split', 'message': msg, 'fixed': fixed}
         if stale and not errors and not missing:
             return {'success': False,
                     'error': f'All {stale} file(s) no longer carry "{combined}" — '
@@ -1268,6 +1709,42 @@ class RepairWorker:
                     'message': 'No files found on disk for this artist'}
         return {'success': False,
                 'error': f'No files re-tagged ({stale} stale, {missing} missing, {errors} errors)'}
+
+    def _comma_split_files_from_db(self, entity_id, details):
+        """Fallback for legacy findings that predate stored file-path lists."""
+        artist_id = details.get('db_artist_id') or entity_id
+        combined = (details.get('combined_name') or details.get('artist_name') or '').strip()
+        if not artist_id and not combined:
+            return []
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            if artist_id:
+                cursor.execute("""
+                    SELECT t.file_path
+                    FROM tracks t
+                    WHERE t.artist_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                """, (artist_id,))
+                rows = [r[0] for r in cursor.fetchall() if r[0]]
+                if rows:
+                    return rows
+            if combined:
+                cursor.execute("""
+                    SELECT t.file_path
+                    FROM tracks t
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                      AND t.file_path IS NOT NULL AND t.file_path != ''
+                """, (combined,))
+                return [r[0] for r in cursor.fetchall() if r[0]]
+            return []
+        except Exception as e:
+            logger.debug("Could not derive comma-split files from DB: %s", e)
+            return []
+        finally:
+            if conn:
+                conn.close()
 
     def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
         """Apply a canonical-version finding — pin the release the resolver chose
@@ -2759,6 +3236,25 @@ class RepairWorker:
         fix_action = details.get('_fix_action', 'retag')
         track_id = entity_id
 
+        # #1132: an ambiguous fingerprint has no single answer — its
+        # `acoustid_title`/`acoustid_artist` are one arbitrary pick from several
+        # equally-scored recordings. Both the retag and relocate paths below
+        # WRITE those values (into the DB, and into the file's tags), which is
+        # how a wrong suggestion becomes wrong data. Deleting or re-downloading
+        # is still fine: those act on "this file is wrong", which the scan did
+        # establish.
+        if details.get('ambiguous') and fix_action in ('retag', 'relocate'):
+            cands = details.get('candidates') or []
+            return {
+                'success': False,
+                'error': (
+                    'This fingerprint matches several different recordings, so there '
+                    'is no single correct title to apply'
+                    + (' (%s)' % '; '.join(cands[:3]) if cands else '')
+                    + '. Pick the right track manually, or use Re-download / Delete.'
+                ),
+            }
+
         if fix_action == 'delete':
             # Delete file + DB record
             if file_path:
@@ -4150,17 +4646,30 @@ class RepairWorker:
                 conn.close()
 
     def _pending_fixable_ids(self, job_id: str = None, severity: str = None,
-                             finding_ids: List[int] = None) -> List[int]:
+                             finding_ids: List[int] = None,
+                             finding_type: str = None,
+                             safe_only: bool = False) -> List[int]:
         """IDs of pending findings the fix loop can actually fix.
 
         Fixable = has a fix handler — derived from the dispatch map so the
         two can never drift apart again (a stale copy of this list silently
-        skipped genre_cleanup / replaygain_retag findings in Fix All)."""
+        skipped genre_cleanup / replaygain_retag findings in Fix All).
+
+        ``safe_only`` drops every DESTRUCTIVE_FINDING_TYPES row, which is what
+        makes a one-click "fix everything harmless" honest.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            fixable_types = tuple(self._fix_handlers().keys())
+            fixable = set(self._fix_handlers().keys())
+            if safe_only:
+                fixable -= DESTRUCTIVE_FINDING_TYPES
+            if finding_type:
+                fixable &= {finding_type}
+            if not fixable:
+                return []
+            fixable_types = tuple(sorted(fixable))
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)
@@ -4223,8 +4732,21 @@ class RepairWorker:
     # the same loop on a worker thread instead; the UI polls for progress.
 
     def start_bulk_fix(self, job_id: str = None, severity: str = None,
-                       finding_ids: List[int] = None, fix_action: str = None) -> dict:
+                       finding_ids: List[int] = None, fix_action: str = None,
+                       finding_type: str = None, safe_only: bool = False) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
+
+        ``fix_action`` may only reach ONE finding type per run. The string is
+        interpreted per handler — 'delete' means "delete the file" to the
+        orphan, quality and AcoustID fixers, while `_fix_duplicates` reads the
+        same parameter as the id of the track to KEEP. Forwarding one string
+        across a mixed selection is how a user answering a question about
+        orphan files could silently delete audio under three other types.
+
+        The check is on the RESOLVED SELECTION, not on which filter produced
+        it: a job scope usually is a single type (the orphan detector emits
+        only orphan_file), and rejecting those would break the working
+        per-job Fix All while catching nothing real.
 
         Returns ``{'started': True, 'total': N}`` or
         ``{'started': False, 'error': ..., 'already_running': bool}``."""
@@ -4234,12 +4756,23 @@ class RepairWorker:
                         'error': 'A bulk fix is already running'}
             try:
                 ids = self._pending_fixable_ids(
-                    job_id=job_id, severity=severity, finding_ids=finding_ids)
+                    job_id=job_id, severity=severity, finding_ids=finding_ids,
+                    finding_type=finding_type, safe_only=safe_only)
             except Exception as e:
                 logger.error("Error starting bulk fix: %s", e, exc_info=True)
                 return {'started': False, 'error': str(e)}
             if not ids:
                 return {'started': False, 'error': 'No pending fixable findings match'}
+
+            if fix_action:
+                spanned = set(self._types_for_findings(ids).values())
+                if len(spanned) > 1:
+                    return {'started': False, 'invalid': True, 'error': (
+                        f"'{fix_action}' would be applied to {len(spanned)} different "
+                        "finding types, and it means something different to each fixer "
+                        "(for one it deletes files; for another it names the copy to "
+                        "KEEP). Narrow the run to a single type, or run it without an "
+                        "action.")}
 
             self._bulk_fix_stop_event.clear()
             # Every key the runner will ever touch is seeded here so later
@@ -4254,8 +4787,13 @@ class RepairWorker:
                 'failed': 0,
                 'stopped': False,
                 'job_id': job_id,
+                'finding_type': finding_type,
+                'safe_only': bool(safe_only),
                 'errors': [],
                 'error': None,
+                # Per-type tallies so a mixed run can say WHAT it is fixing
+                # ("312 cover art, 40 lyrics") instead of one opaque number.
+                'per_type': {},
             }
             self._bulk_fix_thread = threading.Thread(
                 target=self._run_bulk_fix, args=(list(ids), fix_action),
@@ -4265,8 +4803,30 @@ class RepairWorker:
                         len(ids), f" for {job_id}" if job_id else "")
             return {'started': True, 'total': len(ids)}
 
+    def _types_for_findings(self, ids: List[int]) -> Dict[int, str]:
+        """finding_id → finding_type, read once so the bulk loop can tally per
+        type without a query per row."""
+        if not ids:
+            return {}
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(ids))
+            cursor.execute(
+                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({placeholders})",
+                list(ids))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.debug("Could not read finding types for bulk run: %s", e)
+            return {}
+        finally:
+            if conn:
+                conn.close()
+
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
         state = self._bulk_fix_state
+        types = self._types_for_findings(ids)
         try:
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -4279,6 +4839,16 @@ class RepairWorker:
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
+                slug = types.get(fid)
+                if slug:
+                    tally = state['per_type'].get(slug)
+                    if tally is None:
+                        # Seeded whole, never key-by-key: get_bulk_fix_status
+                        # copies this dict from another thread and a partial
+                        # insert could be observed mid-write.
+                        tally = {'fixed': 0, 'failed': 0}
+                        state['per_type'][slug] = tally
+                    tally['fixed' if result.get('success') else 'failed'] += 1
                 if result.get('success'):
                     state['fixed'] += 1
                 else:
@@ -4306,6 +4876,40 @@ class RepairWorker:
         """Ask a running background bulk fix to stop after its current fix."""
         self._bulk_fix_stop_event.set()
         return True
+
+    def dismiss_findings_by_type(self, finding_type: str) -> int:
+        """Dismiss every PENDING finding of one type. Returns count updated.
+
+        The inbox works a whole group at a time, and "dismiss this group" had
+        no honest implementation: the id-based bulk endpoint would have meant
+        paging thousands of ids to the client purely to send them back.
+
+        Pending only. A resolved row is a record of work that actually
+        happened — rewriting it to 'dismissed' would falsify the history the
+        recurrence grace and the run counters both read.
+        """
+        if not finding_type:
+            return 0
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_findings
+                SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE finding_type = ? AND status = 'pending'
+            """, (finding_type,))
+            conn.commit()
+            count = cursor.rowcount
+            logger.info("Dismissed %d pending findings of type %s", count, finding_type)
+            return count
+        except Exception as e:
+            logger.error("Error dismissing findings of type %s: %s", finding_type, e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
 
     def bulk_update_findings(self, finding_ids: List[int], action: str) -> int:
         """Bulk resolve or dismiss findings. Returns count updated."""
@@ -4410,10 +5014,15 @@ class RepairWorker:
             by_job = {}
             for job_id, finding_type, severity, cnt in cursor.fetchall():
                 if job_id not in by_job:
-                    by_job[job_id] = {'total': 0, 'types': {}, 'warning': 0, 'info': 0}
+                    # 'error' belongs here as much as the other two: the
+                    # corruption detector emits it, and leaving it out of the
+                    # buckets hid the single most urgent finding class from
+                    # every per-job severity total.
+                    by_job[job_id] = {'total': 0, 'types': {},
+                                      'error': 0, 'warning': 0, 'info': 0}
                 by_job[job_id]['total'] += cnt
                 by_job[job_id]['types'][finding_type] = by_job[job_id]['types'].get(finding_type, 0) + cnt
-                if severity in ('warning', 'info'):
+                if severity in ('error', 'warning', 'info'):
                     by_job[job_id][severity] += cnt
 
             # Resolve display names
@@ -4459,26 +5068,80 @@ class RepairWorker:
                 conn.close()
 
     def _record_job_finish(self, run_id: Optional[int], job_id: str,
-                           result: JobResult, duration: float):
-        """Record a job run completion."""
+                           result: JobResult, duration: float,
+                           status: str = 'completed', error_text: str = None):
+        """Record a job run completion.
+
+        ``status`` is the truth of the run — 'completed', 'failed' (the scan
+        raised) or 'cancelled' (the user stopped it). It used to be hardcoded
+        'completed', so the history tab could not tell a clean scan from a
+        crash, and a run that died mid-flight stayed 'running' forever.
+        Per-item errors are NOT a failed run: those are counted in ``errors``
+        and the scan still finished.
+        """
         if not run_id:
             return
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            status = 'completed'
-            cursor.execute("""
-                UPDATE repair_job_runs
-                SET finished_at = CURRENT_TIMESTAMP, duration_seconds = ?,
-                    items_scanned = ?, findings_created = ?, auto_fixed = ?,
-                    errors = ?, status = ?
-                WHERE id = ?
-            """, (duration, result.scanned, result.findings_created,
-                  result.auto_fixed, result.errors, status, run_id))
+            # Losing the whole finish record because one late column is
+            # missing would leave the run 'running' forever — the exact bug
+            # this method exists to fix. Record what we can.
+            if self._has_column(cursor, 'repair_job_runs', 'error_text'):
+                cursor.execute("""
+                    UPDATE repair_job_runs
+                    SET finished_at = CURRENT_TIMESTAMP, duration_seconds = ?,
+                        items_scanned = ?, findings_created = ?, auto_fixed = ?,
+                        errors = ?, status = ?, error_text = ?
+                    WHERE id = ?
+                """, (duration, result.scanned, result.findings_created,
+                      result.auto_fixed, result.errors, status,
+                      (error_text or None), run_id))
+            else:
+                cursor.execute("""
+                    UPDATE repair_job_runs
+                    SET finished_at = CURRENT_TIMESTAMP, duration_seconds = ?,
+                        items_scanned = ?, findings_created = ?, auto_fixed = ?,
+                        errors = ?, status = ?
+                    WHERE id = ?
+                """, (duration, result.scanned, result.findings_created,
+                      result.auto_fixed, result.errors, status, run_id))
             conn.commit()
         except Exception as e:
             logger.debug("Error recording job finish: %s", e)
+        finally:
+            if conn:
+                conn.close()
+
+    def _heal_stuck_runs(self) -> int:
+        """Close out runs left 'running' by a process that died mid-scan.
+
+        Only one job runs at a time per worker and this fires before the loop
+        starts, so anything still 'running' at boot belongs to a previous
+        process. Left alone those rows keep ``finished_at`` NULL forever,
+        which the scheduler reads as "never run" — the job then looks
+        infinitely stale and jumps the queue on every single poll.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE repair_job_runs
+                SET status = 'failed', finished_at = CURRENT_TIMESTAMP,
+                    error_text = COALESCE(error_text,
+                        'Interrupted — SoulSync stopped while this scan was running')
+                WHERE status = 'running' AND finished_at IS NULL
+            """)
+            conn.commit()
+            healed = cursor.rowcount or 0
+            if healed:
+                logger.info("Healed %d interrupted maintenance run(s)", healed)
+            return healed
+        except Exception as e:
+            logger.debug("Error healing stuck runs: %s", e)
+            return 0
         finally:
             if conn:
                 conn.close()
@@ -4518,25 +5181,34 @@ class RepairWorker:
                 conn.close()
 
     def get_history(self, job_id: str = None, limit: int = 50) -> List[dict]:
-        """Get job run history."""
+        """Get job run history.
+
+        `error_text` rides along: phase 1 started recording WHY a run failed
+        and this reader never selected it, so the history could say 'failed'
+        and nothing else — the one thing a failed run is worth opening for.
+        Guarded, because a reader that raises here shows an empty history,
+        which reads as "maintenance has never run".
+        """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            has_error_text = self._has_column(cursor, 'repair_job_runs', 'error_text')
+            columns = ("id, job_id, started_at, finished_at, duration_seconds, "
+                       "items_scanned, findings_created, auto_fixed, errors, status")
+            columns += ", error_text" if has_error_text else ", NULL"
 
             if job_id:
-                cursor.execute("""
-                    SELECT id, job_id, started_at, finished_at, duration_seconds,
-                           items_scanned, findings_created, auto_fixed, errors, status
+                cursor.execute(f"""
+                    SELECT {columns}
                     FROM repair_job_runs
                     WHERE job_id = ?
                     ORDER BY started_at DESC
                     LIMIT ?
                 """, (job_id, limit))
             else:
-                cursor.execute("""
-                    SELECT id, job_id, started_at, finished_at, duration_seconds,
-                           items_scanned, findings_created, auto_fixed, errors, status
+                cursor.execute(f"""
+                    SELECT {columns}
                     FROM repair_job_runs
                     ORDER BY started_at DESC
                     LIMIT ?
@@ -4559,6 +5231,7 @@ class RepairWorker:
                     'auto_fixed': row[7],
                     'errors': row[8],
                     'status': row[9],
+                    'error_text': row[10],
                 })
             return runs
         except Exception as e:

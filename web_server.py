@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.1.9"
+_SOULSYNC_BASE_VERSION = "3.2.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -293,6 +293,21 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+
+# The browser's media engine buffers audio in bursts: it opens a Range
+# request, kills it once its internal buffer is full, and re-requests as
+# playback drains it — up to a few times per SECOND. Correct behavior on
+# both sides, but every burst printed an access-log line, which buried the
+# terminal while a song played. Drop just the audio-chunk lines.
+import logging
+
+
+class _AudioChunkLogFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return '/stream/audio' not in msg and '/stream/library-audio' not in msg
+
+logging.getLogger('werkzeug').addFilter(_AudioChunkLogFilter())
 app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # Static assets (library.js / style.css / etc.) get aggressive browser
@@ -2388,7 +2403,12 @@ SERVICE_CONFIG_REGISTRY = {
     'bandcamp':     {'always': True},   # public search + release-page scrape, no credentials
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
-    'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
+    # Qobuz login (M&E mode) stores its credentials NESTED under
+    # qobuz.session = {app_id, app_secret, user_auth_token} — the top-level
+    # keys this registry used to check are never written, so a fully
+    # authenticated Qobuz read as unconfigured and its pill never went
+    # green (#1137). The session dict is truthy exactly when a login saved it.
+    'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token'], ['session']]},
     'lastfm':       {'required': ['api_key']},
     'genius':       {'required': ['access_token']},
     'acoustid':     {'required': ['api_key']},
@@ -3146,7 +3166,14 @@ def _build_system_stats():
 
     if soulseek_active and not soulseek_known_down:
         try:
-            transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
+            # timeout=3: this runs on the dashboard's 10s poll, and gunicorn
+            # has 8 request threads TOTAL — an unbounded wait on a hung slskd
+            # pinned one of them for up to the 120s worker timeout (perf
+            # sweep, Aug 2026). Three seconds is plenty for a local slskd;
+            # a miss just means one tick shows 0 B/s.
+            transfers_data = run_async(
+                download_orchestrator._make_request('GET', 'transfers/downloads'),
+                timeout=3)
             if transfers_data:
                 for user_data in transfers_data:
                     if 'directories' in user_data:
@@ -3564,19 +3591,24 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            if isinstance(_experimental_in, dict):
-                for key, value in _experimental_in.items():
-                    config_manager.set(f'experimental.{key}', value)
+            # ONE database write for the whole page save. Per-leaf saves were
+            # hundreds of encrypt+serialize+commit cycles per click — enough
+            # self-inflicted lock contention to shove the config onto the
+            # (previously non-atomic) JSON fallback path (#1137).
+            with config_manager.batch():
+                if isinstance(_experimental_in, dict):
+                    for key, value in _experimental_in.items():
+                        config_manager.set(f'experimental.{key}', value)
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
-                if service in new_settings:
-                    if service == 'experimental' and isinstance(_experimental_in, dict):
-                        continue
-                    for key, value in new_settings[service].items():
-                        config_manager.set(f'{service}.{key}', value)
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
+                    if service in new_settings:
+                        if service == 'experimental' and isinstance(_experimental_in, dict):
+                            continue
+                        for key, value in new_settings[service].items():
+                            config_manager.set(f'{service}.{key}', value)
 
-            if _primary_override:
-                config_manager.set('metadata.fallback_source', _primary_override)
+                if _primary_override:
+                    config_manager.set('metadata.fallback_source', _primary_override)
 
             # The Settings → Quality page's toggles are saved as config keys
             # (above), but the pipeline enforces the PROFILE row (live, per
@@ -6760,6 +6792,16 @@ def search_music():
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+def _mark_request_free_ok_for_spotify(source: str) -> None:
+    """Explicit-Spotify request marker: lets the no-auth Spotify source serve
+    THIS request even without the persistent metadata-source opt-in (the
+    client's _free_wanted reads g._spotify_free_ok). Only interactive
+    endpoints where the USER pointed at Spotify call this."""
+    if (source or '').strip().lower() in ('spotify', 'spotify_free'):
+        g._spotify_free_ok = True
+
+
 @app.route('/api/enhanced-search', methods=['POST'])
 def enhanced_search():
     """Unified metadata search across configured sources + local DB artists.
@@ -6776,6 +6818,7 @@ def enhanced_search():
         requested_source = ''
     if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
         return jsonify({"error": f"Unknown source: {requested_source}"}), 400
+    _mark_request_free_ok_for_spotify(requested_source)
 
     if not query:
         return jsonify(_search_orchestrator.empty_response())
@@ -6864,11 +6907,20 @@ def enhanced_search_source(source_name):
 
     try:
         client, _available = _search_orchestrator.resolve_client(source_name, deps)
+        prefer_free = False
+        if source_name == 'spotify' and deps.spotify_client:
+            try:
+                if (deps.spotify_client._free_installed()
+                        and not deps.spotify_client.is_spotify_authenticated()):
+                    client = client or deps.spotify_client
+                    prefer_free = True
+            except Exception as e:
+                logger.debug(f"Spotify free-fallback availability check failed: {e}")
         if client is None:
             return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
         return app.response_class(
-            _search_orchestrator.stream_metadata_source(source_name, query, client),
+            _search_orchestrator.stream_metadata_source(source_name, query, client, prefer_free=prefer_free),
             mimetype='application/x-ndjson',
         )
     except Exception as e:
@@ -9328,6 +9380,31 @@ def delete_download_origins():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/library/recently-added')
+def get_recently_added_albums():
+    """The dashboard rail: newest albums to land, folded from library_history
+    with art backfilled from the library (see the db method's docstring)."""
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 20))))
+        db = get_database()
+        albums = db.get_recently_added_albums(limit=limit)
+        # Server-synced art is stored as media-server URLs that need auth and
+        # die in the browser — the exact reason /api/library/artist/<id>/thumb
+        # runs its thumb through this normalizer. Same treatment here, or the
+        # cards render the placeholder while holding a "valid" URL.
+        for album in albums:
+            for key in ('thumb_url', 'artist_thumb_url'):
+                if album.get(key):
+                    try:
+                        album[key] = fix_artist_image_url(album[key]) or ''
+                    except Exception:
+                        album[key] = ''
+        return jsonify({'success': True, 'albums': albums})
+    except Exception as e:
+        logger.error(f"Error getting recently added albums: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -9456,6 +9533,7 @@ from core.artist_source_lookup import (
     SOURCE_ID_FIELD as _SOURCE_ID_FIELD,
     SOURCE_ONLY_ARTIST_SOURCES as _SOURCE_ONLY_ARTIST_SOURCES,
     find_library_artist_for_source as _core_find_library_artist_for_source,
+    sources_resolvable_in_library as _core_sources_resolvable_in_library,
 )
 
 
@@ -9600,6 +9678,7 @@ def get_artist_detail(artist_id):
                     "error": f"{source_param} is not enabled",
                 }), 503
 
+        _mark_request_free_ok_for_spotify(source_param)
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -10365,6 +10444,7 @@ def get_artist_discography(artist_id):
         artist_name = request.args.get('artist_name', '').strip()
         # Optional source override from multi-source search tabs
         source_override = request.args.get('source', '').strip().lower()
+        _mark_request_free_ok_for_spotify(source_override)
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
@@ -11086,6 +11166,8 @@ def get_album_tracks(album_id):
                 source_override = 'itunes'
             else:
                 source_override = 'spotify'
+
+        _mark_request_free_ok_for_spotify(source_override)
 
         from core.metadata_service import get_artist_album_tracks as _get_artist_album_tracks
 
@@ -15135,10 +15217,15 @@ def library_delete_tracks_batch():
 
 @app.route('/api/library/radio')
 def library_radio():
-    """Get a smart queue of similar tracks for radio mode auto-play."""
+    """Get a smart queue of similar tracks for radio mode auto-play.
+
+    Two modes: seeded (track_id → similar tracks, the classic radio refill)
+    and seedless (?library=1 → ranked-random across the whole library, the
+    Library Radio starter)."""
     try:
         track_id = request.args.get('track_id')
-        if not track_id:
+        library_mode = request.args.get('library') in ('1', 'true')
+        if not track_id and not library_mode:
             return jsonify({"success": False, "error": "track_id is required"}), 400
 
         limit = request.args.get('limit', 20, type=int)
@@ -15146,7 +15233,10 @@ def library_radio():
         exclude_ids = [eid.strip() for eid in exclude_raw.split(',') if eid.strip()] if exclude_raw else None
 
         database = get_database()
-        result = database.get_radio_tracks(track_id, limit=limit, exclude_ids=exclude_ids)
+        if track_id:
+            result = database.get_radio_tracks(track_id, limit=limit, exclude_ids=exclude_ids)
+        else:
+            result = database.get_library_radio_tracks(limit=limit, exclude_ids=exclude_ids)
 
         if not result.get('success'):
             return jsonify(result), 404
@@ -15312,7 +15402,10 @@ def _serve_audio_file_with_range(file_path, mimetype_override=None):
                 f.seek(byte_start)
                 remaining = content_length
                 while remaining:
-                    chunk_size = min(8192, remaining)
+                    # 64KB reads: the browser re-opens this endpoint a few
+                    # times a second while buffering, and 8KB yields made
+                    # every one of those visits cost thousands of iterations.
+                    chunk_size = min(65536, remaining)
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
@@ -15331,6 +15424,10 @@ def _serve_audio_file_with_range(file_path, mimetype_override=None):
         response.headers.add('Content-Length', str(file_size))
         response.headers['Cache-Control'] = 'no-cache'
         return response
+
+
+# What /stream/audio last announced — dedupes the per-chunk log lines.
+_LAST_SERVED_AUDIO = {'path': None, 'url': None}
 
 
 @app.route('/stream/audio')
@@ -15353,10 +15450,17 @@ def stream_audio():
 
         # Library track played via the media server's stream API (#809).
         if stream_url:
-            logger.info("Serving audio via server stream proxy")
+            if stream_url != _LAST_SERVED_AUDIO.get('url'):
+                _LAST_SERVED_AUDIO['url'] = stream_url
+                logger.info("Serving audio via server stream proxy")
             return _proxy_stream_url_with_range(stream_url)
 
-        logger.info(f"Serving audio file: {os.path.basename(file_path)}")
+        # One INFO line per TRACK, not per buffer top-up: the browser
+        # re-requests ranges continuously while it plays, and announcing
+        # every chunk drowned the log.
+        if file_path != _LAST_SERVED_AUDIO.get('path'):
+            _LAST_SERVED_AUDIO['path'] = file_path
+            logger.info(f"Serving audio file: {os.path.basename(file_path)}")
         return _serve_audio_file_with_range(file_path, mimetype_override=mimetype_override)
     except Exception as e:
         logger.error(f"Error serving audio file: {e}")
@@ -16151,7 +16255,9 @@ def _sanitize_filename(filename: str) -> str:
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Windows forbids trailing dots/spaces on files and folders.
     # Artists like "Fred again.." would create mangled 8.3 short names.
-    sanitized = sanitized.rstrip('. ') or '_'
+    # A LEADING dot is just as bad the other way: Unix treats it as a hidden
+    # entry and media servers skip it (#1129, "...Baby One More Time").
+    sanitized = sanitized.strip('. ') or '_'
     # Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
     # can't be used as file or folder names even with extensions.
     if re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)', sanitized, re.IGNORECASE):
@@ -16828,9 +16934,35 @@ def _youtube_cookie_opts():
         mode = config_manager.get('youtube.cookies_browser', '')
         path = config_manager.get('youtube.cookies_file', '')
         exists = bool(path) and os.path.exists(path)
+        if path and not exists:
+            # Silently degrading to anonymous here looks identical to "YouTube
+            # is rate-limiting us": private playlists come back empty or short
+            # and every track resolves badly. Say so once, out loud.
+            logger.warning(
+                "[YouTube] Configured cookies file does not exist: %s — continuing "
+                "anonymously. Private playlists (Liked Music, list=LM) will be "
+                "incomplete or invisible. Re-paste cookies in Settings → YouTube.",
+                path,
+            )
         return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
         return {}
+
+
+def _ytmusic_auth_headers():
+    """ytmusicapi browser-auth headers from the same pasted cookies.txt, or None.
+
+    ytmusicapi can't take a cookie FILE, so the jar is projected into the header
+    form it wants. Only PASTE_MODE can feed it: `cookiesfrombrowser` is yt-dlp's
+    own browser-store reader and there's no cookie file to read in that case.
+    None means anonymous — public playlists still resolve."""
+    from core.youtube_cookies import PASTE_MODE, ytmusic_auth_from_cookiefile
+    try:
+        if str(config_manager.get('youtube.cookies_browser', '') or '').strip() != PASTE_MODE:
+            return None
+        return ytmusic_auth_from_cookiefile(config_manager.get('youtube.cookies_file', ''))
+    except Exception:  # noqa: S110 - auth is best-effort; anonymous still works
+        return None
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
@@ -16876,7 +17008,22 @@ def parse_youtube_playlist(url):
     Uses flat playlist extraction to avoid rate limits and get all tracks
     Returns a list of track dictionaries compatible with our Track structure
     """
-    from core.youtube_track_meta import derive_artist_and_title
+    from core.youtube_track_meta import derive_artist_and_title, is_music_youtube_url
+    # On music.youtube.com each flat entry carries the ARTIST's channel; on
+    # youtube.com it carries the playlist owner's (#863). Decided once here from
+    # the URL because the per-entry data can't distinguish the two.
+    allow_channel_artist = is_music_youtube_url(url)
+
+    # A music.youtube.com playlist has a real catalog entry — artist AND album
+    # per track, and no flat-extraction page cap (#908). Try it first; it
+    # returns None on any failure so yt-dlp below stays the fallback. Never
+    # attempted for youtube.com: a video playlist has no catalog entry.
+    if allow_channel_artist:
+        from core.youtube_music_meta import fetch_ytmusic_playlist
+        ytm_playlist = fetch_ytmusic_playlist(url, _ytmusic_auth_headers())
+        if ytm_playlist:
+            return ytm_playlist
+
     try:
         # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
         ydl_opts = {
@@ -16924,7 +17071,8 @@ def parse_youtube_playlist(url):
                 # instead of blindly using `uploader`, which on a playlist is the
                 # OWNER, not the track artist (#863: every track became "Wing It"
                 # / "Unknown Artist"). Returns ('' , title) when nothing reliable.
-                derived_artist, derived_title = derive_artist_and_title(entry)
+                derived_artist, derived_title = derive_artist_and_title(
+                    entry, allow_channel_artist=allow_channel_artist)
 
                 # Clean the track title and artist using our cleaning functions.
                 if derived_artist:
@@ -16947,13 +17095,17 @@ def parse_youtube_playlist(url):
                 
                 tracks.append(track_data)
 
-            # NOTE: current yt-dlp flat extraction returns ONLY the title per entry
-            # (no uploader/artist), so tracks whose title isn't "Artist - Title"
-            # land here as "Unknown Artist". The per-video artist recovery does NOT
-            # run here — it would block this request for minutes on a big playlist
-            # and risk the 120s worker timeout. It runs in the async discovery
-            # worker instead (which already iterates every track with a progress
-            # bar). See run_youtube_discovery_worker / recover_youtube_artist (#863).
+            # NOTE: on youtube.com, flat extraction gives no trustworthy per-entry
+            # artist (the channel is the playlist owner), so tracks whose title
+            # isn't "Artist - Title" land here as "Unknown Artist". The per-video
+            # artist recovery does NOT run here — it would block this request for
+            # minutes on a big playlist and risk the 120s worker timeout. It runs
+            # in the async discovery worker instead (which already iterates every
+            # track with a progress bar). See run_youtube_discovery_worker /
+            # recover_youtube_artist (#863).
+            #
+            # music.youtube.com does NOT have that problem: its entries carry a
+            # per-track channel, so `allow_channel_artist` resolves them inline.
 
             # Create playlist object matching GUI structure
             playlist_data = {
@@ -18640,9 +18792,13 @@ def get_database_stats():
 def process_wishlist_api():
     """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
     try:
-        runtime = _build_wishlist_route_runtime(
-            is_auto_processing_flag=lambda: wishlist_auto_processing,
-        )
+        # #1134: this passed is_auto_processing_flag=<raw wishlist_auto_processing
+        # lambda> — a kwarg the factory never accepted, so the route 500'd on
+        # every call. The factory's DEFAULT (is_wishlist_actually_processing)
+        # is also the better guard: it verifies the worker is really alive,
+        # while the raw flag goes stale after a crash — the same staleness
+        # that kept the reporter's auto-timer "busy" over a dead batch.
+        runtime = _build_wishlist_route_runtime()
         payload, status_code = _wishlist_process_api(
             runtime,
             start_processing=lambda: _process_wishlist_automatically(),
@@ -21570,6 +21726,61 @@ def get_sync_history_entry(entry_id):
         logger.error(f"Error getting sync history entry: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/sync/history/<int:entry_id>/play')
+def play_sync_history_entry(entry_id):
+    """The synced playlist as a PLAYABLE library track list. Each cached track
+    resolves against the library with the same title+artist matcher the stats
+    play button uses; tracks that never landed are skipped (total says how
+    many the playlist really has). Same track shape as /api/library/radio so
+    the player maps it with the one helper it already owns."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id, profile_id=get_current_profile_id())
+        if not entry:
+            return jsonify({"success": False, "error": "Entry not found"}), 404
+        cached = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+
+        # One BATCH resolution, not one query per track: the per-track
+        # resolver's LOWER(title) scan cost a full pass of the tracks table
+        # each call, which read as "the play button does nothing for two
+        # minutes" on a 300k-track library.
+        wanted = []
+        for t in cached[:200]:
+            if not isinstance(t, dict):
+                continue
+            title = str(t.get('name') or t.get('title') or '').strip()
+            artists = t.get('artists') or []
+            first = artists[0] if isinstance(artists, list) and artists else None
+            artist = (first.get('name') if isinstance(first, dict) else str(first or '')).strip()
+            if title:
+                wanted.append((title, artist))
+        resolved = db.resolve_library_tracks(wanted)
+
+        tracks = []
+        for title, artist in wanted:
+            row = resolved.get((title.lower(), artist.lower()))
+            if row and row.get('file_path'):
+                thumb = row.get('thumb_url')
+                tracks.append({
+                    'id': row.get('id'),
+                    'title': row.get('title'),
+                    'artist': row.get('artist_name'),
+                    'album': row.get('album_title'),
+                    'file_path': row.get('file_path'),
+                    'image_url': fix_artist_image_url(thumb) if thumb else None,
+                    'bitrate': row.get('bitrate'),
+                    'duration': row.get('duration'),
+                    'artist_id': row.get('artist_id'),
+                    'album_id': row.get('album_id'),
+                })
+        return jsonify({"success": True,
+                        "name": entry.get('playlist_name') or '',
+                        "total": len(cached),
+                        "tracks": tracks})
+    except Exception as e:
+        logger.error(f"Error resolving sync entry {entry_id} for playback: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
 def readd_sync_track_to_wishlist(entry_id, track_index):
     """Re-add a synced unmatched track to the wishlist with the SAME context the
@@ -21934,6 +22145,43 @@ def get_server_playlist_tracks(playlist_id):
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
+
+        # A durable manual match whose library track isn't in THIS playlist yet
+        # can't be applied above, so its row renders as a plain "missing" with
+        # Find & Add — indistinguishable from a track that was never matched at
+        # all. Users then re-match the same track every single sync and nothing
+        # ever tells them it already took (#1128). The match IS honoured by the
+        # real sync (services/sync_service.py resolves it, with file-path and
+        # live-Plex fallbacks); only this preview was silent about it. Flag the
+        # rows so the UI can say "already matched, not in the playlist yet".
+        try:
+            _mm_ids = set()
+            if hasattr(_db_for_overrides, "find_manual_library_matches_bulk"):
+                _src_ids = [str(s.get("source_track_id")) for s in source_tracks
+                            if isinstance(s, dict) and s.get("source_track_id")]
+                if _src_ids:
+                    _mm_ids = set(_db_for_overrides.find_manual_library_matches_bulk(
+                        _ov_profile, _src_ids, active_server) or {})
+            # A saved match the lookup could NOT apply by any route is dead —
+            # its file was deleted, or the library row vanished. Flagging those
+            # rows "already matched" is what stranded #1138: the UI then offers
+            # neither Find & Add nor a download, so reprocessing the playlist
+            # skipped the track silently, run after run. Mark them stale
+            # instead, so they render as the missing tracks they are.
+            _dead_ids = getattr(_override_lookup, 'dead_match_source_ids', None) or set()
+            if _mm_ids:
+                for _row in combined:
+                    if _row.get('override'):
+                        continue   # already applied — the row shows as matched
+                    _sid = str((_row.get('source_track') or {}).get('source_track_id') or '')
+                    if not _sid or _sid not in _mm_ids:
+                        continue
+                    if _sid in _dead_ids:
+                        _row['manual_match_stale'] = True
+                    else:
+                        _row['has_manual_match'] = True
+        except Exception as _mm_err:   # noqa: BLE001 - a badge must never fail the view
+            logger.debug("manual-match flagging failed: %s", _mm_err)
 
         # Order status: the editor renders the server column in SOURCE order, so a
         # reordered-but-same-membership playlist reads "in sync" when Navidrome's real
@@ -22534,12 +22782,23 @@ def mlm_save():
 
 @app.route('/api/manual-library-matches/<int:match_id>', methods=['DELETE'])
 def mlm_delete(match_id):
-    """Delete a manual library match by ID."""
+    """Delete a manual library match by ID.
+
+    Reports whether a row was actually removed (#1138): the delete is scoped to
+    the CURRENT profile, so a match saved under another one silently matches
+    nothing. Answering "success" to that left the user clicking the same button
+    on the same row forever, with no way to tell the difference between "gone"
+    and "wouldn't go"."""
     try:
         from core.library import manual_library_match as mlm
         db = get_database()
         profile_id = get_current_profile_id()
-        mlm.delete_match(db, match_id, profile_id)
+        if not mlm.delete_match(db, match_id, profile_id):
+            return jsonify({
+                "success": False,
+                "error": "No matching entry for this profile — it may already be "
+                         "removed, or it was saved under a different profile.",
+            }), 404
         return jsonify({"success": True})
     except Exception as e:
         logger.error(f"mlm_delete error: {e}")
@@ -23256,6 +23515,7 @@ def get_playlist_tracks(playlist_id):
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
 def get_spotify_album_tracks(album_id):
     """Fetches full track details for a specific album."""
+    _mark_request_free_ok_for_spotify('spotify')  # the URL itself targets Spotify
     use_hydrabase = _is_hydrabase_active()
 
     # Try Hydrabase first when active — look up by album soul_id
@@ -24440,7 +24700,12 @@ def deezer_download_test():
             'https://www.deezer.com/ajax/gw-light.php',
             params={'method': 'deezer.getUserData', 'api_version': '1.0', 'api_token': 'null'},
             json={},
-            timeout=15
+            # (connect, read): a host that blackholes deezer.com (VPS ranges,
+            # blocked regions — #1137) fails in 5s instead of pinning one of
+            # gunicorn's 8 request threads for the full 15 (this test runs
+            # synchronously in the handler, and the settings page auto-fires
+            # every source test on load).
+            timeout=(5, 15)
         )
         logger.debug(f"Deezer test raw response status={resp.status_code}, body_preview={resp.text[:500]}")
         resp.raise_for_status()
@@ -29677,6 +29942,25 @@ def get_watchlist_count():
         logger.error(f"Error getting watchlist count: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/watchlist/recent-releases', methods=['GET'])
+def get_watchlist_recent_releases():
+    """Newest releases across the whole watchlist, flat (the dashboard rail).
+
+    recent_releases was only ever queried per-artist before this; the dashboard
+    wants one newest-first list. Rows come straight off the table the watchlist
+    scan already fills — no provider calls, so this is cheap enough for a
+    dashboard mount fetch.
+    """
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 20))))
+        database = get_database()
+        releases = database.get_watchlist_recent_releases(
+            limit=limit, profile_id=get_current_profile_id())
+        return jsonify({"success": True, "releases": releases})
+    except Exception as e:
+        logger.error(f"Error getting watchlist recent releases: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/watchlist/artists', methods=['GET'])
 def get_watchlist_artists():
     """Get all artists in the watchlist with cached images"""
@@ -31116,7 +31400,7 @@ def watchlist_artist_config(artist_id):
                 'quality_profile_id': int(result[21]) if len(result) > 21 and result[21] is not None else None,
             }
 
-            from core.metadata.registry import get_primary_source
+            from core.metadata.registry import available_sources, get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
@@ -31130,6 +31414,28 @@ def watchlist_artist_config(artist_id):
                 "musicbrainz_artist_id": musicbrainz_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
                 "global_metadata_source": get_primary_source(),
+                # Which of those providers can serve RIGHT NOW, and which ids
+                # resolve straight to a LIBRARY artist. The panel's "View
+                # Discography" link pins ONE source; a pinned source is safe
+                # exactly when its provider is alive OR its id lands on a
+                # library record (the artist page upgrades to the library view
+                # off the id column with no provider call). Anything else is a
+                # guaranteed 503 ("provider is unavailable" — the Discord
+                # report where the watchlist failed but Discover worked). Only
+                # the server knows either fact, so it says both.
+                "available_sources": available_sources(
+                    ("spotify", "itunes", "deezer", "discogs", "musicbrainz")
+                ),
+                "library_resolvable_sources": _core_sources_resolvable_in_library(
+                    database,
+                    {
+                        "spotify": spotify_id,
+                        "itunes": itunes_id,
+                        "deezer": deezer_id,
+                        "discogs": discogs_id,
+                        "musicbrainz": musicbrainz_id,
+                    },
+                ),
                 "quality_profiles": database.list_quality_profiles(),
             })
 
@@ -31641,6 +31947,52 @@ from core.discovery.hero import (
 )
 
 
+# ── Discover shelf cache ────────────────────────────────────────────────
+# Every heavy discover GET below recomputes multi-second DB/consensus work
+# per request (live: similar-artists 22s, genre-explorer 14s, hero 23s...).
+# The page is read-only and its data changes on SCAN cadence, not request
+# cadence — so each shelf caches its serialized 200 response per
+# (path+query, profile) for 30 minutes, and the warmer below recomputes
+# everything in the background so users only ever hit warm answers.
+_DISCOVER_SHELF_CACHE = {}
+_DISCOVER_SHELF_TTL_S = 1800
+
+
+def _discover_shelf_cache(key_extra=None):
+    def deco(fn):
+        import functools
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            import time as _t
+            extra = key_extra() if key_extra else None
+            key = (fn.__name__, request.full_path, get_current_profile_id(), extra)
+            hit = _DISCOVER_SHELF_CACHE.get(key)
+            now = _t.time()
+            if hit and now < hit[0]:
+                body, status, ctype = hit[1]
+                return app.response_class(body, status=status, content_type=ctype)
+            out = fn(*args, **kwargs)
+            resp = app.make_response(out)
+            if resp.status_code == 200:
+                _DISCOVER_SHELF_CACHE[key] = (
+                    now + _DISCOVER_SHELF_TTL_S,
+                    (resp.get_data(), resp.status_code, resp.content_type),
+                )
+            return resp
+        return wrapper
+    return deco
+
+
+def _discover_dial_key():
+    # The dial re-ranks similar-artists live; committing it must bust the key.
+    try:
+        from config.settings import config_manager
+        return str(config_manager.get('discover.adventurousness', 0.3))
+    except Exception:
+        return '0.3'
+
+
 @app.route('/api/discover/hero', methods=['GET'])
 def get_discover_hero():
     return _discover_hero_get()
@@ -31689,6 +32041,7 @@ def _discover_primary_genre(item):
 
 
 @app.route('/api/discover/similar-artists', methods=['GET'])
+@_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
     try:
@@ -31947,6 +32300,7 @@ def _autostart_popularity_backfill():
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
+@_discover_shelf_cache(key_extra=_discover_dial_key)
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
 
@@ -32305,6 +32659,7 @@ def refresh_spotify_library():
 
 
 @app.route('/api/discover/recent-releases', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_recent_releases():
     """Get cached recent albums from watchlist and similar artists"""
     try:
@@ -32354,6 +32709,18 @@ def get_discover_recent_releases():
         blacklisted = database.get_discovery_blacklist_names()
         if blacklisted:
             albums = [a for a in albums if a.get('artist_name', '').lower() not in blacklisted]
+
+        # Ownership: which of these new releases are ALREADY in the library.
+        # The fuzzy matcher the download pipeline itself uses, so the badge
+        # agrees with what a download would decide. ~20 checks per 30-min
+        # shelf-cache fill — free at request time. Fail-soft per album.
+        for a in albums:
+            try:
+                match, _conf = database.check_album_exists(
+                    a.get('album_name') or '', a.get('artist_name') or '')
+                a['in_library'] = match is not None
+            except Exception as own_err:
+                logger.debug("recent-release ownership check failed: %s", own_err)
 
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
@@ -32430,6 +32797,7 @@ def get_discover_release_radar():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/because-you-listen-to', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_because_you_listen_to():
     """Get 'Because You Listen To' sections — personalized by top played artists."""
     try:
@@ -32497,6 +32865,7 @@ def get_discover_because_you_listen_to():
         return jsonify({'success': True, 'sections': []})
 
 @app.route('/api/discover/undiscovered-albums', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_undiscovered_albums():
     """Albums by artists you listen to that aren't in your library — from cache."""
     try:
@@ -32526,6 +32895,7 @@ def get_discover_undiscovered_albums():
         return jsonify({'success': True, 'albums': []})
 
 @app.route('/api/discover/genre-new-releases', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_genre_new_releases():
     """Recent releases matching your top genres — from cache."""
     try:
@@ -32543,6 +32913,7 @@ def get_discover_genre_new_releases():
         return jsonify({'success': True, 'albums': []})
 
 @app.route('/api/discover/label-explorer', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_label_explorer():
     """Popular albums from labels in your library — from cache."""
     try:
@@ -32566,6 +32937,7 @@ def get_discover_label_explorer():
         return jsonify({'success': True, 'albums': [], 'labels': []})
 
 @app.route('/api/discover/deep-cuts', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_deep_cuts():
     """Low-popularity tracks from artists you listen to — from cache."""
     try:
@@ -32592,6 +32964,7 @@ def _get_genre_allowed_sources():
     return sources
 
 @app.route('/api/discover/genre-explorer', methods=['GET'])
+@_discover_shelf_cache()
 def get_discover_genre_explorer():
     """Genre landscape from cached artists — highlights unexplored genres."""
     try:
@@ -32864,6 +33237,7 @@ def diagnose_discover_data():
 # ========================================
 
 @app.route('/api/discover/seasonal/current', methods=['GET'])
+@_discover_shelf_cache()
 def get_current_seasonal_content():
     """Auto-detect and return current season's content"""
     try:
@@ -34288,6 +34662,7 @@ def generate_custom_playlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/decades/available', methods=['GET'])
+@_discover_shelf_cache()
 def get_available_decades():
     """Get list of decades that have content in discovery pool"""
     try:
@@ -39434,6 +39809,59 @@ _init_discovery_scoring(matching_engine_obj=matching_engine)
 
 _init_discover_hero(get_metadata_fallback_client_fn=_get_metadata_fallback_client)
 
+
+def _start_discover_warmer():
+    """Pre-compute the discover page in the background, forever.
+
+    Every restart used to wipe the in-process caches, so the first person to
+    open Discover paid the full 20s+ compute — and the hero looked broken the
+    whole time. This walks every cached shelf through the real routes (a test
+    client hits the same decorators) 15s after boot and then every 25 minutes,
+    inside the shelves' 30-minute TTL, so real users only ever get warm
+    answers. Sequential on purpose: one background compute at a time instead
+    of a thundering herd on the GIL. Fail-soft everywhere."""
+    import threading
+    import time as _t
+
+    paths = [
+        '/api/discover/hero',
+        '/api/discover/similar-artists',
+        '/api/discover/listening-recommendations',
+        '/api/discover/recent-releases',
+        '/api/discover/genre-explorer',
+        '/api/discover/genre-new-releases',
+        '/api/discover/because-you-listen-to',
+        '/api/discover/undiscovered-albums',
+        '/api/discover/label-explorer',
+        '/api/discover/deep-cuts',
+        '/api/discover/seasonal/current',
+        '/api/discover/decades/available',
+    ]
+
+    def loop():
+        _t.sleep(15)  # let boot finish before the first sweep
+        while True:
+            started = _t.time()
+            with app.test_client() as client:
+                for p in paths:
+                    try:
+                        client.get(p)
+                    except Exception as e:
+                        logger.debug(f"discover warmup {p} failed: {e}")
+            logger.info(f"Discover warmup sweep finished in {_t.time() - started:.1f}s")
+            _t.sleep(1500)
+
+    threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
+
+
+# NEVER under pytest: dozens of tests import web_server, and a leaked
+# background thread touching databases mid-suite is exactly the bug class
+# behind the video-db split-brain incident (conftest locks video installs
+# for the same reason). Opt-out env for anyone who wants it off in prod.
+import sys as _sys
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
+    _start_discover_warmer()
+
 _init_download_validation(
     matching_engine_obj=matching_engine,
     download_orchestrator_obj=download_orchestrator,
@@ -39724,7 +40152,7 @@ def stats_recent():
     """Get recently played tracks."""
     try:
         limit = int(request.args.get('limit', 20))
-        tracks = _stats_queries.get_recent_tracks(get_database(), limit)
+        tracks = _stats_queries.get_recent_tracks(get_database(), limit, fix_artist_image_url)
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -40090,12 +40518,16 @@ def repair_findings_list():
         job_id = request.args.get('job_id')
         status = request.args.get('status')
         severity = request.args.get('severity')
+        finding_type = request.args.get('finding_type')
+        sort = request.args.get('sort')
+        q = request.args.get('q')
         page = int(request.args.get('page', 0))
         limit = int(request.args.get('limit', 50))
 
         result = repair_worker.get_findings(
             job_id=job_id, status=status, severity=severity,
-            page=page, limit=limit
+            page=page, limit=limit, finding_type=finding_type,
+            sort=sort, q=q
         )
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
@@ -40122,6 +40554,53 @@ def repair_findings_counts():
         return jsonify(counts), 200
     except Exception as e:
         logger.error(f"Error getting findings counts: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/groups', methods=['GET'])
+def repair_findings_groups():
+    """Findings folded to one row per TYPE — what the inbox renders.
+
+    The flat list meant paging 30-at-a-time through thousands of rows with no
+    way to see that most of them were one safe, one-click type.
+    """
+    try:
+        if repair_worker is None:
+            return jsonify({'groups': []}), 200
+        return jsonify({'groups': repair_worker.get_finding_groups()}), 200
+    except Exception as e:
+        logger.error(f"Error grouping repair findings: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
+def repair_finding_reopen(finding_id):
+    """Put a resolved/dismissed finding back to pending — the undo half of
+    dismiss, which is otherwise permanent by design."""
+    try:
+        if repair_worker is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        ok = repair_worker.reopen_finding(finding_id)
+        if not ok:
+            return jsonify({'success': False,
+                            'error': 'Finding not found or already pending'}), 404
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Error reopening finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/repair/finding-types', methods=['GET'])
+def repair_finding_types():
+    """The finding-type catalog: label, verb, fixable, destructive, job_ids.
+
+    One source of truth for what the UI may offer per type. The client used
+    to carry its own list, which drifted: nine backend-fixable types had no
+    button and two unfixable ones had a button that could only ever fail.
+    """
+    try:
+        if repair_worker is None:
+            return jsonify({'types': []}), 200
+        return jsonify({'types': repair_worker.get_finding_type_catalog()}), 200
+    except Exception as e:
+        logger.error(f"Error getting finding type catalog: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/repair/cache-health', methods=['GET'])
@@ -40223,7 +40702,13 @@ def repair_findings_bulk_fix_start():
             severity=data.get('severity') or None,
             finding_ids=data.get('ids') or None,
             fix_action=data.get('fix_action') or None,
+            finding_type=data.get('finding_type') or None,
+            safe_only=bool(data.get('safe_only')),
         )
+        # An unscoped fix_action is a caller bug, not a transient failure —
+        # 400 so it can never look like "nothing matched".
+        if result.get('invalid'):
+            return jsonify(result), 400
         return jsonify(result), 200
     except Exception as e:
         logger.error(f"Error starting background bulk fix: {e}")
@@ -40262,6 +40747,16 @@ def repair_findings_bulk():
         data = request.get_json(silent=True) or {}
         finding_ids = data.get('ids', [])
         action = data.get('action', 'dismiss')
+        finding_type = data.get('finding_type')
+
+        # Whole-group dismiss from the findings inbox. Scoped by TYPE rather
+        # than by id, because the alternative is shipping thousands of ids to
+        # the browser only to post them straight back.
+        if not finding_ids and finding_type:
+            if action != 'dismiss':
+                return jsonify({'error': 'Only dismiss is supported for a type-scoped bulk'}), 400
+            count = repair_worker.dismiss_findings_by_type(finding_type)
+            return jsonify({'success': True, 'updated': count}), 200
 
         if not finding_ids:
             return jsonify({'error': 'No finding IDs provided'}), 400
@@ -40534,7 +41029,14 @@ def auto_import_results():
 def auto_import_approve(item_id):
     if not auto_import_worker:
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
-    return jsonify(auto_import_worker.approve_item(item_id))
+    result = auto_import_worker.approve_item(item_id)
+    if result.get('success') and auto_import_worker.running:
+        threading.Thread(
+            target=auto_import_worker.trigger_scan,
+            daemon=True,
+            name='AutoImportApprovalScan',
+        ).start()
+    return jsonify(result)
 
 
 @app.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
@@ -40593,6 +41095,12 @@ def auto_import_approve_all():
             result = auto_import_worker.approve_item(r['id'])
             if result.get('success'):
                 count += 1
+        if count and auto_import_worker.running:
+            threading.Thread(
+                target=auto_import_worker.trigger_scan,
+                daemon=True,
+                name='AutoImportApprovalScan',
+            ).start()
         return jsonify({"success": True, "count": count})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -40618,7 +41126,7 @@ def auto_import_clear_completed():
             cursor = conn.cursor()
             base_sql = (
                 "DELETE FROM auto_import_history "
-                "WHERE status IN ('completed', 'approved', 'failed', "
+                "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
                 "'needs_identification', 'rejected', 'processing')"
             )
             if active_hashes:
@@ -40883,9 +41391,44 @@ def _emit_chat_push_loop():
                             _f = chat_codec.file_of(dec)
                             if _f:
                                 out['file'] = _f
+                            # Channel / thread / avatar envelope tags — the
+                            # SAME set api/chat's unwrap attaches. Dropping
+                            # them here was the channels bug: every LIVE
+                            # message arrived untagged, filed into #general,
+                            # and was archived stripped, so the tag was gone
+                            # for good on reload too.
+                            _c = dec.get('c')
+                            if isinstance(_c, str) and _c.strip():
+                                out['chan'] = _c.strip()[:24]
+                            _th2 = dec.get('th')
+                            if isinstance(_th2, str) and _th2.strip():
+                                out['th'] = _th2.strip()[:160]
+                                _tn2 = dec.get('tn')
+                                if isinstance(_tn2, str) and _tn2.strip():
+                                    out['tn'] = _tn2.strip()[:80]
+                            try:
+                                _av2 = int(dec.get('av'))
+                                if 1 <= _av2 <= 100:
+                                    out['av'] = _av2
+                            except (TypeError, ValueError):
+                                pass
+                            _ed2 = chat_codec.edit_of(dec)
+                            if _ed2:
+                                out['ed'] = _ed2
                         return out
                     decoded = [x for x in (_unwrap(m) for m in fresh) if x]
                     if proto_events:
+                        # Arcade gm.* carriers are durable game state and DO
+                        # get archived (add_chat_game_carriers filters to gm.*
+                        # and is idempotent). Until now only the chat page's
+                        # hydrate endpoint archived them — with nobody on the
+                        # chat page, moves arriving from other room members
+                        # were never written down and an slskd restart lost
+                        # them. The rest of the bus stays live-only.
+                        try:
+                            get_database().add_chat_game_carriers(room, proto_events)
+                        except Exception:
+                            logger.debug("chat: loop game-carrier archive failed", exc_info=True)
                         socketio.emit('chat:room_protocol', {
                             'room': room, 'events': proto_events[-40:]})
                     if decoded:      # a reaction-only tick still tracks PMs below
@@ -41452,6 +41995,13 @@ def _emit_rate_monitor_loop():
             logger.debug(f"Error emitting rate monitor: {e}")
 
 
+# Idle-worker stats cache for the enrichment socket loop: name → (monotonic,
+# status). Emits still happen every 2s (the UI heartbeat is untouched) — this
+# only spaces out the DATABASE reads behind them for workers that are idle.
+_enrich_stats_cache: dict = {}
+_ENRICH_IDLE_STATS_TTL = 30.0
+
+
 def _emit_enrichment_status_loop():
     """Background thread that pushes all enrichment worker statuses every 2 seconds.
     Also auto-pauses rate-limited enrichment workers during active downloads."""
@@ -41529,10 +42079,34 @@ def _emit_enrichment_status_loop():
                 worker = get_worker()
                 if worker is None:
                     continue
-                status = worker.get_stats()
+                # Idle workers don't earn fresh aggregates every 2s: each
+                # get_stats() is ~6 whole-table scans of the (10 GB) library
+                # db, and 18 workers made this loop ~108 scans per tick,
+                # forever, while any tab was open (perf sweep, Aug 2026). A
+                # RUNNING worker's numbers actually move, so it stays on the
+                # 2s beat; an idle one re-reads every 30s. Transitions are
+                # caught instantly via the worker's IN-MEMORY running/paused
+                # attributes (free to read), so starting or pausing a worker
+                # never shows stale for even one tick.
+                now_mono = time.monotonic()
+                hit = _enrich_stats_cache.get(name)
+                fresh_needed = (
+                    hit is None
+                    or hit[1].get('running')
+                    or getattr(worker, 'running', False) != bool(hit[1].get('running'))
+                    or getattr(worker, 'paused', False) != bool(hit[1].get('paused'))
+                    or now_mono - hit[0] >= _ENRICH_IDLE_STATS_TTL
+                )
+                if fresh_needed:
+                    status = worker.get_stats()
+                    _enrich_stats_cache[name] = (now_mono, status)
+                else:
+                    status = hit[1]
                 # Flag workers that were auto-paused for foreground work
                 if name in _download_auto_paused:
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
+                else:
+                    status.pop('yield_reason', None)
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")

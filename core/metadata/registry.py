@@ -557,7 +557,25 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     if source == "spotify":
         try:
             spotify = get_spotify_client(client_factory=spotify_client_factory)
-            if not spotify or not spotify.is_spotify_authenticated():
+            if not spotify:
+                return _default
+            # Availability, NOT auth: a user who picked Spotify Free
+            # (metadata.spotify_free) has no credentials by design, so
+            # is_spotify_authenticated() is False for them forever. Gating on it
+            # here silently demoted their configured source to the default —
+            # every caller then ran on Deezer while the UI still said Spotify,
+            # and watchlist scans for artists the fallback can't resolve found
+            # nothing. is_spotify_metadata_available() accepts real auth OR the
+            # no-creds source, which is what the other availability gates
+            # already use (see spotify_client's docstring on that method).
+            #
+            # Fall back to the auth probe when the object doesn't carry the
+            # availability one: a client shape we don't recognise must keep its
+            # old meaning, never be read as "Spotify is unavailable".
+            probe = getattr(spotify, "is_spotify_metadata_available", None)
+            if probe is None:
+                probe = spotify.is_spotify_authenticated
+            if not probe():
                 return _default
         except Exception:
             return _default
@@ -673,9 +691,9 @@ def get_primary_source_status(
             connected = bool(client and client.is_spotify_authenticated())
             # No-auth composite (fallback_source='spotify' + metadata.spotify_free):
             # works without authentication, so treat the free path's availability
-            # as "connected" too. get_client_for_source() returns None when not
-            # officially authed, so fetch the client directly to probe the free
-            # path — otherwise this check can never fire for a no-auth user.
+            # as "connected" too. (get_client_for_source() resolves free-served
+            # clients itself now; the direct probe stays as the belt for a
+            # client the resolver declined for any other reason.)
             if not connected and _get_config_value("metadata.spotify_free", False):
                 free_client = client
                 if free_client is None:
@@ -735,7 +753,17 @@ def get_client_for_source(
             client = get_spotify_client(client_factory=spotify_client_factory)
             if is_boot_phase():
                 return client if client and getattr(client, "sp", None) else None
-            if client and client.is_spotify_authenticated():
+            # Availability, not auth. is_spotify_metadata_available() is True
+            # when officially authenticated OR when the 'Spotify (no auth)'
+            # free source can serve — its docstring names availability gates
+            # like this one as exactly where it belongs. For a plain-Spotify
+            # user this is identical to the old is_spotify_authenticated()
+            # check; for a Spotify-Free user it is the difference between
+            # working and "provider is unavailable": the strict discography
+            # path resolves its client HERE, and everything downstream
+            # (provider_access's auth gate, the adapter's free search, the
+            # client's own _free_active routing) is already free-aware.
+            if client and client.is_spotify_metadata_available():
                 return client
         except Exception as e:
             logger.debug("spotify client get_for_source: %s", e)
@@ -766,3 +794,30 @@ def get_client_for_source(
         return get_bandcamp_client()
 
     return None
+
+
+def available_sources(candidates) -> list:
+    """Which of ``candidates`` can actually serve right now.
+
+    The UI needs this to avoid ASKING for a provider the user has switched
+    off. The strict discography path treats an explicit source request as
+    exclusive and fatal-if-unavailable — deliberately, because falling back
+    would look up a foreign provider's artist id, miss, and search by NAME,
+    which can serve a DIFFERENT artist's discography under this one's name.
+    So the honest fix is to never pin a dead provider in the first place,
+    and only this module knows which are alive.
+
+    A provider that raises while resolving counts as unavailable — this
+    feeds a UI affordance, never a correctness decision.
+    """
+    out = []
+    for source in candidates or ():
+        name = str(source or "").strip().lower()
+        if not name:
+            continue
+        try:
+            if get_client_for_source(name) is not None:
+                out.append(name)
+        except Exception as e:  # noqa: BLE001 - availability probe, never fatal
+            logger.debug("available_sources: %s probe failed: %s", name, e)
+    return out

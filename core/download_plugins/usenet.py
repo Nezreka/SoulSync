@@ -34,6 +34,7 @@ from core.download_plugins.album_bundle import (
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.candidate_store import get_candidate_store
 from core.download_plugins.torrent import (
+    prowlarr_search_with_variants,
     _adapter_state_to_display,
     _decode_filename,
     _guess_quality_from_title,
@@ -102,16 +103,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
     ) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self._prowlarr.is_configured():
             return ([], [])
-        try:
-            indexer_ids = _parse_indexer_id_filter()
-            results = await self._prowlarr.search(
-                query,
-                categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=indexer_ids,
-            )
-        except Exception as e:
-            logger.error("Usenet plugin search failed: %s", e)
-            return ([], [])
+        results = await prowlarr_search_with_variants(
+            self._prowlarr, query, "usenet", timeout=timeout,
+        )
         return self._project_results(results)
 
     def _project_results(
@@ -525,9 +519,8 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         query = f"{artist_name} {album_name}".strip()
         _emit('searching', query=query)
         try:
-            search_results = run_async(self._prowlarr.search(
-                query, categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=_parse_indexer_id_filter(),
+            search_results = run_async(prowlarr_search_with_variants(
+                self._prowlarr, query, 'usenet',
             ))
         except Exception as e:
             result['error'] = f'Prowlarr search failed: {e}'

@@ -273,6 +273,64 @@ def test_smart_ranking_prefers_more_played_in_same_tier(db):
     assert ids[0] == "hit"
 
 
+# ── Library Radio (seedless mode) ─────────────────────────────────────────
+
+
+def test_library_radio_returns_tracks_with_no_seed_and_no_excludes(db):
+    """The seedless path with an EMPTY exclude set must not emit `NOT IN ()`
+    (a sqlite syntax error) — the clause is conditional."""
+    _add_artist(db, "ar1", "A One")
+    _add_artist(db, "ar2", "A Two")
+    _add_album(db, "al1", "ar1", "Album One")
+    _add_album(db, "al2", "ar2", "Album Two")
+    _add_track(db, "t1", "al1", "ar1", "T1")
+    _add_track(db, "t2", "al2", "ar2", "T2")
+    db._conn.commit()
+
+    res = db.get_library_radio_tracks(limit=10)
+    assert res["success"] is True
+    assert {t["id"] for t in res["tracks"]} == {"t1", "t2"}
+
+
+def test_library_radio_honors_excludes_and_file_filter(db):
+    _add_artist(db, "ar1", "A One")
+    _add_album(db, "al1", "ar1", "Album One")
+    _add_track(db, "keep", "al1", "ar1", "Keep")
+    _add_track(db, "skip", "al1", "ar1", "Skip Me")
+    _add_track(db, "nofile", "al1", "ar1", "No File", file_path="")
+    db._conn.commit()
+
+    res = db.get_library_radio_tracks(limit=10, exclude_ids=["skip"])
+    ids = [t["id"] for t in res["tracks"]]
+    assert ids == ["keep"]
+
+
+def test_library_radio_ranking_is_wired(db):
+    """Same wiring claim as the seeded test: the heavily-played track ranks
+    first out of the pooled random fetch."""
+    _add_artist(db, "ar1", "A One")
+    _add_album(db, "al1", "ar1", "Album One")
+    for i in range(15):
+        _add_track(db, f"rare{i}", "al1", "ar1", f"Rare {i}", play_count=0)
+    _add_track(db, "hit", "al1", "ar1", "Big Hit", play_count=5000)
+    db._conn.commit()
+
+    res = db.get_library_radio_tracks(limit=5)
+    assert res["success"] is True
+    assert res["tracks"][0]["id"] == "hit"
+
+
+def test_library_radio_respects_limit(db):
+    _add_artist(db, "ar1", "A One")
+    _add_album(db, "al1", "ar1", "Album One")
+    for i in range(30):
+        _add_track(db, f"t{i}", "al1", "ar1", f"T {i}")
+    db._conn.commit()
+
+    res = db.get_library_radio_tracks(limit=5)
+    assert len(res["tracks"]) == 5
+
+
 def test_works_without_ranking_columns(db_no_rank):
     """Defensive: a DB predating the play_count/lastfm migration must still
     return radio tracks (column probe omits the missing fields)."""

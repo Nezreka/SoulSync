@@ -24,7 +24,18 @@ _CSS = (_ROOT / "webui" / "static" / "automations-redesign.css").read_text(encod
 _HTML = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 _JS = (_ROOT / "webui" / "static" / "stats-automations.js").read_text(encoding="utf-8")
 _VJS = (_ROOT / "webui" / "static" / "video" / "video-automations.js").read_text(encoding="utf-8")
-_SOURCES = _HTML + _JS + _VJS
+
+# The MUSIC automations list is a React page now (webui/src/routes/automations),
+# so its markup lives in JSX rather than in index.html or stats-automations.js.
+# The video page still renders from the shared vanilla builders, which is why
+# those two sources stay. Without the React source this check reports every
+# music-side class as an unused selector.
+_REACT = "".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted((_ROOT / "webui" / "src" / "routes" / "automations").rglob("*.ts*"))
+    if ".test." not in p.name
+)
+_SOURCES = _HTML + _JS + _VJS + _REACT
 
 # Ancestors that guarantee a rule only applies on the automations surfaces.
 _SCOPES = (
@@ -35,6 +46,11 @@ _SCOPES = (
     # satellite surfaces that mount on document.body — scoped by their own
     # automations-specific class names
     ".automation-history-modal", ".auto-group-dropdown",
+    # The builder palette. Used by BOTH builders (#builder-sidebar and
+    # #vauto-builder-sidebar carry it) and by nothing else in the app, so the
+    # class is itself the scope — styling it under .automations-builder-view
+    # would reach the music builder only.
+    ".builder-sidebar",
 )
 
 
@@ -77,7 +93,9 @@ def test_every_styled_class_exists_in_the_markup():
     """A selector styling a class nothing renders is a silent no-op — a typo."""
     # Classes composed at runtime (class="history-log-" + log.type) never
     # appear as literals in source; the composing prefix proves the family.
-    _DYNAMIC_PREFIXES = ("history-log-",)
+    # `sched-` joins it for the tile's schedule state, composed the same way
+    # (`sched-${schedule.state}`) from automationSchedule's union.
+    _DYNAMIC_PREFIXES = ("history-log-", "sched-")
     missing = []
     for sel in _selectors():
         for cls in re.findall(r"\.([a-zA-Z][\w-]*)", sel):

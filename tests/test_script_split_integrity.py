@@ -27,22 +27,25 @@ _ROOT = Path(__file__).resolve().parent.parent
 _STATIC = _ROOT / "webui" / "static"
 _INDEX = _ROOT / "webui" / "index.html"
 
-# The 17 modules that replaced script.js + shared-helpers.js extracted from
-# artists.js (order matters for first/last checks)
+# The modules that replaced script.js + shared-helpers.js extracted from
+# artists.js (order matters for first/last checks).
+#
+# search.js is GONE — /search is entirely React now (webui/src/routes/search/)
+# and the file was deleted. Its one live symbol, loadInitialData, was the app's
+# boot routine and moved to init.js.
 SPLIT_MODULES = [
     "core.js",
     "shared-helpers.js",
     "media-player.js",
     "settings.js",
-    "search.js",
     "sync-spotify.js",
     "downloads.js",
     "wishlist-tools.js",
     "sync-services.js",
     "api-monitor.js",
-    "library.js",
+    "library-globals.js",
+    "manual-library-match.js",
     "beatport-ui.js",
-    "discover.js",
     "enrichment.js",
     "stats-automations.js",
     "auto-sync.js",
@@ -60,16 +63,21 @@ NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "work
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
 # regressions from the split — they should be deduplicated in a follow-up.
 KNOWN_CROSS_FILE_DUPES = {
-    "escapeHtml",        # downloads.js, shared-helpers.js, discover.js
+    "escapeHtml",        # downloads.js, shared-helpers.js
     "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
-    "matchedDownloadTrack",    # downloads.js, wishlist-tools.js
-    "matchedDownloadAlbum",    # downloads.js, wishlist-tools.js
-    "matchedDownloadAlbumTrack",  # downloads.js, wishlist-tools.js
-    "_esc",              # library.js, stats-automations.js
     "_escAttr",          # downloads.js, stats-automations.js
-    "_formatDuration",   # stats-automations.js, pages-extra.js
-    "loadDashboardData", # search.js, wishlist-tools.js
+    "_formatDuration",   # stats-automations.js, wishlist-tools.js
+                         # (pages-extra.js declared a THIRD, millisecond-based
+                         #  copy that loaded last and shadowed both; it went
+                         #  with the playlist-explorer port, which fixed the
+                         #  "0:00" durations in the download-audit UI)
 }
+# Resolved by the basic-search React port, and removed from the set above
+# because test_known_dupes_still_tracked fails on a stale entry:
+#   matchedDownloadTrack / matchedDownloadAlbum / matchedDownloadAlbumTrack
+#     — downloads.js declared all three AND so did wishlist-tools.js, which
+#       loads second, so the downloads.js copies had never run. Deleted.
+#   loadDashboardData — search.js's copy went with the file.
 
 # Pre-existing same-file duplicates (two filter UIs reuse the same names).
 # (the wishlist-tools double-pasted filter block was removed — c5a8bf241 —
@@ -276,6 +284,12 @@ class TestNoCrossFileWindowAssignments:
             text = _read(_STATIC / module)
             self.module_fns[module] = set(_all_function_decls(text))
             for prop, value in _WINDOW_ASSIGN_RE.findall(text):
+                # `window.flag = false;` assigns a LITERAL, not a function —
+                # the identifier regex catches keywords too (e.g. core.js's
+                # window._socketConnected mirror). Only identifier values can
+                # be cross-file ReferenceErrors.
+                if value in ("true", "false", "null", "undefined"):
+                    continue
                 self.window_assigns[module].append((prop, value))
 
     def test_no_cross_file_references(self):

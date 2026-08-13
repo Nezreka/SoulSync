@@ -228,7 +228,7 @@ class AmazonWorker:
             # Priority 4: Retry not_found artists
             cursor.execute("""
                 SELECT id, name FROM artists
-                WHERE amazon_match_status = 'not_found' AND amazon_last_attempted < ?
+                WHERE amazon_match_status IN ('not_found', 'error') AND amazon_last_attempted < ?
                 ORDER BY amazon_last_attempted ASC LIMIT 1
             """, (not_found_cutoff,))
             row = cursor.fetchone()
@@ -241,7 +241,7 @@ class AmazonWorker:
                 SELECT a.id, a.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.amazon_match_status = 'not_found' AND a.amazon_last_attempted < ?
+                WHERE a.amazon_match_status IN ('not_found', 'error') AND a.amazon_last_attempted < ?
                 ORDER BY a.amazon_last_attempted ASC LIMIT 1
             """, (not_found_cutoff,))
             row = cursor.fetchone()
@@ -253,7 +253,7 @@ class AmazonWorker:
                 SELECT t.id, t.title, ar.name AS artist_name, ar.amazon_id AS artist_amazon_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.amazon_match_status = 'not_found' AND t.amazon_last_attempted < ?
+                WHERE t.amazon_match_status IN ('not_found', 'error') AND t.amazon_last_attempted < ?
                 ORDER BY t.amazon_last_attempted ASC LIMIT 1
             """, (not_found_cutoff,))
             row = cursor.fetchone()
@@ -280,6 +280,13 @@ class AmazonWorker:
     def _name_matches(self, query_name: str, result_name: str) -> bool:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Titles that normalize to NOTHING ("(Intro)", "[Skit]", "!!!",
+            # "...") would compare at SequenceMatcher ratio 1.0 against any
+            # other such title — fall back to exact raw comparison instead.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return bool(raw_q) and raw_q == raw_r
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
@@ -352,6 +359,11 @@ class AmazonWorker:
     def _process_artist(self, artist_id: int, artist_name: str):
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
+            # Has an id but status may still be NULL (e.g. an id-only manual
+            # match) and _get_next_item selects NULL rows every loop — stamp
+            # 'matched' so this artist stops re-selecting and blocking the
+            # queue (#964, the JioSaavn fix applied here too).
+            self._mark_status('artist', artist_id, 'matched')
             logger.debug(f"Preserving existing Amazon ID for artist '{artist_name}': {existing_id}")
             return
 
@@ -386,6 +398,13 @@ class AmazonWorker:
             log_prefix='Amazon',
         ):
             self.stats['matched'] += 1
+            return
+        # honor_stored_match also returns False when the stored id failed to
+        # re-fetch (transient error / rate limit). Don't fall through to a
+        # name search — it could clobber a manual match. Only search when
+        # there's genuinely no stored id (the Bandcamp guard, applied here).
+        if self._get_existing_id('album', album_id):
+            logger.debug(f"Preserving Amazon match for album '{album_name}' despite a refresh miss")
             return
 
         query = f"{artist_name} {album_name}"
@@ -427,6 +446,13 @@ class AmazonWorker:
             log_prefix='Amazon',
         ):
             self.stats['matched'] += 1
+            return
+        # honor_stored_match also returns False when the stored id failed to
+        # re-fetch (transient error / rate limit). Don't fall through to a
+        # name search — it could clobber a manual match. Only search when
+        # there's genuinely no stored id (the Bandcamp guard, applied here).
+        if self._get_existing_id('track', track_id):
+            logger.debug(f"Preserving Amazon match for track '{track_name}' despite a refresh miss")
             return
 
         query = f"{artist_name} {track_name}"

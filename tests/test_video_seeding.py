@@ -9,6 +9,7 @@ seeding time, and the delete only ever touches the client's own copy.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +31,17 @@ def db(tmp_path):
     videoapi._video_db = d
     yield d
     videoapi._video_db = None
+
+
+@pytest.fixture(autouse=True)
+def _private_sweep_guard(monkeypatch):
+    """Isolate the module-global already-running guard per test. A background
+    automation thread leaked by an earlier test can be mid-sweep when a test
+    here calls sweep(), which used to surface the guard's skip return in
+    place of the real pass (the CI KeyError-'seeding' flake). A fresh flag
+    and lock mean a stranger's in-flight sweep is invisible."""
+    monkeypatch.setattr(seeding, "_running", False)
+    monkeypatch.setattr(seeding, "_lock", threading.Lock())
 
 
 def _torrent_row(db, ref="hash1", title="Heat"):
@@ -107,6 +119,15 @@ def test_failed_removal_retries_next_sweep(db, monkeypatch):
     out = seeding.sweep()
     assert out["released"] == 0 and out["seeding"] == 1
     assert len(db.torrents_awaiting_seed_release()) == 1   # still managed
+
+
+def test_already_running_skip_keeps_the_one_return_shape(monkeypatch):
+    """Every sweep() return carries the same key set — the keyless
+    already_running skip used to KeyError callers that index directly."""
+    monkeypatch.setattr(seeding, "_running", True)
+    out = seeding.sweep()
+    assert out == {"status": "skipped", "reason": "already_running",
+                   "checked": 0, "released": 0, "seeding": 0}
 
 
 # ---------------------------------------------------------------------------

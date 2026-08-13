@@ -154,7 +154,11 @@ def sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
-    sanitized = sanitized.rstrip(". ") or "_"
+    # Windows forbids TRAILING dots/spaces; Unix hides anything with a LEADING
+    # dot. #1129: "...Baby One More Time" created a dotfile directory that was
+    # invisible to `ls` and that Plex/Jellyfin/Navidrome skip entirely, so the
+    # album silently vanished from the library. Strip both ends.
+    sanitized = sanitized.strip(". ") or "_"
     if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)", sanitized, re.IGNORECASE):
         sanitized = "_" + sanitized
     return sanitized[:200]
@@ -506,6 +510,69 @@ def _coerce_int(value: Any, default: int = 1) -> int:
     return coerced if coerced > 0 else default
 
 
+def _reachable_original_dir(original_path: Any) -> str | None:
+    """Directory of an enhance/upgrade's existing library file, or ``None``.
+
+    ``None`` means "do not replace in place": either the recorded path can't be
+    mapped onto anything this process can see, or its folder no longer exists.
+    The caller then builds the normal template destination (#1109) instead of
+    trying to ``makedirs`` a media-server-only root such as ``/music``.
+
+    Note this only ever RETURNS an existing directory — it never creates one.
+    That is the whole point: the old behaviour created the media server's path
+    inside the container.
+    """
+    if not isinstance(original_path, str) or not original_path.strip():
+        return None
+    candidates = [original_path]
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        resolved = resolve_library_file_path(
+            original_path, config_manager=_get_config_manager())
+        if resolved:
+            candidates.append(resolved)
+    except Exception as exc:  # noqa: BLE001 - resolution is best-effort
+        logger.debug("[Enhance] library path resolution failed for %r: %s",
+                     original_path, exc)
+    roots = _configured_root_dirs()
+    for candidate in candidates:
+        parent = os.path.dirname(candidate)
+        if not parent or not os.path.isdir(parent):
+            continue
+        # A ROOT is not an album folder. When the recorded file sits loose in
+        # the Transfer/download root or a library root, that root exists, so
+        # "replace in place" would drop the upgrade straight back into the root
+        # — the exact symptom #1109 was reported as. Falling through to the
+        # template files it under Artist/Album instead, and the retirement step
+        # then removes the loose original.
+        if os.path.normpath(parent) in roots:
+            logger.debug(
+                "[Enhance] original sits in a library root (%s) — filing the "
+                "upgrade by template instead of replacing in place", parent)
+            continue
+        return parent
+    return None
+
+
+def _configured_root_dirs() -> set[str]:
+    """Normalized roots that must never be treated as an album folder."""
+    roots: set[str] = set()
+    try:
+        cfg = _get_config_manager()
+        raw = [cfg.get("soulseek.transfer_path", "./Transfer"),
+               cfg.get("soulseek.download_path", "./downloads")]
+        music_paths = cfg.get("library.music_paths", []) or []
+        if isinstance(music_paths, str):
+            music_paths = [music_paths]
+        raw.extend(music_paths)
+        for value in raw:
+            if isinstance(value, str) and value.strip():
+                roots.add(os.path.normpath(docker_resolve_path(value)))
+    except Exception as exc:  # noqa: BLE001 - a missing config must not block the upgrade
+        logger.debug("[Enhance] could not read the configured roots: %s", exc)
+    return roots
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -535,13 +602,25 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         except (json.JSONDecodeError, TypeError):
             source_info = {}
     if source_info.get("enhance") and source_info.get("original_file_path"):
-        original_path = source_info["original_file_path"]
-        original_dir = os.path.dirname(original_path)
-        original_stem = os.path.splitext(os.path.basename(original_path))[0]
-        final_path = os.path.join(original_dir, original_stem + file_ext)
-        _ensure_dir(original_dir, exist_ok=True)
-        logger.info("[Enhance] Using original file location: %s", final_path)
-        return final_path, True
+        original_dir = _reachable_original_dir(source_info["original_file_path"])
+        if original_dir:
+            original_stem = os.path.splitext(
+                os.path.basename(source_info["original_file_path"]))[0]
+            final_path = os.path.join(original_dir, original_stem + file_ext)
+            logger.info("[Enhance] Using original file location: %s", final_path)
+            return final_path, True
+        # #1109: `original_file_path` is the path as RECORDED, which is usually
+        # the media server's view of the library ("/music/…") rather than
+        # anything this process can reach. The old code ran makedirs on it
+        # unconditionally — creating a bogus container-local tree at best, and
+        # at worst dying with PermissionError, which aborted post-processing
+        # and left the finished upgrade sitting unsorted in the library root.
+        # An unreachable original is not a destination: fall through to the
+        # normal template so the upgrade still lands in Artist/Album.
+        logger.info(
+            "[Enhance] Original location %r is not reachable from here — "
+            "using the normal template destination instead.",
+            source_info["original_file_path"])
 
     year = ""
     if album_context and album_context.get("release_date"):

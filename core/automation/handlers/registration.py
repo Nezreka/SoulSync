@@ -142,6 +142,21 @@ def register_all(deps: AutomationDeps) -> None:
         lambda config: auto_deep_scan_library(config, deps),
         lambda: deps.get_db_update_state().get('status') == 'running',
     )
+    # The same incremental server-read on an hourly SCHEDULE rather than only after a
+    # SoulSync download, so manually-added music appears within the hour instead of
+    # waiting for the weekly deep scan. A distinct action_type because the system
+    # seeder looks rows up BY action_type — reusing 'start_database_update' would
+    # collide with the event-driven 'Auto-Update Database After Scan' row.
+    #
+    # full_refresh is pinned FIRST so a schedule can never full-refresh hourly by
+    # accident; an explicit config still wins for a hand-built automation. Shares
+    # the db_update_state guard, so an hourly tick during a long deep scan is
+    # skipped rather than queued.
+    engine.register_action_handler(
+        'start_database_update_hourly',
+        lambda config: auto_start_database_update({'full_refresh': False, **config}, deps),
+        lambda: deps.get_db_update_state().get('status') == 'running',
+    )
     engine.register_action_handler(
         'run_duplicate_cleaner',
         lambda config: auto_run_duplicate_cleaner(config, deps),

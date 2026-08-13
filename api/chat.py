@@ -243,6 +243,12 @@ def _unwrap_room_messages(messages):
             f = chat_codec.file_of(dec)
             if f:
                 m["file"] = f
+            # Edit carrier: the client fold replaces the target's displayed
+            # text and keeps the history; the carrier itself stays a real
+            # message (Soulseek can't unsend, so hiding it would lie).
+            e2 = chat_codec.edit_of(dec)
+            if e2:
+                m["ed"] = e2
         out.append(m)
     return out, reactions, protocol
 
@@ -1013,8 +1019,12 @@ def create_blueprint() -> Blueprint:
             if not _ensure_joined(client, room):
                 return jsonify({"error": "Could not join room '%s' — is slskd connected "
                                          "to the Soulseek network?" % room}), 502
-            messages = _run_async(client.get_room_messages(room))
-            users = _run_async(client.get_room_users(room))
+            # timeout=5: the chat page hydrates this every 4s, and the app has
+            # 8 request threads total — an unbounded wait on a slow slskd let
+            # one hung hydrate pin a slot indefinitely (perf sweep, Aug 2026).
+            # A miss 502s and the next poll simply tries again.
+            messages = _run_async(client.get_room_messages(room), timeout=5)
+            users = _run_async(client.get_room_users(room), timeout=5)
         except Exception as e:
             logger.exception("chat: room hydrate failed")
             return jsonify({"error": str(e)}), 502
@@ -1399,6 +1409,14 @@ def create_blueprint() -> Blueprint:
             tname = str(body.get("thread_name") or "").strip()[:80]
             if tname:
                 extra["tn"] = tname
+        # Message edit: 'ed' targets one of the sender's OWN earlier messages
+        # by key; this envelope's text is the replacement. Author-match and
+        # the 2-edit cap are enforced by the client fold on every machine —
+        # the server only shape-checks (edit_of).
+        edit = chat_codec.edit_of({"ed": body.get("edit")})
+        if edit:
+            extra = dict(extra or {})
+            extra["ed"] = edit
         wrapped = chat_codec.encode(msg, extra)
         if wrapped is None:
             return jsonify({"error": "message too long for Soulseek chat"}), 400

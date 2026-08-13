@@ -22,6 +22,7 @@ get rejected; the real track is then correctly reported missing.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable
 from typing import TypeVar
 
@@ -38,6 +39,23 @@ _TITLE_STOPWORDS = frozenset({
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
+
+def _fold(text: str) -> str:
+    """Casefold and drop combining accents, so 'Versión' tokenises to 'version'.
+
+    ``_TOKEN_RE`` is ASCII by design — a CJK tail yields no tokens at all, which
+    is what makes the version rules ABSTAIN on scripts whose vocabulary they
+    don't know instead of guessing. But that also silently excluded accented
+    Romance forms: 'Versión 1988' and 'En Directo' are the exact Spanish cases
+    :data:`_VERSION_MARKER_TOKENS` lists, and they tokenised to ``['versi', 'n']``.
+    NFKD + dropping the combining marks brings them back without widening the
+    rule to any new script.
+    """
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", (text or "").casefold())
+        if not unicodedata.combining(ch)
+    )
+
 # Char ratio at/above which two titles are treated as the same regardless of
 # shared words — covers typos, punctuation, casing, accents. Tuned so single-
 # word typos ("Beleive"/"Believe" = 0.857) pass while the #769 false positives
@@ -46,7 +64,7 @@ _NEAR_IDENTICAL = 0.85
 
 
 def _content_tokens(text: str) -> set[str]:
-    return {t for t in _TOKEN_RE.findall((text or "").lower()) if t not in _TITLE_STOPWORDS}
+    return {t for t in _TOKEN_RE.findall(_fold(text)) if t not in _TITLE_STOPWORDS}
 
 
 def titles_plausibly_same(
@@ -132,16 +150,174 @@ _VERSION_MARKER_TOKENS = frozenset({
     "club", "mashup", "bootleg", "cover", "covers", "reprise", "session",
     "sessions", "mono", "stereo", "duet", "rework", "dub", "vip", "single",
     "radio", "alt", "alternate", "alternative", "take", "edition", "orchestral",
-    "symphonic", "piano", "acapella", "cappella", "nightcore",
+    "symphonic", "piano", "acapella", "cappella", "nightcore", "vocal",
+    "clean", "explicit",
     # Distinct-track qualifiers — '(Interlude)' etc. are SEPARATE short tracks
     # that share the base name with the full song; never treat as subtitles.
     "interlude", "intro", "outro", "skit", "freestyle", "medley", "snippet",
     # Part/volume markers whose number can be non-numeric ('Pt. II') — the
     # digit guard below only catches actual digits.
     "pt", "part", "vol", "ii", "iii", "iv", "vi", "vii", "viii",
-    # Spanish (unidecode-normalized; 'versión' → 'version' is covered above)
-    "directo", "vivo", "dueto",
+    # Romance languages (accent-folded by `_fold`, so 'versión' → 'version'
+    # above covers it). Their word order puts the marker FIRST and the modifier
+    # after it ('Versión Extendida', 'Version Française'), which no positional
+    # rule can generalise without re-admitting 'Radio Ga Ga' — so the modifiers
+    # are vocabulary too, listed under _VERSION_TAIL_FILLERS.
+    "directo", "vivo", "dueto", "extendida", "extendido",
+    "versione", "versao", "fassung",
+    # Performance/edition markers only the dash-tail rule needs; harmless in
+    # strip_subtitle_qualifiers, where one more marker only means one more
+    # qualifier is KEPT (the conservative direction).
+    "recorded", "bonus", "broadcast",
+    # Japanese / K-pop catalogue abbreviations. Measured against the 13,728
+    # real titles in the user's library, where the JP-language releases write
+    # their version tags in ASCII: 'Inst Ver.', 'Movie ver.', 'Chill Ver.',
+    # 'TV Size'. None of these carried a marker before, so every one of them
+    # normalized differently from its '(…)' twin.
+    "ver", "inst", "size",
+    # Release-format suffixes the Deezer/iTunes catalogue appends to ALBUM
+    # names ('Beyoncé (Platinum Edition) - EP'). 'ep' is safe as a last-token
+    # rule even though anime rows use it for episodes: 'Lord of the Mysteries
+    # EP 13' ends in the number, so it is not a tail.
+    "ep", "remixes", "mixes",
 })
+
+# Markers that name a DIFFERENT track sharing the base name, not an annotated
+# version of the same recording. The two consumers need opposite handling:
+# strip_subtitle_qualifiers keeps a qualifier containing them (so the mismatch
+# penalty stands), while the dash-tail rule must never DROP them — collapsing
+# 'Song - Pt. 1' and 'Song - Pt. 2' (or 'Song' and 'Song - Interlude') onto one
+# normalized identity scores a wrong file at 1.00 and turns a FAIL into a PASS.
+_DISTINCT_TRACK_TOKENS = frozenset({
+    "interlude", "intro", "outro", "skit", "medley", "snippet", "freestyle",
+    "pt", "part", "vol", "ii", "iii", "iv", "vi", "vii", "viii",
+})
+
+# The vocabulary the dash-tail rule may act on.
+_VERSION_TAIL_MARKERS = _VERSION_MARKER_TOKENS - _DISTINCT_TRACK_TOKENS
+
+# Markers that legitimately introduce a venue ('Live at Wembley'). Deliberately
+# a small subset: with the full marker set, 'Take On Me' and 'Piano in the Dark'
+# would read as venue tails.
+_PERFORMANCE_MARKERS = frozenset({
+    "live", "recorded", "unplugged", "acoustic", "session", "sessions",
+    "directo", "vivo",
+})
+_VENUE_PREPOSITIONS = frozenset({
+    "at", "from", "in", "on",          # en
+    "en", "desde", "em", "ao",         # es / pt
+    "aus", "im",                       # de
+})
+
+# Padding that appears inside a real version tail without carrying identity of
+# its own. Kept tight ON PURPOSE — never pronouns or nouns that could be the
+# point of a title ('me', 'you', 'man', 'girl'), since every word added here
+# widens rule B.
+_VERSION_TAIL_FILLERS = frozenset({
+    "the", "a", "an", "and", "or", "of", "with", "de", "la",
+    "original", "official", "super", "ultra", "full", "new", "digital",
+    "track", "album", "studio", "master", "anniversary", "deluxe", "special",
+    "limited", "expanded", "reissue", "up",
+    # Language qualifiers: they say which version, never which song.
+    "francaise", "francais", "italiana", "italiano", "espanola", "espanol",
+    "deutsche", "english", "japanese", "korean",
+})
+_TAIL_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
+
+# CJK version tags, matched against the WHOLE tail by equality.
+#
+# `_TOKEN_RE` is ASCII, so a Japanese/Chinese/Korean tail yields no tokens and
+# the token rules abstain — which is the safe default for a script whose
+# vocabulary they don't know, but it also left a real '- ライブ' tail
+# normalizing differently from its '(Live)' twin. Equality (not substring) is
+# what keeps a song actually called 「ライブが終わって」 intact.
+_CJK_VERSION_TAGS = frozenset({
+    # Japanese
+    "ライブ", "ライヴ", "インスト", "インストゥルメンタル", "カラオケ",
+    "オフボーカル", "リミックス", "アコースティック", "バージョン", "ヴァージョン",
+    "生演奏", "伴奏", "短縮版", "劇場版",
+    # Chinese
+    "現場", "现场", "純音樂", "纯音乐", "伴奏版", "live版",
+    # Korean
+    "라이브", "인스트", "리믹스", "노래방", "반주",
+})
+_CJK_TRIM_RE = re.compile(r"[\s\W_]+", re.UNICODE)
+
+
+def _is_tail_padding(token: str) -> bool:
+    return token in _VERSION_TAIL_FILLERS or bool(_TAIL_YEAR_RE.match(token))
+
+
+def is_trailing_version_qualifier(text: str) -> bool:
+    """Whether a DASH-separated tail describes a version rather than a title.
+
+    Brackets are unambiguous — anything inside ``(...)`` is an annotation, so
+    a single marker token anywhere in the group is enough there. A dash is
+    not: it separates artist from title, and plenty of real titles open with
+    a marker word. "Contains a marker" therefore over-strips catastrophically
+    (PR #1121 review — ``Queen - Radio Ga Ga`` → ``queen``, ``Billy Joel -
+    Piano Man`` → ``billy joel``), and those decisions feed AcoustID
+    verification, so it mis-verifies genuine tracks.
+
+    What separates the families is WHERE the marker sits, but "ends in a
+    marker" alone is too narrow to be the whole rule: Spotify's two most
+    common tails, ``- Remastered 2011`` and ``- Live at Wembley Stadium``,
+    both end in a non-marker word, so that rule left the dash form
+    normalizing differently from the ``(Remastered 2011)`` bracket form — the
+    exact drift this helper exists to prevent. Three shapes are accepted:
+
+      A. the tail ENDS in a marker — ``Don Diablo Edit``, ``2011 Remaster``,
+         ``Slowed + Reverb``, ``Live``. This is what admits the
+         producer-credit forms; requiring the tail to be *entirely* marker
+         words would drop them.
+      B. markers plus padding ONLY — ``Remastered 2011``, ``Remaster 2009``,
+         ``Sped Up``, ``Bonus Track``. Padding is a deliberately small closed
+         set (:data:`_VERSION_TAIL_FILLERS`) plus 19xx/20xx years; arbitrary
+         numbers are excluded so ``Take 3`` and ``Vol. 2`` stay put.
+      C. a performance marker introducing a venue — ``Live at Wembley``,
+         ``Live From Paris``, ``Recorded at Abbey Road``.
+
+    and one veto that outranks all three: a tail containing a
+    :data:`_DISTINCT_TRACK_TOKENS` word (``Pt. 2``, ``Interlude``) names a
+    different track, so it is never dropped.
+
+    Rule C's only known over-match is a real title of the shape ``Live in the
+    Moment``. That is survivable by construction, not by luck:
+    ``audio_verification.similarity`` scores the un-stripped form as well and
+    keeps the better of the two, so a wrong strip costs nothing while a missed
+    strip would leave a genuine ``- Remastered 2011`` track below threshold.
+
+    ``_VERSION_MARKER_TOKENS`` stays shared with
+    :func:`strip_subtitle_qualifiers` so both paths grow the same vocabulary.
+    """
+    tokens = _TOKEN_RE.findall(_fold(text))
+    if not tokens:
+        # No ASCII token at all — the only thing that can be decided here is
+        # whether the whole tail IS one of the known CJK version words.
+        return _CJK_TRIM_RE.sub("", (text or "").casefold()) in _CJK_VERSION_TAGS
+    if any(t in _DISTINCT_TRACK_TOKENS for t in tokens):
+        return False
+    if tokens[-1] in _VERSION_TAIL_MARKERS:
+        return True
+    if any(t in _VERSION_TAIL_MARKERS for t in tokens) and all(
+        t in _VERSION_TAIL_MARKERS or _is_tail_padding(t) for t in tokens
+    ):
+        return True
+    for idx, token in enumerate(tokens):
+        if token not in _VENUE_PREPOSITIONS:
+            continue
+        # Everything before the preposition must be version vocabulary, and at
+        # least one word of it a performance marker ('En Directo en Madrid'
+        # opens with a preposition of its own, hence they count as head
+        # padding too). A failing head is not a verdict — a later preposition
+        # may still open the venue ('Take On Me' finds none and stays put).
+        head = tokens[:idx]
+        if any(t in _PERFORMANCE_MARKERS for t in head) and all(
+            t in _VERSION_TAIL_MARKERS or t in _VENUE_PREPOSITIONS or _is_tail_padding(t)
+            for t in head
+        ):
+            return True
+    return False
 
 
 def strip_subtitle_qualifiers(title: str, other_title: str) -> str:
@@ -270,6 +446,7 @@ def choose_best_title_candidate(
 
 __all__ = [
     "titles_plausibly_same",
+    "is_trailing_version_qualifier",
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",

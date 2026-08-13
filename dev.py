@@ -11,6 +11,7 @@ import atexit
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -22,6 +23,8 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOG_DIR = ROOT_DIR / 'logs'
 GUNICORN_CONFIG = ROOT_DIR / 'gunicorn.dev.conf.py'
 VITE_URL = os.environ.get('SOULSYNC_WEBUI_VITE_URL', 'http://127.0.0.1:5173').rstrip('/')
+# Which interface Vite binds. Loopback by default; `--lan` widens it (see main()).
+VITE_BIND_HOST = '127.0.0.1'
 VITE_LOG_FILE = Path(os.environ.get('SOULSYNC_WEBUI_VITE_LOG', str(LOG_DIR / 'webui-vite.log')))
 
 INCLUDED_SUFFIXES = {'.py', '.html', '.jinja', '.jinja2'}
@@ -35,6 +38,22 @@ FORCE_KILL_ON_SHUTDOWN = os.environ.get('SOULSYNC_FORCE_KILL_ON_SHUTDOWN', '1').
 
 shutdown_requested = False
 managed_processes: list[tuple[str, subprocess.Popen, object | None]] = []
+
+
+def detect_lan_ip() -> str | None:
+    """Best-effort address other devices on the network can reach us at.
+
+    Opens a UDP socket toward a public address and reads back the local end the
+    OS picked. No packets are actually sent, and nothing needs to be reachable.
+    Under WSL this returns the WSL adapter's address, which a phone cannot reach
+    — that is what `--lan=<ip>` is for.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(('8.8.8.8', 80))
+            return probe.getsockname()[0]
+    except OSError:
+        return None
 
 
 def resolve_command(*candidates: str) -> str | None:
@@ -219,7 +238,7 @@ def start_vite() -> subprocess.Popen:
         'dev',
         '--',
         '--host',
-        '127.0.0.1',
+        VITE_BIND_HOST,
         '--port',
         '5173',
     ]
@@ -319,10 +338,26 @@ def main() -> int:
     # `--lan` exposes the dev server on the network (binds 0.0.0.0) so you can
     # reach it from another device at http://<this-pc-ip>:8008. Default stays
     # localhost-only. Set before build_backend_env() so both backend modes see it.
-    if '--lan' in sys.argv:
+    lan_arg = next((a for a in sys.argv if a == '--lan' or a.startswith('--lan=')), None)
+    if lan_arg:
+        global VITE_URL, VITE_BIND_HOST
         os.environ['SOULSYNC_WEB_BIND_HOST'] = '0.0.0.0'
-        print('LAN mode ON — dev server reachable from other devices on your network '
-              '(http://<this-pc-ip>:8008). Allow port 8008 through the firewall if needed.')
+        # Exposing Flask is only half of it. In dev the page loads React from the
+        # VITE dev server by absolute URL, so Vite has to (a) listen off-loopback
+        # and (b) be ADVERTISED at an address the other device can reach. Miss
+        # either and index.html hands the phone "http://127.0.0.1:5173/…" — which
+        # IS the phone — so the bundle never loads and every React page renders
+        # empty while the vanilla pages, served by Flask, look perfectly fine.
+        VITE_BIND_HOST = '0.0.0.0'
+        host = lan_arg.split('=', 1)[1].strip() if '=' in lan_arg else (detect_lan_ip() or '')
+        if host:
+            VITE_URL = f'http://{host}:5173'
+            os.environ['SOULSYNC_WEBUI_VITE_URL'] = VITE_URL
+            print(f'LAN mode ON — open http://{host}:8008 from the other device.')
+        else:
+            print('LAN mode ON, but this machine\'s LAN address could not be detected.')
+            print('Re-run as --lan=<this-pc-ip>, or React pages will be blank on other devices.')
+        print('Allow ports 8008 and 5173 through the firewall if needed.')
 
     if not (ROOT_DIR / 'webui' / 'node_modules').is_dir():
         print('webui/node_modules is missing.')

@@ -461,7 +461,7 @@ class SpotifyWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE spotify_match_status = 'not_found' AND spotify_last_attempted < ?
+                WHERE spotify_match_status IN ('not_found', 'error') AND spotify_last_attempted < ?
                 ORDER BY spotify_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -473,7 +473,7 @@ class SpotifyWorker:
                 SELECT a.id, a.title, ar.name AS artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.spotify_match_status = 'not_found' AND a.spotify_last_attempted < ?
+                WHERE a.spotify_match_status IN ('not_found', 'error') AND a.spotify_last_attempted < ?
                 ORDER BY a.spotify_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -485,7 +485,7 @@ class SpotifyWorker:
                 SELECT t.id, t.title, ar.name AS artist_name
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.spotify_match_status = 'not_found' AND t.spotify_last_attempted < ?
+                WHERE t.spotify_match_status IN ('not_found', 'error') AND t.spotify_last_attempted < ?
                 ORDER BY t.spotify_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -1268,6 +1268,13 @@ class SpotifyWorker:
     def _name_similarity(self, query_name: str, result_name: str) -> float:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            # Names that normalize to NOTHING ("!!!", "+", "...") score a
+            # perfect 1.0 against any other such name — exact raw equality is
+            # the only honest signal left for them.
+            raw_q = (query_name or '').strip().lower()
+            raw_r = (result_name or '').strip().lower()
+            return 1.0 if (raw_q and raw_q == raw_r) else 0.0
         return SequenceMatcher(None, norm_query, norm_result).ratio()
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:

@@ -16,6 +16,19 @@ from core.media_server.types import TrackInfo, PlaylistInfo
 logger = get_logger("jellyfin_client")
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    """Best-effort int for query params that may arrive as strings.
+
+    Jellyfin accepts numeric params either way, so callers legitimately send
+    both `{"Limit": 500}` and `{"Limit": "500"}`. Anything comparing them
+    numerically has to normalise first or it raises TypeError on the string.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class JellyfinArtist:
     """Wrapper class to mimic Plex artist object interface"""
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
@@ -478,8 +491,13 @@ class JellyfinClient(MediaServerClient):
             'Content-Type': 'application/json'
         }
 
-        # Use configurable timeout for bulk operations (lots of data)
-        is_bulk_operation = params and params.get('Limit', 0) > 1000
+        # Use configurable timeout for bulk operations (lots of data).
+        # `params` comes from every caller of this client and Jellyfin accepts
+        # numbers as strings, so Limit arrives as either — core/video/sources.py
+        # `_paged` sends {"Limit": "500"}. Comparing str to int raises
+        # TypeError, which killed the entire video library scan before a single
+        # item was read. Coerce rather than trusting the caller's type.
+        is_bulk_operation = _as_int(params.get('Limit')) > 1000 if params else False
         config = config_manager.get_jellyfin_config()
         bulk_timeout = int(config.get('api_timeout', 120))
         timeout = bulk_timeout if is_bulk_operation else max(5, bulk_timeout // 6)

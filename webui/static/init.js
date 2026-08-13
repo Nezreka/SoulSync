@@ -106,9 +106,14 @@ function applyParticlesSetting(enabled) {
     if (canvas) canvas.style.display = enabled ? '' : 'none';
     if (window.pageParticles) {
         if (enabled) {
+            // React-owned pages have no .page.active node — the shell's
+            // currentPage covers both worlds.
             const activePage = document.querySelector('.page.active');
-            if (activePage) {
-                window.pageParticles.setPage(activePage.id.replace('-page', ''));
+            const activeId = activePage
+                ? activePage.id.replace('-page', '')
+                : (typeof currentPage !== 'undefined' ? currentPage : null);
+            if (activeId) {
+                window.pageParticles.setPage(activeId);
             }
         } else {
             window.pageParticles.stop();
@@ -123,8 +128,9 @@ function applyWorkerOrbsSetting(enabled) {
     localStorage.setItem('soulsync-worker-orbs', String(enabled));
     if (window.workerOrbs) {
         if (enabled) {
-            const activePage = document.querySelector('.page.active');
-            if (activePage && activePage.id === 'dashboard-page') {
+            // The dashboard is React-rendered (no .page.active node) — the
+            // shell's currentPage is the truth for both worlds.
+            if (typeof currentPage !== 'undefined' && currentPage === 'dashboard') {
                 window.workerOrbs.setPage('dashboard');
             }
         } else {
@@ -208,7 +214,9 @@ function applyReduceEffects(enabled) {
     } else {
         // Restore only what the user's own toggles still allow.
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -268,7 +276,9 @@ function applyMaxPerformance(enabled) {
         // Restore whatever the user's own toggles (and reduce-effects) still allow.
         const reduce = window._reduceEffectsActive === true;
         const activePage = document.querySelector('.page.active');
-        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        const activeId = activePage
+            ? activePage.id.replace('-page', '')
+            : (typeof currentPage !== 'undefined' ? currentPage : null);
         if (!reduce && window._particlesEnabled !== false) {
             if (pcanvas) pcanvas.style.display = '';
             if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
@@ -495,6 +505,10 @@ function notifyProfileContextChanged() {
 
 function setCurrentProfile(profile) {
     currentProfile = profile;
+    // Script-scoped let — unreachable from React modules, so the name is
+    // mirrored (the window._socketConnected pattern). The dashboard's
+    // hello strip greets by it.
+    window._currentProfileName = (profile && profile.name) || '';
     updateProfileIndicator();
     notifyProfileContextChanged();
 }
@@ -2872,7 +2886,13 @@ function initApp() {
     initializeMobileNavigation();
     initializeMediaPlayer();
     initExpandedPlayer();
-    initializeSyncPage();
+    // initializeSyncPage() was here. It ran on EVERY page load, not just sync,
+    // and every branch inside it looks up sync markup that no longer exists —
+    // the Beatport tab button, #beatport-clear-btn, the tab strip. Its one
+    // cross-cutting job was initializeLiveLogViewer(), which targets
+    // #sync-log-area; the React sidebar renders that textarea and drives its
+    // own /api/logs poller (sync-sidebar.tsx), so the vanilla half is now a
+    // no-op that would only race it.
     initializeWatchlist();
     if (typeof initializeSpotifyAuthCompletionListener === 'function') {
         initializeSpotifyAuthCompletionListener();
@@ -2895,12 +2915,10 @@ function initApp() {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             fetchAndUpdateServiceStatus();
-            // Refresh dashboard-specific data if on dashboard
-            const dashboardPage = document.getElementById('dashboard-page');
-            if (dashboardPage && dashboardPage.classList.contains('active')) {
-                fetchAndUpdateSystemStats();
-                fetchAndUpdateActivityFeed();
-            }
+            // No dashboard-specific branch since the flip: the React cards'
+            // own pollers are hidden-gated, so the tick that lands after the
+            // tab returns refreshes them (the old .page.active check could
+            // never match the React page anyway).
         }
     });
 
@@ -3008,14 +3026,6 @@ function buildLabelDetailPath(labelId, name = null) {
     return path;
 }
 
-function parseLabelDetailPath(pathname = window.location.pathname) {
-    const segs = String(pathname || '').split('/').filter(Boolean);
-    if (segs[0] !== 'label-detail' || segs.length < 2) return null;
-    const id = decodeURIComponent(segs.slice(1).join('/'));
-    if (!id) return null;
-    const name = new URLSearchParams(window.location.search || '').get('name') || '';
-    return { id, name };
-}
 
 function navigateToLabelDetail(labelId, name = null, options = {}) {
     if (!labelId) return;
@@ -3073,6 +3083,60 @@ function initializeMobileNavigation() {
 
     overlay.addEventListener('click', closeMobileNav);
 
+    // Backstop for the overlay click above: the overlay is one element at a
+    // fixed z-index, so anything that paints over it swallows the tap and the
+    // drawer stays open. Closing on any click that lands outside the drawer
+    // doesn't care what's on top. The hamburger is excluded because its own
+    // handler already toggles — without this guard the two would fight and
+    // re-close the drawer the instant it opened.
+    document.addEventListener('click', (event) => {
+        if (!sidebar.classList.contains('mobile-open')) return;
+        if (sidebar.contains(event.target)) return;
+        if (hamburgerBtn.contains(event.target)) return;
+        closeMobileNav();
+    });
+
+    // A drag inside the drawer must never count as a tap on the link under the
+    // finger. Reported as "responds to scrolling as a tap first, making it
+    // change pages on each scroll" — every attempt to scroll the nav list
+    // navigated instead. Browsers normally cancel the synthetic click once a
+    // touch moves far enough, but they don't when the gesture scrolled nothing,
+    // which is exactly the case in a drawer whose list is short or already at
+    // an edge. Track the movement ourselves and swallow the click.
+    //
+    // Capture phase so this runs BEFORE the .nav-button handlers below and the
+    // anchors' own default navigation.
+    let touchStart = null;
+    let touchDragged = false;
+    const TAP_SLOP_PX = 8;   // a tap wobbles a few px; a drag does not
+
+    sidebar.addEventListener('touchstart', (event) => {
+        touchStart = event.touches.length === 1
+            ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+            : null;
+        touchDragged = false;
+    }, { passive: true });
+
+    sidebar.addEventListener('touchmove', (event) => {
+        if (!touchStart) return;
+        // Distance, not just vertical travel. A drag across the drawer moves
+        // mostly sideways and a Y-only check waves it straight through — the
+        // click then lands on whatever was under the FINGER AT TOUCHSTART,
+        // which is how pressing one entry and dragging away still opened it.
+        const dx = event.touches[0].clientX - touchStart.x;
+        const dy = event.touches[0].clientY - touchStart.y;
+        if (Math.hypot(dx, dy) > TAP_SLOP_PX) {
+            touchDragged = true;
+        }
+    }, { passive: true });
+
+    sidebar.addEventListener('click', (event) => {
+        if (!touchDragged) return;
+        touchDragged = false;          // one click per gesture; never latch
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+
     // Close sidebar on nav button click (mobile only)
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3121,6 +3185,48 @@ function restoreNavSections() {
     });
 }
 
+/**
+ * The wishlist hero button's behaviour, extracted from initializeWatchlist's
+ * click closure to a NAMED top-level function so the React dashboard header
+ * can call it too (window.openWishlistFromHero). It stays in init.js because
+ * it reads activeDownloadProcesses / WishlistModalState / rehydrateModal —
+ * all script-scoped, unreachable from a module. The body is the closure's,
+ * verbatim.
+ */
+async function openWishlistFromHero() {
+    // Fast path: check if we already know about an active wishlist process
+    const clientProcess = activeDownloadProcesses['wishlist'];
+    if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+        clientProcess.modalElement.style.display = 'flex';
+        WishlistModalState.setVisible();
+        return;
+    }
+    // Slow path: ask the server (with timeout to prevent button feeling dead)
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        const resp = await fetch('/api/active-processes', { signal: controller.signal });
+        clearTimeout(timeout);
+        if (resp.ok) {
+            const data = await resp.json();
+            const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
+            if (serverProcess) {
+                try {
+                    WishlistModalState.clearUserClosed();
+                    await rehydrateModal(serverProcess, true);
+                } catch (e) {
+                    console.debug('Rehydration failed, navigating to page:', e);
+                    navigateToPage('wishlist');
+                }
+                return;
+            }
+        }
+    } catch (e) {
+        // Timeout or network error — just navigate
+    }
+    navigateToPage('wishlist');
+}
+
 function initializeWatchlist() {
     // Watchlist button navigates to watchlist page
     const watchlistButton = document.getElementById('watchlist-button');
@@ -3131,39 +3237,7 @@ function initializeWatchlist() {
     // Wishlist button: quick check for active download, otherwise navigate to page
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
-        wishlistButton.addEventListener('click', async () => {
-            // Fast path: check if we already know about an active wishlist process
-            const clientProcess = activeDownloadProcesses['wishlist'];
-            if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
-                clientProcess.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-                return;
-            }
-            // Slow path: ask the server (with timeout to prevent button feeling dead)
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 2000);
-                const resp = await fetch('/api/active-processes', { signal: controller.signal });
-                clearTimeout(timeout);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
-                    if (serverProcess) {
-                        try {
-                            WishlistModalState.clearUserClosed();
-                            await rehydrateModal(serverProcess, true);
-                        } catch (e) {
-                            console.debug('Rehydration failed, navigating to page:', e);
-                            navigateToPage('wishlist');
-                        }
-                        return;
-                    }
-                }
-            } catch (e) {
-                // Timeout or network error — just navigate
-            }
-            navigateToPage('wishlist');
-        });
+        wishlistButton.addEventListener('click', openWishlistFromHero);
     }
 
     // Update watchlist count initially
@@ -3171,6 +3245,14 @@ function initializeWatchlist() {
 
     // Update count every 10 seconds
     setInterval(updateWatchlistButtonCount, 10000);
+
+    // The wishlist SIDEBAR badge's poll. This used to start from
+    // loadDashboardData on every dashboard visit (and leak — the interval was
+    // never cleared, so in steady state it ran app-wide anyway). The dashboard
+    // is React now and loadDashboardData is gone, so the poll lives here with
+    // its watchlist twin; updateWishlistCount itself skips ticks while the
+    // socket pushes.
+    setInterval(updateWishlistCount, 10000);
 
     console.log('Watchlist system initialized');
 }
@@ -3259,73 +3341,45 @@ async function loadPageData(pageId) {
         stopWishlistCountPolling();
         stopLogPolling();
         // Stop watchlist/wishlist page timers when navigating away
-        if (watchlistCountdownInterval) { clearInterval(watchlistCountdownInterval); watchlistCountdownInterval = null; }
         if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
-        if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
         }
         switch (pageId) {
-            case 'dashboard':
-                await loadDashboardData();
-                loadDashboardSyncHistory();
-                break;
-            case 'sync':
-                initializeSyncPage();
-                await loadSyncData();
-                break;
-            case 'search':
-                initializeSearch();
-                initializeSearchModeToggle();
-                initializeFilters();
-                break;
-            case 'label-detail': {
-                // Resolve the label from nav state, falling back to the URL
-                // (reload / browser-back). label-detail.js owns the render.
-                const lab = (_labelDetailState && _labelDetailState.id)
-                    ? _labelDetailState
-                    : (typeof parseLabelDetailPath === 'function' ? parseLabelDetailPath() : null);
-                if (lab && lab.id && typeof loadLabelDetailData === 'function') {
-                    if (typeof initializeLabelDetailPage === 'function') initializeLabelDetailPage();
-                    loadLabelDetailData(lab.id, lab.name || '');
-                }
-                break;
-            }
-            case 'active-downloads':
-                loadActiveDownloadsPage();
-                break;
-            case 'library':
-                // Check if we should return to artist detail view instead of list
-                if (artistDetailPageState.currentArtistId && artistDetailPageState.currentArtistName) {
-                    navigateToPage('artist-detail', {
-                        artistId: artistDetailPageState.currentArtistId,
-                        artistSource: artistDetailPageState.currentArtistSource,
-                    });
-                    if (!artistDetailPageState.isInitialized) {
-                        initializeArtistDetailPage();
-                        loadArtistDetailData(artistDetailPageState.currentArtistId, artistDetailPageState.currentArtistName);
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                } else {
-                    if (!libraryPageState.isInitialized) {
-                        initializeLibraryPage();
-                    }
-                    // Already initialized — DOM content persists, no reload needed
-                }
-                break;
+            // No 'dashboard' case: React owns /dashboard — the whole bento
+            // grid — and loadPageData only runs for legacy-kind pages.
+            // loadDashboardData (and its three leaked intervals) is deleted;
+            // every card hydrates itself on mount.
+            // No 'sync' case: React owns /sync, and loadPageData only runs for
+            // legacy-kind pages, so this could never fire again.
+            // No 'search' case: React owns /search — BOTH panels, enhanced and
+            // basic — and loadPageData only runs for legacy-kind pages, so this
+            // could never fire again. search.js, which used to bind the basic
+            // panel, is deleted.
+            // No 'label-detail' case: React owns /label-detail, and loadPageData
+            // only runs for legacy-kind pages. The vanilla renderer it used to
+            // call (label-detail.js) is deleted.
+            // No 'active-downloads' case: React owns /active-downloads, and
+            // loadPageData only runs for legacy-kind pages. The vanilla page
+            // it used to call lives in pages-extra.js and is deleted.
+            // No 'library' case: React owns /library, and loadPageData only runs
+            // for legacy-kind pages. resolvePageId() returns null for a React
+            // path and #library-page no longer exists, so neither route into
+            // here can reach it — and initializeLibraryPage is deleted.
             case 'artist-detail':
                 // Artist detail page is entered through the route handoff and legacy navigator.
                 break;
             case 'discover':
                 if (!discoverPageInitialized) {
-                    await loadDiscoverPage();
+                    if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
                     discoverPageInitialized = true;
                 }
                 // Already initialized — DOM content persists, no reload needed
                 break;
-            case 'playlist-explorer':
-                initExplorer();
-                break;
+            // No 'playlist-explorer' case: React owns /playlist-explorer, and
+            // loadPageData only runs for legacy-kind pages. The vanilla page it
+            // used to call lived in pages-extra.js and is deleted, along with
+            // #playlist-explorer-page.
             case 'settings':
                 // Suppress auto-save while the form is being populated, so opening
                 // Settings no longer fires a spurious full save (4 POSTs + backend
@@ -3366,15 +3420,13 @@ async function loadPageData(pageId) {
                 // Load comparisons
                 loadHydrabaseComparisons();
                 break;
-            case 'tools':
-                await initializeToolsPage();
-                break;
-            case 'watchlist':
-                await initializeWatchlistPage();
-                break;
-            case 'wishlist':
-                await initializeWishlistPage();
-                break;
+            // 'tools' is a React route now (P7). initializeToolsPage() wired the
+            // vanilla cards AND called switchRepairTab('jobs') + a 10s
+            // fetchAndUpdateDbStats interval — all of which write into ids and
+            // classes the React page renders, so leaving this case in would have
+            // it stomping React's own DOM on every visit.
+            // 'wishlist' is a React route now — navigateToPage shows the React
+            // host and never calls loadPageData for it.
             case 'automations':
                 await loadAutomations();
                 break;
@@ -3552,3 +3604,97 @@ async function loadPageData(pageId) {
         snapToCenterIfReady();
     });
 })();
+
+
+// ===========================================
+// APP BOOT
+// ===========================================
+
+/**
+ * Hydrate the persisted download bubbles, then navigate to the landing page.
+ *
+ * Moved here from search.js when basic search was ported to React and that
+ * file was deleted. It never had anything to do with search — it is the boot
+ * routine, and init.js is where it is called from.
+ */
+async function loadInitialData() {
+    try {
+        const initialPath = window.location.pathname;
+        const initialNavigationEpoch = navigationEpoch;
+
+        // Snapshot hydration is best-effort chrome — bubbles and the discover
+        // download bar. It must never decide whether the app navigates.
+        //
+        // `hydrateDiscoverDownloadsFromSnapshot` is published by the REACT
+        // bundle at module load (see -discover.use-download-bar.ts), unlike the
+        // two above it which live in shared-helpers.js. So when that bundle
+        // fails to arrive — blocked, 404, offline dev server — the bare call
+        // threw a ReferenceError that escaped to the catch below, skipping the
+        // navigateToPage() further down. The user got the shell with no page
+        // inside it at all. One absent feature must not cost the whole startup.
+        try {
+            await hydrateArtistBubblesFromSnapshot();
+            await hydrateSearchBubblesFromSnapshot();
+            // typeof on an undeclared identifier is safe; a bare call is not.
+            if (typeof hydrateDiscoverDownloadsFromSnapshot === 'function') {
+                await hydrateDiscoverDownloadsFromSnapshot();
+            } else {
+                console.warn('[init] discover download hydration unavailable — the React bundle did not load');
+            }
+        } catch (hydrationError) {
+            console.warn('[init] snapshot hydration failed; navigating anyway', hydrationError);
+        }
+
+        // Navigate to user's home page (or dashboard for admin)
+        const homePage = getProfileHomePage();
+        const urlPage = _getPageFromPath();
+        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+            ? urlPage
+            : homePage;
+
+        // A real navigation during startup means abandon it — whatever the user
+        // asked for wins, and it has already activated its own page.
+        if (navigationEpoch !== initialNavigationEpoch) {
+            return;
+        }
+
+        // The pathname changing is NOT the same thing. React's root route
+        // redirects "/" to the profile's home path in beforeLoad (see
+        // routes/index.tsx), which rewrites location.pathname while this async
+        // function is still mid-flight. Treating that as "the user navigated
+        // away" and returning meant showReactHost() below never ran: the URL
+        // read /dashboard while the React host was never activated, so the page
+        // was blank until you navigated by hand. Desktop wins that race and
+        // never sees it; a phone is slow enough to lose it. A redirect only
+        // answers the question startup was already asking, so adopt it.
+        if (window.location.pathname !== initialPath) {
+            const redirectedPage = _getPageFromPath();
+            if (redirectedPage && isPageAllowed(redirectedPage)) {
+                targetPage = redirectedPage;
+            }
+        }
+
+        if (targetPage === 'artist-detail') {
+            const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
+            if (artistRoute && typeof navigateToArtistDetail === 'function') {
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
+            }
+            return;
+        }
+
+        // Always apply the target page to the legacy shell chrome.
+        const router = getWebRouter();
+        const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+
+        if (route?.kind === 'react') {
+            showReactHost(targetPage);
+            setActivePageChrome(targetPage);
+            // Keep nested react-tab URLs like /import/auto or /import/singles intact.
+            return;
+        }
+
+        navigateToPage(targetPage, { forceReload: true });
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+    }
+}

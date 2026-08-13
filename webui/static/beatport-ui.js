@@ -345,9 +345,14 @@ function initializeBeatportReleasesSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Leaving the page runs
+    // cleanupBeatportReleasesSlider, which clears the autoplay interval — so
+    // coming back has to restart it, or the slider stays frozen for the rest of
+    // the session while its arrows and dots keep working. The hero slider above
+    // has always done this (see initializeBeatportRebuildSlider).
     if (slider.dataset.initialized === 'true') {
         console.log('Releases slider already initialized');
+        startBeatportReleasesSliderAutoPlay();
         return;
     }
 
@@ -1024,9 +1029,12 @@ function initializeBeatportChartsSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Re-entry must restart the autoplay that
+    // cleanupBeatportChartsSlider cleared on the way out — see the note in
+    // initializeBeatportReleasesSlider.
     if (slider.dataset.initialized === 'true') {
         console.log('Charts slider already initialized');
+        startBeatportChartsSliderAutoPlay();
         return;
     }
 
@@ -1320,9 +1328,12 @@ function initializeBeatportDJSlider() {
         return;
     }
 
-    // Prevent double initialization
+    // Prevent double initialization. Re-entry must restart the autoplay that
+    // cleanupBeatportDJSlider cleared on the way out — see the note in
+    // initializeBeatportReleasesSlider.
     if (slider.dataset.initialized === 'true') {
         console.log('DJ slider already initialized');
+        startBeatportDJSliderAutoPlay();
         return;
     }
 
@@ -2736,11 +2747,21 @@ function showGenrePageView(genreSlug, genreId, genreName) {
             backButton.addEventListener('click', showGenreListView);
         }
 
-        // Add genre top 100 button listener
+        // Add genre top 100 button listener.
+        // Read the genre off the dataset, NOT off this call's arguments: this
+        // whole block runs only the first time the genre page is built, and the
+        // element is then reused for every later genre. Closing over the
+        // arguments pinned the button to whichever genre was opened first, so
+        // opening a second genre and pressing Top 100 scraped and downloaded the
+        // FIRST genre's chart. The dataset below is refreshed on every open.
         const genreTop100Button = genrePageContent.querySelector('#genre-top100-btn');
         if (genreTop100Button) {
             genreTop100Button.addEventListener('click', () => {
-                handleGenreTop100Click(genreSlug, genreId, genreName);
+                handleGenreTop100Click(
+                    genrePageContent.dataset.genreSlug,
+                    genrePageContent.dataset.genreId,
+                    genrePageContent.dataset.genreName
+                );
             });
         }
     }
@@ -3623,291 +3644,4 @@ function showGenreTop10ReleasesError(errorMessage) {
 document.addEventListener('DOMContentLoaded', () => {
     initializeGenreBrowserModal();
 });
-
-// ============ Plex Music Library Selection ============
-
-async function loadPlexMusicLibraries() {
-    try {
-        const response = await fetch('/api/plex/music-libraries');
-        const data = await response.json();
-
-        if (data.success && data.libraries && data.libraries.length > 0) {
-            const selector = document.getElementById('plex-music-library');
-            const container = document.getElementById('plex-library-selector-container');
-
-            // Clear existing options
-            selector.innerHTML = '';
-
-            // Add options for each library. ``value`` is the canonical
-            // identifier the backend expects (real libraries: title;
-            // synthetic "All Libraries" entry: the sentinel string).
-            // ``title`` stays the human-readable label.
-            data.libraries.forEach(library => {
-                const option = document.createElement('option');
-                const optionValue = library.value || library.title;
-                option.value = optionValue;
-                option.textContent = library.title;
-
-                // Pre-select match: compare ``value`` against the saved
-                // DB pref (``data.selected``) AND ``title`` against the
-                // live-active library name (``data.current``). Covers
-                // both the sentinel case and the legacy single-library
-                // case.
-                if (optionValue === data.selected
-                        || library.title === data.current
-                        || library.title === data.selected) {
-                    option.selected = true;
-                }
-
-                selector.appendChild(option);
-            });
-
-            // Show the container
-            container.style.display = 'block';
-        } else {
-            // Hide if no libraries found or not connected
-            document.getElementById('plex-library-selector-container').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error loading Plex music libraries:', error);
-        document.getElementById('plex-library-selector-container').style.display = 'none';
-    }
-}
-
-async function selectPlexLibrary() {
-    const selector = document.getElementById('plex-music-library');
-    const selectedLibrary = selector.value;
-
-    if (!selectedLibrary) return;
-
-    try {
-        const response = await fetch('/api/plex/select-music-library', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                library_name: selectedLibrary
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            console.log(`Plex music library switched to: ${selectedLibrary}`);
-        } else {
-            console.error('Failed to switch library:', data.error);
-            alert(`Failed to switch library: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('Error selecting Plex library:', error);
-        alert('Error selecting library. Please try again.');
-    }
-}
-
-// ============ Jellyfin User Selection ============
-
-async function loadJellyfinUsers() {
-    try {
-        const response = await fetch('/api/jellyfin/users');
-        const data = await response.json();
-
-        if (data.success && data.users && data.users.length > 0) {
-            const selector = document.getElementById('jellyfin-user');
-            const container = document.getElementById('jellyfin-user-selector-container');
-
-            // Clear existing options
-            selector.innerHTML = '';
-
-            // Add options for each user
-            data.users.forEach(user => {
-                const option = document.createElement('option');
-                option.value = user.name;
-                option.textContent = user.name;
-
-                // Mark the currently selected user
-                if (user.name === data.current || user.name === data.selected) {
-                    option.selected = true;
-                }
-
-                selector.appendChild(option);
-            });
-
-            // Show the container
-            container.style.display = 'block';
-        } else {
-            // Hide if no users found or not connected
-            document.getElementById('jellyfin-user-selector-container').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error loading Jellyfin users:', error);
-        document.getElementById('jellyfin-user-selector-container').style.display = 'none';
-    }
-}
-
-async function selectJellyfinUser() {
-    const selector = document.getElementById('jellyfin-user');
-    const selectedUser = selector.value;
-
-    if (!selectedUser) return;
-
-    try {
-        const response = await fetch('/api/jellyfin/select-user', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                username: selectedUser
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            console.log(`Jellyfin user switched to: ${selectedUser}`);
-            // Refresh library dropdown for the new user
-            loadJellyfinMusicLibraries();
-        } else {
-            console.error('Failed to switch user:', data.error);
-            alert(`Failed to switch user: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('Error selecting Jellyfin user:', error);
-        alert('Error selecting user. Please try again.');
-    }
-}
-
-// ============ Jellyfin Music Library Selection ============
-
-async function loadJellyfinMusicLibraries() {
-    try {
-        const response = await fetch('/api/jellyfin/music-libraries');
-        const data = await response.json();
-
-        if (data.success && data.libraries && data.libraries.length > 0) {
-            const selector = document.getElementById('jellyfin-music-library');
-            const container = document.getElementById('jellyfin-library-selector-container');
-
-            // Clear existing options
-            selector.innerHTML = '';
-
-            // Add options for each library
-            data.libraries.forEach(library => {
-                const option = document.createElement('option');
-                option.value = library.title;
-                option.textContent = library.title;
-
-                // Mark the currently selected library
-                if (library.title === data.current || library.title === data.selected) {
-                    option.selected = true;
-                }
-
-                selector.appendChild(option);
-            });
-
-            // Show the container
-            container.style.display = 'block';
-        } else {
-            // Hide if no libraries found or not connected
-            document.getElementById('jellyfin-library-selector-container').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error loading Jellyfin music libraries:', error);
-        document.getElementById('jellyfin-library-selector-container').style.display = 'none';
-    }
-}
-
-async function selectJellyfinLibrary() {
-    const selector = document.getElementById('jellyfin-music-library');
-    const selectedLibrary = selector.value;
-
-    if (!selectedLibrary) return;
-
-    try {
-        const response = await fetch('/api/jellyfin/select-music-library', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                library_name: selectedLibrary
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            console.log(`Jellyfin music library switched to: ${selectedLibrary}`);
-        } else {
-            console.error('Failed to switch library:', data.error);
-            alert(`Failed to switch library: ${data.error}`);
-        }
-    } catch (error) {
-        console.error('Error selecting Jellyfin library:', error);
-        alert('Error selecting library. Please try again.');
-    }
-}
-
-// ============ Navidrome Music Folder Selection ============
-
-async function loadNavidromeMusicFolders() {
-    try {
-        const response = await fetch('/api/navidrome/music-folders');
-        const data = await response.json();
-
-        if (data.success && data.folders && data.folders.length > 0) {
-            const selector = document.getElementById('navidrome-music-folder');
-            const container = document.getElementById('navidrome-folder-selector-container');
-
-            selector.innerHTML = '<option value="">All Libraries</option>';
-
-            data.folders.forEach(folder => {
-                const option = document.createElement('option');
-                option.value = folder.title;
-                option.textContent = folder.title;
-
-                if (folder.title === data.current || folder.title === data.selected) {
-                    option.selected = true;
-                }
-
-                selector.appendChild(option);
-            });
-
-            container.style.display = 'block';
-        } else {
-            document.getElementById('navidrome-folder-selector-container').style.display = 'none';
-        }
-    } catch (error) {
-        console.error('Error loading Navidrome music folders:', error);
-        document.getElementById('navidrome-folder-selector-container').style.display = 'none';
-    }
-}
-
-async function selectNavidromeMusicFolder() {
-    const selector = document.getElementById('navidrome-music-folder');
-    const selectedFolder = selector.value;
-
-    try {
-        const response = await fetch('/api/navidrome/select-music-folder', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ folder_name: selectedFolder })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showToast(data.message, 'success');
-        } else {
-            console.error('Failed to set music folder:', data.error);
-            showToast(`Failed to set music folder: ${data.error}`, 'error', 'set-media');
-        }
-    } catch (error) {
-        console.error('Error selecting Navidrome music folder:', error);
-        showToast('Error selecting music folder. Please try again.', 'error', 'set-media');
-    }
-}
-
-// ============================================
 

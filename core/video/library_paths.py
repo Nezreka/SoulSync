@@ -25,6 +25,7 @@ from core.video.download_pipeline import basename_of
 # Characters illegal on Windows / awkward on most filesystems, plus control chars.
 _ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _TRAILING_DOTSPACE = re.compile(r"[ .]+$")
+_LEADING_DOTSPACE = re.compile(r"^[ .]+")
 
 # Parsed source token → the label used in the Radarr ``{Quality Full}`` tag.
 _SRC_LABEL = {
@@ -35,10 +36,15 @@ _SRC_LABEL = {
 
 def sanitize(name: Any) -> str:
     """Filesystem-safe path COMPONENT: strip illegal chars, collapse whitespace, and
-    trim trailing dots/spaces (Windows rejects those). Never contains a separator."""
+    trim leading/trailing dots/spaces. Never contains a separator.
+
+    Windows rejects TRAILING dots/spaces; Unix hides any entry with a LEADING
+    dot, and media servers skip hidden entries outright — so a title like
+    "...And Justice for All" would land in a folder nothing could see (#1129)."""
     s = _ILLEGAL.sub("", str(name or ""))
     s = re.sub(r"\s+", " ", s).strip()
     s = _TRAILING_DOTSPACE.sub("", s)
+    s = _LEADING_DOTSPACE.sub("", s)
     return s
 
 

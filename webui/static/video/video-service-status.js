@@ -330,6 +330,56 @@
         }
     });
 
+    // ── sidebar test buttons ────────────────────────────────────────────────
+    // Live probes for the sidebar bolt buttons, reusing endpoints that already
+    // exist: /enrichment/{tmdb,tvdb}/test for metadata and /server-config/test
+    // for the active server. The download row has no button on purpose — it
+    // shows a PREFERENCE (mode + hybrid order), not a connection.
+    function testVideoConnection(kind) {
+        if (typeof showLoadingOverlay === 'function') {
+            showLoadingOverlay('Testing ' + (kind === 'server' ? 'video server' : 'TMDB / TVDB') + '...');
+        }
+        function done() { if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay(); }
+        function post(url, body) {
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {})
+            })
+                .then(function (r) { return r.json(); })
+                .catch(function () { return null; });
+        }
+        var p;
+        if (kind === 'server') {
+            p = fetch(API + '/server', { headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var srv = d && d.server;
+                    if (!srv) { toast('No video server configured', true); return null; }
+                    return post(API + '/server-config/test', { server: srv });
+                });
+        } else {
+            p = Promise.all([post(API + '/enrichment/tmdb/test'), post(API + '/enrichment/tvdb/test')])
+                .then(function (results) {
+                    var msgs = results.map(function (res) {
+                        if (!res) return 'no response';
+                        return res.message || res.error || 'no response';
+                    });
+                    var ok = results.every(function (res) { return res && res.success; });
+                    return { success: ok, message: msgs.join(' — '), error: msgs.join(' — ') };
+                });
+        }
+        p.then(function (res) {
+            if (!res) return;
+            if (res.success) toast(res.message || 'Connection verified');
+            else toast(res.error || res.message || 'Connection test failed', true);
+            fetchStatus();
+        }).catch(function () {
+            toast('Connection test failed', true);
+        }).then(done);
+    }
+    window.testVideoConnection = testVideoConnection;
+
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startPolling);
     else startPolling();
 })();

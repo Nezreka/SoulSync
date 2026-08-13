@@ -100,16 +100,62 @@ def test_pause_and_resume_reflect_instantly_despite_cache(client):
     assert client.get("/api/enrichment/amazon/status").get_json()["paused"] is False
 
 
+class _IdleWorker(_CountingWorker):
+    def get_stats(self):
+        self.calls += 1
+        return {'enabled': True, 'running': False, 'paused': False, 'calls': self.calls}
+
+
+def test_idle_service_holds_its_answer_for_the_long_ttl(client, monkeypatch):
+    # Perf sweep (Aug 2026): each get_stats() is ~6 whole-table aggregates
+    # on a multi-GB db, and the 10s dashboard poll re-collected ~18 idle
+    # services through a 2s cache — always cold. An IDLE service now keeps
+    # its answer for 30s; only a RUNNING one earns the 2s freshness.
+    w = _IdleWorker()
+    register_services([EnrichmentService(id='amazon', display_name='Amazon',
+                                         worker_getter=lambda: w)])
+    t = [1000.0]
+    monkeypatch.setattr(eapi.time, 'monotonic', lambda: t[0])
+    client.get('/api/enrichment/amazon/status')
+    t[0] += eapi._STATUS_TTL_SECONDS + 0.1          # past the SHORT ttl...
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 1, 'idle: the short TTL must not apply'
+    t[0] += eapi._STATUS_IDLE_TTL_SECONDS           # ...past the long one
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 2
+
+
+def test_running_service_keeps_the_short_ttl(client, monkeypatch):
+    w = _CountingWorker()                            # reports running: True
+    register_services([EnrichmentService(id='amazon', display_name='Amazon',
+                                         worker_getter=lambda: w)])
+    t = [1000.0]
+    monkeypatch.setattr(eapi.time, 'monotonic', lambda: t[0])
+    client.get('/api/enrichment/amazon/status')
+    t[0] += eapi._STATUS_TTL_SECONDS + 0.1
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 2, 'running: numbers move, freshness stays 2s'
+
+
 # ---------------------------------------------------------------------------
 # Client contract: fallback pollers slowed, websocket stays primary
 # ---------------------------------------------------------------------------
 
 def test_fallback_pollers_are_10s_and_guarded():
+    """Post-dashboard-flip: the 13 per-provider pollers are DELETED (the React
+    dashboard runs its own socket-and-hidden-gated 10s fallback). The one
+    survivor is the app-wide repair poll at its historical 5s cadence — the
+    only socket-down live source for ss:repair-status, consumed by BOTH the
+    React dashboard pill and the tools maintenance hero. It must keep both
+    gates, and nothing faster may reappear."""
     import re
     assert not re.search(r"setInterval\(update\w+Status, 2000\)", _ENRICH_JS), \
         "a 2s status poller survived — the fallback must not race the websocket"
-    assert _ENRICH_JS.count("setInterval(update") == _ENRICH_JS.count(", 10000)") \
-        or "10000); // fallback only" in _ENRICH_JS
-    # every poller still defers to the socket + hidden tabs
-    assert _ENRICH_JS.count("if (socketConnected) return") >= 14
-    assert "if (document.hidden) return" in _ENRICH_JS
+    intervals = re.findall(r"setInterval\(update(\w+), (\d+)\)", _ENRICH_JS)
+    assert intervals == [("RepairStatus", "5000"), ("RepairStatus", "5000")], (
+        f"unexpected enrichment pollers (want only the repair 5s poll, both "
+        f"readyState arms): {intervals}"
+    )
+    body = _ENRICH_JS.split("async function updateRepairStatus")[1].split("\nfunction ")[0]
+    assert "if (socketConnected) return" in body
+    assert "if (document.hidden) return" in body

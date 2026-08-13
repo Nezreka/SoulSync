@@ -17,7 +17,6 @@ Reference: https://aria2.github.io/manual/en/html/aria2c.html#rpc-interface
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import os
 from typing import List, Optional
@@ -25,6 +24,7 @@ from typing import List, Optional
 import requests as http_requests
 
 from config.settings import config_manager
+from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
@@ -71,7 +71,9 @@ class Aria2Adapter:
         self._url = url
         # aria2 has no username; the RPC secret maps onto the password field.
         self._secret = config_manager.get('torrent_client.password', '') or ''
-        self._category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        self._category = str(
+            config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
+        ).strip() or 'soulsync'
         self._save_path = config_manager.get('torrent_client.save_path', '') or ''
 
     def reload_settings(self) -> None:
@@ -106,14 +108,12 @@ class Aria2Adapter:
     async def check_connection(self) -> bool:
         if not self.is_configured():
             return False
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self._rpc('aria2.getVersion') is not None)
+        return await run_control(lambda: self._rpc('aria2.getVersion') is not None)
 
     # ── add ──
     async def add_torrent(self, url_or_magnet: str, category: str = "soulsync",
                           save_path: Optional[str] = None) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._add_uri_sync, url_or_magnet, save_path)
+        return await run_control(self._add_uri_sync, url_or_magnet, save_path)
 
     def _opts(self, save_path: Optional[str]) -> dict:
         opts: dict = {}
@@ -127,8 +127,7 @@ class Aria2Adapter:
 
     async def add_torrent_file(self, file_bytes: bytes, category: str = "soulsync",
                                save_path: Optional[str] = None) -> Optional[str]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._add_file_sync, file_bytes, save_path)
+        return await run_control(self._add_file_sync, file_bytes, save_path)
 
     def _add_file_sync(self, file_bytes: bytes, save_path: Optional[str]) -> Optional[str]:
         b64 = base64.b64encode(file_bytes).decode('ascii')
@@ -137,16 +136,14 @@ class Aria2Adapter:
 
     # ── status ──
     async def get_status(self, torrent_id: str) -> Optional[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_status_sync, torrent_id)
+        return await run_control(self._get_status_sync, torrent_id)
 
     def _get_status_sync(self, gid: str) -> Optional[TorrentStatus]:
         result = self._rpc('aria2.tellStatus', gid, self._STATUS_KEYS)
         return self._parse_status(result) if result else None
 
     async def get_all(self) -> List[TorrentStatus]:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._get_all_sync)
+        return await run_control(self._get_all_sync)
 
     def _get_all_sync(self) -> List[TorrentStatus]:
         active = self._rpc('aria2.tellActive', self._STATUS_KEYS) or []
@@ -186,8 +183,7 @@ class Aria2Adapter:
 
     # ── remove / pause / resume ──
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._remove_sync, torrent_id, delete_files)
+        return await run_control(self._remove_sync, torrent_id, delete_files)
 
     def _remove_sync(self, gid: str, delete_files: bool) -> bool:
         st = self._rpc('aria2.tellStatus', gid, ['status', 'files']) or {}
@@ -210,9 +206,7 @@ class Aria2Adapter:
         return ok
 
     async def pause(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self._rpc('aria2.pause', torrent_id) is not None)
+        return await run_control(lambda: self._rpc('aria2.pause', torrent_id) is not None)
 
     async def resume(self, torrent_id: str) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self._rpc('aria2.unpause', torrent_id) is not None)
+        return await run_control(lambda: self._rpc('aria2.unpause', torrent_id) is not None)

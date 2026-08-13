@@ -8,6 +8,7 @@ import time
 import uuid
 from concurrent.futures import as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from core.imports.album import build_album_import_context, build_album_import_match_payload, resolve_album_artist_context
@@ -50,11 +51,22 @@ def _is_active_media_server_ready() -> tuple[bool, str]:
     return is_active_media_server_ready()
 
 
+def _get_allowed_import_roots() -> list[str]:
+    from config.settings import config_manager
+    from core.imports.paths import docker_resolve_path
+
+    return [
+        _get_staging_path(),
+        docker_resolve_path(config_manager.get("soulseek.download_path", "./downloads")),
+    ]
+
+
 @dataclass
 class ImportRouteRuntime:
     """Dependencies needed to service import/staging HTTP endpoints."""
 
     get_staging_path: Callable[[], str] = _get_staging_path
+    get_allowed_import_roots: Callable[[], list[str]] = _get_allowed_import_roots
     read_staging_file_metadata: Callable[[str, str], Dict[str, Any]] = _read_staging_file_metadata
     read_tags: Callable[[str], Any] = _default_read_tags
     get_primary_source: Callable[[], str] = _get_primary_source
@@ -79,6 +91,46 @@ class ImportRouteRuntime:
     dev_mode_enabled: bool = False
     import_singles_executor: Any = None
     logger: Any = module_logger
+
+
+def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[Optional[str], str]:
+    """Resolve a client path and require containment in a configured source root.
+
+    The roots are the staging folder and the download folder — between them
+    they cover everything ``staging_files`` can ever hand the client, and the
+    client cannot name a path it wasn't given (there is no path-entry UI).
+    Containment is checked AFTER resolution, so a symlink inside staging that
+    points elsewhere is rejected too: this endpoint MOVES the file it is given.
+    A rejection is logged with the roots, because the message alone can't tell
+    a user with a symlinked staging tree what the server actually allows.
+    """
+    if not isinstance(raw_path, str) or not raw_path:
+        return None, "File path is missing"
+    try:
+        candidate = Path(raw_path).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None, "File not found"
+    if not candidate.is_file():
+        return None, "File not found"
+    roots = []
+    try:
+        for root in runtime.get_allowed_import_roots():
+            try:
+                roots.append(Path(root).resolve(strict=True))
+            except (OSError, RuntimeError, TypeError):
+                continue
+    except (OSError, RuntimeError, TypeError):
+        pass
+    if not any(root.is_dir() and candidate.is_relative_to(root) for root in roots):
+        try:
+            runtime.logger.warning(
+                "Rejected import of %s: outside the allowed roots %s",
+                candidate, [str(r) for r in roots],
+            )
+        except Exception:  # noqa: BLE001, S110 - the LOGGER is what failed here,
+            pass           # so there is nothing left to log it with.
+        return None, "File is outside the allowed import folders"
+    return str(candidate), ""
 
 
 # ── Shared staging scan ──────────────────────────────────────────────────────
@@ -520,9 +572,11 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             if not staging_file or not track:
                 continue
 
-            file_path = staging_file.get("full_path", "")
-            if not os.path.isfile(file_path):
-                errors.append(f"File not found: {staging_file.get('filename', '?')}")
+            file_path, path_error = _validate_import_file(
+                runtime, staging_file.get("full_path", ""),
+            )
+            if path_error:
+                errors.append(f"{path_error}: {staging_file.get('filename', '?')}")
                 continue
 
             track_name = track.get("name", "Unknown Track")
@@ -609,9 +663,9 @@ def search_tracks(runtime: ImportRouteRuntime, query: str, limit: int = 10) -> t
 
 def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str, Any]) -> tuple[str, str]:
     """Validate, resolve metadata, and post-process one single import file."""
-    file_path = file_info.get("full_path", "")
-    if not os.path.isfile(file_path):
-        return ("error", f"File not found: {file_info.get('filename', '?')}")
+    file_path, path_error = _validate_import_file(runtime, file_info.get("full_path", ""))
+    if path_error:
+        return ("error", f"{path_error}: {file_info.get('filename', '?')}")
     if runtime.post_process_matched_download is None:
         return ("error", "Import post-processing not available")
 

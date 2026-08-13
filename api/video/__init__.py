@@ -25,12 +25,22 @@ _video_db_lock = threading.Lock()
 def get_video_db():
     """Return the shared VideoDatabase instance (created on first use)."""
     global _video_db
-    if _video_db is None:
+    db = _video_db
+    if db is None:
         with _video_db_lock:
-            if _video_db is None:
+            db = _video_db
+            if db is None:
                 from database.video_database import VideoDatabase
-                _video_db = VideoDatabase()
-    return _video_db
+                db = VideoDatabase()
+                # Anyone installing a handle from outside must hold
+                # _video_db_lock, and an installed handle outranks a lazily
+                # built one — publish only if the slot is still empty, and
+                # yield to an install that beat us to it.
+                if _video_db is None:
+                    _video_db = db
+                else:
+                    db = _video_db
+    return db
 
 
 def create_video_blueprint() -> Blueprint:
@@ -103,7 +113,8 @@ def create_video_blueprint() -> Blueprint:
         if writing and not getattr(g, "can_download", True) and _p(
                 "/api/video/downloads/grab", "/api/video/downloads/retry",
                 "/api/video/youtube/download", "/api/video/wishlist/add",
-                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add"):
+                "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
+                "/api/video/watch/grab"):
             return jsonify({"error": "Downloads are disabled for this profile."}), 403
 
     from .dashboard import register_routes as reg_dashboard
@@ -130,6 +141,7 @@ def create_video_blueprint() -> Blueprint:
     from .requests import register_routes as reg_requests
     from .notifications import register_routes as reg_notifications
     from .backups import register_routes as reg_backups
+    from .watch import register_routes as reg_watch
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -154,5 +166,6 @@ def create_video_blueprint() -> Blueprint:
     reg_requests(bp)
     reg_notifications(bp)
     reg_backups(bp)
+    reg_watch(bp)
 
     return bp

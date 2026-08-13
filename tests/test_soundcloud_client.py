@@ -427,16 +427,20 @@ def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
         engine.update_record('soundcloud', download_id, {'state': 'Cancelled'})
         return None
 
+    # The patch must span the whole wait: download() only SCHEDULES the worker
+    # thread, so exiting the with-block after it returns reverts the patch in a
+    # race with the thread's first call — on a slow box the worker then runs
+    # the real yt-dlp path and legitimately marks Errored (the CI flake).
     with patch.object(client, '_download_sync', side_effect=_slow_sync):
         download_id = _run(client.download('soundcloud', '1||u||n'))
 
-    deadline = time.time() + 2
-    while time.time() < deadline:
-        record = engine.get_record('soundcloud', download_id)
-        if record and record['state'] in ('Cancelled', 'Errored'):
-            break
-        time.sleep(0.05)
-    assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            record = engine.get_record('soundcloud', download_id)
+            if record and record['state'] in ('Cancelled', 'Errored'):
+                break
+            time.sleep(0.05)
+        assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
 
 
 # ---------------------------------------------------------------------------

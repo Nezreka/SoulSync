@@ -50,21 +50,62 @@ describe('shellRouteManifest', () => {
   });
 
   it('tracks whether a route is rendered by React or the legacy shell', () => {
+    expect(getShellRouteByPageId('dashboard')?.kind).toBe('react');
     expect(getShellRouteByPageId('issues')?.kind).toBe('react');
     expect(getShellRouteByPageId('stats')?.kind).toBe('react');
     expect(getShellRouteByPageId('import')?.kind).toBe('react');
-    expect(getShellRouteByPageId('discover')?.kind).toBe('legacy');
-    expect(reactShellRoutes.map((route) => route.pageId)).toEqual(['import', 'stats', 'issues']);
-    expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(true);
+    expect(getShellRouteByPageId('discover')?.kind).toBe('react');
+    expect(getShellRouteByPageId('watchlist')?.kind).toBe('react');
+    // Order follows the manifest array, not the migration order.
+    expect(getShellRouteByPageId('wishlist')?.kind).toBe('react');
+    expect(getShellRouteByPageId('automations')?.kind).toBe('react');
+    expect(getShellRouteByPageId('library')?.kind).toBe('react');
+    expect(getShellRouteByPageId('artist-detail')?.kind).toBe('react');
+    expect(getShellRouteByPageId('label-detail')?.kind).toBe('react');
+    expect(getShellRouteByPageId('active-downloads')?.kind).toBe('react');
+    expect(getShellRouteByPageId('playlist-explorer')?.kind).toBe('react');
+    expect(getShellRouteByPageId('tools')?.kind).toBe('react');
+    expect(getShellRouteByPageId('sync')?.kind).toBe('react');
+    expect(reactShellRoutes.map((route) => route.pageId)).toEqual([
+      'dashboard',
+      'sync',
+      'search',
+      'discover',
+      'playlist-explorer',
+      'watchlist',
+      'wishlist',
+      'automations',
+      'active-downloads',
+      'import',
+      'library',
+      'tools',
+      'artist-detail',
+      'label-detail',
+      'stats',
+      'issues',
+    ]);
+    // Sync was the 13th and last big music page; nothing in the music nav is
+    // legacy now. `settings` stands in as a route that genuinely still is.
+    expect(legacyShellRoutes.some((route) => route.pageId === 'dashboard')).toBe(false);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'sync')).toBe(false);
+    expect(legacyShellRoutes.some((route) => route.pageId === 'settings')).toBe(true);
   });
 
   it('only resolves legacy page ids for legacy-owned paths', () => {
-    expect(resolveLegacyShellPageFromPath('/search')).toBe('search');
-    expect(resolveLegacyShellPageFromPath('/active-downloads')).toBe('active-downloads');
-    expect(resolveLegacyShellPageFromPath('/tools')).toBe('tools');
+    expect(resolveLegacyShellPageFromPath('/settings')).toBe('settings');
+    // React owns /sync now — resolving it as legacy would show the vanilla
+    // page underneath the React one.
+    expect(resolveLegacyShellPageFromPath('/sync')).toBeNull();
+    // React owns /tools and /dashboard now.
+    expect(resolveLegacyShellPageFromPath('/tools')).toBeNull();
+    expect(resolveLegacyShellPageFromPath('/dashboard')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/artist-detail/deezer/12345')).toBe('artist-detail');
     expect(resolveLegacyShellPageFromPath('/issues')).toBeNull();
+    // React owns /search and /active-downloads now; resolving either as legacy
+    // would show the vanilla page underneath the React one.
+    expect(resolveLegacyShellPageFromPath('/search')).toBeNull();
+    expect(resolveLegacyShellPageFromPath('/active-downloads')).toBeNull();
     expect(resolveLegacyShellPageFromPath('/does-not-exist')).toBeNull();
   });
 

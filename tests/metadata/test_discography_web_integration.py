@@ -142,11 +142,22 @@ def test_legacy_metadata_facade_remains_lenient():
 
 
 def test_artist_detail_frontend_surfaces_api_and_owned_provider_errors():
-    source = Path("webui/static/library.js").read_text(encoding="utf-8")
+    """Two distinct failures the page must not swallow.
 
-    assert re.search(
-        r"if\s*\(\s*!response\.ok\s*\|\|\s*!data\.success\s*\)",
-        source,
-    )
-    assert re.search(r"throw\s+new\s+Error\([\s\S]*?data\.error", source)
-    assert re.search(r"data\.provider_error\?\.error", source)
+    A failed load has to raise with the SERVER's reason rather than a generic
+    message, and a provider that failed while the rest of the payload succeeded
+    has to be surfaced without blanking the page. Reads the React page: the
+    vanilla loader this used to check was deleted with the rest of the vanilla
+    artist-detail.
+    """
+    react = Path("webui/src/routes/artist-detail")
+    api = (react / "-artist-detail.api.ts").read_text(encoding="utf-8")
+    # !response.ok is readJson's job (it throws on a non-2xx); this is the
+    # success:false half, and it must prefer the server's own error string.
+    assert re.search(r"payload\.success === false", api)
+    assert re.search(r"throw new Error\(payload\?\.error \|\|", api)
+
+    page = (react / "-ui" / "artist-detail-page.tsx").read_text(encoding="utf-8")
+    assert re.search(r"payload\?\.provider_error\?\.error", page)
+    # Non-fatal: warned about, page still renders.
+    assert "showToast" in page

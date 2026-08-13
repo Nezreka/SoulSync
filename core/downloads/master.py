@@ -553,6 +553,23 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 _mlm.get_match_for_track(db, batch_profile_id, track_data, default_source=batch_source)
                 if (not ignore_manual_matches and _stid) else None
             )
+            # A saved match whose library track no longer exists is not a
+            # match — it is a stale row (#1138). Trusting it marked the track
+            # "found", pulled it OFF the wishlist and skipped the download, so
+            # a song whose file the user had deleted silently disappeared from
+            # every reprocess: never synced, never re-downloaded, never
+            # wishlisted. Dropping it here sends the track down the normal
+            # path, which downloads it or wishlists it like any other missing
+            # track.
+            if _manual_match and not _mlm.match_is_live(db, _manual_match):
+                logger.warning(
+                    "[Manual Match] '%s' has a saved library match (track %s) whose file is "
+                    "no longer in the library — ignoring the stale match and processing the "
+                    "track normally. Remove it under Tools -> Manual Library Match to stop "
+                    "this warning.",
+                    track_name, _manual_match.get('library_track_id'),
+                )
+                _manual_match = None
             if _manual_match:
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:
@@ -797,6 +814,24 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     is_auto_batch = download_batches[batch_id].get('auto_initiated', False)
                     download_batches[batch_id]['phase'] = 'complete'
                     download_batches[batch_id]['completion_time'] = time.time()  # Track for auto-cleanup
+
+                    # album_bundle_state is a LIVE MIRROR of the plugin's progress
+                    # (album_bundle_dispatch._emit writes whatever the last payload
+                    # said), and it has no completion value — only 'searching',
+                    # 'fallback', 'staged' and 'failed' are ever assigned. Nothing
+                    # cleared it, so _build_album_bundle_status kept emitting a
+                    # bundle row forever, frozen at the last tick: a finished album
+                    # showed "Soulseek downloading release 42%" on the Downloads
+                    # page indefinitely.
+                    #
+                    # Cleared HERE and not earlier: task_worker reads
+                    # `album_bundle_state == 'staged'` while the per-track flow
+                    # runs, so the field has to survive until the batch is done.
+                    # Only the state is dropped — the source/release details stay
+                    # for anything that reports on how the album arrived.
+                    download_batches[batch_id]['album_bundle_state'] = ''
+                    for _mirrored in ('progress', 'speed', 'downloaded', 'count', 'failed'):
+                        download_batches[batch_id].pop(f'album_bundle_{_mirrored}', None)
 
                     # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                     if playlist_id.startswith('youtube_'):

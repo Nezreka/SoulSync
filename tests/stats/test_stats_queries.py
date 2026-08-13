@@ -80,14 +80,15 @@ def _seed_track(db, album_id, artist_id, title, file_path=None, bitrate=None, du
         conn.close()
 
 
-def _seed_history(db, title, artist, album, played_at, duration_ms=180000):
+def _seed_history(db, title, artist, album, played_at, duration_ms=180000,
+                  server_source=None, db_track_id=None):
     conn = db._get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO listening_history (title, artist, album, played_at, duration_ms) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (title, artist, album, played_at, duration_ms),
+            "INSERT INTO listening_history (title, artist, album, played_at, duration_ms, "
+            "server_source, db_track_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (title, artist, album, played_at, duration_ms, server_source, db_track_id),
         )
         conn.commit()
     finally:
@@ -135,7 +136,8 @@ def test_get_recent_tracks_empty_returns_empty(db):
 
 
 def test_get_recent_tracks_returns_full_shape(db):
-    _seed_history(db, "Money", "Pink Floyd", "DSOTM", "2026-04-01 00:00:00", duration_ms=383000)
+    _seed_history(db, "Money", "Pink Floyd", "DSOTM", "2026-04-01 00:00:00",
+                  duration_ms=383000, server_source="plex")
     rows = queries.get_recent_tracks(db, limit=1)
     assert rows == [{
         'title': "Money",
@@ -143,7 +145,26 @@ def test_get_recent_tracks_returns_full_shape(db):
         'album': "DSOTM",
         'played_at': "2026-04-01 00:00:00",
         'duration_ms': 383000,
+        'server_source': "plex",
+        # No db_track_id on the row -> the album-art join misses -> None.
+        'image_url': None,
+        'artist_db_id': None,
     }]
+
+
+def test_get_recent_tracks_joins_album_art_through_db_track_id(db, fix_url):
+    # A play the listening-stats worker matched to a library track carries
+    # its album art, run through the image fixer (media-server thumb URLs
+    # need auth and die raw in the browser).
+    aid = _seed_artist(db, "Pink Floyd")
+    alb = _seed_album(db, aid, "DSOTM", thumb="local://thumb.jpg")
+    tid = _seed_track(db, alb, aid, "Money", file_path="/music/money.flac",
+                      bitrate=1411, duration=383000)
+    _seed_history(db, "Money", "Pink Floyd", "DSOTM", "2026-04-01 00:00:00",
+                  db_track_id=tid)
+    rows = queries.get_recent_tracks(db, limit=1, image_url_fixer=fix_url)
+    assert rows[0]['image_url'] == "FIXED::local://thumb.jpg"
+    assert rows[0]['artist_db_id'] == aid
 
 
 # ---------------------------------------------------------------------------

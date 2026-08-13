@@ -96,6 +96,8 @@
     // An open challenge nobody took is not a game, it is litter. Derived, not
     // a state change -- see `expired` at the bottom of the fold.
     var OPEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
+    // How many tables one player may have open at once (stream-enforced).
+    var OPEN_CAP = 3;
     var VOTE_DEFAULT = 2, VOTE_MAX = 9;
     // How many INDEPENDENT clients must report the same position before it can
     // overrule ours. Every SoulSync client in the room folds every game, so the
@@ -497,7 +499,193 @@
         },
     };
 
-    var VARIANTS = { chess: CHESS, connect4: C4, battleship: BS };
+    // ── Othello / Reversi ───────────────────────────────────────────────
+    //
+    // 8×8, index row*8+col. Standard start rotated so OUR first mover ('w',
+    // the lifecycle's convention) sits where black sits in over-the-board
+    // Othello. Moves are the cell index as a decimal string; 'p' is an
+    // EXPLICIT pass, legal only when the mover truly has no move — auto-pass
+    // inside apply() would make one carrier change whose turn it is twice,
+    // and the fold's audit trail is worth the extra click.
+    var OTH_SIZE = 8, OTH_CELLS = 64;
+    var OTH_DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
+    function _othFlips(cells, idx, me) {
+        var them = me === 'w' ? 'b' : 'w';
+        if (cells[idx]) return [];
+        var r0 = Math.floor(idx / OTH_SIZE), c0 = idx % OTH_SIZE;
+        var flips = [];
+        for (var d = 0; d < 8; d++) {
+            var run = [];
+            var r = r0 + OTH_DIRS[d][0], c = c0 + OTH_DIRS[d][1];
+            while (r >= 0 && r < OTH_SIZE && c >= 0 && c < OTH_SIZE &&
+                   cells[r * OTH_SIZE + c] === them) {
+                run.push(r * OTH_SIZE + c);
+                r += OTH_DIRS[d][0]; c += OTH_DIRS[d][1];
+            }
+            if (run.length && r >= 0 && r < OTH_SIZE && c >= 0 && c < OTH_SIZE &&
+                cells[r * OTH_SIZE + c] === me) {
+                flips = flips.concat(run);
+            }
+        }
+        return flips;
+    }
+
+    function _othLegal(cells, me) {
+        var out = [];
+        for (var i = 0; i < OTH_CELLS; i++) {
+            if (!cells[i] && _othFlips(cells, i, me).length) out.push(i);
+        }
+        return out;
+    }
+
+    function _othCells(fen) {
+        var body = String(fen || '').split(' ')[0] || '';
+        return body.split('').map(function (c) { return c === '.' ? '' : c; });
+    }
+
+    var OTH = {
+        start: function () {
+            var cells = [];
+            for (var i = 0; i < OTH_CELLS; i++) cells.push('');
+            cells[27] = 'b'; cells[36] = 'b';       // d4/e5
+            cells[28] = 'w'; cells[35] = 'w';       // e4/d5 — 'w' opens, black's role
+            return { cells: cells, turn: 'w' };
+        },
+        fen: function (st) {
+            return st.cells.map(function (c) { return c || '.'; }).join('') + ' ' + st.turn;
+        },
+        turn: function (st) { return st.turn; },
+        adopt: function (fen) {
+            var parts = String(fen || '').split(' ');
+            if (parts.length !== 2) return null;
+            var body = parts[0], turn = parts[1];
+            if (body.length !== OTH_CELLS || !/^[.wb]+$/.test(body)) return null;
+            if (turn !== 'w' && turn !== 'b') return null;
+            var cells = body.split('').map(function (c) { return c === '.' ? '' : c; });
+            // Discs are placed, flipped, never removed: the four centre
+            // squares are occupied from move zero forever, and the total
+            // only grows from the initial four. Cheap, forgery-hostile.
+            if (!cells[27] || !cells[28] || !cells[35] || !cells[36]) return null;
+            var n = 0;
+            for (var i = 0; i < OTH_CELLS; i++) if (cells[i]) n++;
+            if (n < 4) return null;
+            return { cells: cells, turn: turn };
+        },
+        apply: function (st, mv) {
+            var me = st.turn, them = me === 'w' ? 'b' : 'w';
+            var cells = st.cells.slice();
+            if (mv === 'p') {
+                // A pass is only real when the mover is genuinely stuck.
+                if (_othLegal(cells, me).length) return null;
+                if (!_othLegal(cells, them).length) return null;   // both stuck = the game is over, not a pass
+                return { state: { cells: cells, turn: them },
+                         over: false, result: null, reason: '', winnerColor: '' };
+            }
+            if (!/^\d{1,2}$/.test(String(mv))) return null;
+            var idx = parseInt(mv, 10);
+            if (!(idx >= 0 && idx < OTH_CELLS)) return null;
+            var flips = _othFlips(cells, idx, me);
+            if (!flips.length) return null;
+            cells[idx] = me;
+            for (var f = 0; f < flips.length; f++) cells[flips[f]] = me;
+            var next = { cells: cells, turn: them };
+            if (_othLegal(cells, them).length || _othLegal(cells, me).length) {
+                return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+            }
+            // Neither side can move (board full or dead) — count the discs.
+            var nw = 0, nb = 0;
+            for (var i = 0; i < OTH_CELLS; i++) {
+                if (cells[i] === 'w') nw++;
+                else if (cells[i] === 'b') nb++;
+            }
+            var reason = nw + '–' + nb + ' discs';
+            if (nw === nb) return { state: next, over: true, result: '½-½',
+                                    reason: reason, winnerColor: '' };
+            return { state: next, over: true,
+                     result: nw > nb ? '1-0' : '0-1',
+                     reason: reason, winnerColor: nw > nb ? 'w' : 'b' };
+        },
+    };
+
+    // ── Gomoku (five in a row) ──────────────────────────────────────────
+    //
+    // 15×15 goban, index row*15+col, move = cell index as decimal. Stones
+    // are placed and never removed, so adopt() gets the same total-count
+    // verification as Connect 4. Freestyle rules: five OR MORE wins.
+    var GMK_SIZE = 15, GMK_CELLS = 225, GMK_WIN = 5;
+
+    function _gmkWinAt(cells, idx) {
+        var who = cells[idx];
+        if (!who) return false;
+        var r0 = Math.floor(idx / GMK_SIZE), c0 = idx % GMK_SIZE;
+        var dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+        for (var d = 0; d < 4; d++) {
+            var n = 1;
+            var r = r0 + dirs[d][0], c = c0 + dirs[d][1];
+            while (r >= 0 && r < GMK_SIZE && c >= 0 && c < GMK_SIZE &&
+                   cells[r * GMK_SIZE + c] === who) {
+                n++; r += dirs[d][0]; c += dirs[d][1];
+            }
+            r = r0 - dirs[d][0]; c = c0 - dirs[d][1];
+            while (r >= 0 && r < GMK_SIZE && c >= 0 && c < GMK_SIZE &&
+                   cells[r * GMK_SIZE + c] === who) {
+                n++; r -= dirs[d][0]; c -= dirs[d][1];
+            }
+            if (n >= GMK_WIN) return true;
+        }
+        return false;
+    }
+
+    var GMK = {
+        start: function () {
+            var cells = [];
+            for (var i = 0; i < GMK_CELLS; i++) cells.push('');
+            return { cells: cells, turn: 'w' };
+        },
+        fen: function (st) {
+            return st.cells.map(function (c) { return c || '.'; }).join('') + ' ' + st.turn;
+        },
+        turn: function (st) { return st.turn; },
+        adopt: function (fen) {
+            var parts = String(fen || '').split(' ');
+            if (parts.length !== 2) return null;
+            var body = parts[0], turn = parts[1];
+            if (body.length !== GMK_CELLS || !/^[.wb]+$/.test(body)) return null;
+            if (turn !== 'w' && turn !== 'b') return null;
+            var cells = body.split('').map(function (c) { return c === '.' ? '' : c; });
+            var nw = 0, nb = 0;
+            for (var i = 0; i < GMK_CELLS; i++) {
+                if (cells[i] === 'w') nw++;
+                else if (cells[i] === 'b') nb++;
+            }
+            // 'w' opens: counts are level or one ahead, and they fix the turn.
+            if (nw !== nb && nw !== nb + 1) return null;
+            if ((nw === nb ? 'w' : 'b') !== turn) return null;
+            return { cells: cells, turn: turn };
+        },
+        apply: function (st, mv) {
+            if (!/^\d{1,3}$/.test(String(mv))) return null;
+            var idx = parseInt(mv, 10);
+            if (!(idx >= 0 && idx < GMK_CELLS)) return null;
+            if (st.cells[idx]) return null;
+            var me = st.turn;
+            var cells = st.cells.slice();
+            cells[idx] = me;
+            var next = { cells: cells, turn: me === 'w' ? 'b' : 'w' };
+            if (_gmkWinAt(cells, idx)) {
+                return { state: next, over: true,
+                         result: me === 'w' ? '1-0' : '0-1',
+                         reason: 'five in a row', winnerColor: me };
+            }
+            var full = cells.every(function (c) { return !!c; });
+            if (full) return { state: next, over: true, result: '½-½',
+                               reason: 'board full', winnerColor: '' };
+            return { state: next, over: false, result: null, reason: '', winnerColor: '' };
+        },
+    };
+
+    var VARIANTS = { chess: CHESS, connect4: C4, battleship: BS, othello: OTH, gomoku: GMK };
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -542,6 +730,31 @@
             var at = _ts(ev);
             var user = ev.username;
 
+            // ── Stream-clock expiry ──────────────────────────────────────
+            // Wall clocks disagree, but the STREAM is a clock every client
+            // shares: message timestamps come from the server, and the fold
+            // walks them in the same order everywhere. So 'an open table
+            // dies once any later game event sits OPEN_EXPIRY past its
+            // creation' is fully deterministic — the smart self-removal a
+            // wall-clock rule could never be. Tables in a room that goes
+            // completely silent keep their presentation-only `expired` flag
+            // (below) until the next event arrives; that's the trade.
+            if (at) {
+                Object.keys(games).forEach(function (oid) {
+                    // The event's OWN table is exempt: a late gm.join is a
+                    // human warming the table up, and the stream clock must
+                    // not kill it in the same breath that someone sits down.
+                    if (oid === gid) return;
+                    var og = games[oid];
+                    if (og.status === 'open' && og.createdAt &&
+                            (at - og.createdAt) >= OPEN_EXPIRY_MS) {
+                        og.status = 'over';
+                        og.reason = 'expired';
+                        og.lastAt = og.createdAt + OPEN_EXPIRY_MS;
+                    }
+                });
+            }
+
             if (k === 'gm.new') {
                 if (games[gid]) return;                      // id already taken
                 var variant = String(p.v || 'chess');
@@ -558,9 +771,35 @@
                 // nobody, so it is never filled with a username and gm.join
                 // has nothing to take. The room moves by vote instead.
                 var roomSeat = p.r ? (creatorColor === 'w' ? 'b' : 'w') : '';
+                // Optional stake in bank credits. Two-human games only — a
+                // wager against 'the room' has no one to pay it. The fold
+                // just RECORDS it; settlement is each client booking its own
+                // win/loss against its own play-money bank (the bank's
+                // philosophy: nobody to defraud but yourself — the ladder is
+                // the currency that matters).
+                var wager = 0;
+                if (!roomSeat && typeof p.w === 'number' && isFinite(p.w)) {
+                    wager = Math.max(0, Math.min(500, Math.floor(p.w)));
+                }
                 var voteK = VOTE_DEFAULT;
                 if (typeof p.kv === 'number' && isFinite(p.kv)) {
                     voteK = Math.max(1, Math.min(VOTE_MAX, Math.floor(p.kv)));
+                }
+
+                // ── The spam cap ─────────────────────────────────────────
+                // One player, three open tables, tops: the fourth gm.new
+                // expires their OLDEST still-open table in the same breath.
+                // Fold-order deterministic, so every client agrees which one
+                // died. (Boulder: 'one player with 10 cold open games is
+                // spammy' — now the pile can never form.)
+                var mineOpen = Object.keys(games).map(function (oid) { return games[oid]; })
+                    .filter(function (og) { return og.status === 'open' && og.createdBy === user; })
+                    .sort(function (a, b) { return a.createdAt - b.createdAt; });
+                while (mineOpen.length >= OPEN_CAP) {
+                    var oldest = mineOpen.shift();
+                    oldest.status = 'over';
+                    oldest.reason = 'expired';
+                    oldest.lastAt = at;
                 }
 
                 states[gid] = st;
@@ -572,6 +811,7 @@
                     createdBy: user,
                     createdAt: at,
                     lastAt: at,
+                    wager: wager,
                     invited: invited,
                     isPrivate: !!invited,
                     roomSeat: roomSeat,
@@ -1068,5 +1308,18 @@
         VARIANTS: Object.keys(VARIANTS),
         C4_COLS: C4_COLS,
         C4_ROWS: C4_ROWS,
+        OTH_SIZE: OTH_SIZE,
+        GMK_SIZE: GMK_SIZE,
+        // Renderer helpers: legal targets + live disc score for a position.
+        othelloLegal: function (fen, turn) { return _othLegal(_othCells(fen), turn); },
+        othelloScore: function (fen) {
+            var cells = _othCells(fen);
+            var nw = 0, nb = 0;
+            for (var i = 0; i < cells.length; i++) {
+                if (cells[i] === 'w') nw++;
+                else if (cells[i] === 'b') nb++;
+            }
+            return { w: nw, b: nb };
+        },
     };
 })();

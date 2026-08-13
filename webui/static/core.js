@@ -7,7 +7,6 @@ let currentPage = 'dashboard';
 let currentTrack = null;
 let isPlaying = false;
 let mediaPlayerExpanded = false;
-let searchResults = [];
 let currentStream = {
     status: 'stopped',
     progress: 0,
@@ -21,37 +20,431 @@ let audioPlayer = null;
 let streamPollingRetries = 0;
 let streamPollingInterval = 1000; // Start with 1-second polling
 const maxStreamPollingRetries = 10;
-let allSearchResults = [];
-let currentFilterType = 'all';
-let currentFilterFormat = 'all';
-let currentSortBy = 'quality_score';
-let isSortReversed = false;
-let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
-let watchlistCountdownInterval = null;  // Countdown timer for watchlist overview modal
 
 // Page state for Watchlist & Wishlist sidebar pages
-let watchlistPageState = { isInitialized: false, artists: [] };
 let wishlistPageState = { isInitialized: false };
 
 // --- Add these globals for the Sync Page ---
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
 let activeSyncPollers = {}; // Key: playlist_id, Value: intervalId
+
+/**
+ * Whether the download engine still holds a sync poller for this playlist.
+ *
+ * A SEAM for the React sync page. `activeSyncPollers` is a top-level `let`,
+ * which — unlike a `function` declaration — creates NO property on `window`,
+ * so React cannot read it however it is spelled. The sequential-sync runner
+ * needs exactly one bit from it: is this playlist still syncing. It watches
+ * the poller's disappearance rather than any completion event, because
+ * `stopSyncPolling` is the single place every terminal path funnels through.
+ *
+ * A function rather than an alias of the object: the binding stays private,
+ * and the closure reads it live even if it were ever reassigned.
+ */
+window.isPlaylistSyncing = function isPlaylistSyncing(playlistId) {
+    return Boolean(activeSyncPollers[playlistId]);
+};
 // Phase 5: WebSocket sync/discovery/scan state
 let _syncProgressCallbacks = {};
 let _discoveryProgressCallbacks = {};
-let _lastWatchlistScanStatus = null;
 let _lastMediaScanStatus = null;
 let _lastWishlistStats = null;
 let playlistTrackCache = {}; // Key: playlist_id, Value: tracks array
 let playlistTrackSnapshotCache = {}; // Key: playlist_id, Value: upstream snapshot_id at cache time
 let spotifyPlaylistsLoaded = false;
 let activeDownloadProcesses = {};
+// Relocated discover.js state the surviving flows still share: the LB caches
+// (sync-listenbrainz reads/fills them; the relocated discovery modal reads
+// them) and the init.js one-shot flag. Declared with `let` exactly as the
+// vanilla page declared them, so sync-listenbrainz's window-fallback branch
+// stays dormant and every bare read resolves to the same binding.
+let listenbrainzPlaylistsCache = {};
+let listenbrainzTracksCache = {};
+let discoverPageInitialized = false;
+/**
+ * Show the modal of an already-active download process, for the React pages.
+ *
+ * `activeDownloadProcesses` is a top-level `let`, so it lives in the script's
+ * lexical scope and is NOT a window property — a module cannot reach it. The
+ * download modal reopens an existing process by itself
+ * (openDownloadMissingModalForArtistAlbum, shared-helpers.js:1767), but the
+ * search page checks FIRST so it can skip fetching album detail it does not
+ * need. That is not just an optimisation: when the re-click happens while the
+ * metadata source is down, the fetch fails and the user gets an error toast
+ * instead of the modal they already had open.
+ *
+ * Returns whether a modal was shown, so the caller knows to stop.
+ */
+/**
+ * Bridge for the React discover page: seed a VIRTUAL playlist and its tracks,
+ * then hand off to the shared sync engine. `playlistTrackCache` and
+ * `spotifyPlaylists` are top-level `let`s in this script's lexical scope, so a
+ * module cannot seed them itself — the same reason the function below exists.
+ * Mirrors what startDecadeSync/startDiscoverPlaylistSync did inline (discover.js
+ * 2753-2764) before the page moved to React.
+ */
+window.startDiscoverVirtualSync = function (virtualPlaylistId, name, spotifyTracks) {
+    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
+    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
+        spotifyPlaylists.push({ id: virtualPlaylistId, name, track_count: spotifyTracks.length });
+    }
+    return startPlaylistSync(virtualPlaylistId);
+};
+
+/**
+ * Bridge for the React discover download bar: expose one download's process
+ * record (status + modal handles). `activeDownloadProcesses` is a top-level
+ * `let` in this script's lexical scope — same story as everything else here.
+ */
+window.discoverDownloadProcess = function (virtualPlaylistId) {
+    return activeDownloadProcesses[virtualPlaylistId] || null;
+};
+
+/**
+ * Bridge for the React SYNC page's account tabs (Spotify + Deezer ARL): put a
+ * playlist row into `spotifyPlaylists` so `openDownloadMissingModal` can find
+ * it. Same lexical-scope story as startDiscoverVirtualSync above — and the same
+ * shape, minus the sync kickoff, because this one only seeds.
+ *
+ * Without it openDownloadMissingModal bails at its `if (!playlist)` guard with
+ * 'Could not find playlist data.' (sync-spotify.js 2235-2240). The vanilla page
+ * never needed a bridge: loadSpotifyPlaylists assigns the whole array (1612)
+ * and the ARL flow pushes its own shim rows (sync-services.js 2471, 2646-2654).
+ * Once React owns those tabs, neither of those runs.
+ *
+ * Idempotent by id, exactly like the push it replaces.
+ */
+window.registerSyncAccountPlaylist = function (row) {
+    if (!row || !row.id) return;
+    if (!spotifyPlaylists.find(p => p.id === row.id)) {
+        spotifyPlaylists.push(row);
+    }
+};
+
+/**
+ * The registered account playlists, in registration order.
+ *
+ * The SECOND half of the seam above, and the React sync page needs both:
+ * `startSequentialSync` has to know what order to queue the selection in, and
+ * the sidebar has to resolve a playlist id to a name for "Syncing 2/5: Beta".
+ * `spotifyPlaylists` is a top-level `let`, so — like `activeSyncPollers` — it
+ * is NOT a window property and React cannot read it directly.
+ *
+ * Reading the ENGINE's array rather than the tab's React state is deliberate.
+ * `startPlaylistSync` resolves every id against this same array and bails with
+ * 'Could not find playlist data.' for anything missing, so a queue built from
+ * it can only contain ids the engine can actually run. The tab renders its
+ * rows in the order it registers them, so this order is also the display
+ * order the vanilla read off the DOM.
+ *
+ * A COPY, so a caller cannot reorder or splice the engine's own array.
+ */
+window.getSyncAccountPlaylists = function () {
+    return spotifyPlaylists.slice();
+};
+
+
+/**
+ * Bridge for the React discover page: the ListenBrainz/Last.fm playlist
+ * DISCOVERY download flow, moved VERBATIM from discover.js's
+ * openDownloadModalForListenBrainzPlaylist (3934-4137) with one change — the
+ * tracks arrive as a parameter instead of discover.js's script-scoped
+ * listenbrainzTracksCache. Everything it touches lives in classic-script
+ * scope this file shares: listenbrainzPlaylistStates (this file),
+ * activeDownloadProcesses (this file), openDownloadMissingModalForYouTube
+ * (downloads.js), openYouTubeDiscoveryModal + startListenBrainzDiscoveryPolling
+ * + startModalDownloadPolling (sync-services.js) — all of which survive
+ * discover.js's deletion, which is why the flow lives HERE and not in a module.
+ */
+window.openLbPlaylistDiscovery = async function (identifier, title, tracks) {
+    try {
+        if (!tracks || tracks.length === 0) {
+            showToast('No tracks to download', 'error');
+            return;
+        }
+
+        console.log(`🎵 Opening ListenBrainz discovery modal: ${title}`);
+        console.log(`🔍 Looking for existing state with identifier: ${identifier}`);
+        console.log(`📋 All ListenBrainz states:`, Object.keys(listenbrainzPlaylistStates));
+
+        // Check if state already exists from backend hydration (like Beatport does)
+        const existingState = listenbrainzPlaylistStates[identifier];
+        console.log(`🔍 Existing state found:`, existingState ? `Phase: ${existingState.phase}` : 'None');
+
+        if (existingState && existingState.phase !== 'fresh') {
+            // State exists - rehydrate the modal with existing data
+            console.log(`🔄 Rehydrating existing ListenBrainz state (Phase: ${existingState.phase})`);
+
+            // If downloading/download_complete, rehydrate download modal instead
+            if ((existingState.phase === 'downloading' || existingState.phase === 'download_complete') &&
+                existingState.convertedSpotifyPlaylistId && existingState.download_process_id) {
+
+                console.log(`📥 Rehydrating download modal for ListenBrainz playlist: ${title}`);
+
+                // Implement download modal rehydration (like Beatport does)
+                const convertedPlaylistId = existingState.convertedSpotifyPlaylistId;
+
+                try {
+                    // Check if modal already exists (user just closed it)
+                    if (activeDownloadProcesses[convertedPlaylistId]) {
+                        console.log(`✅ Download modal already exists, just showing it`);
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process.modalElement) {
+                            process.modalElement.style.display = 'flex';
+                        }
+                        return;
+                    }
+
+                    // Create the download modal using the ListenBrainz state
+                    console.log(`🆕 Creating new download modal for rehydration`);
+                    // Get tracks from the existing state
+                    let spotifyTracks = [];
+
+                    if (existingState && existingState.discovery_results) {
+                        spotifyTracks = existingState.discovery_results
+                            .filter(result => result.spotify_data)
+                            .map(result => {
+                                const track = result.spotify_data;
+                                // Ensure artists is an array of strings
+                                if (track.artists && Array.isArray(track.artists)) {
+                                    track.artists = track.artists.map(artist =>
+                                        typeof artist === 'string' ? artist : (artist.name || artist)
+                                    );
+                                } else if (track.artists && typeof track.artists === 'string') {
+                                    track.artists = [track.artists];
+                                } else {
+                                    track.artists = ['Unknown Artist'];
+                                }
+                                return {
+                                    id: track.id,
+                                    name: track.name,
+                                    artists: track.artists,
+                                    album: track.album || 'Unknown Album',
+                                    duration_ms: track.duration_ms || 0,
+                                    external_urls: track.external_urls || {}
+                                };
+                            });
+                    }
+
+                    if (spotifyTracks.length > 0) {
+                        await openDownloadMissingModalForYouTube(
+                            convertedPlaylistId,
+                            title,
+                            spotifyTracks
+                        );
+
+                        // Set the modal to running state with the correct batch ID
+                        const process = activeDownloadProcesses[convertedPlaylistId];
+                        if (process) {
+                            process.status = existingState.phase === 'download_complete' ? 'complete' : 'running';
+                            process.batchId = existingState.download_process_id;
+
+                            // Update UI to running state
+                            const beginBtn = document.getElementById(`begin-analysis-btn-${convertedPlaylistId}`);
+                            const cancelBtn = document.getElementById(`cancel-all-btn-${convertedPlaylistId}`);
+                            if (beginBtn) beginBtn.style.display = 'none';
+                            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                            // Start polling for this process
+                            startModalDownloadPolling(convertedPlaylistId);
+
+                            // Add to discover download sidebar if this has discoverMetadata
+                            if (process.discoverMetadata) {
+                                const playlistName = title;
+                                const imageUrl = process.discoverMetadata.imageUrl;
+                                const type = process.discoverMetadata.type || 'album';
+                                addDiscoverDownload(convertedPlaylistId, playlistName, type, imageUrl);
+                                console.log(`📥 [REHYDRATION] Added ListenBrainz download to sidebar: ${playlistName}`);
+                            }
+
+                            // Show modal since user clicked the download button (different from background rehydration)
+                            if (process.modalElement) {
+                                process.modalElement.style.display = 'flex';
+                            }
+                            console.log(`✅ Rehydrated download modal for ListenBrainz playlist: ${title}`);
+                        }
+                    } else {
+                        console.warn(`⚠️ No Spotify tracks found for ListenBrainz download modal: ${title}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error setting up download process for ListenBrainz playlist "${title}":`, error.message);
+                }
+
+                return;
+            }
+
+            // Open discovery modal with existing state
+            openYouTubeDiscoveryModal(identifier);
+
+            // If still discovering, resume polling
+            if (existingState.phase === 'discovering') {
+                console.log(`🔄 Resuming discovery polling for: ${title}`);
+                startListenBrainzDiscoveryPolling(identifier);
+            }
+
+            return;
+        }
+
+        // No existing state - create fresh state and start discovery
+        console.log(`🆕 Creating fresh ListenBrainz state for: ${title}`);
+
+        // Create YouTube-style state entry for this ListenBrainz playlist (like Beatport does)
+        const listenbrainzState = {
+            phase: 'fresh',
+            playlist: {
+                name: title,
+                tracks: tracks.map(track => ({
+                    track_name: track.track_name,
+                    artist_name: track.artist_name,
+                    album_name: track.album_name,
+                    duration_ms: track.duration_ms || 0,
+                    mbid: track.mbid,
+                    release_mbid: track.release_mbid,
+                    album_cover_url: track.album_cover_url
+                })),
+                description: `${tracks.length} tracks from ${title}`,
+                source: 'listenbrainz'
+            },
+            is_listenbrainz_playlist: true,
+            playlist_mbid: identifier,  // Link to ListenBrainz playlist
+            // Initialize discovery state properties (both naming conventions for modal compatibility)
+            discovery_results: [],
+            discoveryResults: [],
+            discovery_progress: 0,
+            discoveryProgress: 0,
+            spotify_matches: 0,
+            spotifyMatches: 0,
+            spotify_total: tracks.length,
+            spotifyTotal: tracks.length
+        };
+
+        // Store in ListenBrainz playlist states
+        listenbrainzPlaylistStates[identifier] = listenbrainzState;
+
+        // Start discovery automatically (like Beatport and Tidal do)
+        try {
+            console.log(`🔍 Starting ListenBrainz discovery for: ${title}`);
+
+            // Call the discovery start endpoint with playlist data
+            const response = await fetch(`/api/listenbrainz/discovery/start/${identifier}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    playlist: listenbrainzState.playlist
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Update state to discovering
+                listenbrainzPlaylistStates[identifier].phase = 'discovering';
+
+                // Start polling for progress
+                startListenBrainzDiscoveryPolling(identifier);
+
+                console.log(`✅ Started ListenBrainz discovery for: ${title}`);
+            } else {
+                console.error('❌ Error starting ListenBrainz discovery:', result.error);
+                showToast(`Error starting discovery: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error starting ListenBrainz discovery:', error);
+            showToast(`Error starting discovery: ${error.message}`, 'error');
+        }
+
+        // Open the existing YouTube discovery modal infrastructure
+        openYouTubeDiscoveryModal(identifier);
+
+        console.log(`✅ ListenBrainz discovery modal opened for ${title} with ${tracks.length} tracks`);
+
+    } catch (error) {
+        console.error('Error opening discovery modal for ListenBrainz playlist:', error);
+        showToast('Failed to open discovery modal', 'error');
+    }
+};
+
+window.reopenActiveDownloadModal = function (virtualPlaylistId) {
+    const process = activeDownloadProcesses[virtualPlaylistId];
+    if (!process || !process.modalElement) return false;
+    if (process.status === 'complete') {
+        showToast('Showing previous results. Close this modal to start a new analysis.', 'info');
+    }
+    process.modalElement.style.display = 'flex';
+    return true;
+};
+
+/**
+ * Open the download modal for a batch shown on the Downloads page.
+ *
+ * Lives here for the same reason as the function above: `activeDownloadProcesses`
+ * is a top-level `let` in this script's lexical scope, so a module cannot read
+ * it. `rehydrateModal` and `WishlistModalState` are likewise script-scoped.
+ * Moved verbatim from _adlOpenBatchModal (pages-extra.js) when the Downloads
+ * page became React.
+ *
+ * Wishlist gets its own branch because its modal is a singleton keyed by the
+ * literal 'wishlist' rather than by batch id, and it has visibility state of
+ * its own that has to be told the modal is showing again.
+ */
+window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
+    if (playlistId === 'wishlist') {
+        const clientProcess = activeDownloadProcesses['wishlist'];
+        if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+            clientProcess.modalElement.style.display = 'flex';
+            if (typeof WishlistModalState !== 'undefined') WishlistModalState.setVisible();
+        } else {
+            rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+        }
+        return;
+    }
+
+    // Any other batch: show the modal it already has, or rebuild from the server.
+    for (const [, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+    rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+};
+
+/**
+ * Paint the downloads count on the nav button.
+ *
+ * Moved verbatim from pages-extra.js when the Downloads page became React. It
+ * has to live in a classic script rather than in the React page, because the
+ * websocket status handler below (and its twin in shared-helpers.js) calls it
+ * on every push — including on pages where the Downloads route is not mounted.
+ *
+ * It reads NOTHING from the downloads page: the count is the real server-side
+ * active total from the status push, not the page's list. That distinction is
+ * why the vanilla deliberately never called this from its own poll — the poll
+ * caps at 300 rows and would under-report a bigger queue.
+ */
+function _updateDlNavBadge(count) {
+    const badge = document.getElementById('dl-nav-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+    const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
+    if (dlBtn) {
+        dlBtn.classList.toggle('nav-downloads-active', count > 0);
+    }
+}
+
 let sequentialSyncManager = null;
 
 // --- YouTube Playlist State Management ---
@@ -121,21 +514,17 @@ function stopBeatportDiscoveryAndSyncPolling() {
 }
 
 function resetBeatportSliderInitFlags() {
-    const rebuildSlider = document.getElementById('beatport-rebuild-slider');
-    if (rebuildSlider) rebuildSlider.dataset.initialized = 'false';
-
-    const releasesSlider = document.getElementById('beatport-releases-slider');
-    if (releasesSlider) releasesSlider.dataset.initialized = 'false';
+    // The four `dataset.initialized = 'false'` writes that stood here are gone.
+    // They targeted #beatport-{rebuild,releases,charts,dj}-slider, ids the sync
+    // flip deleted along with the page — every lookup returned null, so every
+    // write was already a no-op. Removing them is behaviour-neutral and stops
+    // four dead `getElementById` calls tripping the class-as-id guard.
+    //
+    // The state resets below are KEPT: they are plain object writes, not DOM,
+    // and the slider state objects still exist in this file.
     beatportReleasesSliderState.isInitialized = false;
-
     beatportHypePicksSliderState.isInitialized = false;
-
-    const chartsSlider = document.getElementById('beatport-charts-slider');
-    if (chartsSlider) chartsSlider.dataset.initialized = 'false';
     beatportChartsSliderState.isInitialized = false;
-
-    const djSlider = document.getElementById('beatport-dj-slider');
-    if (djSlider) djSlider.dataset.initialized = 'false';
     beatportDJSliderState.isInitialized = false;
 }
 
@@ -373,6 +762,10 @@ function _isMassOrphanFix(jobId, count) {
 // ===============================
 let socket = null;
 let socketConnected = false;
+// Mirrored onto window so the React dashboard's fallback pollers can apply the
+// SAME socket gate the vanilla poller twins do (`socketConnected` is a
+// script-scoped `let` no module can read). Kept in lockstep at every write.
+window._socketConnected = false;
 
 function initializeWebSocket() {
     if (typeof io === 'undefined') {
@@ -396,6 +789,7 @@ function initializeWebSocket() {
     socket.on('connect', () => {
         console.log('WebSocket connected');
         socketConnected = true;
+        window._socketConnected = true;
         resubscribeDownloadBatches();
         // Re-subscribe to any active sync/discovery rooms after reconnect
         const activeSyncIds = Object.keys(_syncProgressCallbacks);
@@ -421,6 +815,7 @@ function initializeWebSocket() {
     socket.on('disconnect', (reason) => {
         console.warn('WebSocket disconnected:', reason);
         socketConnected = false;
+        window._socketConnected = false;
     });
 
     socket.on('reconnect', (attemptNumber) => {
@@ -433,10 +828,12 @@ function initializeWebSocket() {
         fetchAndUpdateServiceStatus();
         updateWatchlistButtonCount();
         resubscribeDownloadBatches();
-        // Phase 2: Refresh dashboard data if on dashboard page
+        // Phase 2: Refresh dashboard data if on dashboard page. The stats and
+        // activity refreshers are gone with the flip (the React cards fall
+        // back to their own polls when the socket drops, so a reconnect gap
+        // self-heals); the db-stats push and wishlist count still flow through
+        // their vanilla fetchers' dispatches.
         if (currentPage === 'dashboard') {
-            fetchAndUpdateSystemStats();
-            fetchAndUpdateActivityFeed();
             fetchAndUpdateDbStats();
             updateWishlistCount();
         }
@@ -483,6 +880,8 @@ function initializeWebSocket() {
     socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
+    // NB the ss:repair-status re-broadcast for the React tools page lives inside
+    // updateRepairStatusFromData, not here — the HTTP poller calls it too.
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
@@ -522,23 +921,45 @@ function initializeWebSocket() {
 
     // Phase 5 event listeners (sync/discovery progress + scans)
     socket.on('sync:progress', (data) => { qaSignal('sync'); updateSyncProgressFromData(data); });
-    socket.on('discovery:progress', (data) => { qaSignal('sync'); updateDiscoveryProgressFromData(data); });
+    socket.on('discovery:progress', (data) => {
+        qaSignal('sync');
+        updateDiscoveryProgressFromData(data);
+        // Mirror to the React playlist-explorer page. Same `ss:` seam as
+        // ss:watchlist-scan and ss:automation-progress: `socket` is a
+        // module-scoped `let` in this file, so no module can subscribe to it,
+        // and `youtubePlaylistStates` — which the explorer's poller used to
+        // read for the finished phase — is module-scoped here too. The event
+        // carries the phase, so React needs no second bridge for it.
+        // Purely additive; the vanilla handling above is untouched.
+        window.dispatchEvent(new CustomEvent('ss:discovery-progress', { detail: data }));
+    });
     // Unscoped heartbeat for the Auto-Sync tile: sync:progress above is
     // room-scoped (only playlist watchers receive it), so the dashboard
     // relies on this 1s pulse that fires while ANY pipeline work runs —
     // manual syncs, UI pipelines, and the scheduled auto-sync automation.
     socket.on('sync:active', () => qaSignal('sync'));
     socket.on('scan:watchlist', (data) => {
-        updateWatchlistScanFromData(data);
         const watchlistBtn = document.querySelector('.nav-button[data-page="watchlist"]');
         if (watchlistBtn) {
             watchlistBtn.classList.toggle('nav-watchlist-scanning', data.status === 'scanning');
         }
+        // Re-broadcast to the React side. `socket` is a module-scoped `let` in
+        // this file, so a React route cannot subscribe to it directly; this is
+        // the same `ss:` window-event seam the shell bridge already uses.
+        // Purely additive — the vanilla handlers above are untouched.
+        window.dispatchEvent(new CustomEvent('ss:watchlist-scan', { detail: data }));
     });
     socket.on('scan:media', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMediaScanFromData(data); });
     socket.on('wishlist:stats', (data) => updateWishlistStatsFromData(data));
     // Phase 6: Automation progress
-    socket.on('automation:progress', (data) => { qaSignal('auto'); updateAutomationProgressFromData(data); });
+    socket.on('automation:progress', (data) => {
+        qaSignal('auto');
+        updateAutomationProgressFromData(data);
+        // Mirror to the React automations page. Same seam as ss:watchlist-scan:
+        // the progress state is module-scoped in stats-automations.js and cannot
+        // be read from a module, so the vanilla side announces and React reacts.
+        window.dispatchEvent(new CustomEvent('ss:automation-progress', { detail: data }));
+    });
     socket.on('overlay:progress', (data) => { if (typeof updateOverlayTask === 'function') updateOverlayTask(data); });
     socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
     socket.on('collections:artwork', (data) => { if (typeof updateCollectionArtTask === 'function') updateCollectionArtTask(data); });
@@ -579,6 +1000,9 @@ setInterval(() => {
 }, 2000);
 
 function handleServiceStatusUpdate(data) {
+    // Re-broadcast for the React dashboard's service cards + library card
+    // (tools-seam rule: in the handler, so any future HTTP caller counts too).
+    window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));
     // Cache for library status card
     _lastStatusPayload = data;
 
@@ -592,11 +1016,8 @@ function handleServiceStatusUpdate(data) {
         sanitizeMetadataSourceSelection({ quiet: true });
     }
 
-    // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
-    updateServiceStatus('media-server', data.media_server);
-    updateServiceStatus('soulseek', data.soulseek);
-
+    // The dashboard service cards are React-rendered from the dispatch above
+    // since the flip (service-cards.tsx) — only the sidebar half survives here.
     updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
@@ -621,8 +1042,8 @@ function handleServiceStatusUpdate(data) {
         // (preserves display:none on undiscovered LB/Last.fm playlist sync buttons)
     });
 
-    // Update enrichment service cards
-    if (data.enrichment) renderEnrichmentCards(data.enrichment);
+    // The enrichment chips grid is React-rendered from the dispatch above
+    // since the dashboard flip (service-cards.tsx) — no vanilla write here.
 
     // Spotify rate limit / cooldown / recovery
     //
@@ -658,7 +1079,7 @@ function handleServiceStatusUpdate(data) {
             _spotifyInCooldown = false;
             showToast('Spotify access restored', 'success');
             if (currentPage === 'discover') {
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         } else if (_spotifyRateLimitShown) {
             handleSpotifyRateLimit(null);
@@ -666,29 +1087,17 @@ function handleServiceStatusUpdate(data) {
     }
 }
 
-function _updateHeroBtnCount(buttonId, badgeId, count) {
-    const badge = document.getElementById(badgeId);
-    if (badge) {
-        badge.textContent = count;
-        badge.classList.toggle('has-items', count > 0);
-    }
-}
-
 function handleWatchlistCountUpdate(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:watchlist-count', { detail: data }));
     if (data.success) {
-        _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
-        // Update sidebar nav badge
+        // Only the SIDEBAR half survives the dashboard flip — the hero button
+        // and its badge/countdown-title are React-rendered from the dispatch
+        // above (dashboard-header.tsx).
         const wlNavBadge = document.getElementById('watchlist-nav-badge');
         if (wlNavBadge) {
             wlNavBadge.textContent = data.count;
             wlNavBadge.classList.toggle('hidden', data.count === 0);
-        }
-        const watchlistButton = document.getElementById('watchlist-button');
-        if (watchlistButton) {
-            const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
-            if (countdownText) {
-                watchlistButton.title = `Next auto-scan in ${countdownText}`;
-            }
         }
     }
 }
@@ -733,24 +1142,20 @@ function unsubscribeFromDownloadBatch(batchId) {
 // --- Phase 2: Dashboard event handlers ---
 
 function handleDashboardStats(data) {
-    // Same logic as fetchAndUpdateSystemStats response handler
-    updateStatCard('active-downloads-card', data.active_downloads, 'Currently downloading');
-    updateStatCard('finished-downloads-card', data.finished_downloads, 'Completed downloads');
-    updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
-    updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
-    updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
-    // app's actual footprint (falls back to the generic label on older backends).
-    updateStatCard('memory-card', data.memory_usage,
-        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
+    // Dispatch-only since the dashboard flip — the stat cards are
+    // React-rendered from this frame (system-stats.tsx).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-stats', { detail: data }));
 }
 
 function handleDashboardActivity(data) {
-    // Same logic as fetchAndUpdateActivityFeed response handler
-    updateActivityFeed(data.activities || []);
+    // Dispatch-only since the dashboard flip — the feed is React-rendered
+    // from this frame (activity-feed.tsx).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-activity', { detail: data }));
 }
 
 function handleDashboardToast(activity) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-toast', { detail: activity }));
     // Same logic as checkForActivityToasts response handler
     let toastType = 'info';
     if (activity.icon === '\u2705' || activity.title.includes('Complete')) {
@@ -764,29 +1169,24 @@ function handleDashboardToast(activity) {
 }
 
 function handleDashboardDbStats(stats) {
-    // Same logic as fetchAndUpdateDbStats response handler
-    updateDashboardStatCards(stats);
-    updateDbUpdaterCardInfo(stats);
+    // Dispatch-only since the dashboard flip — the Library card is
+    // React-rendered from this frame (library-card.tsx), and the tools page's
+    // db-updater card (the old updateDbUpdaterCardInfo target) has been React
+    // since the tools flip.
+    window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
 }
 
 function handleDashboardWishlistCount(data) {
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler).
+    window.dispatchEvent(new CustomEvent('ss:dashboard-wishlist-count', { detail: data }));
     const count = data.count || 0;
-    _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
-    // Update sidebar nav badge
+    // Only the SIDEBAR half survives the dashboard flip — the hero button,
+    // its badge and the active/inactive classes are React-rendered from the
+    // dispatch above (dashboard-header.tsx).
     const wlNavBadge = document.getElementById('wishlist-nav-badge');
     if (wlNavBadge) {
         wlNavBadge.textContent = count;
         wlNavBadge.classList.toggle('hidden', count === 0);
-    }
-    const wishlistButton = document.getElementById('wishlist-button');
-    if (wishlistButton) {
-        if (count === 0) {
-            wishlistButton.classList.remove('wishlist-active');
-            wishlistButton.classList.add('wishlist-inactive');
-        } else {
-            wishlistButton.classList.remove('wishlist-inactive');
-            wishlistButton.classList.add('wishlist-active');
-        }
     }
     checkForAutoInitiatedWishlistProcess();
 }
@@ -796,6 +1196,7 @@ function handleDashboardWishlistCount(data) {
 // ===============================
 
 // --- Service Integration Logo Constants ---
+const AUDIODB_LOGO_URL = '/static/img/brands/audiodb.png';
 const MUSICBRAINZ_LOGO_URL = '/static/img/brands/musicbrainz.png';
 const DEEZER_LOGO_URL = '/static/img/brands/deezer.png';
 const SPOTIFY_LOGO_URL = '/static/img/brands/spotify.png';
@@ -807,7 +1208,15 @@ const QOBUZ_LOGO_URL = '/static/img/brands/qobuz.svg';
 const DISCOGS_LOGO_URL = '/static/img/brands/discogs.svg';
 const AMAZON_LOGO_URL = '/static/amazon.svg';
 const BANDCAMP_LOGO_URL = '/static/img/brands/bandcamp.svg';
-function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
+function getAudioDBLogoURL() {
+    // The logo used to live ONLY as a 40KB base64 line inside the dashboard
+    // markup, read off the DOM here. It is a real file now
+    // (static/img/brands/audiodb.png, extracted from that exact line), so this
+    // no longer depends on any page's markup being mounted — the DOM read is
+    // kept first purely so an override of the img keeps winning.
+    const el = document.querySelector('img.audiodb-logo');
+    return el ? el.src : AUDIODB_LOGO_URL;
+}
 
 // --- Wishlist Modal Persistence State Management ---
 const WishlistModalState = {
@@ -878,6 +1287,15 @@ class SequentialSyncManager {
     }
 
     async syncNext() {
+        // A cancel between iterations zeroes the queue AND clears isRunning,
+        // but the `setTimeout(() => this.syncNext(), 1000)` queued by the
+        // previous iteration still fires. Without this guard it then reads
+        // `0 >= 0`, calls complete(), and announces a SUCCESS toast for zero
+        // playlists — with a duration measured against a startTime cancel has
+        // already set to null, so `Date.now() - null` renders the epoch in
+        // seconds ("completed for 0 playlists in 1754584800.0s").
+        if (!this.isRunning) return;
+
         if (this.currentIndex >= this.queue.length) {
             this.complete();
             return;
@@ -1024,3 +1442,396 @@ function getActiveMetadataSource() {
 }
 
 // ===============================
+
+// Relocated verbatim from discover.js: the dashboard discover bubble
+// (wishlist-tools.js onclick) reopens a live download modal via these.
+async function openDiscoverDownloadModal(playlistId) {
+    console.log(`📂 [DOWNLOAD BAR] Opening download modal for: ${playlistId}`);
+
+    // Check if there's an active download process with modal
+    let process = activeDownloadProcesses[playlistId];
+
+    console.log(`📋 [DOWNLOAD BAR] Process found:`, {
+        exists: !!process,
+        hasModalElement: !!(process && process.modalElement),
+        hasModalId: !!(process && process.modalId)
+    });
+
+    if (process) {
+        // Try modalElement first (album downloads)
+        if (process.modalElement) {
+            console.log(`✅ [DOWNLOAD BAR] Opening modal via modalElement`);
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+
+        // Try modalId (sync downloads)
+        if (process.modalId) {
+            const modal = document.getElementById(process.modalId);
+            if (modal) {
+                console.log(`✅ [DOWNLOAD BAR] Opening modal via modalId: ${process.modalId}`);
+                modal.style.display = 'flex';
+                return;
+            }
+        }
+    }
+
+    // If no process found, try to rehydrate from backend
+    console.log(`💧 [DOWNLOAD BAR] No modal found, attempting to rehydrate from backend...`);
+    const rehydrated = await rehydrateDiscoverDownloadModal(playlistId);
+
+    if (rehydrated) {
+        console.log(`✅ [DOWNLOAD BAR] Successfully rehydrated modal, opening it...`);
+        // Try again after rehydration
+        process = activeDownloadProcesses[playlistId];
+        if (process && process.modalElement) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+
+    // Fallback: show toast
+    const download = discoverDownloads[playlistId];
+    if (download) {
+        console.log(`ℹ️ [DOWNLOAD BAR] No modal found after rehydration attempt, showing toast`);
+        showToast(`Download: ${download.name} - ${download.status}`, 'info');
+    } else {
+        console.warn(`⚠️ [DOWNLOAD BAR] No download or process found for: ${playlistId}`);
+    }
+}
+
+async function rehydrateDiscoverDownloadModal(playlistId) {
+    /**
+     * Rehydrates a discover download modal from backend process data.
+     * Fetches tracks from backend API and recreates the modal (user-requested).
+     */
+    try {
+        console.log(`💧 [REHYDRATE] Attempting to rehydrate modal for: ${playlistId}`);
+
+        // Check if there's an active backend process for this playlist
+        const batchResponse = await fetch(`/api/download_status/batch`);
+        if (!batchResponse.ok) {
+            console.log(`⚠️ [REHYDRATE] Failed to fetch batch info`);
+            return false;
+        }
+
+        const batchData = await batchResponse.json();
+        const batches = batchData.batches || {};
+
+        // Find the batch for this playlist (batches is an object with batch_id keys)
+        let batchId = null;
+        let batch = null;
+        for (const [id, batchStatus] of Object.entries(batches)) {
+            if (batchStatus.playlist_id === playlistId) {
+                batchId = id;
+                batch = batchStatus;
+                break;
+            }
+        }
+
+        if (!batch || !batchId) {
+            console.log(`⚠️ [REHYDRATE] No active batch found for ${playlistId}`);
+            return false;
+        }
+
+        console.log(`✅ [REHYDRATE] Found active batch for ${playlistId}: ${batchId}`, batch);
+
+        // Get the download metadata from discoverDownloads
+        const downloadData = discoverDownloads[playlistId];
+        if (!downloadData) {
+            console.log(`⚠️ [REHYDRATE] No download metadata found for ${playlistId}`);
+            return false;
+        }
+
+        // Handle album downloads from Recent Releases
+        if (playlistId.startsWith('discover_album_')) {
+            const albumId = playlistId.replace('discover_album_', '');
+            console.log(`💧 [REHYDRATE] Album download - fetching album ${albumId}...`);
+
+            try {
+                const albumResponse = await fetch(`/api/spotify/album/${albumId}`);
+                if (!albumResponse.ok) {
+                    console.error(`❌ [REHYDRATE] Failed to fetch album: ${albumResponse.status}`);
+                    return false;
+                }
+
+                const albumData = await albumResponse.json();
+                if (!albumData.tracks || albumData.tracks.length === 0) {
+                    console.error(`❌ [REHYDRATE] No tracks in album`);
+                    return false;
+                }
+
+                // Convert tracks to expected format
+                const spotifyTracks = albumData.tracks.map(track => {
+                    let artists = track.artists || [];
+                    if (Array.isArray(artists)) {
+                        artists = artists.map(a => a.name || a);
+                    }
+
+                    return {
+                        id: track.id,
+                        name: track.name,
+                        artists: artists,
+                        album: {
+                            name: albumData.name || downloadData.name.split(' - ')[0],
+                            images: downloadData.imageUrl ? [{ url: downloadData.imageUrl }] : []
+                        },
+                        duration_ms: track.duration_ms || 0
+                    };
+                });
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks for album`);
+
+                // Create modal
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+                // Update process
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated album modal with polling`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching album:`, error);
+                return false;
+            }
+        }
+
+        // Determine API endpoint based on playlist ID
+        let apiEndpoint;
+        if (playlistId === 'discover_release_radar') {
+            apiEndpoint = '/api/discover/release-radar';
+        } else if (playlistId === 'discover_discovery_weekly') {
+            apiEndpoint = '/api/discover/discovery-weekly';
+        } else if (playlistId === 'discover_seasonal_playlist') {
+            apiEndpoint = '/api/discover/seasonal-playlist';
+        } else if (playlistId === 'discover_popular_picks') {
+            apiEndpoint = '/api/discover/popular-picks';
+        } else if (playlistId === 'discover_hidden_gems') {
+            apiEndpoint = '/api/discover/hidden-gems';
+        } else if (playlistId === 'discover_discovery_shuffle') {
+            apiEndpoint = '/api/discover/discovery-shuffle';
+        } else if (playlistId === 'build_playlist_custom') {
+            apiEndpoint = '/api/discover/build-playlist';
+        } else if (playlistId.startsWith('discover_lb_')) {
+            // ListenBrainz playlist - fetch from cache
+            const identifier = playlistId.replace('discover_lb_', '');
+            const tracks = listenbrainzTracksCache[identifier];
+            if (!tracks || tracks.length === 0) {
+                console.log(`⚠️ [REHYDRATE] No ListenBrainz tracks in cache for ${identifier}`);
+                return false;
+            }
+
+            // Convert to Spotify format
+            const spotifyTracks = tracks.map(track => ({
+                id: track.mbid || `listenbrainz_${track.track_name}_${track.artist_name}`.replace(/[^a-z0-9]/gi, '_'),  // Generate ID if missing
+                name: track.track_name,
+                artists: [{ name: cleanArtistName(track.artist_name) }], // Proper Spotify format
+                album: {
+                    name: track.album_name,
+                    images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                },
+                duration_ms: track.duration_ms || 0,
+                mbid: track.mbid
+            }));
+
+            // Create modal and update process
+            await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+            const process = activeDownloadProcesses[playlistId];
+            if (process) {
+                process.status = 'running';
+                process.batchId = batchId;
+                subscribeToDownloadBatch(batchId);
+                const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                if (beginBtn) beginBtn.style.display = 'none';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                // Start polling for status updates
+                startModalDownloadPolling(playlistId);
+                console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz modal with polling`);
+                return true;
+            }
+            return false;
+        } else if (playlistId.startsWith('listenbrainz_')) {
+            // ListenBrainz download from discovery modal - get from backend state
+            const mbid = playlistId.replace('listenbrainz_', '');
+            console.log(`💧 [REHYDRATE] ListenBrainz download - fetching state for MBID: ${mbid}`);
+
+            try {
+                // Fetch ListenBrainz state from backend
+                const stateResponse = await fetch(`/api/listenbrainz/state/${mbid}`);
+                if (!stateResponse.ok) {
+                    console.log(`⚠️ [REHYDRATE] Failed to fetch ListenBrainz state`);
+                    return false;
+                }
+
+                const stateData = await stateResponse.json();
+                if (!stateData || !stateData.discovery_results) {
+                    console.log(`⚠️ [REHYDRATE] No discovery results in ListenBrainz state`);
+                    return false;
+                }
+
+                // Convert discovery results to Spotify tracks
+                const spotifyTracks = stateData.discovery_results
+                    .filter(result => result.spotify_data)
+                    .map(result => {
+                        const track = result.spotify_data;
+                        // Ensure artists is in proper Spotify format: [{name: ...}]
+                        let artistsArray = [];
+                        if (track.artists && Array.isArray(track.artists)) {
+                            artistsArray = track.artists.map(artist => {
+                                if (typeof artist === 'string') {
+                                    return { name: artist };
+                                } else if (artist && artist.name) {
+                                    return { name: artist.name };
+                                } else {
+                                    return { name: String(artist || 'Unknown Artist') };
+                                }
+                            });
+                        } else if (track.artists && typeof track.artists === 'string') {
+                            artistsArray = [{ name: track.artists }];
+                        } else {
+                            artistsArray = [{ name: 'Unknown Artist' }];
+                        }
+                        return {
+                            id: track.id,
+                            name: track.name,
+                            artists: artistsArray,
+                            album: track.album || { name: 'Unknown Album', images: [] },
+                            duration_ms: track.duration_ms || 0,
+                            external_urls: track.external_urls || {}
+                        };
+                    });
+
+                if (spotifyTracks.length === 0) {
+                    console.log(`⚠️ [REHYDRATE] No Spotify tracks in ListenBrainz discovery results`);
+                    return false;
+                }
+
+                console.log(`✅ [REHYDRATE] Retrieved ${spotifyTracks.length} tracks from ListenBrainz state`);
+
+                // Create modal and update process
+                await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+                const process = activeDownloadProcesses[playlistId];
+                if (process) {
+                    process.status = 'running';
+                    process.batchId = batchId;
+                    subscribeToDownloadBatch(batchId);
+                    const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+                    const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+                    if (beginBtn) beginBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+                    // Start polling for status updates
+                    startModalDownloadPolling(playlistId);
+                    console.log(`✅ [REHYDRATE] Successfully rehydrated ListenBrainz download modal with polling`);
+                    return true;
+                }
+                return false;
+
+            } catch (error) {
+                console.error(`❌ [REHYDRATE] Error fetching ListenBrainz state:`, error);
+                return false;
+            }
+        } else {
+            console.error(`❌ [REHYDRATE] Unknown discover playlist type: ${playlistId}`);
+            return false;
+        }
+
+        // Fetch tracks from API
+        console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+            console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
+            return false;
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.tracks) {
+            console.error(`❌ [REHYDRATE] Invalid track data:`, data);
+            return false;
+        }
+
+        const tracks = data.tracks;
+        console.log(`✅ [REHYDRATE] Retrieved ${tracks.length} tracks`);
+
+        // Transform tracks to Spotify format
+        const spotifyTracks = tracks.map(track => {
+            let spotifyTrack;
+            if (track.track_data_json) {
+                spotifyTrack = track.track_data_json;
+            } else {
+                spotifyTrack = {
+                    id: track.spotify_track_id,
+                    name: track.track_name,
+                    artists: [{ name: track.artist_name }],
+                    album: {
+                        name: track.album_name,
+                        images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
+                    },
+                    duration_ms: track.duration_ms || 0
+                };
+            }
+            if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
+                spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
+            }
+            return spotifyTrack;
+        });
+
+        // Create the modal
+        await openDownloadMissingModalForYouTube(playlistId, downloadData.name, spotifyTracks);
+
+        // Update process with batch info
+        const process = activeDownloadProcesses[playlistId];
+        if (process) {
+            process.status = 'running';
+            process.batchId = batchId;
+            subscribeToDownloadBatch(batchId);
+
+            // Update button states
+            const beginBtn = document.getElementById(`begin-analysis-btn-${playlistId}`);
+            const cancelBtn = document.getElementById(`cancel-all-btn-${playlistId}`);
+            if (beginBtn) beginBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            // Start polling for status updates
+            startModalDownloadPolling(playlistId);
+
+            // Don't hide the modal - user clicked to open it
+            console.log(`✅ [REHYDRATE] Successfully rehydrated modal for ${downloadData.name} with polling`);
+            return true;
+        } else {
+            console.error(`❌ [REHYDRATE] Failed to find rehydrated process for ${playlistId}`);
+            return false;
+        }
+
+    } catch (error) {
+        console.error(`❌ [REHYDRATE] Error rehydrating discover download modal:`, error);
+        return false;
+    }
+}
+
+// Relocated from discover.js: the LB sync modal's entry point. The body moved
+// to window.openLbPlaylistDiscovery (parameterized by tracks) during the React
+// port; this keeps the original name + cache sourcing for sync-listenbrainz.
+async function openDownloadModalForListenBrainzPlaylist(identifier, title) {
+    const tracks = listenbrainzTracksCache[identifier];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks to download', 'error');
+        return;
+    }
+    await window.openLbPlaylistDiscovery(identifier, title, tracks);
+}

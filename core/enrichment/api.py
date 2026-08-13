@@ -103,6 +103,13 @@ def _add_yield_override(service: EnrichmentService) -> None:
 # them. A short per-service cache caps the cost at one stats read per service
 # per window no matter how many polls pile up. Time source injectable for tests.
 _STATUS_TTL_SECONDS = 2.0
+# Idle services keep their answer far longer: get_stats() runs ~6 whole-table
+# aggregates against a multi-GB library db, and the dashboard's 10s fallback
+# poll re-collected all ~18 services through this cache with a 2s TTL — i.e.
+# always cold (perf sweep, Aug 2026). A RUNNING service's numbers move, so it
+# keeps the short TTL; pause/resume still reflect instantly because those
+# endpoints call _invalidate_status_cache.
+_STATUS_IDLE_TTL_SECONDS = 30.0
 _status_cache: dict = {}          # service_id -> (monotonic_ts, stats_dict)
 _status_cache_lock = threading.Lock()
 
@@ -111,8 +118,10 @@ def _cached_stats(service: EnrichmentService, now: Optional[float] = None) -> di
     t = time.monotonic() if now is None else now
     with _status_cache_lock:
         hit = _status_cache.get(service.id)
-        if hit and t - hit[0] < _STATUS_TTL_SECONDS:
-            return hit[1]
+        if hit:
+            ttl = _STATUS_TTL_SECONDS if hit[1].get('running') else _STATUS_IDLE_TTL_SECONDS
+            if t - hit[0] < ttl:
+                return hit[1]
     worker = service.get_worker()
     stats = service.fallback_status() if worker is None else worker.get_stats()
     with _status_cache_lock:
@@ -341,6 +350,56 @@ def create_blueprint() -> Blueprint:
         logger.info("Enrichment retry-all sweep re-queued %d item(s) across %d worker(s)",
                     total, len(per_service))
         return jsonify({'success': True, 'reset': total, 'services': per_service}), 200
+
+    @bp.route('/api/enrichment/<service_id>/verify-matches', methods=['POST'])
+    def enrichment_verify_matches(service_id: str):
+        """Targeted repair of the pre-fix corruption classes for one worker
+        (MusicDatabase.verify_enrichment_matches): reset every artist
+        id-collision cluster (the smear fingerprint) and every matched row
+        with a degenerate title (the empty-normalization class). Pure SQL +
+        a local title scan — no API calls; the fixed worker rematches the
+        reset rows on its next pass."""
+        if service_id not in SERVICE_ENTITY_SUPPORT:
+            return jsonify({'error': f'Unknown enrichment service: {service_id}'}), 404
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        try:
+            result = _db_getter().verify_enrichment_matches(service_id)
+        except Exception as e:
+            logger.error("verify-matches failed for %s: %s", service_id, e)
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'service': service_id, **result}), 200
+
+    @bp.route('/api/enrichment/verify-matches', methods=['POST'])
+    def enrichment_verify_matches_all():
+        """The hub-level Verify matches: the same repair across ALL workers.
+        The degenerate-title scan is service-independent, so it runs once and
+        every service resets against it. Per-service failures are skipped,
+        not fatal — same contract as retry-all-failed."""
+        if _db_getter is None:
+            return jsonify({'error': 'database unavailable'}), 503
+        db = _db_getter()
+        try:
+            degenerates = db.degenerate_entity_ids()
+        except Exception as e:
+            logger.error("verify-matches degenerate scan failed: %s", e)
+            degenerates = {}
+        totals = {'collision_clusters': 0, 'collision_rows': 0, 'degenerate_reset': 0}
+        per_service: dict = {}
+        for service_id in SERVICE_ENTITY_SUPPORT:
+            try:
+                result = db.verify_enrichment_matches(service_id, degenerates=degenerates)
+            except Exception as e:
+                logger.warning("verify-matches sweep: %s failed: %s", service_id, e)
+                continue
+            touched = (result.get('collision_rows', 0) or 0) + (result.get('degenerate_reset', 0) or 0)
+            if touched:
+                per_service[service_id] = result
+            for k in totals:
+                totals[k] += result.get(k, 0) or 0
+        logger.info("Enrichment verify-matches sweep: %s across %d worker(s)",
+                    totals, len(per_service))
+        return jsonify({'success': True, 'services': per_service, **totals}), 200
 
     @bp.route('/api/enrichment/<service_id>/priority', methods=['GET'])
     def enrichment_get_priority(service_id: str):

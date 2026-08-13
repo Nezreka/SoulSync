@@ -100,21 +100,47 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
         return []
 
 
+def _artist_catalog_weight(artist: Any) -> tuple:
+    """Rank same-named search results: catalog size, then popularity.
+
+    §62.5: providers carry FRAGMENT artist entries under the exact same name
+    (Deezer lists five "Hiroyuki Sawano"s; the first exact hit had 4 albums,
+    the real one 104). Catalog size (`nb_album`) is the direct discriminator;
+    fan/follower counts (`nb_fan`, Spotify's `followers.total`, `popularity`)
+    break remaining ties. Missing signals rank lowest, preserving the old
+    first-exact-hit behavior when a source reports nothing."""
+    def _num(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    albums = _num(_extract_lookup_value(artist, 'nb_album', 'album_count'))
+    followers = _extract_lookup_value(artist, 'followers')
+    if isinstance(followers, dict):
+        followers = followers.get('total')
+    fans = max(_num(_extract_lookup_value(artist, 'nb_fan')), _num(followers))
+    return (albums, fans, _num(_extract_lookup_value(artist, 'popularity')))
+
+
 def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
     """Pick the search result whose artist NAME matches, or None.
 
-    Exact (normalized) name wins; otherwise the closest fuzzy match, but only if
-    it's similar enough. Never a blind first result — that handed back an
-    unrelated popular artist (#988: a Deezer name-search for "The Outfield"
-    returning The Beatles) when the source's search doesn't actually contain the
-    artist we asked for. Returning None lets the caller fall back / show nothing
-    instead of the wrong artist's catalogue.
+    Exact (normalized) name wins; among SEVERAL exact hits the largest
+    catalog/most-popular entry is chosen (§62.5 — provider-side fragment
+    artists share the real entry's exact name). Otherwise the closest fuzzy
+    match, but only if it's similar enough. Never a blind first result — that
+    handed back an unrelated popular artist (#988: a Deezer name-search for
+    "The Outfield" returning The Beatles) when the source's search doesn't
+    actually contain the artist we asked for. Returning None lets the caller
+    fall back / show nothing instead of the wrong artist's catalogue.
     """
     if not search_results:
         return None
     target_name = _normalize_artist_name(artist_name)
     if not target_name:
         return None
+    exact: List[Any] = []
     best, best_ratio = None, 0.0
     for artist in search_results:
         candidate_name = _normalize_artist_name(
@@ -123,10 +149,13 @@ def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Opti
         if not candidate_name:
             continue
         if candidate_name == target_name:
-            return artist
+            exact.append(artist)
+            continue
         ratio = SequenceMatcher(None, target_name, candidate_name).ratio()
         if ratio > best_ratio:
             best, best_ratio = artist, ratio
+    if exact:
+        return max(exact, key=_artist_catalog_weight)
     return best if best_ratio >= 0.85 else None
 
 
@@ -704,6 +733,44 @@ def resolve_album_reference(
     return None, None
 
 
+def _served_album_name_acceptable(requested_name: str, album_data: Any) -> bool:
+    """Sanity gate for id lookups: the album a source returned must at least
+    resemble the album the caller ASKED for.
+
+    Album ids are only meaningful within their own catalog, but this lookup
+    walks a source CHAIN — when an id from one id-space (a library DB row id,
+    another provider's id) reaches the wrong catalog, that catalog happily
+    returns whatever unrelated release owns the number, and the chain stops at
+    the first "success" (clicking GNX served a Lady Blacktronika record).
+    With no requested name there is no basis to reject; otherwise require a
+    lenient match — normalized containment either way, or a fuzzy ratio that
+    survives subtitle/edition noise. A rejected hit just continues the chain
+    and ultimately falls to resolve_album_reference, which matches by NAME.
+    """
+    if not requested_name:
+        return True
+    # The RAW source data, not the built payload — the payload builder stamps
+    # the caller's requested name over the served one, which would make this
+    # check vacuously true. Wire shapes: spotify/bandcamp 'name', deezer/
+    # discogs 'title', itunes 'collectionName'. Unknown shape → no basis.
+    served = ''
+    if isinstance(album_data, dict):
+        served = str(album_data.get('name') or album_data.get('title')
+                     or album_data.get('collectionName') or '')
+    else:
+        served = str(getattr(album_data, 'name', '') or getattr(album_data, 'title', '') or '')
+    if not served:
+        return True
+    def _norm(value: str) -> str:
+        return ' '.join(''.join(c if c.isalnum() else ' ' for c in value.casefold()).split())
+    a, b = _norm(requested_name), _norm(served)
+    if not a or not b:
+        return True
+    if a in b or b in a:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.6
+
+
 def get_artist_album_tracks(
     album_id: str,
     artist_name: str = '',
@@ -737,6 +804,13 @@ def get_artist_album_tracks(
             artist_name=artist_name,
         )
         if payload['tracks']:
+            if not _served_album_name_acceptable(album_name, album_data):
+                logger.info(
+                    "Rejecting %s album %s for id %s: served name %r does not match requested %r",
+                    source, (payload.get('album') or {}).get('id'), album_id,
+                    (payload.get('album') or {}).get('name'), album_name,
+                )
+                continue
             payload['success'] = True
             payload['source_priority'] = source_chain
             payload['resolved_album_id'] = album_id
@@ -776,6 +850,19 @@ def get_artist_album_tracks(
                 artist_name=artist_name,
             )
             if payload['tracks']:
+                # The resolved id belongs to resolved_source's catalog — that
+                # hop is trusted (the id came from that source's own stored
+                # mapping or name search, and a stored external id may
+                # legitimately carry a different title). The OTHER retry hops
+                # walk the id through foreign catalogs — same collision class
+                # as above, so they must still resemble the requested name.
+                if source != resolved_source and not _served_album_name_acceptable(album_name, album_data):
+                    logger.info(
+                        "Rejecting %s album %s for resolved id %s: served name %r does not match requested %r",
+                        source, (payload.get('album') or {}).get('id'), resolved_album_id,
+                        (payload.get('album') or {}).get('name'), album_name,
+                    )
+                    continue
                 payload['success'] = True
                 payload['source_priority'] = source_chain
                 payload['resolved_album_id'] = resolved_album_id

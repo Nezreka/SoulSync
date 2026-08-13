@@ -696,11 +696,100 @@ class TidalClient:
                 next_params = None      # the cursor URL carries all query params
 
             logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
+
+            # The V2 owners.id filter above returns only playlists the user
+            # CREATED — playlists they merely FOLLOW (Tidal editorial "My
+            # Daily Discovery", other users' lists) never appear, which is
+            # why curated playlists were invisible unless the user re-added
+            # them as personal copies (Specialmed's report). Merge the v1
+            # favorites listing, deduped by id.
+            try:
+                seen_ids = {str(p.id) for p in playlists}
+                favorites = self._get_favorite_playlists(user_id)
+                added = 0
+                for fav in favorites:
+                    if str(fav.id) in seen_ids:
+                        continue
+                    seen_ids.add(str(fav.id))
+                    playlists.append(fav)
+                    added += 1
+                if added:
+                    logger.info(f"Merged {added} followed/favorited Tidal playlists into the listing.")
+            except Exception as e:
+                # Favorites are additive — never let them break the personal listing.
+                logger.warning(f"Could not fetch favorited Tidal playlists: {e}")
+
             return playlists
 
         except Exception as e:
             logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
             return []
+
+    @staticmethod
+    def _favorite_playlist_from_item(item):
+        """Build a Playlist from one v1 favorites row. The v1 endpoint wraps
+        each playlist as {'created': ts, 'item': {...}}; tolerate a flat row
+        too. Returns None for rows without a uuid."""
+        pl = item.get('item') if isinstance(item.get('item'), dict) else item
+        uuid = pl.get('uuid') or pl.get('id')
+        if not uuid:
+            return None
+        image_guid = pl.get('squareImage') or pl.get('image') or ''
+        image_url = (
+            f"https://resources.tidal.com/images/{image_guid.replace('-', '/')}/640x640.jpg"
+            if image_guid else None
+        )
+        creator = pl.get('creator') or {}
+        # Editorial playlists carry creator id 0 / no name — label them Tidal.
+        owner = creator.get('name') or ('Tidal' if not creator.get('id') else 'Tidal user')
+        playlist = Playlist(
+            id=str(uuid),
+            name=pl.get('title') or 'Unknown Playlist',
+            description=pl.get('description') or '',
+            external_urls={'tidal': f"https://listen.tidal.com/playlist/{uuid}"},
+            public=bool(pl.get('publicPlaylist', True)),
+            tracks=[],  # fetched on-demand, like the owned rows
+        )
+        playlist.track_count = pl.get('numberOfTracks') or 0
+        playlist.owner = owner
+        if image_url:
+            playlist.image_url = image_url
+        return playlist
+
+    def _get_favorite_playlists(self, user_id):
+        """The user's FOLLOWED playlists via the v1 favorites endpoint,
+        paged. Same v1 base + bearer auth the fallback listing already
+        uses."""
+        favorites = []
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {self.access_token}',
+            'User-Agent': 'TIDAL_ANDROID/2.47.1 okhttp/4.9.0',
+        }
+        limit, offset = 50, 0
+        for _page in range(20):  # 1000 followed playlists — generous ceiling
+            response = requests.get(
+                f"{self.alt_base_url}/users/{user_id}/favorites/playlists",
+                headers=headers,
+                params={'limit': limit, 'offset': offset, 'countryCode': 'US'},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                logger.info(f"v1 favorites/playlists returned {response.status_code}; skipping followed playlists.")
+                break
+            data = response.json() or {}
+            items = data.get('items') or []
+            for item in items:
+                try:
+                    playlist = self._favorite_playlist_from_item(item)
+                    if playlist:
+                        favorites.append(playlist)
+                except Exception as e:
+                    logger.debug(f"Skipping unparseable favorite playlist row: {e}")
+            if len(items) < limit:
+                break
+            offset += limit
+        return favorites
 
     def _collect_v2_playlist_page(self, data, playlists):
         """Append one V2 /playlists page's rows to ``playlists`` (metadata only —

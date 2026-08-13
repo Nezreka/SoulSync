@@ -1569,20 +1569,10 @@ async function addModalTracksToWishlist(playlistId) {
     }
 }
 
-/**
- * Format duration from milliseconds to MM:SS format
- */
-function formatDuration(durationMs) {
-    if (!durationMs || durationMs <= 0) {
-        return '--:--';
-    }
-
-    const totalSeconds = Math.floor(durationMs / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
+// formatDuration lived here too, returning '--:--' for an unknown duration.
+// It was DEAD: sync-services.js declared the same name and loaded later, so its
+// '0:00' version won for every caller in this file. The one definition now
+// lives in shared-helpers.js — see the note there.
 
 // Note: Functions from other modules (downloads.js, sync-spotify.js, sync-services.js, artists.js)
 // are already global via their function declarations and do not need window.X = X assignments.
@@ -1595,167 +1585,11 @@ window.handleWishlistDownloadNow = handleWishlistDownloadNow;
 window.addModalTracksToWishlist = addModalTracksToWishlist;
 
 
-// APPEND THIS JAVASCRIPT SNIPPET (B)
-
-function initializeFilters() {
-    const toggleBtn = document.getElementById('filter-toggle-btn');
-    const container = document.getElementById('filters-container');
-    const content = document.getElementById('filter-content');
-
-    if (toggleBtn && container && content) {
-        // Using .onclick ensures we only ever have one click handler
-        toggleBtn.onclick = () => {
-            const isExpanded = container.classList.contains('expanded');
-
-            if (isExpanded) {
-                // Collapse the container
-                container.classList.remove('expanded');
-                toggleBtn.textContent = '⏷ Filters';
-            } else {
-                // Expand the container
-                content.classList.remove('hidden'); // Make sure content is visible for animation
-                container.classList.add('expanded');
-                toggleBtn.textContent = '⏶ Filters';
-            }
-        };
-    }
-
-    // This part is correct and doesn't need to change
-    document.querySelectorAll('.filter-btn').forEach(button => {
-        button.addEventListener('click', handleFilterClick);
-    });
-}
-
-function handleFilterClick(event) {
-    const button = event.target;
-    const filterType = button.dataset.filterType;
-    const value = button.dataset.value;
-
-    if (filterType === 'type') currentFilterType = value;
-    if (filterType === 'format') currentFilterFormat = value;
-    if (filterType === 'sort') currentSortBy = value;
-
-    if (button.id === 'sort-order-btn') {
-        isSortReversed = !isSortReversed;
-        button.textContent = isSortReversed ? '↑' : '↓';
-    }
-
-    document.querySelectorAll(`.filter-btn[data-filter-type="${filterType}"]`).forEach(btn => {
-        btn.classList.remove('active');
-    });
-    if (filterType) { // Don't try to activate the sort order button
-        button.classList.add('active');
-    }
-
-    applyFiltersAndSort();
-}
-
-function resetFilters() {
-    currentFilterType = 'all';
-    currentFilterFormat = 'all';
-    currentSortBy = 'quality_score';
-    isSortReversed = false;
-
-    document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelector('.filter-btn[data-filter-type="type"][data-value="all"]').classList.add('active');
-    document.querySelector('.filter-btn[data-filter-type="format"][data-value="all"]').classList.add('active');
-    document.querySelector('.filter-btn[data-filter-type="sort"][data-value="quality_score"]').classList.add('active');
-    document.getElementById('sort-order-btn').textContent = '↓';
-}
-
-function applyFiltersAndSort() {
-    let processedResults = [...allSearchResults];
-    const query = document.getElementById('downloads-search-input').value.trim().toLowerCase();
-
-    // 1. Filter by Type
-    if (currentFilterType !== 'all') {
-        processedResults = processedResults.filter(r => r.result_type === currentFilterType);
-    }
-
-    // 2. Filter by Format
-    if (currentFilterFormat !== 'all') {
-        processedResults = processedResults.filter(r => {
-            const quality = (r.dominant_quality || r.quality || '').toLowerCase();
-            return quality === currentFilterFormat;
-        });
-    }
-
-    // 3. Sort Results
-    processedResults.sort((a, b) => {
-        let valA, valB;
-
-        // Special handling for relevance sort
-        if (currentSortBy === 'relevance') {
-            valA = calculateRelevanceScore(a, query);
-            valB = calculateRelevanceScore(b, query);
-            return valB - valA; // Higher score is better
-        }
-
-        // Special handling for availability
-        if (currentSortBy === 'availability') {
-            valA = (a.free_upload_slots || 0) - (a.queue_length || 0) * 0.1;
-            valB = (b.free_upload_slots || 0) - (b.queue_length || 0) * 0.1;
-            return valB - valA;
-        }
-
-        valA = a[currentSortBy] || 0;
-        valB = b[currentSortBy] || 0;
-
-        if (typeof valA === 'string') {
-            // For name/title sort, use the correct property
-            const titleA = (a.album_title || a.title || '').toLowerCase();
-            const titleB = (b.album_title || b.title || '').toLowerCase();
-            return titleA.localeCompare(titleB);
-        }
-
-        // Default numeric sort (descending)
-        return valB - valA;
-    });
-
-    // Handle sort direction toggle
-    const sortDefaults = {
-        relevance: 'desc', quality_score: 'desc', size: 'desc', bitrate: 'desc',
-        upload_speed: 'desc', duration: 'desc', availability: 'desc',
-        title: 'asc', username: 'asc'
-    };
-
-    const defaultOrder = sortDefaults[currentSortBy] || 'desc';
-    if ((defaultOrder === 'asc' && isSortReversed) || (defaultOrder === 'desc' && !isSortReversed)) {
-        processedResults.reverse();
-    }
-
-    displayDownloadsResults(processedResults);
-}
-
-function calculateRelevanceScore(result, query) {
-    let score = 0.0;
-    const queryTerms = query.split(' ').filter(t => t.length > 1);
-
-    // 1. Search Term Matching (40%)
-    let searchableText = `${result.title || ''} ${result.artist || ''} ${result.album || ''} ${result.album_title || ''}`.toLowerCase();
-    let termMatches = 0;
-    for (const term of queryTerms) {
-        if (searchableText.includes(term)) {
-            termMatches++;
-        }
-    }
-    score += (termMatches / queryTerms.length) * 0.40;
-
-    // 2. Quality Score (25%)
-    score += (result.quality_score || 0) * 0.25;
-
-    // 3. User Reliability (Availability & Speed) (20%)
-    const reliability = ((result.free_upload_slots || 0) > 0 ? 0.5 : 0) + Math.min(1, (result.upload_speed || 0) / 500) * 0.5;
-    score += reliability * 0.20;
-
-    // 4. File Completeness (Bitrate & Duration) (15%)
-    const completeness = (Math.min(1, (result.bitrate || 0) / 320) * 0.5) + (result.duration > 0 ? 0.5 : 0);
-    score += completeness * 0.15;
-
-    return score;
-}
-// Add to global scope for onclick
-window.handleFilterClick = handleFilterClick;
+// The basic-search filter/sort controls lived here: initializeFilters,
+// handleFilterClick, resetFilters, applyFiltersAndSort and
+// calculateRelevanceScore. They are React's now
+// (webui/src/routes/search/-basic.helpers.ts), where four defects in them were
+// fixed rather than carried over — see that file's header.
 
 // ===============================
 // MATCHED DOWNLOADS MODAL
@@ -2247,18 +2081,34 @@ function showNoResultsMessage(containerId, message) {
 function skipMatching() {
     console.log('🎯 Skipping matching, proceeding with normal download');
 
-    // Close modal
+    // Captured BEFORE closing: closeMatchingModal() resets currentMatchingData
+    // to nulls, and this function used to read it afterwards.
+    //
+    // For an album, searchResult is its FIRST TRACK (matchedDownloadAlbum hands
+    // the modal a real track to identify) — the thing to download is the album.
+    const target = currentMatchingData.isAlbumDownload
+        ? (currentMatchingData.albumResult || currentMatchingData.searchResult)
+        : currentMatchingData.searchResult;
+
     closeMatchingModal();
 
-    // Start normal download
-    if (currentMatchingData.isAlbumDownload) {
-        // For albums, we need to download each track
-        showToast('⬇️ Starting album download (unmatched)', 'info');
-        // This would need to be implemented to download all album tracks
-    } else {
-        // Single track download
-        startDownload(window.currentSearchResults.indexOf(currentMatchingData.searchResult));
+    if (!target) {
+        showToast('Nothing to download', 'error');
+        return;
     }
+
+    // The search page owns the download call. Previously this went through
+    // startDownload(currentSearchResults.indexOf(result)), which could not work
+    // for three independent reasons: the state was already cleared (so indexOf
+    // got null), startDownload indexed a DIFFERENT array (`searchResults`, the
+    // core.js global, which nothing populates), and it POSTed
+    // /api/downloads/start, which is not a route. The album branch was a stub
+    // that toasted a download it never started.
+    if (typeof window._basicDownloadUnmatched === 'function') {
+        window._basicDownloadUnmatched(target);
+        return;
+    }
+    showToast('Open the Search page to download this', 'error');
 }
 
 function matchSlskdTracksToSpotify(slskdTracks, spotifyTracks) {
@@ -2633,9 +2483,6 @@ async function confirmMatch() {
     }
 }
 
-
-
-
 function matchedDownloadTrack(trackIndex) {
     const results = window.currentSearchResults;
     if (!results || !results[trackIndex]) {
@@ -2712,11 +2559,13 @@ async function handleReconcileIdsButtonClick() {
     if (!button) return;
     if (button.textContent.trim() !== 'Scan Library') return; // already running
 
-    const ok = confirm(
-        'Scan every library file for embedded provider IDs and fill any that are ' +
-        'missing in the database?\n\nEach file is read once. Existing matches are ' +
-        'never overwritten. This can take a while on large libraries.'
-    );
+    const ok = await showConfirmDialog({
+        title: 'Import IDs from File Tags',
+        message: 'Scan every library file for embedded provider IDs and fill any that are ' +
+            'missing in the database?\n\nEach file is read once. Existing matches are ' +
+            'never overwritten. This can take a while on large libraries.',
+        confirmText: 'Scan Library'
+    });
     if (!ok) return;
 
     try {
@@ -5078,7 +4927,12 @@ function toggleMcacheClearDropdown(event) {
 }
 
 async function clearMetadataCache() {
-    if (!confirm('Clear ALL cached metadata? This removes all cached API responses.')) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Metadata Cache',
+        message: 'Clear ALL cached metadata? This removes every cached API response — lookups will have to be made again.',
+        confirmText: 'Clear All',
+        destructive: true
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -5098,7 +4952,12 @@ async function clearMetadataCache() {
 }
 
 async function clearMetadataCacheBySource(source) {
-    if (!confirm(`Clear all ${source} cached metadata?`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Cache by Source',
+        message: `Clear all ${source} cached metadata?`,
+        confirmText: 'Clear',
+        destructive: true
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -5119,7 +4978,12 @@ async function clearMetadataCacheBySource(source) {
 
 async function clearMusicBrainzCache(failedOnly = false) {
     const label = failedOnly ? 'failed MusicBrainz lookups' : 'ALL MusicBrainz cache entries';
-    if (!confirm(`Clear ${label}?`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear MusicBrainz Cache',
+        message: `Clear ${label}?`,
+        confirmText: 'Clear',
+        destructive: !failedOnly
+    })) return;
     document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
 
     try {
@@ -5214,6 +5078,34 @@ const TOOL_HELP_CONTENT = {
 
             <h4>Note</h4>
             <p>Available for <strong>Plex</strong> and <strong>Jellyfin</strong> media servers. Each enrichment worker only runs if its service is authenticated.</p>
+        `
+    },
+    'reconcile-ids': {
+        title: 'Import IDs from File Tags',
+        content: `
+            <h4>What does this tool do?</h4>
+            <p>Reads provider IDs that are already embedded in your audio files — Spotify, MusicBrainz, iTunes, Deezer and friends — and fills them into the database where they're missing.</p>
+
+            <h4>Why it's worth running</h4>
+            <p>Every ID it recovers is one the enrichment workers no longer have to go looking for. On a large library that's a lot of API calls skipped, and matches that were already correct in your tags get used instead of being re-guessed.</p>
+
+            <h4>How safe is it?</h4>
+            <ul>
+                <li><strong>Only fills blanks.</strong> An existing match is never overwritten.</li>
+                <li><strong>Read-only on your files.</strong> Each file is opened once to read tags; nothing is written back to disk.</li>
+                <li><strong>Conflicts are skipped, not applied.</strong> If a tag disagrees with a stored ID, the row is counted under Conflicts and left alone.</li>
+            </ul>
+
+            <h4>The counters</h4>
+            <ul>
+                <li><strong>IDs Filled:</strong> individual provider IDs written</li>
+                <li><strong>Rows Updated:</strong> database rows touched (a row can gain several IDs)</li>
+                <li><strong>Conflicts:</strong> tag disagreed with an existing match — skipped</li>
+                <li><strong>Unreadable:</strong> files whose tags could not be parsed</li>
+            </ul>
+
+            <h4>Note</h4>
+            <p>Reads every file in the library, so it can take a while on large collections. Safe to re-run — a second pass only picks up what's still blank.</p>
         `
     },
     'duplicate-cleaner': {
@@ -6423,22 +6315,30 @@ const TOOL_HELP_CONTENT = {
     }
 };
 
+// Called from initializeToolsPage() on EVERY visit to the Tools page, so every
+// binding here has to be idempotent. It used to add a fresh listener per call —
+// including a document-level keydown — so N visits left N keydown handlers and N
+// click handlers per help button. Guarded the same way the tool buttons in
+// initializeToolsPage are (`_toolsWired`).
 function initializeToolHelpButtons() {
-    const helpButtons = document.querySelectorAll('.tool-help-button');
-    const modal = document.getElementById('tool-help-modal');
-    const closeButton = modal.querySelector('.tool-help-modal-close');
-
-    // Attach click handlers to all help buttons
-    helpButtons.forEach(button => {
+    document.querySelectorAll('.tool-help-button').forEach(button => {
+        if (button._toolsWired) return;
         button.addEventListener('click', (e) => {
             e.stopPropagation();
-            const toolId = button.getAttribute('data-tool');
-            openToolHelpModal(toolId);
+            openToolHelpModal(button.getAttribute('data-tool'));
         });
+        button._toolsWired = true;
     });
 
-    // Close modal when clicking close button
-    closeButton.addEventListener('click', closeToolHelpModal);
+    // The modal itself lives outside #tools-page (index.html), so it survives
+    // navigation — bind it once and never again. Also guard the lookup: a throw
+    // here used to abort initializeToolsPage before the DB/cache/pool stats and
+    // switchRepairTab('jobs') ever ran.
+    const modal = document.getElementById('tool-help-modal');
+    if (!modal || modal._toolsWired) return;
+
+    const closeButton = modal.querySelector('.tool-help-modal-close');
+    if (closeButton) closeButton.addEventListener('click', closeToolHelpModal);
 
     // Close modal when clicking outside content
     modal.addEventListener('click', (e) => {
@@ -6447,12 +6347,7 @@ function initializeToolHelpButtons() {
         }
     });
 
-    // Close modal on Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && modal.classList.contains('active')) {
-            closeToolHelpModal();
-        }
-    });
+    modal._toolsWired = true;
 }
 
 function openToolHelpModal(toolId) {
@@ -7060,8 +6955,6 @@ function stopWishlistCountPolling() {
     }
 }
 
-
-
 function resetWishlistModalToIdleState() {
     // Reset wishlist modal to idle state after background processing completes
     const playlistId = 'wishlist';
@@ -7202,33 +7095,6 @@ async function initializeToolsPage() {
     toolsPageState.isInitialized = true;
 }
 
-async function loadDashboardData() {
-    // Start periodic refreshers up front (independent of the initial loads).
-    stopWishlistCountPolling(); // Ensure no duplicates
-    wishlistCountInterval = setInterval(updateWishlistCount, 10000);
-    setInterval(fetchAndUpdateSystemStats, 10000);   // dashboard-specific (service status polled globally)
-    setInterval(fetchAndUpdateActivityFeed, 2000);   // responsive activity feed
-    setInterval(checkForActivityToasts, 3000);
-
-    // Fire all independent initial loads in parallel instead of sequentially.
-    // Sequential awaits meant 6 back-to-back round-trips, each triggering its own
-    // reflow — the layout kept shifting for ~1-2s, which made the page feel
-    // unscrollable. Concurrent loads collapse that into a single settle.
-    await Promise.all([
-        updateWishlistCount(),
-        fetchAndUpdateServiceStatus(),
-        fetchAndUpdateSystemStats(),
-        fetchAndUpdateDbStats(),
-        fetchAndUpdateActivityFeed(),
-        checkForActiveProcesses(),
-    ]);
-
-    // Render existing downloads once active processes are known.
-    updateDashboardDownloads();
-
-    // Automatic wishlist processing now runs server-side
-}
-
 // --- Data Fetching and UI Updates ---
 
 async function fetchAndUpdateDbStats() {
@@ -7239,330 +7105,20 @@ async function fetchAndUpdateDbStats() {
 
         const stats = await response.json();
 
-        // This function updates the stat cards in the top grid
-        updateDashboardStatCards(stats);
-
-        // This function updates the info within the DB Updater tool card
-        updateDbUpdaterCardInfo(stats);
+        // Re-broadcast on the socket handler's channel (the poller-twin rule,
+        // same as fetchAndUpdateServiceStatus): the React dashboard Library
+        // card consumes ss:dashboard-db-stats, and the vanilla DOM halves this
+        // used to call (updateDashboardStatCards / updateDbUpdaterCardInfo)
+        // wrote what is React DOM now. Exactly one of the two dispatchers runs
+        // at a time — this one early-returns while the socket is connected.
+        window.dispatchEvent(new CustomEvent('ss:dashboard-db-stats', { detail: stats }));
 
     } catch (error) {
         console.warn('Could not fetch DB stats:', error);
     }
 }
 
-function updateDashboardStatCards(stats) {
-    // Update the Library Status card on the dashboard
-    updateLibraryStatusCard(stats);
-}
-
-/**
- * Smart Library Status card on the Dashboard.
- * Shows different states: no server, empty library, healthy library, scanning.
- */
-function updateLibraryStatusCard(dbStats) {
-    const card = document.getElementById('library-status-card');
-    if (!card) return;
-
-    const title = document.getElementById('library-status-title');
-    const subtitle = document.getElementById('library-status-subtitle');
-    const statsRow = document.getElementById('library-status-stats');
-    const scanBtn = document.getElementById('library-status-scan-btn');
-    const scanLabel = document.getElementById('library-status-scan-label');
-    const deepBtn = document.getElementById('library-status-deep-btn');
-    const progressDiv = document.getElementById('library-status-progress');
-    const messageDiv = document.getElementById('library-status-message');
-
-    const artists = dbStats ? (dbStats.artists || 0) : 0;
-    const albums = dbStats ? (dbStats.albums || 0) : 0;
-    const tracks = dbStats ? (dbStats.tracks || 0) : 0;
-    const sizeMb = dbStats ? (dbStats.database_size_mb || 0) : 0;
-    const lastUpdate = dbStats ? dbStats.last_update : null;
-    const serverSource = dbStats ? dbStats.server_source : null;
-
-    // Check if a scan is in progress
-    const isScanning = window._libraryStatusScanning || false;
-
-    // Determine state
-    const serverConnected = _lastStatusPayload && _lastStatusPayload.media_server && _lastStatusPayload.media_server.connected;
-    const serverType = _lastStatusPayload && _lastStatusPayload.active_media_server;
-    const hasData = tracks > 0;
-    const hasServer = !!serverType && serverType !== 'none';
-
-    // Reset classes
-    card.className = 'library-status-card';
-
-    if (isScanning) {
-        // State: Scanning
-        card.classList.add('scanning');
-        if (title) title.textContent = 'Library Scan';
-        if (subtitle) subtitle.textContent = 'Updating library database...';
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.add('scanning');
-            scanLabel.textContent = 'Stop';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = hasData ? '' : 'none';
-        if (progressDiv) progressDiv.style.display = '';
-        if (messageDiv) messageDiv.style.display = 'none';
-
-    } else if (!hasServer) {
-        // State: No server configured
-        card.classList.add('needs-setup');
-        if (title) title.textContent = 'No Media Server';
-        if (subtitle) subtitle.textContent = 'Connect a server to get started';
-        if (scanBtn) scanBtn.style.display = 'none';
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = 'SoulSync needs a media server to manage your library. '
-                + 'Go to <span class="link" onclick="navigateToPage(\'settings\')">Settings</span> '
-                + 'to connect Plex, Jellyfin, or Navidrome.';
-        }
-
-    } else if (!serverConnected) {
-        // State: Server configured but not connected
-        card.classList.add('needs-setup');
-        const serverName = _capitalize(serverType);
-        if (title) title.textContent = `${serverName} — Disconnected`;
-        if (subtitle) subtitle.textContent = 'Cannot reach your media server';
-        if (scanBtn) scanBtn.style.display = 'none';
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = `Your ${serverName} server is configured but not responding. `
-                + 'Check that it\'s running and the connection details are correct in '
-                + '<span class="link" onclick="navigateToPage(\'settings\')">Settings</span>.';
-        }
-
-    } else if (!hasData) {
-        // State: Server connected but library is empty
-        card.classList.add('empty-library');
-        const serverName = _capitalize(serverType);
-        if (title) title.textContent = `${serverName} Connected`;
-        if (subtitle) subtitle.textContent = 'Library database is empty';
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.remove('scanning');
-            scanLabel.textContent = 'Scan Now';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = 'none';
-        if (statsRow) statsRow.style.display = 'none';
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) {
-            messageDiv.style.display = '';
-            messageDiv.innerHTML = 'Your server is connected but SoulSync hasn\'t imported your library yet. '
-                + 'Click <strong>Scan Now</strong> to pull your artists, albums, and tracks into SoulSync.';
-        }
-
-    } else {
-        // State: Healthy library with data
-        card.classList.add('has-data');
-        const serverName = _capitalize(serverType);
-        let lastRefreshText = 'Never';
-        if (lastUpdate) {
-            const d = new Date(lastUpdate);
-            if (!isNaN(d.getTime())) {
-                lastRefreshText = typeof _formatTimeAgo === 'function' ? _formatTimeAgo(d) : d.toLocaleDateString();
-            }
-        }
-        if (title) title.textContent = `${serverName} Library`;
-        if (subtitle) subtitle.textContent = `Last refreshed ${lastRefreshText}`;
-        if (scanBtn) {
-            scanBtn.style.display = '';
-            scanBtn.classList.remove('scanning');
-            scanLabel.textContent = 'Refresh';
-            scanBtn.disabled = false;
-        }
-        if (deepBtn) deepBtn.style.display = '';
-        if (statsRow) {
-            statsRow.style.display = '';
-            document.getElementById('library-status-artists').textContent = artists.toLocaleString();
-            document.getElementById('library-status-albums').textContent = albums.toLocaleString();
-            document.getElementById('library-status-tracks').textContent = tracks.toLocaleString();
-            document.getElementById('library-status-size').textContent = sizeMb < 1 ? `${Math.round(sizeMb * 1024)} KB` : `${sizeMb.toFixed(1)} MB`;
-        }
-        if (progressDiv) progressDiv.style.display = 'none';
-        if (messageDiv) messageDiv.style.display = 'none';
-    }
-}
-
 // _lastStatusPayload and _isSoulsyncStandalone are declared in core.js
-const _origFetchServiceStatus = typeof fetchAndUpdateServiceStatus === 'function' ? fetchAndUpdateServiceStatus : null;
-
-function _capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
-
-/**
- * Dashboard library scan button handler — triggers incremental DB update.
- */
-async function dashboardLibraryScan(fullRefresh = false) {
-    const scanBtn = document.getElementById('library-status-scan-btn');
-    const scanLabel = document.getElementById('library-status-scan-label');
-
-    // If already scanning, stop it
-    if (window._libraryStatusScanning) {
-        try {
-            await fetch('/api/database/update/stop', { method: 'POST' });
-            window._libraryStatusScanning = false;
-            showToast('Library scan stopped', 'info');
-            // Refresh the card
-            try {
-                const r = await fetch('/api/database/stats');
-                if (r.ok) updateLibraryStatusCard(await r.json());
-            } catch (e) {}
-        } catch (e) {
-            showToast('Failed to stop scan', 'error');
-        }
-        return;
-    }
-
-    // Start scan
-    try {
-        window._libraryStatusScanning = true;
-        updateLibraryStatusCard(null); // Update to scanning state
-
-        const response = await fetch('/api/database/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_refresh: fullRefresh })
-        });
-        const data = await response.json();
-        if (!data.success) {
-            window._libraryStatusScanning = false;
-            showToast(data.error || 'Failed to start scan', 'error');
-            return;
-        }
-
-        showToast('Library scan started', 'success');
-
-        // Poll for progress
-        const pollInterval = setInterval(async () => {
-            try {
-                const statusResp = await fetch('/api/database/update/status');
-                if (!statusResp.ok) return;
-                const status = await statusResp.json();
-
-                const phase = document.getElementById('library-status-phase');
-                const barFill = document.getElementById('library-status-bar-fill');
-                const detail = document.getElementById('library-status-progress-detail');
-
-                if (phase) phase.textContent = status.phase || 'Scanning...';
-                if (barFill) barFill.style.width = `${status.progress || 0}%`;
-                if (detail && status.processed !== undefined) {
-                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
-                }
-
-                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
-                    clearInterval(pollInterval);
-                    window._libraryStatusScanning = false;
-
-                    if (status.status === 'completed' || status.status === 'finished') {
-                        showToast('Library scan complete', 'success');
-                    } else if (status.status === 'error') {
-                        showToast(`Scan error: ${status.error_message || 'Unknown'}`, 'error');
-                    }
-
-                    // Refresh stats
-                    try {
-                        const r = await fetch('/api/database/stats');
-                        if (r.ok) updateLibraryStatusCard(await r.json());
-                    } catch (e) {}
-                }
-            } catch (e) {
-                clearInterval(pollInterval);
-                window._libraryStatusScanning = false;
-            }
-        }, 2000);
-
-    } catch (e) {
-        window._libraryStatusScanning = false;
-        showToast(`Scan failed: ${e.message}`, 'error');
-    }
-}
-
-/**
- * Dashboard deep scan — finds new tracks, removes stale ones, preserves enrichment data.
- */
-async function dashboardLibraryDeepScan() {
-    if (window._libraryStatusScanning) {
-        showToast('A scan is already running', 'warning');
-        return;
-    }
-
-    if (!await showConfirmDialog({
-        title: 'Deep Scan Library',
-        message: 'A deep scan re-checks every track in your media server library.\n\n' +
-                 '• Adds any new tracks that were missed\n' +
-                 '• Removes tracks no longer on your server\n' +
-                 '• Preserves all existing metadata and enrichment data\n\n' +
-                 'This may take a while for large libraries. Continue?',
-    })) return;
-
-    // Use the same scan flow as dashboardLibraryScan but with deep_scan flag
-    try {
-        window._libraryStatusScanning = true;
-        updateLibraryStatusCard(null);
-
-        const response = await fetch('/api/database/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ deep_scan: true })
-        });
-        const data = await response.json();
-        if (!data.success) {
-            window._libraryStatusScanning = false;
-            showToast(data.error || 'Failed to start deep scan', 'error');
-            try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
-            return;
-        }
-
-        showToast('Deep scan started — this may take a while', 'success');
-
-        const pollInterval = setInterval(async () => {
-            try {
-                const statusResp = await fetch('/api/database/update/status');
-                if (!statusResp.ok) return;
-                const status = await statusResp.json();
-
-                const phase = document.getElementById('library-status-phase');
-                const barFill = document.getElementById('library-status-bar-fill');
-                const detail = document.getElementById('library-status-progress-detail');
-
-                if (phase) phase.textContent = status.phase || 'Deep scanning...';
-                if (barFill) barFill.style.width = `${status.progress || 0}%`;
-                if (detail && status.processed !== undefined) {
-                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
-                }
-
-                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
-                    clearInterval(pollInterval);
-                    window._libraryStatusScanning = false;
-
-                    if (status.status === 'completed' || status.status === 'finished') {
-                        showToast('Deep scan complete', 'success');
-                    } else if (status.status === 'error') {
-                        showToast(`Deep scan error: ${status.error_message || 'Unknown'}`, 'error');
-                    }
-
-                    try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
-                }
-            } catch (e) {
-                clearInterval(pollInterval);
-                window._libraryStatusScanning = false;
-            }
-        }, 2000);
-
-    } catch (e) {
-        window._libraryStatusScanning = false;
-        showToast(`Deep scan failed: ${e.message}`, 'error');
-    }
-}
 
 /**
  * Update the Active Downloads section on the dashboard.
@@ -7711,38 +7267,6 @@ function createDashboardDiscoverBubble(playlistId) {
     `;
 }
 
-
-
-function updateDbUpdaterCardInfo(stats) {
-    // Update the detailed stats within the DB Updater tool card
-    const lastRefreshEl = document.getElementById('db-last-refresh');
-    const artistsStatEl = document.getElementById('db-stat-artists');
-    const albumsStatEl = document.getElementById('db-stat-albums');
-    const tracksStatEl = document.getElementById('db-stat-tracks');
-    const sizeStatEl = document.getElementById('db-stat-size');
-
-    if (lastRefreshEl) {
-        if (stats.last_full_refresh) {
-            const date = new Date(stats.last_full_refresh);
-            lastRefreshEl.textContent = date.toLocaleString();
-        } else {
-            lastRefreshEl.textContent = 'Never';
-        }
-    }
-
-    if (artistsStatEl) artistsStatEl.textContent = stats.artists.toLocaleString() || '0';
-    if (albumsStatEl) albumsStatEl.textContent = stats.albums.toLocaleString() || '0';
-    if (tracksStatEl) tracksStatEl.textContent = stats.tracks.toLocaleString() || '0';
-    if (sizeStatEl) sizeStatEl.textContent = `${stats.database_size_mb.toFixed(2)} MB`;
-
-    // Update the title of the tool card to show which server is active
-    const toolCardTitle = document.querySelector('#db-updater-card .tool-card-title');
-    if (toolCardTitle && stats.server_source) {
-        const serverName = stats.server_source.charAt(0).toUpperCase() + stats.server_source.slice(1);
-        toolCardTitle.textContent = `${serverName} Database Updater`;
-    }
-}
-
 // --- Wishlist Count Functions ---
 
 async function updateWishlistCount() {
@@ -7754,22 +7278,14 @@ async function updateWishlistCount() {
         const data = await response.json();
         const count = data.count || 0;
 
-        _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
-        // Update sidebar nav badge
+        // Only the SIDEBAR badge survives the dashboard flip — the hero
+        // button, its badge and the active/inactive classes are React-rendered
+        // (dashboard-header.tsx fetches this same endpoint on mount and
+        // consumes the socket dispatch afterwards).
         const wlNavBadge = document.getElementById('wishlist-nav-badge');
         if (wlNavBadge) {
             wlNavBadge.textContent = count;
             wlNavBadge.classList.toggle('hidden', count === 0);
-        }
-        const wishlistButton = document.getElementById('wishlist-button');
-        if (wishlistButton) {
-            if (count === 0) {
-                wishlistButton.classList.remove('wishlist-active');
-                wishlistButton.classList.add('wishlist-inactive');
-            } else {
-                wishlistButton.classList.remove('wishlist-inactive');
-                wishlistButton.classList.add('wishlist-active');
-            }
         }
 
         // Check for auto-initiated wishlist processes that user should see immediately

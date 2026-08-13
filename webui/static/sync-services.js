@@ -22,19 +22,45 @@ async function loadTidalPlaylists() {
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
 
-        // Auto-mirror Tidal playlists: fetch tracks in background then mirror
-        // Cards render instantly from metadata; tracks load per-playlist without blocking UI
-        for (const p of tidalPlaylists) {
+        // Load and apply saved discovery states from backend (like YouTube)
+        await loadTidalPlaylistStatesFromBackend();
+
+        // Auto-mirror: the per-playlist track crawl runs in the BACKGROUND
+        // (no await). It used to run inline, so the Refresh button sat on
+        // "Loading" for the whole crawl — 3-5 minutes on real accounts
+        // (Specialmed's report) even though the cards had long rendered.
+        void _prefetchTidalTracksAndMirror();
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Tidal playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+// The old inline crawl, extracted: fetch each playlist's full tracks and
+// mirror it, three at a time (sequential took minutes; unbounded would
+// hammer Tidal's API).
+async function _prefetchTidalTracksAndMirror() {
+    const queue = tidalPlaylists.slice();
+    const mirrorFromTracks = (p, tracks) => {
+        mirrorPlaylist('tidal', p.id, p.name, tracks.map(t => ({
+            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+            source_track_id: t.id || ''
+        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+    };
+    const worker = async () => {
+        for (;;) {
+            const p = queue.shift();
+            if (!p) return;
             // Skip if already have tracks from a previous load
             if (p.tracks && p.tracks.length > 0) {
-                mirrorPlaylist('tidal', p.id, p.name, p.tracks.map(t => ({
-                    track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
-                    album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
-                    source_track_id: t.id || ''
-                })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                mirrorFromTracks(p, p.tracks);
                 continue;
             }
-            // Fetch tracks on-demand for this playlist
             try {
                 const fullResp = await fetch(`/api/tidal/playlist/${p.id}`);
                 if (fullResp.ok) {
@@ -45,29 +71,16 @@ async function loadTidalPlaylists() {
                         // Update card track count in UI
                         const countEl = document.querySelector(`#tidal-card-${p.id} .playlist-card-track-count`);
                         if (countEl) countEl.textContent = `${fullData.tracks.length} tracks`;
-                        // Mirror with full track data
-                        mirrorPlaylist('tidal', p.id, p.name, fullData.tracks.map(t => ({
-                            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
-                            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
-                            source_track_id: t.id || ''
-                        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                        mirrorFromTracks(p, fullData.tracks);
                     }
                 }
             } catch (e) {
                 console.warn(`Failed to fetch tracks for Tidal playlist ${p.name}: ${e.message}`);
             }
         }
-
-        // Load and apply saved discovery states from backend (like YouTube)
-        await loadTidalPlaylistStatesFromBackend();
-
-    } catch (error) {
-        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
-        showToast(`Error loading Tidal playlists: ${error.message}`, 'error');
-    } finally {
-        refreshBtn.disabled = false;
-        refreshBtn.textContent = '🔄 Refresh';
-    }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    console.log('🎵 Tidal track prefetch + mirroring complete');
 }
 
 function renderTidalPlaylists() {
@@ -3693,7 +3706,44 @@ async function startDeezerDownloadMissing(urlHash) {
 // SYNC PAGE FUNCTIONALITY (REDESIGNED)
 // ===============================
 
+// Set once the listener bindings below have run. `initializeSyncPage` is
+// called from TWO places in init.js — once at boot (2885) and again from
+// loadPageData's `case 'sync'` (3290), which fires on every navigation to the
+// page. The sync markup is static in index.html and is never re-created, so
+// the listeners only ever need binding once; binding them per visit stacked a
+// duplicate set each time.
+//
+// That was not merely wasteful. Only four of the 25 bindings guarded
+// themselves with a removeEventListener first (the Spotify/Tidal/Deezer-ARL/
+// Qobuz refresh buttons). One of the other 21 is the Start Sync button, and
+// `startSequentialSync` is a TOGGLE — it cancels when the manager is already
+// running, and `SequentialSyncManager.start` sets `isRunning` synchronously.
+// So after an even number of visits to the page a single click started the
+// sync and immediately cancelled it, and the button looked dead.
+let _syncPageListenersBound = false;
+
 function initializeSyncPage() {
+    // Per-visit work, which must run on EVERY call: all three are idempotent
+    // refreshes rather than bindings.
+    const _activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
+    if (_activeBeatportTab) {
+        ensureBeatportContentLoaded();
+    }
+    if (document.getElementById('beatport-clear-btn')) {
+        updateBeatportClearButtonState();
+    }
+    // MUST stay above the guard. `loadPageData` calls `stopLogPolling()` at the
+    // top of EVERY navigation (init.js), and this is the only thing that ever
+    // restarts it — so leaving it below the early return stopped the activity
+    // feed after the first visit and never brought it back. That only shows
+    // when the socket is down, because `tool:logs` (core.js) writes the same
+    // textarea through `updateLogsFromData` and the HTTP poll is its twin.
+    // It is idempotent: `startLogPolling` returns early when already polling.
+    initializeLiveLogViewer();
+
+    if (_syncPageListenersBound) return;
+    _syncPageListenersBound = true;
+
     // Logic for tab switching
     const tabButtons = document.querySelectorAll('.sync-tab-button');
     const syncSidebar = document.querySelector('.sync-sidebar');
@@ -3802,12 +3852,6 @@ function initializeSyncPage() {
         });
     });
 
-    // If the Beatport tab is already active when Sync initializes, load it now.
-    const activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
-    if (activeBeatportTab) {
-        ensureBeatportContentLoaded();
-    }
-
     // Logic for the Spotify refresh button
     const refreshBtn = document.getElementById('spotify-refresh-btn');
     if (refreshBtn) {
@@ -3863,8 +3907,6 @@ function initializeSyncPage() {
     const beatportClearBtn = document.getElementById('beatport-clear-btn');
     if (beatportClearBtn) {
         beatportClearBtn.addEventListener('click', clearBeatportPlaylists);
-        // Set initial clear button state
-        updateBeatportClearButtonState();
     }
 
     // Logic for Beatport nested tabs
@@ -4030,9 +4072,6 @@ function initializeSyncPage() {
     if (hypeTop100Btn) {
         hypeTop100Btn.addEventListener('click', handleHypeTop100Click);
     }
-
-    // Initialize live log viewer
-    initializeLiveLogViewer();
 }
 
 
@@ -4110,75 +4149,6 @@ async function handleDbUpdateButtonClick() {
     }
 }
 
-async function handleWishlistButtonClick() {
-    try {
-        const playlistId = 'wishlist';
-
-        console.log('🎵 [Wishlist Button] User clicked wishlist button - checking server state first');
-
-        // STEP 1: Always check server state first to detect any active wishlist processes
-        const response = await fetch('/api/active-processes');
-        if (!response.ok) {
-            throw new Error(`Failed to fetch active processes: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const processes = data.active_processes || [];
-        const serverWishlistProcess = processes.find(p => p.playlist_id === playlistId);
-
-        // STEP 2: Handle active server process - show current state immediately
-        if (serverWishlistProcess) {
-            console.log('🎯 [Wishlist Button] Server has active wishlist process:', {
-                batch_id: serverWishlistProcess.batch_id,
-                phase: serverWishlistProcess.phase,
-                auto_initiated: serverWishlistProcess.auto_initiated,
-                should_show: serverWishlistProcess.should_show_modal
-            });
-
-            // Clear any user-closed state since user explicitly requested to see modal
-            WishlistModalState.clearUserClosed();
-
-            // Check if we need to create/sync the frontend modal
-            const clientWishlistProcess = activeDownloadProcesses[playlistId];
-            const needsRehydration = !clientWishlistProcess ||
-                clientWishlistProcess.batchId !== serverWishlistProcess.batch_id ||
-                !clientWishlistProcess.modalElement ||
-                !document.body.contains(clientWishlistProcess.modalElement);
-
-            if (needsRehydration) {
-                console.log('🔄 [Wishlist Button] Frontend modal needs sync/creation');
-                await rehydrateModal(serverWishlistProcess, true); // user-requested = true
-            } else {
-                console.log('✅ [Wishlist Button] Frontend modal already synced, showing existing modal');
-                clientWishlistProcess.modalElement.style.display = 'flex';
-                WishlistModalState.setVisible();
-            }
-            return;
-        }
-
-        // STEP 3: No active server process - check wishlist count and create fresh modal
-        console.log('📭 [Wishlist Button] No active server process, checking wishlist content');
-
-        const countResponse = await fetch('/api/wishlist/count');
-        if (!countResponse.ok) {
-            throw new Error(`Failed to fetch wishlist count: ${countResponse.status}`);
-        }
-
-        const countData = await countResponse.json();
-        if (countData.count === 0) {
-            showToast('Wishlist is empty. No tracks to download.', 'info');
-            return;
-        }
-
-        // STEP 4: Open wishlist overview modal (NEW - category selection)
-        console.log(`🆕 [Wishlist Button] Opening wishlist overview for ${countData.count} tracks`);
-        await openWishlistOverviewModal();
-
-    } catch (error) {
-        console.error('❌ [Wishlist Button] Error handling wishlist button click:', error);
-        showToast(`Error opening wishlist: ${error.message}`, 'error');
-    }
-}
 
 async function cleanupWishlist(playlistId) {
     try {

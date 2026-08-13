@@ -975,3 +975,39 @@ def test_quarantine_failure_preserves_file_instead_of_deleting(tmp_path, monkeyp
              runtime_state.post_process_locks), snap):
             d.clear()
             d.update(original)
+
+
+def test_replacement_move_failure_keeps_existing_library_file(tmp_path, monkeypatch):
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"new audio")
+    target_path = tmp_path / "Library" / "track.flac"
+    target_path.parent.mkdir()
+    target_path.write_bytes(b"known good audio")
+    _wire_post_process_common(
+        monkeypatch, tmp_path, target_path,
+        track_number=1, is_album_download=True,
+    )
+    monkeypatch.setattr(import_pipeline, "_replacement_length_is_safe", lambda *_: True)
+
+    def fail_move(_src, _dst):
+        assert target_path.read_bytes() == b"known good audio"
+        raise OSError("injected move failure")
+
+    monkeypatch.setattr(import_pipeline, "safe_move_file", fail_move)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": True,
+    }
+    runtime = types.SimpleNamespace(
+        automation_engine=None, on_download_completed=None,
+        web_scan_manager=None, repair_worker=None,
+    )
+    import_pipeline.post_process_matched_download(
+        "replacement-failure", context, str(source_path), runtime,
+    )
+
+    assert source_path.read_bytes() == b"new audio"
+    assert target_path.read_bytes() == b"known good audio"
+    assert "injected move failure" in context["_context_failure_msg"]
+    assert context.get("_pipeline_import_succeeded") is not True

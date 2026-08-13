@@ -121,12 +121,22 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
                            "rejected": "Format score %d is below your minimum %d" % (fscore, floor)}
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
+        # ``rejected`` is a STRING contract everywhere ('rejected says why') —
+        # this branch used to append a LIST onto it, which crashed the whole
+        # wishlist drain with "can only concatenate str (not 'list') to str"
+        # whenever a blocklisted uploader's hit ALSO failed a quality check
+        # (Boulder's Auto-Process Episode Wishlist error), and silently broke
+        # the contract with a bare list when it didn't.
         if user and user in blocked_users:
+            prior = verdict.get("rejected")
             verdict = {**verdict, "accepted": False,
-                       "rejected": (verdict.get("rejected") or []) + ["Uploader blocklisted"]}
+                       "rejected": ("Uploader blocklisted · %s" % prior) if prior
+                       else "Uploader blocklisted"}
         elif (user, hit.get("filename")) in blocked:
+            prior = verdict.get("rejected")
             verdict = {**verdict, "accepted": False,
-                       "rejected": (verdict.get("rejected") or []) + ["Blocklisted release"]}
+                       "rejected": ("Blocklisted release · %s" % prior) if prior
+                       else "Blocklisted release"}
         # Availability = how downloadable the source is (slskd: free slot/queue/speed score
         # from group_video_files; torrents/mock: seeders/peers). Ranks within a quality tier
         # so we grab a free-slot/empty-queue release over one stuck behind a huge queue.

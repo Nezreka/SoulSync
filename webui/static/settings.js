@@ -215,17 +215,20 @@ function resolveExperimentalEnableDialog(confirmed) {
 }
 
 function syncJiosaavnEnrichmentBubble(enabled) {
-    const container = document.querySelector('.jiosaavn-button-container');
-    if (container) container.style.display = enabled ? '' : 'none';
+    // Re-broadcast for the React dashboard (tools-seam rule: in the handler) —
+    // its JioSaavn orb shows/hides on this, since the container write below
+    // only reaches the vanilla markup.
+    window.dispatchEvent(new CustomEvent('ss:jiosaavn-experimental', { detail: { enabled: !!enabled } }));
+    // No container write since the dashboard flip — the JioSaavn orb is
+    // React-rendered and shows/hides on the dispatch above.
     if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
         refreshRateMonitorExperimentalVisibility();
     }
     if (enabled && typeof renderEnrichmentRail === 'function') {
         renderEnrichmentRail();
     }
-    if (window._lastStatusPayload?.enrichment && typeof renderEnrichmentCards === 'function') {
-        renderEnrichmentCards(window._lastStatusPayload.enrichment);
-    }
+    // The chips replay is React's now: service-cards.tsx re-renders its
+    // cached enrichment payload on the ss:jiosaavn-experimental dispatch.
 }
 
 async function onExperimentalJiosaavnToggle(checkbox) {
@@ -1566,6 +1569,11 @@ async function loadSettingsData() {
             _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
         }
         if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
+        const _tcMinSeed = document.getElementById('torrent-min-seeders');
+        if (_tcMinSeed) {
+            const n = settings.download_source?.torrent_min_seeders;
+            _tcMinSeed.value = (n === undefined || n === null) ? 1 : Number(n);
+        }
         const _tcDlPath = document.getElementById('torrent-download-path');
         if (_tcDlPath) _tcDlPath.value = settings.download_source?.torrent_download_path || '';
         const _ucType = document.getElementById('usenet-client-type');
@@ -1913,10 +1921,15 @@ async function loadSettingsData() {
             const devResponse = await fetch('/api/dev-mode');
             const devData = await devResponse.json();
             if (devData.enabled) {
+                // Re-broadcast for the React dashboard's Hydrabase orb.
+                window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
                 document.getElementById('dev-mode-status').textContent = 'Active';
                 document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
                 document.getElementById('hydrabase-nav').style.display = '';
-                document.getElementById('hydrabase-button-container').style.display = '';
+                // The Hydrabase ORB is React-rendered since the dashboard flip
+                // and shows on the dispatch above; the old container write
+                // would throw here (the node only exists while the dashboard
+                // is mounted).
             }
         } catch (error) {
             console.error('Error checking dev mode:', error);
@@ -4069,10 +4082,12 @@ async function activateDevMode() {
         });
         const data = await response.json();
         if (data.success) {
+            // Re-broadcast for the React dashboard's Hydrabase orb.
+            window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: true } }));
             document.getElementById('dev-mode-status').textContent = 'Active';
             document.getElementById('dev-mode-status').style.color = 'rgb(var(--accent-light-rgb))';
             document.getElementById('hydrabase-nav').style.display = '';
-            document.getElementById('hydrabase-button-container').style.display = '';
+            // Orb visibility rides the dispatch (React-owned since the flip).
             document.getElementById('dev-mode-password').value = '';
             showToast('Dev mode activated', 'success');
         } else {
@@ -4140,8 +4155,9 @@ async function hydrabaseDisconnect() {
     document.getElementById('hydra-connection-status').style.color = '#888';
     document.getElementById('hydra-connect-btn').textContent = 'Connect';
     // Dev mode is disabled on disconnect — hide Hydrabase nav and update settings status
+    window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));
     document.getElementById('hydrabase-nav').style.display = 'none';
-    document.getElementById('hydrabase-button-container').style.display = 'none';
+    // Orb visibility rides the dispatch (React-owned since the flip).
     const devStatus = document.getElementById('dev-mode-status');
     if (devStatus) {
         devStatus.textContent = 'Inactive';
@@ -4475,6 +4491,12 @@ async function saveSettings(quiet = false) {
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
             torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            // #1139: don't queue a release nobody is serving. Blank/NaN → 1;
+            // 0 stays 0 (gate off).
+            torrent_min_seeders: (() => {
+                const n = parseInt(document.getElementById('torrent-min-seeders')?.value, 10);
+                return Number.isFinite(n) && n >= 0 ? n : 1;
+            })(),
             // In-container path(s) where SoulSync reads finished torrent/usenet
             // downloads (#857). Rendered in the torrent/usenet client sections.
             torrent_download_path: document.getElementById('torrent-download-path')?.value || '',
@@ -5206,7 +5228,7 @@ function handleSpotifyRateLimit(rateLimitInfo) {
             // Refresh discover page if user is on it — data source switched back to Spotify
             if (currentPage === 'discover') {
                 console.log('Spotify restored — refreshing discover page data');
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         }
         return;
@@ -5222,7 +5244,7 @@ function handleSpotifyRateLimit(rateLimitInfo) {
         // Refresh discover page if user is on it — data source switched to iTunes
         if (currentPage === 'discover') {
             console.log('Spotify rate limited — refreshing discover page with iTunes data');
-            loadDiscoverPage();
+            if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
         }
     }
 }
@@ -5280,7 +5302,7 @@ async function disconnectSpotifyFromRateLimit() {
             syncMetadataSourceSelection(data.source || 'deezer');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
-                loadDiscoverPage();
+                if (typeof loadDiscoverPage === 'function') loadDiscoverPage();
             }
         } else {
             showToast(`Failed to disconnect: ${data.error}`, 'error');
@@ -6265,3 +6287,308 @@ async function rebuildPlaylistFolders() {
 
 
 // ===============================
+
+// ============================================================================
+// MEDIA-SERVER LIBRARY PICKERS
+//
+// Moved here verbatim from beatport-ui.js 3648-3931. They were never Beatport
+// code — they drive this page's Plex / Jellyfin / Navidrome selects (the
+// `onchange` handlers at index.html 4392, 4456, 4465, 4492) and are called from
+// three places in this file. They only lived in beatport-ui.js because that is
+// where somebody appended them.
+//
+// The move is a PRECONDITION for the sync port: that file is deleted when the
+// sync page flips to React, and deleting it with these inside would break
+// media-server setup for every user, on a page that has nothing to do with sync.
+//
+// Moved unchanged first, then the six `alert()` calls it carried were
+// converted to showToast in a follow-up — matching the Navidrome path in this
+// same block, which already used
+// `showToast(msg, 'error', 'set-media')`. The move and the edit were kept
+// apart on purpose: a move that also edits is a move you cannot verify.
+// ============================================================================
+
+// ============ Plex Music Library Selection ============
+
+async function loadPlexMusicLibraries() {
+    try {
+        const response = await fetch('/api/plex/music-libraries');
+        const data = await response.json();
+
+        if (data.success && data.libraries && data.libraries.length > 0) {
+            const selector = document.getElementById('plex-music-library');
+            const container = document.getElementById('plex-library-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each library. ``value`` is the canonical
+            // identifier the backend expects (real libraries: title;
+            // synthetic "All Libraries" entry: the sentinel string).
+            // ``title`` stays the human-readable label.
+            data.libraries.forEach(library => {
+                const option = document.createElement('option');
+                const optionValue = library.value || library.title;
+                option.value = optionValue;
+                option.textContent = library.title;
+
+                // Pre-select match: compare ``value`` against the saved
+                // DB pref (``data.selected``) AND ``title`` against the
+                // live-active library name (``data.current``). Covers
+                // both the sentinel case and the legacy single-library
+                // case.
+                if (optionValue === data.selected
+                        || library.title === data.current
+                        || library.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no libraries found or not connected
+            document.getElementById('plex-library-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Plex music libraries:', error);
+        document.getElementById('plex-library-selector-container').style.display = 'none';
+    }
+}
+
+async function selectPlexLibrary() {
+    const selector = document.getElementById('plex-music-library');
+    const selectedLibrary = selector.value;
+
+    if (!selectedLibrary) return;
+
+    try {
+        const response = await fetch('/api/plex/select-music-library', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                library_name: selectedLibrary
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Plex music library switched to: ${selectedLibrary}`);
+        } else {
+            console.error('Failed to switch library:', data.error);
+            showToast(`Failed to switch library: ${data.error}`, 'error', 'set-media');
+        }
+    } catch (error) {
+        console.error('Error selecting Plex library:', error);
+        showToast('Error selecting library. Please try again.', 'error', 'set-media');
+    }
+}
+
+// ============ Jellyfin User Selection ============
+
+async function loadJellyfinUsers() {
+    try {
+        const response = await fetch('/api/jellyfin/users');
+        const data = await response.json();
+
+        if (data.success && data.users && data.users.length > 0) {
+            const selector = document.getElementById('jellyfin-user');
+            const container = document.getElementById('jellyfin-user-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each user
+            data.users.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.name;
+                option.textContent = user.name;
+
+                // Mark the currently selected user
+                if (user.name === data.current || user.name === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no users found or not connected
+            document.getElementById('jellyfin-user-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Jellyfin users:', error);
+        document.getElementById('jellyfin-user-selector-container').style.display = 'none';
+    }
+}
+
+async function selectJellyfinUser() {
+    const selector = document.getElementById('jellyfin-user');
+    const selectedUser = selector.value;
+
+    if (!selectedUser) return;
+
+    try {
+        const response = await fetch('/api/jellyfin/select-user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: selectedUser
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Jellyfin user switched to: ${selectedUser}`);
+            // Refresh library dropdown for the new user
+            loadJellyfinMusicLibraries();
+        } else {
+            console.error('Failed to switch user:', data.error);
+            showToast(`Failed to switch user: ${data.error}`, 'error', 'set-media');
+        }
+    } catch (error) {
+        console.error('Error selecting Jellyfin user:', error);
+        showToast('Error selecting user. Please try again.', 'error', 'set-media');
+    }
+}
+
+// ============ Jellyfin Music Library Selection ============
+
+async function loadJellyfinMusicLibraries() {
+    try {
+        const response = await fetch('/api/jellyfin/music-libraries');
+        const data = await response.json();
+
+        if (data.success && data.libraries && data.libraries.length > 0) {
+            const selector = document.getElementById('jellyfin-music-library');
+            const container = document.getElementById('jellyfin-library-selector-container');
+
+            // Clear existing options
+            selector.innerHTML = '';
+
+            // Add options for each library
+            data.libraries.forEach(library => {
+                const option = document.createElement('option');
+                option.value = library.title;
+                option.textContent = library.title;
+
+                // Mark the currently selected library
+                if (library.title === data.current || library.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            // Show the container
+            container.style.display = 'block';
+        } else {
+            // Hide if no libraries found or not connected
+            document.getElementById('jellyfin-library-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Jellyfin music libraries:', error);
+        document.getElementById('jellyfin-library-selector-container').style.display = 'none';
+    }
+}
+
+async function selectJellyfinLibrary() {
+    const selector = document.getElementById('jellyfin-music-library');
+    const selectedLibrary = selector.value;
+
+    if (!selectedLibrary) return;
+
+    try {
+        const response = await fetch('/api/jellyfin/select-music-library', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                library_name: selectedLibrary
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            console.log(`Jellyfin music library switched to: ${selectedLibrary}`);
+        } else {
+            console.error('Failed to switch library:', data.error);
+            showToast(`Failed to switch library: ${data.error}`, 'error', 'set-media');
+        }
+    } catch (error) {
+        console.error('Error selecting Jellyfin library:', error);
+        showToast('Error selecting library. Please try again.', 'error', 'set-media');
+    }
+}
+
+// ============ Navidrome Music Folder Selection ============
+
+async function loadNavidromeMusicFolders() {
+    try {
+        const response = await fetch('/api/navidrome/music-folders');
+        const data = await response.json();
+
+        if (data.success && data.folders && data.folders.length > 0) {
+            const selector = document.getElementById('navidrome-music-folder');
+            const container = document.getElementById('navidrome-folder-selector-container');
+
+            selector.innerHTML = '<option value="">All Libraries</option>';
+
+            data.folders.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder.title;
+                option.textContent = folder.title;
+
+                if (folder.title === data.current || folder.title === data.selected) {
+                    option.selected = true;
+                }
+
+                selector.appendChild(option);
+            });
+
+            container.style.display = 'block';
+        } else {
+            document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading Navidrome music folders:', error);
+        document.getElementById('navidrome-folder-selector-container').style.display = 'none';
+    }
+}
+
+async function selectNavidromeMusicFolder() {
+    const selector = document.getElementById('navidrome-music-folder');
+    const selectedFolder = selector.value;
+
+    try {
+        const response = await fetch('/api/navidrome/select-music-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_name: selectedFolder })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            console.error('Failed to set music folder:', data.error);
+            showToast(`Failed to set music folder: ${data.error}`, 'error', 'set-media');
+        }
+    } catch (error) {
+        console.error('Error selecting Navidrome music folder:', error);
+        showToast('Error selecting music folder. Please try again.', 'error', 'set-media');
+    }
+}

@@ -223,19 +223,18 @@ def build_reset_query(
     # Also forget the stored source ID so re-matching actually RE-RESOLVES the
     # entity. Without this, the worker hits its existing-id short-circuit, sees
     # the old (possibly WRONG) id and just re-confirms it — which is why "click
-    # to rematch" never fixed a mis-matched same-name artist (#868). Tracks keep
-    # their ids in file tags rather than a column, so only artist/album clear one
-    # — except Bandcamp, whose canonical match handle (bandcamp_url) lives in a
-    # real column on BOTH albums and tracks, so it must be nulled for tracks too
-    # or the worker re-confirms the old release from bandcamp_url.
-    if entity_type in ('artist', 'album') or service == 'bandcamp':
-        try:
-            from core.source_ids import id_column
-            id_col = id_column(service, entity_type)
-        except Exception:
-            id_col = None
-        if id_col:
-            set_parts.append(f"{id_col} = NULL")
+    # to rematch" never fixed a mis-matched same-name artist (#868). That
+    # applies to ALL entity types: tracks carry per-service id columns too
+    # (spotify_track_id, itunes_track_id, deezer_id, ... — see
+    # core/source_ids), and leaving one in place made a track rematch an
+    # instant no-op re-confirmation of the old id.
+    try:
+        from core.source_ids import id_column
+        id_col = id_column(service, entity_type)
+    except Exception:
+        id_col = None
+    if id_col:
+        set_parts.append(f"{id_col} = NULL")
     # Bandcamp carries a supplementary numeric id alongside its canonical URL;
     # clear it too so a stale id can't linger past a reset.
     if service == 'bandcamp':
@@ -248,6 +247,105 @@ def build_reset_query(
         return f"UPDATE {table} {set_clause} WHERE id = ?", [entity_id]
     # 'failed' — re-queue everything this source explicitly gave up on.
     return f"UPDATE {table} {set_clause} WHERE {ms} = 'not_found'", []
+
+
+# ── Verify matches — targeted repair of the pre-fix corruption classes ──────
+#
+# The Aug 2026 matching fixes STOP new corruption but can't repair rows the
+# old bugs already froze as 'matched'. Two bug classes left fingerprints
+# findable WITHOUT any API calls:
+#
+#   1. The artist id-smear (Tidal/Qobuz/AudioDB fail-open verify): one
+#      artist's source id written onto OTHER artists' rows. Fingerprint:
+#      multiple artist rows sharing one source id. Every such cluster is
+#      corruption (artists are unique rows; only ONE can own an id), so all
+#      its rows reset for the fixed workers to rematch. Albums/tracks are
+#      deliberately NOT collision-checked — owning the same recording twice
+#      (original album + compilation) legitimately maps two library rows to
+#      one source id.
+#
+#   2. The empty-normalization false match: titles that normalize to nothing
+#      ('!!!', '...', '(Intro)') compared at SequenceMatcher ratio 1.0
+#      against ANY such title, so their 'matched' ids are untrustworthy.
+#      Fingerprint: a DEGENERATE title (nothing left after stripping
+#      bracketed segments and non-word characters). Those rows reset too.
+
+import re as _re
+
+_BRACKETED = _re.compile(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}")
+_NON_WORD = _re.compile(r"[^\w]+", _re.UNICODE)
+
+
+def degenerate_title(text) -> bool:
+    """True when a title carries no matchable content — nothing left after
+    stripping bracketed segments and non-word characters. Conservative
+    approximation of the workers' normalizers; unicode letters (CJK titles)
+    are real content, not degenerate."""
+    s = str(text or "")
+    s = _BRACKETED.sub(" ", s)
+    s = _NON_WORD.sub("", s)
+    return not s
+
+
+def build_artist_collision_queries(service: str) -> Optional[Tuple[str, str, str]]:
+    """(count_clusters_sql, count_rows_sql, reset_sql) for the artist
+    id-smear fingerprint, or None when the service has no artist id column.
+    All three take no parameters. The reset clears the id + match_status +
+    last_attempted for EVERY row in a colliding cluster."""
+    if 'artist' not in SERVICE_ENTITY_SUPPORT.get(service, ()):
+        return None
+    try:
+        from core.source_ids import id_column
+        id_col = id_column(service, 'artist')
+    except Exception:
+        id_col = None
+    if not id_col:
+        return None
+    ms, la = match_status_column(service), last_attempted_column(service)
+    colliding = (
+        f"SELECT {id_col} FROM artists "
+        f"WHERE {id_col} IS NOT NULL AND {id_col} != '' "
+        f"GROUP BY {id_col} HAVING COUNT(*) > 1"
+    )
+    count_clusters = f"SELECT COUNT(*) FROM ({colliding})"
+    count_rows = f"SELECT COUNT(*) FROM artists WHERE {id_col} IN ({colliding})"
+    reset = (
+        f"UPDATE artists SET {id_col} = NULL, {ms} = NULL, {la} = NULL "
+        f"WHERE {id_col} IN ({colliding})"
+    )
+    return count_clusters, count_rows, reset
+
+
+def build_degenerate_reset_query(service: str, entity_type: str,
+                                 entity_ids: List) -> Optional[Tuple[str, List]]:
+    """Reset the given rows' match for this service IF currently matched —
+    the empty-normalization repair. Returns (sql, params) or None when the
+    service doesn't enrich this entity type or the id list is empty. Reuses
+    build_reset_query's column semantics (id column + supplementary
+    bandcamp_id) so a repair reset and a manual re-queue behave identically."""
+    if not entity_ids:
+        return None
+    support = SERVICE_ENTITY_SUPPORT.get(service)
+    if not support or entity_type not in support or entity_type not in _ENTITY_TABLE:
+        return None
+    table = _ENTITY_TABLE[entity_type]['table']
+    ms, la = match_status_column(service), last_attempted_column(service)
+    set_parts = [f"{ms} = NULL", f"{la} = NULL"]
+    try:
+        from core.source_ids import id_column
+        id_col = id_column(service, entity_type)
+    except Exception:
+        id_col = None
+    if id_col:
+        set_parts.append(f"{id_col} = NULL")
+    if service == 'bandcamp':
+        set_parts.append("bandcamp_id = NULL")
+    placeholders = ", ".join("?" for _ in entity_ids)
+    sql = (
+        f"UPDATE {table} SET {', '.join(set_parts)} "
+        f"WHERE {ms} = 'matched' AND id IN ({placeholders})"
+    )
+    return sql, list(entity_ids)
 
 
 def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
@@ -290,4 +388,7 @@ __all__ = [
     'build_breakdown_query',
     'build_reset_query',
     'RESET_SCOPES',
+    'degenerate_title',
+    'build_artist_collision_queries',
+    'build_degenerate_reset_query',
 ]

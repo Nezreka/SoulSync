@@ -7,7 +7,6 @@ automatic quality fallback.
 Authentication: User provides an ARL token (browser cookie from deezer.com).
 """
 
-import asyncio
 import hashlib
 import json
 import os
@@ -20,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from core.async_utils import run_blocking
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from core.quality.source_map import quality_from_deezer, quality_tier_for_source
 from utils.logging_config import get_logger
@@ -245,8 +245,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         return self._authenticated
 
     async def check_connection(self) -> bool:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.is_available)
+        return await run_blocking(self.is_available)
 
     # ─── Playlist export (#945) ──────────────────────────────────
     #
@@ -622,8 +621,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     async def search(self, query: str, timeout: int = None,
                      progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Search Deezer for tracks matching the query."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._search_sync, query)
+        return await run_blocking(self._search_sync, query)
 
     def _search_sync(self, query: str) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Synchronous search implementation."""

@@ -2541,7 +2541,7 @@ const _autoIcons = {
     watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
     import_completed: '\uD83D\uDCE5', mirrored_playlist_created: '\uD83D\uDCC2',
     quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F', library_scan_completed: '\uD83D\uDCE1',
-    start_database_update: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
+    start_database_update: '\uD83D\uDDC4\uFE0F', start_database_update_hourly: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
     clear_quarantine: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',
     update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
     backup_database: '\uD83D\uDCBE',
@@ -3314,6 +3314,15 @@ async function loadAutomations() {
     const empty = document.getElementById('automations-empty');
     const statsBar = document.getElementById('automations-stats');
     if (!list || !empty) return;
+    // If React owns /automations, IT is the live page and this container is
+    // hidden. Repainting it would put a second copy of every section and card
+    // in the document — duplicate #auto-section-* ids and duplicate
+    // .automation-card[data-id] nodes, which document-wide getElementById /
+    // querySelector calls then resolve to instead of the visible ones.
+    //
+    // This is reachable: the shared builder's onSaved hook calls back into
+    // here after a save made from the React page.
+    if (document.getElementById('webui-react-root')?.classList.contains('active')) return;
     try {
         const res = await fetch('/api/automations');
         const payload = await res.json();
@@ -3367,8 +3376,6 @@ async function loadAutomations() {
             renderAutomationsMasterToggle(statsBar, 'music');
         }
 
-        // Filter bar — show when 6+ automations
-        _initAutoFilterBar(automations);
         // Catch up on current automation progress
         try {
             const progRes = await fetch('/api/automations/progress');
@@ -3954,63 +3961,7 @@ function _promptNotifyConfig(groupName) {
 }
 
 // --- Filter Bar ---
-function _initAutoFilterBar(automations) {
-    const bar = document.getElementById('auto-filter-bar');
-    if (!bar) return;
-    if (automations.length < 7) { bar.style.display = 'none'; return; }
-    bar.style.display = '';
 
-    // Populate trigger dropdown
-    const trigSel = document.getElementById('auto-filter-trigger');
-    const actSel = document.getElementById('auto-filter-action');
-    const trigTypes = [...new Set(automations.map(a => a.trigger_type))].sort();
-    const actTypes = [...new Set(automations.map(a => a.action_type))].sort();
-    const prevTrig = trigSel.value;
-    const prevAct = actSel.value;
-    trigSel.innerHTML = '<option value="">All Triggers</option>' + trigTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatTrigger(t, {}))}</option>`).join('');
-    actSel.innerHTML = '<option value="">All Actions</option>' + actTypes.map(t =>
-        `<option value="${_escAttr(t)}">${_esc(_autoFormatAction(t))}</option>`).join('');
-    trigSel.value = prevTrig;
-    actSel.value = prevAct;
-
-    // Bind events (use a flag to avoid double-binding)
-    if (!bar.dataset.bound) {
-        bar.dataset.bound = '1';
-        document.getElementById('auto-filter-search').addEventListener('input', _filterAutomations);
-        trigSel.addEventListener('change', _filterAutomations);
-        actSel.addEventListener('change', _filterAutomations);
-    }
-    _filterAutomations();
-}
-
-function _filterAutomations() {
-    const q = (document.getElementById('auto-filter-search').value || '').toLowerCase().trim();
-    const trigFilter = document.getElementById('auto-filter-trigger').value;
-    const actFilter = document.getElementById('auto-filter-action').value;
-    const cards = document.querySelectorAll('#automations-list .automation-card');
-    let visible = 0;
-    cards.forEach(card => {
-        const name = (card.querySelector('.automation-name')?.textContent || '').toLowerCase();
-        const trig = card.querySelector('.flow-trigger')?.textContent || '';
-        const act = card.querySelector('.flow-action')?.textContent || '';
-        // Match search text against name, trigger label, action label
-        const matchQ = !q || name.includes(q) || trig.toLowerCase().includes(q) || act.toLowerCase().includes(q);
-        // Match trigger/action type filters using data attributes
-        const matchTrig = !trigFilter || card.dataset.triggerType === trigFilter;
-        const matchAct = !actFilter || card.dataset.actionType === actFilter;
-        const show = matchQ && matchTrig && matchAct;
-        card.style.display = show ? '' : 'none';
-        if (show) visible++;
-    });
-    const countEl = document.getElementById('auto-filter-count');
-    if (countEl) {
-        countEl.textContent = (q || trigFilter || actFilter) ? `${visible} of ${cards.length}` : '';
-    }
-}
-
-// --- Group Dropdown ---
-let _activeGroupDropdown = null;
 
 function _showGroupDropdown(event, autoId, currentGroup) {
     // Close any existing dropdown
@@ -4240,7 +4191,8 @@ function _autoFormatAction(type) {
         scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
         sync_playlist: 'Sync Playlist', discover_playlist: 'Discover Playlist',
         notify_only: 'Notify Only',
-        start_database_update: 'Update Database', run_duplicate_cleaner: 'Run Duplicate Cleaner',
+        start_database_update: 'Update Database', start_database_update_hourly: 'Update Database (Hourly)',
+        run_duplicate_cleaner: 'Run Duplicate Cleaner',
         clear_quarantine: 'Clear Quarantine', cleanup_wishlist: 'Clean Up Wishlist',
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
         backup_database: 'Backup Database',
@@ -4372,7 +4324,13 @@ function updateAutomationProgressFromData(data) {
     for (const [aidStr, state] of Object.entries(data)) {
         const aid = parseInt(aidStr);
         const card = document.querySelector(`.automation-card[data-id="${aid}"]`);
-        if (!card) continue;
+        // Skip cards React owns. This query is document-wide, so once /automations
+        // is a React route it would otherwise inject .automation-output panels
+        // into React's DOM — which React then clobbers on its next render, and
+        // the two fight over the same node. React renders its own progress from
+        // the ss:automation-progress event instead. Vanilla music + video cards
+        // live outside the React root and are unaffected.
+        if (!card || card.closest('#webui-react-root')) continue;
 
         let panel = card.querySelector('.automation-output');
         if (!panel) {
@@ -4738,6 +4696,7 @@ async function _openAutomationBuilder(editId) {
     _autoMirroredPlaylists = null; // invalidate so it re-fetches
     _autoSpotifyAuthenticated = false;
     _autoBuilder = { editId: editId || null, when: null, do: null, then: [], isSystem: false };
+    _autoBlockQuery = '';   // a stale search would open the palette pre-filtered
 
     // Populate group datalist from existing automations
     try {
@@ -4798,37 +4757,123 @@ function hideAutomationBuilder() {
 
 // --- Sidebar ---
 
-function _renderBuilderSidebar() {
+/**
+ * The block palette.
+ *
+ * Was three flat, unsearchable lists — 45 triggers and 52 actions, each a
+ * full-width row with an icon and a description. Finding "Playlist Synced"
+ * meant scrolling past twenty other triggers, which is the same wall the
+ * findings page had in a different costume.
+ *
+ * Now: a search box over everything, and drawers by the `category` the
+ * BACKEND tags each block with (blocks.py owns that taxonomy, so the video
+ * builder gets identical grouping for free). Searching flattens the drawers —
+ * when you know what you want, categories are in the way.
+ *
+ * Shared with the video builder. `_bEl` resolves against whichever builder is
+ * open, so every id below is context-correct without branching.
+ */
+let _autoBlockQuery = '';
+
+function _autoBlockSearch(value) {
+    _autoBlockQuery = String(value || '');
+    _renderBuilderSidebar({ keepFocus: true });
+}
+
+function _autoToggleBlockDrawer(key) {
+    const el = document.querySelector('.block-drawer[data-drawer="' + key + '"]');
+    if (el) el.classList.toggle('collapsed');
+}
+
+function _renderBuilderSidebar(opts) {
     const sidebar = _bEl('sidebar');
     if (!sidebar || !_autoBlocks) return;
 
-    let html = '';
+    const query = _autoBlockQuery.trim().toLowerCase();
+    const searching = query.length > 0;
+    const order = _autoBlocks.category_order || [];
     const sections = [
         { key: 'triggers', title: 'Triggers', slot: 'when' },
         { key: 'actions', title: 'Actions', slot: 'do' },
         { key: 'notifications', title: 'Then', slot: 'then' },
     ];
 
-    sections.forEach(sec => {
+    const matches = (block) => !searching
+        || String(block.label || '').toLowerCase().includes(query)
+        || String(block.description || '').toLowerCase().includes(query)
+        || String(block.type || '').toLowerCase().includes(query);
+
+    const renderBlock = (block, slot) => {
+        const icon = _autoIcons[block.type] || '\u2699\uFE0F';
+        const disabled = !block.available;
+        const helpKey = 'auto-' + block.type;
+        const hasHelp = !!TOOL_HELP_CONTENT[helpKey];
+        return `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${slot}')" onclick="_autoClickBlock('${block.type}','${slot}')"` : ''}>
+            <div class="block-item-icon">${icon}</div>
+            <div class="block-item-text">
+                <div class="block-item-label">${_esc(block.label)}</div>
+                <div class="block-item-desc">${_esc(block.description)}</div>
+            </div>
+            ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
+            ${hasHelp ? `<button class="tool-help-button block-help-btn" onclick="event.stopPropagation(); openToolHelpModal('${helpKey}')" title="Learn more">?</button>` : ''}
+        </div>`;
+    };
+
+    let html = `<div class="block-search-wrap">
+        <input type="search" id="block-search" class="block-search" placeholder="Search blocks\u2026"
+               value="${_escAttr(_autoBlockQuery)}" oninput="_autoBlockSearch(this.value)"
+               aria-label="Search automation blocks">
+    </div>`;
+
+    let total = 0;
+    sections.forEach(function (sec) {
+        const blocks = (_autoBlocks[sec.key] || []).filter(matches);
+        total += blocks.length;
+        if (!blocks.length) return;
+
         html += `<div class="sidebar-section"><div class="sidebar-section-title">${sec.title}</div>`;
-        (_autoBlocks[sec.key] || []).forEach(block => {
-            const icon = _autoIcons[block.type] || '\u2699\uFE0F';
-            const disabled = !block.available;
-            const helpKey = 'auto-' + block.type;
-            const hasHelp = !!TOOL_HELP_CONTENT[helpKey];
-            html += `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${sec.slot}')" onclick="_autoClickBlock('${block.type}','${sec.slot}')"` : ''}>
-                <div class="block-item-icon">${icon}</div>
-                <div class="block-item-text">
-                    <div class="block-item-label">${_esc(block.label)}</div>
-                    <div class="block-item-desc">${_esc(block.description)}</div>
-                </div>
-                ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
-                ${hasHelp ? `<button class="tool-help-button block-help-btn" onclick="event.stopPropagation(); openToolHelpModal('${helpKey}')" title="Learn more">?</button>` : ''}
-            </div>`;
-        });
+
+        if (searching) {
+            // A search is a request for a specific block; drawers would just
+            // be one more click between the query and the answer.
+            html += blocks.map(function (b) { return renderBlock(b, sec.slot); }).join('');
+        } else {
+            const byCategory = {};
+            blocks.forEach(function (b) {
+                const cat = b.category || 'Other';
+                (byCategory[cat] = byCategory[cat] || []).push(b);
+            });
+            const cats = Object.keys(byCategory).sort(function (a, b) {
+                const ia = order.indexOf(a), ib = order.indexOf(b);
+                return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib) || a.localeCompare(b);
+            });
+            cats.forEach(function (cat) {
+                const key = sec.key + '-' + cat.replace(/\W+/g, '_');
+                html += `<div class="block-drawer" data-drawer="${key}">
+                    <button type="button" class="block-drawer-head" onclick="_autoToggleBlockDrawer('${key}')">
+                        <span class="block-drawer-chevron">\u25BC</span>
+                        <span class="block-drawer-name">${_esc(cat)}</span>
+                        <span class="block-drawer-count">${byCategory[cat].length}</span>
+                    </button>
+                    <div class="block-drawer-body">${byCategory[cat].map(function (b) { return renderBlock(b, sec.slot); }).join('')}</div>
+                </div>`;
+            });
+        }
         html += '</div>';
     });
+
+    if (searching && total === 0) {
+        html += '<div class="block-search-empty">No blocks match \u201C' + _esc(_autoBlockQuery) + '\u201D</div>';
+    }
+
     sidebar.innerHTML = html;
+
+    // innerHTML replaces the input, so typing would lose focus after the
+    // first character without this.
+    if (opts && opts.keepFocus) {
+        const input = document.getElementById('block-search');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
 }
 
 // --- Canvas ---

@@ -11,6 +11,7 @@ fallback disabled, and only ever appends cards.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from core.metadata.discography_gapfill import (
@@ -152,27 +153,35 @@ def test_endpoint_is_conservative_and_additive():
 
 
 def test_frontend_contract():
-    js = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
-    assert "_loadDiscographyGapFill" in js
-    assert "_gap_source" in js
-    # the click override routes the card's OWN source into the tracks fetch
-    click = js[js.index("if (rel._gap_source)"):]
-    assert "_aat2.set('source', rel._gap_source)" in click[:200]
-    # opt-in chip + persisted preference; default off
-    assert "discog_gapfill" in js
-    assert "gapfill-source-badge" in js
+    """The page half of #1067 now lives in React, so this pins it there.
+
+    The vanilla implementation this used to read -- _loadDiscographyGapFill,
+    _insertGapCardSorted, _gapSameRelease, the static #gapfill-toggle-btn chip
+    -- was deleted with the vanilla artist-detail page. Each assertion below
+    names the module that replaced it; the behaviour itself is covered in
+    detail by the vitest suites next to them (persistence, dedup, per-source
+    ownership, sorted merge).
+    """
+    react = _ROOT / "webui" / "src" / "routes" / "artist-detail"
+    gapfill = (react / "-artist-detail.gap-fill.ts").read_text(encoding="utf-8")
+    # opt-in chip + persisted preference, default off, under the vanilla's key
+    assert "discog_gapfill" in gapfill
     # client-side FINAL dedup vs the page's library-merged view: an owned
     # release the base source doesn't list must not return as a gap card
-    assert "_renderedDiscography" in js
-    assert "_gapSameRelease" in js
-    # Boulder's live feedback: cards slot into the REAL sections (no bolted-on
-    # extra section), and the toggle lives with the other filter groups
-    assert "gapfill-card" in js
-    assert "_insertGapCardSorted" in js
-    after_insert = js[js.index("_insertGapCardSorted(grid, card, _gapYear"):]
-    assert "applyDiscographyFilters" in after_insert[:800]    # filters apply to gap cards
+    assert re.search(r"export function dedupeGaps\b", gapfill), "dedupeGaps is gone"
+    assert re.search(r"export function gapSameRelease\b", gapfill), "gapSameRelease is gone"
+    # cards slot into the REAL sections rather than a bolted-on extra one
+    assert re.search(r"export function mergeGapReleases\b", gapfill), "mergeGapReleases is gone"
+
+    card = (react / "-ui" / "release-card.tsx").read_text(encoding="utf-8")
+    assert "gapfill-card" in card
+    assert "gapSourceLabel" in card                  # the source badge
+
+    # the click override routes the card's OWN source into the tracks fetch
+    open_release = (react / "-artist-detail.open-release.ts").read_text(encoding="utf-8")
+    assert "if (release._gap_source) params.source = String(release._gap_source);" in open_release
+
     html = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    assert 'id="gapfill-toggle-btn"' in html          # static chip in the Sources group
     assert 'gapfill-section' not in html              # the separate section is gone
 
 
@@ -181,9 +190,15 @@ def test_download_discography_modal_includes_gaps():
     releases. When the chip is on, the modal fetches gaps, dedups against its
     own list, and each entry POSTs with ITS source (backend honors per-entry
     source at entry['source'])."""
-    js = (_ROOT / "webui" / "static" / "library.js").read_text(encoding="utf-8")
-    # both the page loader AND the modal call the gap-fill endpoint
-    assert js.count("discography/gap-fill") == 2
-    assert "gapSource: cb.dataset.gapSource" in js
-    assert "source: e.gapSource || sourceForBatch" in js
-    assert "data-gap-source=" in js
+    # The modal is React now (library.js is deleted); the same three pins
+    # hold in its module + component.
+    module = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail"
+        / "-artist-detail.discography-modal.ts"
+    ).read_text(encoding="utf-8")
+    component = (
+        _ROOT / "webui" / "src" / "routes" / "artist-detail" / "-ui" / "discography-modal.tsx"
+    ).read_text(encoding="utf-8")
+    assert "discography/gap-fill" in module
+    assert "source: e.gapSource || sourceForBatch" in module
+    assert "data-gap-source=" in component

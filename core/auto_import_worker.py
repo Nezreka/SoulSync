@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
+from core.imports.pipeline import import_rejection_reason
 from utils.logging_config import get_logger
 
 logger = get_logger("auto_import")
@@ -76,6 +77,25 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
         except OSError:
             items.append(os.path.basename(f))
     return hashlib.md5('|'.join(items).encode()).hexdigest()
+
+
+# Statuses that end a folder's automatic lifecycle. Anything else ('scanning',
+# 'processing', 'approved') is in flight and must stay re-pickable.
+_TERMINAL_IMPORT_STATUSES = (
+    'completed', 'partial', 'pending_review', 'needs_identification',
+    'failed', 'rejected',
+)
+
+
+def _summarize_names(names: List[str], limit: int = 10) -> str:
+    """Comma-joined ``names``, truncated with an explicit remainder marker.
+
+    A bare ``names[:10]`` reads as the complete list next to a count of 30 —
+    which matters where the log line is the only record that the files exist.
+    """
+    if len(names) <= limit:
+        return ', '.join(names)
+    return f"{', '.join(names[:limit])} … and {len(names) - limit} more"
 
 
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
@@ -554,7 +574,7 @@ class AutoImportWorker:
                 break
 
             # Skip if already processed (DB-level dedup)
-            if self._is_already_processed(candidate.folder_hash):
+            if self._is_already_processed(candidate):
                 continue
 
             # Skip if already submitted to / running in the pool. This
@@ -648,11 +668,12 @@ class AutoImportWorker:
             # overall score, but the 2 tracks match perfectly and should still import)
             high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
             has_strong_individual_matches = len(high_conf_matches) > 0
+            approved_row_id = self._consume_approval(candidate)
 
             # A re-identify is an explicit user choice — let it auto-process like a
             # strong match (still gated on the global auto_process preference).
-            if (confidence >= threshold or has_strong_individual_matches
-                    or rematch_hint is not None) and auto_process:
+            if approved_row_id is not None or ((confidence >= threshold or has_strong_individual_matches
+                    or rematch_hint is not None) and auto_process):
                 # Phase 5: Auto-process — insert an in-progress row
                 # so the UI sees the import the moment it starts,
                 # then update it with the final status when done.
@@ -663,11 +684,14 @@ class AutoImportWorker:
 
                 in_progress_row_id = self._record_in_progress(
                     candidate, identification, match_result,
+                    row_id=approved_row_id,
                 )
                 self._update_active(candidate.folder_hash, status='processing')
 
-                success = self._process_matches(candidate, identification, match_result)
-                status = 'completed' if success else 'failed'
+                status, process_errors = self._process_matches(
+                    candidate, identification, match_result,
+                )
+                success = status == 'completed'
                 confidence = max(confidence, effective_conf)
                 if success:
                     self._bump_stat('auto_processed')
@@ -683,7 +707,13 @@ class AutoImportWorker:
 
                 # Update the in-progress row in place — UI shows the
                 # final result without a separate insert race.
-                self._finalize_result(in_progress_row_id, status, confidence)
+                self._finalize_result(
+                    in_progress_row_id,
+                    status,
+                    confidence,
+                    error_message='; '.join(process_errors) or None,
+                    match_data=match_result,
+                )
             elif confidence >= 0.7:
                 status = 'pending_review'
                 self._bump_stat('pending_review')
@@ -959,18 +989,91 @@ class AutoImportWorker:
             return False  # First scan — wait for next cycle to confirm stability
         return abs(current_mtime - prev) < 0.01  # Unchanged
 
-    def _is_already_processed(self, folder_hash: str) -> bool:
-        """Check if this folder was already processed."""
+    def _is_already_processed(self, candidate: FolderCandidate) -> bool:
+        """Whether this folder already has a terminal auto-import row.
+
+        'partial' is terminal like 'failed': recovery is the user's explicit
+        re-identify / re-import action, not another automatic pass.
+
+        Two lookups, because ``folder_hash`` is CONTENT-derived
+        (``_compute_folder_hash`` = basename:size of the folder's audio files).
+        A successful import moves the matched tracks out, so what is left hashes
+        to something the history has never seen — the status check alone can
+        never fire for a remnant, and the folder gets identified as a brand-new
+        album and imported again. That path is on the happy path now that
+        leftovers ARE a normal outcome (quality-dedup losers). The second lookup
+        matches on ``folder_path`` and only claims the folder when every file
+        still in it was recorded as a leftover of that finished run, so a new
+        album dropped into the same path — which shares no filename with the
+        leftovers — is still picked up.
+        """
+        try:
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT status FROM auto_import_history WHERE folder_hash = ?"
+                    " ORDER BY created_at DESC LIMIT 1",
+                    (candidate.folder_hash,),
+                )
+                row = cursor.fetchone()
+                if row is not None:
+                    return row['status'] in _TERMINAL_IMPORT_STATUSES
+                return self._is_import_remnant(cursor, candidate)
+            finally:
+                conn.close()
+        except Exception:
+            return False
+
+    def _is_import_remnant(self, cursor, candidate: FolderCandidate) -> bool:
+        """Whether ``candidate`` is only what a finished import left behind."""
+        current = {os.path.basename(f) for f in (candidate.audio_files or [])}
+        if not current:
+            return False
+        cursor.execute(
+            "SELECT match_data FROM auto_import_history WHERE folder_path = ?"
+            f" AND status IN ({','.join('?' * len(_TERMINAL_IMPORT_STATUSES))})"
+            " ORDER BY created_at DESC LIMIT 1",
+            (candidate.path, *_TERMINAL_IMPORT_STATUSES),
+        )
+        row = cursor.fetchone()
+        if row is None or not row['match_data']:
+            return False
+        try:
+            leftovers = set(json.loads(row['match_data']).get('unmatched_files') or [])
+        except (ValueError, TypeError):
+            return False
+        return bool(leftovers) and current <= leftovers
+
+    def _consume_approval(self, candidate: FolderCandidate) -> Optional[int]:
+        """Atomically claim one approval bound to this exact candidate."""
+        conn = None
         try:
             conn = self.database._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT status FROM auto_import_history WHERE folder_hash = ? ORDER BY created_at DESC LIMIT 1",
-                           (folder_hash,))
+            cursor.execute(
+                "SELECT id, folder_path FROM auto_import_history "
+                "WHERE folder_hash = ? AND status = 'approved' "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (candidate.folder_hash,),
+            )
             row = cursor.fetchone()
-            conn.close()
-            return row and row['status'] in ('completed', 'pending_review', 'needs_identification', 'failed', 'rejected')
-        except Exception:
-            return False
+            if not row or os.path.realpath(row['folder_path']) != os.path.realpath(candidate.path):
+                return None
+            cursor.execute(
+                "UPDATE auto_import_history SET status = 'processing' "
+                "WHERE id = ? AND status = 'approved'",
+                (row['id'],),
+            )
+            claimed_id = row['id'] if cursor.rowcount == 1 else None
+            conn.commit()
+            return claimed_id
+        except Exception as e:
+            logger.error("[Auto-Import] Could not consume approval: %s", e)
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ── Re-identify hints (#889) ──
 
@@ -1718,11 +1821,12 @@ class AutoImportWorker:
 
     # ── Processing ──
 
-    def _process_matches(self, candidate: FolderCandidate, identification: Dict, match_result: Dict) -> bool:
+    def _process_matches(self, candidate: FolderCandidate, identification: Dict,
+                         match_result: Dict) -> Tuple[str, List[str]]:
         """Process matched files through the post-processing pipeline."""
         if not self._process_callback:
             logger.warning("No process callback configured — cannot auto-process")
-            return False
+            return 'failed', ['Import post-processing is not available']
 
         album_data = match_result.get('album_data', {})
         if not isinstance(album_data, dict):
@@ -1827,7 +1931,10 @@ class AutoImportWorker:
             )
 
             if not os.path.exists(file_path):
-                errors.append(f"File not found: {os.path.basename(file_path)}")
+                error = f"File not found: {os.path.basename(file_path)}"
+                errors.append(error)
+                match['import_status'] = 'failed'
+                match['import_error'] = error
                 continue
 
             try:
@@ -1952,17 +2059,52 @@ class AutoImportWorker:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
 
                 self._process_callback(context_key, context, file_path)
+                rejection = import_rejection_reason(context)
+                final_path = context.get('_final_processed_path') or context.get('_final_path')
+                if rejection:
+                    raise RuntimeError(rejection)
+                if not context.get('_pipeline_import_succeeded'):
+                    raise RuntimeError('post-processing did not confirm a successful import')
+                if not final_path or not os.path.isfile(final_path):
+                    raise RuntimeError('post-processing produced no final file')
+
                 processed += 1
+                match['import_status'] = 'completed'
                 # Capture where the pipeline actually landed the file (#889 same-home
                 # guard) — the pipeline writes it back into the mutable context.
-                _landed = context.get('_final_processed_path')
+                _landed = final_path
                 if _landed:
                     reid_final_paths.append(_landed)
                 logger.info(f"[Auto-Import] Processed: {track_number}. {track_name}")
 
             except Exception as e:
-                errors.append(f"{track.get('name', '?')}: {str(e)}")
+                error = f"{track.get('name', '?')}: {str(e)}"
+                errors.append(error)
+                match['import_status'] = 'failed'
+                match['import_error'] = str(e)
                 logger.warning(f"[Auto-Import] Error processing track: {e}")
+
+        # Leftovers split two ways. A quality-dedup loser — the lower-bitrate
+        # copy of a track that DID import — is the expected outcome of a healthy
+        # album, and counting it as a failure marked those albums 'partial'
+        # forever (that status suppresses re-processing, by design). A leftover
+        # that is NOT a dedup loser is a real song the match never claimed;
+        # swallowing that one reports 'completed' with no error_message, drops
+        # the file in staging with only a log line, and — since `success =
+        # status == 'completed'` — releases `_finalize_rematch_hint` to delete
+        # the replaced original. So it stays an error. Match results without
+        # `duplicate_files` (older callers, re-identify hints) get the safe
+        # reading: unexplained leftovers block 'completed'.
+        leftovers = list(match_result.get('unmatched_files') or [])
+        dedup_losers = set(match_result.get('duplicate_files') or [])
+        for unmatched in (f for f in leftovers if f not in dedup_losers):
+            errors.append(f"Unmatched file: {os.path.basename(unmatched)}")
+        dropped = [os.path.basename(f) for f in leftovers if f in dedup_losers]
+        if dropped:
+            logger.info(
+                "[Auto-Import] %d quality-duplicate file(s) in %s stay where they are: %s",
+                len(dropped), candidate.name, _summarize_names(dropped),
+            )
 
         # Emit automation events
         if processed > 0 and self._automation_engine:
@@ -1988,15 +2130,19 @@ class AutoImportWorker:
         except Exception as e:
             logger.debug("could not stash reid final paths: %s", e)
 
-        return processed > 0
+        if all_matches and processed == len(all_matches) and not errors:
+            return 'completed', []
+        return ('partial' if processed else 'failed'), errors
 
     # ── Database ──
 
     def _record_in_progress(self, candidate: FolderCandidate, identification: Dict,
-                            match_result: Dict) -> Optional[int]:
-        """Insert a status='processing' row up-front so the UI can see
-        an in-flight import while it's still running. Returns the row's
-        id so ``_finalize_result`` can update the same row when done.
+                            match_result: Dict, row_id: Optional[int] = None) -> Optional[int]:
+        """Create or refresh a status='processing' row for the live UI.
+
+        An approved review passes its existing row id so approval consumption
+        and processing remain one exactly-once history record. Returns the id
+        that ``_finalize_result`` updates when processing finishes.
 
         Without this, auto-import goes silent for the entire processing
         window (5+ minutes for a full album) — the existing
@@ -2008,22 +2154,34 @@ class AutoImportWorker:
             match_json = self._serialize_match_data(match_result)
             conn = self.database._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO auto_import_history
-                (folder_name, folder_path, folder_hash, status, confidence, album_id, album_name,
-                 artist_name, image_url, total_files, matched_files, match_data,
-                 identification_method, error_message, processed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                candidate.name, candidate.path, candidate.folder_hash,
-                'processing', match_result.get('confidence', 0.0),
-                identification.get('album_id'), identification.get('album_name'),
-                identification.get('artist_name'), identification.get('image_url'),
-                len(candidate.audio_files),
-                match_result.get('matched_count', 0),
-                match_json, identification.get('method'), None, None,
-            ))
-            row_id = cursor.lastrowid
+            values = (
+                match_result.get('confidence', 0.0), identification.get('album_id'),
+                identification.get('album_name'), identification.get('artist_name'),
+                identification.get('image_url'), len(candidate.audio_files),
+                match_result.get('matched_count', 0), match_json,
+                identification.get('method'),
+            )
+            if row_id is not None:
+                cursor.execute("""
+                    UPDATE auto_import_history SET status = 'processing', confidence = ?,
+                    album_id = ?, album_name = ?, artist_name = ?, image_url = ?,
+                    total_files = ?, matched_files = ?, match_data = ?,
+                    identification_method = ?, error_message = NULL, processed_at = NULL
+                    WHERE id = ? AND status = 'processing'
+                """, (*values, row_id))
+                if cursor.rowcount != 1:
+                    raise RuntimeError("approved history row could not be claimed")
+            else:
+                cursor.execute("""
+                    INSERT INTO auto_import_history
+                    (folder_name, folder_path, folder_hash, status, confidence, album_id, album_name,
+                     artist_name, image_url, total_files, matched_files, match_data,
+                     identification_method, error_message, processed_at)
+                    VALUES (?, ?, ?, 'processing', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                """, (
+                    candidate.name, candidate.path, candidate.folder_hash, *values,
+                ))
+                row_id = cursor.lastrowid
             conn.commit()
             conn.close()
             return row_id
@@ -2032,7 +2190,8 @@ class AutoImportWorker:
             return None
 
     def _finalize_result(self, row_id: int, status: str, confidence: float,
-                         error_message: Optional[str] = None) -> None:
+                         error_message: Optional[str] = None,
+                         match_data: Optional[Dict] = None) -> None:
         """Update the in-progress row created by ``_record_in_progress``
         with the final outcome. Idempotent — safe to call even if the
         row creation failed (row_id is None)."""
@@ -2043,11 +2202,13 @@ class AutoImportWorker:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE auto_import_history
-                SET status = ?, confidence = ?, error_message = ?, processed_at = ?
+                SET status = ?, confidence = ?, error_message = ?, processed_at = ?,
+                    match_data = COALESCE(?, match_data)
                 WHERE id = ?
             """, (
                 status, confidence, error_message,
                 datetime.now().isoformat() if status == 'completed' else None,
+                self._serialize_match_data(match_data),
                 row_id,
             ))
             conn.commit()
@@ -2066,7 +2227,9 @@ class AutoImportWorker:
                 'matches': [{'track_name': m['track']['name'],
                              'track_number': m['track'].get('track_number', 0),
                              'file': os.path.basename(m['file']),
-                             'confidence': m['confidence']} for m in match_data.get('matches', [])],
+                             'confidence': m['confidence'],
+                             'import_status': m.get('import_status'),
+                             'import_error': m.get('import_error')} for m in match_data.get('matches', [])],
                 'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),
@@ -2129,12 +2292,12 @@ class AutoImportWorker:
 
     def approve_item(self, item_id: int) -> Dict:
         """Approve a pending_review item and process it."""
+        conn = None
         try:
             conn = self.database._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM auto_import_history WHERE id = ? AND status = 'pending_review'", (item_id,))
             row = cursor.fetchone()
-            conn.close()
 
             if not row:
                 return {'success': False, 'error': 'Item not found or not pending review'}
@@ -2144,19 +2307,25 @@ class AutoImportWorker:
             if not match_data_raw:
                 return {'success': False, 'error': 'No match data available'}
 
-            # We can't easily re-process from stored data alone because we don't store
-            # the full album_data or file paths. Mark as approved and let next scan pick it up.
-            # For now, update status to trigger re-processing.
-            conn = self.database._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE auto_import_history SET status = 'approved' WHERE id = ?", (item_id,))
+            # The row itself is the single-use approval token. The next scan
+            # atomically transitions it to processing before importing.
+            cursor.execute(
+                "UPDATE auto_import_history SET status = 'approved' "
+                "WHERE id = ? AND status = 'pending_review'",
+                (item_id,),
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return {'success': False, 'error': 'Item was already reviewed'}
             conn.commit()
-            conn.close()
 
             return {'success': True, 'message': 'Item approved — will be processed on next scan'}
 
         except Exception as e:
             return {'success': False, 'error': str(e)}
+        finally:
+            if conn is not None:
+                conn.close()
 
     def reject_item(self, item_id: int) -> Dict:
         """Reject/dismiss an auto-import item."""

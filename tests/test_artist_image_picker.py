@@ -190,11 +190,12 @@ def test_endpoint_cache_is_id_keyed_and_forgives_empties():
 
 
 def test_picker_grid_never_goes_silently_blank():
+    # The picker is React now (art-picker.tsx); same pin, new home.
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
     # dead image URLs remove tiles — an emptied grid must SAY so
-    assert "none of the images would load" in js
+    assert "none of the images would load" in tsx
 
 
 def test_spotify_free_mode_contributes(monkeypatch):
@@ -238,14 +239,12 @@ def test_image_sniffer():
 
 
 def test_picker_has_the_custom_url_row():
+    # React renders the row declaratively, so the vanilla's mount-after-reset
+    # ordering hazard is structurally impossible; only the row itself is pinned.
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "_artPickerCustomRow" in js
-    assert "paste an image URL" in js
-    # the row mounts AFTER the innerHTML reset that would wipe it
-    seg = js.split("body.appendChild(grid);")[1][:400]
-    assert "_artPickerCustomRow" in seg
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
+    assert "paste an image URL" in tsx
 
 
 def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
@@ -279,15 +278,9 @@ def test_spotify_403_falls_through_to_free_metadata(monkeypatch):
     assert cands[0]["url"] == "https://i.scdn.co/free.jpg"
 
 
-def test_custom_row_check_icon_is_module_scope():
-    """The pickers' _checkSvg consts are function-LOCAL — the custom row
-    referencing one was a silent ReferenceError ('paste and nothing happens')."""
-    from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "const _ART_CHECK_SVG" in js
-    row = js.split("function _artPickerCustomRow")[1].split("\nfunction ")[0]
-    assert "_ART_CHECK_SVG" in row and "_checkSvg" not in row
+# test_custom_row_check_icon_is_module_scope was retired with library.js: the
+# hazard it pinned (a function-local const referenced from another function's
+# markup — a silent ReferenceError) cannot exist in the React module system.
 
 
 def test_current_photo_leads_the_grid_as_reference():
@@ -295,14 +288,11 @@ def test_current_photo_leads_the_grid_as_reference():
     it's read from the PAGE (the DB may hold a local cache path that must
     never round-trip through the apply endpoint as a source URL)."""
     from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent / "webui" / "static" / "library.js").read_text(
-        encoding="utf-8", errors="replace")
-    seg = js.split("art-picker-tile--current")[0]
-    assert "getElementById('artist-detail-image')" in js
+    tsx = (Path(__file__).resolve().parent.parent / "webui" / "src" / "routes"
+           / "artist-detail" / "-ui" / "art-picker.tsx").read_text(encoding="utf-8")
     # a DIV, not a button — it can't be selected/applied
-    assert "createElement('div');\n                cur.className = 'art-picker-tile art-picker-tile--current'" \
-        .replace("\n                ", "") in js.replace("\n                ", "")
-    assert "art-picker-badge--current" in js
+    assert '<div className="art-picker-tile art-picker-tile--current">' in tsx
+    assert "art-picker-badge--current" in tsx
 
 
 
@@ -325,3 +315,44 @@ def test_text_artist_ids_work_end_to_end(tmp_path):
     assert db.get_artist('7dB07x8Q2P9jPvGeDHxIFa').thumb_url == 'https://x/p.jpg'
     albums = db.get_albums_by_artist('7dB07x8Q2P9jPvGeDHxIFa')
     assert [a.title for a in albums] == ['Divide']
+
+
+def test_candidate_fan_out_uses_one_bounded_process_wide_pool(monkeypatch):
+    """PR #1121 review: a fresh ThreadPoolExecutor per call, sized to the
+    source list and abandoned with shutdown(wait=False), means nothing caps
+    threads ACROSS calls — every picker open adds a full set while the
+    previous stragglers are still sleeping inside a rate-limit backoff. Two
+    picker opens must reuse the same bounded pool."""
+    import threading as _threading
+
+    seen_threads = set()
+
+    class _RecordingClient(_Client):
+        def search_artists(self, name, limit=1):
+            seen_threads.add(_threading.current_thread().name)
+            return super().search_artists(name, limit=limit)
+
+    clients = {
+        "deezer": _RecordingClient(search_hit=SimpleNamespace(image_url="https://dz/1.jpg")),
+        "itunes": _RecordingClient(search_hit=SimpleNamespace(image_url="https://it/1.jpg")),
+    }
+    _wire_registry(monkeypatch, clients, ["deezer", "itunes"])
+
+    rounds = 20
+    for _ in range(rounds):
+        ai.gather_artist_image_candidates("Adele", {})
+
+    assert seen_threads, "no worker thread ran"
+    # A per-call executor gives each round its own threads, so the distinct
+    # count grows with the number of picker opens. A shared pool cannot exceed
+    # its cap however many times the picker is opened.
+    assert len(seen_threads) <= ai._CANDIDATE_POOL_MAX_WORKERS, (
+        f"{rounds} picker opens produced {len(seen_threads)} distinct worker "
+        f"threads: {sorted(seen_threads)}"
+    )
+
+
+def test_candidate_pool_is_capped():
+    pool = ai._candidate_pool()
+    assert ai._candidate_pool() is pool, "the pool must be process-wide"
+    assert 0 < pool._max_workers <= ai._CANDIDATE_POOL_MAX_WORKERS

@@ -183,16 +183,26 @@ def get_library_disk_usage(database) -> dict:
     return database.get_library_disk_usage()
 
 
-def get_recent_tracks(database, limit: int) -> list[dict]:
-    """Recently played tracks from listening_history."""
+def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFixer] = None) -> list[dict]:
+    """Recently played tracks from listening_history.
+
+    Joins album art through db_track_id when the play was matched to a
+    library track (the listening-stats worker sets it; media-server plays it
+    couldn't match leave it NULL, and those rows come back with image_url
+    None). Art passes through ``image_url_fixer`` because server-synced thumb
+    URLs need auth and die in the browser — same treatment as resolve_track.
+    """
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT title, artist, album, played_at, duration_ms
-            FROM listening_history
-            ORDER BY played_at DESC
+            SELECT lh.title, lh.artist, lh.album, lh.played_at, lh.duration_ms,
+                   lh.server_source, al.thumb_url, t.artist_id
+            FROM listening_history lh
+            LEFT JOIN tracks t ON t.id = lh.db_track_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            ORDER BY lh.played_at DESC
             LIMIT ?
             """,
             (limit,),
@@ -208,6 +218,11 @@ def get_recent_tracks(database, limit: int) -> list[dict]:
             'album': row[2],
             'played_at': row[3],
             'duration_ms': row[4],
+            'server_source': row[5],
+            'image_url': (image_url_fixer(row[6]) if image_url_fixer else row[6]) if row[6] else None,
+            # The library artist PK when the play was matched — lets the
+            # dashboard band jump straight to the artist page, no name lookup.
+            'artist_db_id': row[7],
         }
         for row in rows
     ]

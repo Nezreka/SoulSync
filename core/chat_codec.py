@@ -173,6 +173,25 @@ def file_of(payload) -> dict | None:
     return out
 
 
+def edit_of(payload) -> str | None:
+    """The validated edit-target key from a decoded envelope, or None. An
+    edit is a normal envelope whose 'ed' names one of the SENDER's own
+    earlier messages (the client message key: 'user|timestamp|text', same
+    format threads use for 'th'); the envelope's own 't' is the replacement
+    text. Soulseek cannot unsend, so vanilla clients keep seeing both
+    messages — SoulSync clients fold the edit onto the original and retain
+    the history. Author-match and the edit cap are enforced by the client
+    fold (every client computes them identically); this only shape-checks
+    REMOTE input."""
+    e = (payload or {}).get("ed") if isinstance(payload, dict) else None
+    if not isinstance(e, str):
+        return None
+    e = e.strip()[:160]
+    if not e or "|" not in e:
+        return None
+    return e
+
+
 def reply_of(payload) -> dict | None:
     """The validated reply reference from a decoded envelope, or None.
     Everything here is REMOTE input — strict shape, hard caps."""

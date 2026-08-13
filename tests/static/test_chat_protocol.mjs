@@ -240,28 +240,33 @@ describe('reducePins — the shared pin board', () => {
     const add = (by, u, ts, x) => ev(by, { k: 'pin.add', u, ts, x });
 
     test('add, dedupe (re-pin moves to newest), delete', () => {
+        // Pins are MODERATOR-only now (Boulder's owner powers): every event
+        // here rides the moderator name; sender identity checks moved to the
+        // moderation describe below.
+        const MOD = 'boulderbadgedad';
         const pins = P.reducePins([
-            add('a', 'bob', 't1', 'first'),
-            add('a', 'sue', 't2', 'second'),
-            add('b', 'bob', 't1', 'again'),          // re-pin same message
-            ev('c', { k: 'pin.del', u: 'sue', ts: 't2' }),
+            add(MOD, 'bob', 't1', 'first'),
+            add(MOD, 'sue', 't2', 'second'),
+            add(MOD, 'bob', 't1', 'again'),          // re-pin same message
+            ev(MOD, { k: 'pin.del', u: 'sue', ts: 't2' }),
         ]);
         assert.equal(pins.length, 1);
         assert.equal(pins[0].u, 'bob');
-        assert.equal(pins[0].by, 'b');               // latest pinner wins
+        assert.equal(pins[0].by, MOD);
     });
 
     test('board caps at 8 — oldest falls off', () => {
         const evs = [];
-        for (let i = 0; i < 10; i++) evs.push(add('a', 'u' + i, 't' + i, 'x'));
+        for (let i = 0; i < 10; i++) evs.push(add('boulderbadgedad', 'u' + i, 't' + i, 'x'));
         const pins = P.reducePins(evs);
         assert.equal(pins.length, 8);
         assert.equal(pins[0].u, 'u2');
     });
 
     test('garbage never lands', () => {
-        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: '', ts: 't' })]).length, 0);
-        assert.equal(P.reducePins([ev('a', { k: 'pin.add', u: 'x'.repeat(99), ts: 't' })]).length, 0);
+        const MOD = 'boulderbadgedad';
+        assert.equal(P.reducePins([ev(MOD, { k: 'pin.add', u: '', ts: 't' })]).length, 0);
+        assert.equal(P.reducePins([ev(MOD, { k: 'pin.add', u: 'x'.repeat(99), ts: 't' })]).length, 0);
     });
 });
 
@@ -338,5 +343,264 @@ describe('reduceTopic + reduceTuned', () => {
             ev('b', { k: 'jbx.tune', on: 1 }),
             ev('a', { k: 'jbx.tune', on: 0 }),
         ]), { b: 1 });
+    });
+});
+
+// ── Moderator model (Boulder's reserved-owner powers) ──────────────────────
+describe('moderation', () => {
+  const P = ctx.window.ChatProtocol;
+  const mod = 'BoulderBadgeDad';        // casefold must match 'boulderbadgedad'
+  const rando = 'SomeUser';
+
+  test('isModerator is casefolded and exact', () => {
+    assert.equal(P.isModerator('boulderbadgedad'), true);
+    assert.equal(P.isModerator('  BoulderBadgeDad '), true);
+    assert.equal(P.isModerator('boulderbadgedad2'), false);
+    assert.equal(P.isModerator(''), false);
+    assert.equal(P.isModerator(null), false);
+  });
+
+  test('reducePins folds ONLY moderator pins now', () => {
+    const pins = P.reducePins([
+      { username: rando, p: { k: 'pin.add', u: 'a', ts: '1', x: 'not yours' } },
+      { username: mod, p: { k: 'pin.add', u: 'b', ts: '2', x: 'mine' } },
+      // a rando's unpin of the moderator's pin is inert too
+      { username: rando, p: { k: 'pin.del', u: 'b', ts: '2' } },
+    ]);
+    assert.equal(pins.length, 1);
+    assert.equal(pins[0].x, 'mine');
+  });
+
+  test('reduceHidden folds hide/unhide from moderators only', () => {
+    const hidden = P.reduceHidden([
+      { username: rando, p: { k: 'mod.hide', u: 'victim', ts: '9' } },  // forged — inert
+      { username: mod, p: { k: 'mod.hide', u: 'spammer', ts: '5' } },
+      { username: mod, p: { k: 'mod.hide', u: 'spammer', ts: '6' } },
+      { username: mod, p: { k: 'mod.unhide', u: 'spammer', ts: '6' } },
+    ]);
+    assert.deepEqual({ ...hidden }, { 'spammer|5': true });
+  });
+
+  test('reduceGameKills folds moderator kills only, hostile input inert', () => {
+    const kills = P.reduceGameKills([
+      { username: rando, p: { k: 'mod.gamekill', id: 'g1' } },
+      { username: mod, p: { k: 'mod.gamekill', id: 'g2' } },
+      { username: mod, p: { k: 'mod.gamekill', id: 'x'.repeat(65) } },  // oversized — inert
+      { username: mod, p: { k: 'mod.gamekill' } },                      // no id — inert
+      null,
+    ]);
+    assert.deepEqual({ ...kills }, { g2: true });
+  });
+});
+
+describe('reduceWatch — movie night as a pure fold', () => {
+    // Stream timestamps are the party clock — ms numbers here, exactly what
+    // the fold sees after chat.js normalizes slskd timestamps.
+    const ev = (user, p, at) => ({ username: user, timestamp: at ?? 1000, p });
+    const nom = (user, id, extra) =>
+        ev(user, { k: 'watch.nom', id, kd: 'm', ti: 'T' + id, ...extra });
+
+    test('nominations dedupe by key, cap at 12, keep first attribution', () => {
+        const evs = [nom('alice', '603'), nom('bob', '603')];
+        for (let i = 0; i < 15; i++) evs.push(nom('carl', String(700 + i)));
+        const st = P.reduceWatch(evs);
+        assert.equal(st.noms.length, 12);
+        assert.equal(st.noms[0].by, 'alice');
+        // Garbage ids and kinds never enter the ballot.
+        const bad = P.reduceWatch([
+            nom('x', 'not-a-number'),
+            ev('x', { k: 'watch.nom', id: '5', kd: 'z' }),
+            ev('x', { k: 'watch.nom', id: '5', kd: 't', s: 1 }),   // episode sans e
+        ]);
+        assert.equal(bad.noms.length, 0);
+    });
+
+    test('episodes key on show:SxE; votes count latest per user', () => {
+        const st = P.reduceWatch([
+            ev('a', { k: 'watch.nom', id: '1399', kd: 't', s: 1, e: 1, ti: 'GoT' }),
+            nom('b', '603'),
+            ev('c', { k: 'watch.vote', o: 'm:603' }),
+            ev('c', { k: 'watch.vote', o: 't:1399:1x1' }),   // c changed their mind
+            ev('d', { k: 'watch.vote', o: 't:1399:1x1' }),
+        ]);
+        assert.equal(st.noms[0].key, 't:1399:1x1');
+        assert.equal(st.noms[0].votes, 2);
+        assert.equal(st.noms[1].votes, 0);
+        assert.equal(st.tally.winner, 't:1399:1x1');
+    });
+
+    test('unnom: nominator or moderator only, and its votes evaporate', () => {
+        const base = [nom('alice', '603'), ev('bob', { k: 'watch.vote', o: 'm:603' })];
+        const stranger = P.reduceWatch([...base, ev('bob', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(stranger.noms.length, 1);
+        const owner = P.reduceWatch([...base, ev('alice', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(owner.noms.length, 0);
+        assert.equal(owner.tally.total, 0);
+        const mod = P.reduceWatch([...base, ev('boulderbadgedad', { k: 'watch.unnom', o: 'm:603' })]);
+        assert.equal(mod.noms.length, 0);
+    });
+
+    test('start consumes the nomination, anchors the stream clock, resets votes', () => {
+        const st = P.reduceWatch([
+            nom('alice', '603'),
+            nom('bob', '604'),
+            ev('c', { k: 'watch.vote', o: 'm:603' }),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 5000),
+        ]);
+        assert.equal(st.now.key, 'm:603');
+        assert.equal(st.now.at, 5000);
+        assert.equal(st.now.by, 'alice');
+        assert.equal(st.noms.length, 1);            // 604 still on the ballot
+        assert.equal(st.tally.total, 0);            // new round
+        // A start naming a dead key is inert.
+        const noop = P.reduceWatch([ev('x', { k: 'watch.start', o: 'm:99' }, 5000)]);
+        assert.equal(noop.now, null);
+    });
+
+    test('latest start wins; the replaced showing lands in history', () => {
+        const st = P.reduceWatch([
+            nom('a', '1'), nom('b', '2'),
+            ev('a', { k: 'watch.start', o: 'm:1' }, 1000),
+            ev('b', { k: 'watch.start', o: 'm:2' }, 2000),
+        ]);
+        assert.equal(st.now.key, 'm:2');
+        assert.equal(st.history[0].key, 'm:1');
+    });
+
+    test('pause/resume: starter or moderator only, position math is exact', () => {
+        const play = [
+            nom('alice', '603'),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 10000),
+        ];
+        // A stranger's pause is inert.
+        const heckled = P.reduceWatch([...play, ev('bob', { k: 'watch.pause' }, 20000)]);
+        assert.equal(heckled.now.paused, false);
+        // Starter pauses at +10s → position freezes at 10000ms.
+        const paused = P.reduceWatch([...play, ev('alice', { k: 'watch.pause' }, 20000)]);
+        assert.equal(paused.now.paused, true);
+        assert.equal(P.watchPosition(paused.now, 99999), 10000);
+        // Moderator resumes at 30s; at stream-time 35s the party is at 15s.
+        const resumed = P.reduceWatch([
+            ...play,
+            ev('alice', { k: 'watch.pause' }, 20000),
+            ev('boulderbadgedad', { k: 'watch.resume' }, 30000),
+        ]);
+        assert.equal(P.watchPosition(resumed.now, 35000), 15000);
+        // Playing, never paused: pure elapsed stream time.
+        const live = P.reduceWatch(play);
+        assert.equal(P.watchPosition(live.now, 15000), 5000);
+    });
+
+    test('end: starter or moderator; the showing retires to history', () => {
+        const play = [
+            nom('alice', '603'),
+            ev('alice', { k: 'watch.start', o: 'm:603' }, 1000),
+        ];
+        const heckled = P.reduceWatch([...play, ev('bob', { k: 'watch.end' })]);
+        assert.notEqual(heckled.now, null);
+        const done = P.reduceWatch([...play, ev('boulderbadgedad', { k: 'watch.end' })]);
+        assert.equal(done.now, null);
+        assert.equal(done.history[0].key, 'm:603');
+        assert.equal(P.watchPosition(null, 5000), null);
+    });
+});
+
+describe('reduceWatch — stream-clock normalization', () => {
+    test('ISO-string timestamps (raw slskd) anchor the clock too', () => {
+        const st = P.reduceWatch([
+            { username: 'a', timestamp: '2026-08-11T05:00:00.000Z',
+              p: { k: 'watch.nom', id: '603', kd: 'm', ti: 'Matrix' } },
+            { username: 'a', timestamp: '2026-08-11T05:00:10.000Z',
+              p: { k: 'watch.start', o: 'm:603' } },
+        ]);
+        assert.equal(st.now.at, Date.parse('2026-08-11T05:00:10.000Z'));
+        // +25s of stream time → 25000ms into the film.
+        assert.equal(P.watchPosition(st.now, st.now.at + 25000), 25000);
+        // An UNCLOCKED start (garbage timestamp) must stay inert, never NaN.
+        const junk = P.reduceWatch([
+            { username: 'a', timestamp: '??',
+              p: { k: 'watch.nom', id: '603', kd: 'm', ti: 'Matrix' } },
+            { username: 'a', timestamp: '??', p: { k: 'watch.start', o: 'm:603' } },
+        ]);
+        assert.equal(junk.now, null);
+        assert.equal(junk.noms.length, 1);
+    });
+});
+
+// Node's sha256 emits the same lowercase hex as chat-hash.js, so the trivia
+// tests exercise the REAL hash path, not a toy stand-in.
+const { createHash } = await import('node:crypto');
+
+describe('reduceTrivia — the stream is the buzzer', () => {
+    const sha = s => createHash('sha256').update(s, 'utf8').digest('hex');
+    const norm = P.normalizeTriviaAnswer;
+    const ev = (user, p, at) => ({ username: user, timestamp: at ?? 1000, p });
+    const ask = (user, answer, extra) => ev(user, {
+        k: 'trv.ask', id: 'quiz0001', q: 'What city?',
+        h: sha(norm(answer)), pot: 50, ...extra,
+    });
+
+    test('normalization forgives caps, punctuation and articles', () => {
+        assert.equal(norm('  The PARIS!  '), 'paris');
+        assert.equal(norm('selected ambient works 85-92'), norm('Selected Ambient Works 85–92'));
+        assert.equal(norm('An Answer'), 'answer');
+        assert.notEqual(norm('paris'), norm('london'));
+    });
+
+    test('a malformed ask never becomes a question', () => {
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { id: 'BAD ID' })], sha), null);
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { h: 'not-hex!' })], sha), null);
+        assert.equal(P.reduceTrivia([ask('quizzer', 'paris', { q: '' })], sha), null);
+    });
+
+    test('first correct guess in stream order wins; the door then shuts', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('alice', { k: 'trv.guess', id: 'quiz0001', a: 'London' }),
+            ev('bob', { k: 'trv.guess', id: 'quiz0001', a: 'The PARIS!' }),   // normalized hit
+            ev('carl', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),      // too late
+        ], sha);
+        assert.equal(t.winner, 'bob');
+        assert.equal(t.closed, true);
+        assert.equal(t.pot, 50);
+        assert.equal(t.guesses.length, 2, 'the late guess never entered');
+        assert.equal(t.guesses[0].ok, false);
+    });
+
+    test('the asker cannot win their own pot', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('quizzer', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),
+        ], sha);
+        assert.equal(t.winner, '');
+        assert.equal(t.guesses.length, 0);
+    });
+
+    test('a newer ask replaces the live question (poll discipline)', () => {
+        const t = P.reduceTrivia([
+            ask('quizzer', 'paris'),
+            ev('other', { k: 'trv.ask', id: 'quiz0002', q: 'Second?', h: sha(norm('two')) }),
+            ev('alice', { k: 'trv.guess', id: 'quiz0001', a: 'paris' }),   // dead question
+            ev('alice', { k: 'trv.guess', id: 'quiz0002', a: 'two' }),
+        ], sha);
+        assert.equal(t.id, 'quiz0002');
+        assert.equal(t.winner, 'alice');
+    });
+
+    test('end: asker or moderator only, reveal verified against the hash', () => {
+        const base = [ask('quizzer', 'paris')];
+        const stranger = P.reduceTrivia([...base,
+            ev('mallory', { k: 'trv.end', id: 'quiz0001', ans: 'paris' })], sha);
+        assert.equal(stranger.closed, false);
+        const honest = P.reduceTrivia([...base,
+            ev('quizzer', { k: 'trv.end', id: 'quiz0001', ans: 'Paris' })], sha);
+        assert.equal(honest.closed, true);
+        assert.equal(honest.verified, true, 'the reveal matches the commitment');
+        const liar = P.reduceTrivia([...base,
+            ev('quizzer', { k: 'trv.end', id: 'quiz0001', ans: 'london' })], sha);
+        assert.equal(liar.verified, false, 'a lying reveal is flagged');
+        const mod = P.reduceTrivia([...base,
+            ev('boulderbadgedad', { k: 'trv.end', id: 'quiz0001', ans: '' })], sha);
+        assert.equal(mod.closed, true);
     });
 });

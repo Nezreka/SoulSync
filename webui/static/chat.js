@@ -41,6 +41,7 @@
         pingArmed: false,        // suppress mention pings while the archive loads
         thread: null,            // {id, name} while viewing a thread (null = channel)
         replyTo: null,           // {u, x} while composing a reply
+        editing: null,           // {key} while editing one of your own messages
         pendingReactions: {},    // "msgKey|emoji" self-reactions awaiting slskd echo
         jukebox: {               // shared room listening (reduced from protocolLog)
             open: false,         //   panel visible
@@ -70,7 +71,18 @@
         pinsOpen: false,         // pin board expanded
         topicEditing: false,     // head shows the topic input (renderHead pauses)
         pollDismissedAt: null,   // locally-dismissed closed poll (its start ts)
+        trivDismissedAt: null,   // locally-dismissed closed trivia (its ask ts)
         arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
+        watch: {                 // movie night (reduced from watch.* on the bus)
+            searchResults: [],   //   picker modal TMDB results
+            searching: false,    //   picker fetch in flight
+            pickShow: -1,        //   result index awaiting a season/episode pick
+            owned: {},           //   nomination key → true/false (MY library's answer)
+            ownedFetching: '',   //   in-flight probe signature (dedupe)
+            ownedRetryAt: 0,     //   backoff after a failed/denied probe (ms)
+            ownedDenied: false,  //   403 = music-only profile: hide ownership UI
+            grabbed: {},         //   keys we already sent to the grab pipeline
+        },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
     try {
@@ -368,33 +380,89 @@
         return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
     }
 
+    // Moderator gate — one list, owned by chat-protocol.js (the reducers
+    // enforce it on EVERY client; this only decides which buttons WE see).
+    function _selfIsMod() {
+        var CP = window.ChatProtocol;
+        return !!(CP && CP.isModerator && CP.isModerator(state.selfName));
+    }
+
+    function _hiddenSet() {
+        var CP = window.ChatProtocol;
+        if (!CP || !CP.reduceHidden || state.view !== 'room') return {};
+        return CP.reduceHidden(_roomEvents());
+    }
+
     function _lineHtml(m) {
         var self = m.self === true || m.direction === 'Out';
-        var me = !self && state.view === 'room' && mentionsMe(m.message);
+        // Edits: the DISPLAYED text is the latest applied edit; m.message
+        // stays the original everywhere a stable identity matters (the react
+        // key hashes it, the message key embeds it).
+        var versions = m._editOrphan ? null : _editsFor(m);
+        var showText = versions ? versions[versions.length - 1] : String(m.message || '');
+        // Moderator-hidden messages collapse to a stub on EVERY SoulSync
+        // client (the reducer only folds mod.hide from moderators, so the
+        // envelope can't be forged). Click reveals locally; a moderator
+        // also gets the unhide that lifts it for the whole room.
+        var hideKey = String(m.username || '') + '|' + String(m.timestamp || '');
+        if (state.view === 'room' && _hiddenSet()[hideKey]) {
+            if (!state.revealedHidden || !state.revealedHidden[hideKey]) {
+                return '<div class="chat-line chat-line--hidden" data-chat-hidden-reveal="' +
+                    attr(hideKey) + '" title="Click to view anyway">' +
+                    '🚫 <span>Message from <b>' + esc(m.username || '') +
+                    '</b> hidden by a moderator</span>' +
+                    (_selfIsMod()
+                        ? ' <button type="button" class="chat-line-reply" ' +
+                          'data-chat-unhide-user="' + attr(m.username || '') + '" ' +
+                          'data-chat-unhide-ts="' + attr(String(m.timestamp || '')) +
+                          '">unhide</button>'
+                        : '') +
+                    '</div>';
+            }
+        }
+        var me = !self && state.view === 'room' && mentionsMe(showText);
         var replyRef = (m.reply && m.reply.u)
             ? '<div class="chat-reply-ref">↩ <b>' + esc(m.reply.u) + '</b> ' +
               '<span>' + esc(m.reply.x || '') + '</span></div>'
             : '';
         var acts = '<button type="button" class="chat-line-reply" title="Copy text" ' +
-            'data-chat-copy="' + attr(String(m.message || '')) + '">⧉</button>';
+            'data-chat-copy="' + attr(showText) + '">⧉</button>';
         if (state.view === 'room' && state.canSend && !self) {
             acts = '<button type="button" class="chat-line-reply" title="React" ' +
                 'data-chat-react-user="' + attr(m.username || '') + '" ' +
                 'data-chat-react-text="' + attr(String(m.message || '')) + '">🙂+</button>' +   // FULL text — the react key is a hash of it
                 '<button type="button" class="chat-line-reply" title="Reply" ' +
                 'data-chat-reply-user="' + attr(m.username || '') + '" ' +
-                'data-chat-reply-x="' + attr(String(m.message || '').slice(0, 100)) + '">↩</button>' + acts;
+                'data-chat-reply-x="' + attr(showText.slice(0, 100)) + '">↩</button>' + acts;
+        }
+        // Your own SoulSync message, still under the edit cap → offer ✏.
+        // File cards are excluded (their text is the link the card dresses),
+        // and so are edit carriers themselves.
+        if (state.view === 'room' && state.canSend && state.selfName &&
+                m.username === state.selfName && m.rich && !m.ed && !m._editOrphan &&
+                !(m.file && m.file.n) &&
+                (!versions || versions.length < EDIT_MAX)) {
+            acts = '<button type="button" class="chat-line-reply" title="Edit' +
+                (versions ? ' (1 edit left)' : '') + '" ' +
+                'data-chat-edit-key="' + attr(_msgKey(m).slice(0, 160)) + '" ' +
+                'data-chat-edit-text="' + attr(showText) + '">✏</button>' + acts;
         }
         if (state.view === 'room' && state.canSend && !state.thread && _chanRoom()) {
             acts += '<button type="button" class="chat-line-reply" title="Start a thread on this message" ' +
                 'data-chat-thread-start="' + attr(_msgKey(m)) + '" ' +
                 'data-chat-thread-title="' + attr(String(m.message || '').slice(0, 60)) + '">🧵</button>';
         }
-        if (state.view === 'room' && state.canSend) {
+        // Pin + hide are MODERATOR tools now (Boulder): the reducers refuse
+        // anyone else's events anyway — hiding the buttons just keeps honest
+        // UIs honest, exactly like the reserved avatar's picker.
+        if (state.view === 'room' && state.canSend && _selfIsMod()) {
             acts += '<button type="button" class="chat-line-reply" title="Pin to the room board" ' +
                 'data-chat-pin-user="' + attr(m.username || '') + '" ' +
                 'data-chat-pin-ts="' + attr(String(m.timestamp || '')) + '" ' +
-                'data-chat-pin-x="' + attr(String(m.message || '').slice(0, 140)) + '">📌</button>';
+                'data-chat-pin-x="' + attr(showText.slice(0, 140)) + '">📌</button>' +
+                '<button type="button" class="chat-line-reply" title="Hide for everyone (moderator)" ' +
+                'data-chat-hide-user="' + attr(m.username || '') + '" ' +
+                'data-chat-hide-ts="' + attr(String(m.timestamp || '')) + '">🚫</button>';
         }
         var actions = '<span class="chat-line-acts">' + acts + '</span>';
         var chips = '';
@@ -407,7 +475,22 @@
         }
         var bodyHtml = (m.file && m.file.n)
             ? _fileCardHtml(m)
-            : (m.rich ? renderRich(m.message) : renderPlain(m.message));
+            : (m.rich ? renderRich(showText) : renderPlain(showText));
+        // An edited message wears the marker; hovering it shows every prior
+        // version, oldest first (the history is retained, not replaced).
+        if (versions) {
+            var history = [String(m.message || '')].concat(versions.slice(0, -1));
+            bodyHtml += '<span class="chat-line-edited" title="' +
+                attr(history.map(function (v, i) {
+                    return (i === 0 ? 'original: ' : 'edit ' + i + ': ') + v;
+                }).join('\n')) + '">(edited)</span>';
+        }
+        // A carrier whose original isn't in the loaded window (or that fell
+        // past the edit cap) renders as itself, annotated.
+        if (m._editOrphan) {
+            bodyHtml = '<span class="chat-line-editnote" title="This is an edit of an ' +
+                'earlier message that isn’t loaded here">✏</span> ' + bodyHtml;
+        }
         return '<div class="chat-line' + (me ? ' chat-line--me' : '') + '" title="' +
             attr(_fullTs(m.timestamp)) + '">' + replyRef +
             bodyHtml + actions + chips + '</div>';
@@ -575,7 +658,11 @@
         var newest = String(msgs[msgs.length - 1].timestamp || '') + ':' + msgs.length;
         if (newest === state.lastStamp && host.childElementCount) return;   // nothing new
         state.lastStamp = newest;
-        var shown = msgs, hidden = 0, muted = 0;
+        // Fold message edits BEFORE any view filtering, so an edit applies to
+        // its target no matter which channel/thread either is shown in.
+        var editFold = _applyEdits(msgs);
+        _editsByKey = editFold.edits;
+        var shown = editFold.list, hidden = 0, muted = 0;
         if (state.view === 'room') {
             var ign = ignoredSet();
             if (ign.length) {
@@ -650,6 +737,25 @@
                     String(msgs[msgs.length - 1].timestamp || ''));
             } catch (e) { /* ignore */ }
         }
+    }
+
+    // ── per-channel mute (local, per browser — like the user mute) ──────────
+    // A muted channel stays fully readable and keeps its place in the list;
+    // it just goes quiet: no unread badge, dimmed row, 🔕. Mentions still
+    // ping (someone saying your name cuts through, Discord-style). Nothing
+    // rides the wire — muting is this browser's preference, nobody else's.
+    function mutedChans() {
+        try { return JSON.parse(localStorage.getItem('chat_chan_muted') || '[]'); }
+        catch (e) { return []; }
+    }
+    function isChanMuted(slug) { return mutedChans().indexOf(slug) > -1; }
+    function toggleChanMuted(slug) {
+        if (!slug) return;
+        var list = mutedChans();
+        var i = list.indexOf(slug);
+        if (i > -1) list.splice(i, 1); else list.push(slug);
+        try { localStorage.setItem('chat_chan_muted', JSON.stringify(list)); } catch (e) { /* ignore */ }
+        renderChannels();
     }
 
     // ── ignore list (local mute — per browser, hides messages + greys the user) ──
@@ -936,13 +1042,21 @@
             var isClosed = !!closed[group.cat];
             var rows = isClosed ? '' : group.items.map(function (ch) {
                 var on = state.channel === ch.slug;
-                var n = unread[ch.slug] || 0;
+                var muted = isChanMuted(ch.slug);
+                // Muted = quiet: the unread badge is suppressed, not the
+                // channel. Mentions still ping regardless.
+                var n = muted ? 0 : (unread[ch.slug] || 0);
                 var row = '<button class="chat-chan' + (on ? ' chat-chan--on' : '') +
-                    (n ? ' chat-chan--unread' : '') + '" type="button" ' +
+                    (n ? ' chat-chan--unread' : '') +
+                    (muted ? ' chat-chan--muted' : '') + '" type="button" ' +
                     'data-chat-chan="' + attr(ch.slug) + '">' +
                     '<span class="chat-chan-hash">#</span>' +
                     '<span class="chat-chan-name">' + esc(ch.name) + '</span>' +
                     (n ? '<span class="chat-chan-unread">' + (n > 99 ? '99+' : n) + '</span>' : '') +
+                    '<span class="chat-chan-mute" data-chat-chan-mute="' + attr(ch.slug) + '" ' +
+                        'title="' + (muted ? 'Unmute #' + attr(ch.slug) : 'Mute #' + attr(ch.slug) +
+                        ' — no unread badge, mentions still ping') + '">' +
+                        (muted ? '🔕' : '🔔') + '</span>' +
                 '</button>';
                 // Forum-style: the active channel's threads hang beneath it.
                 if (on) {
@@ -1122,6 +1236,17 @@
             return _arcCache.out;
         }
         var out = window.ChatGames.reduceGames(_roomEvents(), Date.now());
+        _settleWagers(out);
+        // Moderator game-kill: a killed id is erased from the fold — board,
+        // cards, lifecycle, everywhere — on every client that folds the room.
+        var CPk = window.ChatProtocol;
+        var kills = (CPk && CPk.reduceGameKills) ? CPk.reduceGameKills(_roomEvents()) : {};
+        if (out && out.order && out.order.some(function (id) { return kills[id]; })) {
+            var games = {};
+            var order = out.order.filter(function (id) { return !kills[id]; });
+            order.forEach(function (id) { games[id] = out.games[id]; });
+            out = { games: games, order: order };
+        }
         _arcCache = { ref: log, n: log.length, room: state.room, out: out };
         return out;
     }
@@ -1294,7 +1419,60 @@
                   c: color === 'b' ? 'b' : 'w' };
         if (vsRoom) f.r = 1;
         if (opponent) f.o = String(opponent).slice(0, 64);
+        // The lobby's stake selector rides along (two-human games only).
+        var stake = (state.arcade && state.arcade.stake) || 0;
+        if (stake > 0 && !vsRoom) f.w = stake;
         sendProtocol('gm.new', f).then(_arcAfterSend(gid));
+    }
+
+    // ── Wager settlement ─────────────────────────────────────────────────
+    // Each client books ONLY ITS OWN result against ITS OWN bank — the
+    // fold is the referee every client shares, so both sides compute the
+    // same winner; your client applying your loss is the bank's whole
+    // philosophy (play money, nobody to defraud but yourself). Idempotent
+    // per game id across repaints AND reloads via localStorage; marked
+    // settled BEFORE the POST so a slow request can't double-book.
+    var _wagerSettled = null;
+    function _wagerSettledMap() {
+        if (_wagerSettled) return _wagerSettled;
+        try { _wagerSettled = JSON.parse(localStorage.getItem('chatWagerSettled') || '{}'); }
+        catch (e) { _wagerSettled = {}; }
+        return _wagerSettled;
+    }
+    function _wagerMarkSettled(gid) {
+        var map = _wagerSettledMap();
+        map[gid] = 1;
+        var keys = Object.keys(map);
+        if (keys.length > 300) keys.slice(0, keys.length - 300).forEach(function (k) { delete map[k]; });
+        try { localStorage.setItem('chatWagerSettled', JSON.stringify(map)); } catch (e) { /* private mode */ }
+    }
+    function _settleWagers(st) {
+        if (!state.selfName) return;
+        var map = _wagerSettledMap();
+        (st.order || []).forEach(function (gid) {
+            var g = st.games[gid];
+            if (!g || !g.wager || g.status !== 'over' || !g.result || map[gid]) return;
+            if (g.reason === 'expired' || g.reason === 'cancelled') return;
+            var seat = _arcSeat(g);
+            if (!seat) return;                            // spectators hold no stake
+            _wagerMarkSettled(gid);
+            var delta = 0;
+            if (g.result === '1/2-1/2') delta = 0;
+            else if (g.winner === state.selfName) delta = g.wager;
+            else delta = -g.wager;
+            if (!delta) return;
+            postJSON('/api/chat/arcade/bank', { delta: delta }).then(function (r) {
+                if (r && r.ok && r.body && typeof r.body.balance === 'number') {
+                    _slotState().bank = r.body;
+                }
+                if (typeof showToast === 'function') {
+                    showToast(delta > 0
+                        ? '🪙 +' + delta + ' — you won the stake'
+                        : '🪙 ' + delta + ' — stake paid out', delta > 0 ? 'success' : 'info');
+                }
+                renderArcade();
+            }).catch(function () { /* bank floors at zero server-side; refusal = uncollectable, fine */ });
+        });
     }
 
     function arcJoin(gid) { sendProtocol('gm.join', { g: gid }).then(_arcAfterSend(gid)); }
@@ -1391,7 +1569,9 @@
     // one, which every client works out from the same stream.
     function arcVote(gid, uci) {
         var g = _arcGame(gid);
-        if (!g || !window.ChatGames.previewMove(g, uci)) return;
+        // A ballot is cast for the ROOM's seat — that is the actor a variant
+        // judges the move by (chess and Connect 4 ignore it).
+        if (!g || !window.ChatGames.previewMove(g, uci, g.roomSeat)) return;
         state.arcade.sel = -1;
         state.arcade.promo = null;
         sendProtocol('gm.vote', { g: gid, n: g.ply, m: uci }).then(_arcAfterSend(gid));
@@ -1423,28 +1603,39 @@
     // Both are what let a client that missed the opening still follow along,
     // and what lets a client that has the history catch a disagreement.
     var _arcLastMoveAt = 0;
+    var _arcLastMoveKey = '';
 
     function arcMove(gid, uci) {
         var g = _arcGame(gid);
-        if (!g) return;
+        if (!g) return false;
         // Every move is a real message in the room, and vanilla Soulseek
-        // clients see each one as a line of noise. Chess is slow enough not
-        // to care; Connect 4 is a game of fast taps, so a short floor keeps
-        // a quick pair (or a double-click) from bursting the room.
+        // clients see each one as a line of noise. The floor keys on the
+        // EXACT action (game + move), not on time alone: it exists to eat a
+        // double-click, and a flat global floor also ate legitimate back-to-
+        // back actions — battleship answers a shot automatically and the
+        // answerer fires next, so their real shot landed inside the window
+        // and vanished with no feedback.
         var nowMs = Date.now();
-        if (nowMs - _arcLastMoveAt < 600) return;
+        var moveKey = gid + '|' + uci;
+        if (moveKey === _arcLastMoveKey && nowMs - _arcLastMoveAt < 600) return false;
+        _arcLastMoveKey = moveKey;
         _arcLastMoveAt = nowMs;
         // The fold owns "what does this move produce" so this works for any
         // variant, and so an illegal move is caught here rather than being
-        // sent and silently dropped by every client that receives it.
-        var next = window.ChatGames.previewMove(g, uci);
-        if (!next) return;                       // never put an illegal move on the bus
+        // sent and silently dropped by every client that receives it. The
+        // actor seat rides along: battleship's apply() refuses to judge a
+        // move without knowing who made it (only a board's owner may answer
+        // a shot at it), so previewing without it rejected EVERY battleship
+        // action — commit, fire, answer and reveal all died right here.
+        var next = window.ChatGames.previewMove(g, uci, _arcSeat(g));
+        if (!next) return false;                 // never put an illegal move on the bus
         state.arcade.sel = -1;
         state.arcade.promo = null;
         sendProtocol('gm.move', {
             g: gid, v: g.variant, n: g.ply, m: uci, f: next.fen,
         }).then(_arcAfterSend(gid));
         renderArcade();                          // clear the selection immediately
+        return true;
     }
 
     // ── Arcade rendering ────────────────────────────────────────────────
@@ -1469,17 +1660,25 @@
     function _arcLobbyHtml() {
         var st = _gamesState();
         var CG = window.ChatGames;
-        var mine = [], open = [], live = [], done = [];
+        var mine = [], open = [], live = [], done = [], cold = [];
         st.order.forEach(function (id) {
             var g = st.games[id];
             // A withdrawn table never had an opponent and never had a result,
             // so it does not belong in "Finished" beside real games — nothing
             // finished. The carriers stay in the room (they cannot be unsent),
             // but there is nothing here worth showing anyone.
-            if (g.reason === 'cancelled') return;
+            if (g.reason === 'cancelled' || g.reason === 'expired') return;
             if (g.status === 'over') { done.push(g); return; }
             if (_arcSeat(g)) { mine.push(g); return; }
-            if (g.status === 'open') { open.push(g); return; }
+            if (g.status === 'open') {
+                // A table nobody joined inside the expiry window stops
+                // squatting in the lobby: carriers can't be unsent, and only
+                // the creator can withdraw — so everyone else's lobby demotes
+                // cold tables to a collapsed count instead of forever-cards.
+                // (The creator's own table sits in `mine`, Withdraw and all.)
+                (g.expired ? cold : open).push(g);
+                return;
+            }
             live.push(g);
         });
 
@@ -1530,11 +1729,16 @@
                 '</span>' +
                 '<span class="chat-arc-card-sub">' +
                     esc(g.variant) + ' · move ' + (Math.floor(g.ply / 2) + 1) +
+                    (g.wager ? ' · 🪙' + g.wager + ' stake' : '') +
                     (g.isPrivate ? ' · private' : '') +
                     (g.partial ? ' · joined mid-game' : '') +
                 '</span>' +
                 badge +
-                (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : '') +
+                ((_selfIsMod()
+                    ? '<span class="chat-arc-card-actions"><button type="button" class="chat-line-reply" ' +
+                      'title="End this game for everyone (moderator)" ' +
+                      'data-chat-arc-kill="' + attr(g.id) + '">🛑</button>' + (actions || '') + '</span>'
+                    : (actions ? '<span class="chat-arc-card-actions">' + actions + '</span>' : ''))) +
             '</div>';
         }
 
@@ -1554,7 +1758,21 @@
         if (!sl.bank) _slotLoadBank();
         var bank = sl.bank;
 
-        function tile(attrs, icon, name, blurb) {
+        function _stakeRowHtml() {
+        var cur = (state.arcade && state.arcade.stake) || 0;
+        return '<div class="chat-arc-stakes">' +
+            '<span class="chat-arc-stakes-lab">table stake</span>' +
+            [0, 5, 25, 100, 500].map(function (s) {
+                return '<button type="button" class="chat-arc-btn' +
+                    (s === cur ? ' chat-arc-btn--go' : '') + '" ' +
+                    'data-chat-arc-stake="' + s + '">' +
+                    (s ? '🪙' + s : 'none') + '</button>';
+            }).join('') +
+            '<span class="chat-arc-stakes-note">winner takes it from the loser\'s bank</span>' +
+        '</div>';
+    }
+
+    function tile(attrs, icon, name, blurb) {
             return '<button class="chat-arc-tile" type="button" ' + attrs + '>' +
                 '<span class="chat-arc-tile-icon">' + icon + '</span>' +
                 '<span class="chat-arc-tile-name">' + esc(name) + '</span>' +
@@ -1587,15 +1805,22 @@
                     : '') +
             '</div>' +
             (state.canSend
-                ? '<div class="chat-arc-tiles">' +
+                ? _stakeRowHtml() +
+                  '<div class="chat-arc-tiles">' +
                     tile('data-chat-arc-new="w"', '♟', 'Chess',
                          'turn by turn, no clock') +
                     tile('data-chat-arc-new="w" data-chat-arc-variant="connect4"', '🔴',
                          'Connect 4', 'four in a row, quick') +
                     tile('data-chat-arc-new="w" data-chat-arc-variant="battleship"', '🚢',
                          'Battleship', 'hidden fleets, checked at the end') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="othello"', '⚫',
+                         'Othello', 'flank and flip — corners are king') +
+                    tile('data-chat-arc-new="w" data-chat-arc-variant="gomoku"', '⚪',
+                         'Gomoku', 'five stones in a row wins') +
                     tile('data-chat-arc-new="w" data-chat-arc-room="1"', '🗳',
                          'You vs the room', 'everyone else votes their move') +
+                    tile('data-chat-triv-open', '🎓', 'Trivia',
+                         'first right answer takes the pot') +
                     tile('data-chat-slot-open', '🎰', 'Slots',
                          'solo, against your own luck') +
                   '</div>' +
@@ -1608,7 +1833,15 @@
                 ? '<div class="chat-arc-blank">Nothing on the tables yet. Start ' +
                   'something and it shows up for everyone in the room.</div>'
                 : section('Your games', mine) + section('Looking for an opponent', open) +
-                  section('In progress', live) + section('Finished', done.slice(0, 10))) +
+                  section('In progress', live) + section('Finished', done.slice(0, 10)) +
+                  // Cold tables: one muted line, expandable — not forever-cards.
+                  (cold.length
+                      ? (state.arcade && state.arcade.showCold
+                          ? section('Gone cold — nobody joined', cold)
+                          : '<button class="chat-arc-cold-line" type="button" data-chat-arc-cold>' +
+                            '🧊 ' + cold.length + ' cold table' + (cold.length === 1 ? '' : 's') +
+                            ' hidden — nobody joined · show</button>')
+                      : '')) +
             _arcLadderHtml() +
         '</div>';
     }
@@ -1641,6 +1874,8 @@
     function _arcBoardHtml(game) {
         if (game.variant === 'connect4') return _arcC4BoardHtml(game);
         if (game.variant === 'battleship') return _arcBsBoardHtml(game);
+        if (game.variant === 'othello') return _arcOthBoardHtml(game);
+        if (game.variant === 'gomoku') return _arcGmkBoardHtml(game);
         var E = window.ChessEngine;
         var CG = window.ChatGames;
         // game.fen is our OWN fold's output, not wire data — it has already
@@ -2129,7 +2364,6 @@
         if (idx === undefined) return;
         var key = game.id + '|' + shots.length;
         if (_bsAnswered[key]) return;                 // one answer per shot
-        _bsAnswered[key] = 1;
 
         var board = secret.board;
         var res = 'miss';
@@ -2142,7 +2376,11 @@
             }
             res = hit >= len ? 'sunk' : 'hit';
         }
-        arcMove(game.id, 'r:' + res);
+        // Marked answered only when the send actually went out — marking
+        // first meant a send arcMove dropped (rate floor, dead game) was
+        // swallowed forever and the game sat at "Answering…" until a reload.
+        // The tick runs on every bus event, so a miss here simply retries.
+        if (arcMove(game.id, 'r:' + res)) _bsAnswered[key] = 1;
     }
 
     // Once our fleet is down we owe a reveal; send it without ceremony.
@@ -2451,9 +2689,171 @@
         var H = window.ChatHash;
         if (!H) return;
         var salt = H.salt();
+        // Secret saved BEFORE the send — a crash in between must never lose
+        // the fleet the room now holds a fingerprint of. The draft is only
+        // cleared when the commit actually went out, so a dropped send
+        // leaves the layout on screen to commit again instead of wiping it.
         _bsSecret(gid, { salt: salt, board: draft.board });
-        state.arcade.bs = null;
-        arcMove(gid, 'c:' + H.commit(salt, draft.board));
+        if (arcMove(gid, 'c:' + H.commit(salt, draft.board))) {
+            state.arcade.bs = null;
+        }
+    }
+
+    // Shared chrome for the two placed-piece boards: status line + actions.
+    function _arcCellStatus(game, verb) {
+        var CG = window.ChatGames;
+        if (game.status === 'over') {
+            return game.winner ? esc(game.winner) + ' wins — ' + esc(game.reason)
+                               : 'Draw — ' + esc(game.reason);
+        }
+        if (game.desync) {
+            return 'Frozen: a move arrived with a position that disagreed with ' +
+                'this one, and neither can be proven right.';
+        }
+        if (game.status === 'open') return 'Waiting for an opponent to join.';
+        if (_arcMyMove(game)) return 'Your move — ' + verb + '.';
+        if (CG.isRoomTurn(game)) {
+            return 'The room is choosing' +
+                (_arcCanVote(game) ? ' — ' + verb + ' to vote for it.'
+                                   : '. You are playing against them, so no ballot for you.');
+        }
+        return 'Waiting on ' + esc(CG.toMove(game)) + '.';
+    }
+
+    function _arcCellActions(game) {
+        var mySeat = _arcSeat(game);
+        var actions = '';
+        if (state.canSend && mySeat && game.status === 'live') {
+            actions += '<button class="chat-arc-btn chat-arc-btn--bad" type="button" ' +
+                'data-chat-arc-resign="' + attr(game.id) + '">Resign</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'open' &&
+            (!game.isPrivate || game.invited === state.selfName)) {
+            actions += '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-join="' + attr(game.id) + '">Join this game</button>';
+        }
+        if (state.canSend && !mySeat && game.status === 'live' && game.stale) {
+            actions += '<button class="chat-arc-btn" type="button" data-chat-arc-claim="' +
+                attr(game.id) + '">Take the idle seat</button>';
+        }
+        return actions;
+    }
+
+    function _arcOthBoardHtml(game) {
+        var CG = window.ChatGames;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var turnChar = String(game.fen || '').split(' ')[1] || 'w';
+        var live = game.status === 'live';
+        var acting = live && _arcActive(game) && state.canSend;
+        var legal = {};
+        if (acting) {
+            CG.othelloLegal(game.fen, turnChar).forEach(function (i) { legal[i] = 1; });
+        }
+        var stuck = acting && !Object.keys(legal).length;
+        var cells = [];
+        for (var i = 0; i < 64; i++) {
+            var who = body[i] || '.';
+            var playable = !!legal[i];
+            // seat 'w' OPENS and plays the black discs (Othello's first mover)
+            cells.push('<div class="chat-arc-othcell' +
+                (playable ? ' chat-arc-othcell--live' : '') + '"' +
+                (playable ? ' data-chat-arc-cell="' + i + '"' : '') + '>' +
+                (who === 'w' ? '<span class="chat-arc-othdisc chat-arc-othdisc--dark"></span>'
+                 : who === 'b' ? '<span class="chat-arc-othdisc chat-arc-othdisc--light"></span>'
+                 : (playable ? '<span class="chat-arc-othdot"></span>' : '')) +
+            '</div>');
+        }
+        var score = CG.othelloScore(game.fen);
+        var toMove = CG.toMove(game);
+        var actions = _arcCellActions(game);
+        if (stuck) {
+            actions = '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                'data-chat-arc-pass="' + attr(game.id) + '" ' +
+                'title="No legal move anywhere — the turn passes">No moves — pass</button>' + actions;
+        }
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '⚪', toMove === game.black, game.roomSeat === 'b') +
+                '<span class="chat-arc-othscore">⚫ ' + score.w + ' · ' + score.b + ' ⚪</span>' +
+            '</div>' +
+            '<div class="chat-arc-othboard' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '⚫', toMove === game.white, game.roomSeat === 'w') +
+            '</div>' +
+            (game.partial ? '<div class="chat-arc-note">Picked up mid-game — the room ' +
+                'archive had already rolled past the start.</div>' : '') +
+            _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + _arcCellStatus(game, 'pick a glowing square') + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = actions + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+        '</div>';
+    }
+
+    function _arcGmkBoardHtml(game) {
+        var CG = window.ChatGames;
+        var body = String(game.fen || '').split(' ')[0] || '';
+        var live = game.status === 'live';
+        var acting = live && _arcActive(game) && state.canSend;
+        // Ring the newest stone so the board reads at a glance.
+        var last = -1;
+        if (game.moves && game.moves.length) {
+            var lm = game.moves[game.moves.length - 1];
+            var lmStr = String((lm && lm.m) != null ? lm.m : lm);
+            if (/^\d{1,3}$/.test(lmStr)) last = parseInt(lmStr, 10);
+        }
+        var cells = [];
+        for (var i = 0; i < 225; i++) {
+            var who = body[i] || '.';
+            var playable = acting && who === '.';
+            cells.push('<div class="chat-arc-gmkcell' +
+                (playable ? ' chat-arc-gmkcell--live' : '') + '"' +
+                (playable ? ' data-chat-arc-cell="' + i + '"' : '') + '>' +
+                (who !== '.'
+                    ? '<span class="chat-arc-stone chat-arc-stone--' +
+                      (who === 'w' ? 'dark' : 'light') +
+                      (i === last ? ' chat-arc-stone--last' : '') + '"></span>'
+                    : '') +
+            '</div>');
+        }
+        var toMove = CG.toMove(game);
+        return '<div class="chat-arc-board-wrap">' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.black, '⚪', toMove === game.black, game.roomSeat === 'b') +
+            '</div>' +
+            '<div class="chat-arc-gmkboard' +
+                (game.status === 'over' ? ' chat-arc-board--over' : '') + '">' +
+                cells.join('') + '</div>' +
+            '<div class="chat-arc-players">' +
+                _arcWho(game.white, '⚫', toMove === game.white, game.roomSeat === 'w') +
+            '</div>' +
+            (game.partial ? '<div class="chat-arc-note">Picked up mid-game — the room ' +
+                'archive had already rolled past the start.</div>' : '') +
+            _arcBallotHtml(game) +
+            '<div class="chat-arc-status">' + _arcCellStatus(game, 'place a stone') + '</div>' +
+            _arcAckHtml(game) +
+            (function () {
+                var extra = _arcCellActions(game) + _arcSyncActions(game);
+                return extra ? '<div class="chat-arc-actions">' + extra + '</div>' : '';
+            })() +
+        '</div>';
+    }
+
+    function _arcCellClick(idx) {
+        var arc = state.arcade;
+        var game = arc && arc.game ? _arcGame(arc.game) : null;
+        if (!game || game.status !== 'live') return;
+        if (game.variant !== 'othello' && game.variant !== 'gomoku') return;
+        if (!_arcActive(game) || !state.canSend) return;
+        var cap = game.variant === 'othello' ? 64 : 225;
+        var n = parseInt(idx, 10);
+        if (!(n >= 0 && n < cap)) return;
+        if (_arcCanVote(game)) arcVote(game.id, String(n));
+        else arcMove(game.id, String(n));
     }
 
     function _arcColumnClick(col) {
@@ -2702,6 +3102,8 @@
               })() + '</button>' +
               '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
+              '<button class="chat-filter-btn" type="button" data-chat-watch-btn ' +
+              'title="Movie night — nominate something, the room votes, owners watch together">🎬 Movie night</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'Showing SoulSync app messages only — click for everything'
@@ -2789,6 +3191,36 @@
         if (bar) bar.hidden = true;
     }
 
+    // ── edit composing ───────────────────────────────────────────────────────
+    // Reuses the reply bar as the "editing…" banner (they're mutually
+    // exclusive composer modes) and preloads the input with the current text.
+    function startEdit(key, currentText) {
+        if (state.view !== 'room' || !state.canSend || !key) return;
+        cancelReply();
+        state.editing = { key: key };
+        var bar = q('[data-chat-reply-bar]');
+        var who = q('[data-chat-reply-who]');
+        var ex = q('[data-chat-reply-excerpt]');
+        if (who) who.textContent = '✏ editing your message';
+        if (ex) ex.textContent = String(currentText || '').slice(0, 100);
+        if (bar) bar.hidden = false;
+        var input = q('[data-chat-input]');
+        if (input) {
+            input.value = String(currentText || '');
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        }
+    }
+
+    function cancelEdit() {
+        if (!state.editing) return;
+        state.editing = null;
+        var bar = q('[data-chat-reply-bar]');
+        if (bar) bar.hidden = true;
+        var input = q('[data-chat-input]');
+        if (input) input.value = '';
+    }
+
     // ── reactions (chatbic P4) ───────────────────────────────────────────────
     var QUICK_REACTS = ['👍', '❤️', '😂', '🔥', '🎵', '👀', '💯'];
 
@@ -2865,6 +3297,14 @@
             ignBtn.title = isIgnored(name)
                 ? 'Show this user’s messages again'
                 : 'Hide this user’s messages (this browser only)';
+        }
+        // Challenge = a PRIVATE Arcade game with them in the invited seat.
+        // The whole invite lifecycle (gm.new {o}, join gate, 'private' badge)
+        // has been in the fold since P2 — this button is its first way in.
+        var chBtn = overlay.querySelector('[data-chat-card-challenge]');
+        if (chBtn) {
+            chBtn.hidden = !state.canSend || !_arcReady() ||
+                (state.selfName && name === state.selfName);
         }
         getJSON('/api/chat/user/' + encodeURIComponent(name)).then(function (res) {
             if (overlay.getAttribute('data-chat-user-card-for') !== name) return;
@@ -2945,6 +3385,53 @@
     function closeUserCard() {
         var overlay = q('[data-chat-user-card]');
         if (overlay) overlay.hidden = true;
+    }
+
+    // The Challenge button toggles a small variant row inside the card —
+    // three choices, no second modal. Picking one sends gm.new {o: them}
+    // and the normal _arcAfterSend flow lands you on the fresh board.
+    function _arcChallengeRow(overlay) {
+        var body = overlay.querySelector('[data-chat-user-card-body]');
+        if (!body) return;
+        var existing = body.querySelector('.chat-card-challenge');
+        if (existing) { existing.remove(); return; }
+        var div = document.createElement('div');
+        div.className = 'chat-card-challenge';
+        div.innerHTML = '<span class="chat-card-challenge-label">Pick the game — ' +
+            'only they can take the seat</span>' +
+            '<div class="chat-card-challenge-btns">' +
+            [['chess', '♟ Chess'], ['connect4', '🔴 Connect 4'], ['battleship', '🚢 Battleship'],
+             ['othello', '⚫ Othello'], ['gomoku', '⚪ Gomoku']]
+                .map(function (v) {
+                    return '<button class="chat-arc-btn" type="button" ' +
+                        'data-chat-card-challenge-v="' + v[0] + '">' + v[1] + '</button>';
+                }).join('') +
+            '</div>';
+        body.appendChild(div);
+    }
+
+    // Ping the invited user when a challenge NAMING THEM arrives. Once per
+    // game per session, and only while the table is still open — replayed
+    // archive carriers on a page load would otherwise re-announce every
+    // stale table ever aimed at us.
+    var _arcChallengeToasted = {};
+    function _arcNoticeChallenges(fresh) {
+        if (!state.selfName || !_arcReady()) return;
+        (fresh || []).forEach(function (e) {
+            if (!e || !e.p || e.p.k !== 'gm.new') return;
+            if (e.p.o !== state.selfName || e.username === state.selfName) return;
+            var gid = String(e.p.g || '');
+            if (!gid || _arcChallengeToasted[gid]) return;
+            _arcChallengeToasted[gid] = 1;
+            var g = _gamesState().games[gid];
+            if (!g || g.status !== 'open' || g.expired) return;
+            if (typeof showToast === 'function') {
+                showToast('⚔ ' + e.username + ' challenged you to ' +
+                    (g.variant === 'connect4' ? 'Connect 4'
+                        : g.variant === 'battleship' ? 'Battleship' : 'chess') +
+                    ' — it’s waiting in the Arcade', 'info', 6000);
+            }
+        });
     }
 
     // ── share browser: a peer's files, downloadable in place ─────────────────
@@ -3567,6 +4054,51 @@
         return (m.username || '') + '|' + (m.timestamp || '') + '|' + (m.message || '');
     }
 
+    // ── message edits (envelope 'ed') ────────────────────────────────────
+    // Soulseek cannot unsend, so an edit is a NEW message whose 'ed' names
+    // the sender's own earlier message by key; its text is the replacement.
+    // Vanilla clients honestly see both lines. SoulSync folds the edit onto
+    // the original, shows "(edited)" and keeps every version — and a message
+    // may be edited at most twice (Boulder's rule): later edit carriers stop
+    // counting as edits and render as plain messages instead. Rules every
+    // client computes identically:
+    //   - only the AUTHOR's carriers apply (key starts with their name)
+    //   - the first EDIT_MAX carriers in stream order win
+    //   - a carrier whose target isn't in the loaded window still renders
+    //     (as an ✏-annotated line) — nothing is ever invisible.
+    var EDIT_MAX = 2;
+    var _editsByKey = {};      // target key -> [replacement texts], set per render
+
+    function _applyEdits(msgs) {
+        var present = {};
+        msgs.forEach(function (m) {
+            if (!m.ed) present[_msgKey(m).slice(0, 160)] = 1;
+        });
+        var edits = {};
+        var out = [];
+        msgs.forEach(function (m) {
+            var target = (typeof m.ed === 'string' && m.ed) ? m.ed : null;
+            if (!target) { out.push(m); return; }
+            var isAuthor = target.indexOf((m.username || '') + '|') === 0;
+            var slot = isAuthor ? (edits[target] || (edits[target] = [])) : null;
+            var applies = !!(slot && slot.length < EDIT_MAX);
+            if (applies) slot.push(String(m.message || ''));
+            if (!applies || !present[target]) {
+                // Not a valid/countable edit, or the original has scrolled
+                // out of the window — show the carrier itself.
+                out.push(Object.assign({}, m, { _editOrphan: true }));
+            }
+        });
+        return { list: out, edits: edits };
+    }
+
+    // The applied edits for a rendered message: null, or the version list
+    // (original first is NOT included — m.message stays the original).
+    function _editsFor(m) {
+        var slot = _editsByKey[_msgKey(m).slice(0, 160)];
+        return (slot && slot.length) ? slot : null;
+    }
+
     // ── preset avatars ─────────────────────────────────────────────────────
     // webui/static/avatar/1.png .. N.png. The id is an INDEX into that fixed
     // set and is bounds-checked everywhere it crosses the wire — it must never
@@ -3968,6 +4500,7 @@
         renderBusUI();
         state.msgs = []; state.loadingOlder = false; state.historyDone = false;
         cancelReply();
+        cancelEdit();
         try {
             state.newMarker = localStorage.getItem('chat_seen_' + (state.room || '')) || null;
         } catch (e) { state.newMarker = null; }
@@ -4091,6 +4624,7 @@
         state.searchMode = false;
         state.renderedCount = 0; hideJumpPill(); state.newMarker = null;
         cancelReply();
+        cancelEdit();
         state.topicEditing = false;
         renderHead(); renderComposer(); renderBusUI();   // hides the panels (audio keeps playing)
         var host = q('[data-chat-messages]');
@@ -4144,6 +4678,11 @@
             payload.reply = state.replyTo;
             sentReply = state.replyTo;
         }
+        var sentEdit = null;
+        if (state.view === 'room' && state.editing && state.editing.key) {
+            payload.edit = state.editing.key;
+            sentEdit = state.editing.key;
+        }
         postJSON(url, payload).then(function (res) {
             if (!res.ok) {
                 if (typeof showToast === 'function') {
@@ -4155,8 +4694,10 @@
             // Optimistic echo: slskd takes a beat to include a just-sent message,
             // and the poll adds up to 4s more — paint it NOW, then let the next
             // authoritative render replace it (lastStamp reset forces that).
+            // Except edits: their echo would paint as a stray ✏ line under the
+            // original — the authoritative render folds it in place instead.
             var host = q('[data-chat-messages]');
-            if (host) {
+            if (host && !sentEdit) {
                 var empty = host.querySelector('.chat-empty');
                 if (empty) empty.remove();
                 host.insertAdjacentHTML('beforeend', renderGroups([{
@@ -4171,6 +4712,7 @@
             }
             state.stickBottom = true;
             cancelReply();
+            cancelEdit();
             refresh();
         });
     }
@@ -4257,12 +4799,19 @@
             if (t) { insertAtCursor(t.getAttribute('data-chat-emoji-pick')); toggleEmojiPicker(true); return; }
             t = e.target.closest('[data-chat-reply-user]');
             if (t) {
+                cancelEdit();
                 startReply(t.getAttribute('data-chat-reply-user'),
                            t.getAttribute('data-chat-reply-x'));
                 return;
             }
+            t = e.target.closest('[data-chat-edit-key]');
+            if (t) {
+                startEdit(t.getAttribute('data-chat-edit-key'),
+                          t.getAttribute('data-chat-edit-text'));
+                return;
+            }
             t = e.target.closest('[data-chat-reply-cancel]');
-            if (t) { cancelReply(); return; }
+            if (t) { cancelReply(); cancelEdit(); return; }
             t = e.target.closest('[data-chat-slash-pick]');
             if (t) { pickSlash(t.getAttribute('data-chat-slash-pick')); return; }
             t = e.target.closest('[data-chat-mention-pick]');
@@ -4286,6 +4835,13 @@
             }
             t = e.target.closest('[data-chat-thread-close]');
             if (t) { closeThread(); return; }
+            t = e.target.closest('[data-chat-chan-mute]');
+            if (t) {
+                // The bell sits INSIDE the channel row button — handle it
+                // first or the click would also switch channels.
+                toggleChanMuted(t.getAttribute('data-chat-chan-mute'));
+                return;
+            }
             t = e.target.closest('[data-chat-chan]');
             if (t) { switchChannel(t.getAttribute('data-chat-chan')); return; }
             // ── Arcade ──
@@ -4300,10 +4856,51 @@
             }
             t = e.target.closest('[data-chat-arc-col]');
             if (t) { _arcColumnClick(t.getAttribute('data-chat-arc-col')); return; }
+            t = e.target.closest('[data-chat-arc-cell]');
+            if (t) { _arcCellClick(t.getAttribute('data-chat-arc-cell')); return; }
+            t = e.target.closest('[data-chat-arc-pass]');
+            if (t) {
+                var passGame = _arcGame(t.getAttribute('data-chat-arc-pass'));
+                if (passGame && passGame.variant === 'othello' && state.canSend) {
+                    if (_arcCanVote(passGame)) arcVote(passGame.id, 'p');
+                    else arcMove(passGame.id, 'p');
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-arc-join]');
             if (t) { arcJoin(t.getAttribute('data-chat-arc-join')); return; }
             t = e.target.closest('[data-chat-arc-claim]');
             if (t) { arcClaim(t.getAttribute('data-chat-arc-claim')); return; }
+            t = e.target.closest('[data-chat-arc-stake]');
+            if (t) {
+                state.arcade = state.arcade || {};
+                state.arcade.stake = parseInt(t.getAttribute('data-chat-arc-stake'), 10) || 0;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-cold]');
+            if (t) {
+                if (state.arcade) state.arcade.showCold = !state.arcade.showCold;
+                renderArcade();
+                return;
+            }
+            t = e.target.closest('[data-chat-arc-kill]');
+            if (t) {
+                e.stopPropagation();     // the card click would open the board
+                var killId = t.getAttribute('data-chat-arc-kill');
+                var doKill = function () {
+                    sendProtocol('mod.gamekill', { id: killId });
+                    if (typeof showToast === 'function') showToast('🛑 Game ended for the room', 'info');
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({ title: 'End Game',
+                        message: 'End this game for everyone in the room? The board disappears for all players.',
+                        confirmText: 'End game', destructive: true }).then(function (ok) {
+                        if (ok !== false) doKill();
+                    });
+                } else { doKill(); }
+                return;
+            }
             t = e.target.closest('[data-chat-arc-resign]');
             if (t) { arcResign(t.getAttribute('data-chat-arc-resign')); return; }
             t = e.target.closest('[data-chat-arc-draw]');
@@ -4457,6 +5054,55 @@
                 if (typeof showToast === 'function') showToast('📌 Pinned for the room', 'success');
                 return;
             }
+            t = e.target.closest('[data-chat-hide-user]');
+            if (t) {
+                sendProtocol('mod.hide', { u: t.getAttribute('data-chat-hide-user'),
+                                           ts: t.getAttribute('data-chat-hide-ts') });
+                if (typeof showToast === 'function') showToast('🚫 Hidden for the room', 'success');
+                return;
+            }
+            t = e.target.closest('[data-chat-unhide-user]');
+            if (t) {
+                sendProtocol('mod.unhide', { u: t.getAttribute('data-chat-unhide-user'),
+                                             ts: t.getAttribute('data-chat-unhide-ts') });
+                return;
+            }
+            t = e.target.closest('[data-chat-hidden-reveal]');
+            if (t && !e.target.closest('[data-chat-unhide-user]')) {
+                state.revealedHidden = state.revealedHidden || {};
+                state.revealedHidden[t.getAttribute('data-chat-hidden-reveal')] = true;
+                renderMessages(state.msgs || []);
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-send]');
+            if (t) { _trivGuess(); return; }
+            t = e.target.closest('[data-chat-triv-end]');
+            if (t) {
+                var tEnd = _trivState();
+                if (tEnd && !tEnd.closed) {
+                    sendProtocol('trv.end', { id: tEnd.id, ans: _trivAnsStore(tEnd.id) });
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-dismiss]');
+            if (t) {
+                var tDis = _trivState();
+                state.trivDismissedAt = tDis ? tDis.at : null;
+                renderTrivia();
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-open]');
+            if (t) {
+                var trivOv = q('[data-chat-triv-modal]');
+                if (trivOv) { trivOv.hidden = false; var tq = q('[data-chat-triv-q]'); if (tq) tq.focus(); }
+                return;
+            }
+            t = e.target.closest('[data-chat-triv-close]');
+            if (t) { var trivOv2 = q('[data-chat-triv-modal]'); if (trivOv2) trivOv2.hidden = true; return; }
+            var trivOvBg = e.target.closest('[data-chat-triv-modal]');
+            if (trivOvBg && e.target === trivOvBg) { trivOvBg.hidden = true; return; }
+            t = e.target.closest('[data-chat-triv-start]');
+            if (t) { _trivAsk(); return; }
             t = e.target.closest('[data-chat-poll-btn]');
             if (t) { togglePollPop(); return; }
             t = e.target.closest('[data-chat-poll-start]');
@@ -4546,6 +5192,68 @@
                 renderJukebox();
                 return;
             }
+            // ── movie night ──
+            t = e.target.closest('[data-chat-watch-btn]');
+            if (t) { _openWatchModal(); return; }
+            t = e.target.closest('[data-chat-watch-searchclose]');
+            if (t) { _closeWatchModal(); return; }
+            var watchOv = e.target.closest('[data-chat-watch-modal]');
+            if (watchOv && e.target === watchOv) { _closeWatchModal(); return; }
+            t = e.target.closest('[data-chat-watch-nomshow]');
+            if (t) {
+                var wsr = state.watch.searchResults[parseInt(t.getAttribute('data-chat-watch-nomshow'), 10)];
+                var sEl = q('[data-chat-watch-se-s]'), eEl = q('[data-chat-watch-se-e]');
+                var ws = sEl ? parseInt(sEl.value, 10) : NaN;
+                var we = eEl ? parseInt(eEl.value, 10) : NaN;
+                if (wsr && ws >= 0 && we >= 0) _watchNominate(wsr, ws, we);
+                return;
+            }
+            t = e.target.closest('[data-chat-watch-nom]');
+            if (t && !e.target.closest('.chat-watch-sepick')) {
+                var wi = parseInt(t.getAttribute('data-chat-watch-nom'), 10);
+                var wr = state.watch.searchResults[wi];
+                if (!wr) return;
+                if (wr.kind === 'show') {
+                    // an episode nomination needs S+E — expand the card
+                    state.watch.pickShow = (state.watch.pickShow === wi) ? -1 : wi;
+                    var wgrid = q('[data-chat-watch-searchgrid]');
+                    if (wgrid) wgrid.innerHTML = _watchResultCards();
+                    var wse = q('[data-chat-watch-se-s]');
+                    if (wse) wse.focus();
+                } else {
+                    _watchNominate(wr, null, null);
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-watch-vote]');
+            if (t) { sendProtocol('watch.vote', { o: t.getAttribute('data-chat-watch-vote') }); return; }
+            t = e.target.closest('[data-chat-watch-start]');
+            if (t) { sendProtocol('watch.start', { o: t.getAttribute('data-chat-watch-start') }); return; }
+            t = e.target.closest('[data-chat-watch-unnom]');
+            if (t) { sendProtocol('watch.unnom', { o: t.getAttribute('data-chat-watch-unnom') }); return; }
+            t = e.target.closest('[data-chat-watch-grab]');
+            if (t) { _watchGrab(t.getAttribute('data-chat-watch-grab')); return; }
+            t = e.target.closest('[data-chat-watch-pause]');
+            if (t) { sendProtocol('watch.pause', {}); return; }
+            t = e.target.closest('[data-chat-watch-resume]');
+            if (t) { sendProtocol('watch.resume', {}); return; }
+            t = e.target.closest('[data-chat-watch-end]');
+            if (t) {
+                var wst = _watchState();
+                if (wst.now && wst.now.by !== state.selfName && _selfIsMod() &&
+                        typeof showConfirmDialog === 'function') {
+                    // a moderator ending someone ELSE's party deserves a beat
+                    showConfirmDialog({
+                        title: 'End the party?',
+                        message: 'This ends ' + wst.now.by + '\'s showing for the whole room.',
+                        confirmText: 'End it',
+                        destructive: true,
+                    }).then(function (okd) { if (okd !== false) sendProtocol('watch.end', {}); });
+                } else {
+                    sendProtocol('watch.end', {});
+                }
+                return;
+            }
             t = e.target.closest('[data-chat-search-btn]');
             if (t) { state.searchMode ? exitSearch() : enterSearch(); return; }
             t = e.target.closest('[data-chat-search-exit]');
@@ -4592,6 +5300,25 @@
                 var ov = q('[data-chat-user-card]');
                 closeUserCard();
                 if (ov) openPm(ov.getAttribute('data-chat-user-card-for'));
+                return;
+            }
+            t = e.target.closest('[data-chat-card-challenge-v]');
+            if (t) {
+                var vOv = q('[data-chat-user-card]');
+                var vOpp = vOv && vOv.getAttribute('data-chat-user-card-for');
+                if (vOpp) {
+                    arcNewGame('w', vOpp, t.getAttribute('data-chat-card-challenge-v'), false);
+                    closeUserCard();
+                    if (typeof showToast === 'function') {
+                        showToast('Challenge sent — ' + vOpp + ' is the only one who can join', 'success');
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-card-challenge]');
+            if (t) {
+                var cOv = q('[data-chat-user-card]');
+                if (cOv) _arcChallengeRow(cOv);
                 return;
             }
             t = e.target.closest('[data-chat-card-browse]');
@@ -4646,6 +5373,22 @@
         if (jbxForm) jbxForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSubmit(); });
         var jbxSearchForm = q('[data-chat-jbx-searchform]');
         if (jbxSearchForm) jbxSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _jbxSearchModalSubmit(); });
+        var watchSearchForm = q('[data-chat-watch-searchform]');
+        if (watchSearchForm) watchSearchForm.addEventListener('submit', function (e) { e.preventDefault(); _watchSearchSubmit(); });
+        var watchSearchIn = q('[data-chat-watch-searchinput]');
+        if (watchSearchIn) watchSearchIn.addEventListener('input', _watchQueueSearch);
+        // The trivia answer input is re-rendered with its card, so Enter is
+        // caught by delegation on the page rather than a per-render listener.
+        var chatPageEl = document.getElementById('chat-page');
+        if (chatPageEl) {
+            chatPageEl.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' && e.target && e.target.matches &&
+                        e.target.matches('[data-chat-triv-guess]')) {
+                    e.preventDefault();
+                    _trivGuess();
+                }
+            });
+        }
 
         var inputEl = q('[data-chat-input]');
         if (inputEl) {
@@ -4862,6 +5605,31 @@
     }
 
     // ── protocol bus (the hidden coordination channel) ──────────────────
+
+    // Bound the log without eating live games. The old flat slice(-300)
+    // treated a chess move and a typing blip as equals, so a chatty room
+    // (typ/hello/jukebox events) evicted a game's gm.new and early moves
+    // MID-SESSION — the refold then degraded the game to 'partial', dropped
+    // inferred seats and reset the board to the last checkpoint while you
+    // were playing it. Ephemeral chatter keeps the old bound; game carriers
+    // get a deeper one (two full-length games' worth). Order is preserved —
+    // the fold depends on stream order.
+    function _trimProtocolLog(log) {
+        var keptGm = 0, keptOther = 0;
+        var out = [];
+        for (var i = log.length - 1; i >= 0; i--) {
+            var e = log[i];
+            var k = e && e.p && e.p.k;
+            if (typeof k === 'string' && k.slice(0, 3) === 'gm.') {
+                if (keptGm < 1200) { out.push(e); keptGm++; }
+            } else if (keptOther < 300) {
+                out.push(e); keptOther++;
+            }
+        }
+        out.reverse();
+        return out;
+    }
+
     function _ingestProtocol(events) {
         if (!events || !events.length) return;
         var log = state.protocolLog;
@@ -4887,12 +5655,13 @@
                 renderTyping();
             }
         });
-        if (log.length > 300) state.protocolLog = log.slice(-300);
+        if (log.length > 300) state.protocolLog = _trimProtocolLog(log);
         if (fresh.length) {
             // presence: a protocol event proves SoulSync — refresh buckets
             renderUsersList();
             renderBusUI();
             _arcAnswerSyncs(fresh);
+            _arcNoticeChallenges(fresh);
             try {
                 document.dispatchEvent(new CustomEvent('soulsync:chat-protocol',
                     { detail: { events: fresh } }));
@@ -4975,8 +5744,10 @@
         _bsTick();               // answer shots at us, and reveal when sunk
         renderArcade();          // no-op unless the Arcade view is open
         renderJukebox();
+        renderWatch();
         renderPinbar();
         renderPoll();
+        renderTrivia();
         // topic lives in the head sub-line — but search mode freezes the
         // head (its input would be clobbered mid-typing by a socket event)
         if (!state.searchMode) renderHead();
@@ -4999,13 +5770,15 @@
                     return '<div class="chat-pin-row">' +
                         '<span class="chat-pin-text"><b>' + esc(pin.u) + '</b> ' + esc(pin.x) + '</span>' +
                         '<span class="chat-pin-by">pinned by ' + esc(pin.by) + '</span>' +
-                        (state.canSend
+                        (state.canSend && _selfIsMod()
                             ? '<button class="chat-pin-del" type="button" title="Unpin" ' +
                               'data-chat-pin-del-u="' + attr(pin.u) + '" data-chat-pin-del-ts="' + attr(pin.ts) + '">×</button>'
                             : '') +
                     '</div>';
                 }).join('')
-                : '<div class="chat-side-none">Nothing pinned yet — hover a message and hit 📌</div>');
+                : '<div class="chat-side-none">' +
+                    (_selfIsMod() ? 'Nothing pinned yet — hover a message and hit 📌'
+                                  : 'Nothing pinned yet') + '</div>');
     }
 
     // ── the room poll (poll.start / poll.vote / poll.end on the bus) ────
@@ -5063,6 +5836,150 @@
             .forEach(function (el) { if (el) el.value = ''; });
         togglePollPop(true);
         state.pollDismissedAt = null;
+    }
+
+    // ── trivia (trv.ask / trv.guess / trv.end — the stream is the buzzer) ──
+    // State is a pure fold (chat-protocol.js reduceTrivia) with ChatHash
+    // injected; every client checks every guess against the asker's hash and
+    // the FIRST correct one in stream order wins the pot. Fingerprint-gated
+    // repaint: the card holds a text input, and a poll-tick innerHTML rewrite
+    // would eat whatever you were typing.
+    var _trivLastPaint = '';
+
+    function _trivState() {
+        var CP = window.ChatProtocol;
+        if (!CP || !CP.reduceTrivia) return null;
+        var H = window.ChatHash;
+        return CP.reduceTrivia(_roomEvents(), H ? H.sha256 : null);
+    }
+
+    function _trivAnsStore(id, ans) {
+        try {
+            var map = JSON.parse(localStorage.getItem('chatTrivAns') || '{}');
+            if (ans !== undefined) {
+                map[id] = ans;
+                var keys = Object.keys(map);
+                while (keys.length > 20) { delete map[keys.shift()]; }
+                localStorage.setItem('chatTrivAns', JSON.stringify(map));
+            }
+            return map[id] || '';
+        } catch (e) { return ''; }
+    }
+
+    function _settleTrivia(t) {
+        // Same client-local idempotent booking as the wagers: winner books
+        // +pot, asker books -pot, each against their OWN play-money bank,
+        // marked settled BEFORE the POST so a retry can never double-pay.
+        if (!t || !t.winner || !t.pot || !state.selfName) return;
+        if (state.selfName !== t.winner && state.selfName !== t.by) return;
+        var key = t.id;
+        try {
+            var done = JSON.parse(localStorage.getItem('chatTrivSettled') || '{}');
+            if (done[key]) return;
+            done[key] = 1;
+            var ks = Object.keys(done);
+            while (ks.length > 100) { delete done[ks.shift()]; }
+            localStorage.setItem('chatTrivSettled', JSON.stringify(done));
+        } catch (e) { return; }
+        var delta = state.selfName === t.winner ? t.pot : -t.pot;
+        postJSON('/api/chat/arcade/bank', { delta: delta });
+    }
+
+    function renderTrivia() {
+        var host = q('[data-chat-triv]');
+        if (!host) return;
+        var t = _trivState();
+        // Settlement is independent of what you're LOOKING at — a pot won
+        // while you sat in a PM still books when the fold next runs.
+        _settleTrivia(t);
+        var show = !!(t && state.view === 'room' &&
+                      !(t.closed && state.trivDismissedAt === t.at));
+        if (!show) {
+            host.hidden = true;
+            if (host.innerHTML) host.innerHTML = '';
+            _trivLastPaint = '';
+            return;
+        }
+        var paint = [t.id, t.at, t.guesses.length, t.closed ? 1 : 0, t.winner,
+                     state.canSend ? 1 : 0].join('|');
+        if (paint === _trivLastPaint && !host.hidden) return;   // keep the input alive
+        _trivLastPaint = paint;
+        host.hidden = false;
+        var mine = t.by === state.selfName;
+        var tail = t.guesses.slice(-4).map(function (g) {
+            return '<span class="chat-triv-guess' + (g.ok ? ' chat-triv-guess--win' : '') + '">' +
+                esc(g.u) + ': ' + esc(g.a) + (g.ok ? ' ✓' : ' ✗') + '</span>';
+        }).join('');
+        var footer;
+        if (t.winner) {
+            footer = '<div class="chat-triv-winline">🏆 <b>' + esc(t.winner) + '</b> takes ' +
+                (t.pot ? 'the 🪙' + t.pot + ' pot' : 'it') + ' — “' + esc(t.winAnswer) + '”</div>';
+        } else if (t.closed) {
+            footer = '<div class="chat-triv-winline">Nobody got it' +
+                (t.answer ? ' — the answer was “' + esc(t.answer) + '”' +
+                    (t.verified ? '' : ' <span class="chat-jbx-meta">(unverified)</span>') : '') +
+                '.</div>';
+        } else if (state.canSend && !mine) {
+            footer = '<div class="chat-triv-row">' +
+                '<input class="chat-input chat-triv-in" data-chat-triv-guess type="text" ' +
+                    'maxlength="120" placeholder="Your answer…" autocomplete="off">' +
+                '<button class="chat-send-btn" type="button" data-chat-triv-send>Answer</button>' +
+            '</div>';
+        } else {
+            footer = '<div class="chat-jbx-meta">' +
+                (mine ? 'Your question — you can\'t win your own pot.'
+                      : 'Watching only — sending is admin-only here.') + '</div>';
+        }
+        host.innerHTML =
+            '<div class="chat-poll-head">🎓 <b>' + esc(t.q) + '</b>' +
+                '<span class="chat-jbx-meta">' +
+                    (t.pot ? '🪙' + t.pot + ' pot · ' : '') + 'asked by ' + esc(t.by) + '</span>' +
+                (!t.closed && state.canSend && (mine || _selfIsMod())
+                    ? '<button class="chat-fmt-btn" type="button" data-chat-triv-end>End &amp; reveal</button>'
+                    : '') +
+                (t.closed
+                    ? '<button class="chat-pin-del" type="button" title="Dismiss" data-chat-triv-dismiss>×</button>'
+                    : '') +
+            '</div>' +
+            (tail ? '<div class="chat-triv-tail">' + tail + '</div>' : '') +
+            footer;
+    }
+
+    function _trivGuess() {
+        var t = _trivState();
+        var inp = q('[data-chat-triv-guess]');
+        if (!t || t.closed || !inp) return;
+        var a = String(inp.value || '').trim();
+        if (!a) return;
+        inp.value = '';
+        sendProtocol('trv.guess', { id: t.id, a: a.slice(0, 120) });
+    }
+
+    function _trivAsk() {
+        var qEl = q('[data-chat-triv-q]'), aEl = q('[data-chat-triv-a]'), pEl = q('[data-chat-triv-pot]');
+        var H = window.ChatHash, CP = window.ChatProtocol;
+        if (!qEl || !aEl || !H || !CP) return;
+        var question = String(qEl.value || '').trim();
+        var answer = String(aEl.value || '').trim();
+        if (!question || !answer) {
+            if (typeof showToast === 'function') showToast('A question and its answer are both required', 'error');
+            return;
+        }
+        var pot = Math.max(0, Math.min(500, parseInt((pEl && pEl.value) || '0', 10) || 0));
+        var id = '';
+        for (var i = 0; i < 10; i++) id += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)];
+        _trivAnsStore(id, answer);              // for End & reveal later
+        sendProtocol('trv.ask', {
+            id: id, q: question.slice(0, 200),
+            h: H.sha256(CP.normalizeTriviaAnswer(answer)), pot: pot,
+        });
+        qEl.value = ''; aEl.value = ''; if (pEl) pEl.value = '';
+        var ov = q('[data-chat-triv-modal]');
+        if (ov) ov.hidden = true;
+        state.trivDismissedAt = null;
+        if (typeof showToast === 'function') {
+            showToast('🎓 Question is live in the room' + (pot ? ' — 🪙' + pot + ' on the line' : ''), 'success');
+        }
     }
 
     function togglePollPop(forceClose) {
@@ -5680,6 +6597,292 @@
         if (resHost) { resHost.hidden = true; resHost.innerHTML = ''; }
         state.jukebox.results = [];
         if (typeof showToast === 'function') showToast('♫ Added to the room queue', 'success');
+    }
+
+    // ── movie night (watch-together — a pure fold over watch.* carriers) ──
+    // The ballot/party state lives on the bus (chat-protocol.js reduceWatch):
+    // every client folds the same nominations, votes and party clock.
+    // OWNERSHIP is the one personal ingredient — each SoulSync probes its own
+    // video library (/api/video/watch/owned) and renders "you have this" or a
+    // GRAB into the wishlist pipeline. Phase 1 = ballot + ownership + grab;
+    // the in-page video panel is phase 2.
+    function _watchState() {
+        var CP = window.ChatProtocol;
+        return (CP && CP.reduceWatch) ? CP.reduceWatch(_roomEvents())
+                                      : { noms: [], now: null, tally: { total: 0 }, history: [] };
+    }
+
+    function _watchLabel(e) {
+        return esc(e.ti || ('#' + e.id)) +
+            (e.y ? ' <span class="chat-jbx-meta">(' + esc(e.y) + ')</span>' : '') +
+            (e.kd === 't' ? ' <span class="chat-watch-se">S' + e.s + 'E' + e.e + '</span>' : '');
+    }
+
+    function _watchPoster(e, cls) {
+        // po rides the bus (hostile) — render only an https URL, never a path.
+        return (e.po && /^https:\/\//.test(e.po))
+            ? '<img class="' + cls + '" src="' + attr(e.po) + '" alt="" loading="lazy">'
+            : '<div class="' + cls + ' chat-watch-poster--ph">🎬</div>';
+    }
+
+    function _watchOwnChip(key, entry) {
+        if (state.watch.ownedDenied) return '';
+        var own = state.watch.owned[key];
+        if (own === true) return '<span class="chat-watch-own">✓ you have this</span>';
+        if (own !== false) return '';                      // probe still out
+        if (state.watch.grabbed[key]) return '<span class="chat-watch-own chat-watch-own--want">grabbing…</span>';
+        return '<button class="chat-arc-btn chat-watch-grab" type="button" ' +
+            'data-chat-watch-grab="' + attr(key) + '" ' +
+            'title="You don\'t have this — send it to the video wishlist and search now">Grab</button>';
+    }
+
+    function renderWatch() {
+        var host = q('[data-chat-watch]');
+        if (!host) return;
+        var st = (state.view === 'room') ? _watchState() : null;
+        var show = !!(st && (st.noms.length || st.now));
+        host.hidden = !show;
+        if (!show) { host.innerHTML = ''; return; }
+        _watchFetchOwned(st);
+        var can = state.canSend;
+        var html = '<div class="chat-watch-headrow">🎬 <b>Movie night</b>' +
+            '<span class="chat-jbx-meta">' +
+                (st.now ? 'showing now' : st.noms.length + ' nominated · ' +
+                    st.tally.total + ' vote' + (st.tally.total === 1 ? '' : 's')) + '</span>' +
+            (can ? '<button class="chat-fmt-btn chat-watch-nombtn" type="button" ' +
+                       'data-chat-watch-btn>+ Nominate</button>' : '') +
+        '</div>';
+
+        if (st.now) {
+            var CP = window.ChatProtocol;
+            var pos = CP.watchPosition(st.now, Date.now());
+            var mine = st.now.by === state.selfName;
+            var boss = can && (mine || _selfIsMod());
+            html += '<div class="chat-watch-now">' +
+                _watchPoster(st.now, 'chat-watch-poster') +
+                '<div class="chat-watch-now-main">' +
+                    '<div class="chat-watch-now-ti">' + _watchLabel(st.now) + '</div>' +
+                    '<div class="chat-jbx-meta">' +
+                        (st.now.paused ? '⏸ paused at ' : '🔴 live · ') +
+                        _fmtSecs(Math.floor((pos || 0) / 1000)) +
+                        ' · started by ' + esc(st.now.by) + '</div>' +
+                    '<div class="chat-watch-now-acts">' +
+                        (boss ? '<button class="chat-arc-btn" type="button" data-chat-watch-' +
+                                (st.now.paused ? 'resume">▶ Resume' : 'pause">⏸ Pause') + '</button>' +
+                                '<button class="chat-arc-btn" type="button" data-chat-watch-end>⏹ End</button>'
+                              : '') +
+                        _watchOwnChip(st.now.key, st.now) +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }
+
+        html += st.noms.map(function (n) {
+            var canPull = can && (n.by === state.selfName || _selfIsMod());
+            return '<div class="chat-watch-row">' +
+                _watchPoster(n, 'chat-watch-thumb') +
+                '<div class="chat-watch-row-main">' +
+                    '<div class="chat-watch-row-ti">' + _watchLabel(n) + '</div>' +
+                    '<div class="chat-jbx-meta">by ' + esc(n.by) +
+                        (n.votes ? ' · ' + n.votes + ' vote' + (n.votes === 1 ? '' : 's') : '') +
+                    '</div>' +
+                '</div>' +
+                _watchOwnChip(n.key, n) +
+                (can ? '<button class="chat-arc-btn" type="button" title="Vote for this one" ' +
+                           'data-chat-watch-vote="' + attr(n.key) + '">👍' +
+                           (n.votes ? ' ' + n.votes : '') + '</button>' +
+                       '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                           'title="Start the party with this" ' +
+                           'data-chat-watch-start="' + attr(n.key) + '">▶</button>'
+                     : (n.votes ? '<span class="chat-jbx-meta">👍 ' + n.votes + '</span>' : '')) +
+                (canPull ? '<button class="chat-pin-del" type="button" title="Withdraw this nomination" ' +
+                               'data-chat-watch-unnom="' + attr(n.key) + '">×</button>' : '') +
+            '</div>';
+        }).join('');
+        host.innerHTML = html;
+    }
+
+    function _watchFetchOwned(st) {
+        if (state.watch.ownedDenied || Date.now() < state.watch.ownedRetryAt) return;
+        var entries = (st.noms || []).slice();
+        if (st.now) entries.push(st.now);
+        var need = entries.filter(function (e) { return !(e.key in state.watch.owned); });
+        if (!need.length) return;
+        var sig = need.map(function (e) { return e.key; }).sort().join(',');
+        if (state.watch.ownedFetching === sig) return;
+        state.watch.ownedFetching = sig;
+        postJSON('/api/video/watch/owned', {
+            items: need.map(function (e) {
+                return e.kd === 't' ? { kd: 't', id: e.id, s: e.s, e: e.e }
+                                    : { kd: 'm', id: e.id };
+            }),
+        }).then(function (res) {
+            state.watch.ownedFetching = '';
+            if (res.ok && res.body && res.body.owned) {
+                Object.assign(state.watch.owned, res.body.owned);
+                renderWatch();
+            } else if (res.status === 403) {
+                state.watch.ownedDenied = true;    // music-only profile: no video side
+            } else {
+                state.watch.ownedRetryAt = Date.now() + 60000;
+            }
+        }).catch(function () {
+            state.watch.ownedFetching = '';
+            state.watch.ownedRetryAt = Date.now() + 60000;
+        });
+    }
+
+    function _watchGrab(key) {
+        var st = _watchState();
+        var entry = null;
+        (st.noms || []).concat(st.now ? [st.now] : []).forEach(function (e) {
+            if (e.key === key) entry = e;
+        });
+        if (!entry || state.watch.grabbed[key]) return;
+        state.watch.grabbed[key] = 1;
+        renderWatch();
+        // ONE hydrated call: the server enriches the bare bus context (id +
+        // title + poster) into a full wishlist row — year/detail blob for
+        // movies, episode title/still/air date/season poster for episodes —
+        // then fires the manual search. The bus fields ride along as
+        // fallbacks so the grab lands even if TMDB is unreachable.
+        var p = { kd: entry.kd === 't' ? 't' : 'm', id: entry.id, ti: entry.ti || '' };
+        if (entry.y) p.y = entry.y;
+        if (entry.po) p.po = entry.po;
+        if (entry.kd === 't') { p.s = entry.s; p.e = entry.e; }
+        postJSON('/api/video/watch/grab', p).then(function (res) {
+            if (!res.ok || !(res.body && res.body.success)) {
+                delete state.watch.grabbed[key];
+                if (typeof showToast === 'function') {
+                    showToast((res.body && res.body.error) || 'Grab failed — is the video side set up?', 'error');
+                }
+                renderWatch();
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast('🎬 Grabbing — it\'s on the video wishlist and searching now', 'success');
+            }
+        }).catch(function () { delete state.watch.grabbed[key]; renderWatch(); });
+    }
+
+    // ── movie night picker (TMDB search via the video side) ─────────────
+    function _openWatchModal() {
+        var ov = q('[data-chat-watch-modal]');
+        if (!ov) return;
+        ov.hidden = false;
+        var grid = q('[data-chat-watch-searchgrid]');
+        if (grid && !state.watch.searchResults.length) grid.innerHTML = _watchResultCards();
+        var inp = q('[data-chat-watch-searchinput]');
+        if (inp) { inp.focus(); inp.select(); }
+    }
+
+    function _closeWatchModal() {
+        var ov = q('[data-chat-watch-modal]');
+        if (ov) ov.hidden = true;
+        if (_watchSearchTimer) { clearTimeout(_watchSearchTimer); _watchSearchTimer = null; }
+        _watchSearchSeq += 1;                  // orphan any in-flight response
+        state.watch.searchResults = [];
+        state.watch.pickShow = -1;
+    }
+
+    function _watchResultCards() {
+        var results = state.watch.searchResults;
+        if (!results.length) {
+            return '<div class="chat-watch-resnote">Type at least two letters — this searches YOUR library.<br>' +
+                'Movie night runs on what someone can actually press play on.</div>';
+        }
+        return results.map(function (r, i) {
+            var isShow = r.kind === 'show';
+            var picking = state.watch.pickShow === i;
+            var rating = (typeof r.rating === 'number' && r.rating > 0) ? r.rating.toFixed(1) : '';
+            return '<div class="chat-watch-rescard' + (picking ? ' chat-watch-rescard--picking' : '') + '"' +
+                ' role="button" tabindex="0" data-chat-watch-nom="' + i + '">' +
+                '<div class="chat-watch-resposter">' +
+                    // r.art is OUR poster proxy path (server-built, library id) —
+                    // never a remote URL from the wire.
+                    (r.art ? '<img src="' + attr(r.art) + '" alt="" loading="lazy">' : '🎬') +
+                '</div>' +
+                '<div class="chat-watch-resmain">' +
+                    '<div class="chat-watch-restitle" title="' + attr(r.title || '') + '">' + esc(r.title || '') +
+                        (r.year ? '<span class="chat-watch-resyear">' + esc(String(r.year)) + '</span>' : '') +
+                    '</div>' +
+                    '<div class="chat-watch-resmeta">' +
+                        '<span class="chat-watch-reskind' + (isShow ? ' chat-watch-reskind--show' : '') + '">' +
+                            (isShow ? 'SHOW' : 'MOVIE') + '</span>' +
+                        (rating ? '<span>★ ' + rating + '</span>' : '') +
+                        (isShow && r.episode_count
+                            ? '<span>' + (r.owned_count || 0) + '/' + r.episode_count + ' episodes on hand</span>'
+                            : '') +
+                    '</div>' +
+                    (picking
+                        ? '<div class="chat-watch-sepick">' +
+                              '<label>Season <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
+                              '<label>Episode <input class="chat-input chat-watch-sein" data-chat-watch-se-e type="number" min="0" max="9999" value="1"></label>' +
+                              '<button class="chat-send-btn" type="button" data-chat-watch-nomshow="' + i + '">Nominate S·E</button>' +
+                          '</div>'
+                        : '') +
+                '</div>' +
+                '<span class="chat-watch-resact">' +
+                    (picking ? '' : (isShow ? 'Pick episode ▸' : 'Nominate ▸')) + '</span>' +
+            '</div>';
+        }).join('');
+    }
+
+    // Live search: debounced as-you-type, with a sequence token so a slow
+    // early response can never clobber the results of a later keystroke.
+    var _watchSearchTimer = null;
+    var _watchSearchSeq = 0;
+
+    function _watchQueueSearch() {
+        if (_watchSearchTimer) clearTimeout(_watchSearchTimer);
+        _watchSearchTimer = setTimeout(_watchSearchSubmit, 300);
+    }
+
+    function _watchSearchSubmit() {
+        if (_watchSearchTimer) { clearTimeout(_watchSearchTimer); _watchSearchTimer = null; }
+        var inp = q('[data-chat-watch-searchinput]');
+        var grid = q('[data-chat-watch-searchgrid]');
+        if (!inp) return;
+        var qtext = String(inp.value || '').trim();
+        var seq = ++_watchSearchSeq;
+        if (qtext.length < 2) {
+            state.watch.searchResults = [];
+            state.watch.pickShow = -1;
+            if (grid) grid.innerHTML = _watchResultCards();
+            return;
+        }
+        // Empty grid gets a searching note; existing results stay put until
+        // the fresh ones land (no flicker while typing).
+        if (grid && !state.watch.searchResults.length) {
+            grid.innerHTML = '<div class="chat-watch-resnote">Searching…</div>';
+        }
+        getJSON('/api/video/watch/library?q=' + encodeURIComponent(qtext)).then(function (res) {
+            if (seq !== _watchSearchSeq) return;          // a newer keystroke owns the grid
+            state.watch.pickShow = -1;
+            var results = (res.ok && res.body.results) || [];
+            state.watch.searchResults = results;
+            if (grid) grid.innerHTML = results.length ? _watchResultCards() :
+                '<div class="chat-watch-resnote">' +
+                (res.status === 403 ? 'Video access is disabled for this profile.'
+                                    : 'Nothing in your library matches “' + esc(qtext) + '”.') + '</div>';
+        }).catch(function () {
+            if (seq !== _watchSearchSeq) return;
+            if (grid) grid.innerHTML = '<div class="chat-watch-resnote">Search failed — try again.</div>';
+        });
+    }
+
+    function _watchNominate(r, s, e) {
+        var p = { id: String(r.tmdb_id), kd: (s != null) ? 't' : 'm',
+                  ti: String(r.title || '').slice(0, 120) };
+        if (r.year) p.y = String(r.year).slice(0, 4);
+        // Only the server-vetted TMDB CDN poster rides the bus (r.po) — a
+        // library row's raw artwork path can be a tokened Plex/Jellyfin URL,
+        // which must never be broadcast into a public Soulseek room.
+        if (r.po && /^https:\/\/image\.tmdb\.org\//.test(r.po)) p.po = String(r.po).slice(0, 200);
+        if (s != null) { p.s = s; p.e = e; }
+        sendProtocol('watch.nom', p);
+        _closeWatchModal();
+        if (typeof showToast === 'function') showToast('🎬 Nominated — the room votes', 'success');
     }
 
     function onRoomMessages(d) {

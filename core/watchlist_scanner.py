@@ -1644,8 +1644,24 @@ class WatchlistScanner:
                 logger.warning(f"API failure fetching albums for artist {artist_id}")
                 return None
             if not albums:
-                logger.debug(f"No albums found for artist {artist_id}")
-                return []
+                # RAW discography is empty — before any date filtering. A real
+                # artist always has releases, so this means the provider does
+                # not recognise this ID (commonly a foreign one: iTunes and
+                # Deezer IDs are both bare integers and get confused for each
+                # other). Returning [] said "success, nothing new", which ENDED
+                # the source fallback chain in
+                # get_artist_discography_for_watchlist — so a blind provider
+                # first in the priority order silently starved the wishlist and
+                # the sources that did know the artist were never asked.
+                #
+                # None means "this source failed, try the next one". A genuine
+                # "nothing new" still returns [] further down, AFTER the lookback
+                # filter, so the common fast path is unchanged and this costs no
+                # extra API calls.
+                logger.info(
+                    "No albums at all for artist %s — treating this source as unable "
+                    "to resolve it and falling through to the next", artist_id)
+                return None
 
             # Add small delay after fetching artist discography to be extra safe
             time.sleep(0.3)  # 300ms breathing room

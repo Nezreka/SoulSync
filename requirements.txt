@@ -56,6 +56,12 @@ tzlocal>=5.0
 # it; bare-metal installs need it on PATH: https://docs.deno.com/runtime/
 yt-dlp>=2026.3.17
 
+# music.youtube.com playlist metadata (artist + album per track, and no
+# flat-extraction page cap). Optional at RUNTIME -- core/youtube_music_meta.py
+# falls back to yt-dlp when the import fails -- so an in-place upgrade that
+# skips this line keeps working, just without albums.
+ytmusicapi>=1.10.0
+
 # Lyrics support
 lrclibapi==0.3.1
 

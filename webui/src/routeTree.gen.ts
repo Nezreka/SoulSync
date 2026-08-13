@@ -10,9 +10,20 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
+import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
+import { Route as ToolsRouteRouteImport } from './routes/tools/route'
+import { Route as SyncRouteRouteImport } from './routes/sync/route'
 import { Route as StatsRouteRouteImport } from './routes/stats/route'
+import { Route as SearchRouteRouteImport } from './routes/search/route'
+import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-explorer/route'
+import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
+import { Route as DiscoverRouteRouteImport } from './routes/discover/route'
+import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
+import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
+import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
@@ -26,9 +37,44 @@ const SplatRoute = SplatRouteImport.update({
   path: '/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WishlistRouteRoute = WishlistRouteRouteImport.update({
+  id: '/wishlist',
+  path: '/wishlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WatchlistRouteRoute = WatchlistRouteRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ToolsRouteRoute = ToolsRouteRouteImport.update({
+  id: '/tools',
+  path: '/tools',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SyncRouteRoute = SyncRouteRouteImport.update({
+  id: '/sync',
+  path: '/sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StatsRouteRoute = StatsRouteRouteImport.update({
   id: '/stats',
   path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchRouteRoute = SearchRouteRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaylistExplorerRouteRoute = PlaylistExplorerRouteRouteImport.update({
+  id: '/playlist-explorer',
+  path: '/playlist-explorer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LibraryRouteRoute = LibraryRouteRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IssuesRouteRoute = IssuesRouteRouteImport.update({
@@ -39,6 +85,26 @@ const IssuesRouteRoute = IssuesRouteRouteImport.update({
 const ImportRouteRoute = ImportRouteRouteImport.update({
   id: '/import',
   path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiscoverRouteRoute = DiscoverRouteRouteImport.update({
+  id: '/discover',
+  path: '/discover',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRouteRoute = DashboardRouteRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AutomationsRouteRoute = AutomationsRouteRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActiveDownloadsRouteRoute = ActiveDownloadsRouteRouteImport.update({
+  id: '/active-downloads',
+  path: '/active-downloads',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -79,9 +145,20 @@ const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
+  '/dashboard': typeof DashboardRouteRoute
+  '/discover': typeof DiscoverRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
+  '/library': typeof LibraryRouteRoute
+  '/playlist-explorer': typeof PlaylistExplorerRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
+  '/tools': typeof ToolsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -92,8 +169,19 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
+  '/dashboard': typeof DashboardRouteRoute
+  '/discover': typeof DiscoverRouteRoute
   '/issues': typeof IssuesRouteRoute
+  '/library': typeof LibraryRouteRoute
+  '/playlist-explorer': typeof PlaylistExplorerRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
+  '/tools': typeof ToolsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -105,9 +193,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/active-downloads': typeof ActiveDownloadsRouteRoute
+  '/automations': typeof AutomationsRouteRoute
+  '/dashboard': typeof DashboardRouteRoute
+  '/discover': typeof DiscoverRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
+  '/library': typeof LibraryRouteRoute
+  '/playlist-explorer': typeof PlaylistExplorerRouteRoute
+  '/search': typeof SearchRouteRoute
   '/stats': typeof StatsRouteRoute
+  '/sync': typeof SyncRouteRoute
+  '/tools': typeof ToolsRouteRoute
+  '/watchlist': typeof WatchlistRouteRoute
+  '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
   '/import/album': typeof ImportAlbumRoute
   '/import/auto': typeof ImportAutoRoute
@@ -120,9 +219,20 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/active-downloads'
+    | '/automations'
+    | '/dashboard'
+    | '/discover'
     | '/import'
     | '/issues'
+    | '/library'
+    | '/playlist-explorer'
+    | '/search'
     | '/stats'
+    | '/sync'
+    | '/tools'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -133,8 +243,19 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/active-downloads'
+    | '/automations'
+    | '/dashboard'
+    | '/discover'
     | '/issues'
+    | '/library'
+    | '/playlist-explorer'
+    | '/search'
     | '/stats'
+    | '/sync'
+    | '/tools'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -145,9 +266,20 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/active-downloads'
+    | '/automations'
+    | '/dashboard'
+    | '/discover'
     | '/import'
     | '/issues'
+    | '/library'
+    | '/playlist-explorer'
+    | '/search'
     | '/stats'
+    | '/sync'
+    | '/tools'
+    | '/watchlist'
+    | '/wishlist'
     | '/$'
     | '/import/album'
     | '/import/auto'
@@ -159,9 +291,20 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ActiveDownloadsRouteRoute: typeof ActiveDownloadsRouteRoute
+  AutomationsRouteRoute: typeof AutomationsRouteRoute
+  DashboardRouteRoute: typeof DashboardRouteRoute
+  DiscoverRouteRoute: typeof DiscoverRouteRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
+  LibraryRouteRoute: typeof LibraryRouteRoute
+  PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
+  SearchRouteRoute: typeof SearchRouteRoute
   StatsRouteRoute: typeof StatsRouteRoute
+  SyncRouteRoute: typeof SyncRouteRoute
+  ToolsRouteRoute: typeof ToolsRouteRoute
+  WatchlistRouteRoute: typeof WatchlistRouteRoute
+  WishlistRouteRoute: typeof WishlistRouteRoute
   SplatRoute: typeof SplatRoute
   LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
@@ -176,11 +319,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/wishlist': {
+      id: '/wishlist'
+      path: '/wishlist'
+      fullPath: '/wishlist'
+      preLoaderRoute: typeof WishlistRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/watchlist': {
+      id: '/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof WatchlistRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tools': {
+      id: '/tools'
+      path: '/tools'
+      fullPath: '/tools'
+      preLoaderRoute: typeof ToolsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sync': {
+      id: '/sync'
+      path: '/sync'
+      fullPath: '/sync'
+      preLoaderRoute: typeof SyncRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/stats': {
       id: '/stats'
       path: '/stats'
       fullPath: '/stats'
       preLoaderRoute: typeof StatsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playlist-explorer': {
+      id: '/playlist-explorer'
+      path: '/playlist-explorer'
+      fullPath: '/playlist-explorer'
+      preLoaderRoute: typeof PlaylistExplorerRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/library': {
+      id: '/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof LibraryRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/issues': {
@@ -195,6 +387,34 @@ declare module '@tanstack/react-router' {
       path: '/import'
       fullPath: '/import'
       preLoaderRoute: typeof ImportRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/discover': {
+      id: '/discover'
+      path: '/discover'
+      fullPath: '/discover'
+      preLoaderRoute: typeof DiscoverRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/automations': {
+      id: '/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof AutomationsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/active-downloads': {
+      id: '/active-downloads'
+      path: '/active-downloads'
+      fullPath: '/active-downloads'
+      preLoaderRoute: typeof ActiveDownloadsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -269,9 +489,20 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ActiveDownloadsRouteRoute: ActiveDownloadsRouteRoute,
+  AutomationsRouteRoute: AutomationsRouteRoute,
+  DashboardRouteRoute: DashboardRouteRoute,
+  DiscoverRouteRoute: DiscoverRouteRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
+  LibraryRouteRoute: LibraryRouteRoute,
+  PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
+  SearchRouteRoute: SearchRouteRoute,
   StatsRouteRoute: StatsRouteRoute,
+  SyncRouteRoute: SyncRouteRoute,
+  ToolsRouteRoute: ToolsRouteRoute,
+  WatchlistRouteRoute: WatchlistRouteRoute,
+  WishlistRouteRoute: WishlistRouteRoute,
   SplatRoute: SplatRoute,
   LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,

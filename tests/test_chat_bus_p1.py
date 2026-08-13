@@ -116,7 +116,7 @@ def bus_app():
     state = {"client": client, "admin": True, "config": {}}
     chat_api.configure(
         client_getter=lambda: state["client"],
-        run_async=lambda v: v,
+        run_async=lambda v, timeout=None: v,
         config_get=lambda key, default=None: state["config"].get(key, default),
         config_set=lambda key, value: state["config"].__setitem__(key, value),
     )
@@ -128,7 +128,7 @@ def bus_app():
 
     app.register_blueprint(chat_api.create_blueprint())
     yield app.test_client(), state, client
-    chat_api.configure(client_getter=lambda: None, run_async=lambda v: v,
+    chat_api.configure(client_getter=lambda: None, run_async=lambda v, timeout=None: v,
                        config_get=lambda k, d=None: d)
 
 

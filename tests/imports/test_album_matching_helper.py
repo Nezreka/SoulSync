@@ -381,6 +381,33 @@ def test_match_below_threshold_files_left_unmatched():
     )
     assert not result['matches']
     assert result['unmatched_files'] == ['/a/random.flac']
+    # Nothing was dropped as a quality duplicate — this file is genuinely
+    # unclaimed, and the caller must be able to tell the two apart.
+    assert result['duplicate_files'] == []
+
+
+def test_match_reports_quality_dedup_losers_separately():
+    """``unmatched_files`` mixes two very different things: the lower-quality
+    copy of a track that DID import, and a real song the matcher never claimed.
+    Only the second is a reason to call an import incomplete, so the dedup
+    losers are reported on their own key (PR #1121 review)."""
+    files = ['/a/01.flac', '/a/01.mp3', '/a/stray.flac']
+    file_tags = {
+        '/a/01.flac': _tags(title='A', track=1, disc=1),
+        '/a/01.mp3': _tags(title='A', track=1, disc=1),
+        '/a/stray.flac': _tags(title='Totally Different', track=9, disc=1),
+    }
+    tracks = [
+        {'name': 'A', 'track_number': 1, 'disc_number': 1, 'artists': [{'name': 'Artist'}]},
+    ]
+    result = match_files_to_tracks(
+        files, file_tags, tracks,
+        target_album='Album', similarity=_sim, quality_rank=_qrank,
+    )
+    assert [m['file'] for m in result['matches']] == ['/a/01.flac']
+    assert result['duplicate_files'] == ['/a/01.mp3']
+    # unmatched_files stays the FULL leftover list — the review UI shows it.
+    assert sorted(result['unmatched_files']) == ['/a/01.mp3', '/a/stray.flac']
 
 
 # ---------------------------------------------------------------------------

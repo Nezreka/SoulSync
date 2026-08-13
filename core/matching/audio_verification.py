@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, List, Optional
 
+from core.text.title_match import is_trailing_version_qualifier
 from utils.logging_config import get_logger
 
 logger = get_logger("audio_verification")
@@ -25,6 +26,19 @@ MIN_ACOUSTID_SCORE = 0.80       # Minimum fingerprint score to trust a match.
 TITLE_MATCH_THRESHOLD = 0.70    # Title similarity to consider a match.
 ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity to consider a match.
 CLEAR_MISMATCH_THRESHOLD = 0.30  # Below this artist sim = clear wrong song.
+# Spotify's version separator is a SPACED dash (' - Remastered 2011'), so the
+# rule needs whitespace next to the dash — with `\s*` a bare intra-word hyphen
+# matched and 'Post-Remix' normalized to 'post'. ONE side is enough, and has to
+# be: real catalogue rows write ']- Single' ('Cold Water … [Anirudh Diwali
+# Edition]- Single'), where the bracket strip has already eaten the space in
+# front. En/em dashes appear in the same role in provider metadata.
+# The dash class covers what real metadata actually writes: ASCII hyphen, the
+# unicode hyphen/en/em dashes, the minus sign, and the FULLWIDTH hyphen-minus a
+# Japanese tagger produces (残酷な天使のテーゼ － Instrumental).
+_DASH_CHARS = r"\-‐‑‒–—―−－"
+_DASH_QUALIFIER_RE = re.compile(
+    rf"(?:\s[{_DASH_CHARS}]\s*|\s*[{_DASH_CHARS}]\s)(?P<qualifier>[^{_DASH_CHARS}]+)$"
+)
 
 
 class Decision(Enum):
@@ -43,29 +57,7 @@ class Outcome:
     reason: str = ""
 
 
-def normalize(text: str) -> str:
-    """Normalize a title/artist for comparison.
-
-    lowercase; strip ``()`` / ``[]`` / ``<>`` annotations (version tags,
-    performer credits like ``<Vocal: MIKA KOBAYASHI>``); strip trailing
-    version / featuring tags; KEEP CJK characters (``\\w`` is unicode-aware) so
-    Japanese/Chinese/Korean titles produce a comparable form instead of an empty
-    string; collapse whitespace.
-    """
-    if not text:
-        return ""
-    s = text.lower().strip()
-    # Annotations that are metadata, not core identity.
-    s = re.sub(r'\s*\([^)]*\)', '', s)
-    s = re.sub(r'\s*\[[^\]]*\]', '', s)
-    s = re.sub(r'\s*<[^>]*>', '', s)
-    # Trailing featuring / version tags.
-    s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
-    s = re.sub(
-        r'\s*-\s*(?:vocal|instrumental|acoustic|live|remix|cover|clean|explicit|'
-        r'radio\s*edit|original\s*mix|extended\s*mix|club\s*mix)\s*$',
-        '', s, flags=re.IGNORECASE,
-    )
+def _finish_normalization(s: str) -> str:
     s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
     # Path/separator punctuation -> space so a title keeps matching a source
     # filename that substituted '_' for an illegal '/' or ':' (#851): the on-disk
@@ -74,18 +66,75 @@ def normalize(text: str) -> str:
     s = re.sub(r'[\\/:_]+', ' ', s)
     # Drop remaining punctuation but keep word chars (incl. CJK) + spaces.
     s = re.sub(r'[^\w\s]', '', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _normalized_readings(text: str) -> tuple:
+    """``(canonical, verbatim)`` normalized forms of ``text``.
+
+    ``verbatim`` is ``None`` unless a ``' - <qualifier>'`` version tail was
+    actually dropped, in which case it is the same normalization with the tail
+    kept. No token rule can tell ``Taylor Swift - Long Live`` (artist + title)
+    from ``Halo - Long Live`` (title + version tag) — both end in a version
+    marker — so :func:`similarity` scores both readings and keeps the better
+    one. That is what stops the strip from being load-bearing: a wrong strip
+    costs a few points instead of collapsing a real title to the artist name
+    and quarantining a correct file.
+    """
+    if not text:
+        return "", None
+    s = text.lower().strip()
+    # Annotations that are metadata, not core identity.
+    s = re.sub(r'\s*\([^)]*\)', '', s)
+    s = re.sub(r'\s*\[[^\]]*\]', '', s)
+    s = re.sub(r'\s*<[^>]*>', '', s)
+    # Trailing featuring / version tags.
+    s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
+    dash_qualifier = _DASH_QUALIFIER_RE.search(s)
+    if dash_qualifier and is_trailing_version_qualifier(dash_qualifier.group("qualifier")):
+        return (
+            _finish_normalization(s[:dash_qualifier.start()].rstrip()),
+            _finish_normalization(s),
+        )
+    return _finish_normalization(s), None
+
+
+def normalize(text: str, *, strip_version_tail: bool = True) -> str:
+    """Normalize a title/artist for comparison.
+
+    lowercase; strip ``()`` / ``[]`` / ``<>`` annotations (version tags,
+    performer credits like ``<Vocal: MIKA KOBAYASHI>``); strip trailing
+    version / featuring tags; KEEP CJK characters (``\\w`` is unicode-aware) so
+    Japanese/Chinese/Korean titles produce a comparable form instead of an empty
+    string; collapse whitespace.
+
+    ``strip_version_tail=False`` keeps a ``' - <qualifier>'`` tail — the second
+    reading :func:`similarity` scores, see :func:`_normalized_readings`.
+    """
+    canonical, verbatim = _normalized_readings(text)
+    if not strip_version_tail and verbatim is not None:
+        return verbatim
+    return canonical
 
 
 def similarity(a: str, b: str) -> float:
-    """Similarity (0.0–1.0) between two strings after normalization."""
-    na, nb = normalize(a), normalize(b)
-    if not na or not nb:
+    """Similarity (0.0–1.0) between two strings after normalization.
+
+    Scored across both readings of each side (see :func:`_normalized_readings`),
+    best pairing wins. Only a stripped dash tail produces a second reading, so
+    the common path is the single comparison it has always been.
+    """
+    va = [v for v in _normalized_readings(a) if v]
+    vb = [v for v in _normalized_readings(b) if v]
+    if not va or not vb:
         return 0.0
-    if na == nb:
-        return 1.0
-    return SequenceMatcher(None, na, nb).ratio()
+    best = 0.0
+    for na in va:
+        for nb in vb:
+            if na == nb:
+                return 1.0
+            best = max(best, SequenceMatcher(None, na, nb).ratio())
+    return best
 
 
 _match_engine = None
@@ -143,23 +192,93 @@ def _alias_aware_artist_sim(expected_artist: str, actual_artist: str,
 
 def _find_best_title_artist_match(recordings, expected_title, expected_artist,
                                   aliases=None):
-    """Return (best_recording, title_sim, artist_sim) — title weighted higher."""
+    """Return (best_recording, title_sim, artist_sim) — title weighted higher.
+
+    Ties are broken in favour of a candidate whose VERSION matches the expected
+    one. `normalize` deliberately strips bracketed version tags, so "Celebrity"
+    and "Celebrity (karaoke)" both score title_sim 1.0 against an expected
+    "Celebrity" — an exact tie. With a strict `>` the winner was simply whichever
+    MusicBrainz happened to list first, and `evaluate`'s version gate then failed
+    on it and reported "Wrong download: 'Celebrity' is actually 'Celebrity
+    (karaoke)'" — for a file that is perfectly correct, with the matching
+    recording sitting in the same candidate list (#1132).
+
+    Reversing the candidate order flipped the verdict between FAIL and PASS,
+    which is what makes this a bug rather than a judgement call.
+    """
+    expected_version = _detect_title_version(expected_title or '')
     best_rec = None
     best_title_sim = 0.0
     best_artist_sim = 0.0
-    best_combined = 0.0
+    best_key = None
     for rec in recordings:
         title = rec.get('title') or ''
         artist = rec.get('artist') or ''
         title_sim = similarity(expected_title, title)
         artist_sim = _alias_aware_artist_sim(expected_artist, artist, aliases)
         combined = (title_sim * 0.6) + (artist_sim * 0.4)
-        if combined > best_combined:
-            best_combined = combined
+        # Similarity dominates; version agreement only settles a draw.
+        key = (combined, 1 if _detect_title_version(title) == expected_version else 0)
+        if best_key is None or key > best_key:
+            best_key = key
             best_rec = rec
             best_title_sim = title_sim
             best_artist_sim = artist_sim
     return best_rec, best_title_sim, best_artist_sim
+
+
+def fingerprint_is_ambiguous(recordings: List[dict]) -> bool:
+    """True when the fingerprint's best-scoring recordings name DIFFERENT songs.
+
+    AcoustID returns results, and each result carries a whole LIST of MusicBrainz
+    recordings that all share that result's single score (see
+    ``acoustid.parse_lookup_result``). So "the top match" is frequently a tie
+    between several recordings, and their order is just MusicBrainz's — not a
+    ranking. Mature AcoustID entries accumulate mis-submitted links, so that tie
+    can span genuinely different songs by the same artist.
+
+    When that happens the fingerprint honestly cannot say which track this is,
+    and any single "it's actually X" claim is a coin flip. #1132: a file of
+    Chicago's "You're the Inspiration" was reported as "Saturday in the Park",
+    and the reporter found "almost all suggestions are wrong" — different songs,
+    or instrumental/karaoke/acoustic variants of the right one.
+
+    Deciding whether the file is MISLABELLED is still sound (that asks whether
+    ANY candidate matches, which ties don't affect). Only the claim about what
+    the file actually IS has to be withheld.
+    """
+    if not recordings:
+        return False
+    scored = [r for r in recordings if r.get('score') is not None]
+    if not scored:
+        # No per-recording scores to compare — treat >1 distinct title as
+        # ambiguous, since nothing distinguishes them.
+        titles = {_recording_identity(r.get('title')) for r in recordings}
+        titles.discard('')
+        return len(titles) > 1
+    top = max(r['score'] for r in scored)
+    top_titles = {
+        _recording_identity(r.get('title'))
+        for r in scored if r['score'] >= top
+    }
+    top_titles.discard('')
+    return len(top_titles) > 1
+
+
+def _recording_identity(title: Optional[str]) -> str:
+    """Case/punctuation-insensitive key for "is this the same RECORDING".
+
+    Deliberately NOT `normalize`: that strips bracketed version tags (so
+    "Song" and "Song (Instrumental)" collapse to one string — which is what
+    makes the separate version gate necessary). Here an instrumental IS a
+    different recording, and reporting one in place of the other is exactly
+    what #1132 complained about, so the qualifier has to survive.
+    """
+    if not title:
+        return ""
+    s = str(title).lower().strip()
+    s = re.sub(r'[^\w\s]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
 
 
 def evaluate(expected_title: str, expected_artist: str,
