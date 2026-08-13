@@ -33,8 +33,13 @@ _CSS = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8")
 
 
 def _fn(name: str) -> str:
+    """ONE function's body, bounded by the next top-level `function` in this
+    IIFE — not a fixed character window. A window overruns into whatever
+    follows, which turns "this function must not call X" into "nothing within
+    2600 characters may call X" and fails the moment a neighbour grows."""
     start = _JS.index("function " + name + "(")
-    return _JS[start:start + 2600]
+    nxt = _JS.find("\n    function ", start + 1)
+    return _JS[start:nxt if nxt != -1 else len(_JS)]
 
 
 # ── 1. the screen survives a re-render ───────────────────────────────────────
@@ -166,3 +171,88 @@ def test_the_stream_url_carries_only_the_title_identity():
 def test_the_stage_is_styled():
     for cls in (".chat-watch-stagehost", ".chat-watch-video", ".chat-watch-stage-warn"):
         assert cls in _CSS, cls
+
+
+# ── the flow fixes: start, join, and the silent gap ──────────────────────────
+# Boulder: "i click ply button and i see a pause and end button and a join party
+# button". Right — starting a showing and watching it were two separate gestures,
+# which is nonsense for the person who just pressed ▶.
+
+def test_pressing_play_also_joins_the_showing():
+    """▶ IS the opt-in gesture. Requiring a second click to watch your own pick
+    was the wrong reading of "playback is opt-in"."""
+    handler = _JS[_JS.index("data-chat-watch-start]"):][:600]
+    assert "state.watch.autoJoin" in handler
+    assert "sendProtocol('watch.start'" in handler
+
+
+def test_the_auto_join_waits_for_the_fold_not_a_local_guess():
+    """The showing only exists once the reducer says so — joining before that
+    would race the bus and mount a screen for a party that never started."""
+    render = _fn("renderWatch")
+    assert "st.now.key === state.watch.autoJoin" in render
+
+
+def test_the_auto_join_does_not_fire_for_a_file_this_box_lacks():
+    """Otherwise starting a showing you don't own mounts an empty player
+    instead of leaving the Grab path visible."""
+    render = _fn("renderWatch")
+    seg = render[render.index("state.watch.autoJoin && st.now"):]
+    assert "state.watch.owned[st.now.key] === true" in seg
+
+
+def test_start_now_nominates_and_starts_in_one_gesture():
+    """Alone in a room, nominate → vote → start is three gestures of ceremony
+    to watch your own film. The ballot is untouched for real parties."""
+    nom = _fn("_watchNominate")
+    assert "state.watch.autoStart" in nom
+    assert "data-chat-watch-now=" in _JS and "data-chat-watch-nowshow=" in _JS
+
+
+def test_the_pending_start_is_confirmed_against_the_fold():
+    """We never fire watch.start from a locally-guessed key — renderWatch waits
+    for the nomination to actually appear in the reducer's output first."""
+    render = _fn("renderWatch")
+    seg = render[render.index("state.watch.autoStart"):]
+    assert "st.noms.filter" in seg
+    assert "state.watch.autoStart = ''" in seg, "the intent must be consumed, not repeated"
+
+
+def test_start_now_is_checked_before_the_card_click():
+    """The button lives INSIDE the nominate card; matching the card first would
+    swallow it and merely nominate."""
+    assert _JS.index("data-chat-watch-now]") < _JS.index("data-chat-watch-nom]")
+
+
+def test_the_ownership_probe_gap_is_named():
+    """An empty action row while the probe is out is indistinguishable from
+    'this is broken' — and that gap is exactly when the user is looking hardest
+    for the play button."""
+    chip = _fn("_watchJoinChip")
+    assert "in state.watch.owned" in chip
+    assert "checking your library" in chip
+
+
+def test_the_waiting_chip_is_styled():
+    assert ".chat-watch-own--wait" in _CSS
+
+
+# ── the squooshed card ───────────────────────────────────────────────────────
+# Boulder: "all squooshed together and overlapping".
+
+def test_the_nomination_controls_are_grouped_so_they_can_wrap():
+    """As bare flex siblings they shrank below their own text and collided.
+    Grouping them is what lets them drop to a second line instead."""
+    render = _fn("renderWatch")
+    assert "chat-watch-row-acts" in render
+
+
+def test_the_row_is_a_grid_with_the_controls_on_their_own_line():
+    assert "grid-template-areas: \"thumb main\" \"acts acts\"" in _CSS
+
+
+def test_controls_keep_their_intrinsic_width():
+    """flex: 0 0 auto is the actual fix for the overlap — without it they
+    compress below their content no matter what the container does."""
+    assert ".chat-watch-row-acts > * { flex: 0 0 auto; }" in _CSS
+    assert ".chat-watch-now-acts > * { flex: 0 0 auto; }" in _CSS

@@ -88,6 +88,8 @@
             playFetching: '',    //   in-flight playability probe signature
             drift: null,         //   interval id: re-anchors the element to the fold
             err: '',             //   the browser refused the file (element error)
+            autoJoin: '',        //   showing key to join the moment it goes live
+            autoStart: '',       //   nomination to start as soon as the fold sees it
         },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
@@ -5215,6 +5217,23 @@
                 if (wsr && ws >= 0 && we >= 0) _watchNominate(wsr, ws, we);
                 return;
             }
+            // "Start now" — nominate AND start in one gesture. Checked BEFORE
+            // the card's own nominate handler, which would otherwise swallow
+            // the click (the button lives inside the card).
+            t = e.target.closest('[data-chat-watch-now]');
+            if (t) {
+                var nr = state.watch.searchResults[parseInt(t.getAttribute('data-chat-watch-now'), 10)];
+                if (nr) _watchNominate(nr, null, null, true);
+                return;
+            }
+            t = e.target.closest('[data-chat-watch-nowshow]');
+            if (t) {
+                var nsr = state.watch.searchResults[parseInt(t.getAttribute('data-chat-watch-nowshow'), 10)];
+                var nsS = q('[data-chat-watch-se-s]'), nsE = q('[data-chat-watch-se-e]');
+                var ns = nsS ? parseInt(nsS.value, 10) : -1, ne = nsE ? parseInt(nsE.value, 10) : -1;
+                if (nsr && ns >= 0 && ne >= 0) _watchNominate(nsr, ns, ne, true);
+                return;
+            }
             t = e.target.closest('[data-chat-watch-nom]');
             if (t && !e.target.closest('.chat-watch-sepick')) {
                 var wi = parseInt(t.getAttribute('data-chat-watch-nom'), 10);
@@ -5235,7 +5254,14 @@
             t = e.target.closest('[data-chat-watch-vote]');
             if (t) { sendProtocol('watch.vote', { o: t.getAttribute('data-chat-watch-vote') }); return; }
             t = e.target.closest('[data-chat-watch-start]');
-            if (t) { sendProtocol('watch.start', { o: t.getAttribute('data-chat-watch-start') }); return; }
+            if (t) {
+                // Pressing ▶ IS the opt-in gesture — making the person who
+                // started the showing hunt for a second button to watch their
+                // own pick was the wrong reading of "playback is opt-in".
+                state.watch.autoJoin = t.getAttribute('data-chat-watch-start');
+                sendProtocol('watch.start', { o: state.watch.autoJoin });
+                return;
+            }
             t = e.target.closest('[data-chat-watch-unnom]');
             if (t) { sendProtocol('watch.unnom', { o: t.getAttribute('data-chat-watch-unnom') }); return; }
             t = e.target.closest('[data-chat-watch-grab]');
@@ -6664,6 +6690,12 @@
 
     function _watchJoinChip(now) {
         if (state.watch.ownedDenied) return '';
+        if (!(now.key in state.watch.owned)) {
+            // The probe is still out. Saying so matters: an empty action row
+            // here is indistinguishable from "this is broken", and the probe
+            // is exactly when a user is looking hardest for the play button.
+            return '<span class="chat-watch-own chat-watch-own--wait">checking your library…</span>';
+        }
         if (state.watch.owned[now.key] !== true) return '';   // no file here, nothing to join
         if (state.watch.joined === now.key) {
             return '<button class="chat-arc-btn" type="button" data-chat-watch-leave ' +
@@ -6800,6 +6832,28 @@
         _watchFetchOwned(st);
         // A NEW showing supersedes whatever we joined: the old party is over.
         if (state.watch.joined && (!st.now || st.now.key !== state.watch.joined)) _watchTeardown();
+
+        // Deferred intents, resolved against the FOLD rather than guessed at
+        // locally: we never compute a nomination key here (that logic lives in
+        // chat-protocol's reducer and must have exactly one home), we just wait
+        // for the key we asked for to show up.
+        if (state.watch.autoStart) {
+            var pending = st.noms.filter(function (n) { return n.key === state.watch.autoStart; })[0];
+            if (pending) {
+                state.watch.autoJoin = pending.key;
+                state.watch.autoStart = '';
+                sendProtocol('watch.start', { o: pending.key });
+            }
+        }
+        if (state.watch.autoJoin && st.now && st.now.key === state.watch.autoJoin) {
+            state.watch.autoJoin = '';
+            // Only if this box can actually play it — otherwise leave the Grab
+            // path alone rather than mounting a screen with nothing behind it.
+            if (state.watch.owned[st.now.key] === true && state.watch.joined !== st.now.key) {
+                _watchJoin();
+                return;                       // _watchJoin re-renders
+            }
+        }
         var can = state.canSend;
         var html = '<div class="chat-watch-headrow">🎬 <b>Movie night</b>' +
             '<span class="chat-jbx-meta">' +
@@ -6844,16 +6898,21 @@
                         (n.votes ? ' · ' + n.votes + ' vote' + (n.votes === 1 ? '' : 's') : '') +
                     '</div>' +
                 '</div>' +
-                _watchOwnChip(n.key, n) +
-                (can ? '<button class="chat-arc-btn" type="button" title="Vote for this one" ' +
-                           'data-chat-watch-vote="' + attr(n.key) + '">👍' +
-                           (n.votes ? ' ' + n.votes : '') + '</button>' +
-                       '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
-                           'title="Start the party with this" ' +
-                           'data-chat-watch-start="' + attr(n.key) + '">▶</button>'
-                     : (n.votes ? '<span class="chat-jbx-meta">👍 ' + n.votes + '</span>' : '')) +
-                (canPull ? '<button class="chat-pin-del" type="button" title="Withdraw this nomination" ' +
-                               'data-chat-watch-unnom="' + attr(n.key) + '">×</button>' : '') +
+                // The controls get their own wrapper so they can drop to a
+                // second line in a narrow rail. Unwrapped, they were flex
+                // siblings that shrank below their own text and collided.
+                '<div class="chat-watch-row-acts">' +
+                    _watchOwnChip(n.key, n) +
+                    (can ? '<button class="chat-arc-btn" type="button" title="Vote for this one" ' +
+                               'data-chat-watch-vote="' + attr(n.key) + '">👍' +
+                               (n.votes ? ' ' + n.votes : '') + '</button>' +
+                           '<button class="chat-arc-btn chat-arc-btn--go" type="button" ' +
+                               'title="Start the party with this" ' +
+                               'data-chat-watch-start="' + attr(n.key) + '">▶ Play</button>'
+                         : (n.votes ? '<span class="chat-jbx-meta">👍 ' + n.votes + '</span>' : '')) +
+                    (canPull ? '<button class="chat-pin-del" type="button" title="Withdraw this nomination" ' +
+                                   'data-chat-watch-unnom="' + attr(n.key) + '">×</button>' : '') +
+                '</div>' +
             '</div>';
         }).join('');
         host.innerHTML = html;
@@ -6977,11 +7036,17 @@
                               '<label>Season <input class="chat-input chat-watch-sein" data-chat-watch-se-s type="number" min="0" max="999" value="1"></label>' +
                               '<label>Episode <input class="chat-input chat-watch-sein" data-chat-watch-se-e type="number" min="0" max="9999" value="1"></label>' +
                               '<button class="chat-send-btn" type="button" data-chat-watch-nomshow="' + i + '">Nominate S·E</button>' +
+                              '<button class="chat-send-btn" type="button" data-chat-watch-nowshow="' + i + '">Start now</button>' +
                           '</div>'
                         : '') +
                 '</div>' +
                 '<span class="chat-watch-resact">' +
-                    (picking ? '' : (isShow ? 'Pick episode ▸' : 'Nominate ▸')) + '</span>' +
+                    (picking ? '' :
+                        (isShow ? 'Pick episode ▸'
+                                : '<button class="chat-arc-btn chat-arc-btn--go chat-watch-resnow" type="button" ' +
+                                      'data-chat-watch-now="' + i + '" ' +
+                                      'title="Put it on right now — skips the ballot">Start now</button>' +
+                                  '<span class="chat-watch-resnom">Nominate ▸</span>')) + '</span>' +
             '</div>';
         }).join('');
     }
@@ -7029,7 +7094,10 @@
         });
     }
 
-    function _watchNominate(r, s, e) {
+    // ``now`` = nominate AND start it the moment the fold sees the nomination.
+    // Alone in a room, nominate → vote → start is three gestures of ceremony to
+    // watch your own film; the ballot still exists untouched for real parties.
+    function _watchNominate(r, s, e, now) {
         var p = { id: String(r.tmdb_id), kd: (s != null) ? 't' : 'm',
                   ti: String(r.title || '').slice(0, 120) };
         if (r.year) p.y = String(r.year).slice(0, 4);
@@ -7038,9 +7106,19 @@
         // which must never be broadcast into a public Soulseek room.
         if (r.po && /^https:\/\/image\.tmdb\.org\//.test(r.po)) p.po = String(r.po).slice(0, 200);
         if (s != null) { p.s = s; p.e = e; }
+        if (now) {
+            // The key is the reducer's to compute — mirror its shape ONCE here
+            // only to know what to wait for, and let renderWatch confirm the
+            // nomination actually landed before starting anything.
+            state.watch.autoStart = (s != null)
+                ? 't:' + p.id + ':' + s + 'x' + e
+                : 'm:' + p.id;
+        }
         sendProtocol('watch.nom', p);
         _closeWatchModal();
-        if (typeof showToast === 'function') showToast('🎬 Nominated — the room votes', 'success');
+        if (typeof showToast === 'function') {
+            showToast(now ? '🎬 Starting…' : '🎬 Nominated — the room votes', 'success');
+        }
     }
 
     function onRoomMessages(d) {

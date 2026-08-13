@@ -75802,12 +75802,27 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 }
 .chat-watch-poster--ph { display: flex; align-items: center; justify-content: center;
     font-size: 15px; opacity: 0.6; }
+/* A GRID, not a flex row. The rail is narrow and the controls vary in number
+   (own-chip / vote / play / withdraw), so as flex siblings they shrank below
+   their own text and collided. Two areas — thumb + title on the first line,
+   controls on their own beneath — means nothing ever has to squeeze. */
 .chat-watch-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 5px 6px; border-radius: 8px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "thumb main" "acts acts";
+    align-items: center;
+    gap: 4px 8px;
+    padding: 6px; border-radius: 8px;
 }
 .chat-watch-row:hover { background: rgba(255,255,255,0.04); }
-.chat-watch-row-main { flex: 1 1 auto; min-width: 0; }
+.chat-watch-row > .chat-watch-thumb { grid-area: thumb; }
+.chat-watch-row-main { grid-area: main; min-width: 0; }
+.chat-watch-row-acts {
+    grid-area: acts;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+}
+/* Controls keep their intrinsic width and wrap instead of compressing. */
+.chat-watch-row-acts > * { flex: 0 0 auto; }
 .chat-watch-row-ti { font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.88);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-watch-se { font-size: 10.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px;
@@ -75815,6 +75830,18 @@ button.chat-hidden-note:hover { color: rgba(255,255,255,0.65); }
 .chat-watch-own { font-size: 10.5px; font-weight: 700; white-space: nowrap;
     color: #6ee7a0; }
 .chat-watch-own--want { color: rgba(var(--accent-light-rgb), 0.9); }
+.chat-watch-own--wait { color: rgba(255,255,255,0.45); font-weight: 600; font-style: italic; }
+/* The showing block has the same crowding problem once Join/Pause/End/own-chip
+   all land in it, so its action row wraps too. */
+.chat-watch-now-acts > * { flex: 0 0 auto; }
+.chat-watch-now { min-width: 0; }
+.chat-watch-now-main { flex: 1 1 auto; min-width: 0; }
+.chat-watch-now-ti { overflow: hidden; text-overflow: ellipsis; }
+/* Picker: "Start now" beside the nominate affordance, without stacking. */
+.chat-watch-resact { display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    align-self: center; white-space: nowrap; }
+.chat-watch-resnom { font-size: 11px; color: rgba(255,255,255,0.5); }
+.chat-watch-resnow { font-size: 11px; }
 /* ── movie night picker modal — its OWN design. The jukebox's landscape
    video-card grid (minmax(180px) columns, 16:9 thumbs) cannot hold 2:3
    posters; these are row cards: poster left, title/meta/overview right. ── */
