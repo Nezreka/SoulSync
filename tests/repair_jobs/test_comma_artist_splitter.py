@@ -486,10 +486,18 @@ def test_bulk_fix_comma_artist_split_end_to_end(tmp_path):
 
 # ── UI contract pins (labels + detail renderer present) ──────────────────────
 
-def test_enrichment_js_carries_the_ui_contract():
-    js = open(os.path.join(os.path.dirname(__file__), '..', '..',
-                           'webui', 'static', 'enrichment.js'), encoding='utf-8').read()
-    assert "comma_artist_split: 'Comma Artist'" in js       # type badge
-    assert "comma_artist_split: 'Split Artists'" in js      # fix button
-    assert "artists_split: 'Artists Split'" in js           # resolved badge
-    assert "case 'comma_artist_split':" in js               # detail renderer
+def test_the_findings_ui_carries_the_contract():
+    """The Tools findings surface is React since the P7 flip, and the vanilla
+    renderers it replaced were deleted once each was proven to have no caller.
+    The contract did not move with them — it lives in the React modules now, so
+    this follows it rather than pinning a file that no longer renders anything.
+
+    Labels and the detail renderer are separate modules on that side, so this
+    checks each where it actually lives."""
+    root = os.path.join(os.path.dirname(__file__), '..', '..', 'webui', 'src', 'routes', 'tools')
+    core = open(os.path.join(root, '-tools.core.ts'), encoding='utf-8').read()
+    detail = open(os.path.join(root, '-ui', 'finding-detail.tsx'), encoding='utf-8').read()
+    assert "comma_artist_split: 'Comma Artist'" in core      # type badge
+    assert "comma_artist_split: 'Split Artists'" in core     # fix button
+    assert "artists_split: 'Artists Split'" in core          # resolved badge
+    assert "case 'comma_artist_split':" in detail            # detail renderer

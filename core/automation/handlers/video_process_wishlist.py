@@ -372,7 +372,8 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
     else:
         # torrent / usenet — hand off to the shared client; carry the returned ref into the row.
         from core.video.client_grab import grab
-        res = grab(source, best.get("download_url"))
+        res = grab(source, best.get("download_url"),
+                   fallback_magnet=best.get("magnet_uri"))
         if not res.get("ok"):
             logger.warning("video hybrid: %s grab refused for %s: %s", source, item.get("title"), res.get("error"))
             return False

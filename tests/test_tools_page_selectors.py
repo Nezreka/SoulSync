@@ -87,25 +87,6 @@ RETIRED_MARKUP_TOKENS = {
     ("downloads.js", "gsearch-aura"),
     ("downloads.js", "gsearch-shortcut"),
     ("downloads.js", "gsearch-clear"),
-    # Same shape, from the Tools flip. `id="repair-findings-dashboard"` left
-    # index.html in 504d28269 ("feat(tools): P7a — flip the route, delete the
-    # vanilla markup"); the React findings surface renders that dashboard now.
-    # Its vanilla builder, loadRepairFindingsDashboard, stayed behind and is
-    # UNREACHABLE: its only entry point is switchRepairTab, whose only caller
-    # is initializeToolsPage, which has no callers at all now that 'tools' is a
-    # React route (init.js:3423 says so in as many words). The lookup returns
-    # null and the function returns on its first line.
-    #
-    # Not deleted with the markup because enrichment.js itself is very much
-    # alive — core.js:885 drives updateRepairStatusFromData from the socket, in
-    # the same file — so unpicking the dead tab renderers from the live status
-    # path is its own change with its own reachability sweep, not a drive-by.
-    # The video side is unaffected either way: video/video-repair.js carries its
-    # own loadRepairJobs/loadRepairFindings/loadRepairHistory.
-    #
-    # SELF-DELETING like the block above: when that sweep removes the vanilla
-    # repair-tab renderers, this entry stops matching — delete it then.
-    ("enrichment.js", "repair-findings-dashboard"),
 }
 
 KNOWN_CLASS_AS_ID = {

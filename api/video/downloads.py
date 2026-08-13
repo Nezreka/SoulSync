@@ -162,7 +162,8 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "repack": parsed.get("repack") or parsed.get("proper"),
             # torrent/usenet grab carriers (present only for Prowlarr hits) — the magnet/NZB
             # URL + protocol the grab hands to the shared torrent/usenet client.
-            "download_url": hit.get("download_url"), "protocol": hit.get("protocol"),
+            "download_url": hit.get("download_url"), "magnet_uri": hit.get("magnet_uri"),
+            "protocol": hit.get("protocol"),
             "indexer_id": hit.get("indexer_id"), "guid": hit.get("guid"),
         })
     # accepted first, then quality-profile score, then availability, then bigger file.
@@ -793,7 +794,8 @@ def register_routes(bp):
             # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
             # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
             from core.video.client_grab import grab
-            res = grab(source, body.get("download_url"))
+            res = grab(source, body.get("download_url"),
+                       fallback_magnet=body.get("magnet_uri"))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
             dl_id = db.add_video_download({**common, "source": source,

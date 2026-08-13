@@ -47,12 +47,21 @@ _CONTRACT = {
     #   - navigateToArtistDetail's coupling genuinely IS gone: the React page
     #     renders /artist-detail/$source/$id hrefs and lets the router handle
     #     it instead of calling the global.
+    # enrichment.js held BOTH of these through the Tools findings renderers:
+    # playFindingTrack played a finding's track, openFindingArtist opened its
+    # artist. Those renderers were deleted when the dead vanilla repair region
+    # went, and — same as the search.js case above — the couplings did not go
+    # with them. finding-detail.tsx makes both calls now, so both are recorded
+    # where they live rather than dropped, which is the whole point of this
+    # table: a port that quietly loses a guard looks identical to a port that
+    # never needed one.
     "playLibraryTrack": {
         "stats-automations.js", "shell-bridge.js", "downloads.js",
-        "enrichment.js", "src/routes/search/-search.actions.ts",
+        "src/routes/search/-search.actions.ts",
+        "src/routes/tools/-ui/finding-detail.tsx",
     },
     "navigateToArtistDetail": {
-        "shell-bridge.js", "enrichment.js",
+        "shell-bridge.js", "src/routes/tools/-ui/finding-detail.tsx",
     },
     "artistDetailPageState": {"stats-automations.js"},
     "_updateSidebarLibraryBreadcrumb": {"shell-bridge.js"},
