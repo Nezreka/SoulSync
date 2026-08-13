@@ -160,6 +160,7 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
             "rating_count": "discogs_rating_count",
         },
         "bandcamp": {
+            "id": "bandcamp_id",
             "tags": _AsList("bandcamp_tags"), "label": "bandcamp_label",
         },
     },
@@ -170,6 +171,7 @@ _ENRICHMENT_PAYLOAD: Dict[str, Dict[str, Dict[str, str]]] = {
         },
         "genius": {"description": "genius_description", "url": "genius_url"},
         "bandcamp": {
+            "id": "bandcamp_id",
             "tags": _AsList("bandcamp_tags"), "label": "bandcamp_label",
         },
     },

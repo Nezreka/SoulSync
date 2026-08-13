@@ -1616,7 +1616,7 @@ class MusicDatabase:
             # Auto writes can't clobber a manual lock; manual writes always apply.
             guard = "" if locked else " AND (canonical_locked IS NULL OR canonical_locked = 0)"
             cursor.execute(
-                "UPDATE albums SET canonical_source = ?, canonical_album_id = ?, "
+                "UPDATE lib2_albums SET canonical_source = ?, canonical_album_id = ?, "
                 "canonical_score = ?, canonical_locked = ?, "
                 "canonical_resolved_at = CURRENT_TIMESTAMP "
                 f"WHERE id = ?{guard}",
@@ -1640,7 +1640,7 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT canonical_source, canonical_album_id, canonical_score, "
-                "canonical_resolved_at, canonical_locked FROM albums WHERE id = ?",
+                "canonical_resolved_at, canonical_locked FROM lib2_albums WHERE id = ?",
                 (album_id,),
             )
             row = cursor.fetchone()

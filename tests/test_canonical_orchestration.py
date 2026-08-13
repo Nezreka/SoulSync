@@ -16,26 +16,28 @@ STD = [{"duration_ms": 180_000 + i * 10_000, "title": f"Song {i+1}", "track_numb
 DLX = STD + [{"duration_ms": 320_000 + i * 10_000, "title": f"Bonus {i+1}", "track_number": 12 + i} for i in range(6)]
 
 
-def _seed(db, *, spotify=None, deezer=None, n_files=11):
-    """Insert an album (with given source IDs) + n_files tracks whose
-    durations/titles match the STANDARD release."""
+def _seed(db, *, spotify=None, deezer=None, n_files=11, artist_image=None,
+          album_image=None):
+    """A catalogue album (with given source IDs) + n_files tracks whose
+    durations/titles match the STANDARD release. Returns its catalogue id."""
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('art1', 'Imagine Dragons')")
-    cur.execute(
-        "INSERT INTO albums (id, title, artist_id, spotify_album_id, deezer_id) "
-        "VALUES ('alb1', 'Evolve', 'art1', ?, ?)",
-        (spotify, deezer),
-    )
+    artist = seed_artist(conn, server_id='art1', name='Imagine Dragons',
+                         image_url=artist_image)
+    album = seed_album(conn, server_id='alb1', title='Evolve', artist_id=artist,
+                       image_url=album_image)
+    conn.execute(
+        "UPDATE lib2_albums SET spotify_id=?,"
+        "       external_ids=CASE WHEN ? IS NULL THEN external_ids"
+        "                         ELSE json_set(external_ids,'$.deezer',?) END"
+        " WHERE id=?", (spotify, deezer, deezer, album))
     for i in range(n_files):
-        cur.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration) "
-            "VALUES (?, 'alb1', 'art1', ?, ?, ?)",
-            (f"t{i}", f"Song {i+1}", i + 1, 180_000 + i * 10_000),
-        )
+        seed_track(conn, server_id=f"t{i}", title=f"Song {i+1}", album_id=album,
+                   artist_id=artist, track_number=i + 1,
+                   duration=180_000 + i * 10_000)
     conn.commit()
     conn.close()
-    return "alb1"
+    return album
 
 
 def test_resolve_and_store_picks_best_fit_and_persists(tmp_path):
@@ -72,24 +74,11 @@ def test_default_mode_prefers_active_source(tmp_path):
 
 def test_result_includes_artist_and_album_context(tmp_path):
     db = MusicDatabase(str(tmp_path / "m.db"))
-    conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('art1', 'Imagine Dragons', 'http://artist.jpg')")
-    cur.execute(
-        "INSERT INTO albums (id, title, artist_id, thumb_url, spotify_album_id) "
-        "VALUES ('alb1', 'Evolve', 'art1', 'http://album.jpg', 'sp1')"
-    )
-    for i in range(11):
-        cur.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration) "
-            "VALUES (?, 'alb1', 'art1', ?, ?, ?)",
-            (f"t{i}", f"Song {i+1}", i + 1, 180_000 + i * 10_000),
-        )
-    conn.commit()
-    conn.close()
+    album_id = _seed(db, spotify="sp1", artist_image='http://artist.jpg',
+                     album_image='http://album.jpg')
 
     out = resolve_and_store_canonical_for_album(
-        db, "alb1", fetch_tracklist=lambda s, a: STD, source_priority=["spotify"],
+        db, album_id, fetch_tracklist=lambda s, a: STD, source_priority=["spotify"],
     )
     assert out["artist_name"] == "Imagine Dragons"
     assert out["album_thumb_url"] == "http://album.jpg"

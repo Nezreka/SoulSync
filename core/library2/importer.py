@@ -314,6 +314,30 @@ def _legacy_rows(
         last_rowid = int(rows[-1]["__lib2_source_rowid"])
 
 
+def _server_identity(row: Any) -> Tuple[Optional[str], Optional[str]]:
+    """``(server_source, server_id)`` for a legacy row.
+
+    A legacy row's own id IS the media server's id — that is the whole of
+    #1069, and why the column had to become TEXT. Without carrying it, a
+    migrated library cannot say which server reported a row: removal
+    detection, per-server statistics and the M3U export filter all go silent,
+    and the next scan re-matches every row by name (§50.4.4.34). A row no
+    server reported (a SoulSync download) gets neither half — claiming a
+    server knows it would be worse than saying nothing.
+    """
+    server_source = _pick(row, "server_source")
+    if not server_source:
+        return None, None
+    return str(server_source), str(row["id"])
+
+
+def _enrichment_columns(entity_type: str) -> Tuple[str, ...]:
+    """Legacy columns the enrichment bucket reads — from the one declaration."""
+    from core.library2.enrich import enrichment_columns
+
+    return enrichment_columns(entity_type)
+
+
 def _provider_id_columns(entity_type: str) -> Tuple[str, ...]:
     from .match_status import SERVICES
 
@@ -431,46 +455,38 @@ def _parse_json_list(raw: Any) -> Optional[List[Any]]:
     return parsed if isinstance(parsed, list) and parsed else None
 
 
-def _artist_enrichment_payload(row: Any) -> Dict[str, Dict[str, Any]]:
-    """Provider-specific bio/stats fields (§17.7 remainder) the legacy row may
-    carry, keyed by source. These are enrichment content, not identity (unlike
-    ``external_ids``), so they're grouped per-provider instead of flattened —
-    a Last.fm bio and a Genius description are different text, not the same
-    field from two sources."""
-    lastfm = {
-        "bio": _pick(row, "lastfm_bio"),
-        "listeners": _pick(row, "lastfm_listeners"),
-        "tags": _parse_json_list(_pick(row, "lastfm_tags")),
-        "similar": _parse_json_list(_pick(row, "lastfm_similar")),
-        "url": _pick(row, "lastfm_url"),
-    }
-    genius = {
-        "description": _pick(row, "genius_description"),
-        "alt_names": _parse_json_list(_pick(row, "genius_alt_names")),
-        "url": _pick(row, "genius_url"),
-    }
-    discogs = {
-        "bio": _pick(row, "discogs_bio"),
-        "members": _parse_json_list(_pick(row, "discogs_members")),
-        "urls": _parse_json_list(_pick(row, "discogs_urls")),
-    }
-    out: Dict[str, Dict[str, Any]] = {}
-    for source, fields in (("lastfm", lastfm), ("genius", genius), ("discogs", discogs)):
-        cleaned = {k: v for k, v in fields.items() if v not in (None, "", [])}
-        if cleaned:
-            out[source] = cleaned
-    return out
+def _enrichment_payload(entity_type: str, row: Any) -> Dict[str, Dict[str, Any]]:
+    """Provider-specific bio/stats/tag fields (§17.7 remainder) the legacy row
+    may carry, keyed by source. These are enrichment content, not identity
+    (unlike ``external_ids``), so they're grouped per-provider instead of
+    flattened — a Last.fm bio and a Genius description are different text, not
+    the same field from two sources.
+
+    The field map is ``enrich._ENRICHMENT_PAYLOAD``, the same declaration the
+    trigger mirror and the divergence audit read. The migration used to keep
+    its own hand-written copy, for artists only: every album wiki and track
+    tag list was dropped on the one-time import (§50.4.4.34).
+    """
+    from core.library2.enrich import _enrichment_payload as _from_declaration
+
+    return _from_declaration(entity_type, row)
 
 
-def _merge_artist_enrichment(cursor, artist_id: int, payload: Dict[str, Dict[str, Any]]) -> None:
-    """Merge provider enrichment into the artist's ``enrichment`` JSON column,
+_ENRICHMENT_TABLES = {"artist": "lib2_artists", "album": "lib2_albums",
+                      "track": "lib2_tracks"}
+
+
+def _merge_enrichment(cursor, entity_type: str, entity_id: int,
+                      payload: Dict[str, Dict[str, Any]]) -> None:
+    """Merge provider enrichment into a row's ``enrichment`` JSON column,
     filling only fields not already set (per-provider, per-field) — mirrors
     ``_merge_external_ids``'s never-overwrite semantics so a thinner re-import
     never clobbers richer data an earlier import already captured."""
     if not payload:
         return
+    table = _ENRICHMENT_TABLES[entity_type]
     row = cursor.connection.execute(
-        "SELECT enrichment FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+        f"SELECT enrichment FROM {table} WHERE id=?", (entity_id,)).fetchone()
     try:
         current = json.loads((row["enrichment"] if row else None) or "{}")
         if not isinstance(current, dict):
@@ -484,8 +500,8 @@ def _merge_artist_enrichment(cursor, artist_id: int, payload: Dict[str, Dict[str
             bucket.setdefault(field, value)
     if merged != current:
         cursor.execute(
-            "UPDATE lib2_artists SET enrichment=? WHERE id=?",
-            (json.dumps(merged, sort_keys=True, separators=(",", ":")), artist_id))
+            f"UPDATE {table} SET enrichment=? WHERE id=?",
+            (json.dumps(merged, sort_keys=True, separators=(",", ":")), entity_id))
 
 
 def _extra_provider_ids(row: Any, entity_type: str, exclude: Set[str]) -> Dict[str, Any]:
@@ -720,7 +736,10 @@ class _ArtistResolver:
                 "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
-                "aliases=?, soul_id=COALESCE(?, soul_id), legacy_artist_id=?, "
+                "aliases=?, soul_id=COALESCE(?, soul_id), "
+                "server_source=COALESCE(?, server_source), "
+                "server_id=COALESCE(?, server_id), "
+                "added_at=COALESCE(?, added_at), legacy_artist_id=?, "
                 "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (fields["name"], normalize_name(fields["name"]),
                  fields["sort_name"], row_ids.get("spotify"),
@@ -728,7 +747,9 @@ class _ArtistResolver:
                  external_json, fields["image_url"], fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
                  fields["label"], fields["banner_url"], fields["aliases"],
-                 fields["soul_id"], legacy_id, run_id, existing),
+                 fields["soul_id"], fields.get("server_source"),
+                 fields.get("server_id"), fields.get("added_at"),
+                 legacy_id, run_id, existing),
             )
             self._by_legacy[_legacy_key(legacy_id)] = existing
             self._by_name.setdefault(normalize_name(fields["name"]), existing)
@@ -739,14 +760,18 @@ class _ArtistResolver:
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
             "external_ids, image_url, genres, summary, style, mood, label, "
-            "banner_url, aliases, soul_id, legacy_artist_id, quality_profile_id, "
-            "legacy_import_run_id, monitored) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "banner_url, aliases, soul_id, server_source, server_id, "
+            "legacy_artist_id, quality_profile_id, "
+            "legacy_import_run_id, monitored, added_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "       COALESCE(?, CURRENT_TIMESTAMP))",
             (fields["name"], normalize_name(fields["name"]),
              fields["sort_name"], spotify_col, mbid_col, external_json,
              fields["image_url"], fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
-             fields["aliases"], fields["soul_id"], legacy_id,
-             self.default_profile_id, run_id, 0),
+             fields["aliases"], fields["soul_id"], fields.get("server_source"),
+             fields.get("server_id"), legacy_id,
+             self.default_profile_id, run_id, 0, fields.get("added_at")),
         )
         new_id = self.cursor.lastrowid
         self._by_legacy[_legacy_key(legacy_id)] = new_id
@@ -1109,6 +1134,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "lastfm_similar", "lastfm_url", "genius_description",
                 "genius_alt_names", "genius_url", "discogs_bio",
                 "discogs_members", "discogs_urls",
+                "server_source", "created_at",
+                *_enrichment_columns("artist"),
                 *_provider_id_columns("artist"),
             ),
         )
@@ -1128,9 +1155,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             name = row["name"]
             if not name:
                 continue
+            server_source, server_id = _server_identity(row)
             lib2_artist_id = resolver.upsert_legacy(row["id"], {
                 "name": name,
                 "sort_name": name,
+                "server_source": server_source,
+                "server_id": server_id,
+                "added_at": _pick(row, "created_at"),
                 "spotify_id": _legacy_spotify_id(row, "spotify_artist_id"),
                 "musicbrainz_id": _pick(row, "musicbrainz_artist_id", "musicbrainz_id"),
                 # Import EVERY provider id the legacy row carries (SoulSync's
@@ -1174,7 +1205,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # enrichment content, not identity, so it's merged separately
             # (never overwrites a richer existing value) rather than threaded
             # through the same COALESCE-on-UPDATE columns as name/image/genres.
-            _merge_artist_enrichment(cursor, lib2_artist_id, _artist_enrichment_payload(row))
+            _merge_enrichment(cursor, "artist", lib2_artist_id,
+                              _enrichment_payload("artist", row))
             stats["artists"] += 1
             if (i + 1) % IMPORT_BATCH_SIZE == 0:
                 checkpoint("artists", artist_done + i + 1, artist_total,
@@ -1198,7 +1230,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "musicbrainz_release_id", "thumb_url", "genres", "explicit",
                 "label", "upc", "style", "mood", "soul_id", "deezer_album_id",
                 "deezer_id", "tidal_album_id", "tidal_id", "qobuz_album_id",
-                "qobuz_id", *_provider_id_columns("album"),
+                "qobuz_id", "record_type", "server_source", "created_at",
+                "canonical_source", "canonical_album_id", "canonical_score",
+                "canonical_resolved_at", "canonical_locked",
+                *_enrichment_columns("album"),
+                *_provider_id_columns("album"),
             ),
         )
         album_total = int(cursor.execute("SELECT COUNT(*) FROM albums").fetchone()[0])
@@ -1241,7 +1277,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             actual = actual_track_counts.get(_legacy_key(row["id"]), 0)
             track_count = _pick(row, "track_count")
             album_type = _normalize_album_type(
-                _pick(row, "album_type", "release_type", "type"),
+                # `record_type` is what the legacy schema calls it; the other
+                # three are shapes older imports produced.
+                _pick(row, "album_type", "record_type", "release_type", "type"),
                 track_count,
                 actual,
             )
@@ -1261,6 +1299,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 _pick(row, "style"), _pick(row, "mood"),
                 # docs §50.4.4.12 — see the artist note.
                 _pick(row, "soul_id"),
+                # #758/#765: the pinned canonical release. The locked half is a
+                # decision the user made; nothing can recompute it (§50.4.4.34).
+                _pick(row, "canonical_source"), _pick(row, "canonical_album_id"),
+                _pick(row, "canonical_score"), _pick(row, "canonical_resolved_at"),
+                _pick(row, "canonical_locked"),
+                # The server link. A legacy row's id IS the server's own id.
+                *_server_identity(row),
             )
             existing = album_map.get(_legacy_key(row["id"]))
             if existing is None:
@@ -1286,9 +1331,17 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "upc=COALESCE(?, upc), "
                     "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                     "soul_id=COALESCE(?, soul_id), "
+                    "canonical_source=COALESCE(?, canonical_source), "
+                    "canonical_album_id=COALESCE(?, canonical_album_id), "
+                    "canonical_score=COALESCE(?, canonical_score), "
+                    "canonical_resolved_at=COALESCE(?, canonical_resolved_at), "
+                    "canonical_locked=COALESCE(?, canonical_locked), "
+                    "server_source=COALESCE(?, server_source), "
+                    "server_id=COALESCE(?, server_id), "
+                    "added_at=COALESCE(?, added_at), "
                     "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (*fields, row["id"], run_id, existing),
+                    (*fields, _pick(row, "created_at"), row["id"], run_id, existing),
                 )
                 album_id = existing
             else:
@@ -1307,9 +1360,15 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
                     "track_count, expected_track_count, explicit, label, upc, "
                     "style, mood, soul_id, "
-                    "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*fields, row["id"], default_profile_id, album_monitored, run_id),
+                    "canonical_source, canonical_album_id, canonical_score, "
+                    "canonical_resolved_at, canonical_locked, "
+                    "server_source, server_id, "
+                    "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id, "
+                    "added_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                    "       COALESCE(?, CURRENT_TIMESTAMP))",
+                    (*fields, row["id"], default_profile_id, album_monitored, run_id,
+                     _pick(row, "created_at")),
                 )
                 album_id = cursor.lastrowid
                 album_map[_legacy_key(row["id"])] = album_id
@@ -1318,6 +1377,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # Beyond those five, capture the long tail (iTunes/AudioDB/Discogs/
             # Amazon/JioSaavn/Bandcamp/…) from match_status.SERVICES so a new
             # provider only needs to be added there, not re-derived here (§17.7).
+            _merge_enrichment(cursor, "album", album_id,
+                              _enrichment_payload("album", row))
             _merge_album_external_ids(cursor, album_id, {
                 "spotify": _legacy_spotify_id(row, "spotify_album_id"),
                 "deezer": _pick(row, "deezer_album_id", "deezer_id"),
@@ -1394,6 +1455,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "play_count", "last_played", "file_path", "quality_profile_id",
                 "artist_id", "track_artist", "file_size", "bitrate",
                 "sample_rate", "bit_depth", "verification_status",
+                "server_source", "created_at",
+                *_enrichment_columns("track"),
                 *_provider_id_columns("track"),
             ),
         )
@@ -1455,8 +1518,12 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "album_soul_id=COALESCE(?, album_soul_id), "
                     "play_count=COALESCE(?, play_count), "
                     "last_played=COALESCE(?, last_played), "
+                    "server_source=COALESCE(?, server_source), "
+                    "server_id=COALESCE(?, server_id), "
+                    "added_at=COALESCE(?, added_at), "
                     "legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (*tfields, run_id, existing),
+                    (*tfields, *_server_identity(row), _pick(row, "created_at"),
+                     run_id, existing),
                 )
                 track_id = existing
             else:
@@ -1487,12 +1554,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, "
                     "duration, isrc, musicbrainz_id, spotify_id, bpm, explicit, "
                     "genius_lyrics, copyright, style, mood, soul_id, album_soul_id, "
-                    "play_count, last_played, "
+                    "play_count, last_played, server_source, server_id, "
                     "legacy_track_id, quality_profile_id, quality_profile_explicit, "
-                    "monitored, legacy_import_run_id) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (*insert_fields, row["id"], track_profile_id, profile_explicit,
-                     track_monitored, run_id),
+                    "monitored, legacy_import_run_id, added_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                    "       COALESCE(?, CURRENT_TIMESTAMP))",
+                    (*insert_fields, *_server_identity(row), row["id"],
+                     track_profile_id, profile_explicit, track_monitored, run_id,
+                     _pick(row, "created_at")),
                 )
                 track_id = cursor.lastrowid
                 track_map[_legacy_key(row["id"])] = track_id
@@ -1501,6 +1570,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # dedicated columns above) — deezer/tidal/qobuz/itunes/audiodb/genius/
             # amazon/jiosaavn/bandcamp/lastfm — via the same match_status.SERVICES
             # mapping the album/track match-status chips already trust (§17.7).
+            _merge_enrichment(cursor, "track", track_id,
+                              _enrichment_payload("track", row))
             _merge_track_external_ids(
                 cursor, track_id,
                 _extra_provider_ids(row, "track", exclude={"spotify", "musicbrainz"}),

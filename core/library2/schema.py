@@ -467,6 +467,20 @@ _ADDED_COLUMNS = (
     ("lib2_albums", "mood", "ALTER TABLE lib2_albums ADD COLUMN mood TEXT"),
     ("lib2_tracks", "style", "ALTER TABLE lib2_tracks ADD COLUMN style TEXT"),
     ("lib2_tracks", "mood", "ALTER TABLE lib2_tracks ADD COLUMN mood TEXT"),
+    # #758/#765: which release of an album is the canonical one. The AUTO half
+    # is a resolver's answer and could be recomputed; the LOCKED half is the
+    # user saying "this version, not that one", and nothing can recover that
+    # once the legacy table is gone (§50.4.4.34).
+    ("lib2_albums", "canonical_source",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_source TEXT"),
+    ("lib2_albums", "canonical_album_id",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_album_id TEXT"),
+    ("lib2_albums", "canonical_score",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_score REAL"),
+    ("lib2_albums", "canonical_resolved_at",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_resolved_at TIMESTAMP"),
+    ("lib2_albums", "canonical_locked",
+     "ALTER TABLE lib2_albums ADD COLUMN canonical_locked INTEGER"),
     # Deep-dive A7/C4: pipeline-result detail (AcoustID message, quality-gate
     # fallback) that the autolink import-callback now persists per file.
     ("lib2_track_files", "pipeline_result_json",

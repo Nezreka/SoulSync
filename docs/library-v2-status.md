@@ -4720,3 +4720,62 @@ entkäme dem Zähler, und das ist der deutlich unwahrscheinlichere Fehler.
 Legacy-Schemaverwaltung (10), die Reorganize-Pipeline mitsamt Brücke (7), die
 Migration selbst (5), der Album-Canonical-Zeiger (2) und eine Handvoll
 Stellen, die an denselben Blöcken hängen.
+
+#### 50.4.4.34 Was die Migration fallen ließ
+
+Stand: **35/13**. Der Importer läuft genau einmal pro Installation — bei dem
+Update, das den Nutzer auf Library V2 hebt. Was er dabei nicht mitnimmt, ist
+nicht „fehlt bis zum nächsten Scan", sondern weg, denn die Legacy-Tabellen
+gehen mit. Gemessen gegen das echte Schema (63/76/74 Spalten) fehlten sechs
+Dinge:
+
+**1. `albums.record_type`.** Der Normalisierer suchte `album_type`,
+`release_type`, `type` — die drei Schreibweisen früherer Importe. Legacy
+nennt es `record_type`. Jede EP, jede Compilation, jedes Live-Album kam als
+schlichtes „album" an, mit der Antwort in genau der Zeile, die gelesen wurde.
+
+**2. `created_at`.** Wurde nirgends gelesen, also stand `added_at` auf dem
+Migrationszeitpunkt: die ganze Bibliothek an einem Tag hinzugefügt, und
+„zuletzt hinzugefügt" sortiert danach.
+
+**3. Die Server-Identität.** Eine Legacy-Zeile *ist* die Id des Medien-Servers
+— das ist der ganze #1069-Fall und der Grund, warum die Spalte TEXT werden
+musste. Ohne sie kann ein migrierter Katalog nicht sagen, welcher Server eine
+Zeile gemeldet hat: Entfernungserkennung, Per-Server-Statistik und der
+M3U-Filter laufen leer, und der nächste Scan gleicht jede Zeile wieder über
+den Namen ab. Eine Zeile, die kein Server gemeldet hat (ein SoulSync-Download),
+bekommt weiterhin keine — zu behaupten, ein Server kenne sie, wäre schlimmer
+als zu schweigen.
+
+**4. Die Provider-Anreicherung von Alben und Tracks.** Artists wurden
+übernommen, Alben und Tracks nicht: die Migration schrieb ein leeres `{}` über
+Last.fm-Wiki, Discogs-Katalognummer und Bandcamp-Label gleichermaßen — und das
+Nachholen sind tausende API-Aufrufe, die der Nutzer schon bezahlt hat. Ursache
+war eine zweite, handgeführte Feldliste im Importer. Jetzt liest er
+`enrich._ENRICHMENT_PAYLOAD`, dieselbe Deklaration, die der Trigger-Spiegel und
+die Divergenz-Prüfung schon lesen. Die numerische `bandcamp_id` ist dabei neu
+in der Deklaration — und der Wächtertest `test_mirror_declaration` hat sofort
+gemeldet, dass der Trigger sie dann auch beobachten muss.
+
+**5. Der Canonical-Zeiger (#758/#765).** `lib2_albums` bekommt die fünf
+Spalten. Die AUTO-Hälfte könnte ein Auflöser neu berechnen; die LOCKED-Hälfte
+ist die Entscheidung des Nutzers, welche Fassung eines Albums die richtige
+ist, und die kann niemand rekonstruieren.
+
+**Und eine Folge daraus:** der Canonical-Auflöser lieh sich seinen Album-Lader
+bei der Reorganize-Pipeline, damit beide dieselben Quell-Ids sehen. Die
+Pipeline ist noch legacy-gebunden, der Zeiger liegt jetzt am Katalog — eine
+Bibliothek lesen und die andere schreiben ist genau der Weg, auf dem ein Album
+an eine Fassung gepinnt wird, die es nie hatte. Er hat deshalb seinen eigenen
+Katalog-Lader (`_catalogue_album_and_tracks`), der die Provider-Ids unter
+denselben Namen liefert, die `_extract_source_ids` ohnehin sucht.
+
+**Nicht übernommen, und zwar bewusst:** `tracks.repair_status` /
+`repair_last_checked` (die Legacy-Migration legt Spalte und Index an, gelesen
+werden sie von niemandem) und die 74 `<service>_match_status` /
+`_last_attempted`-Paare. Letztere sind kein Datenverlust im Sinne der
+Bibliothek, aber eine Verhaltensregression: lib2 leitet die Chips daraus ab,
+*ob* eine Id da ist, also überlebt „gefunden" — „schon gesucht, nichts
+gefunden" nicht. Nach dem Update fragt jeder Provider-Worker die ganze
+Bibliothek erneut ab. Das gehört ins Provider-Versuchs-Ledger und damit in
+seine eigene Runde.

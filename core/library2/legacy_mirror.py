@@ -79,7 +79,7 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
         "lastfm_listeners", "lastfm_playcount", "lastfm_tags", "lastfm_wiki",
         "discogs_genres", "discogs_styles", "discogs_label", "discogs_catno",
         "discogs_country", "discogs_rating", "discogs_rating_count",
-        "bandcamp_tags", "bandcamp_label",
+        "bandcamp_tags", "bandcamp_label", "bandcamp_id",
     ),
     "tracks": (
         "bpm", "explicit", "genius_lyrics", "copyright", "style", "mood", "isrc",
@@ -90,6 +90,7 @@ _WATCHED_COLUMNS: Dict[str, Tuple[str, ...]] = {
         # provider payload (mirrored into lib2_tracks.enrichment)
         "lastfm_listeners", "lastfm_playcount", "lastfm_tags",
         "genius_description", "genius_url", "bandcamp_tags", "bandcamp_label",
+        "bandcamp_id",
     ),
 }
 
