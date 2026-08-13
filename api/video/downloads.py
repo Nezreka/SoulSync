@@ -916,6 +916,30 @@ def register_routes(bp):
             ensure_started(get_video_db)
         return jsonify({"ok": started > 0, "started": started, "skipped": skipped, "ids": ids})
 
+    def _annotate_packs(rows) -> None:
+        """Mark the season-pack BATCH rows for the Downloads page.
+
+        The page groups a show's episodes into one card, keyed on show + season,
+        and it did that by reading ``search_ctx`` itself — which meant a pack row
+        (a season, no episode) matched nothing and rendered as a lonely card
+        beside the very episodes it produced. Live: pack #3911 sat outside the
+        group holding its own #3912–3919.
+
+        The verdict comes from ``core.video.season_pack.is_pack_download`` — the
+        same function the monitor uses to decide whether to map a finished folder.
+        Re-deriving it in JavaScript would be a second answer to one question, and
+        the two would drift the first time the shape changed."""
+        try:
+            from core.video.season_pack import is_pack_download
+        except Exception:   # noqa: BLE001 - the page must render even if this import breaks
+            logger.exception("pack annotation unavailable")
+            return
+        for r in rows or []:
+            try:
+                r["is_pack"] = bool(is_pack_download(r))
+            except Exception:   # noqa: BLE001 - one odd row must not blank the page
+                r["is_pack"] = False
+
     def _annotate_upgrade_watches(db, rows) -> None:
         """Mark COMPLETED movie/episode rows that still hold a wishlist row —
         the upgrade-until-cutoff watches. Without this, a below-cutoff grab
@@ -955,6 +979,7 @@ def register_routes(bp):
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         rows = db.list_video_downloads()
         _annotate_upgrade_watches(db, rows)
+        _annotate_packs(rows)
         return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])
