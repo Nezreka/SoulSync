@@ -3873,6 +3873,25 @@
     .automation-card { padding: 12px 12px 11px 15px; }
     .automation-card .automation-actions { flex-wrap: wrap; }
 
+    /* The tile's foot is a two-up row on desktop. On a phone the meta line
+       alone eats the width, so the controls take their own row underneath
+       rather than being squeezed to one button per line. */
+    .automation-card.automation-tile .auto-tile-foot {
+        flex-direction: column; align-items: stretch; gap: 8px;
+    }
+    .automation-card.automation-tile .automation-actions { justify-content: flex-end; }
+    /* Thumb targets: these were 28px squares built for a mouse. */
+    .automation-card.automation-tile .automation-actions button {
+        width: 38px; height: 38px; font-size: 14px;
+    }
+    /* The cadence editor is three controls in a chip-sized row — let it wrap
+       instead of overflowing the card. */
+    .automation-card.automation-tile .auto-cadence-edit { width: 100%; }
+    .automation-card.automation-tile .auto-cadence-edit input,
+    .automation-card.automation-tile .auto-cadence-edit select { min-height: 34px; }
+    .automation-card.automation-tile .auto-cadence-save,
+    .automation-card.automation-tile .auto-cadence-cancel { min-height: 34px; }
+
     /* The builder is two columns on desktop; stack them, and cap the palette
        so the canvas is reachable without scrolling past 100 blocks. */
     .builder-content { flex-direction: column; }
@@ -3886,6 +3905,12 @@
     .automations-stats .auto-stat strong { font-size: 16px; }
     .automation-card .automation-flow { flex-wrap: wrap; row-gap: 4px; }
     .automation-card .auto-meta-fail { max-width: 100%; white-space: normal; }
+    /* The name and the runs badge stop competing for one line. */
+    .automation-card.automation-tile .auto-tile-head { flex-wrap: wrap; row-gap: 4px; }
+    .automation-card.automation-tile .automation-name { font-size: 13.5px; }
+    .automation-card.automation-tile .flow-trigger,
+    .automation-card.automation-tile .flow-action,
+    .automation-card.automation-tile .flow-notify { max-width: 100%; }
     .builder-sidebar { max-height: 40vh; }
 }
 
@@ -3895,4 +3920,9 @@
     .builder-sidebar .block-item { min-height: 46px; }
     .automations-stats .auto-stat-lens:hover { transform: none; }
     .automation-card:hover { transform: none; }
+    /* No hover to reveal the tile's controls with, and the editable trigger
+       chip must be tappable rather than hover-hinted. */
+    .automation-card.automation-tile .automation-actions { opacity: 1; }
+    .automation-card.automation-tile .auto-flow-editable { min-height: 30px; }
+    .automation-card.automation-tile .auto-tile-badge { min-height: 30px; }
 }

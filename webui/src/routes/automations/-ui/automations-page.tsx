@@ -215,6 +215,8 @@ export function AutomationsPage() {
     onDuplicate: (a: Automation) => duplicate.mutate(a),
     onDelete: (a: Automation) => void confirmDelete(a),
     onEdit: (a: Automation) => openBuilder(a.id),
+    // The cadence control on the card face edits the server's copy directly.
+    onRefresh: () => void refresh(),
     // Body-attached modal, so unlike the builder it needs no shell handoff.
     onShowHistory: (a: Automation) =>
       window.showAutomationHistory?.(a.id, a.name, a.action_type ?? ''),

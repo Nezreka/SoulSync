@@ -357,6 +357,59 @@ export function automationMeta(
 }
 
 /**
+ * The schedule line on a card's face.
+ *
+ * `automationMeta` answers "what should the meta line say"; this answers the
+ * one question the card is asked most — *when does this next happen* — as a
+ * single state word plus a label, so the same fact can be coloured, filtered
+ * and read at a glance instead of being inferred from which of three optional
+ * meta fragments happens to be present.
+ *
+ * The order is a precedence, not a list: a run in flight outranks everything
+ * (it IS happening), then the two ways an automation can be held — its own
+ * switch, then the side's — and only after that does a stored `next_run` mean
+ * anything. That is the same order the engine itself applies.
+ *
+ * `due` rather than `overdue`: the scheduler arms `next_run` and picks the row
+ * up on its next pass, so a timestamp a moment in the past is normal operation,
+ * not a fault. Nothing here claims to know how late is late.
+ */
+export type AutomationScheduleState =
+  | 'running'
+  | 'off'
+  | 'paused'
+  | 'due'
+  | 'waiting'
+  | 'unscheduled'
+  | 'listening';
+
+export interface AutomationSchedule {
+  state: AutomationScheduleState;
+  label: string;
+  /** The label is a live countdown, so the card must re-render each second. */
+  ticking: boolean;
+}
+
+export function automationSchedule(
+  a: Automation,
+  now: number = Date.now(),
+  paused = false,
+  running = false,
+): AutomationSchedule {
+  if (running) return { state: 'running', label: 'Running now', ticking: false };
+  const enabled = a.enabled === true || a.enabled === 1;
+  if (!enabled) return { state: 'off', label: 'Switched off', ticking: false };
+  if (paused) return { state: 'paused', label: 'Paused', ticking: false };
+  if (!isTimerTrigger(a.trigger_type))
+    return { state: 'listening', label: 'Listening', ticking: false };
+  // A timer automation with no armed next_run has not been picked up by the
+  // scheduler yet — usually the seconds after it was created or re-triggered.
+  if (!a.next_run) return { state: 'unscheduled', label: 'Not scheduled yet', ticking: false };
+  if (parseServerTime(a.next_run) <= now) return { state: 'due', label: 'Due now', ticking: false };
+  return { state: 'waiting', label: `Next ${timeUntil(a.next_run, now)}`, ticking: true };
+}
+
+/**
  * Label for a type that the static maps do not cover — video triggers,
  * monthly_time, webhook_received and anything shipped later.
  *

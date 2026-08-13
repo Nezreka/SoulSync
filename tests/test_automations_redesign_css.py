@@ -93,7 +93,9 @@ def test_every_styled_class_exists_in_the_markup():
     """A selector styling a class nothing renders is a silent no-op — a typo."""
     # Classes composed at runtime (class="history-log-" + log.type) never
     # appear as literals in source; the composing prefix proves the family.
-    _DYNAMIC_PREFIXES = ("history-log-",)
+    # `sched-` joins it for the tile's schedule state, composed the same way
+    # (`sched-${schedule.state}`) from automationSchedule's union.
+    _DYNAMIC_PREFIXES = ("history-log-", "sched-")
     missing = []
     for sel in _selectors():
         for cls in re.findall(r"\.([a-zA-Z][\w-]*)", sel):

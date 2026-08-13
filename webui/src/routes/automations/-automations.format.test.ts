@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   automationMeta,
   automationOutcome,
+  automationSchedule,
   formatAction,
   formatTrigger,
   humanizeType,
@@ -353,5 +354,88 @@ describe('automationOutcome — the handler stops speaking its own dialect', () 
     expect(automationOutcome('process_wishlist', null)).toBeNull();
     // Arrays are not results; index-keyed nonsense must not reach a card.
     expect(automationOutcome('process_wishlist', [1, 2])).toBeNull();
+  });
+});
+
+describe('automationSchedule', () => {
+  const NOW = Date.UTC(2026, 7, 12, 12, 0, 0);
+  const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
+
+  it('puts a run in flight above every other state', () => {
+    // It IS happening — nothing the stored row says can outrank that, not the
+    // automation's own switch and not the side's.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 0, trigger_type: 'schedule' },
+        NOW,
+        true,
+        true,
+      ),
+    ).toEqual({ state: 'running', label: 'Running now', ticking: false });
+  });
+
+  it('reads its own switch before the side"s', () => {
+    // A disabled automation is already off on its own account; calling it
+    // "paused" would blame the master switch for a state the user chose.
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 0, trigger_type: 'schedule' }, NOW, true),
+    ).toEqual({ state: 'off', label: 'Switched off', ticking: false });
+  });
+
+  it('says paused, and says nothing about a next run, while the side is held', () => {
+    // The engine skips the slot but keeps next_run alive, so the timestamp is
+    // real — what would be false is the implication that it will fire.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(3_600_000) },
+        NOW,
+        true,
+      ),
+    ).toEqual({ state: 'paused', label: 'Paused', ticking: false });
+  });
+
+  it('counts down for an armed timer, and asks to be ticked', () => {
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(7_200_000) },
+        NOW,
+      ),
+    ).toEqual({ state: 'waiting', label: 'Next in 2h', ticking: true });
+  });
+
+  it('says due, not overdue, once the stored time has passed', () => {
+    // The scheduler arms next_run and picks the row up on its next pass, so a
+    // timestamp in the recent past is normal operation, not a fault. Nothing
+    // here claims to know how late is late.
+    const due = automationSchedule(
+      { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(-600_000) },
+      NOW,
+    );
+    expect(due).toEqual({ state: 'due', label: 'Due now', ticking: false });
+  });
+
+  it('marks a timer with no armed next_run as unscheduled', () => {
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 1, trigger_type: 'daily_time' }, NOW),
+    ).toEqual({ state: 'unscheduled', label: 'Not scheduled yet', ticking: false });
+  });
+
+  it('says Listening for an armed event automation', () => {
+    // Event triggers have no next_run at all — a countdown would be a lie and
+    // an empty line would read as broken.
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 1, trigger_type: 'app_started' }, NOW),
+    ).toEqual({ state: 'listening', label: 'Listening', ticking: false });
+  });
+
+  it('reads a naive server timestamp as UTC, like every other label here', () => {
+    // "2026-08-12 14:00:00" is UTC; new Date() would read it as LOCAL and the
+    // countdown would be wrong by the viewer"s offset in either direction.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: '2026-08-12 14:00:00' },
+        NOW,
+      ).label,
+    ).toBe('Next in 2h');
   });
 });
