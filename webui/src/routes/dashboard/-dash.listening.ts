@@ -24,6 +24,9 @@ export interface RecentPlay {
   key: string;
   title: string;
   artist: string;
+  /** Carried for playback: it sharpens the streaming search when the library
+   *  has no copy. '' when the ledger row didn't record one. */
+  album: string;
   imageUrl: string | null;
   /** '' until the timestamp parses — the row renders without a time. */
   ago: string;
@@ -70,6 +73,7 @@ export function toRecentPlays(rows: RecentPlayRow[], now: Date, limit: number): 
       key: `${title}|${row.artist ?? ''}|${row.played_at ?? ''}`,
       title,
       artist: (row.artist ?? '').trim(),
+      album: (row.album ?? '').trim(),
       imageUrl: row.image_url || null,
       ago: timeAgo(row.played_at, now),
       source: sourceLabel(row.server_source),

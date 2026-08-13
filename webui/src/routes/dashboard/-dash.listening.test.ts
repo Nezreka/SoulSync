@@ -39,7 +39,7 @@ describe('toRecentPlays', () => {
 
   it('shapes rows, drops untitled ones, and respects the limit', () => {
     const rows = [
-      { title: 'Windowlicker', artist: 'Aphex Twin', played_at: '2026-08-12 11:00:00', server_source: 'plex', image_url: '/art/1' },
+      { title: 'Windowlicker', artist: 'Aphex Twin', album: 'Windowlicker EP', played_at: '2026-08-12 11:00:00', server_source: 'plex', image_url: '/art/1' },
       { title: '   ', artist: 'Nobody', played_at: '2026-08-12 10:00:00' },
       { title: 'Flim', artist: 'Aphex Twin', played_at: '2026-08-12 09:00:00', image_url: null },
       { title: 'Alberto Balsalm', artist: 'Aphex Twin', played_at: '2026-08-12 08:00:00' },
@@ -50,6 +50,9 @@ describe('toRecentPlays', () => {
       key: 'Windowlicker|Aphex Twin|2026-08-12 11:00:00',
       title: 'Windowlicker',
       artist: 'Aphex Twin',
+      // Carried for playback: the album sharpens the streaming search when
+      // the library has no copy of the track.
+      album: 'Windowlicker EP',
       imageUrl: '/art/1',
       ago: '1h ago',
       source: 'Plex',
@@ -58,5 +61,8 @@ describe('toRecentPlays', () => {
     // The blank-titled row is dropped, so Flim is second despite the limit.
     expect(plays[1].title).toBe('Flim');
     expect(plays[1].imageUrl).toBeNull();
+    // A ledger row with no album is '' — never undefined, so the playback
+    // call always has a string to pass.
+    expect(plays[1].album).toBe('');
   });
 });

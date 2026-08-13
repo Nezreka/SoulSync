@@ -3,10 +3,20 @@
  *
  * Rows come from /api/stats/recent, the same listening_history spine the
  * stats page reads (media-server plays via the listening-stats worker +
- * SoulSync web-player plays). Pure display: no play buttons, no actions —
- * the Listen band below is for playing; this band is for "what have I been
- * listening to", and clicking anywhere goes to the stats page for the full
- * ledger.
+ * SoulSync web-player plays).
+ *
+ * Clicking a card PLAYS the song again — library first, streaming second, the
+ * same ladder Recently Added uses (Boulder: "clicking elsewhere on the card
+ * should begin playing that song from your library if available... if song
+ * isn't available, then stream it"). The band originally went to the stats
+ * page from anywhere on the card, which made the most obvious gesture on a
+ * rail of songs do the one thing you cannot do to a song. The header still
+ * leads to the full ledger, and the artist line still leads to the artist.
+ *
+ * These rows carry no file path — /api/stats/recent is a play LEDGER, not a
+ * library view — so the title+artist resolve in playTrackByMetadata is how a
+ * card finds its file. That is also why an unmatched play still works: it
+ * falls through to the stream source instead of doing nothing.
  *
  * Renders NOTHING until history exists (listening stats off, or a fresh
  * install) — same calm-page rule as the content band. Speaks the content
@@ -18,6 +28,8 @@ import { useEffect, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
+import { playTrackByMetadata } from '../../../features/playback/play-track';
+import { getShellBridge } from '../../../platform/shell/bridge';
 import { openArtistFromRail } from '../-dash.content';
 import { toRecentPlays } from '../-dash.listening';
 
@@ -62,15 +74,17 @@ export function ListeningHistoryBand() {
             Recently Played
           </button>
         </div>
-        <span className="dash-rail-subtitle">what you&apos;ve been listening to — tap for the full stats</span>
+        <span className="dash-rail-subtitle">
+          tap a song to play it again — the heading opens your full stats
+        </span>
       </div>
       <div className="dash-rail">
         {plays.map((play) => (
           <div
             key={play.key}
             className="ya-card dash-rail-card"
-            title={`${play.title} — ${play.artist}${play.source ? ` · ${play.source}` : ''}`}
-            onClick={openStats}
+            title={`Play ${play.title} — ${play.artist}${play.source ? ` · ${play.source}` : ''}`}
+            onClick={() => void playTrackByMetadata(getShellBridge(), play.title, play.artist, play.album)}
           >
             <div className="ya-card-img">
               {play.imageUrl && <img src={play.imageUrl} alt="" loading="lazy" />}
@@ -88,8 +102,8 @@ export function ListeningHistoryBand() {
                   className="ya-card-sub ya-card-sub--link"
                   title={`Open ${play.artist}`}
                   onClick={(event) => {
-                    // The card body goes to the stats page; the artist
-                    // line goes to the ARTIST — never both.
+                    // The card body PLAYS; the artist line goes to the
+                    // ARTIST — never both.
                     event.stopPropagation();
                     void openArtistFromRail({
                       name: play.artist,
