@@ -125,6 +125,84 @@ def register_routes(bp):
             owned[key] = bool(hit)
         return jsonify({"owned": owned})
 
+    def _party_file(args):
+        """Resolve a party item to a real local file, or (None, error, status).
+
+        The client names a TITLE (kind + tmdb id + SxE), never a path — the path
+        comes from the library row and is then re-rooted through the video path
+        resolver. That is what keeps this endpoint from being an arbitrary file
+        reader: there is no request shape that can point it at something the
+        scanner didn't record."""
+        from . import get_video_db
+        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
+        kd = args.get("kd")
+        try:
+            tmdb_id = int(args.get("id"))
+        except (TypeError, ValueError):
+            return None, "id required", 400
+        if tmdb_id <= 0 or kd not in ("m", "t"):
+            return None, "kd must be m|t with a tmdb id", 400
+        db = get_video_db()
+        if kd == "m":
+            hit = db.video_stored_file_path("movie", tmdb_id=tmdb_id)
+        else:
+            try:
+                season, episode = int(args.get("s")), int(args.get("e"))
+            except (TypeError, ValueError):
+                return None, "season and episode required for a show", 400
+            hit = db.video_stored_file_path("episode", tmdb_id=tmdb_id,
+                                            season=season, episode=episode)
+        if not hit:
+            return None, "You don't have a file for this", 404
+        local = resolve_video_file_path(hit.get("path"), video_base_dirs(db),
+                                        size_bytes=hit.get("size_bytes"))
+        if not local:
+            # The library row exists but the file isn't reachable from HERE —
+            # the split-mount case the resolver exists for. Saying so beats a
+            # dead <video> element.
+            return None, "That file is in your library but this server can't reach it", 404
+        return {"path": local, "row": hit}, None, 200
+
+    @bp.route("/watch/playable", methods=["GET"])
+    def video_watch_playable():
+        """Whether THIS box can stream the party's pick to a browser, and if not
+        why — asked before playback so the room gets an honest answer instead of
+        a video element that fails silently or plays a silent picture."""
+        from . import get_video_db
+        from core.video.direct_play import direct_play_verdict
+        found, err, status = _party_file(request.args)
+        if err:
+            return jsonify({"playable": False, "verdict": "no", "reasons": [err]}), status
+        db = get_video_db()
+        codecs = {}
+        try:
+            codecs = db.video_file_codecs(found["row"].get("path")) or {}
+        except Exception:   # noqa: BLE001 - a codec lookup must never block playback
+            logger.debug("codec lookup failed for the watch party", exc_info=True)
+        v = direct_play_verdict(found["path"], codecs.get("video_codec"),
+                                codecs.get("audio_codec"))
+        return jsonify({"playable": v["verdict"] != "no", **v})
+
+    @bp.route("/watch/stream", methods=["GET"])
+    def video_watch_stream():
+        """Byte-serve the party's file to a ``<video>`` element.
+
+        ``conditional=True`` is what makes this a video source rather than a
+        download: Werkzeug answers Range requests with 206 partial content, so
+        the browser can seek — and seeking is not a nicety here, it is how a
+        latecomer joins a showing already in progress."""
+        from flask import send_file
+        from core.video.direct_play import mime_for
+        found, err, status = _party_file(request.args)
+        if err:
+            return jsonify({"error": err}), status
+        try:
+            return send_file(found["path"], mimetype=mime_for(found["path"]),
+                             conditional=True, as_attachment=False)
+        except OSError:
+            logger.exception("watch stream failed to open %s", found["path"])
+            return jsonify({"error": "That file could not be opened for playback"}), 404
+
     @bp.route("/watch/grab", methods=["POST"])
     def video_watch_grab():
         from . import get_video_db

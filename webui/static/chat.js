@@ -82,6 +82,12 @@
             ownedRetryAt: 0,     //   backoff after a failed/denied probe (ms)
             ownedDenied: false,  //   403 = music-only profile: hide ownership UI
             grabbed: {},         //   keys we already sent to the grab pipeline
+            // ── P2: the room itself ──────────────────────────────────────
+            joined: '',          //   showing key we're actually PLAYING ('' = not in)
+            play: null,          //   {verdict, reasons} from /watch/playable
+            playFetching: '',    //   in-flight playability probe signature
+            drift: null,         //   interval id: re-anchors the element to the fold
+            err: '',             //   the browser refused the file (element error)
         },
     };
     try { state.ssOnly = localStorage.getItem('chat_ss_only') === '1'; } catch (e) { /* ignore */ }
@@ -4484,6 +4490,7 @@
         var nextRoom = name || state.room || state.homeRoom || 'SoulSync';
         if (state.room && state.room !== nextRoom) {
             _jbxTuneOut();               // BEFORE the flip: the off event goes to the OLD room
+            _watchTeardown();            // and the party you joined belongs to the old room too
             state.jukebox.lastRendered = '';
             state.jukebox.nowSeen = null;   // new room, new event stream, new clock base
             state.pinsOpen = false;
@@ -5233,6 +5240,10 @@
             if (t) { sendProtocol('watch.unnom', { o: t.getAttribute('data-chat-watch-unnom') }); return; }
             t = e.target.closest('[data-chat-watch-grab]');
             if (t) { _watchGrab(t.getAttribute('data-chat-watch-grab')); return; }
+            t = e.target.closest('[data-chat-watch-join]');
+            if (t) { _watchJoin(); return; }
+            t = e.target.closest('[data-chat-watch-leave]');
+            if (t) { _watchTeardown(); renderWatch(); return; }
             t = e.target.closest('[data-chat-watch-pause]');
             if (t) { sendProtocol('watch.pause', {}); return; }
             t = e.target.closest('[data-chat-watch-resume]');
@@ -6636,14 +6647,159 @@
             'title="You don\'t have this — send it to the video wishlist and search now">Grab</button>';
     }
 
+    // ── the room (P2) ────────────────────────────────────────────────────────
+    // Phase 1 gave the room a ballot; this is the part that makes it a place you
+    // ENTER. Playback is opt-in exactly like the jukebox's Tune in — nothing
+    // plays until a real gesture, because a chat page that starts blasting a
+    // film when someone else presses ▶ is a hostile page. And a user is in the
+    // jukebox OR the party, never both: they are two audio sources competing for
+    // the same ears.
+
+    function _watchStreamUrl(now) {
+        var u = '/api/video/watch/stream?kd=' + encodeURIComponent(now.kd) +
+                '&id=' + encodeURIComponent(now.id);
+        if (now.kd === 't') u += '&s=' + now.s + '&e=' + now.e;
+        return u;
+    }
+
+    function _watchJoinChip(now) {
+        if (state.watch.ownedDenied) return '';
+        if (state.watch.owned[now.key] !== true) return '';   // no file here, nothing to join
+        if (state.watch.joined === now.key) {
+            return '<button class="chat-arc-btn" type="button" data-chat-watch-leave ' +
+                'title="Stop playing here — the party carries on without you">⏏ Leave</button>';
+        }
+        return '<button class="chat-arc-btn chat-arc-btn--go" type="button" data-chat-watch-join ' +
+            'title="Play your copy, synced to the room">▶ Join party</button>';
+    }
+
+    // The screen is mounted ONCE per showing and then left alone. Re-rendering it
+    // with the rest of the card would tear the <video> element down on every room
+    // event and restart the film; only a change of showing (or leaving) touches it.
+    function _watchMountStage(now) {
+        var host = q('[data-chat-watch-stage]');
+        if (!host) return;
+        var want = (now && state.watch.joined === now.key) ? now.key : '';
+        if (host.getAttribute('data-mounted') === want) { _watchStageWarn(); return; }
+        host.setAttribute('data-mounted', want);
+        host.hidden = !want;
+        if (!want) { host.innerHTML = ''; return; }
+        host.innerHTML =
+            '<video class="chat-watch-video" data-chat-watch-video playsinline controls ' +
+                'preload="metadata" src="' + attr(_watchStreamUrl(now)) + '"></video>' +
+            '<div class="chat-watch-stage-warn" data-chat-watch-warn hidden></div>';
+        var v = host.querySelector('[data-chat-watch-video]');
+        if (v) {
+            v.addEventListener('error', function () {
+                // The browser is the final authority on playability — when it
+                // refuses, say so plainly instead of leaving a black rectangle.
+                state.watch.err = (state.watch.play && state.watch.play.reasons || []).join(' · ') ||
+                    'It may be an unsupported codec or container.';
+                _watchStageWarn();
+            });
+        }
+        _watchStageWarn();
+    }
+
+    function _watchStageWarn() {
+        var el = q('[data-chat-watch-warn]');
+        if (!el) return;
+        var p = state.watch.play;
+        var text = state.watch.err
+            ? ('Your browser refused this file. ' + state.watch.err)
+            : (p && p.verdict === 'maybe' && (p.reasons || []).length ? p.reasons.join(' · ') : '');
+        el.textContent = text;
+        el.hidden = !text;
+    }
+
+    function _watchTeardown() {
+        if (state.watch.drift) { clearInterval(state.watch.drift); state.watch.drift = null; }
+        state.watch.joined = '';
+        state.watch.play = null;
+        state.watch.err = '';
+        // Take the screen down HERE rather than waiting for the next render: the
+        // drift loop can tear down mid-showing (party ended between ticks), and
+        // until something re-rendered the film would keep playing to nobody.
+        _watchMountStage(null);
+    }
+
+    function _watchJoin() {
+        var st = _watchState();
+        if (!st.now) return;
+        // One pair of ears: joining a showing tunes you out of the jukebox.
+        if (state.jukebox.tunedIn) { _jbxTuneOut(); renderJukebox(); }
+        state.watch.joined = st.now.key;
+        state.watch.err = '';
+        renderWatch();
+        _watchProbePlayable(st.now);
+        _watchArm();
+    }
+
+    function _watchProbePlayable(now) {
+        var sig = now.key;
+        if (state.watch.playFetching === sig) return;
+        state.watch.playFetching = sig;
+        var u = '/api/video/watch/playable?kd=' + encodeURIComponent(now.kd) +
+                '&id=' + encodeURIComponent(now.id) +
+                (now.kd === 't' ? '&s=' + now.s + '&e=' + now.e : '');
+        fetch(u).then(function (r) { return r.json(); }).then(function (d) {
+            state.watch.playFetching = '';
+            if (state.watch.joined !== sig) return;
+            state.watch.play = d || null;
+            renderWatch();
+        }).catch(function () {
+            // The probe is an assist. Failing it must never stop the element
+            // from trying — the browser is the final authority anyway.
+            state.watch.playFetching = '';
+        });
+    }
+
+    // Re-anchor the element to the fold: the party's position is DERIVED state
+    // (started-at + pause/resume on the bus), so the video is corrected toward
+    // it rather than the other way round. Nothing about the local player is
+    // ever published — a viewer scrubbing their own copy must not move the room.
+    function _watchArm() {
+        if (state.watch.drift) clearInterval(state.watch.drift);
+        state.watch.drift = setInterval(_watchSync, 5000);
+        setTimeout(_watchSync, 0);
+    }
+
+    function _watchSync() {
+        var v = q('[data-chat-watch-video]');
+        var st = _watchState();
+        if (!v || !st.now || state.watch.joined !== st.now.key) { _watchTeardown(); return; }
+        var CP = window.ChatProtocol;
+        var want = (CP.watchPosition(st.now, Date.now()) || 0) / 1000;
+        if (st.now.paused) {
+            if (!v.paused) v.pause();
+        } else if (v.paused) {
+            var pr = v.play();
+            if (pr && pr.catch) pr.catch(function () { /* autoplay policy — controls are there */ });
+        }
+        // 2s of slack: seeking on every tick would stutter, and nobody notices
+        // a second of drift in a film.
+        if (isFinite(v.duration) && Math.abs(v.currentTime - want) > 2) {
+            try { v.currentTime = Math.min(want, Math.max(0, v.duration - 0.5)); } catch (e) { /* not seekable yet */ }
+        }
+    }
+
     function renderWatch() {
         var host = q('[data-chat-watch]');
         if (!host) return;
         var st = (state.view === 'room') ? _watchState() : null;
         var show = !!(st && (st.noms.length || st.now));
         host.hidden = !show;
-        if (!show) { host.innerHTML = ''; return; }
+        if (!show) {
+            host.innerHTML = '';
+            // The party ended (or we navigated away from the room) — take the
+            // screen down with it rather than leaving a film playing to nobody.
+            if (state.watch.joined) _watchTeardown();
+            _watchMountStage(null);
+            return;
+        }
         _watchFetchOwned(st);
+        // A NEW showing supersedes whatever we joined: the old party is over.
+        if (state.watch.joined && (!st.now || st.now.key !== state.watch.joined)) _watchTeardown();
         var can = state.canSend;
         var html = '<div class="chat-watch-headrow">🎬 <b>Movie night</b>' +
             '<span class="chat-jbx-meta">' +
@@ -6672,6 +6828,7 @@
                                 '<button class="chat-arc-btn" type="button" data-chat-watch-end>⏹ End</button>'
                               : '') +
                         _watchOwnChip(st.now.key, st.now) +
+                        _watchJoinChip(st.now) +
                     '</div>' +
                 '</div>' +
             '</div>';
@@ -6700,6 +6857,7 @@
             '</div>';
         }).join('');
         host.innerHTML = html;
+        _watchMountStage(st.now);
     }
 
     function _watchFetchOwned(st) {
