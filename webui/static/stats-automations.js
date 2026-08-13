@@ -4695,6 +4695,7 @@ async function _openAutomationBuilder(editId) {
     _autoMirroredPlaylists = null; // invalidate so it re-fetches
     _autoSpotifyAuthenticated = false;
     _autoBuilder = { editId: editId || null, when: null, do: null, then: [], isSystem: false };
+    _autoBlockQuery = '';   // a stale search would open the palette pre-filtered
 
     // Populate group datalist from existing automations
     try {
@@ -4755,37 +4756,123 @@ function hideAutomationBuilder() {
 
 // --- Sidebar ---
 
-function _renderBuilderSidebar() {
+/**
+ * The block palette.
+ *
+ * Was three flat, unsearchable lists — 45 triggers and 52 actions, each a
+ * full-width row with an icon and a description. Finding "Playlist Synced"
+ * meant scrolling past twenty other triggers, which is the same wall the
+ * findings page had in a different costume.
+ *
+ * Now: a search box over everything, and drawers by the `category` the
+ * BACKEND tags each block with (blocks.py owns that taxonomy, so the video
+ * builder gets identical grouping for free). Searching flattens the drawers —
+ * when you know what you want, categories are in the way.
+ *
+ * Shared with the video builder. `_bEl` resolves against whichever builder is
+ * open, so every id below is context-correct without branching.
+ */
+let _autoBlockQuery = '';
+
+function _autoBlockSearch(value) {
+    _autoBlockQuery = String(value || '');
+    _renderBuilderSidebar({ keepFocus: true });
+}
+
+function _autoToggleBlockDrawer(key) {
+    const el = document.querySelector('.block-drawer[data-drawer="' + key + '"]');
+    if (el) el.classList.toggle('collapsed');
+}
+
+function _renderBuilderSidebar(opts) {
     const sidebar = _bEl('sidebar');
     if (!sidebar || !_autoBlocks) return;
 
-    let html = '';
+    const query = _autoBlockQuery.trim().toLowerCase();
+    const searching = query.length > 0;
+    const order = _autoBlocks.category_order || [];
     const sections = [
         { key: 'triggers', title: 'Triggers', slot: 'when' },
         { key: 'actions', title: 'Actions', slot: 'do' },
         { key: 'notifications', title: 'Then', slot: 'then' },
     ];
 
-    sections.forEach(sec => {
+    const matches = (block) => !searching
+        || String(block.label || '').toLowerCase().includes(query)
+        || String(block.description || '').toLowerCase().includes(query)
+        || String(block.type || '').toLowerCase().includes(query);
+
+    const renderBlock = (block, slot) => {
+        const icon = _autoIcons[block.type] || '\u2699\uFE0F';
+        const disabled = !block.available;
+        const helpKey = 'auto-' + block.type;
+        const hasHelp = !!TOOL_HELP_CONTENT[helpKey];
+        return `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${slot}')" onclick="_autoClickBlock('${block.type}','${slot}')"` : ''}>
+            <div class="block-item-icon">${icon}</div>
+            <div class="block-item-text">
+                <div class="block-item-label">${_esc(block.label)}</div>
+                <div class="block-item-desc">${_esc(block.description)}</div>
+            </div>
+            ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
+            ${hasHelp ? `<button class="tool-help-button block-help-btn" onclick="event.stopPropagation(); openToolHelpModal('${helpKey}')" title="Learn more">?</button>` : ''}
+        </div>`;
+    };
+
+    let html = `<div class="block-search-wrap">
+        <input type="search" id="block-search" class="block-search" placeholder="Search blocks\u2026"
+               value="${_escAttr(_autoBlockQuery)}" oninput="_autoBlockSearch(this.value)"
+               aria-label="Search automation blocks">
+    </div>`;
+
+    let total = 0;
+    sections.forEach(function (sec) {
+        const blocks = (_autoBlocks[sec.key] || []).filter(matches);
+        total += blocks.length;
+        if (!blocks.length) return;
+
         html += `<div class="sidebar-section"><div class="sidebar-section-title">${sec.title}</div>`;
-        (_autoBlocks[sec.key] || []).forEach(block => {
-            const icon = _autoIcons[block.type] || '\u2699\uFE0F';
-            const disabled = !block.available;
-            const helpKey = 'auto-' + block.type;
-            const hasHelp = !!TOOL_HELP_CONTENT[helpKey];
-            html += `<div class="block-item${disabled ? ' coming-soon' : ''}" ${!disabled ? `draggable="true" ondragstart="_autoDragStart(event,'${block.type}','${sec.slot}')" onclick="_autoClickBlock('${block.type}','${sec.slot}')"` : ''}>
-                <div class="block-item-icon">${icon}</div>
-                <div class="block-item-text">
-                    <div class="block-item-label">${_esc(block.label)}</div>
-                    <div class="block-item-desc">${_esc(block.description)}</div>
-                </div>
-                ${disabled ? '<span class="coming-soon-badge">Soon</span>' : ''}
-                ${hasHelp ? `<button class="tool-help-button block-help-btn" onclick="event.stopPropagation(); openToolHelpModal('${helpKey}')" title="Learn more">?</button>` : ''}
-            </div>`;
-        });
+
+        if (searching) {
+            // A search is a request for a specific block; drawers would just
+            // be one more click between the query and the answer.
+            html += blocks.map(function (b) { return renderBlock(b, sec.slot); }).join('');
+        } else {
+            const byCategory = {};
+            blocks.forEach(function (b) {
+                const cat = b.category || 'Other';
+                (byCategory[cat] = byCategory[cat] || []).push(b);
+            });
+            const cats = Object.keys(byCategory).sort(function (a, b) {
+                const ia = order.indexOf(a), ib = order.indexOf(b);
+                return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib) || a.localeCompare(b);
+            });
+            cats.forEach(function (cat) {
+                const key = sec.key + '-' + cat.replace(/\W+/g, '_');
+                html += `<div class="block-drawer" data-drawer="${key}">
+                    <button type="button" class="block-drawer-head" onclick="_autoToggleBlockDrawer('${key}')">
+                        <span class="block-drawer-chevron">\u25BC</span>
+                        <span class="block-drawer-name">${_esc(cat)}</span>
+                        <span class="block-drawer-count">${byCategory[cat].length}</span>
+                    </button>
+                    <div class="block-drawer-body">${byCategory[cat].map(function (b) { return renderBlock(b, sec.slot); }).join('')}</div>
+                </div>`;
+            });
+        }
         html += '</div>';
     });
+
+    if (searching && total === 0) {
+        html += '<div class="block-search-empty">No blocks match \u201C' + _esc(_autoBlockQuery) + '\u201D</div>';
+    }
+
     sidebar.innerHTML = html;
+
+    // innerHTML replaces the input, so typing would lose focus after the
+    // first character without this.
+    if (opts && opts.keepFocus) {
+        const input = document.getElementById('block-search');
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
 }
 
 // --- Canvas ---

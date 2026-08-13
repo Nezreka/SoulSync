@@ -984,3 +984,58 @@
     color: rgba(255,255,255,0.3);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* ── Builder palette: search + drawers ──
+   Was three flat, unsearchable lists — 45 triggers and 52 actions, each a
+   full-width row. `.builder-sidebar` is the scope on purpose: both builders
+   carry it, so the video side gets this without a second rule. */
+.builder-sidebar .block-search-wrap {
+    position: sticky; top: 0; z-index: 2;
+    padding: 2px 0 10px;
+    background: inherit;
+}
+.builder-sidebar .block-search {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 11px;
+    border-radius: 9px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.05);
+    color: #fff; font-size: 12.5px; font-family: inherit;
+}
+.builder-sidebar .block-search:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+.builder-sidebar .block-search::placeholder { color: rgba(255,255,255,0.3); }
+
+.builder-sidebar .block-drawer { margin-bottom: 4px; }
+.builder-sidebar .block-drawer-head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 5px 6px; margin-bottom: 2px;
+    border: none; border-radius: 7px;
+    background: transparent; color: inherit;
+    cursor: pointer; text-align: left; font-family: inherit;
+}
+.builder-sidebar .block-drawer-head:hover { background: rgba(255,255,255,0.04); }
+.builder-sidebar .block-drawer-chevron {
+    font-size: 8px; color: rgba(255,255,255,0.3);
+    transition: transform .2s ease;
+}
+.builder-sidebar .block-drawer.collapsed .block-drawer-chevron { transform: rotate(-90deg); }
+.builder-sidebar .block-drawer-name {
+    flex: 1; font-size: 11px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+}
+.builder-sidebar .block-drawer-count {
+    font-size: 10px; font-weight: 700;
+    padding: 1px 7px; border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.4);
+}
+.builder-sidebar .block-drawer.collapsed .block-drawer-body { display: none; }
+.builder-sidebar .block-search-empty {
+    padding: 14px 6px; font-size: 12px; font-style: italic;
+    color: rgba(255,255,255,0.3);
+}

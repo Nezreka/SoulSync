@@ -46,6 +46,11 @@ _SCOPES = (
     # satellite surfaces that mount on document.body — scoped by their own
     # automations-specific class names
     ".automation-history-modal", ".auto-group-dropdown",
+    # The builder palette. Used by BOTH builders (#builder-sidebar and
+    # #vauto-builder-sidebar carry it) and by nothing else in the app, so the
+    # class is itself the scope — styling it under .automations-builder-view
+    # would reach the music builder only.
+    ".builder-sidebar",
 )
 
 

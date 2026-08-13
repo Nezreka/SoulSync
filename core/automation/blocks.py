@@ -487,14 +487,68 @@ def _in_scope(block: dict, scope: str) -> bool:
     return s == "both" or s == scope
 
 
+# Which drawer of the builder palette a block belongs in.
+#
+# The sidebar was three flat, unsearchable lists — 45 triggers and 52 actions,
+# every one a full-width row. Finding "Playlist Synced" meant scrolling past
+# twenty other triggers.
+#
+# Rules rather than 100 hand-written entries: ORDER MATTERS, first match wins,
+# and the whole taxonomy stays readable in one screen. A type that matches
+# nothing lands in "Other", which is visible rather than silent —
+# tests/test_automation_block_categories.py fails if anything ends up there.
+_CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
+    # Exact-ish first: these would otherwise be caught by a keyword below.
+    ("Timing", ("schedule", "daily_time", "weekly_time", "monthly_time", "app_started")),
+    ("External", ("signal_received", "webhook_received", "fire_signal")),
+    ("Notify", ("discord_webhook", "pushbullet", "telegram", "webhook", "notify_only")),
+    ("Advanced", ("run_script",)),
+    # Then keywords, most specific first.
+    ("Maintenance", ("repair", "duplicate", "quality", "cleanup", "clean_", "_clean",
+                     "expired", "backup", "cache", "overlays", "plex_images")),
+    ("Wishlist", ("wishlist",)),
+    ("Watchlist", ("watchlist",)),
+    ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),
+    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding",
+                   "quarantine", "request", "search_and", "upgrade")),
+    ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube")),
+]
+
+
+def block_category(block_type: str) -> str:
+    """The palette drawer a block sits in. Unknown types are grouped, not hidden."""
+    name = block_type or ""
+    for category, needles in _CATEGORY_RULES:
+        if any(needle in name for needle in needles):
+            return category
+    return "Other"
+
+
+#: Drawer order in the sidebar — timing first because every automation starts
+#: with "when", then the things people automate most.
+CATEGORY_ORDER = [
+    "Timing", "Downloads", "Library", "Playlists", "Wishlist", "Watchlist",
+    "Maintenance", "External", "Notify", "Advanced", "Other",
+]
+
+
 def blocks_for_scope(scope: str = "music") -> dict:
     """Return the trigger/action/notification lists filtered to one side.
 
     ``scope="music"`` reproduces the pre-scope behaviour (everything except
     video-only blocks); ``scope="video"`` returns generic + video-only blocks.
+
+    Each block is copied with a ``category`` so the builder can group the
+    palette without re-deriving the taxonomy in JavaScript — one source of
+    truth, and the video builder gets it for free.
     """
+    def _tagged(blocks):
+        return [{**b, "category": block_category(b.get("type", ""))}
+                for b in blocks if _in_scope(b, scope)]
+
     return {
-        "triggers": [b for b in TRIGGERS if _in_scope(b, scope)],
-        "actions": [b for b in ACTIONS if _in_scope(b, scope)],
-        "notifications": [b for b in NOTIFICATIONS if _in_scope(b, scope)],
+        "triggers": _tagged(TRIGGERS),
+        "actions": _tagged(ACTIONS),
+        "notifications": _tagged(NOTIFICATIONS),
+        "category_order": CATEGORY_ORDER,
     }
