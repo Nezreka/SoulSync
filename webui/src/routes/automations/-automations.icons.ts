@@ -44,6 +44,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   duplicate_scan_completed: '🗂️',
   library_scan_completed: '📡',
   start_database_update: '🗄️',
+  start_database_update_hourly: '🗄️',
   run_duplicate_cleaner: '🗂️',
   clear_quarantine: '🗑️',
   cleanup_wishlist: '🧹',

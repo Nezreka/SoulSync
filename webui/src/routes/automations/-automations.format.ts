@@ -269,6 +269,7 @@ const ACTION_LABELS: Record<string, string> = {
   discover_playlist: 'Discover Playlist',
   notify_only: 'Notify Only',
   start_database_update: 'Update Database',
+  start_database_update_hourly: 'Update Database (Hourly)',
   run_duplicate_cleaner: 'Run Duplicate Cleaner',
   clear_quarantine: 'Clear Quarantine',
   cleanup_wishlist: 'Clean Up Wishlist',

@@ -297,6 +297,8 @@ ACTIONS: list[dict] = [
      "description": "Radarr's seed-until-done tail for music torrents: once a completed torrent grab reaches your seed ratio or seed time goal (Settings → Downloads), remove it from the torrent client — including the client's copy of the file (your imported library copy is separate and never touched). Off until you set a goal. Pair with a half-hourly schedule.", "available": True},
     {"type": "full_cleanup", "label": "Full Cleanup", "icon": "trash",
      "description": "Clear quarantine, download queue, import folder, and search history in one sweep", "available": True},
+    {"type": "start_database_update_hourly", "label": "Update Database (Hourly)", "icon": "database",
+     "description": "The same incremental server-read on an hourly schedule, so music added to the library by hand (which Plex/Jellyfin/Navidrome index on their own) appears within the hour instead of waiting for the weekly deep scan. Pair with a 1-hour Schedule trigger.", "available": True},
     {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
      "description": "Full library comparison without losing enrichment data", "available": True},
     {"type": "run_script", "label": "Run Script", "icon": "terminal", "scope": "both",

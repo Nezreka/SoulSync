@@ -102,6 +102,23 @@ SYSTEM_AUTOMATIONS = [
         'trigger_config': {},
         'action_type': 'start_database_update',
     },
+    # Safety net, and the music twin of 'Auto-Update Video Database (Hourly)'.
+    # The chain above only fires after SoulSync ITSELF downloads something, so
+    # music added to the library any other way — dropped in by hand, ripped,
+    # moved from another box — waited up to seven days for the deep scan even
+    # though Plex/Jellyfin/Navidrome had already indexed it within minutes.
+    #
+    # Cheap enough to run hourly because it is the same smart-incremental read:
+    # newest albums first, stop after 25 consecutive already-known ones, and
+    # return without touching the database at all when nothing is new.
+    {
+        'name': 'Auto-Update Database (Hourly)',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'start_database_update_hourly',
+        'action_config': {'full_refresh': False},
+        'initial_delay': 900,  # 15 min after startup, off the boot path
+    },
     # Maintenance automations
     {
         'name': 'Refresh Beatport Cache',
