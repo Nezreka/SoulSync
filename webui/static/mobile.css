@@ -3845,3 +3845,54 @@
     /* Same for the health bar segments — they are buttons. */
     .repair-health-seg { min-width: 10px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTOMATIONS REDESIGN — phone + tablet
+   Verdict strip, family containers, and the builder palette.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+    /* The verdict chips are buttons now, so they need thumb-sized targets and
+       have to wrap rather than push the master toggle off the row. */
+    .automations-stats { padding: 12px 13px; gap: 8px; }
+    .automations-stats .auto-stat { padding: 7px 11px; min-height: 38px; }
+    .automations-stats .auto-master-toggle {
+        order: -1; margin-left: 0; width: 100%; justify-content: center; min-height: 42px;
+    }
+
+    .automations-section { padding: 11px 11px 12px; }
+    .automations-section-header { flex-wrap: wrap; row-gap: 4px; }
+    /* The family summary drops to its own line rather than squeezing the
+       label and the count into ellipsis. */
+    .automations-section-header .section-summary { flex-basis: 100%; order: 5; white-space: normal; }
+    .automations-section-header .section-line { display: none; }
+    .automations-section-header .section-action-btn { min-width: 34px; min-height: 34px; }
+
+    /* One card per row: the grid's 430px floor is wider than a phone. */
+    .automations-section .automations-grid { grid-template-columns: 1fr; }
+    .automation-card { padding: 12px 12px 11px 15px; }
+    .automation-card .automation-actions { flex-wrap: wrap; }
+
+    /* The builder is two columns on desktop; stack them, and cap the palette
+       so the canvas is reachable without scrolling past 100 blocks. */
+    .builder-content { flex-direction: column; }
+    .builder-sidebar {
+        width: 100%; max-width: none;
+        max-height: 45vh; overflow-y: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .automations-stats .auto-stat strong { font-size: 16px; }
+    .automation-card .automation-flow { flex-wrap: wrap; row-gap: 4px; }
+    .automation-card .auto-meta-fail { max-width: 100%; white-space: normal; }
+    .builder-sidebar { max-height: 40vh; }
+}
+
+@media (hover: none) {
+    /* Drawer headers and block rows are the builder's whole interaction. */
+    .builder-sidebar .block-drawer-head { min-height: 38px; }
+    .builder-sidebar .block-item { min-height: 46px; }
+    .automations-stats .auto-stat-lens:hover { transform: none; }
+    .automation-card:hover { transform: none; }
+}
