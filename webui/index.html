@@ -4768,6 +4768,13 @@
                                             </div>
                                         </div>
                                         <div class="form-group">
+                                            <label>Minimum seeders:</label>
+                                            <input type="number" id="torrent-min-seeders" min="0" step="1" placeholder="1">
+                                            <div class="setting-help-text">
+                                                Skip releases the indexer reports as having fewer seeders than this, instead of queueing something nobody is serving and waiting for it to time out. Releases that report <strong>no</strong> seeder count (usenet, and indexers that omit the field) are never skipped. <strong>0 disables</strong>.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
                                             <label>Stalled torrent timeout (minutes):</label>
                                             <input type="number" id="torrent-stall-timeout" min="0" step="1" placeholder="10">
                                             <div class="setting-help-text">

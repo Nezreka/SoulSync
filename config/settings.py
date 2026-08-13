@@ -555,6 +555,13 @@ class ConfigManager:
                 # its partial data, fail the download so the next source can
                 # try) or "pause" (pause in the client, leave for the user).
                 "torrent_stall_action": "abandon",
+                # Minimum indexer-reported seeders before a torrent is queued
+                # at all (#1139). Picking the "most seeded" release still picks
+                # a dead one when the whole field is on zero, and the grab then
+                # occupies the queue until the poll deadline. Releases that
+                # report NO seeder count (usenet, and indexers that omit the
+                # field) are never gated by this. 0 disables.
+                "torrent_min_seeders": 1,
                 # Where THIS container can read completed torrent/usenet
                 # downloads (#857). The downloader (qBit/SAB) reports a save
                 # path from inside ITS OWN container — often a category folder

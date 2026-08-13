@@ -199,12 +199,22 @@ async def add_torrent_smart(
     url_or_magnet: str,
     category: str = "soulsync",
     save_path: Optional[str] = None,
+    fallback_magnet: Optional[str] = None,
 ) -> Optional[str]:
     """Add a release the way Sonarr/Radarr do: magnets go straight to the
     client; HTTP download links are fetched server-side and handed over as
     file bytes via ``add_torrent_file``. Falls back to the legacy URL handoff
     only when the server-side fetch fails, so setups where the client CAN
-    reach the indexer keep working."""
+    reach the indexer keep working.
+
+    ``fallback_magnet`` is the magnet for the SAME release, when the indexer
+    offered both. Callers now prefer the .torrent URL (#1139: a magnet gives
+    the client nothing but an info-hash, so a swarm it can't reach leaves it
+    parked on "downloading metadata" forever), and this is what keeps that
+    preference from being a downgrade — if the server-side fetch fails we use
+    the magnet we already had instead of handing over a URL this process just
+    proved it cannot reach.
+    """
     from utils.logging_config import get_logger
     logger = get_logger('torrent.add')
 
@@ -216,6 +226,14 @@ async def add_torrent_smart(
         return await adapter.add_torrent(magnet, category=category, save_path=save_path)
     if file_bytes is not None:
         return await adapter.add_torrent_file(file_bytes, category=category, save_path=save_path)
+
+    if fallback_magnet:
+        logger.warning(
+            "Could not fetch the .torrent server-side from %s — falling back to the "
+            "release's magnet link",
+            _strip_query(url_or_magnet),
+        )
+        return await adapter.add_torrent(fallback_magnet, category=category, save_path=save_path)
 
     logger.warning(
         "Could not fetch the .torrent server-side from %s — handing the URL to the "

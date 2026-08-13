@@ -1569,6 +1569,11 @@ async function loadSettingsData() {
             _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
         }
         if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
+        const _tcMinSeed = document.getElementById('torrent-min-seeders');
+        if (_tcMinSeed) {
+            const n = settings.download_source?.torrent_min_seeders;
+            _tcMinSeed.value = (n === undefined || n === null) ? 1 : Number(n);
+        }
         const _tcDlPath = document.getElementById('torrent-download-path');
         if (_tcDlPath) _tcDlPath.value = settings.download_source?.torrent_download_path || '';
         const _ucType = document.getElementById('usenet-client-type');
@@ -4486,6 +4491,12 @@ async function saveSettings(quiet = false) {
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
             torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            // #1139: don't queue a release nobody is serving. Blank/NaN → 1;
+            // 0 stays 0 (gate off).
+            torrent_min_seeders: (() => {
+                const n = parseInt(document.getElementById('torrent-min-seeders')?.value, 10);
+                return Number.isFinite(n) && n >= 0 ? n : 1;
+            })(),
             // In-container path(s) where SoulSync reads finished torrent/usenet
             // downloads (#857). Rendered in the torrent/usenet client sections.
             torrent_download_path: document.getElementById('torrent-download-path')?.value || '',

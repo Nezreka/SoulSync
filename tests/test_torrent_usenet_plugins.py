@@ -160,14 +160,40 @@ def test_torrent_project_results_drops_releases_without_download_url() -> None:
     assert albums == []
 
 
-def test_torrent_project_results_prefers_magnet_when_available() -> None:
+def test_torrent_project_results_prefers_the_torrent_url_over_the_magnet() -> None:
+    """#1139 reversed this. A magnet hands the client an info-hash and nothing
+    else — it has to find the swarm itself, and a client without working
+    DHT/PEX (or a release with no live peers) parks on "downloading metadata"
+    indefinitely. The http link lets SoulSync fetch the real .torrent
+    server-side and push the file, which is what Sonarr/Radarr do.
+
+    The magnet is not thrown away: it rides along as the fallback for when
+    that fetch fails, which is what the pair encoding below is for."""
     from core.download_plugins.candidate_store import get_candidate_store
+    from core.download_plugins.torrent import _decode_candidate
     plugin = TorrentDownloadPlugin()
     magnet = 'magnet:?xt=urn:btih:abc'
     results = [_make_torrent_result(magnet_uri=magnet, download_url='https://x/y.torrent')]
     tracks, _ = plugin._project_results(results)
     token, _ = _decode_filename(tracks[0].filename)
-    assert get_candidate_store().resolve(token) == magnet
+    url, fallback = _decode_candidate(get_candidate_store().resolve(token))
+    assert url == 'https://x/y.torrent'
+    assert fallback == magnet
+
+
+def test_torrent_project_results_still_uses_the_magnet_when_it_is_all_there_is() -> None:
+    from core.download_plugins.candidate_store import get_candidate_store
+    from core.download_plugins.torrent import _decode_candidate
+    plugin = TorrentDownloadPlugin()
+    magnet = 'magnet:?xt=urn:btih:def'
+    results = [_make_torrent_result(magnet_uri=magnet, download_url=None)]
+    tracks, _ = plugin._project_results(results)
+    token, _ = _decode_filename(tracks[0].filename)
+    url, fallback = _decode_candidate(get_candidate_store().resolve(token))
+    assert url == magnet
+    # No second link to fall back to, and the magnet must not be its own
+    # fallback — add_torrent_smart would otherwise retry the identical add.
+    assert fallback is None
 
 
 def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
@@ -179,7 +205,8 @@ def test_torrent_project_results_encodes_token_and_title_in_filename() -> None:
     token, display = _decode_filename(tracks[0].filename)
     assert 'https://x/y.torrent' not in tracks[0].filename
     assert get_candidate_store().is_token(token)
-    assert get_candidate_store().resolve(token) == 'https://x/y.torrent'
+    from core.download_plugins.torrent import _decode_candidate
+    assert _decode_candidate(get_candidate_store().resolve(token))[0] == 'https://x/y.torrent'
     assert display == 'Danny Brown - Atrocity Exhibition [FLAC]'
 
 
