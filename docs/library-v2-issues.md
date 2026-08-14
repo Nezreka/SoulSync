@@ -5685,3 +5685,12 @@ Media-Server-Tracks wieder als `inserted` zu behandeln. Mit LV2-CUT-03 ist
 dieser Zweig absichtlich unzulässig: Ein Scan kann keinen neuen Track erzeugen.
 Die benötigten History-/Embedded-ID-Side-Effects laufen stattdessen im echten
 Import-/Downloadpfad, der auch die physische Datei besitzt.
+
+## 35. Post-Cutover-Runtime-Regressionen (14. August 2026)
+
+| ID | Prio | Diagnose | Korrekturvertrag |
+|---|---|---|---|
+| LV2-RUN-01 | P1 | Ein Repair-Finding konnte nach einem Katalog-Reconcile noch die inzwischen gelöschte `lib2`-Track-ID tragen. Die physische Reparatur gelang, aber der Wanted-Outbox-Schritt brach mit „projection missing or stale“ ab und ließ das Finding endlos pending. | Nicht mehr existierende Finding-IDs ignorieren; für jeden noch existierenden Track bleibt eine fehlende oder veraltete Wanted-Projektion ein harter Fehler. |
+| LV2-RUN-02 | P1 | `/api/discover/similar-artists/enrich` liefert Artists als Map nach Provider-ID, der neue React-Hook iterierte sie wie ein Array. Das löste `TypeError: e.artists is not iterable` aus und brachte die gesamte Discover-Seite in die Error Boundary. | Die vorhandene kanonische Map-Projektion `enrichUpdates()` verwenden und den echten Response-Shape im Hook-Test abbilden. |
+| LV2-RUN-03 | P2 | Bei einer verifiziert leeren Media-Server-Auswahl wurden Track-Verknüpfungen gelöst, Artist-/Album-Verknüpfungen blieben jedoch servergescoped zurück. | Nach doppelter Empty-Verifikation den vollständigen Serverbeitrag detach-en; Katalogtracks und aktive physische File-Rows ausdrücklich erhalten. |
+| LV2-RUN-04 | P2 | Der React-Umbau der Library-Seite entfernte stabile DOM-Anker, die Help-Tour und Download-Integration weiterhin verwenden. | Die bestehenden IDs für Suche, Monitoring, Grid, Pagination und View-Toggle am neuen Renderer bereitstellen und die Tourtexte auf die neue UI-Semantik aktualisieren. |

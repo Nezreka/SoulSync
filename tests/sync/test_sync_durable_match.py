@@ -38,7 +38,8 @@ def test_durable_match_used_when_volatile_cache_wiped():
     db.check_track_exists.return_value = (None, 0.0)             # fuzzy would FAIL
     db.find_manual_library_match_by_source_track_id.return_value = {
         "library_track_id": "t99", "library_file_path": "/m/x.flac"}
-    db.get_track_by_id.side_effect = lambda i: dt if str(i) == "t99" else None
+    db.get_track_by_server_id.side_effect = (
+        lambda i, server: dt if str(i) == "t99" and server == "jellyfin" else None)
     match, conf = _run(svc=_service(), db=db)
     assert conf == 1.0 and match.id == "t99"                    # manual pick honored across the rescan
 
@@ -50,7 +51,8 @@ def test_durable_match_self_heals_stale_library_id():
     db.check_track_exists.return_value = (None, 0.0)
     db.find_manual_library_match_by_source_track_id.return_value = {
         "library_track_id": "staleid", "library_file_path": "/m/x.flac"}
-    db.get_track_by_id.side_effect = lambda i: dt if str(i) == "newid" else None  # stale id gone
+    db.get_track_by_server_id.side_effect = (
+        lambda i, server: dt if str(i) == "newid" and server == "jellyfin" else None)
     db.find_track_id_by_file_path.return_value = "newid"
     match, conf = _run(svc=_service(), db=db)
     assert conf == 1.0 and match.id == "newid"

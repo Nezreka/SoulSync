@@ -163,15 +163,6 @@ def test_manual_match_provenance_accepts_text_entity_ids(tmp_path):
     entity_id = "01MoTj8w4VkVtgdPOijUUE"
     db = MusicDatabase(str(tmp_path / "text-matches.db"))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists(id, name) VALUES(?, 'Text Artist')", (entity_id,))
-    conn.execute(
-        """UPDATE artists
-              SET spotify_artist_id='spotify-artist',
-                  spotify_match_status='matched'
-            WHERE id=?""",
-        (entity_id,),
-    )
-
     record_manual_match(
         conn,
         entity_type="artist",

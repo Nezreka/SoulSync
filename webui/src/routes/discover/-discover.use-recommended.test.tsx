@@ -27,7 +27,7 @@ function stub() {
       enrichBodies.push(await request.json());
       return HttpResponse.json({
         success: true,
-        artists: [{ artist_id: 'sp2', image_url: '/img/2.jpg' }],
+        artists: { sp2: { image_url: '/img/2.jpg' } },
       });
     }),
     http.post('/api/discover/adventurousness', async ({ request }) => {

@@ -207,12 +207,12 @@ def _db_with_tracks(n=3):
     d = MusicDatabase(_os.path.join(_tempfile.mkdtemp(), 't.db'))
     conn = d._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('AR1','A')")
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('AL1','AR1','Al')")
+    cur.execute("INSERT INTO artists (id, name) VALUES (1,'A')")
+    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES (1,1,'Al')")
     for i in range(n):
         cur.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-                    "VALUES (?, 'AL1', 'AR1', ?, ?)",
-                    (f'T{i}', f'Song {i}', f'/music/{i}.flac'))
+                    "VALUES (?, 1, 1, ?, ?)",
+                    (i + 1, f'Song {i}', f'/music/{i}.flac'))
     conn.commit(); conn.close()
     return d
 
@@ -227,11 +227,9 @@ def _subjects_from_db(db):
         "SELECT id, title, file_path FROM tracks ORDER BY id"
     ).fetchall()
     conn.close()
-    # subject_details() casts track_id to int (real lib2 rows use an integer
-    # PK) — synthesize one instead of reusing the legacy string id ("T0").
     return [
-        {'track_id': index + 1, 'title': r['title'], 'artist_name': 'A', 'path': r['file_path']}
-        for index, r in enumerate(rows)
+        {'track_id': r['id'], 'title': r['title'], 'artist_name': 'A', 'path': r['file_path']}
+        for r in rows
     ]
 
 

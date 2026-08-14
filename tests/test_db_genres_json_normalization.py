@@ -45,7 +45,7 @@ def _seed_and_normalize(db: MusicDatabase, artists, albums=()):
         conn.commit()
 
 
-def _get_genres(db: MusicDatabase, table: str, rid: str):
+def _get_genres(db: MusicDatabase, table: str, rid: int):
     with db._get_connection() as conn:
         row = conn.execute(f"SELECT genres FROM {table} WHERE id = ?", (rid,)).fetchone()
     return row[0]
@@ -53,39 +53,39 @@ def _get_genres(db: MusicDatabase, table: str, rid: str):
 
 def test_csv_genres_normalized_to_json(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
-    _seed_and_normalize(db, [("a1", "Artist One", "Rock, Pop, Jazz")])
-    stored = _get_genres(db, "artists", "a1")
+    _seed_and_normalize(db, [(1, "Artist One", "Rock, Pop, Jazz")])
+    stored = _get_genres(db, "artists", 1)
     assert json.loads(stored) == ["Rock", "Pop", "Jazz"]
 
 
 def test_existing_json_genres_left_unchanged(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
     canonical = json.dumps(["Hip-Hop", "Soul"])
-    _seed_and_normalize(db, [("a1", "Artist One", canonical)])
+    _seed_and_normalize(db, [(1, "Artist One", canonical)])
     # Byte-for-byte identical — no needless churn on already-canonical rows.
-    assert _get_genres(db, "artists", "a1") == canonical
+    assert _get_genres(db, "artists", 1) == canonical
 
 
 def test_single_genre_without_comma(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
-    _seed_and_normalize(db, [("a1", "Artist One", "Electronic")])
-    assert json.loads(_get_genres(db, "artists", "a1")) == ["Electronic"]
+    _seed_and_normalize(db, [(1, "Artist One", "Electronic")])
+    assert json.loads(_get_genres(db, "artists", 1)) == ["Electronic"]
 
 
 def test_csv_whitespace_and_empties_dropped(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
-    _seed_and_normalize(db, [("a1", "Artist One", " Rock ,, Pop , ")])
-    assert json.loads(_get_genres(db, "artists", "a1")) == ["Rock", "Pop"]
+    _seed_and_normalize(db, [(1, "Artist One", " Rock ,, Pop , ")])
+    assert json.loads(_get_genres(db, "artists", 1)) == ["Rock", "Pop"]
 
 
 def test_albums_table_also_normalized(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
     _seed_and_normalize(
         db,
-        artists=[("a1", "Artist One", "Rock")],
-        albums=[("al1", "a1", "Album One", "Soul, Funk")],
+        artists=[(1, "Artist One", "Rock")],
+        albums=[(1, 1, "Album One", "Soul, Funk")],
     )
-    assert json.loads(_get_genres(db, "albums", "al1")) == ["Soul", "Funk"]
+    assert json.loads(_get_genres(db, "albums", 1)) == ["Soul", "Funk"]
 
 
 def test_values_match_legacy_reader_semantics(tmp_path: Path) -> None:
@@ -93,21 +93,21 @@ def test_values_match_legacy_reader_semantics(tmp_path: Path) -> None:
     so downstream genre values are identical pre- and post-migration."""
     db = _fresh_db(tmp_path)
     raw = "Rock, Pop, Hip-Hop/Rap"
-    _seed_and_normalize(db, [("a1", "Artist One", raw)])
+    _seed_and_normalize(db, [(1, "Artist One", raw)])
     legacy = [g.strip() for g in raw.split(",") if g.strip()]
-    assert json.loads(_get_genres(db, "artists", "a1")) == legacy
+    assert json.loads(_get_genres(db, "artists", 1)) == legacy
 
 
 def test_idempotent_rerun(tmp_path: Path) -> None:
     db = _fresh_db(tmp_path)
-    _seed_and_normalize(db, [("a1", "Artist One", "Rock, Pop")])
-    first = _get_genres(db, "artists", "a1")
+    _seed_and_normalize(db, [(1, "Artist One", "Rock, Pop")])
+    first = _get_genres(db, "artists", 1)
     # Marker is now set; a second run must be a no-op and leave the value identical.
     with db._get_connection() as conn:
         cur = conn.cursor()
         db._normalize_genres_to_json(cur)
         conn.commit()
-    assert _get_genres(db, "artists", "a1") == first
+    assert _get_genres(db, "artists", 1) == first
     assert json.loads(first) == ["Rock", "Pop"]
 
 

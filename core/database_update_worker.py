@@ -366,6 +366,9 @@ class DatabaseUpdateWorker:
                     logger.info(f"Deep scan: Removing {len(stale)} stale tracks from database")
                     stale_removed = self.database.delete_stale_tracks(stale, self.server_type)
 
+            if not artists and getattr(self, '_artists_fetch_verified', False):
+                self.database.clear_server_data(self.server_type)
+
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")
             try:

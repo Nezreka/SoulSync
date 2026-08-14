@@ -182,9 +182,15 @@ class _FakeDB:
                     "INSERT INTO lib2_artists(name, name_key) VALUES(?,?)",
                     (row["artist_name"], normalize_name(row["artist_name"]))
                 ).lastrowid
-                conn.execute(
+                album = conn.execute(
                     "INSERT INTO lib2_albums(primary_artist_id, title, origin)"
-                    " VALUES(?,?,'library')", (artist, row["title"]))
+                    " VALUES(?,?,'library')", (artist, row["title"])).lastrowid
+                track = conn.execute(
+                    "INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                    (album, f'{row["title"]} Track')).lastrowid
+                conn.execute(
+                    "INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                    (track, f'/music/{track}.flac'))
             conn.commit()
         finally:
             conn.close()

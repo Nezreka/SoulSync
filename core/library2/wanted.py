@@ -320,17 +320,16 @@ def track_wanted_states(
     ).fetchall()
     found = {int(row["id"]): row for row in rows}
     incomplete = [
-        track_id for track_id in normalized
-        if track_id not in found
-        or found[track_id]["wanted"] is None
-        or found[track_id]["projection_version"] != PROJECTION_VERSION
+        track_id for track_id, row in found.items()
+        if row["wanted"] is None
+        or row["projection_version"] != PROJECTION_VERSION
     ]
     if incomplete:
         raise RuntimeError(
             "wanted projection missing or stale for tracks: "
             + ",".join(str(track_id) for track_id in incomplete[:20])
         )
-    return {track_id: bool(found[track_id]["wanted"]) for track_id in normalized}
+    return {track_id: bool(row["wanted"]) for track_id, row in found.items()}
 
 
 def track_is_wanted(conn: Any, track_id: int, *, profile_id: int = 1) -> bool:

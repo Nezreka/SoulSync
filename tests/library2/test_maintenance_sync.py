@@ -198,6 +198,30 @@ def test_successful_delete_marks_v2_file_deleted_and_recomputes_wanted(legacy_db
     assert "file_state" in event[1]
 
 
+def test_repair_sync_ignores_a_stale_finding_track_id(legacy_db):
+    from core.library2.maintenance_sync import sync_repair_change
+
+    _import(legacy_db)
+    conn = legacy_db._get_connection()
+    native = conn.execute(
+        "SELECT t.id AS track_id, f.id AS file_id FROM lib2_tracks t "
+        "JOIN lib2_track_files f ON f.track_id=t.id WHERE t.legacy_track_id=100"
+    ).fetchone()
+    conn.close()
+
+    outcome = sync_repair_change(
+        legacy_db, _Config(True), job_id="acoustid_scanner",
+        finding_type="acoustid_mismatch", action="retagged",
+        entity_type="track", entity_id="lib2:999999", file_path="/m/01.flac",
+        details={"library_v2": {
+            "track_ids": [999999], "file_ids": [native["file_id"]],
+        }},
+        result={"library_v2_recompute_wanted": True},
+    )
+
+    assert outcome["reason"] == "synchronized"
+
+
 def test_remove_only_suppresses_wanted_even_for_monitored_track(legacy_db):
     from core.library2.maintenance_sync import sync_repair_change
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule

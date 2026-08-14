@@ -64,15 +64,15 @@ class TestBackfillMigration:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO artists (id, name, lastfm_url) VALUES (?, ?, ?)",
-                ("a1", "Artist A", "https://last.fm/music/Artist%20A"),
+                (1, "Artist A", "https://last.fm/music/Artist%20A"),
             )
             cur.execute(
                 "INSERT INTO artists (id, name, lastfm_url, lastfm_match_status) VALUES (?, ?, ?, ?)",
-                ("a2", "Artist B", "https://last.fm/music/B", "matched"),
+                (2, "Artist B", "https://last.fm/music/B", "matched"),
             )
             cur.execute(
                 "INSERT INTO artists (id, name) VALUES (?, ?)",
-                ("a3", "Artist C"),  # no url, status stays NULL
+                (3, "Artist C"),  # no url, status stays NULL
             )
             conn.commit()
 
@@ -94,12 +94,12 @@ class TestBackfillMigration:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO artists (id, name) VALUES (?, ?)",
-                ("art1", "A"),
+                (1, "A"),
             )
             cur.execute(
                 "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
                 "VALUES (?, ?, ?, ?)",
-                ("alb1", "art1", "Album X", "mb-release-uuid"),
+                (1, 1, "Album X", "mb-release-uuid"),
             )
             conn.commit()
 
@@ -114,15 +114,15 @@ class TestBackfillMigration:
     def test_musicbrainz_recording_id_on_tracks(self, db):
         with db._get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("INSERT INTO artists (id, name) VALUES ('art2', 'A')")
+            cur.execute("INSERT INTO artists (id, name) VALUES (1, 'A')")
             cur.execute(
                 "INSERT INTO albums (id, artist_id, title) VALUES (?, ?, 'Alb')",
-                ("alb2", "art2"),
+                (1, 1),
             )
             cur.execute(
                 "INSERT INTO tracks (id, artist_id, album_id, title, musicbrainz_recording_id) "
                 "VALUES (?, ?, ?, ?, ?)",
-                ("trk1", "art2", "alb2", "T1", "mb-rec-uuid"),
+                (1, 1, 1, "T1", "mb-rec-uuid"),
             )
             conn.commit()
 
@@ -139,7 +139,7 @@ class TestBackfillMigration:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO artists (id, name, tidal_id, qobuz_id) VALUES (?, ?, ?, ?)",
-                ("art3", "A", "tidal123", "qobuz456"),
+                (1, "A", "tidal123", "qobuz456"),
             )
             conn.commit()
 
@@ -147,7 +147,7 @@ class TestBackfillMigration:
             conn.commit()
 
             row = cur.execute(
-                "SELECT tidal_match_status, qobuz_match_status FROM artists WHERE id = 'art3'"
+                "SELECT tidal_match_status, qobuz_match_status FROM artists WHERE id = 1"
             ).fetchone()
         assert tuple(row) == ("matched", "matched")
 
@@ -156,7 +156,7 @@ class TestBackfillMigration:
             cur = conn.cursor()
             cur.execute(
                 "INSERT INTO artists (id, name, tidal_id) VALUES (?, ?, ?)",
-                ("art4", "Empty", ""),
+                (1, "Empty", ""),
             )
             conn.commit()
 
@@ -164,7 +164,7 @@ class TestBackfillMigration:
             conn.commit()
 
             status = cur.execute(
-                "SELECT tidal_match_status FROM artists WHERE id = 'art4'"
+                "SELECT tidal_match_status FROM artists WHERE id = 1"
             ).fetchone()[0]
         assert status is None
 

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { RecommendedArtist } from './-discover.recommended';
 
 import { ADV_ENDPOINT, ADV_LIVE_THROTTLE_MS } from './-discover.adventurousness';
-import { watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
+import { enrichUpdates, watchingIdsFrom, watchlistCheckIds } from './-discover.recommended';
 import { watchlistRequest, watchlistToast } from './-discover.your-artists-actions';
 
 /**
@@ -90,14 +90,12 @@ export function useRecommended(onToast: (toast: RecToast) => void): RecommendedC
       });
       const data = (await res.json()) as {
         success?: boolean;
-        artists?: { artist_id?: string; image_url?: string }[];
+        artists?: Record<string, { image_url?: string }>;
       };
-      if (!data.success || !data.artists) return;
+      const updates = enrichUpdates(data);
       setImages((prev) => {
         const next = { ...prev };
-        for (const a of data.artists!) {
-          if (a.artist_id && a.image_url) next[a.artist_id] = a.image_url;
-        }
+        for (const update of updates) next[update.artistId] = update.imageUrl;
         return next;
       });
     } catch {

@@ -4051,7 +4051,7 @@ function ArtistIndexView() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
+      <header className={`${styles.header} library-header`}>
         <div>
           <h1 className={styles.title}>Library</h1>
           <p className={styles.subtitle}>
@@ -4067,6 +4067,7 @@ function ArtistIndexView() {
       <div className={styles.toolbar}>
         <LibrarySectionTabs />
         <input
+          id="library-search-input"
           className={styles.searchInput}
           type="text"
           placeholder="Filter artists…"
@@ -4074,6 +4075,7 @@ function ArtistIndexView() {
           onChange={(e) => artistFilter.onChange(e.target.value)}
         />
         <select
+          id="watchlist-filter"
           className={styles.select}
           value={search.monitored}
           onChange={(e) =>
@@ -4091,6 +4093,7 @@ function ArtistIndexView() {
           <option value="unmonitored">Unmonitored</option>
         </select>
         <select
+          id="library-sort"
           className={styles.select}
           value={search.sort}
           onChange={(e) =>
@@ -4108,7 +4111,7 @@ function ArtistIndexView() {
           <option value="albums">Album count</option>
           <option value="tracks">Track count</option>
         </select>
-        <div className={styles.viewToggle}>
+        <div className={styles.viewToggle} id="library-view-toggle">
           <button
             type="button"
             className={search.view === 'cards' ? styles.viewActive : ''}
@@ -4159,7 +4162,7 @@ function ArtistIndexView() {
       )}
 
       {pagination && pagination.total_pages > 1 ? (
-        <div className={styles.pagination}>
+        <div className={styles.pagination} id="library-pagination">
           <button
             type="button"
             disabled={!pagination.has_prev}
@@ -4486,7 +4489,7 @@ export function ArtistCard({
 function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
   const navigate = useNavigate();
   return (
-    <div className={styles.cardGrid}>
+    <div className={styles.cardGrid} id="library-artists-grid">
       {artists.map((artist) => (
         <ArtistCard
           key={artist.id}
@@ -4579,7 +4582,7 @@ function ArtistTable({
   };
 
   return (
-    <table className={styles.table}>
+    <table className={styles.table} id="library-artists-grid">
       <thead>
         <tr>
           <th className={styles.colMonitor}>Mon.</th>

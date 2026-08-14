@@ -117,6 +117,11 @@ def test_verified_empty_library_removes_stale_artists(dbpath):
     artists, tracks = _counts(dbpath)
     assert tracks == 0
     assert artists == 0, "stale artists must be cleaned up"
+    with MusicDatabase(dbpath)._get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 10
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_track_files WHERE file_state='active'"
+        ).fetchone()[0] == 10
 
 
 def test_failed_connection_still_errors_and_removes_nothing(dbpath):

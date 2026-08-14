@@ -158,24 +158,12 @@ def test_album_aware_fallback_does_not_over_match_wrong_album(tmp_path: Path) ->
     db = MusicDatabase(database_path=str(db_path))
 
     conn = db._get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-y", "Madonna", "plex"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-y", "ar-y", "Ray of Light", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("tr-y", "al-y", "ar-y", "Frozen", 1, 200000,
-         "/m/frozen.mp3", 320, "plex", None),
+    from tests.support.catalogue_seed import seed_library_track
+    seed_library_track(
+        conn, artist="Madonna", album="Ray of Light", title="Frozen",
+        artist_server_id="ar-y", album_server_id="al-y", track_server_id="tr-y",
+        track_number=1, duration=200000, file_path="/m/frozen.mp3", bitrate=320,
+        server_source="plex",
     )
     conn.commit()
     conn.close()

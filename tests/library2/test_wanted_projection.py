@@ -30,6 +30,7 @@ from core.library2.wanted import (
     ensure_wanted_projection,
     recompute_wanted,
     recompute_wanted_for_entity,
+    track_wanted_states,
     wanted_projection_status,
     wanted_track_ids,
 )
@@ -60,6 +61,14 @@ def test_default_is_unmonitored(imported_conn):
     _, _, track = _seed_chain(conn)
     recompute_wanted(conn, track_ids=[track])
     assert _projected(conn, track) == (False, "default_unmonitored")
+
+
+def test_wanted_state_ignores_a_stale_finding_track_id(imported_conn):
+    conn = imported_conn
+    _, _, track = _seed_chain(conn)
+    recompute_wanted(conn, track_ids=[track])
+
+    assert track_wanted_states(conn, [track, 999999]) == {track: False}
 
 
 def test_explicit_track_rule_beats_every_parent(imported_conn):

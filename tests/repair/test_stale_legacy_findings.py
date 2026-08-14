@@ -32,12 +32,12 @@ from database.music_database import MusicDatabase
 def _db(tmp_path: Path) -> MusicDatabase:
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'A-ha')")
+    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'A-ha')")
     conn.execute(
-        "INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Hunting')")
+        "INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Hunting')")
     conn.execute(
         "INSERT INTO tracks (id, artist_id, album_id, title, track_number, file_path) "
-        "VALUES (1, 'ar1', 'al1', 'Take On Me', 1, '/m/a.flac')")
+        "VALUES (1, 1, 1, 'Take On Me', 1, '/m/a.flac')")
     conn.commit()
     conn.close()
     return db
@@ -94,7 +94,7 @@ def test_declining_leaves_the_legacy_catalogue_untouched(finding_type, tmp_path:
         track = conn.execute(
             "SELECT title, track_number, isrc FROM tracks WHERE id=1").fetchone()
         album_thumb = conn.execute(
-            "SELECT thumb_url FROM albums WHERE id='al1'").fetchone()[0]
+            "SELECT thumb_url FROM albums WHERE id=1").fetchone()[0]
     finally:
         conn.close()
 

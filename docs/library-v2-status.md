@@ -4872,3 +4872,25 @@ umgestellt.
 gesamten `tests/library2`- und `tests/repair_jobs`-Bäume: **1816 bestanden**, 4
 reine Python-3.12-SQLite-Deprecation-Warnungen. Der Produktionsdelta dieser
 Runde beträgt netto **+55 Zeilen**.
+
+## 54. Post-Cutover-Runtime-Regressionen (14. August 2026)
+
+Stand: **Implemented, noch nicht committed.** Die vier bestätigten Nachträge
+aus [Issues §35](library-v2-issues.md#35-post-cutover-runtime-regressionen-14-august-2026)
+sind korrigiert: stale Repair-Subjects blockieren die Wanted-Outbox nicht mehr,
+Discover konsumiert den tatsächlichen Enrich-Response, ein verifiziert leerer
+Media-Server-Scan löst den gesamten Serverbeitrag ohne Verlust physischer
+Files, und die React-Library stellt ihre stabilen Integrationsanker wieder
+bereit.
+
+Die übrigen Fehler des ersten Repository-Laufs waren veraltete Test-Fixtures:
+Sie schrieben opaque Media-Server-Strings in die integerbasierten Katalog-PKs
+oder mockten den entfernten ungescopten ID-Lookup. Die Produktverträge wurden
+dafür nicht zurückgedreht; die Fixtures verwenden jetzt Katalog-Integer und
+`get_track_by_server_id(..., server_source)`.
+
+**Nachweis:** 1845 Library-V2-/Repair-Tests, 2741 Discover-/Library-Frontendtests
+und anschließend die vollständigen Suites mit **14303 Python-Tests bestanden,
+3 übersprungen, 2 abgewählt** sowie **6459 Frontendtests bestanden**.
+`compileall`, Legacy-Ratsche, Frontend-Typecheck und Produktions-Build sind
+grün.
