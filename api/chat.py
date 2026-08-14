@@ -297,7 +297,7 @@ def _resolve_track_path(db, track_id):
     if not fp:
         return None
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.library.path_resolver import resolve_library_file_path
         return resolve_library_file_path(str(fp), config_manager=config_manager)
     except Exception:
@@ -1255,7 +1255,7 @@ def create_blueprint() -> Blueprint:
         lastfm = None
         try:
             from core.lastfm_client import LastFMClient
-            from config.settings import config_manager as _cfg
+            from core.settings import config_manager as _cfg
             _key = _cfg.get("lastfm.api_key", "")
             if _key:
                 lastfm = LastFMClient(api_key=_key)

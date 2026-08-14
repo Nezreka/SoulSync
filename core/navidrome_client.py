@@ -7,7 +7,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 import json
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 # Shared dataclasses live in the neutral media_server package — every
 # server client used to define a near-identical XTrackInfo /
@@ -1427,7 +1427,7 @@ class NavidromeClient(MediaServerClient):
             existing_playlists = self.get_playlists_by_name(playlist_name)
             
             # Check if backup is enabled in config
-            from config.settings import config_manager
+            from core.settings import config_manager
             create_backup = config_manager.get('playlist_sync.create_backup', True)
 
             # If we have existing playlists and want to backup, use the first one found

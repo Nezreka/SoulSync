@@ -90,7 +90,7 @@ class TestConfiguredRedirectUriIsHonored:
         Tidal error 1002)."""
         client, _fake = auth_route_client
 
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: (
@@ -114,7 +114,7 @@ class TestConfiguredRedirectUriIsHonored:
         and matching portal registration."""
         client, _fake = auth_route_client
 
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: (
@@ -137,7 +137,7 @@ class TestConfiguredRedirectUriIsHonored:
         be honored, not overridden."""
         client, _fake = auth_route_client
 
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: (
@@ -169,7 +169,7 @@ class TestEmptyConfigFallsBackToDefault:
         the documented portal registration) wins instead."""
         client, _fake = auth_route_client
 
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: ("" if key == "tidal.redirect_uri" else default),
@@ -190,7 +190,7 @@ class TestEmptyConfigFallsBackToDefault:
     ) -> None:
         client, _fake = auth_route_client
 
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: ("" if key == "tidal.redirect_uri" else default),

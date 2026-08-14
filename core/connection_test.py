@@ -10,7 +10,7 @@ import os
 
 import requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.jellyfin_client import JellyfinClient
 from core.metadata.registry import get_primary_source
 from core.plex_client import PlexClient

@@ -28,7 +28,7 @@ from urllib.parse import urljoin
 
 import requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.api_call_tracker import api_call_tracker
 from utils.logging_config import get_logger
 

@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Iterable, List
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.ffmpeg_errors import summarize_ffmpeg_error
 
 logger = logging.getLogger("imports.file_ops")

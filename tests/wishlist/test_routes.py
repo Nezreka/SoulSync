@@ -572,7 +572,7 @@ def _own_track_args():
 
 
 def test_add_album_track_skips_owned_when_duplicates_off(monkeypatch):
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
     runtime, service, db, _logger, _ = _build_runtime()
@@ -586,7 +586,7 @@ def test_add_album_track_skips_owned_when_duplicates_off(monkeypatch):
 
 
 def test_add_album_track_adds_missing_when_duplicates_off(monkeypatch):
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: False if key == 'wishlist.allow_duplicate_tracks' else default)
     runtime, service, db, _logger, _ = _build_runtime()
@@ -600,7 +600,7 @@ def test_add_album_track_adds_missing_when_duplicates_off(monkeypatch):
 
 
 def test_add_album_track_adds_owned_when_duplicates_on(monkeypatch):
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: True if key == 'wishlist.allow_duplicate_tracks' else default)
     runtime, service, db, _logger, _ = _build_runtime()

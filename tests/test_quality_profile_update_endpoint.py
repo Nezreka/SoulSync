@@ -38,7 +38,7 @@ def _default_profile_id(client):
 
 
 def test_updating_the_default_profile_pushes_config(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
 
     default_id = _default_profile_id(client)
     assert config_manager.get('acoustid.require_verified') is not True
@@ -72,7 +72,7 @@ def test_updating_a_non_default_profile_does_not_touch_config(client):
     into the live global config. (Toggles `deep_audio_verify` — a key the
     other test in this file leaves untouched — so this assertion is valid
     regardless of test execution order within the shared app/config.)"""
-    from config.settings import config_manager
+    from core.settings import config_manager
 
     r = client.post(
         '/api/quality-profile/custom',

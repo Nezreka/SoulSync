@@ -75,7 +75,7 @@ def test_read_priority_unset_is_empty():
 
 
 def test_read_priority_roundtrip():
-    from config.settings import config_manager
+    from core.settings import config_manager
     key = 'spotify_enrichment_priority'
     old = config_manager.get(key, '')
     try:

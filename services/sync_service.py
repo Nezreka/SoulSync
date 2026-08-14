@@ -218,7 +218,7 @@ class PlaylistSyncService:
         """
         profile_id = profile_id or getattr(self, '_active_profile_id', None)
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
 
             if active_server == "jellyfin":
@@ -718,7 +718,7 @@ class PlaylistSyncService:
 
             # Use the SAME improved database matching as PlaylistTrackAnalysisWorker
             from database.music_database import MusicDatabase
-            from config.settings import config_manager
+            from core.settings import config_manager
 
             original_title = spotify_track.name
             spotify_id = getattr(spotify_track, 'id', '') or ''

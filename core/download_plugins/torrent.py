@@ -56,7 +56,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.archive_pipeline import AUDIO_EXTENSIONS, collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
@@ -528,7 +528,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         push fails/isn't supported, fall back to recording so the goal still
         applies. Best-effort — never raises into the completion path."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             mode = config_manager.get('torrent_client.seed_mode', 'soulsync')
             if mode == 'client':
                 ratio_goal = config_manager.get('torrent_client.seed_ratio_goal', 0)
@@ -549,7 +549,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         never raises into the completion path."""
         try:
             from database.music_database import get_database
-            from config.settings import config_manager
+            from core.settings import config_manager
             category = config_manager.get('torrent_client.category', 'soulsync') or 'soulsync'
             get_database().record_torrent_seed_grab(torrent_hash, title, category)
         except Exception as e:

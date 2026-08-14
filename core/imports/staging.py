@@ -27,7 +27,7 @@ _import_suggestions_cache: Dict[str, Any] = {
 
 def _get_config_manager():
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         return config_manager
     except Exception:

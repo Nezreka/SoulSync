@@ -709,7 +709,7 @@ class iTunesWorker:
             # Backfill genres if empty
             if artist_obj.genres:
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres(list(artist_obj.genres), _cfg)
                 if _filtered:
                     cursor.execute("""

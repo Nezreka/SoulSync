@@ -36,7 +36,7 @@ except ImportError:
     yt_dlp = None
 
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_blocking
 
 # Standard data structures shared across all download clients so downstream

@@ -8,7 +8,7 @@ flag mirrored from web_server's own flag in ``_shutdown_runtime_components``.
 import threading
 import time
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.runtime_state import (
     download_batches,
     download_tasks,

@@ -308,7 +308,7 @@ def test_get_next_item_defaults_to_album_first(tmp_path):
 def test_get_next_item_honors_track_priority_override(tmp_path):
     """PR #968 review: the Bandcamp worker must respect the Manage Enrichment
     Workers 'process this group first' override like the other workers."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     worker = _real_db_worker(tmp_path)
     key = 'bandcamp_enrichment_priority'
     old = config_manager.get(key, '')

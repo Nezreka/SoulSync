@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests as http_requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.amazon_client import AmazonClient, AmazonClientError
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult

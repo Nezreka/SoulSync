@@ -66,7 +66,7 @@ def test_deezer_download_defers_arl_auth_during_boot(monkeypatch):
 
     boot_phase._boot_active = True
     monkeypatch.setattr(
-        "config.settings.config_manager.get",
+        "core.settings.config_manager.get",
         lambda key, default=None: "fake-arl" if key == "deezer_download.arl" else default,
     )
 

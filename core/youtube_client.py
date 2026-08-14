@@ -44,7 +44,7 @@ def _resolve_cookie_opts() -> dict:
     'custom' — which must become a yt-dlp ``cookiefile`` pointing at the saved file,
     NOT be passed through as a browser name (yt-dlp rejects: 'unsupported browser:
     custom'). Delegates to the shared, tested precedence in core.youtube_cookies."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.youtube_cookies import build_youtube_cookie_opts
     mode = config_manager.get('youtube.cookies_browser', '')
     cookiefile = config_manager.get('youtube.cookies_file', '')
@@ -139,7 +139,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
     def __init__(self, download_path: str = None):
         # Use Soulseek download path for consistency (post-processing expects files here)
-        from config.settings import config_manager
+        from core.settings import config_manager
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
@@ -319,7 +319,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
     def reload_settings(self):
         """Reload YouTube settings from config (called when settings are saved)."""
-        from config.settings import config_manager
+        from core.settings import config_manager
         self._download_delay = config_manager.get('youtube.download_delay', 3)
         # Clear both cookie sources, then re-apply from current settings (browser
         # store or pasted cookies.txt) so a mode switch doesn't leave a stale arg.

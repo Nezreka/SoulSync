@@ -194,7 +194,7 @@ def manual_search_client(monkeypatch):
 
                 # Default config: hybrid mode with all six in hybrid_order.
                 # Individual tests override this.
-                from config.settings import config_manager
+                from core.settings import config_manager
                 original_get = config_manager.get
 
                 def _fake_config_get(key, default=None):
@@ -227,7 +227,7 @@ def test_manual_search_soundcloud_link_forces_soundcloud_source(manual_search_cl
     — it must NOT be turned into a text query or fan out to other sources."""
     client, ctx = manual_search_client
     # Hybrid order = soundcloud only, so SoundCloud is the lone available source.
-    from config.settings import config_manager
+    from core.settings import config_manager
     original = config_manager.get
 
     def _cfg(key, default=None):
@@ -477,7 +477,7 @@ def test_manual_search_single_source_mode_only_offers_one_source(monkeypatch, ma
     label in this case."""
     client, _ctx = manual_search_client
 
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(
         config_manager, 'get',
         lambda key, default=None: (

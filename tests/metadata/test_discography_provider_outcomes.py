@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.metadata import registry as metadata_registry
 from core.metadata.discography_providers import (
     MusicBrainzDiscographyProviderAdapter,

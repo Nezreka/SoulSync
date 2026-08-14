@@ -485,7 +485,7 @@ class DiscogsWorker:
             # Backfill genres if empty
             if data.get('genres'):
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres(data.get('genres', []), _cfg)
                 if _filtered:
                     cursor.execute("""

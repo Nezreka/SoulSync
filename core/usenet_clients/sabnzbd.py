@@ -13,7 +13,7 @@ from typing import List, Optional, Union
 
 import requests as http_requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_control
 from core.usenet_clients.base import UsenetStatus
 from utils.logging_config import get_logger

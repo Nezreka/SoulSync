@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import time
 from pathlib import Path
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.filename import parse_filename_metadata
 # Shared download-result dataclasses + plugin contract live in the
 # neutral plugin package — every source uses the same types, so they
@@ -549,7 +549,7 @@ class SoulseekClient(DownloadSourcePlugin):
             return [], []
 
         # Get timeout from config if not specified
-        from config.settings import config_manager
+        from core.settings import config_manager
         if timeout is None:
             timeout = config_manager.get('soulseek.search_timeout', 60)
 
@@ -597,7 +597,7 @@ class SoulseekClient(DownloadSourcePlugin):
             self.active_searches[search_id] = True
 
             # Get timeout buffer from config
-            from config.settings import config_manager
+            from core.settings import config_manager
             timeout_buffer = config_manager.get('soulseek.search_timeout_buffer', 15)
 
             # Poll for results - process and emit results immediately when found

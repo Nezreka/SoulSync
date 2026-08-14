@@ -53,7 +53,7 @@ def floor_gb() -> float:
     if _floor_override is not None:
         return _floor_override
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return max(0.0, float(config_manager.get("soulseek.min_free_disk_gb", DEFAULT_FLOOR_GB)))
     except Exception:   # noqa: BLE001 - config hiccup must never wedge downloads
         return DEFAULT_FLOOR_GB
@@ -69,7 +69,7 @@ def music_has_room() -> tuple[bool, float | None, float]:
     if floor <= 0:
         return True, None, floor
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         target = config_manager.get("soulseek.download_path", "./downloads")
     except Exception:   # noqa: BLE001
         return True, None, floor

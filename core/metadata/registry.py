@@ -218,7 +218,7 @@ def clear_cached_profile_spotify_client(profile_id: int) -> None:
 
 def _get_config_value(key: str, default: Any = None) -> Any:
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         return config_manager.get(key, default)
     except Exception:

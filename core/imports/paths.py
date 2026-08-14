@@ -45,7 +45,7 @@ def artist_letter(artist, symbol_fallback=None):
     literal = (artist or "U")[0].upper()
     if symbol_fallback is None:
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             symbol_fallback = bool(config_manager.get(
                 "file_organization.artistletter_symbol_fallback", False))
         except Exception:   # config unavailable → historical behavior
@@ -61,7 +61,7 @@ def artist_letter(artist, symbol_fallback=None):
 
 def _get_config_manager():
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return config_manager
     except Exception:
         class _FallbackConfig:

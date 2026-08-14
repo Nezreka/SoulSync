@@ -203,7 +203,7 @@ class SoulSyncClient(MediaServerClient):
     """
 
     def __init__(self):
-        from config.settings import config_manager
+        from core.settings import config_manager
         self._config_manager = config_manager
         self._transfer_path = ''
         self._progress_callback = None

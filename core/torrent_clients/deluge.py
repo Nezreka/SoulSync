@@ -18,7 +18,7 @@ from typing import Any, List, Optional
 
 import requests as http_requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger

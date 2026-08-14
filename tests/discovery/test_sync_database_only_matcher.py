@@ -29,7 +29,7 @@ def _run(track, **kw):
     fake_cm = MagicMock()
     fake_cm.get_active_media_server.return_value = "plex"
     with patch("database.music_database.MusicDatabase", return_value=fake_db), \
-         patch("config.settings.config_manager", fake_cm), \
+         patch("core.settings.config_manager", fake_cm), \
          patch("core.artists.map.get_current_profile_id", return_value=1):
         return asyncio.run(sync_mod._database_only_find_track(track, **kw))
 
@@ -49,7 +49,7 @@ def test_returns_match_when_db_has_it():
     fake_cm = MagicMock()
     fake_cm.get_active_media_server.return_value = "plex"
     with patch("database.music_database.MusicDatabase", return_value=fake_db), \
-         patch("config.settings.config_manager", fake_cm), \
+         patch("core.settings.config_manager", fake_cm), \
          patch("core.artists.map.get_current_profile_id", return_value=1):
         match, conf = asyncio.run(sync_mod._database_only_find_track(track, candidate_pool={}))
     assert conf == 0.95 and match.id == "t1"
@@ -63,7 +63,7 @@ def _run_with_db(track, fake_db):
     fake_cm = MagicMock()
     fake_cm.get_active_media_server.return_value = "plex"
     with patch("database.music_database.MusicDatabase", return_value=fake_db), \
-         patch("config.settings.config_manager", fake_cm), \
+         patch("core.settings.config_manager", fake_cm), \
          patch("core.artists.map.get_current_profile_id", return_value=1):
         return asyncio.run(sync_mod._database_only_find_track(track, candidate_pool={}))
 

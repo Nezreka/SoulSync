@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.library.bulk_paginate import paginate_all_items
 
 # Shared dataclasses live in the neutral media_server package — every
@@ -1778,7 +1778,7 @@ class JellyfinClient(MediaServerClient):
             existing_playlist = self.get_playlist_by_name(playlist_name)
             
             # Check if backup is enabled in config
-            from config.settings import config_manager
+            from core.settings import config_manager
             create_backup = config_manager.get('playlist_sync.create_backup', True)
             
             if existing_playlist and create_backup:

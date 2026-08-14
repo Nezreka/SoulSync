@@ -9,7 +9,7 @@ an empty/sentinel posted value back to the stored token.
 
 from __future__ import annotations
 
-from config.settings import ConfigManager
+from core.settings import ConfigManager
 
 S = ConfigManager.REDACTED_SENTINEL
 

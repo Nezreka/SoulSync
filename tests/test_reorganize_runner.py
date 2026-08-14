@@ -26,10 +26,10 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# Stub config.settings so importing core.reorganize_runner -> core.library_reorganize doesn't blow up
-if "config.settings" not in sys.modules:
+# Stub core.settings so importing core.reorganize_runner -> core.library_reorganize doesn't blow up
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     class _DummyConfigManager:
         def get(self, key, default=None):
@@ -41,7 +41,7 @@ if "config.settings" not in sys.modules:
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
+    sys.modules["core.settings"] = settings_mod
 
 if "spotipy" not in sys.modules:
     spotipy = types.ModuleType("spotipy")

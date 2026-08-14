@@ -45,7 +45,7 @@ def db(tmp_path):
 @pytest.fixture()
 def config(monkeypatch):
     stub = _StubConfig()
-    import config.settings as settings
+    import core.settings as settings
     monkeypatch.setattr(settings, "config_manager", stub)
     return stub
 

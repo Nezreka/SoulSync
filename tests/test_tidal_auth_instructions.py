@@ -73,7 +73,7 @@ def test_instructions_show_tidal_port_not_spotify_port_when_config_uses_8889(
 
     fake_client.redirect_uri = "http://127.0.0.1:8889/tidal/callback"
 
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(
         config_manager, "get",
         lambda key, default=None: (
@@ -104,7 +104,7 @@ def test_instructions_respect_custom_callback_port_from_env(
 
     fake_client.redirect_uri = "http://127.0.0.1:9999/tidal/callback"
 
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(
         config_manager, "get",
         lambda key, default=None: (
@@ -131,7 +131,7 @@ def test_instructions_fall_back_to_default_port_when_redirect_uri_is_unparseable
 
     fake_client.redirect_uri = "not-a-valid-url"
 
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(
         config_manager, "get",
         lambda key, default=None: (

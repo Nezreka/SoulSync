@@ -21,7 +21,7 @@ ride the full poll deadline).
 
 from __future__ import annotations
 
-from config.settings import config_manager
+from core.settings import config_manager
 
 # 0 = disabled. 10 minutes is long enough to ride out a slow metadata fetch
 # or a brief peer drought, short enough to give up on a truly dead magnet

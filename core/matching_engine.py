@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from unidecode import unidecode
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 from core.spotify_client import Track as SpotifyTrack
 from core.media_server.types import TrackInfo

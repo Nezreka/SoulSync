@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from config.settings import config_manager
+from core.settings import config_manager
 
 from core.torrent_clients.aria2 import Aria2Adapter
 from core.torrent_clients.base import TorrentClientAdapter, TorrentStatus

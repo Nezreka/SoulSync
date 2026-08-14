@@ -43,7 +43,7 @@ def _plex_config(db=None) -> Dict[str, str]:
     origin), then the video side's effective creds. Both usually point at the
     same server, and sessions() returns everything, so either works."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         cfg = config_manager.get_plex_config() or {}
         if cfg.get("base_url") and cfg.get("token"):
             return {"base_url": cfg["base_url"], "token": cfg["token"]}
@@ -223,7 +223,7 @@ def normalize_session(item: Any) -> Dict[str, Any]:
 def _jellyfin_config(db=None) -> Dict[str, str]:
     """Any working Jellyfin config — music first, then video's effective creds."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         cfg = config_manager.get_jellyfin_config() or {}
         if cfg.get("base_url") and cfg.get("api_key"):
             return {"base_url": cfg["base_url"], "api_key": cfg["api_key"]}

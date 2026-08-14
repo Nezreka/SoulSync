@@ -35,7 +35,7 @@ from mutagen.oggvorbis import OggVorbis
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
-from config.settings import config_manager
+from core.settings import config_manager
 
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
@@ -5824,7 +5824,7 @@ def spotify_callback():
     try:
         from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         # Per-profile callback: the profile's own account via the shared app.
         if profile_id_from_state and profile_id_from_state != 1:
@@ -11636,7 +11636,7 @@ def library_completion_stream():
             # Pre-fetch the artist's library albums AND tracks ONCE so per-item
             # matching runs in-memory instead of firing per-item SQL searches.
             # Turns N*K queries into 2 broad fetches + N track-count lookups.
-            from config.settings import config_manager as _cm_cs
+            from core.settings import config_manager as _cm_cs
             _active_server = _cm_cs.get_active_media_server()
             candidate_albums = None
             candidate_tracks = None
@@ -20540,7 +20540,7 @@ def _try_version_mismatch_fallback_for_worker(expected_title, expected_artist, t
     import time
     from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
     from core.imports.quarantine import approve_quarantine_entry, list_quarantine_entries
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.imports.paths import docker_resolve_path
     import os
     try:
@@ -28247,7 +28247,7 @@ def test_database_access():
         logger.info(f"   Track existence check works: found={db_track is not None}, confidence={confidence}")
         
         # Test config manager
-        from config.settings import config_manager
+        from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         logger.info(f"   Active media server: {active_server}")
         
@@ -32063,7 +32063,7 @@ def _discover_shelf_cache(key_extra=None):
 def _discover_dial_key():
     # The dial re-ranks similar-artists live; committing it must bust the key.
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return str(config_manager.get('discover.adventurousness', 0.3))
     except Exception:
         return '0.3'
@@ -32123,7 +32123,7 @@ def get_discover_similar_artists():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
-        from config.settings import config_manager
+        from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         try:
             _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
@@ -39133,7 +39133,7 @@ def start_oauth_callback_servers():
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
-                        from config.settings import config_manager
+                        from core.settings import config_manager
                         from core.spotify_client import normalize_spotify_oauth_config
 
                         # Get Spotify config

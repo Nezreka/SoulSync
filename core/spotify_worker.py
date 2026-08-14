@@ -240,7 +240,7 @@ class SpotifyWorker:
                 # Harmless when the no-auth package isn't installed (the methods
                 # fall back to official, then iTunes/Deezer).
                 try:
-                    from config.settings import config_manager as _cfg
+                    from core.settings import config_manager as _cfg
                     self.client._prefer_free = bool(
                         _cfg.get('metadata.spotify_free_enrichment', True))
                 except Exception:  # noqa: S110 — prefer-free toggle is best-effort
@@ -921,7 +921,7 @@ class SpotifyWorker:
             # Backfill genres if empty
             if artist_obj.genres:
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres(list(artist_obj.genres), _cfg)
                 if _filtered:
                     cursor.execute("""

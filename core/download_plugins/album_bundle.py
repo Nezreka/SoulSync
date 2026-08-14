@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from config.settings import config_manager
+from core.settings import config_manager
 from utils.logging_config import get_logger
 
 logger = get_logger("download_plugins.album_bundle")

@@ -850,7 +850,7 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         # Stage into the shared download folder (a 'youtube' subfolder), then transfer to the
         # library — same pipeline as movies/TV. Falls back to straight-to-library if no
         # download folder is configured.
-        from config.settings import config_manager
+        from core.settings import config_manager
         dl_root = str(config_manager.get("soulseek.download_path", "") or "").strip()
         stage_dir = os.path.join(dl_root, "youtube") if dl_root else None
 

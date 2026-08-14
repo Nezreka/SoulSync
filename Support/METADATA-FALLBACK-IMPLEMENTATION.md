@@ -1204,7 +1204,7 @@ Phase 3 (Optional): Add anonymous Spotify
 
 1. `core/spotify_client.py` - Add fallback logic
 2. `core/itunes_client.py` - New file for iTunes API
-3. `config/settings.py` - Add iTunes/anonymous settings
+3. `core/settings.py` - Add iTunes/anonymous settings
 4. `web_server.py` - Update status endpoints to show active source
 5. `templates/settings.html` - UI for fallback options
 

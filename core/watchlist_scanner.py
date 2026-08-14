@@ -1066,7 +1066,7 @@ class WatchlistScanner:
         follow-only they had set."""
         from core.watchlist_auto_download import effective_with_legacy
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             g_auto = config_manager.get('watchlist.global_auto_download', True)
         except Exception:   # noqa: BLE001 - a config hiccup keeps today's behaviour
             g_auto = True
@@ -1083,7 +1083,7 @@ class WatchlistScanner:
         # Runs first and unconditionally — see _apply_auto_download_default.
         self._apply_auto_download_default(watchlist_artists)
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
         except Exception:
             return
 
@@ -2175,7 +2175,7 @@ class WatchlistScanner:
 
             # Check custom exclusion terms
             try:
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 exclude_terms_str = _cfg.get('watchlist.exclude_terms', '')
                 if exclude_terms_str:
                     exclude_terms = [t.strip() for t in exclude_terms_str.split(',') if t.strip()]
@@ -2224,7 +2224,7 @@ class WatchlistScanner:
             unique_title_variations = list(dict.fromkeys(title_variations))
 
             # Search for each artist with each title variation
-            from config.settings import config_manager
+            from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
@@ -4447,7 +4447,7 @@ class WatchlistScanner:
         """
         try:
             from datetime import datetime, timedelta
-            from config.settings import config_manager
+            from core.settings import config_manager
             from database.music_database import get_database
 
             # Weekly throttle

@@ -12,7 +12,7 @@ set config_data directly — the methods under test only read/write that dict.
 
 from __future__ import annotations
 
-from config.settings import ConfigManager
+from core.settings import ConfigManager
 
 S = ConfigManager.REDACTED_SENTINEL
 

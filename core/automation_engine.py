@@ -467,7 +467,7 @@ class AutomationEngine:
         # let users override without touching env vars; falls back to
         # the system-detected local tz.
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             self._default_tz = (config_manager.get('automation.default_timezone', '') or _SYSTEM_DEFAULT_TZ)
         except Exception:
             self._default_tz = _SYSTEM_DEFAULT_TZ

@@ -4606,7 +4606,7 @@ class MusicDatabase:
     def set_profile_listenbrainz(self, profile_id: int, token: str, base_url: str = '', username: str = '') -> bool:
         """Save encrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             encrypted_token = config_manager._encrypt_value(token) if token else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4625,7 +4625,7 @@ class MusicDatabase:
     def get_profile_listenbrainz(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4666,7 +4666,7 @@ class MusicDatabase:
     def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
         """Get all profiles that have ListenBrainz tokens configured"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4791,7 +4791,7 @@ class MusicDatabase:
         """Create a named credential set for a service. Returns the new id, or
         None on failure / duplicate (service, label). Payload is encrypted."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc = config_manager._encrypt_value(payload) if payload else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4813,7 +4813,7 @@ class MusicDatabase:
         """Update a credential set's label and/or payload. Only provided fields
         change. Returns True if a row was updated."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             sets, params = [], []
             if label is not None:
                 sets.append("label = ?")
@@ -4888,7 +4888,7 @@ class MusicDatabase:
         """Get a credential set WITH its decrypted payload, or None. For the
         resolver / client wiring — not for shipping to the browser."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -5561,7 +5561,7 @@ class MusicDatabase:
                             redirect_uri: str = '') -> bool:
         """Save Spotify API credentials for a profile (encrypted)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_id = config_manager._encrypt_value(client_id) if client_id else None
             enc_secret = config_manager._encrypt_value(client_secret) if client_secret else None
             with self._get_connection() as conn:
@@ -5581,7 +5581,7 @@ class MusicDatabase:
     def get_profile_spotify(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Spotify credentials for a profile."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -5606,7 +5606,7 @@ class MusicDatabase:
     def set_profile_spotify_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
         """Save Spotify OAuth tokens for a profile (from auth callback)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5628,7 +5628,7 @@ class MusicDatabase:
         per-profile Tidal client's token refresh — keeps a profile's refresh from
         ever touching the global tidal_tokens slot."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5648,7 +5648,7 @@ class MusicDatabase:
     def get_profile_tidal(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Tidal tokens for a profile ({} if none)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -9880,7 +9880,7 @@ class MusicDatabase:
         self.set_quality_profile(profile)
 
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             config_manager.set("acoustid.require_verified", profile["acoustid_required"])
             config_manager.set("lossy_copy.downsample_hires", profile["downsample_enabled"])
             config_manager.set("post_processing.audio_completeness_check", profile["deep_audio_verify"])
@@ -9909,7 +9909,7 @@ class MusicDatabase:
         the active profile" true in both directions.
         """
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             values = {
                 "acoustid_required": 1 if config_manager.get("acoustid.require_verified", False) else 0,
                 "downsample_enabled": 1 if config_manager.get("lossy_copy.downsample_hires", False) else 0,
@@ -10153,7 +10153,7 @@ class MusicDatabase:
         .quality = 'hires'|'hires_max'), which #896 removed in favour of the
         global profile. Used to preserve their intent on migration."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
         except Exception:
             return False
         hires = {'hires', 'hires_max'}
@@ -10664,7 +10664,7 @@ class MusicDatabase:
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # When allow_duplicates is True (default), same song from different albums can coexist
-                from config.settings import config_manager
+                from core.settings import config_manager
                 allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
                 # Convert data once; existing rows and inserts use the same
@@ -11573,7 +11573,7 @@ class MusicDatabase:
         Keeps the oldest entry (by date_added) for each duplicate set.
         Returns the number of duplicates removed."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
             with self._get_connection() as conn:
@@ -13686,7 +13686,7 @@ class MusicDatabase:
         """Get comprehensive database information filtered by server source"""
         try:
             # Import here to avoid circular imports
-            from config.settings import config_manager
+            from core.settings import config_manager
             
             # If no server specified, use active server
             if server_source is None:
@@ -13801,7 +13801,7 @@ class MusicDatabase:
                             where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
 
                 # Get active server for filtering
-                from config.settings import config_manager
+                from core.settings import config_manager
                 active_server = config_manager.get_active_media_server()
 
                 # Add active server filter to where conditions

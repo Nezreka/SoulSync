@@ -25,9 +25,9 @@ if "spotipy" not in sys.modules:
     spotipy.oauth2 = oauth2
     sys.modules["spotipy"] = spotipy
     sys.modules["spotipy.oauth2"] = oauth2
-if "config.settings" not in sys.modules:
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     class _DummyCM:
         def get(self, key, default=None):
@@ -39,7 +39,7 @@ if "config.settings" not in sys.modules:
     settings_mod.config_manager = _DummyCM()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
+    sys.modules["core.settings"] = settings_mod
 
 from core.metadata.cache import (  # noqa: E402
     MetadataCache,

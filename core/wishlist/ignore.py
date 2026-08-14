@@ -35,7 +35,7 @@ def configured_ttl_days() -> int:
     (javiavid: 30 was hardcoded; some users want a weekly re-try window).
     Clamped to [1, 365]; anything unreadable falls back to the default."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         raw = config_manager.get('wishlist.ignore_ttl_days', IGNORE_TTL_DAYS)
         return max(1, min(int(raw), 365))
     except Exception:

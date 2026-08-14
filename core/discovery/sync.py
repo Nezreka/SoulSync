@@ -147,7 +147,7 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
     logger.info(f"Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
     try:
         from database.music_database import MusicDatabase
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
@@ -433,7 +433,7 @@ def run_sync_task(
         logger.info(f"   jellyfin_client: {(_ms_engine.client('jellyfin') if _ms_engine else None) is not None}")
         
         # Check media server connection before starting
-        from config.settings import config_manager
+        from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         logger.info(f"   Active media server: {active_server}")
         

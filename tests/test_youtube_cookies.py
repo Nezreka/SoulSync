@@ -109,7 +109,7 @@ def test_resolve_cookie_opts_routes_custom_to_cookiefile(monkeypatch, tmp_path):
     cookiefile = tmp_path / "youtube_cookies.txt"
     cookiefile.write_text(".youtube.com\tTRUE\t/\tTRUE\t123\tSID\tv\n")
     cfg = {'youtube.cookies_browser': 'custom', 'youtube.cookies_file': str(cookiefile)}
-    monkeypatch.setattr('config.settings.config_manager.get',
+    monkeypatch.setattr('core.settings.config_manager.get',
                         lambda k, d=None: cfg.get(k, d))
     opts = yt._resolve_cookie_opts()
     assert opts == {'cookiefile': str(cookiefile)}
@@ -119,7 +119,7 @@ def test_resolve_cookie_opts_routes_custom_to_cookiefile(monkeypatch, tmp_path):
 def test_resolve_cookie_opts_browser_mode_unchanged(monkeypatch):
     import core.youtube_client as yt
     cfg = {'youtube.cookies_browser': 'firefox', 'youtube.cookies_file': ''}
-    monkeypatch.setattr('config.settings.config_manager.get',
+    monkeypatch.setattr('core.settings.config_manager.get',
                         lambda k, d=None: cfg.get(k, d))
     assert yt._resolve_cookie_opts() == {'cookiesfrombrowser': ('firefox',)}
 
@@ -127,7 +127,7 @@ def test_resolve_cookie_opts_browser_mode_unchanged(monkeypatch):
 def test_resolve_cookie_opts_custom_missing_file_is_anonymous(monkeypatch):
     import core.youtube_client as yt
     cfg = {'youtube.cookies_browser': 'custom', 'youtube.cookies_file': '/nope/gone.txt'}
-    monkeypatch.setattr('config.settings.config_manager.get',
+    monkeypatch.setattr('core.settings.config_manager.get',
                         lambda k, d=None: cfg.get(k, d))
     assert yt._resolve_cookie_opts() == {}            # not a broken cookiefile arg
 

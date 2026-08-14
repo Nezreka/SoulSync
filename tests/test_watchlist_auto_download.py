@@ -250,7 +250,7 @@ def _scanner():
 
 
 def _with_config(monkeypatch, **values):
-    from config import settings
+    from core import settings
 
     class _Cfg:
         def get(self, key, default=None):

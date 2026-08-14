@@ -56,7 +56,7 @@ VIDEO_EXTS = frozenset((
 
 
 def _conn():
-    from config.settings import config_manager
+    from core.settings import config_manager
     base = str(config_manager.get("soulseek.slskd_url", "") or "").rstrip("/")
     key = config_manager.get("soulseek.api_key", "") or ""
     headers = {"Accept": "application/json"}   # make slskd answer in JSON, not whatever default
@@ -212,7 +212,7 @@ def group_video_files(responses: Any) -> list:
 
 
 def _min_speed_bytes() -> int:
-    from config.settings import config_manager
+    from core.settings import config_manager
     try:
         return int(config_manager.get("soulseek.min_peer_upload_speed", 0) or 0) * 125000
     except (TypeError, ValueError):
@@ -222,7 +222,7 @@ def _min_speed_bytes() -> int:
 def search_timeout_ms() -> int:
     """How long to ask slskd to keep searching — the SAME ``soulseek.search_timeout``
     the music side uses (default 60s), so results have time to arrive."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     try:
         secs = int(config_manager.get("soulseek.search_timeout", 60) or 60)
     except (TypeError, ValueError):
@@ -317,7 +317,7 @@ def poll_search(search_id: str) -> dict:
 def slskd_search(query: str, *, max_seconds: int = 8, slskd_timeout_ms: int = 4500) -> dict:
     """POST a search to slskd, poll responses, return {configured, hits[, error]}.
     Thin I/O glue around ``group_video_files``."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     base = str(config_manager.get("soulseek.slskd_url", "") or "").rstrip("/")
     if not base:
         return {"configured": False, "hits": []}

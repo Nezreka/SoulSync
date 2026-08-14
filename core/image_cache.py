@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.metadata.artwork import is_internal_image_host
 from utils.logging_config import get_logger
 

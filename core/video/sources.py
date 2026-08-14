@@ -100,7 +100,7 @@ def video_plex_config(db=None):
     if url and token:
         return {"base_url": url, "token": token, "source": "video"}
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         cfg = config_manager.get_plex_config() or {}
         return {"base_url": cfg.get("base_url") or "", "token": cfg.get("token") or "",
                 "source": "music"}
@@ -120,7 +120,7 @@ def video_jellyfin_config(db=None):
     if url and key:
         return {"base_url": url, "api_key": key, "source": "video"}
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         cfg = config_manager.get_jellyfin_config() or {}
         return {"base_url": cfg.get("base_url") or "", "api_key": cfg.get("api_key") or "",
                 "source": "music"}

@@ -37,7 +37,7 @@ def _resolve_album_bundle_threshold() -> int:
     config key is missing or carries garbage — same defensive shape as
     the rest of the config-driven knobs in core/."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         raw = config_manager.get('wishlist.album_bundle_min_tracks',
                                  _DEFAULT_ALBUM_BUNDLE_MIN_TRACKS)
         value = int(raw)
@@ -1108,7 +1108,7 @@ def _automatic_wishlist_cleanup_inner(
     logger=logger,
 ) -> int:
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         from database.music_database import MusicDatabase, get_database
 
         wishlist_service = wishlist_service or get_wishlist_service()
