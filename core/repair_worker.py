@@ -1627,8 +1627,10 @@ class RepairWorker:
             return {'success': True, 'action': 'genres_applied'}
         except Exception as e:
             logger.error("Genre enrichment fix failed for %s %s: %s", entity_type, entity_id, e)
-            try: conn.close()
-            except Exception: pass
+            try:
+                conn.close()
+            except Exception as close_err:   # noqa: BLE001 — the real error is already logged above
+                logger.debug("Genre enrichment: connection close failed: %s", close_err)
             return {'success': False, 'error': str(e)}
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):

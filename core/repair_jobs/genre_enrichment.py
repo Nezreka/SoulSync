@@ -64,7 +64,7 @@ class GenreEnrichmentJob(RepairJob):
                 cur.execute(f"SELECT * FROM {table}")
                 columns = [x[0] for x in cur.description]
                 for raw_row in cur:
-                    yield kind, dict(zip(columns, raw_row))
+                    yield kind, dict(zip(columns, raw_row, strict=True))
 
         run_cache, stats = {}, {'entities_scanned': 0, 'entities_with_existing_genres': 0,
             'local_candidates': 0, 'metadata_cache_hits': 0, 'translation_cache_hits': 0,
