@@ -28,7 +28,7 @@ const artist: LibraryV2ArtistSummary = {
 };
 
 describe('library v2 artist card semantics', () => {
-  it('shows every positive media-server recognition without changing ownership', () => {
+  it('summarises media-server recognition without showing provider names on the card', () => {
     render(
       <QueryClientProvider client={createTestQueryClient()}>
         <LibraryV2CanWriteContext.Provider value>
@@ -40,8 +40,11 @@ describe('library v2 artist card semantics', () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByText('✓ Jellyfin')).toBeInTheDocument();
-    expect(screen.getByText('✓ Plex')).toBeInTheDocument();
+    const recognition = screen.getByLabelText('Recognised by Jellyfin and Plex');
+    expect(recognition).toHaveAttribute('title', 'Recognised by Jellyfin and Plex');
+    expect(recognition).toHaveTextContent('✓2');
+    expect(screen.queryByText('Jellyfin')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
   it('keeps card navigation and monitoring as sibling buttons', async () => {

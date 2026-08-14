@@ -316,6 +316,8 @@ const ICON_PATHS = {
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
   play: 'M8 5l11 7-11 7V5z',
   cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
+  server:
+    'M5 4h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M5 13h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z M7 7h.01 M7 16h.01 M11 7h7 M11 16h7',
   more: 'M3.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M10.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M17.4,12 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0',
   settings:
     'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
@@ -344,6 +346,60 @@ function SvgIcon({
         strokeLinejoin={!isFillIcon ? 'round' : undefined}
       />
     </svg>
+  );
+}
+
+const MEDIA_SERVER_LABELS: Record<string, string> = {
+  emby: 'Emby',
+  jellyfin: 'Jellyfin',
+  navidrome: 'Navidrome',
+  plex: 'Plex',
+};
+
+function mediaServerLabel(source: string): string {
+  const normalized = source.trim().toLowerCase();
+  return (
+    MEDIA_SERVER_LABELS[normalized] ??
+    normalized
+      .split(/[_-]+/)
+      .filter(Boolean)
+      .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
+      .join(' ')
+  );
+}
+
+function naturalList(values: string[]): string {
+  if (values.length <= 1) return values[0] ?? '';
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`;
+}
+
+/** A single quiet signal for one or more positive media-server mappings.
+ * Provider names stay out of the layout and are available on hover and to
+ * assistive technology. The count only appears when more than one server
+ * independently recognised the artist. */
+function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefined }) {
+  const labels = Array.from(
+    new Set((sources ?? []).map(mediaServerLabel).filter((source) => source.length > 0)),
+  );
+  if (labels.length === 0) return null;
+  const description = `Recognised by ${naturalList(labels)}`;
+  return (
+    <span
+      className={styles.mediaServerRecognitionBadge}
+      aria-label={description}
+      title={description}
+    >
+      <SvgIcon name="server" />
+      <span className={styles.mediaServerRecognitionCheck} aria-hidden="true">
+        ✓
+      </span>
+      {labels.length > 1 ? (
+        <span className={styles.mediaServerRecognitionCount} aria-hidden="true">
+          {labels.length}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -4467,17 +4523,8 @@ export function ArtistCard({
           thumb
         />
         {artist.media_server_sources?.length ? (
-          <span className={styles.mediaServerBadges} aria-label="Media server recognition">
-            {artist.media_server_sources.map((source) => (
-              <span
-                key={source}
-                className={styles.mediaServerBadge}
-                title={`${source[0]?.toUpperCase()}${source.slice(1)} recognised this artist`}
-              >
-                ✓ {source[0]?.toUpperCase()}
-                {source.slice(1)}
-              </span>
-            ))}
+          <span className={styles.mediaServerBadges}>
+            <MediaServerRecognitionBadge sources={artist.media_server_sources} />
           </span>
         ) : null}
         <span className={styles.artistInfo}>
@@ -4628,6 +4675,7 @@ function ArtistTable({
                   thumb
                 />
                 <span>{artist.name}</span>
+                <MediaServerRecognitionBadge sources={artist.media_server_sources} />
               </span>
             </td>
             <td className={styles.colNum}>{artist.album_count}</td>
@@ -6395,6 +6443,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                       {formatFileSize(artist.total_size_bytes)}
                     </span>
                   ) : null}
+                  <MediaServerRecognitionBadge sources={artist.media_server_sources} />
                 </div>
                 {artist.genres.length > 0 ? (
                   <p className={styles.genres}>{artist.genres.join(', ')}</p>
@@ -7124,6 +7173,32 @@ const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
   file_path: 20,
 };
 
+/** A saved width is the user's preferred share of the table, not permission
+ * to crush a compact value below the space it needs. Text-heavy columns stay
+ * deliberately flexible because titles, artist names and paths can be
+ * arbitrarily long; fixed-format values and controls get a readable floor.
+ * The floor only affects the current render and is never persisted. */
+const RESPONSIVE_COLUMN_MIN_WIDTHS: Record<string, number> = {
+  number: 42,
+  title: 112,
+  play: 48,
+  disc: 52,
+  artists: 96,
+  duration: 76,
+  bpm: 56,
+  match: 82,
+  // The widest Quality sub-cell is 140px; include the table cell padding.
+  quality: 164,
+  features: 82,
+  metadata: 104,
+  verification: 112,
+  acoustid: 112,
+  file_size: 84,
+  file_path: 120,
+};
+
+const DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH = 72;
+
 /** iss28-02: clamp a relative weight, not a CSS-pixel width. The old
  * preference values remain usable because normalization treats any positive
  * number as a weight. */
@@ -7232,11 +7307,92 @@ export function resizeColumnWidths(
   };
 }
 
-function dataColumnWidth(weight: number, tableWidth: number | null): string {
-  if (tableWidth == null || tableWidth <= UTILITY_COLUMN_WIDTH) return `${weight}%`;
-  const dataWidth = tableWidth - UTILITY_COLUMN_WIDTH;
-  const pixels = Math.round((weight / 100) * dataWidth * 1000) / 1000;
-  return `${pixels}px`;
+/** Resolve the preferred percentages against the current data area.
+ *
+ * With enough room the result is the exact saved proportion. As the table
+ * narrows, columns that would hide a fixed-format value stop shrinking at
+ * their semantic pixel minimum. The remaining room is redistributed across
+ * columns that still have slack, preserving their relative preference. If a
+ * viewport is narrower than all minima combined, the minima scale together;
+ * clipping is then unavoidable, but the table still stays inside its card. */
+export function resolveResponsiveColumnWidths(
+  keys: string[],
+  weights: Record<string, number>,
+  availableWidth: number,
+): Record<string, number> {
+  const uniqueKeys = Array.from(new Set(keys));
+  if (uniqueKeys.length === 0) return {};
+  if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
+    return Object.fromEntries(uniqueKeys.map((key) => [key, 0]));
+  }
+  if (uniqueKeys.length === 1) return { [uniqueKeys[0]]: availableWidth };
+
+  const rawWeights = Object.fromEntries(
+    uniqueKeys.map((key) => {
+      const weight = weights[key];
+      return [
+        key,
+        typeof weight === 'number' && Number.isFinite(weight) && weight > 0 ? weight : 1,
+      ];
+    }),
+  );
+  const rawMinimums = Object.fromEntries(
+    uniqueKeys.map((key) => [
+      key,
+      RESPONSIVE_COLUMN_MIN_WIDTHS[key] ?? DEFAULT_RESPONSIVE_COLUMN_MIN_WIDTH,
+    ]),
+  );
+  const minimumTotal = Object.values(rawMinimums).reduce((sum, width) => sum + width, 0);
+  const minimumScale = minimumTotal > availableWidth ? availableWidth / minimumTotal : 1;
+  const minimums = Object.fromEntries(
+    uniqueKeys.map((key) => [key, rawMinimums[key] * minimumScale]),
+  );
+
+  const result: Record<string, number> = {};
+  let remainingKeys = [...uniqueKeys];
+  let remainingWidth = availableWidth;
+
+  // Pixel-space water filling: pin every column whose proportional target is
+  // below its readable floor, then repeat with the columns that still flex.
+  while (remainingKeys.length > 0) {
+    if (remainingKeys.length === 1) {
+      result[remainingKeys[0]] = remainingWidth;
+      break;
+    }
+    const weightTotal = remainingKeys.reduce((sum, key) => sum + rawWeights[key], 0);
+    const constrainedKey = remainingKeys.find(
+      (key) => (rawWeights[key] / weightTotal) * remainingWidth < minimums[key],
+    );
+    if (constrainedKey == null) {
+      for (const key of remainingKeys) {
+        result[key] = (rawWeights[key] / weightTotal) * remainingWidth;
+      }
+      break;
+    }
+    result[constrainedKey] = minimums[constrainedKey];
+    remainingWidth -= minimums[constrainedKey];
+    remainingKeys = remainingKeys.filter((key) => key !== constrainedKey);
+  }
+
+  const rounded = Object.fromEntries(
+    uniqueKeys.map((key) => [key, Math.round(result[key] * 1000) / 1000]),
+  );
+  const roundedTotal = Object.values(rounded).reduce((sum, width) => sum + width, 0);
+  const correction = Math.round((availableWidth - roundedTotal) * 1000) / 1000;
+  const correctionKey =
+    uniqueKeys.find((key) => rounded[key] + correction >= minimums[key] - 0.001) ??
+    uniqueKeys[uniqueKeys.length - 1];
+  rounded[correctionKey] = Math.round((rounded[correctionKey] + correction) * 1000) / 1000;
+  return rounded;
+}
+
+function dataColumnWidth(
+  key: string,
+  weight: number,
+  responsiveWidths: Record<string, number> | null,
+): string {
+  const responsiveWidth = responsiveWidths?.[key];
+  return responsiveWidth == null ? `${weight}%` : `${responsiveWidth}px`;
 }
 
 function measureTrackTableWidth(element: HTMLDivElement | null): number | null {
@@ -8242,6 +8398,15 @@ export function AlbumTrackTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleColumnsSignature, persistedWidthsSignature]);
 
+  const responsiveColumnWidths =
+    tableWidth != null && tableWidth > UTILITY_COLUMN_WIDTH
+      ? resolveResponsiveColumnWidths(
+          visibleColumnKeys,
+          columnWeights,
+          tableWidth - UTILITY_COLUMN_WIDTH,
+        )
+      : null;
+
   const availableProviders = useMemo(() => {
     if (!matchQuery.data) return null;
     const set = new Set<string>();
@@ -8540,7 +8705,7 @@ export function AlbumTrackTable({
             <col
               key={key}
               style={{
-                width: dataColumnWidth(columnWeights[key] ?? 0, tableWidth),
+                width: dataColumnWidth(key, columnWeights[key] ?? 0, responsiveColumnWidths),
               }}
             />
           ))}
@@ -8592,7 +8757,7 @@ export function AlbumTrackTable({
               columns={columns}
               columnOrder={orderedKeys}
               columnWidths={columnWeights}
-              tableWidth={tableWidth}
+              responsiveColumnWidths={responsiveColumnWidths}
               showAllProviders={showAllProviders}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
@@ -8798,7 +8963,7 @@ function TrackRow({
   columns,
   columnOrder,
   columnWidths,
-  tableWidth,
+  responsiveColumnWidths,
   showAllProviders,
   selected,
   onToggleSelect,
@@ -8813,7 +8978,7 @@ function TrackRow({
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
   columnWidths: Record<string, number | null>;
-  tableWidth: number | null;
+  responsiveColumnWidths: Record<string, number> | null;
   showAllProviders: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
@@ -8833,7 +8998,7 @@ function TrackRow({
     const raw = columnWidths[key];
     if (raw == null) return undefined;
     return {
-      width: dataColumnWidth(raw, tableWidth),
+      width: dataColumnWidth(key, raw, responsiveColumnWidths),
     };
   };
 

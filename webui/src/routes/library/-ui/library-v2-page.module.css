@@ -990,12 +990,9 @@ button.featureTag:disabled {
   top: 18px;
   right: 18px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
 }
 
-.mediaServerBadge,
 .mediaServerTrackBadge {
   display: inline-flex;
   align-items: center;
@@ -1008,6 +1005,55 @@ button.featureTag:disabled {
   line-height: 1;
   padding: 4px 6px;
   white-space: nowrap;
+}
+
+.mediaServerRecognitionBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 27px;
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 1px solid rgba(134, 239, 172, 0.2);
+  border-radius: 7px;
+  background: rgba(16, 42, 31, 0.7);
+  color: rgba(187, 247, 208, 0.72);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.mediaServerRecognitionBadge:hover {
+  border-color: rgba(134, 239, 172, 0.38);
+  background: rgba(16, 55, 38, 0.82);
+  color: rgba(220, 252, 231, 0.94);
+}
+
+.mediaServerRecognitionBadge svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  stroke-width: 1.7;
+}
+
+.mediaServerRecognitionCheck {
+  color: rgba(74, 222, 128, 0.9);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.mediaServerRecognitionCount {
+  min-width: 8px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 .mediaServerTrackBadge {

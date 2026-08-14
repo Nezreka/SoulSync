@@ -64,6 +64,7 @@ describe('Library V2 artist detail — All Releases views', () => {
             image_url: '/api/library/v2/artwork/artist/1',
             remote_image_url: null,
             provider_ids: { spotify: 'sp-1' },
+            media_server_sources: ['navidrome', 'plex'],
             summary: null,
             style: null,
             mood: null,
@@ -81,7 +82,7 @@ describe('Library V2 artist detail — All Releases views', () => {
             album_count: 2,
             single_count: 0,
             discography_count: 2,
-            total_size_bytes: 0,
+            total_size_bytes: 2048,
             user_overrides: {},
           },
         }),
@@ -188,6 +189,17 @@ describe('Library V2 artist detail — All Releases views', () => {
     // and they are the one number that still resolves without a Last.fm key.
     expect(screen.getByText('3.4M')).toBeInTheDocument();
     expect(document.querySelectorAll('.artist-hero-numbers')).toHaveLength(1);
+  });
+
+  it('places compact media-server recognition beside the size in the compact header', async () => {
+    renderArtist('/library?artist=1');
+
+    const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
+    expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
+    expect(recognition).toHaveTextContent('✓2');
+    expect(recognition.parentElement).toContainElement(screen.getByText('2.00 KB'));
+    expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
   it('opening an artist from inside Library V2 always starts in the V2 shape', async () => {

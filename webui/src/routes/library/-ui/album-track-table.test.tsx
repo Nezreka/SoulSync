@@ -14,6 +14,7 @@ import {
   LibraryV2CanWriteContext,
   mergeColumnOrder,
   normalizeColumnWidths,
+  resolveResponsiveColumnWidths,
   resizeColumnWidths,
   TrackCheckBadge,
 } from './library-v2-page';
@@ -146,6 +147,33 @@ describe('library v2 album track table', () => {
 
     const expandedNumber = resizeColumnWidths(defaultLayout, ['number', 'title'], 'number', 500);
     expect(expandedNumber).toEqual({ number: 99, title: 1 });
+  });
+
+  it('keeps relative widths until compact columns need their readable minimum', () => {
+    const keys = ['number', 'title', 'duration', 'file_path'];
+    const weights = { number: 2, title: 48, duration: 3, file_path: 47 };
+
+    const ultrawide = resolveResponsiveColumnWidths(keys, weights, 4_000);
+    expect(ultrawide).toEqual({
+      number: 80,
+      title: 1_920,
+      duration: 120,
+      file_path: 1_880,
+    });
+
+    const narrower = resolveResponsiveColumnWidths(keys, weights, 1_000);
+    expect(Object.values(narrower).reduce((sum, width) => sum + width, 0)).toBeCloseTo(1_000);
+    expect(narrower.number).toBeGreaterThan(20);
+    expect(narrower.duration).toBeGreaterThan(30);
+    expect(narrower.title).toBeLessThan(480);
+    expect(narrower.file_path).toBeLessThan(470);
+    // Columns that still have room keep the user's relative relationship;
+    // only the compact columns opt out of proportional shrinking.
+    expect(narrower.title / narrower.file_path).toBeCloseTo(48 / 47, 3);
+
+    const veryNarrow = resolveResponsiveColumnWidths(keys, weights, 180);
+    expect(Object.values(veryNarrow).reduce((sum, width) => sum + width, 0)).toBeCloseTo(180);
+    expect(Math.min(...Object.values(veryNarrow))).toBeGreaterThan(0);
   });
 
   it('expands an uncached album after its first request completes', async () => {
@@ -627,9 +655,9 @@ describe('library v2 album track table', () => {
       pointerId: 6,
       clientX: 100,
     });
-    fireEvent.pointerMove(numberHandle, { pointerId: 6, clientX: 75 });
-    expect(Number.parseFloat(numberColumn.style.width)).toBeLessThan(initialNumberWidth);
-    fireEvent.pointerUp(numberHandle, { pointerId: 6, clientX: 75 });
+    fireEvent.pointerMove(numberHandle, { pointerId: 6, clientX: 125 });
+    expect(Number.parseFloat(numberColumn.style.width)).toBeGreaterThan(initialNumberWidth);
+    fireEvent.pointerUp(numberHandle, { pointerId: 6, clientX: 125 });
 
     const visibleTitles = () =>
       within(table)
