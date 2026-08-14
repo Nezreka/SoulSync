@@ -993,20 +993,6 @@ button.featureTag:disabled {
   align-items: center;
 }
 
-.mediaServerTrackBadge {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid rgba(74, 222, 128, 0.38);
-  border-radius: 999px;
-  background: rgba(20, 83, 45, 0.86);
-  color: #bbf7d0;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 4px 6px;
-  white-space: nowrap;
-}
-
 .mediaServerRecognitionBadge {
   display: inline-flex;
   align-items: center;
@@ -1054,11 +1040,6 @@ button.featureTag:disabled {
   font-size: 9px;
   font-variant-numeric: tabular-nums;
   text-align: center;
-}
-
-.mediaServerTrackBadge {
-  font-size: 9px;
-  padding: 3px 5px;
 }
 
 .artistCard:hover,

@@ -272,8 +272,11 @@ describe('library v2 album track table', () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText('✓ Navidrome')).toBeInTheDocument();
-    expect(screen.getByText('✓ Plex')).toBeInTheDocument();
+    const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
+    expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
+    expect(recognition).toHaveTextContent('✓2');
+    expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
   it('renders the generic Check column separately from verification provenance', async () => {

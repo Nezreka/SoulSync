@@ -378,7 +378,7 @@ function naturalList(values: string[]): string {
 /** A single quiet signal for one or more positive media-server mappings.
  * Provider names stay out of the layout and are available on hover and to
  * assistive technology. The count only appears when more than one server
- * independently recognised the artist. */
+ * independently recognised the entity. */
 function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefined }) {
   const labels = Array.from(
     new Set((sources ?? []).map(mediaServerLabel).filter((source) => source.length > 0)),
@@ -9224,17 +9224,7 @@ function TrackRow({
         {/* Legacy parity: present/missing shown inline right after the title. */}
         <span className={styles.trackTitleCell}>
           <span className={missing ? styles.muted : undefined}>{label}</span>
-          {track.media_server_sources?.map((source) => (
-            <span
-              key={source}
-              className={styles.mediaServerTrackBadge}
-              title={`${source[0]?.toUpperCase()}${source.slice(1)} recognised this track`}
-              aria-label={`${source} recognised`}
-            >
-              ✓ {source[0]?.toUpperCase()}
-              {source.slice(1)}
-            </span>
-          ))}
+          <MediaServerRecognitionBadge sources={track.media_server_sources} />
           <InlineFileStatus status={track.file_status} />
           <QueueStatusBadge status={queueStatus} />
         </span>
