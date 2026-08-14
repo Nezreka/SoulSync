@@ -4965,6 +4965,25 @@ class RepairWorker:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)
         finally:
+            # Release the thread reference BEFORE clearing the running flag.
+            #
+            # start_bulk_fix's single-flight guard asks `_bulk_fix_thread
+            # .is_alive()`, while callers wait on `state['running']` — two
+            # signals for one condition. A caller that correctly waited for the
+            # run to finish could still be told "a bulk fix is already running",
+            # because the flag flipped while this thread was still winding down.
+            # Rare locally, reliable on a loaded CI runner.
+            #
+            # This order makes the flag the conservative signal: anyone who
+            # observes running=False is guaranteed to observe a cleared
+            # reference too. The reverse order leaves the same window, only
+            # narrower — which is how a race hides rather than gets fixed.
+            #
+            # Safe to clear from inside the thread: `finally` runs even when the
+            # loop raises, and if start_bulk_fix re-assigns the reference after
+            # a very fast run it can only store an already-dead thread, which
+            # the guard reads as not-running anyway.
+            self._bulk_fix_thread = None
             state['running'] = False
             logger.info("Background bulk fix finished: %d fixed, %d failed of %d",
                         state['fixed'], state['failed'], state['total'])
