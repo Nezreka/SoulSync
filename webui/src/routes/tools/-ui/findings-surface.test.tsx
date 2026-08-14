@@ -112,12 +112,7 @@ const typeInfo = (over: Record<string, unknown> = {}) => ({
 function renderSurface(jobs: RepairJob[] = JOBS) {
   const onStatusChanged = vi.fn();
   const result = render(
-    <FindingsSurface
-      jobs={jobs}
-      runs={[]}
-      trackCount={10000}
-      onStatusChanged={onStatusChanged}
-    />,
+    <FindingsSurface jobs={jobs} runs={[]} trackCount={10000} onStatusChanged={onStatusChanged} />,
   );
   return { ...result, onStatusChanged };
 }
@@ -252,7 +247,9 @@ describe('the health hero', () => {
     renderSurface();
     await flush();
     // The 20 orphans move files; only the 10 art rows are safe.
-    expect(document.querySelector('.repair-health-fix-safe')?.textContent).toBe('Fix all safe (10)');
+    expect(document.querySelector('.repair-health-fix-safe')?.textContent).toBe(
+      'Fix all safe (10)',
+    );
   });
 
   it('sends safe_only — never a fix_action — when Fix all safe runs', async () => {
@@ -325,7 +322,9 @@ describe('the status segmented control', () => {
 
     fireEvent.click(screen.getByText('Dismissed').closest('button') as HTMLElement);
     await flush();
-    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .findLast((u) => u.includes('?'));
     expect(url).toContain('status=dismissed');
   });
 });
@@ -594,7 +593,9 @@ describe('filters', () => {
     });
     await flush();
 
-    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .findLast((u) => u.includes('?'));
     expect(url).toContain('severity=warning');
     expect(url).toContain('status=pending');
     expect(url).toContain('sort=newest');
@@ -607,7 +608,11 @@ describe('filters', () => {
   });
 
   it('a search replaces the inbox rather than filtering it', async () => {
-    routes({ [GROUPS]: { groups: [group()] }, [TYPES]: { types: [typeInfo()] }, [FINDINGS]: page([]) });
+    routes({
+      [GROUPS]: { groups: [group()] },
+      [TYPES]: { types: [typeInfo()] },
+      [FINDINGS]: page([]),
+    });
     await renderList();
     expect(document.querySelector('.repair-inbox')).toBeNull();
     expect(document.querySelector('.repair-search-note')).not.toBeNull();
@@ -621,7 +626,9 @@ describe('filters', () => {
       target: { value: 'path' },
     });
     await flush();
-    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .findLast((u) => u.includes('?'));
     expect(url).toContain('sort=path');
   });
 
@@ -635,7 +642,9 @@ describe('filters', () => {
     await flush();
 
     expect(localStorage.getItem('repairFindingsPageSize')).toBe('100');
-    const url = fetchMock.mock.calls.map((call) => String(call[0])).findLast((u) => u.includes('?'));
+    const url = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .findLast((u) => u.includes('?'));
     expect(url).toContain('limit=100');
   });
 
@@ -815,7 +824,7 @@ describe('the finding list', () => {
     fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
     await flush();
     expect(
-      (panel().querySelector('.repair-finding-detail-inner')?.children.length || 0),
+      panel().querySelector('.repair-finding-detail-inner')?.children.length || 0,
     ).toBeGreaterThan(0);
   });
 
@@ -840,9 +849,7 @@ describe('the finding list', () => {
     await flush();
 
     fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
-    expect((document.getElementById('repair-detail-5') as HTMLElement).className).toContain(
-      'open',
-    );
+    expect((document.getElementById('repair-detail-5') as HTMLElement).className).toContain('open');
     fireEvent.click(document.querySelector('.repair-finding-expand-btn') as HTMLElement);
     expect((document.getElementById('repair-detail-5') as HTMLElement).className).not.toContain(
       'open',
@@ -1596,6 +1603,35 @@ describe('the detail renderer', () => {
       details: { kept_genres: [], removed_genres: ['x'] },
     });
     expect(gridPairs(detail)[0][1]).toBe('— none (all genres are off your whitelist)');
+  });
+
+  it('genre_enrichment shows the proposal, review items, and provenance', async () => {
+    const detail = await openDetail({
+      finding_type: 'genre_enrichment',
+      details: {
+        original_genres: ['Rock'],
+        proposed_genres: ['Rock', 'Alternative Rock'],
+        added_genres: ['Alternative Rock'],
+        ambiguous_genres: [
+          { raw: 'alt rock', candidates: ['Alternative Rock', 'Indie Rock'], score: 0.82 },
+        ],
+        rejected_genres: ['unrelated tag'],
+        omitted_due_to_cap: ['Post-Rock'],
+        sources: { 'Alternative Rock': ['spotify', 'discogs'] },
+        cache_stats: { metadata_cache_hits: 2, live_calls: 0 },
+      },
+    });
+
+    expect(gridPairs(detail)).toEqual([
+      ['Current genres', 'Rock'],
+      ['Proposed genres', 'Rock, Alternative Rock'],
+      ['Added', 'Alternative Rock'],
+      ['Omitted at cap', 'Post-Rock'],
+      ['Rejected', 'unrelated tag'],
+      ['Ambiguous', 'alt rock: Alternative Rock, Indie Rock (82%)'],
+      ['Sources', 'Alternative Rock: spotify, discogs'],
+      ['Cache / external calls', 'metadata 2, live 0'],
+    ]);
   });
 
   it('comma_artist_split shows the resulting tag and clickable library chips', async () => {

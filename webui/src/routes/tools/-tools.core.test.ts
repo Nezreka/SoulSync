@@ -177,14 +177,15 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(22);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(20);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(12);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(23);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(21);
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(13);
   });
 
   it('labels known finding types', () => {
     expect(findingTypeLabel('acoustid_mismatch')).toBe('Wrong Song');
     expect(findingTypeLabel('short_preview_track')).toBe('Preview Clip');
+    expect(findingTypeLabel('genre_enrichment')).toBe('Genre Enrichment');
     expect(findingTypeLabel('comma_artist_split')).toBe('Comma Artist');
   });
 
@@ -194,6 +195,7 @@ describe('finding labels', () => {
 
   it('gives fixable types their button label and others none', () => {
     expect(findingFixLabel('duplicate_tracks')).toBe('Keep Best');
+    expect(findingFixLabel('genre_enrichment')).toBe('Apply Genres');
     expect(findingFixLabel('comma_artist_split')).toBe('Split Artists');
     expect(findingFixLabel('fake_lossless')).toBeNull();
     expect(findingFixLabel('path_mismatch')).toBeNull();
