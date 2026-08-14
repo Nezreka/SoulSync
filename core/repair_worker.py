@@ -1424,6 +1424,16 @@ class RepairWorker:
             if result.get('success'):
                 self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
                 self._set_finding_error(finding_id, None)
+            elif result.get('stale'):
+                # The file this finding is ABOUT is gone — reorganised, renamed
+                # or deleted since the scan raised it. That is not a failure to
+                # retry: it can never succeed, and left pending it is attempted
+                # again on every run forever. Users were having to clear these
+                # by hand to get a maintenance action moving again (#1143).
+                # Retire it instead; the next scan re-raises a finding against
+                # the file's new path if there is still something to fix.
+                self.resolve_finding(finding_id, action='obsolete')
+                self._set_finding_error(finding_id, result.get('error'))
             else:
                 # Keep the reason ON the row: the finding stays pending, and
                 # without this the user is left with a row that silently
@@ -2738,7 +2748,10 @@ class RepairWorker:
         resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
                                       config_manager=self._config_manager) or raw_path
         if not os.path.isfile(resolved):
-            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+            # stale=True: the file is gone, so no retry can ever succeed. Marks
+            # the finding obsolete instead of leaving it pending forever (#1143).
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
             from core.lyrics_client import lyrics_client
             duration = details.get('duration')
@@ -2767,7 +2780,10 @@ class RepairWorker:
         resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
                                       config_manager=self._config_manager) or raw_path
         if not os.path.isfile(resolved):
-            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+            # stale=True: the file is gone, so no retry can ever succeed. Marks
+            # the finding obsolete instead of leaving it pending forever (#1143).
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
             from core.replaygain import (analyze_track, write_replaygain_tags,
                                          is_ffmpeg_available, get_target_lufs)
@@ -4786,7 +4802,16 @@ class RepairWorker:
             failed = 0
             errors = []
             for fid in ids_to_fix:
-                result = self.fix_finding(fid, fix_action=fix_action)
+                try:
+                    result = self.fix_finding(fid, fix_action=fix_action)
+                except Exception as e:  # noqa: BLE001
+                    # One bad finding must not abandon the rest. Without this
+                    # the whole loop fell to the outer handler and returned
+                    # {'fixed': 0, 'failed': 0, 'total': 0} — throwing away
+                    # every fix already applied and reporting nothing happened.
+                    # The background twin (_run_bulk_fix) has always had this
+                    # guard; this loop never got it.
+                    result = {'success': False, 'error': str(e)}
                 if result.get('success'):
                     fixed += 1
                 else:
