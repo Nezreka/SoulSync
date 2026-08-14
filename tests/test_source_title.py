@@ -155,6 +155,12 @@ def test_restated_title_returns_the_latin_statement(raw, expected):
     # A live-recording credit is a genuine subtitle, not a restatement — even
     # though the title before it is a single non-Latin character.
     "夜 - Live at Budokan",
+    # A generic upload credit is the same class of false positive.
+    "がっこうぐらし! - Official Music Video",
+    # A script _NON_LATIN doesn't enumerate (Armenian) must never itself be
+    # returned as "the Latin half" just because it isn't on the list — it
+    # has no Latin letter either, so it can't win either side.
+    "花 - Երգ",
     # No separator at all.
     "だから僕は音楽を辞めた",
     "Yellow",

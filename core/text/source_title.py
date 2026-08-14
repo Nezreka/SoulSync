@@ -61,12 +61,28 @@ _NON_LATIN = re.compile(
 _BRACKETED = re.compile(r"[（(\[【｢「].*?[)）\]】｣」]")
 _DASHED_TAIL = re.compile(r"\s-[^-]+-\s*$")
 
-# A live-recording credit ("Live at Budokan", "Live in Paris") describes a
-# DIFFERENT thing from the title before it — it is not evidence of a
-# restatement just because it happens to be in a different script. Real
-# restatements are two statements of the SAME title; this is a title plus a
-# performance note.
-_LIVE_MARKER = re.compile(r"^live\s+(?:at|in|from)\s+", re.IGNORECASE)
+# A segment only counts as "the Latin statement" if it actually contains a
+# Latin letter — NOT merely because it fails to match _NON_LATIN. _NON_LATIN
+# is a fixed list of scripts; a script it doesn't list (Armenian, Georgian,
+# ...) would otherwise slip through as "not non-Latin" and could itself get
+# returned as the "Latin" candidate, which is nonsense for callers expecting
+# Latin text back.
+_HAS_LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏḀ-ỿ]")
+
+# A generic upload/performance credit ("Live at Budokan", "Official Music
+# Video") describes a DIFFERENT thing from the title before it — it is not
+# evidence of a restatement just because it happens to be in a different
+# script. Real restatements are two statements of the SAME title; this is a
+# title plus a credit that says nothing about the title itself.
+_GENERIC_CREDIT = re.compile(
+    r"^(?:"
+    r"live\s+(?:at|in|from)\s+.+"
+    r"|official\s+(?:music\s+)?video"
+    r"|official\s+audio"
+    r"|lyrics?\s+video"
+    r")$",
+    re.IGNORECASE,
+)
 
 
 def clean_source_artist(artist: str) -> str:
@@ -138,10 +154,13 @@ def restated_title(title: str) -> str | None:
     Returns ``None`` unless the two halves are demonstrably the same title, by
     one of two independent tests:
 
-    * **different scripts** — one half contains non-Latin script and the other
-      does not, so they cannot be title-and-subtitle; the Latin half is returned
-      unless it reads as a live-recording credit ("Live at Budokan"), which is
-      a genuine subtitle rather than a restatement.
+    * **different scripts** — one half contains a genuine Latin letter and no
+      recognized non-Latin script, the other contains a recognized non-Latin
+      script (or otherwise has no Latin letter of its own — an unlisted
+      script never gets returned as "the Latin half"); the Latin half is
+      returned unless it reads as a generic upload/performance credit
+      ("Live at Budokan", "Official Music Video"), which is a genuine
+      subtitle rather than a restatement.
     * **same core** — both halves reduce to the same string once bracketed and
       dash-delimited decoration is dropped.
 
@@ -160,10 +179,13 @@ def restated_title(title: str) -> str | None:
     if len(segments) < 2:
         return None
 
-    latin = [s for s in segments if not _NON_LATIN.search(s)]
+    latin = [
+        s for s in segments
+        if _HAS_LATIN_LETTER.search(s) and not _NON_LATIN.search(s)
+    ]
     if latin and len(latin) != len(segments):
         candidate = latin[0]
-        if candidate != title and not _LIVE_MARKER.match(candidate):
+        if candidate != title and not _GENERIC_CREDIT.match(candidate):
             return candidate
         return None
 
