@@ -6278,6 +6278,59 @@
                             </div>
                             </div><!-- end Developer Mode body -->
 
+                            <!-- Artwork cache. Deliberately NOT marked video-only: one cache
+                                 serves covers on the music side and posters on the video side,
+                                 same as the yt-dlp tile above. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Artwork Cache</h3>
+                                <span class="settings-section-hint">Local copies of cover &amp; poster art</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group" data-stg="advanced">
+
+                                <div class="form-group">
+                                    <label>Cached images:</label>
+                                    <span id="imgcache-entries" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Disk used:</label>
+                                    <span id="imgcache-size" class="readonly-field">Loading...</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="imgcache-max-mb">Size limit (MB):</label>
+                                    <input type="number" id="imgcache-max-mb" min="0" step="128" style="max-width:160px;" onchange="onImageCacheSettingChanged()">
+                                </div>
+                                <div class="help-text">
+                                    Oldest-unused art is removed once the cache passes this size. <strong>0</strong> means no limit.
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="imgcache-thumbnails" style="display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="imgcache-thumbnails" style="width:auto;margin:0;" onchange="onImageCacheSettingChanged()">
+                                        Serve resized thumbnails
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    Off by default. When on, SoulSync resizes art server-side so a grid of tiles
+                                    doesn't pull full-size originals — the big win on large libraries, at the cost
+                                    of some CPU the first time each image is seen. Everything else about the cache
+                                    is unchanged.
+                                </div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="imgcache-prune-btn" onclick="runImageCachePrune()">Reclaim space now</button>
+                                    <button class="test-button" id="imgcache-clear-btn" onclick="runImageCacheClear()">Clear cache</button>
+                                </div>
+                                <div class="help-text">
+                                    Nothing here is irreplaceable — every image is re-downloaded on demand, so
+                                    clearing only costs a slower first load.
+                                </div>
+                                <div id="imgcache-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                            </div>
+                            </div><!-- end Artwork Cache body -->
+
                             <div class="settings-experimental-break" data-stg="advanced" role="separator" aria-label="Experimental features">
                                 <span class="settings-experimental-break__line" aria-hidden="true"></span>
                                 <span class="settings-experimental-break__label">Experimental — proceed with caution</span>

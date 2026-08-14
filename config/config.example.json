@@ -72,5 +72,12 @@
   },
   "listenbrainz": {
     "token": ""
+  },
+  "image_cache": {
+    "enabled": true,
+    "thumbnails": false,
+    "max_cache_mb": 2048,
+    "ttl_seconds": 2592000,
+    "max_download_mb": 15
   }
 }

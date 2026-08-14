@@ -3600,7 +3600,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -3616,6 +3616,15 @@ def handle_settings():
             # default profile so "the page edits the active profile" holds —
             # without this, a checkbox change here would never reach the
             # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if 'image_cache' in new_settings:
+                # The cache is a singleton built from config on first use, so a
+                # new size limit would otherwise not apply until a restart.
+                try:
+                    from core.image_cache import reset_image_cache
+                    reset_image_cache()
+                except Exception as _ic_err:
+                    logger.debug("image cache reset after settings save failed: %s", _ic_err)
+
             if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
                 try:
                     get_database().sync_default_quality_profile_from_config()
@@ -34612,6 +34621,46 @@ def image_proxy():
         return '', 502
 
 
+@app.route('/api/image-cache/status', methods=['GET'])
+def image_cache_status():
+    """What the artwork cache is holding, for Settings -> Advanced."""
+    try:
+        from core.image_cache import get_image_cache, thumbnails_enabled
+
+        stats = get_image_cache().stats()
+        stats['enabled'] = config_manager.get('image_cache.enabled', True) is not False
+        stats['thumbnails'] = thumbnails_enabled()
+        return jsonify({'success': True, **stats})
+    except Exception as e:
+        logger.error("image cache status failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/image-cache/clear', methods=['POST'])
+def image_cache_clear():
+    """Empty the artwork cache. Everything in it is re-fetchable, so this is
+    only ever a temporary cost — nothing user-created lives here."""
+    try:
+        from core.image_cache import get_image_cache
+
+        return jsonify({'success': True, **get_image_cache().clear()})
+    except Exception as e:
+        logger.error("image cache clear failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/image-cache/prune', methods=['POST'])
+def image_cache_prune():
+    """Apply the TTL and size cap now, rather than waiting for the next store."""
+    try:
+        from core.image_cache import get_image_cache
+
+        return jsonify({'success': True, **get_image_cache().prune()})
+    except Exception as e:
+        logger.error("image cache prune failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/image-cache/<cache_key>', methods=['GET'])
 def serve_cached_image(cache_key):
     """Serve a registered image URL from SoulSync's disk cache."""
@@ -34619,9 +34668,18 @@ def serve_cached_image(cache_key):
         return '', 404
 
     try:
-        from core.image_cache import get_image_cache
+        from core.image_cache import get_image_cache, thumbnails_enabled
 
-        cached = get_image_cache().get(cache_key)
+        # ?v=grid|card|hero asks for a resized copy. The BROWSER picks the size,
+        # so a page adopts thumbnails by adding one query param — no need to
+        # rewrite every URL-producing call site, and a page that asks for
+        # nothing keeps getting the original.
+        variant = (request.args.get('v') or '').strip()
+        cache = get_image_cache()
+        if variant and thumbnails_enabled():
+            cached = cache.get_variant_of(cache_key, variant)
+        else:
+            cached = cache.get(cache_key)
         response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
         max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
         response.headers['Cache-Control'] = f'private, max-age={max_age}'
