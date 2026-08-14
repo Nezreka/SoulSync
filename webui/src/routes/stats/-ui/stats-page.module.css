@@ -913,3 +913,87 @@
   background: rgb(var(--accent-rgb));
   color: #0c0c0c;
 }
+
+/* When You Listen — the weekday x hour heatmap and the habit numbers. */
+.statsClock {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statsClockGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statsClockRow {
+  display: grid;
+  grid-template-columns: 34px repeat(24, 1fr);
+  gap: 3px;
+  align-items: center;
+}
+
+.statsClockDay {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: right;
+  padding-right: 4px;
+}
+
+.statsClockCell {
+  aspect-ratio: 1;
+  min-height: 10px;
+  border-radius: 2px;
+  background: rgb(var(--accent-rgb));
+  transition: transform 90ms ease;
+}
+
+.statsClockCell:hover {
+  transform: scale(1.35);
+}
+
+.statsClockAxis {
+  display: grid;
+  grid-template-columns: 34px repeat(4, 1fr);
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.statsClockAxisLabel {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.statsClockEmpty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsRhythm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsRhythmItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statsRhythmValue {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.statsRhythmLabel {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}

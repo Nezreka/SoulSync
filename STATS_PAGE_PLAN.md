@@ -44,7 +44,7 @@ The tab lives in the URL (`?tab=library`) so it is linkable and survives a
 reload, and the range picker hides there because disk usage is not
 range-scoped — an inert control is worse than no control.
 
-## P3 — The two charts that are actually personal
+## P3 — The two charts that are actually personal ✅ SHIPPED
 
 1. **When you listen** — hour-of-day × day-of-week heatmap. One `GROUP BY` over
    `played_at`. The most personal chart available per unit of effort.
@@ -52,8 +52,21 @@ range-scoped — an inert control is worse than no control.
    days give streaks. Yields "longest session", "biggest listening day",
    "current streak".
 
-New DB helpers next to the existing `get_listening_timeline`. Both are cacheable
-in the same worker pass.
+New DB helpers next to `get_listening_timeline`, both folded into the same
+worker cache pass. Sessions (gap detection) deliberately deferred — the gap
+threshold is a judgement call and it is the least legible of the numbers.
+
+**TIMEZONE, discovered during this phase and worth knowing:** `played_at` is
+stored as LOCAL naive wall-clock — the web player writes
+`datetime.now().isoformat()` and `plex_client` writes `item.viewedAt`, both
+local. That makes the heatmap correct for free (`strftime('%H')` IS the hour
+you listened) and must not be "fixed" to UTC.
+
+The same fact means the RANGE FILTERS are skewed: they compare local
+timestamps against SQLite's UTC `datetime('now')`, so every range-scoped stat
+is off by the server's UTC offset (a few hours on a 7-day window). Pre-existing
+and untouched here — changing it moves every existing number, so it wants its
+own change with its own before/after.
 
 ## P4 — Own vs play (the thing only SoulSync can say)
 

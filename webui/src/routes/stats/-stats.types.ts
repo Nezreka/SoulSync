@@ -105,6 +105,8 @@ export interface StatsCachedPayload {
    *  deltas. null for 'all' — there is no period before everything, and the UI
    *  omits the comparison rather than comparing against nothing. */
   previous?: Partial<StatsOverview> | null;
+  clock?: StatsClock;
+  rhythm?: StatsRhythm;
   top_artists?: StatsArtistRow[];
   top_albums?: StatsAlbumRow[];
   top_tracks?: StatsTrackRow[];
@@ -165,4 +167,20 @@ export interface StatsStreamTrackPayload {
   success: boolean;
   error?: string;
   result?: Record<string, unknown>;
+}
+
+/** Plays by weekday (0=Sunday) x hour. Dense 7x24 — a heatmap needs a value
+ *  in every cell, so gaps are zeros from the backend, never undefined. */
+export interface StatsClock {
+  grid: number[][];
+  peak: { weekday: number | null; hour: number | null; plays: number };
+  total: number;
+}
+
+/** Listening as a habit rather than a total. */
+export interface StatsRhythm {
+  current_streak: number;
+  longest_streak: number;
+  busiest_day: { date: string | null; plays: number };
+  active_days: number;
 }

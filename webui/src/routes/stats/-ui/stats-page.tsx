@@ -21,11 +21,13 @@ import { useReactPageShell, useShellStatus } from '@/platform/shell/route-contro
 import type {
   StatsAlbumRow,
   StatsArtistRow,
+  StatsClock,
   StatsDbStoragePayload,
   StatsHealth,
   StatsLibraryDiskUsagePayload,
   StatsRange,
   StatsRecentTrack,
+  StatsRhythm,
   StatsTab,
   StatsTrackRow,
 } from '../-stats.types';
@@ -45,17 +47,21 @@ import {
   formatBytes,
   formatCompactNumber,
   formatDbStorageValue,
+  formatHourLabel,
   formatListeningTime,
+  formatPeakSlot,
   formatRelativePlayedAt,
   formatTotalDuration,
   getStatsRangeLabel,
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
+  heatIntensity,
   isNewSincePrevious,
   STATS_DB_STORAGE_COLORS,
   STATS_GENRE_COLORS,
   statDelta,
+  WEEKDAY_LABELS,
   visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
 import { STATS_TAB_VALUES } from '../-stats.types';
@@ -258,6 +264,9 @@ export function StatsPage() {
           />
           <div className={styles.statsMainGrid}>
             <div className={styles.statsLeftCol}>
+              <StatsSectionCard title="When You Listen">
+                <StatsListeningClock clock={cachedStats?.clock} rhythm={cachedStats?.rhythm} />
+              </StatsSectionCard>
               <StatsSectionCard title="Listening Activity">
                 <div id="stats-timeline-chart" className={styles.chartContainer}>
                   <StatsActivityChart timeline={cachedStats?.timeline ?? []} />
@@ -391,6 +400,93 @@ function StatsCardDelta({
   return (
     <div className={`${styles.statsCardDelta} ${styles[`statsCardDelta_${delta.direction}`]}`}>
       {arrow} {delta.pct}% {periodLabel}
+    </div>
+  );
+}
+
+
+/**
+ * The shape of a listening week — plays by weekday x hour — plus the habit
+ * numbers beside it.
+ *
+ * The page could say how MUCH you listened and never WHEN. This is the most
+ * personal thing the data can show, and it is one GROUP BY.
+ *
+ * The grid arrives dense (7x24, zeros included) from the backend, so this
+ * renders it directly: a UI that has to fill gaps is a UI where an empty hour
+ * and a missing hour look the same.
+ */
+function StatsListeningClock({
+  clock,
+  rhythm,
+}: {
+  clock: StatsClock | undefined;
+  rhythm: StatsRhythm | undefined;
+}) {
+  const grid = clock?.grid;
+  const peak = clock?.peak;
+  const peakPlays = peak?.plays ?? 0;
+
+  if (!grid || !clock?.total) {
+    return <div className={styles.statsClockEmpty}>No plays in this range yet.</div>;
+  }
+
+  const peakSlot = formatPeakSlot(peak?.weekday, peak?.hour);
+
+  return (
+    <div className={styles.statsClock}>
+      <div className={styles.statsClockGrid}>
+        {grid.map((row, weekday) => (
+          <div key={weekday} className={styles.statsClockRow}>
+            <span className={styles.statsClockDay}>{WEEKDAY_LABELS[weekday]}</span>
+            {row.map((plays, hour) => (
+              <span
+                key={hour}
+                className={styles.statsClockCell}
+                style={{ opacity: heatIntensity(plays, peakPlays) }}
+                title={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)} — ${plays} ${
+                  plays === 1 ? 'play' : 'plays'
+                }`}
+              />
+            ))}
+          </div>
+        ))}
+        <div className={styles.statsClockAxis}>
+          <span className={styles.statsClockDay} />
+          {[0, 6, 12, 18].map((h) => (
+            <span key={h} className={styles.statsClockAxisLabel}>
+              {formatHourLabel(h)}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className={styles.statsRhythm}>
+        {peakSlot ? (
+          <div className={styles.statsRhythmItem}>
+            <span className={styles.statsRhythmValue}>{peakSlot}</span>
+            <span className={styles.statsRhythmLabel}>peak slot</span>
+          </div>
+        ) : null}
+        {rhythm ? (
+          <>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.current_streak}</span>
+              <span className={styles.statsRhythmLabel}>
+                day{rhythm.current_streak === 1 ? '' : 's'} in a row
+              </span>
+            </div>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.longest_streak}</span>
+              <span className={styles.statsRhythmLabel}>longest streak</span>
+            </div>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.busiest_day.plays}</span>
+              <span className={styles.statsRhythmLabel}>busiest day</span>
+            </div>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

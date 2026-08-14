@@ -4,7 +4,10 @@ import {
   formatBytes,
   formatDbStorageValue,
   formatListeningTime,
+  formatHourLabel,
+  formatPeakSlot,
   formatRelativePlayedAt,
+  heatIntensity,
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
@@ -139,5 +142,43 @@ describe('statDelta', () => {
     // No plays then, no plays now. Not "new", not a percentage.
     expect(statDelta(0, 0)).toBeNull();
     expect(isNewSincePrevious(0, 0)).toBe(false);
+  });
+});
+
+// ── the listening clock (stats P3) ───────────────────────────────────────────
+
+describe('the listening clock helpers', () => {
+  it('labels hours the way people say them', () => {
+    expect(formatHourLabel(0)).toBe('12am');
+    expect(formatHourLabel(9)).toBe('9am');
+    expect(formatHourLabel(12)).toBe('12pm');
+    expect(formatHourLabel(21)).toBe('9pm');
+    expect(formatHourLabel(23)).toBe('11pm');
+  });
+
+  it('gives any play a visible floor', () => {
+    // One play beside a peak of 300 is the most interesting cell on the chart.
+    // A linear ramp from zero renders it invisible.
+    expect(heatIntensity(1, 300)).toBeGreaterThan(0.15);
+    expect(heatIntensity(0, 300)).toBe(0);
+  });
+
+  it('scales relative to the busiest cell, not an absolute count', () => {
+    // The question is when YOU listen, not how you compare to anyone else.
+    expect(heatIntensity(5, 10)).toBeCloseTo(heatIntensity(50, 100));
+    expect(heatIntensity(10, 10)).toBe(1);
+  });
+
+  it('survives a peak of zero without dividing by it', () => {
+    expect(heatIntensity(0, 0)).toBe(0);
+    expect(heatIntensity(3, 0)).toBe(0);
+  });
+
+  it('names the peak slot, and stays quiet when there is not one', () => {
+    expect(formatPeakSlot(3, 21)).toBe('Wed 9pm');
+    expect(formatPeakSlot(0, 0)).toBe('Sun 12am');
+    expect(formatPeakSlot(null, 21)).toBeNull();
+    expect(formatPeakSlot(3, null)).toBeNull();
+    expect(formatPeakSlot(9, 1)).toBeNull();
   });
 });

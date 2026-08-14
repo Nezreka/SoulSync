@@ -5294,6 +5294,133 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ── When you listen (stats P3) ───────────────────────────────────────
+    #
+    # TIMEZONE NOTE: played_at is stored as LOCAL naive wall-clock — the web
+    # player writes datetime.now().isoformat() and plex_client writes
+    # item.viewedAt.isoformat(), both local. So strftime('%H', played_at)
+    # already yields the hour the user actually listened, which is precisely
+    # what this chart means. Do NOT "fix" it to UTC.
+    #
+    # (The same fact means the range filters, which compare local timestamps
+    # against SQLite's UTC datetime('now'), are skewed by the server's UTC
+    # offset. Pre-existing, affects every range-scoped stat, and deliberately
+    # not changed here — see STATS_PAGE_PLAN.md.)
+
+    def get_listening_clock(self, time_range='all'):
+        """Plays by weekday x hour — the shape of a listening week.
+
+        Returns a dict with a dense 7x24 ``grid`` (weekday 0=Sunday, matching
+        strftime %w) plus the peak cell. Dense on purpose: a heatmap needs a
+        value for every cell, and making the UI fill gaps is how an empty hour
+        becomes an undefined square."""
+        where = self._listening_time_filter(time_range)
+        grid = [[0] * 24 for _ in range(7)]
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT CAST(strftime('%w', played_at) AS INTEGER) AS weekday,
+                       CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                       COUNT(*) AS plays
+                FROM listening_history
+                {where}
+                GROUP BY weekday, hour
+            """)
+            peak = {'weekday': None, 'hour': None, 'plays': 0}
+            total = 0
+            for weekday, hour, plays in cursor.fetchall():
+                # strftime returns NULL for an unparseable timestamp; skip
+                # rather than letting None index the grid.
+                if weekday is None or hour is None:
+                    continue
+                if not (0 <= weekday <= 6 and 0 <= hour <= 23):
+                    continue
+                grid[weekday][hour] = plays
+                total += plays
+                if plays > peak['plays']:
+                    peak = {'weekday': weekday, 'hour': hour, 'plays': plays}
+            return {'grid': grid, 'peak': peak, 'total': total}
+        except Exception as e:
+            logger.error(f"Error building listening clock: {e}")
+            return {'grid': grid, 'peak': {'weekday': None, 'hour': None, 'plays': 0}, 'total': 0}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_listening_rhythm(self, time_range='all'):
+        """Streaks and the biggest day — listening as a habit, not a total.
+
+        ``current_streak`` counts back from today, and tolerates today having
+        no plays yet: a streak should not read as broken at 9am just because
+        you have not put anything on."""
+        where = self._listening_time_filter(time_range)
+        empty = {'current_streak': 0, 'longest_streak': 0,
+                 'busiest_day': {'date': None, 'plays': 0}, 'active_days': 0}
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays
+                FROM listening_history
+                {where}
+                GROUP BY day
+                ORDER BY day
+            """)
+            rows = [(day, plays) for day, plays in cursor.fetchall() if day]
+            if not rows:
+                return dict(empty)
+
+            from datetime import date as _date, timedelta as _timedelta
+
+            days = []
+            for day, plays in rows:
+                try:
+                    days.append((_date.fromisoformat(day), plays))
+                except (TypeError, ValueError):
+                    continue
+            if not days:
+                return dict(empty)
+
+            busiest = max(days, key=lambda d: d[1])
+
+            longest = run = 1
+            for i in range(1, len(days)):
+                if days[i][0] - days[i - 1][0] == _timedelta(days=1):
+                    run += 1
+                    longest = max(longest, run)
+                else:
+                    run = 1
+
+            # Count back from the most recent day, but only call it CURRENT if
+            # that day is today or yesterday — an unbroken run that ended last
+            # month is history, not a streak you are on.
+            today = _date.today()
+            last_day = days[-1][0]
+            current = 0
+            if (today - last_day).days <= 1:
+                current = 1
+                for i in range(len(days) - 1, 0, -1):
+                    if days[i][0] - days[i - 1][0] == _timedelta(days=1):
+                        current += 1
+                    else:
+                        break
+
+            return {
+                'current_streak': current,
+                'longest_streak': longest,
+                'busiest_day': {'date': busiest[0].isoformat(), 'plays': busiest[1]},
+                'active_days': len(days),
+            }
+        except Exception as e:
+            logger.error(f"Error building listening rhythm: {e}")
+            return dict(empty)
+        finally:
+            if conn:
+                conn.close()
+
     def get_listening_stats_previous(self, time_range='all'):
         """The overview for the period immediately BEFORE ``time_range``.
 

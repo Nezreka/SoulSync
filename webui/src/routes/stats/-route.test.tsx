@@ -40,6 +40,19 @@ describe('stats route', () => {
             unique_albums: 2,
             unique_tracks: 6,
           },
+          clock: {
+            grid: Array.from({ length: 7 }, (_, d) =>
+              Array.from({ length: 24 }, (_, h) => (d === 3 && h === 21 ? 9 : 0)),
+            ),
+            peak: { weekday: 3, hour: 21, plays: 9 },
+            total: 9,
+          },
+          rhythm: {
+            current_streak: 4,
+            longest_streak: 11,
+            busiest_day: { date: '2026-08-12', plays: 9 },
+            active_days: 20,
+          },
           top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
           top_albums: [],
           top_tracks: [],
@@ -262,6 +275,43 @@ describe('stats route', () => {
     await screen.findByText('Library Disk Usage');
     expect(history.location.search).toContain('range=30d');
     expect(history.location.search).toContain('tab=library');
+  });
+
+  /**
+   * P3: the page could say how MUCH you listened and never WHEN. The heatmap
+   * is the most personal thing the data supports, and it is one GROUP BY.
+   */
+  it('names the slot you listen most', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Wed 9pm')).toBeTruthy();
+    expect(screen.getByText('peak slot')).toBeTruthy();
+  });
+
+  it('shows listening as a habit, not just a total', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('longest streak')).toBeTruthy();
+    expect(screen.getByText('11')).toBeTruthy();
+    expect(screen.getByText('days in a row')).toBeTruthy();
+  });
+
+  it('says so plainly when there are no plays to shape', async () => {
+    // An empty heatmap is a grid of blank squares, which reads as broken.
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 3, total_time_ms: 1, unique_artists: 1,
+                      unique_albums: 1, unique_tracks: 1 },
+          clock: { grid: Array.from({ length: 7 }, () => Array(24).fill(0)),
+                   peak: { weekday: null, hour: null, plays: 0 }, total: 0 },
+          top_artists: [], top_albums: [], top_tracks: [],
+          timeline: [], genres: [], recent: [],
+          health: { total_tracks: 1 },
+        }),
+      ),
+    );
+    renderStatsRoute();
+    expect(await screen.findByText(/No plays in this range yet/)).toBeTruthy();
   });
 
   it('omits the comparison entirely on the all-time range', async () => {

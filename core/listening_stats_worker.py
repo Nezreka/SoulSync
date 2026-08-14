@@ -242,6 +242,10 @@ class ListeningStatsWorker:
                     'top_tracks': self.db.get_top_tracks(time_range, 25),
                     'timeline': self.db.get_listening_timeline(time_range, granularity),
                     'genres': self.db.get_genre_breakdown(time_range),
+                    # When you listen, and whether you keep listening — the
+                    # first stats that are about a person rather than a total.
+                    'clock': self.db.get_listening_clock(time_range),
+                    'rhythm': self.db.get_listening_rhythm(time_range),
                 }
 
                 # Enrich with images/IDs so the endpoint doesn't have to
