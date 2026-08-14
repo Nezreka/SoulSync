@@ -135,6 +135,8 @@ def test_canonical_noop_on_clean_input():
     ("Sign -NARUTO Opening Mix- - Sign (Naruto Opening Mix)", "Sign (Naruto Opening Mix)"),
     ("forget-me-not -unknown mix- - forget-me-not (unknown mix)",
      "forget-me-not (unknown mix)"),
+    # Devanagari restated in Latin — same shape as the CJK/Cyrillic/etc cases.
+    ("फूल - Flower", "Flower"),
 ])
 def test_restated_title_returns_the_latin_statement(raw, expected):
     assert restated_title(raw) == expected

@@ -53,6 +53,7 @@ _NON_LATIN = re.compile(
     "֐-׿"              # hebrew
     "؀-ۿ"              # arabic
     "฀-๿"              # thai
+    "ऀ-ॿ"              # devanagari
     "]"
 )
 
