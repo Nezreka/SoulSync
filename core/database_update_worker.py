@@ -162,9 +162,37 @@ class DatabaseUpdateWorker:
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
-                    self._emit_signal('error', f"No artists found in {self.server_type} library or connection failed")
-                    return
-                logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
+                    # 5BILLION, round 4. An empty answer used to abort here
+                    # unconditionally — which RETURNS BEFORE the stale-removal
+                    # phase below, so "Refresh completes but doesn't remove the
+                    # previous artists" was exactly what the code did. The three
+                    # earlier fixes all went into run_deep_scan(); this path,
+                    # which is what the Refresh button runs, still had the
+                    # original behaviour.
+                    #
+                    # A VERIFIED empty library is a legitimate state (the user
+                    # emptied it, or switched the selection to an empty one) and
+                    # must fall through to removal. An UNVERIFIED empty is a
+                    # failed fetch and must still abort — never delete a
+                    # library's rows because the API had a bad minute.
+                    if not getattr(self, '_artists_fetch_verified', False):
+                        logger.error(
+                            "Full refresh aborted: artists fetch UNVERIFIED for %s "
+                            "(connection/API failure, last API error: %r) — stale "
+                            "removal skipped as a safety measure",
+                            self.server_type,
+                            getattr(self.media_client, 'last_api_error', None))
+                        self._emit_signal('error', f"No artists found in {self.server_type} library or connection failed")
+                        return
+                    logger.info(
+                        "Full refresh: %s library verified EMPTY — continuing to "
+                        "removal so stale artists from the previous library are "
+                        "cleared", self.server_type)
+                    self._emit_signal('phase_changed',
+                                      "Library is empty — removing stale data...")
+                    artists_to_process = []
+                else:
+                    logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
                 # For incremental, use smart recent-first approach
@@ -1104,18 +1132,49 @@ class DatabaseUpdateWorker:
             logger.info(f"Removal detection not supported for {self.server_type} — skipping")
             return None
 
-        # Fetch current IDs from media server (lightweight calls)
+        # Fetch current IDs from media server (lightweight calls).
+        #
+        # `last_fetch_failed` is read IMMEDIATELY after each call — it describes
+        # the most recent fetch and the next call overwrites it.
+        #
+        # The tripwire matters: it is set True before each call so a client that
+        # does NOT implement the contract (Plex and Jellyfin's id fetchers don't)
+        # leaves it True and reads as unverified, keeping the old conservative
+        # behaviour. Only a client that explicitly clears it can authorise
+        # removal on an empty answer. Without the tripwire we'd be reading a
+        # stale flag left by some earlier call — and that flag decides whether
+        # rows get deleted.
         logger.info(f"Removal detection: fetching current IDs from {self.server_type}...")
         self._emit_signal('phase_changed', f"Fetching artist catalog from {self.server_type}...")
+        self.media_client.last_fetch_failed = True
         server_artist_ids = self.media_client.get_all_artist_ids()
+        artists_verified = not getattr(self.media_client, 'last_fetch_failed', True)
         self._emit_signal('phase_changed', f"Fetching album catalog from {self.server_type}...")
+        self.media_client.last_fetch_failed = True
         server_album_ids = self.media_client.get_all_album_ids()
+        albums_verified = not getattr(self.media_client, 'last_fetch_failed', True)
 
-        # Safety: if both come back empty, the server is unreachable
+        # Safety: both empty usually means the server is unreachable — UNLESS both
+        # fetches were verified, which is a genuinely empty library and exactly
+        # the case 5BILLION has been reporting since July. Removing on a real
+        # empty is the whole point; removing on a failure is the thing to fear.
+        #
+        # The early return here is DIAGNOSTIC, not load-bearing: the
+        # `not check_artists and not check_albums` guard further down catches the
+        # same case, because an unverified empty leaves both checks False. It is
+        # kept because that later message ("both checks disabled") does not say
+        # WHY, and every round of this bug has been prolonged by a failure that
+        # did not explain itself. Deleting it changes no behaviour, only the log.
         if not server_artist_ids and not server_album_ids:
-            logger.warning("SAFETY: Server returned zero artists AND zero albums — "
-                          "skipping removal detection")
-            return None
+            if not (artists_verified and albums_verified):
+                logger.warning("SAFETY: Server returned zero artists AND zero albums, "
+                               "unverified (artists_verified=%s albums_verified=%s) — "
+                               "skipping removal detection",
+                               artists_verified, albums_verified)
+                return None
+            logger.info("Removal detection: %s verified EMPTY (both catalogues "
+                        "answered with zero) — removing everything stale",
+                        self.server_type)
 
         # Get current DB counts for safety threshold
         try:
@@ -1127,24 +1186,59 @@ class DatabaseUpdateWorker:
             db_album_count = 0
 
         # Per-type safety: skip removal for any type where the server returned
-        # empty or suspiciously few results. An empty set means the API call
-        # failed, not that the server has zero items.
-        check_artists = bool(server_artist_ids)
-        check_albums = bool(server_album_ids)
+        # empty or suspiciously few results — an empty set USUALLY means the API
+        # call failed rather than the server having zero items.
+        #
+        # "Usually" is the whole bug: a VERIFIED empty answer really does mean
+        # zero, and refusing to act on it is what left 5BILLION's artists on
+        # screen after every Refresh. Verified empty is allowed through; empty
+        # from a client that cannot vouch for it still is not.
+        check_artists = bool(server_artist_ids) or artists_verified
+        check_albums = bool(server_album_ids) or albums_verified
 
-        if check_artists and db_artist_count > 100:
+        # The >50%-shrink threshold guards against an API that answered but
+        # answered SHORT — a partial catalogue that would mass-delete real rows.
+        #
+        # A verified-empty answer is the one case it must not apply to. Zero is
+        # always less than half of anything, so leaving the threshold in charge
+        # re-disables both checks for any library over 100 artists and lands
+        # straight back on "Refresh doesn't remove anything" — the bug, for
+        # everyone except users with tiny libraries. Deep scan already makes
+        # this exact carve-out (see `scan_trusted` in run_deep_scan).
+        # Deliberately the WHOLE library, not per-catalogue. Exempting the
+        # artist threshold on "zero artists" alone would fire on a contradictory
+        # answer — zero artists WITH albums present — which cannot be a real
+        # library state and is the signature of a partial read. That would wipe
+        # every artist row. The exemption is for one situation only: the server
+        # says the entire library is empty, and vouched for both halves of it.
+        library_verified_empty = (
+            artists_verified and albums_verified
+            and not server_artist_ids and not server_album_ids
+        )
+        artists_verified_empty = library_verified_empty
+        albums_verified_empty = library_verified_empty
+
+        if check_artists and db_artist_count > 100 and not artists_verified_empty:
             if len(server_artist_ids) < db_artist_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_artist_ids)} artists but "
                     f"database has {db_artist_count} — skipping artist removal check")
                 check_artists = False
 
-        if check_albums and db_album_count > 100:
+        if check_albums and db_album_count > 100 and not albums_verified_empty:
             if len(server_album_ids) < db_album_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_album_ids)} albums but "
                     f"database has {db_album_count} — skipping album removal check")
                 check_albums = False
+
+        if artists_verified_empty or albums_verified_empty:
+            logger.info(
+                "Removal detection: verified-empty catalogue exempt from the "
+                "shrink threshold (artists_empty=%s albums_empty=%s, db has "
+                "%d artists / %d albums)",
+                artists_verified_empty, albums_verified_empty,
+                db_artist_count, db_album_count)
 
         if not check_artists and not check_albums:
             logger.warning("SAFETY: Both artist and album checks disabled — "
