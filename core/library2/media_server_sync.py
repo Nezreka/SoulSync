@@ -102,10 +102,14 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
     if not allow_create:
         upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
         return artist_id
-    image_set = ("image_url=CASE WHEN image_url IS NULL OR image_url='' "
-                 "THEN COALESCE(?, image_url) ELSE image_url END"
-                 if not overwrite else
-                 "image_url=COALESCE(NULLIF(?, ''), image_url)")
+    image_set = (
+        "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
+        "WHEN image_url IS NULL OR image_url='' THEN COALESCE(?, image_url) "
+        "ELSE image_url END"
+        if not overwrite else
+        "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
+        "ELSE COALESCE(NULLIF(?, ''), image_url) END"
+    )
     genres_set = ("genres=CASE WHEN genres IS NULL OR genres IN ('', '[]') "
                   "THEN COALESCE(?, genres) ELSE genres END"
                   if not overwrite else "genres=COALESCE(?, genres)")
@@ -205,7 +209,8 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
         cursor.execute(
             "UPDATE lib2_albums"
             "   SET primary_artist_id=?, title=?, year=COALESCE(?, year),"
-            "       image_url=COALESCE(NULLIF(?, ''), image_url),"
+            "       image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
+            "                      ELSE COALESCE(NULLIF(?, ''), image_url) END,"
             "       genres=COALESCE(?, genres),"
             "       track_count=COALESCE(?, track_count),"
             "       duration=COALESCE(?, duration),"

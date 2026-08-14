@@ -35,7 +35,7 @@ from mutagen.oggvorbis import OggVorbis
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
-from config.settings import config_manager
+from core.settings import config_manager
 
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.2.0"
+_SOULSYNC_BASE_VERSION = "3.2.1"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1322,8 +1322,8 @@ def _set_db_update_automation_id(value):
     global _db_update_automation_id
     _db_update_automation_id = value
 
-# Quality scanning is now the 'quality_upgrade' library-maintenance repair job
-# (core/repair_jobs/quality_upgrade.py) — no standalone state/executor here.
+# Quality scanning is now the native ``quality_upgrade_scan`` maintenance job
+# (core/repair_jobs/lib2_upgrade_scan.py) — no standalone state/executor here.
 
 # Duplicate Cleaner state
 duplicate_cleaner_state = {
@@ -3690,7 +3690,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental', 'image_cache']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -3706,6 +3706,15 @@ def handle_settings():
             # default profile so "the page edits the active profile" holds —
             # without this, a checkbox change here would never reach the
             # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if 'image_cache' in new_settings:
+                # The cache is a singleton built from config on first use, so a
+                # new size limit would otherwise not apply until a restart.
+                try:
+                    from core.image_cache import reset_image_cache
+                    reset_image_cache()
+                except Exception as _ic_err:
+                    logger.debug("image cache reset after settings save failed: %s", _ic_err)
+
             if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
                 try:
                     get_database().sync_default_quality_profile_from_config()
@@ -5923,7 +5932,7 @@ def spotify_callback():
     try:
         from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         # Per-profile callback: the profile's own account via the shared app.
         if profile_id_from_state and profile_id_from_state != 1:
@@ -10807,8 +10816,9 @@ def _overwrite_cover_jpg(url, folder):
 @app.route('/api/album/<album_id>/art', methods=['POST'])
 def set_album_art(album_id):
     """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
-    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
-    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    album folder. This also sets ``albums.art_locked``, which is what makes the choice stick — the
+    old "non-empty thumb_url pins it" reasoning only held against enrichment workers, and a library
+    sync happily wrote the server's cover back over it. Body: ``{"url": "<image url>"}``."""
     try:
         data = request.get_json(silent=True) or {}
         url = (data.get('url') or '').strip()
@@ -10835,6 +10845,42 @@ def set_album_art(album_id):
                         "cover_written": cover_written})
     except Exception as e:
         logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/album/<album_id>/art', methods=['DELETE'])
+def clear_album_art_lock(album_id):
+    """Hand this album's cover back to the media server.
+
+    The art picker can only offer covers it finds on external sources, and for
+    an obscure release it finds none — so without this there is no way to undo a
+    pick. The current image stays until the next library sync replaces it."""
+    try:
+        db = get_database()
+        if not db.clear_art_lock('album', album_id):
+            return jsonify({"error": "Album not found"}), 404
+        logger.info("[set-art] album %s art unlocked — the server owns it again", album_id)
+        return jsonify({"success": True, "album_id": album_id, "art_locked": False})
+    except Exception as e:
+        logger.error("[set-art] unlock failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/artist/<artist_id>/art', methods=['DELETE'])
+def clear_artist_art_lock(artist_id):
+    """Hand this artist's photo back to the media server. See the album twin."""
+    try:
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
+        db = get_database()
+        if not db.clear_art_lock('artist', artist_id):
+            return jsonify({"error": "Artist not found"}), 404
+        logger.info("[set-artist-art] artist %s art unlocked — the server owns it again", artist_id)
+        return jsonify({"success": True, "artist_id": artist_id, "art_locked": False})
+    except Exception as e:
+        logger.error("[set-artist-art] unlock failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -10890,8 +10936,8 @@ def get_artist_art_options(artist_id):
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
 
-    1. SoulSync DB (``artists.thumb_url``; a non-empty value pins it, the
-       enrichment workers only fill empty thumbs)
+    1. SoulSync DB (``artists.thumb_url`` + ``artists.art_locked``, which is what
+       stops the next library sync writing the server's photo back over it)
     2. the active media server (Plex/Jellyfin poster upload; Navidrome has no
        API and is covered by step 3)
     3. ``artist.jpg`` in the artist's folder on disk (what Navidrome reads;
@@ -11646,7 +11692,7 @@ def library_completion_stream():
             # Pre-fetch the artist's library albums AND tracks ONCE so per-item
             # matching runs in-memory instead of firing per-item SQL searches.
             # Turns N*K queries into 2 broad fetches + N track-count lookups.
-            from config.settings import config_manager as _cm_cs
+            from core.settings import config_manager as _cm_cs
             _active_server = _cm_cs.get_active_media_server()
             candidate_albums = None
             candidate_tracks = None
@@ -19054,7 +19100,7 @@ def _get_quality_tier_from_extension(file_path):
 
     return ('unknown', 999)
 
-# (Quality scanning moved to the 'quality_upgrade' library-maintenance repair job.)
+# (Quality scanning moved to the native ``quality_upgrade_scan`` repair job.)
 
 from core.library.duplicate_cleaner import (
     _run_duplicate_cleaner,
@@ -19463,7 +19509,7 @@ def _try_version_mismatch_fallback_for_worker(expected_title, expected_artist, t
     import time
     from core.imports.version_mismatch_fallback import try_accept_version_mismatch_fallback
     from core.imports.quarantine import approve_quarantine_entry, list_quarantine_entries
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.imports.paths import docker_resolve_path
     import os
     try:
@@ -26725,9 +26771,14 @@ def update_youtube_discovery_match():
 
 def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url=''):
     """Build stub matched_data for tracks that failed metadata discovery.
-    Used as automatic Wing It fallback so tracks still flow through the download pipeline."""
+    Used as automatic Wing It fallback so tracks still flow through the download pipeline.
+
+    The id comes from core.discovery.wing_it so it is stable — the previous
+    `hash(...) % 100000` was salted per interpreter, so a stub written to
+    mirrored_playlist_tracks.extra_data resolved to a different id after a restart."""
+    from core.discovery.wing_it import stub_track_id
     return {
-        'id': f"wing_it_{hash(f'{artist_name}_{track_name}') % 100000}",
+        'id': stub_track_id(artist_name, track_name),
         'name': track_name,
         'artists': [{'name': artist_name}] if isinstance(artist_name, str) else artist_name,
         'album': {'name': '', 'album_type': 'single', 'images': [], 'release_date': ''},
@@ -27225,7 +27276,7 @@ def test_database_access():
         logger.info(f"   Track existence check works: found={db_track is not None}, confidence={confidence}")
         
         # Test config manager
-        from config.settings import config_manager
+        from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         logger.info(f"   Active media server: {active_server}")
         
@@ -31068,7 +31119,7 @@ def _discover_shelf_cache(key_extra=None):
 def _discover_dial_key():
     # The dial re-ranks similar-artists live; committing it must bust the key.
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return str(config_manager.get('discover.adventurousness', 0.3))
     except Exception:
         return '0.3'
@@ -31128,7 +31179,7 @@ def get_discover_similar_artists():
     try:
         database = get_database()
         active_source = _get_active_discovery_source()
-        from config.settings import config_manager
+        from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
         try:
             _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
@@ -33703,6 +33754,46 @@ def image_proxy():
         return '', 502
 
 
+@app.route('/api/image-cache/status', methods=['GET'])
+def image_cache_status():
+    """What the artwork cache is holding, for Settings -> Advanced."""
+    try:
+        from core.image_cache import get_image_cache, thumbnails_enabled
+
+        stats = get_image_cache().stats()
+        stats['enabled'] = config_manager.get('image_cache.enabled', True) is not False
+        stats['thumbnails'] = thumbnails_enabled()
+        return jsonify({'success': True, **stats})
+    except Exception as e:
+        logger.error("image cache status failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/image-cache/clear', methods=['POST'])
+def image_cache_clear():
+    """Empty the artwork cache. Everything in it is re-fetchable, so this is
+    only ever a temporary cost — nothing user-created lives here."""
+    try:
+        from core.image_cache import get_image_cache
+
+        return jsonify({'success': True, **get_image_cache().clear()})
+    except Exception as e:
+        logger.error("image cache clear failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/image-cache/prune', methods=['POST'])
+def image_cache_prune():
+    """Apply the TTL and size cap now, rather than waiting for the next store."""
+    try:
+        from core.image_cache import get_image_cache
+
+        return jsonify({'success': True, **get_image_cache().prune()})
+    except Exception as e:
+        logger.error("image cache prune failed: %s", e, exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/image-cache/<cache_key>', methods=['GET'])
 def serve_cached_image(cache_key):
     """Serve a registered image URL from SoulSync's disk cache."""
@@ -33710,9 +33801,18 @@ def serve_cached_image(cache_key):
         return '', 404
 
     try:
-        from core.image_cache import get_image_cache
+        from core.image_cache import get_image_cache, thumbnails_enabled
 
-        cached = get_image_cache().get(cache_key)
+        # ?v=grid|card|hero asks for a resized copy. The BROWSER picks the size,
+        # so a page adopts thumbnails by adding one query param — no need to
+        # rewrite every URL-producing call site, and a page that asks for
+        # nothing keeps getting the original.
+        variant = (request.args.get('v') or '').strip()
+        cache = get_image_cache()
+        if variant and thumbnails_enabled():
+            cached = cache.get_variant_of(cache_key, variant)
+        else:
+            cached = cache.get(cache_key)
         response = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
         max_age = int(config_manager.get("image_cache.ttl_seconds", 2592000))
         response.headers['Cache-Control'] = f'private, max-age={max_age}'
@@ -38261,7 +38361,7 @@ def start_oauth_callback_servers():
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
-                        from config.settings import config_manager
+                        from core.settings import config_manager
                         from core.spotify_client import normalize_spotify_oauth_config
 
                         # Get Spotify config
@@ -40078,8 +40178,16 @@ def repair_findings_clear():
         data = request.get_json(silent=True) or {}
         job_id = data.get('job_id')
         status = data.get('status')
+        # severity / finding_type / q were missing here, so "clear findings
+        # matching current filters" ignored three of the five filters the list
+        # view offers and deleted the wider set (#1142).
+        severity = data.get('severity')
+        finding_type = data.get('finding_type')
+        q = data.get('q')
 
-        count = repair_worker.clear_findings(job_id=job_id, status=status)
+        count = repair_worker.clear_findings(
+            job_id=job_id, status=status, severity=severity,
+            finding_type=finding_type, q=q)
         return jsonify({'success': True, 'deleted': count}), 200
     except Exception as e:
         logger.error(f"Error clearing findings: {e}")

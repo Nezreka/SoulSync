@@ -61,7 +61,7 @@ def correlation_enforcement_enabled(
     before turning bookkeeping availability into an admission requirement.
     """
     if config_get is None:
-        from config.settings import config_manager
+        from core.settings import config_manager
         config_get = config_manager.get
     try:
         return config_get(CORRELATION_ENFORCEMENT_KEY, False) is True

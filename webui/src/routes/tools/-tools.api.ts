@@ -308,10 +308,24 @@ export interface ClearFindingsResult {
 }
 
 /** `clearRepairFindings` and the discography "Just Clear" path. */
-export async function clearFindings(jobId?: string, status?: string): Promise<ClearFindingsResult> {
+/**
+ * Delete findings matching the CURRENT filters.
+ *
+ * Takes the same shape the list query does, because the button promises
+ * "matching current filters" and used to send only two of them — a user who
+ * had searched for one album and pressed Clear lost every finding the job and
+ * status filters matched (#1142). Anything added to `FindingsQuery` that
+ * narrows the list has to be threaded through here too.
+ */
+export async function clearFindings(
+  filters: Pick<FindingsQuery, 'jobId' | 'status' | 'severity' | 'findingType' | 'q'>,
+): Promise<ClearFindingsResult> {
   const body: Record<string, string> = {};
-  if (jobId) body.job_id = jobId;
-  if (status) body.status = status;
+  if (filters.jobId) body.job_id = filters.jobId;
+  if (filters.status) body.status = filters.status;
+  if (filters.severity) body.severity = filters.severity;
+  if (filters.findingType) body.finding_type = filters.findingType;
+  if (filters.q?.trim()) body.q = filters.q.trim();
   const response = await postJson('/api/repair/findings/clear', body);
   return (await response.json()) as ClearFindingsResult;
 }

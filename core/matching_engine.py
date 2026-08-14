@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from unidecode import unidecode
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 from core.spotify_client import Track as SpotifyTrack
 from core.media_server.types import TrackInfo
@@ -500,6 +500,30 @@ class MusicMatchingEngine:
         
         return track_title, False
 
+    # A title-only query (no artist) is a BROADCAST to the whole Soulseek
+    # network, and every peer holding a match opens a connection back. "alex"
+    # or "SISTERS" matches on thousands of peers at once, which exhausts the
+    # NAT connection-tracking table on a consumer router and takes the user's
+    # entire internet connection down — not just SoulSync's (#1102, and the
+    # same root cause as slskd#1598).
+    #
+    # A short title is also where the query is worth least: it returns noise
+    # the matcher discards anyway, so we pay the whole connection cost for
+    # almost no match value. A distinctive title ("Californication",
+    # "Bohemian Rhapsody") still earns its broadcast, which is what the
+    # title-only fallback was added for.
+    # Length, not word count. Word count looks like a distinctiveness signal
+    # and isn't: "Kid A" is two words and five characters, and matches about as
+    # much of the network as "alex" does. Total length is what predicts how
+    # many peers answer.
+    _TITLE_ONLY_MIN_CHARS = 12
+
+    @classmethod
+    def _title_is_distinctive_enough_to_broadcast(cls, title: str) -> bool:
+        """May ``title`` be searched on its own, without an artist to narrow it?"""
+        cleaned = " ".join(str(title or "").split())
+        return len(cleaned) >= cls._TITLE_ONLY_MIN_CHARS
+
     def generate_download_queries(self, spotify_track: SpotifyTrack) -> List[str]:
         """
         Generate multiple search query variations for better matching.
@@ -624,8 +648,15 @@ class MusicMatchingEngine:
 
         # PRIORITY 4: Clean title without artist (broadens results when artist name limits matches)
         if original_track_clean and original_track_clean not in [q.lower() for q in queries]:
-            queries.append(original_track_clean)
-            logger.debug(f"PRIORITY 4: Title-only query: '{original_track_clean}'")
+            if self._title_is_distinctive_enough_to_broadcast(original_track_clean):
+                queries.append(original_track_clean)
+                logger.debug(f"PRIORITY 4: Title-only query: '{original_track_clean}'")
+            else:
+                # Every artist-qualified query above still runs; only the
+                # unqualified broadcast is withheld (#1102).
+                logger.debug(
+                    f"PRIORITY 4: skipping title-only query for short title "
+                    f"'{original_track_clean}' — too broad to search without an artist")
 
         # Remove duplicates while preserving order
         unique_queries = []

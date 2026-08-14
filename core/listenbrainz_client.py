@@ -1,7 +1,7 @@
 import requests
 from typing import Dict, List, Optional, Any
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 import time
 
 logger = get_logger("listenbrainz_client")

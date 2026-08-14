@@ -384,7 +384,7 @@ class BandcampWorker:
                     backfill['release_date'] = result['release_date']
                 if tags:
                     from core.genre_filter import filter_genres
-                    from config.settings import config_manager as _cfg
+                    from core.settings import config_manager as _cfg
                     genre_names = filter_genres(list(tags), _cfg)
                     if genre_names:
                         backfill['genres'] = json.dumps(genre_names)

@@ -63,14 +63,14 @@ def test_returns_none_when_list_only_has_empty_entries():
 # ──────────────────────────────────────────────────────────────────────
 
 def test_multi_artist_write_reads_config():
-    with patch('config.settings.config_manager.get', return_value=True):
+    with patch('core.settings.config_manager.get', return_value=True):
         assert _multi_artist_write_enabled() is True
-    with patch('config.settings.config_manager.get', return_value=False):
+    with patch('core.settings.config_manager.get', return_value=False):
         assert _multi_artist_write_enabled() is False
 
 
 def test_multi_artist_write_swallows_config_error():
-    with patch('config.settings.config_manager.get', side_effect=RuntimeError('boom')):
+    with patch('core.settings.config_manager.get', side_effect=RuntimeError('boom')):
         assert _multi_artist_write_enabled() is False
 
 
@@ -108,7 +108,7 @@ def flac_path():
 
 
 def test_multi_value_artists_key_written_when_setting_on(flac_path):
-    with patch('config.settings.config_manager.get', return_value=True):
+    with patch('core.settings.config_manager.get', return_value=True):
         result = write_tags_to_file(flac_path, {
             'title': 'Track',
             'artist_name': 'Artist A, Artist B',
@@ -126,7 +126,7 @@ def test_multi_value_artists_key_written_when_setting_on(flac_path):
 
 
 def test_multi_value_artists_key_skipped_when_setting_off(flac_path):
-    with patch('config.settings.config_manager.get', return_value=False):
+    with patch('core.settings.config_manager.get', return_value=False):
         result = write_tags_to_file(flac_path, {
             'title': 'Track',
             'artist_name': 'Artist A, Artist B',
@@ -146,7 +146,7 @@ def test_single_artist_does_not_write_multi_value_key(flac_path):
     """When list has only one entry (or no list at all), don't
     write the multi-value key even if the setting is on. The point
     is to differentiate true multi-artist from single-artist tracks."""
-    with patch('config.settings.config_manager.get', return_value=True):
+    with patch('core.settings.config_manager.get', return_value=True):
         result = write_tags_to_file(flac_path, {
             'title': 'Track',
             'artist_name': 'Solo Artist',
@@ -163,7 +163,7 @@ def test_no_artists_list_legacy_callers_unchanged(flac_path):
     """Backward compat — callers that don't supply artists_list get
     the same single-string write as before. No regression for the
     write_artist_image button or any other tag_writer caller."""
-    with patch('config.settings.config_manager.get', return_value=True):
+    with patch('core.settings.config_manager.get', return_value=True):
         result = write_tags_to_file(flac_path, {
             'title': 'Track',
             'artist_name': 'Solo Artist',

@@ -386,7 +386,7 @@ class DiscogsClient:
         self.token = token
         if not self.token:
             try:
-                from config.settings import config_manager
+                from core.settings import config_manager
                 self.token = config_manager.get('discogs.token', '')
             except Exception as e:
                 logger.debug("load discogs.token from config: %s", e)

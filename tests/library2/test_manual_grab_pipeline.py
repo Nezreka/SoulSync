@@ -126,7 +126,7 @@ def _patch_common(monkeypatch, transfer_root):
     monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: None)
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(import_pipeline, "_journal_pipeline_check", lambda _context, **event: True)
-    monkeypatch.setattr("config.settings.config_manager.get", _Config(str(transfer_root)).get)
+    monkeypatch.setattr("core.settings.config_manager.get", _Config(str(transfer_root)).get)
 
 
 def test_manual_grab_with_lib2_entity_routes_through_full_pipeline(

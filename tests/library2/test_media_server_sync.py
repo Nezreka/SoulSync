@@ -89,6 +89,56 @@ def test_server_maps_existing_imported_rows_and_preserves_catalogue_metadata(cur
     assert tuple(file_row) == ("/music/song.flac", 5000, 1411)
 
 
+def test_import_refresh_does_not_overwrite_user_locked_art(cur):
+    """Port of dev's custom-art sync regression to the native catalogue."""
+    artist, album, _track, _file = _imported(cur)
+    cur.execute(
+        "UPDATE lib2_artists SET image_url='custom-artist.jpg', art_locked=1 WHERE id=?",
+        (artist,),
+    )
+    cur.execute(
+        "UPDATE lib2_albums SET image_url='custom-album.jpg', art_locked=1 WHERE id=?",
+        (album,),
+    )
+
+    upsert_artist(
+        cur, server_source="soulsync", server_id="refresh-a", name="Muse",
+        image_url="server-artist.jpg", allow_create=True,
+    )
+    # Match the existing release by title/artist as a refresh with a new source id.
+    refreshed_album = upsert_album(
+        cur, server_source="soulsync", server_id="refresh-al", artist_id=artist,
+        title="Absolution", image_url="server-album.jpg", allow_create=True,
+    )
+
+    assert refreshed_album == album
+    assert cur.execute(
+        "SELECT image_url FROM lib2_artists WHERE id=?", (artist,)
+    ).fetchone()[0] == "custom-artist.jpg"
+    assert cur.execute(
+        "SELECT image_url FROM lib2_albums WHERE id=?", (album,)
+    ).fetchone()[0] == "custom-album.jpg"
+
+
+def test_unlocked_native_art_follows_import_refresh(cur):
+    artist, album, _track, _file = _imported(cur)
+    upsert_artist(
+        cur, server_source="soulsync", server_id="refresh-a", name="Muse",
+        image_url="new-artist.jpg", allow_create=True,
+    )
+    upsert_album(
+        cur, server_source="soulsync", server_id="refresh-al", artist_id=artist,
+        title="Absolution", image_url="new-album.jpg", allow_create=True,
+    )
+
+    assert cur.execute(
+        "SELECT image_url FROM lib2_artists WHERE id=?", (artist,)
+    ).fetchone()[0] == "new-artist.jpg"
+    assert cur.execute(
+        "SELECT image_url FROM lib2_albums WHERE id=?", (album,)
+    ).fetchone()[0] == "new-album.jpg"
+
+
 def test_server_does_not_stamp_catalogue_only_release(cur):
     artist, album, track, file_id = _imported(cur, origin="discography")
     cur.execute("DELETE FROM lib2_track_files WHERE id=?", (file_id,))

@@ -7,7 +7,7 @@ import threading
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 
@@ -108,7 +108,7 @@ def _request_scoped_free_opt_in() -> bool:
 def _get_min_api_interval():
     """Get configurable API interval from settings, falling back to default."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         val = config_manager.get('spotify.min_api_interval', None)
         if val is not None:
             return max(0.1, float(val))  # Floor at 100ms to prevent abuse

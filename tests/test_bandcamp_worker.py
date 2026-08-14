@@ -291,8 +291,7 @@ def test_get_next_item_defaults_to_album_first(worker):
 def test_get_next_item_honors_track_priority_override(worker):
     """PR #968 review: the Bandcamp worker must respect the Manage Enrichment
     Workers 'process this group first' override like the other workers."""
-    from config.settings import config_manager
-
+    from core.settings import config_manager
     key = 'bandcamp_enrichment_priority'
     old = config_manager.get(key, '')
     try:

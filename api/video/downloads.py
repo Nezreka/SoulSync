@@ -235,7 +235,7 @@ def register_routes(bp):
     def video_downloads_config():
         from . import get_video_db
         from core.video.download_config import load as load_source
-        from config.settings import config_manager
+        from core.settings import config_manager
         db = get_video_db()
         out = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
         if not out["movies_path"]:        # migrate the legacy single transfer folder → Movies
@@ -254,7 +254,7 @@ def register_routes(bp):
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
         if "download_path" in body:   # SHARED with music — write the same config key
-            from config.settings import config_manager
+            from core.settings import config_manager
             config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
@@ -748,7 +748,7 @@ def register_routes(bp):
         Body: {kind, title, release_title, source, username, filename, size_bytes,
         quality_label}."""
         from . import get_video_db
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.video.download_monitor import ensure_started
         from core.video.download_pipeline import target_dir_for
         from core.video.slskd_download import start_download
@@ -1088,13 +1088,13 @@ def register_routes(bp):
     @bp.route("/downloads/slskd", methods=["GET"])
     def video_slskd_config():
         # SHARED with music — same slskd instance. Reads the app-wide config_manager.
-        from config.settings import config_manager
+        from core.settings import config_manager
         return jsonify({k: config_manager.get(cfg, default)
                         for k, (cfg, default) in _SLSKD_KEYS.items()})
 
     @bp.route("/downloads/slskd", methods=["POST"])
     def video_slskd_config_save():
-        from config.settings import config_manager
+        from core.settings import config_manager
         body = request.get_json(silent=True) or {}
         for k, (cfg, _default) in _SLSKD_KEYS.items():
             if k in body:

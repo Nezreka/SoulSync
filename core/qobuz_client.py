@@ -24,7 +24,7 @@ from pathlib import Path
 import requests as http_requests
 
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_blocking
 
 # Import Soulseek data structures for drop-in replacement compatibility

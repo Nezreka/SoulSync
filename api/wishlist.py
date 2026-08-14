@@ -101,7 +101,7 @@ def register_routes(bp):
                 # hourly reconciler saw a wishlisted track with no lib2 rule
                 # making it wanted, pruned it, and the entry vanished within
                 # the hour — so failed downloads silently stopped retrying.
-                from config.settings import config_manager
+                from core.settings import config_manager
                 from core.library2.monitor_sync import sync_wishlist_addition
                 sync_wishlist_addition(
                     db, config_manager,
@@ -161,7 +161,7 @@ def register_routes(bp):
             ]
             ok = db.remove_from_wishlist(track_id, profile_id=profile_id)
             if ok:
-                from config.settings import config_manager
+                from core.settings import config_manager
                 from core.library2.monitor_sync import sync_wishlist_removal
                 sync_wishlist_removal(
                     db, config_manager, descriptors, profile_id=profile_id,

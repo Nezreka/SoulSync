@@ -27,7 +27,7 @@ def _cfg(monkeypatch, mode='soulsync', ratio=0, hours=0):
         'torrent_client.seed_ratio_goal': ratio,
         'torrent_client.seed_time_goal_hours': hours,
     }
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, 'get', lambda k, d=None: vals.get(k, d))
 
 

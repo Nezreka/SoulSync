@@ -63,11 +63,18 @@ else
     echo "   ✅ config.json already exists"
 fi
 
-# Always update settings.py — it's application code, not user configuration.
-# Stale versions from older releases cause startup crashes (missing methods).
-echo "   📄 Updating settings.py to current version..."
-cp /defaults/settings.py /app/config/settings.py
-chown soulsync:soulsync /app/config/settings.py 2>/dev/null || true
+# settings.py used to live HERE, inside the mounted config dir — application
+# code in a folder users persist. When the image updated and their folder did
+# not, the app ran a months-old ConfigManager against current callers, which
+# surfaced as "'ConfigManager' object has no attribute 'batch'" on Save
+# (TheHomeGuy, 3.2.0). Copying a fresh one in every boot was the workaround;
+# the module now lives at core/settings.py, outside any mount, so the class of
+# bug is gone. Sweep the leftover so nobody edits a file that does nothing.
+if [ -f "/app/config/settings.py" ]; then
+    echo "   🧹 Removing obsolete config/settings.py (moved to core/settings.py)"
+    rm -f /app/config/settings.py
+    rm -rf /app/config/__pycache__
+fi
 
 # Ensure all directories exist with correct ownership.
 # Only the directory nodes themselves need chown here — the recursive chown

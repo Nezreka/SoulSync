@@ -13,7 +13,7 @@ from pathlib import Path
 
 from flask import jsonify, request
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.metadata.registry import (
     get_spotify_client,
     get_primary_source,

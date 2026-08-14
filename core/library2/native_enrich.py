@@ -138,7 +138,9 @@ def _persist_identity(
         params.append(json.dumps(ids, sort_keys=True, separators=(",", ":")))
 
     if image_url:
-        assignments.append("image_url=?")
+        assignments.append(
+            "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
+        )
         params.append(str(image_url))
     if genres:
         assignments.append("genres=?")
@@ -392,7 +394,9 @@ def enrich_native_artist_artwork(
     if not url:
         return False
     conn.execute(
-        "UPDATE lib2_artists SET image_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        "UPDATE lib2_artists SET "
+        "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END, "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (str(url), int(artist_id)),
     )
     return True
@@ -486,7 +490,12 @@ def _apply_descriptive_metadata(
             continue
         if attribute == "genres":
             value = json.dumps(list(value))
-        assignments.append(f"{column}=?")
+        if column == "image_url" and entity_type in {"artist", "album"}:
+            assignments.append(
+                "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
+            )
+        else:
+            assignments.append(f"{column}=?")
         values.append(value)
     if assignments:
         values.append(int(entity_id))
@@ -673,7 +682,9 @@ def enrich_native_entity_for_service(
             )
         if image_url:
             conn.execute(
-                "UPDATE lib2_artists SET image_url=?, updated_at=CURRENT_TIMESTAMP "
+                "UPDATE lib2_artists SET "
+                "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END, "
+                "updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=?", (image_url, int(entity_id)),
             )
     elif canonical == "album":
@@ -690,7 +701,9 @@ def enrich_native_entity_for_service(
             image_url = artwork.url if artwork else None
         if image_url:
             conn.execute(
-                "UPDATE lib2_albums SET image_url=?, updated_at=CURRENT_TIMESTAMP "
+                "UPDATE lib2_albums SET "
+                "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END, "
+                "updated_at=CURRENT_TIMESTAMP "
                 "WHERE id=?", (image_url, int(entity_id)),
             )
     else:

@@ -51,7 +51,7 @@ class WebScanManager:
     def _get_active_media_client(self):
         """Get the active media client through the engine."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
 
             if not self._engine:

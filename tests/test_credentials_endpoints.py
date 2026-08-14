@@ -154,7 +154,7 @@ def test_select_rejects_wrong_service_or_missing_set(client):
 # ── Quick-switch: active source/server/download (admin=global, non-admin read-only) ──
 
 def test_active_sources_read_shape(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     a = client.get('/api/profiles/me/active-sources').get_json()
     assert a['success'] and a['editable'] is True   # default session = admin
     assert a['metadata']['active']
@@ -174,7 +174,7 @@ def test_admin_sets_global_active_sources(client):
 
 
 def test_admin_can_set_jiosaavn_as_primary_metadata_source(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     config_manager.set('experimental.jiosaavn_enabled', True)
     assert client.post('/api/profiles/active-sources', json={'metadata_source': 'jiosaavn'}).get_json()['success']
     payload = client.get('/api/profiles/me/active-sources').get_json()
@@ -183,7 +183,7 @@ def test_admin_can_set_jiosaavn_as_primary_metadata_source(client):
 
 
 def test_jiosaavn_primary_rejected_when_experimental_disabled(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     config_manager.set('experimental.jiosaavn_enabled', False)
     resp = client.post('/api/profiles/active-sources', json={'metadata_source': 'jiosaavn'})
     assert resp.status_code == 400
@@ -191,7 +191,7 @@ def test_jiosaavn_primary_rejected_when_experimental_disabled(client):
 
 def test_settings_save_jiosaavn_primary_with_experimental_enabled(client):
     """Settings and sidebar must agree: enable + primary in one save sticks."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     resp = client.post('/api/settings', json={
         'experimental': {'jiosaavn_enabled': True},
         'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
@@ -205,7 +205,7 @@ def test_settings_save_jiosaavn_primary_with_experimental_enabled(client):
 
 
 def test_settings_save_jiosaavn_primary_rejected_when_experimental_disabled(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     config_manager.set('experimental.jiosaavn_enabled', False)
     config_manager.set('metadata.fallback_source', 'deezer')
     resp = client.post('/api/settings', json={
@@ -216,7 +216,7 @@ def test_settings_save_jiosaavn_primary_rejected_when_experimental_disabled(clie
 
 
 def test_settings_save_rejected_does_not_persist_other_changes(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     original_client_id = config_manager.get('spotify.client_id')
     config_manager.set('experimental.jiosaavn_enabled', False)
     resp = client.post('/api/settings', json={
@@ -228,7 +228,7 @@ def test_settings_save_rejected_does_not_persist_other_changes(client):
 
 
 def test_settings_disable_jiosaavn_resets_primary(client):
-    from config.settings import config_manager
+    from core.settings import config_manager
     config_manager.set('experimental.jiosaavn_enabled', True)
     config_manager.set('metadata.fallback_source', 'jiosaavn')
     resp = client.post('/api/settings', json={'experimental': {'jiosaavn_enabled': False}})
@@ -254,7 +254,7 @@ def test_spotify_free_composite_roundtrips_like_settings(client):
     # "Spotify (no auth)" is stored as fallback_source=spotify + spotify_free=true
     # (the same composite the Settings page uses) — the modal must report it as
     # active='spotify_free', not raw 'spotify'.
-    from config.settings import config_manager
+    from core.settings import config_manager
     assert client.post('/api/profiles/active-sources', json={'metadata_source': 'spotify_free'}).get_json()['success']
     assert config_manager.get('metadata.fallback_source') == 'spotify'
     assert config_manager.get('metadata.spotify_free') is True
@@ -311,7 +311,7 @@ def test_disconnect_unsupported_service_400(client, nonadmin_profile):
 def test_tidal_token_refresh_redirects_to_profile_not_global(client, nonadmin_profile):
     # THE safety guarantee: a per-profile Tidal client's token save must write to
     # the PROFILE, never the global tidal_tokens slot the app runs on.
-    from config.settings import config_manager
+    from core.settings import config_manager
     db = web_server.get_database()
     config_manager.set('tidal_tokens', {'access_token': 'ADMIN-ACC', 'refresh_token': 'ADMIN-REF'})
     db.set_profile_tidal_tokens(nonadmin_profile, 'p-acc', 'p-ref')

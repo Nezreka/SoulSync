@@ -35,7 +35,7 @@ def resolve_lib2_path(file_path: Any, config_manager: Any = None) -> Optional[st
         return None
     try:
         if config_manager is None:
-            from config.settings import config_manager as _cm
+            from core.settings import config_manager as _cm
             config_manager = _cm
     except Exception:  # noqa: BLE001
         config_manager = None
@@ -83,7 +83,7 @@ def missing_path_root_is_healthy(file_path: Any, config_manager: Any = None) -> 
         return True
     try:
         if config_manager is None:
-            from config.settings import config_manager as _cm
+            from core.settings import config_manager as _cm
             config_manager = _cm
         configured = config_manager.get("library.music_paths", []) or []
     except Exception:  # noqa: BLE001

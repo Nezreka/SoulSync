@@ -7,7 +7,7 @@ browser). Falls back to 404 so the frontend shows its placeholder.
 
 from __future__ import annotations
 
-from flask import Response, abort, request
+from flask import Response, abort, request, send_file
 from werkzeug.exceptions import HTTPException
 
 from utils.logging_config import get_logger
@@ -25,6 +25,24 @@ def _req_width():
     if not w:
         return None
     return max(48, min(1600, w))
+
+
+def _cached_file(url):
+    """The shared artwork cache's copy of ``url``, or None to stream it live.
+
+    Deliberately best-effort and silent: this is a page full of posters, and a
+    cache problem should cost a cache miss, never a broken image. Honours the
+    same `image_cache.enabled` switch as the music side, so one toggle governs
+    both."""
+    try:
+        from core.settings import config_manager
+        if config_manager.get("image_cache.enabled", True) is False:
+            return None
+        from core.image_cache import get_image_cache
+        return get_image_cache().get_url(url)
+    except Exception as exc:
+        logger.debug("video art cache miss for %s: %s", url, exc)
+        return None
 
 
 def _tmdb_resize(url, w, backdrop):
@@ -52,6 +70,19 @@ def register_routes(bp):
             if path.startswith("http://") or path.startswith("https://"):
                 if w and "image.tmdb.org" in path:
                     path = _tmdb_resize(path, w, backdrop)
+                # Serve through the shared disk cache. Without this the video
+                # side re-fetched every poster from TMDB on EVERY request and
+                # leaned entirely on the browser cache — so a hard refresh, a
+                # second device, or a cleared browser cache paid for the whole
+                # grid again. The music side has cached art for a while; this
+                # is the same cache, so both sides share one size limit, one
+                # TTL and one Clear button.
+                cached = _cached_file(path)
+                if cached is not None:
+                    resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    resp.headers["X-SoulSync-Image-Cache"] = cached.status
+                    return resp
                 upstream = requests.get(path, timeout=15, stream=True)
                 if upstream.status_code != 200:
                     abort(404)
@@ -132,6 +163,13 @@ def register_routes(bp):
             host == s or host.endswith("." + s) for s in ("ytimg.com", "ggpht.com", "googleusercontent.com"))
         if not ok:
             abort(404)
+        cached = _cached_file(url)
+        if cached is not None:
+            resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
+            resp.headers["Cache-Control"] = "public, max-age=604800"
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            resp.headers["X-SoulSync-Image-Cache"] = cached.status
+            return resp
         try:
             import requests
             # A browser UA — Google's image CDN (yt3/googleusercontent) 403s some

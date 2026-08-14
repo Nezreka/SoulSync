@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from config.settings import ConfigManager
+from core.settings import ConfigManager
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_save_succeeds_on_first_attempt_emits_no_error_logs(
 ) -> None:
     """Happy path: a successful save should not log at ERROR."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
-    with patch("config.settings.time.sleep") as sleep_mock:
+    with patch("core.settings.time.sleep") as sleep_mock:
         with patch.object(manager, "_save_to_database", return_value=True) as save_mock:
             manager._save_config()
     assert save_mock.call_count == 1
@@ -95,7 +95,7 @@ def test_lock_errors_during_retries_log_at_debug_not_error(
     """Three transient locks then success should produce DEBUG noise only."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     stub, state = _fail_n_times_then_succeed(3, manager)
-    with patch("config.settings.time.sleep") as sleep_mock:
+    with patch("core.settings.time.sleep") as sleep_mock:
         with patch.object(manager, "_save_to_database", side_effect=stub):
             with patch.object(manager, "_ensure_database_exists"):
                 manager._save_config()
@@ -109,7 +109,7 @@ def test_save_uses_six_attempts_with_exponential_backoff(
     manager: ConfigManager,
 ) -> None:
     """All six attempts must run, with the documented backoff schedule."""
-    with patch("config.settings.time.sleep") as sleep_mock:
+    with patch("core.settings.time.sleep") as sleep_mock:
         with patch.object(manager, "_save_to_database", return_value=False) as save_mock:
             with patch("builtins.open"):  # silence the json fallback's filesystem write
                 with patch.object(Path, "mkdir"):
@@ -126,7 +126,7 @@ def test_all_retries_exhausted_logs_single_error_and_falls_back_to_json(
     """Exhausting retries should produce one ERROR log + one fallback file."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     manager.config_path = tmp_path / "config.json"
-    with patch("config.settings.time.sleep"):
+    with patch("core.settings.time.sleep"):
         with patch.object(manager, "_save_to_database", return_value=False):
             manager._save_config()
     error_logs = [r for r in caplog.records if r.levelno == logging.ERROR]
@@ -143,7 +143,7 @@ def test_save_to_database_lock_error_logs_at_debug(
     """sqlite3.OperationalError("...locked...") must surface as DEBUG only."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     with patch.object(manager, "_ensure_database_exists"):
-        with patch("config.settings.sqlite3.connect") as connect_mock:
+        with patch("core.settings.sqlite3.connect") as connect_mock:
             connect_mock.return_value.execute.side_effect = sqlite3.OperationalError(
                 "database is locked"
             )
@@ -164,7 +164,7 @@ def test_save_to_database_non_lock_operational_error_logs_at_error(
     """A non-lock OperationalError is a real failure and must log ERROR."""
     caplog.set_level(logging.DEBUG, logger="soulsync.config")
     with patch.object(manager, "_ensure_database_exists"):
-        with patch("config.settings.sqlite3.connect") as connect_mock:
+        with patch("core.settings.sqlite3.connect") as connect_mock:
             connect_mock.return_value.execute.side_effect = sqlite3.OperationalError(
                 "no such table: metadata"
             )

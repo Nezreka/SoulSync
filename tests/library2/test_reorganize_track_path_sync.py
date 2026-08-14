@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-if "config.settings" not in sys.modules:
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     class _DummyConfigManager:
         def get(self, key, default=None):
@@ -25,7 +25,7 @@ if "config.settings" not in sys.modules:
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
+    sys.modules["core.settings"] = settings_mod
 
 from core.reorganize_runner import build_runner  # noqa: E402
 

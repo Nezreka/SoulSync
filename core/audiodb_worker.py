@@ -497,7 +497,7 @@ class AudioDBWorker:
             genre = data.get('strGenre')
             if genre and entity_type != 'track':
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres([genre], _cfg)
                 if _filtered:
                     backfill['genres'] = json.dumps(_filtered)

@@ -181,6 +181,34 @@ def test_apply_art_pins_the_choice_and_serves_it_locally(monkeypatch, api):
         assert image.getpixel((0, 0)) == pytest.approx((9, 8, 7), abs=2)
 
 
+def test_release_album_art_clears_override_and_lock(monkeypatch, api):
+    client, db, ids = api
+    monkeypatch.setattr(
+        "core.library2.artwork._download_remote_artwork", lambda _url: _png_bytes(),
+    )
+    endpoint = f"/api/library/v2/albums/{ids['album']}/art"
+    assert client.post(endpoint, json={"url": "https://example.com/cover.jpg"}).status_code == 200
+
+    response = client.delete(endpoint)
+
+    assert response.status_code == 200
+    assert response.get_json()["art_locked"] is False
+    conn = db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT art_locked FROM lib2_albums WHERE id=?", (ids["album"],)
+        ).fetchone()
+        override = conn.execute(
+            "SELECT 1 FROM lib2_metadata_overrides "
+            "WHERE entity_type='release_group' AND entity_id=? AND field_name='image_url'",
+            (ids["album"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] == 0
+    assert override is None
+
+
 def test_apply_art_triggers_a_background_cover_embed_retag(monkeypatch, api):
     """A1: applying a pick must also (re-)embed the cover into the album's
     existing files — not just update the DB/cache — otherwise the picked
@@ -358,3 +386,31 @@ def test_apply_artist_art_pins_the_choice_and_serves_it_locally(monkeypatch, api
     assert served.status_code == 200
     with Image.open(BytesIO(served.data)) as image:
         assert image.getpixel((0, 0)) == pytest.approx((5, 6, 7), abs=2)
+
+
+def test_release_artist_art_clears_override_and_lock(monkeypatch, api):
+    client, db, ids = api
+    monkeypatch.setattr(
+        "core.library2.artwork._download_remote_artwork", lambda _url: _png_bytes(),
+    )
+    endpoint = f"/api/library/v2/artists/{ids['artist']}/art"
+    assert client.post(endpoint, json={"url": "https://example.com/photo.jpg"}).status_code == 200
+
+    response = client.delete(endpoint)
+
+    assert response.status_code == 200
+    conn = db._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT art_locked FROM lib2_artists WHERE id=?", (ids["artist"],)
+        ).fetchone()
+        override = conn.execute(
+            "SELECT 1 FROM lib2_metadata_overrides "
+            "WHERE entity_type='artist' AND entity_id=? AND field_name='image_url'",
+            (ids["artist"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert response.get_json()["art_locked"] is False
+    assert row[0] == 0
+    assert override is None

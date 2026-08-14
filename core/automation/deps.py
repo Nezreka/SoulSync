@@ -85,7 +85,7 @@ class AutomationDeps:
     # --- Engine + shared state ---
     engine: Any                                          # AutomationEngine instance
     state: AutomationState
-    config_manager: Any                                  # config.settings.ConfigManager singleton
+    config_manager: Any                                  # core.settings.ConfigManager singleton
     update_progress: Callable[..., None]                 # _update_automation_progress
     logger: Any                                          # module-level logger from utils.logging_config
 

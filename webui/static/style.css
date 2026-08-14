@@ -73977,6 +73977,11 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .art-picker-btn:hover { transform: scale(1.04); }
 .art-picker-cancel { background: transparent; color: #e6e6e6; border-color: rgba(255,255,255,.22); }
 .art-picker-cancel:hover { border-color: #fff; }
+/* Hands the image back to the media server. Quieter than Cancel — it is a real
+   change, but it is the escape hatch, not the primary action. */
+.art-picker-release { background: transparent; color: #9aa0a6; border-color: rgba(255,255,255,.12); margin-right: auto; }
+.art-picker-release:hover:not(:disabled) { color: #e6e6e6; border-color: rgba(255,255,255,.3); }
+.art-picker-release:disabled { opacity: .5; cursor: default; }
 .art-picker-apply { background: rgb(var(--accent-rgb)); color: #0b1d12; }
 .art-picker-apply:disabled { opacity: .4; cursor: default; transform: none; }
 

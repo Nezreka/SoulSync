@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 import json
 import base64
 import webbrowser

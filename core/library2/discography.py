@@ -650,7 +650,7 @@ def _expand_artist_discography(
     # precache run.  Warm them (and the artist itself) in the background so the
     # discography view does not open on the cold artwork path.
     try:
-        from config.settings import config_manager as settings_config
+        from core.settings import config_manager as settings_config
         from core.library2.artwork import schedule_missing_artwork
         schedule_missing_artwork(
             database, settings_config,

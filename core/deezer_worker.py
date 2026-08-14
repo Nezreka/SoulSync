@@ -556,7 +556,7 @@ class DeezerWorker:
                            if g.get('name')]
             if genre_names:
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres(genre_names, _cfg)
                 if _filtered:
                     backfill['genres'] = json.dumps(_filtered)

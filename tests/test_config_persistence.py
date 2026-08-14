@@ -27,8 +27,8 @@ def _manager(tmp_path, monkeypatch):
     monkeypatch.setenv('SOULSYNC_CONFIG_PATH', str(tmp_path / 'config.json'))
     # The retry ladder sleeps ~7.5s before declaring the row unreadable —
     # correct in production, pointless in a test.
-    monkeypatch.setattr('config.settings.time.sleep', lambda s: None)
-    from config.settings import ConfigManager
+    monkeypatch.setattr('core.settings.time.sleep', lambda s: None)
+    from core.settings import ConfigManager
     return ConfigManager(str(tmp_path / 'config.json'))
 
 

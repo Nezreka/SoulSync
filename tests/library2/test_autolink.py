@@ -18,7 +18,7 @@ def _disable_unrelated_artwork_warmup(monkeypatch):
 @pytest.fixture
 def lib2_enabled(monkeypatch, legacy_db):
     """Enable the feature flag and point get_database at the test DB."""
-    from config.settings import config_manager
+    from core.settings import config_manager
 
     real_get = config_manager.get
 
@@ -52,7 +52,7 @@ def _context(**overrides):
 
 
 def test_deprecated_false_flag_cannot_disable_autolink(monkeypatch, legacy_db, imported_conn):
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, "get",
                         lambda key, default=None: False if key == "features.library_v2" else default)
     assert A.link_download_into_library_v2(_context()) is not None

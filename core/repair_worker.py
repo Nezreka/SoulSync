@@ -151,6 +151,7 @@ JOB_CATEGORIES = {
     'album_tag_consistency': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
+    'genre_enrichment': 'Tags & metadata',
     'comma_artist_splitter': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
     'native_enrichment_sweep': 'Tags & metadata',
@@ -293,6 +294,7 @@ NATIVE_SUBJECT_FINDING_TYPES = frozenset({
     'dead_file',
     'metadata_gap',
     'missing_cover_art',
+    'genre_enrichment',
     'short_preview_track',
     'track_number_mismatch',
     'unwanted_content',
@@ -638,11 +640,20 @@ class RepairWorker:
         if interval_hours is not None:
             self._config_manager.set(f'repair.jobs.{job_id}.interval_hours', interval_hours)
         if settings is not None:
+            if not isinstance(settings, dict):
+                settings = {}
             current = self._config_manager.get(f'repair.jobs.{job_id}.settings', {})
             if isinstance(current, dict):
                 current.update(settings)
             else:
                 current = settings
+            if job_id == 'genre_enrichment':
+                defaults = self._jobs.get(job_id).default_settings if self._jobs.get(job_id) else {
+                    'max_genres': 5, 'include_artists': True, 'include_albums': True, 'allow_live_calls': False}
+                value = current.get('max_genres')
+                current['max_genres'] = value if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 20 else defaults['max_genres']
+                for key in ('include_artists', 'include_albums', 'allow_live_calls'):
+                    if not isinstance(current.get(key), bool): current[key] = defaults[key]
             self._config_manager.set(f'repair.jobs.{job_id}.settings', current)
 
     def get_all_job_info(self) -> List[dict]:
@@ -1496,6 +1507,46 @@ class RepairWorker:
         'path': 'file_path IS NULL, file_path ASC, created_at DESC',
     }
 
+    @staticmethod
+    def _findings_filter(job_id: str = None, status: str = None,
+                         severity: str = None, finding_type: str = None,
+                         q: str = None):
+        """Build the WHERE clause shared by listing and clearing findings.
+
+        This is ONE function on purpose. "Clear findings matching current
+        filters" used to build its own clause supporting only job_id and
+        status, so a user who narrowed by severity or typed in the search box
+        and hit Clear destroyed every finding the WIDER filter matched — the
+        button deleted rows that were never on screen (#1142). Two hand-rolled
+        clauses for one concept will drift again; a caller that forgets an
+        argument here degrades to a broader match, so new filters must be
+        added in this one place and passed by both callers.
+
+        Returns ``(where_sql, params)`` — ``where_sql`` is '' when unfiltered.
+        """
+        where_parts = []
+        params = []
+
+        if job_id:
+            where_parts.append("job_id = ?")
+            params.append(job_id)
+        if status:
+            where_parts.append("status = ?")
+            params.append(status)
+        if severity:
+            where_parts.append("severity = ?")
+            params.append(severity)
+        if finding_type:
+            where_parts.append("finding_type = ?")
+            params.append(finding_type)
+        if q and str(q).strip():
+            needle = f"%{str(q).strip()}%"
+            where_parts.append("(title LIKE ? OR file_path LIKE ?)")
+            params.extend([needle, needle])
+
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        return where, params
+
     def get_findings(self, job_id: str = None, status: str = None,
                      severity: str = None, page: int = 0, limit: int = 50,
                      finding_type: str = None, sort: str = None,
@@ -1513,27 +1564,9 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            where_parts = []
-            params = []
-
-            if job_id:
-                where_parts.append("job_id = ?")
-                params.append(job_id)
-            if status:
-                where_parts.append("status = ?")
-                params.append(status)
-            if severity:
-                where_parts.append("severity = ?")
-                params.append(severity)
-            if finding_type:
-                where_parts.append("finding_type = ?")
-                params.append(finding_type)
-            if q and str(q).strip():
-                needle = f"%{str(q).strip()}%"
-                where_parts.append("(title LIKE ? OR file_path LIKE ?)")
-                params.extend([needle, needle])
-
-            where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+            where, params = self._findings_filter(
+                job_id=job_id, status=status, severity=severity,
+                finding_type=finding_type, q=q)
             order_by = self._FINDING_SORTS.get(sort or 'newest',
                                                self._FINDING_SORTS['newest'])
 
@@ -1816,6 +1849,12 @@ class RepairWorker:
                     self.resolve_finding(
                         finding_id, action=result.get('action', 'auto_fix'))
                     self._set_finding_error(finding_id, None)
+            elif result.get('stale'):
+                # A finding about a vanished file can never succeed on retry.
+                # Retire it; the next scan will raise a fresh finding for the
+                # new path if the underlying issue still exists (#1143).
+                self.resolve_finding(finding_id, action='obsolete')
+                self._set_finding_error(finding_id, result.get('error'))
             else:
                 # Keep the reason ON the row: the finding stays pending, and
                 # without this the user is left with a row that silently
@@ -1927,6 +1966,7 @@ class RepairWorker:
             'corrupt_audio': self._fix_corrupt_audio,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
+            'genre_enrichment': self._fix_genre_enrichment,
             'comma_artist_split': self._fix_comma_artist_split,
             'stale_index_path': self._fix_stale_index_path,
         }
@@ -2008,6 +2048,42 @@ class RepairWorker:
         finally:
             if conn:
                 conn.close()
+
+    def _fix_genre_enrichment(self, entity_type, entity_id, file_path, details):
+        """Merge scanned additions with current genres without deleting anything."""
+        additions = details.get('added_genres')
+        table = {'artist': 'lib2_artists', 'album': 'lib2_albums'}.get(entity_type)
+        if not isinstance(additions, list) or table is None:
+            return {'success': False, 'error': 'Invalid genre enrichment finding'}
+        if not additions:
+            return {'success': False, 'error': 'No unambiguous genres are available to apply'}
+        native_id = _lib2_id(entity_id)
+        if native_id is None:
+            return _stale_legacy_subject(entity_id) or {
+                'success': False, 'error': 'Finding has no Library v2 entity id'}
+        conn = None
+        try:
+            conn = self.db._get_connection(); cur = conn.cursor()
+            cur.execute(f"SELECT genres FROM {table} WHERE id = ?", (native_id,))
+            row = cur.fetchone()
+            if not row:
+                conn.close(); return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
+            from core.metadata.genre_enrichment import parse_values
+            from core.genre_filter import _normalize_for_match
+            current = parse_values(row[0]); seen = {_normalize_for_match(g) for g in current}
+            for genre in additions:
+                if genre and _normalize_for_match(genre) not in seen:
+                    current.append(genre); seen.add(_normalize_for_match(genre))
+            cur.execute(f"UPDATE {table} SET genres = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), native_id))
+            conn.commit(); conn.close()
+            return {'success': True, 'action': 'genres_applied'}
+        except Exception as e:
+            logger.error("Genre enrichment fix failed for %s %s: %s", entity_type, entity_id, e)
+            try:
+                conn.close()
+            except Exception as close_err:   # noqa: BLE001 — the real error is already logged above
+                logger.debug("Genre enrichment: connection close failed: %s", close_err)
+            return {'success': False, 'error': str(e)}
 
     def _fix_comma_artist_split(self, entity_type, entity_id, file_path, details):
         """Split a separator-joined artist tag into properly separated artists (jadux).
@@ -2948,6 +3024,15 @@ class RepairWorker:
         finally:
             conn.close()
 
+    @staticmethod
+    def _art_lock_column(cursor, table: str) -> bool:
+        """Return whether an older/test schema already has ``art_locked``."""
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            return any(row[1] == 'art_locked' for row in cursor.fetchall())
+        except Exception:
+            return False
+
     def _fix_artist_art(self, album_id, details):
         """Apply the found ARTIST image to the album's artist (DB thumb only —
         artist art has no per-file embed). Pache711: independently applyable
@@ -2963,12 +3048,23 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
             native_album_id = _lib2_id(album_id)
+            has_lock = self._art_lock_column(cursor, 'lib2_artists')
             cursor.execute(
                 "UPDATE lib2_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)",
+                "WHERE id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)"
+                + (" AND COALESCE(art_locked, 0) = 0" if has_lock else ""),
                 (artist_url, native_album_id))
             conn.commit()
             if cursor.rowcount == 0:
+                if has_lock:
+                    cursor.execute(
+                        "SELECT COALESCE(art_locked, 0) FROM lib2_artists "
+                        "WHERE id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)",
+                        (native_album_id,))
+                    row = cursor.fetchone()
+                    if row is not None and row[0]:
+                        return {'success': True, 'action': 'kept_chosen_artist_art',
+                                'message': 'Kept your chosen artist photo'}
                 return {'success': False, 'error': 'Artist not found for this album'}
         finally:
             if conn:
@@ -3020,13 +3116,30 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            if artwork_url:
+            has_lock = self._art_lock_column(cursor, 'lib2_albums')
+            cursor.execute(
+                "SELECT image_url, %s FROM lib2_albums WHERE id = ?"
+                % ("COALESCE(art_locked, 0)" if has_lock else "0"),
+                (native_album_id,))
+            existing = cursor.fetchone()
+            if existing is None:
+                return {'success': False, 'error': 'Album not found in database'}
+
+            locked = bool(existing[1]) and bool((existing[0] or '').strip())
+            if locked:
+                # A manual pick outranks a repair/provider candidate. Use the
+                # chosen URL for the sidecar/embed work below as well.
+                if artwork_url:
+                    artwork_url = existing[0]
+                logger.info(
+                    "[repair] album %s art is locked — keeping the chosen cover",
+                    native_album_id,
+                )
+            elif artwork_url:
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
                 conn.commit()
-                if cursor.rowcount == 0:
-                    return {'success': False, 'error': 'Album not found in database'}
             cursor.execute("""
                 SELECT al.title, ar.name, al.musicbrainz_id
                 FROM lib2_albums al LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -3264,7 +3377,10 @@ class RepairWorker:
             return {'success': False, 'error': 'No file path in finding'}
         resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
-            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+            # stale=True: the file is gone, so no retry can ever succeed. Marks
+            # the finding obsolete instead of leaving it pending forever (#1143).
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
             from core.lyrics_client import lyrics_client
             duration = details.get('duration')
@@ -3293,7 +3409,10 @@ class RepairWorker:
             return {'success': False, 'error': 'No file path in finding'}
         resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
         if not os.path.isfile(resolved):
-            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+            # stale=True: the file is gone, so no retry can ever succeed. Marks
+            # the finding obsolete instead of leaving it pending forever (#1143).
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
         try:
             from core.replaygain import (analyze_track, write_replaygain_tags,
                                          is_ffmpeg_available, get_target_lufs)
@@ -4203,7 +4322,16 @@ class RepairWorker:
             failed = 0
             errors = []
             for fid in ids_to_fix:
-                result = self.fix_finding(fid, fix_action=fix_action)
+                try:
+                    result = self.fix_finding(fid, fix_action=fix_action)
+                except Exception as e:  # noqa: BLE001
+                    # One bad finding must not abandon the rest. Without this
+                    # the whole loop fell to the outer handler and returned
+                    # {'fixed': 0, 'failed': 0, 'total': 0} — throwing away
+                    # every fix already applied and reporting nothing happened.
+                    # The background twin (_run_bulk_fix) has always had this
+                    # guard; this loop never got it.
+                    result = {'success': False, 'error': str(e)}
                 if result.get('success'):
                     fixed += 1
                 else:
@@ -4400,6 +4528,25 @@ class RepairWorker:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)
         finally:
+            # Release the thread reference BEFORE clearing the running flag.
+            #
+            # start_bulk_fix's single-flight guard asks `_bulk_fix_thread
+            # .is_alive()`, while callers wait on `state['running']` — two
+            # signals for one condition. A caller that correctly waited for the
+            # run to finish could still be told "a bulk fix is already running",
+            # because the flag flipped while this thread was still winding down.
+            # Rare locally, reliable on a loaded CI runner.
+            #
+            # This order makes the flag the conservative signal: anyone who
+            # observes running=False is guaranteed to observe a cleared
+            # reference too. The reverse order leaves the same window, only
+            # narrower — which is how a race hides rather than gets fixed.
+            #
+            # Safe to clear from inside the thread: `finally` runs even when the
+            # loop raises, and if start_bulk_fix re-assigns the reference after
+            # a very fast run it can only store an already-dead thread, which
+            # the guard reads as not-running anyway.
+            self._bulk_fix_thread = None
             state['running'] = False
             logger.info("Background bulk fix finished: %d fixed, %d failed of %d",
                         state['fixed'], state['failed'], state['total'])
@@ -4482,28 +4629,32 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def clear_findings(self, job_id: str = None, status: str = None) -> int:
-        """Delete findings from the database. Optionally filter by job_id and/or status. Returns count deleted."""
+    def clear_findings(self, job_id: str = None, status: str = None,
+                       severity: str = None, finding_type: str = None,
+                       q: str = None) -> int:
+        """Delete findings matching the SAME filters the list view applies.
+
+        Every argument here must be forwarded from the UI's current filter
+        state. This deletes rows outright, so a filter the caller drops widens
+        the blast radius silently — which is exactly how #1142 destroyed
+        findings the user had filtered away.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            conditions = []
-            params = []
-            if job_id:
-                conditions.append("job_id = ?")
-                params.append(job_id)
-            if status:
-                conditions.append("status = ?")
-                params.append(status)
-            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-            cursor.execute(f"SELECT COUNT(*) FROM repair_findings{where}", params)
+            where, params = self._findings_filter(
+                job_id=job_id, status=status, severity=severity,
+                finding_type=finding_type, q=q)
+            cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
             count = cursor.fetchone()[0]
-            cursor.execute(f"DELETE FROM repair_findings{where}", params)
+            cursor.execute(f"DELETE FROM repair_findings {where}", params)
             conn.commit()
-            logger.info("Cleared %d findings%s%s", count,
+            logger.info("Cleared %d findings%s%s%s%s", count,
                          f" for job {job_id}" if job_id else "",
-                         f" with status {status}" if status else "")
+                         f" with status {status}" if status else "",
+                         f" severity {severity}" if severity else "",
+                         f" matching {q!r}" if q and str(q).strip() else "")
             return count
         except Exception as e:
             logger.error("Error clearing findings: %s", e)

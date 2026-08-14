@@ -249,7 +249,7 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
 
     cursor.execute(f"SAVEPOINT {_SAVEPOINT_NAME}")
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         legacy_profile = database._legacy_quality_profile_from_preferences()
         fields = _profile_row_fields(legacy_profile)
@@ -389,7 +389,7 @@ def apply_pending_quality_profile_config_writes(database) -> None:
             pending = {}
 
         if pending:
-            from config.settings import config_manager
+            from core.settings import config_manager
             for key, value in pending.items():
                 config_manager.set(key, value)
 
@@ -422,7 +422,7 @@ def reconcile_stale_quality_profile_config(database) -> int:
     """
     cleared = 0
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
     except Exception as e:  # noqa: BLE001
         logger.debug("Quality-profile config reconcile skipped (no config): %s", e)
         return 0

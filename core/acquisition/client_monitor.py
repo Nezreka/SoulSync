@@ -502,7 +502,7 @@ class UsenetAcquisitionMonitor:
 
     @staticmethod
     def _default_category() -> str:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return str(config_manager.get(
             "usenet_client.category", "soulsync") or "soulsync")
 

@@ -158,7 +158,7 @@ def _fetch_members(entry: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
 
 def _fetch_plex_watchlist(limit: int) -> List[Dict[str, Any]]:
     """The Plex ACCOUNT watchlist via plexapi. Needs an account token."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     from plexapi.myplex import MyPlexAccount
     token = config_manager.get("plex.token", "") or ""
     if not token:

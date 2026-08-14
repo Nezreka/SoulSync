@@ -152,6 +152,47 @@ class MetadataCache:
             logger.debug(f"Cache lookup error ({source}/{entity_type}/{entity_id}): {e}")
             return None
 
+    def get_genre_translation(self, whitelist_hash: str, normalized_source_genre: str) -> Optional[dict]:
+        """Return and touch a persisted genre translation outcome."""
+        try:
+            db = self._get_db(); conn = db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM genre_translation_cache WHERE whitelist_hash=? AND normalized_source_genre=?",
+                            (whitelist_hash, normalized_source_genre))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cur.execute("UPDATE genre_translation_cache SET last_accessed_at=CURRENT_TIMESTAMP, access_count=access_count+1 WHERE id=?", (row['id'],))
+                conn.commit()
+                return dict(row)
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Genre translation cache lookup failed: %s", e)
+            return None
+
+    def store_genre_translation(self, whitelist_hash: str, source_genre: str,
+                                normalized_source_genre: str, outcome: dict) -> None:
+        try:
+            db = self._get_db(); conn = db._get_connection()
+            try:
+                conn.execute("""INSERT INTO genre_translation_cache
+                    (whitelist_hash,source_genre,normalized_source_genre,status,matched_genre,score,margin,candidates_json)
+                    VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(whitelist_hash,normalized_source_genre) DO UPDATE SET
+                    source_genre=excluded.source_genre,status=excluded.status,matched_genre=excluded.matched_genre,
+                    score=excluded.score,margin=excluded.margin,candidates_json=excluded.candidates_json,
+                    updated_at=CURRENT_TIMESTAMP,last_accessed_at=CURRENT_TIMESTAMP,access_count=genre_translation_cache.access_count+1""",
+                    (whitelist_hash, source_genre, normalized_source_genre, outcome.get('status'),
+                     outcome.get('matched_genre'), outcome.get('score'), outcome.get('margin'),
+                     json.dumps(outcome.get('candidates', []))))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Genre translation cache store failed: %s", e)
+
     # Names that indicate junk/placeholder data — should not be cached
     _JUNK_NAMES = frozenset({
         '', 'unknown', 'unknown artist', 'unknown album', 'unknown track',

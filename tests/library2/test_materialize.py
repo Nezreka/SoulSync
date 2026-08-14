@@ -263,7 +263,7 @@ class TestMaterializeWishlistIntent:
     def test_deprecated_false_flag_does_not_disable_materialization(
         self, monkeypatch, legacy_db, imported_conn
     ):
-        from config.settings import config_manager
+        from core.settings import config_manager
         monkeypatch.setattr(
             config_manager, "get",
             lambda key, default=None: False if key == "features.library_v2" else default)
@@ -282,7 +282,7 @@ class TestMaterializeWishlistIntent:
         ).fetchone()["c"] == before + 1
 
     def test_commits_and_returns_result_when_enabled(self, monkeypatch, legacy_db, imported_conn):
-        from config.settings import config_manager
+        from core.settings import config_manager
         real_get = config_manager.get
 
         def fake_get(key, default=None):
@@ -308,7 +308,7 @@ class TestMaterializeWishlistIntent:
         assert row["title"] == "Should Materialize"
 
     def test_never_raises_on_internal_error(self, monkeypatch, legacy_db):
-        from config.settings import config_manager
+        from core.settings import config_manager
         real_get = config_manager.get
 
         def fake_get(key, default=None):

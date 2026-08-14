@@ -238,7 +238,7 @@ def load_effective_policy(
         raise ValueError("acquisition quality profile no longer exists")
     profile = _row_dict(row)
     if config_get is None:
-        from config.settings import config_manager
+        from core.settings import config_manager
         config_get = config_manager.get
     from core.downloads.source_policy import source_policy_from_settings
     source_policy = source_policy_from_settings(

@@ -32,6 +32,8 @@ import {
   materializeLibraryV2MissingTrack,
   previewLibraryV2AlbumReorganize,
   rankSearchResultQuality,
+  releaseLibraryV2AlbumArt,
+  releaseLibraryV2ArtistArt,
   removeLibraryV2FileRecords,
   runRepairJob,
   searchLibraryV2MatchService,
@@ -864,6 +866,15 @@ describe('library v2 art picker api', () => {
     );
   });
 
+  it('releases a chosen cover back to automatic/server artwork', async () => {
+    server.use(
+      http.delete('/api/library/v2/albums/42/art', () =>
+        HttpResponse.json({ success: true, art_locked: false }),
+      ),
+    );
+    await expect(releaseLibraryV2AlbumArt(42)).resolves.toBeUndefined();
+  });
+
   it('surfaces an unresolvable-image error', async () => {
     server.use(
       http.post('/api/library/v2/albums/42/art', () =>
@@ -919,6 +930,15 @@ describe('library v2 artist image picker api (deep-dive A9)', () => {
     await expect(applyLibraryV2ArtistArt(7, 'https://example.com/pick.jpg')).resolves.toBe(
       '/api/library/v2/artwork/artist/7',
     );
+  });
+
+  it('releases a chosen photo back to automatic/server artwork', async () => {
+    server.use(
+      http.delete('/api/library/v2/artists/7/art', () =>
+        HttpResponse.json({ success: true, art_locked: false }),
+      ),
+    );
+    await expect(releaseLibraryV2ArtistArt(7)).resolves.toBeUndefined();
   });
 
   it('surfaces an unresolvable-image error', async () => {

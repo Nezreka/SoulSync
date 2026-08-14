@@ -451,7 +451,7 @@ def _warm_new_artwork(database, conn, album_id: Optional[int]) -> None:
     if not album_id:
         return
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.library2.artwork import schedule_missing_artwork
         targets = [("album", int(album_id))]
         row = conn.execute(
@@ -587,7 +587,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
     reported successful while its Library-v2 row is missing.
     """
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.library2.feature import library_v2_enabled
         library_v2_enabled(config_manager)
 

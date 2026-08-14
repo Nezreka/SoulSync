@@ -87,7 +87,7 @@ def run_probe() -> None:
 
         # Imports intentionally happen after the isolated paths are installed.
         import web_server
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.downloads import candidates as candidate_walk
         from core.runtime_state import download_tasks, matched_downloads_context
         from database.music_database import close_database, get_database

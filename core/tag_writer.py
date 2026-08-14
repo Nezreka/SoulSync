@@ -600,7 +600,7 @@ def _multi_artist_write_enabled() -> bool:
     """Read the same config flag the enrichment pipeline reads, so the
     repair-path retag respects the user's choice."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return bool(config_manager.get('metadata_enhancement.tags.write_multi_artist', False))
     except Exception:
         return False

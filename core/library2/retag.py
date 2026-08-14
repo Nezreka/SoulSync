@@ -248,7 +248,7 @@ def _album_cover_data(database, album_id: int) -> Optional[Tuple[bytes, str]]:
     try:
         if not _album_cover_source(conn, album_id):
             return None
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         built = artwork_mod.build_artwork(
             database, conn, config_manager, "album", int(album_id),

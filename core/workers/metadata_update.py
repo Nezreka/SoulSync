@@ -12,7 +12,7 @@ from datetime import datetime
 
 from core.matching_engine import MusicMatchingEngine
 from core.runtime_state import add_activity_item
-from config.settings import config_manager
+from core.settings import config_manager
 
 logger = logging.getLogger(__name__)
 

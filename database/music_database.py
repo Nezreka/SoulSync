@@ -43,6 +43,22 @@ _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
+
+def _row_value(row, column: str, default=None):
+    """Read a column off a sqlite3.Row that may not have it.
+
+    Upgraded databases can lag the code by a migration, and indexing a Row for a
+    missing column raises IndexError rather than returning None. The upsert paths
+    read columns that only newer schemas carry, and a raised IndexError there
+    would fail the whole scan, so absent means default."""
+    if row is None:
+        return default
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return default
+    return default if value is None else value
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -728,6 +744,26 @@ class MusicDatabase:
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS genre_translation_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    whitelist_hash TEXT NOT NULL,
+                    source_genre TEXT NOT NULL,
+                    normalized_source_genre TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    matched_genre TEXT,
+                    score REAL,
+                    margin REAL,
+                    candidates_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 1,
+                    UNIQUE(whitelist_hash, normalized_source_genre)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gtc_hash ON genre_translation_cache (whitelist_hash)")
+
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS mirrored_playlists (
@@ -1218,6 +1254,7 @@ class MusicDatabase:
                 logger.error(f"Acquisition schema init failed: {grabs_err}")
 
             self._ensure_core_media_schema_columns(cursor)
+            self._ensure_art_lock_columns(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -1471,8 +1508,67 @@ class MusicDatabase:
                 if album_cols and _col not in album_cols:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
+
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
+
+    def _art_lock_supported(self, cursor, table: str) -> bool:
+        """Does this database have ``<table>.art_locked`` yet?
+
+        The sync upserts REFERENCE the column, and SQLite raises "no such
+        column" for the whole statement if it is absent — which the upsert's
+        broad ``except`` swallows into a False return, losing the row silently.
+        A scan that quietly stops saving albums is far worse than art that
+        forgets it was pinned, so the lock degrades instead of exploding:
+        no column ⇒ exactly the pre-lock behaviour.
+
+        Reachable whenever the schema is older than the code: a database whose
+        migration failed, and any caller that builds a bare albums table and
+        drives the upsert directly (which several tests legitimately do).
+
+        Memoized per instance — a PRAGMA per upsert would be a real cost on a
+        full library scan. `getattr` because callers may bypass ``__init__``."""
+        cache = getattr(self, '_art_lock_cols', None)
+        if cache is None:
+            cache = {}
+            self._art_lock_cols = cache
+        if table not in cache:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cache[table] = any(row[1] == 'art_locked' for row in cursor.fetchall())
+            except Exception:
+                cache[table] = False
+        return cache[table]
+
+    def _ensure_art_lock_columns(self, cursor):
+        """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
+        a manual pick must survive every automatic writer.
+
+        The art picker used to be "pinned" only by accident — enrichment workers
+        fill art solely ``WHERE thumb_url IS NULL OR ''``, so a non-empty value
+        happened to survive them. A library sync is a different writer with
+        different rules, and it overwrote the pick with whatever the media server
+        returned. Nothing in the row said a human chose this, so nothing could
+        protect it. Additive, defaults to 0 = "follow the server", i.e. exactly
+        today's behaviour for every existing row.
+
+        Deliberately its OWN method with its OWN try, not part of
+        ``_ensure_core_media_schema_columns``: that one wraps every repair in a
+        single try, so one unrelated failure would skip everything after it. The
+        sync upserts now REFERENCE ``art_locked``, and a missing column there
+        raises "no such column" for every album and artist — swallowed by the
+        upsert's broad except, which would silently lose the whole scan. This
+        column has to be the one thing that cannot be skipped by someone else's
+        error."""
+        for table in ('albums', 'artists'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'art_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN art_locked INTEGER DEFAULT 0")
+                    logger.info("Added art_locked column to %s table (custom artwork)", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.art_locked: %s", table, e)
 
     def _ensure_wishlist_quality_columns(self, cursor):
         """Give every wishlist row a pointer to its own quality profile.
@@ -4658,7 +4754,7 @@ class MusicDatabase:
     def set_profile_listenbrainz(self, profile_id: int, token: str, base_url: str = '', username: str = '') -> bool:
         """Save encrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             encrypted_token = config_manager._encrypt_value(token) if token else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4677,7 +4773,7 @@ class MusicDatabase:
     def get_profile_listenbrainz(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4718,7 +4814,7 @@ class MusicDatabase:
     def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
         """Get all profiles that have ListenBrainz tokens configured"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4843,7 +4939,7 @@ class MusicDatabase:
         """Create a named credential set for a service. Returns the new id, or
         None on failure / duplicate (service, label). Payload is encrypted."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc = config_manager._encrypt_value(payload) if payload else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4865,7 +4961,7 @@ class MusicDatabase:
         """Update a credential set's label and/or payload. Only provided fields
         change. Returns True if a row was updated."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             sets, params = [], []
             if label is not None:
                 sets.append("label = ?")
@@ -4940,7 +5036,7 @@ class MusicDatabase:
         """Get a credential set WITH its decrypted payload, or None. For the
         resolver / client wiring — not for shipping to the browser."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -5668,7 +5764,7 @@ class MusicDatabase:
                             redirect_uri: str = '') -> bool:
         """Save Spotify API credentials for a profile (encrypted)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_id = config_manager._encrypt_value(client_id) if client_id else None
             enc_secret = config_manager._encrypt_value(client_secret) if client_secret else None
             with self._get_connection() as conn:
@@ -5688,7 +5784,7 @@ class MusicDatabase:
     def get_profile_spotify(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Spotify credentials for a profile."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -5713,7 +5809,7 @@ class MusicDatabase:
     def set_profile_spotify_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
         """Save Spotify OAuth tokens for a profile (from auth callback)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5735,7 +5831,7 @@ class MusicDatabase:
         per-profile Tidal client's token refresh — keeps a profile's refresh from
         ever touching the global tidal_tokens slot."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5755,7 +5851,7 @@ class MusicDatabase:
     def get_profile_tidal(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Tidal tokens for a profile ({} if none)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -6917,7 +7013,7 @@ class MusicDatabase:
                         f"AND entity_id IN ({orphan_albums})")
                     cursor.execute(f"UPDATE lib2_albums SET server_source=NULL,server_id=NULL "
                                    f"WHERE id IN ({orphan_albums})")
-                    logger.info(f"Detached %d orphaned album mappings", orphaned_albums_count)
+                    logger.info("Detached %d orphaned album mappings", orphaned_albums_count)
 
                 cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
                 orphaned_artists_count = cursor.fetchone()[0]
@@ -6927,7 +7023,7 @@ class MusicDatabase:
                         f"AND entity_id IN ({orphan_artists})")
                     cursor.execute(f"UPDATE lib2_artists SET server_source=NULL,server_id=NULL "
                                    f"WHERE id IN ({orphan_artists})")
-                    logger.info(f"Detached %d orphaned artist mappings", orphaned_artists_count)
+                    logger.info("Detached %d orphaned artist mappings", orphaned_artists_count)
                 
                 conn.commit()
                 
@@ -7639,8 +7735,8 @@ class MusicDatabase:
                 if conn:
                     try:
                         conn.close()
-                    except Exception:
-                        pass
+                    except Exception as close_err:
+                        logger.debug("Media track connection close failed: %s", close_err)
         return False
 
     def track_exists(self, track_id) -> bool:
@@ -9994,7 +10090,7 @@ class MusicDatabase:
         self.set_quality_profile(profile)
 
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             config_manager.set("acoustid.require_verified", profile["acoustid_required"])
             config_manager.set("lossy_copy.downsample_hires", profile["downsample_enabled"])
             config_manager.set("post_processing.audio_completeness_check", profile["deep_audio_verify"])
@@ -10023,7 +10119,7 @@ class MusicDatabase:
         the active profile" true in both directions.
         """
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             values = {
                 "acoustid_required": 1 if config_manager.get("acoustid.require_verified", False) else 0,
                 "downsample_enabled": 1 if config_manager.get("lossy_copy.downsample_hires", False) else 0,
@@ -10307,7 +10403,7 @@ class MusicDatabase:
         .quality = 'hires'|'hires_max'), which #896 removed in favour of the
         global profile. Used to preserve their intent on migration."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
         except Exception:
             return False
         hires = {'hires', 'hires_max'}
@@ -10827,7 +10923,7 @@ class MusicDatabase:
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # When allow_duplicates is True (default), same song from different albums can coexist
-                from config.settings import config_manager
+                from core.settings import config_manager
                 allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
                 # Convert data once; existing rows and inserts use the same
@@ -11797,7 +11893,7 @@ class MusicDatabase:
         Keeps the oldest entry (by date_added) for each duplicate set.
         Returns the number of duplicates removed."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
             with self._get_connection() as conn:
@@ -13965,7 +14061,7 @@ class MusicDatabase:
         """Get comprehensive database information filtered by server source"""
         try:
             # Import here to avoid circular imports
-            from config.settings import config_manager
+            from core.settings import config_manager
             
             # If no server specified, use active server
             if server_source is None:
@@ -14338,15 +14434,27 @@ class MusicDatabase:
             return {'success': False, 'error': str(e)}
 
     def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
-        """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
-        every enrichment worker fills art only ``WHERE image_url IS NULL OR = ''``, so none will
-        overwrite a user pick. Returns True when a row was updated."""
+        """Set an album's cover-art URL (the user's art-picker choice) and LOCK it.
+
+        Two different protections, because there are two kinds of writer:
+
+        * enrichment workers fill art only when ``image_url`` is empty,
+          so a non-empty value is enough to survive them;
+        * a library sync writes whatever the media server returned, and does not
+          care whether the value it is replacing was chosen by a human. That is
+          what wiped TheHomeGuy's covers — Navidrome always returns a cover URL
+          (its own placeholder counts), so the "non-empty" protection above
+          never applied. ``art_locked`` is the flag that says a person picked
+          this, and the sync upserts leave locked art alone.
+
+        Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE lib2_albums SET image_url = ?, art_locked = 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (thumb_url, album_id))
             conn.commit()
             return cursor.rowcount > 0
@@ -14358,20 +14466,50 @@ class MusicDatabase:
                 conn.close()
 
     def set_artist_thumb_url(self, artist_id, thumb_url: str) -> bool:
-        """Set an artist's photo URL (the user's image-picker choice). A non-empty value also PINS
-        it: every enrichment worker fills artist thumbs only ``WHERE image_url IS NULL OR = ''``,
-        so none will overwrite a user pick. Returns True when a row was updated."""
+        """Set an artist's photo URL and lock it against automatic replacement."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE lib2_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE lib2_artists SET image_url = ?, art_locked = 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (thumb_url, artist_id))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"set_artist_thumb_url failed for artist {artist_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_art_lock(self, kind: str, entity_id) -> bool:
+        """Release a hand-picked image so the media server owns the art again.
+
+        Without this the lock is a one-way door. The picker offers covers from
+        external sources only (Cover Art Archive, Deezer, iTunes, …) and can
+        legitimately return NOTHING — TheHomeGuy's own screenshot reads "No
+        alternative covers found for this album" — so a user who locked art they
+        no longer want would have no candidate to switch to and no way back.
+
+        The current image is deliberately left in place: it stays until the next
+        library sync refreshes it, so "unlock" never blanks the page. Returns
+        True when a row was updated."""
+        table = {'album': 'lib2_albums', 'artist': 'lib2_artists'}.get(kind)
+        if table is None:
+            raise ValueError(f"clear_art_lock: kind must be 'album' or 'artist', got {kind!r}")
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE {table} SET art_locked = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (entity_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"clear_art_lock failed for {kind} {entity_id}: {e}")
             return False
         finally:
             if conn:

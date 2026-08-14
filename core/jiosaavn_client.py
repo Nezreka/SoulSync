@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.api_call_tracker import api_call_tracker
 from core.metadata.cache import get_metadata_cache
 from utils.logging_config import get_logger

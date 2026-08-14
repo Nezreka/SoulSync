@@ -7,7 +7,7 @@ ran video-side YouTube cookie-less while the music side worked.
 
 from __future__ import annotations
 
-import config.settings as cfg
+import core.settings as cfg
 from core.video.youtube import _cookie_opts
 
 

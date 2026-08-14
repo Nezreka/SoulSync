@@ -1643,6 +1643,15 @@ export async function applyLibraryV2AlbumArt(albumId: number, url: string): Prom
   return payload.image_url;
 }
 
+/** Stop overriding an album cover. The current image remains until the next
+ * artwork rebuild/server refresh supplies the baseline again. */
+export async function releaseLibraryV2AlbumArt(albumId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.delete(`library/v2/albums/${albumId}/art`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to release cover art');
+}
+
 /** Candidate photos for an artist, for the image picker (deep-dive A9). */
 export async function fetchLibraryV2ArtistArtOptions(
   artistId: number,
@@ -1679,6 +1688,14 @@ export async function applyLibraryV2ArtistArt(artistId: number, url: string): Pr
     throw new Error(payload.error || 'Failed to apply photo');
   }
   return payload.image_url;
+}
+
+/** Stop overriding an artist photo and follow automatic/server artwork again. */
+export async function releaseLibraryV2ArtistArt(artistId: number): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.delete(`library/v2/artists/${artistId}/art`),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to release artist photo');
 }
 
 export async function fetchLibraryV2JobStatus(jobId?: string): Promise<LibraryV2JobState> {

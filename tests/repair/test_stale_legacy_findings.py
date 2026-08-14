@@ -61,8 +61,13 @@ STALE_SUBJECT_CASES = {
     'metadata_gap': {'found_fields': {'isrc': 'DEZZZ0000001'}},
     'acoustid_mismatch': {'_fix_action': 'delete'},
     'missing_cover_art': {'found_artwork_url': 'https://cdn/art.jpg'},
+    'genre_enrichment': {'added_genres': ['Rock']},
     'comma_artist_split': {'split_artists': ['A', 'B'], 'combined_name': 'A, B'},
     'track_number_mismatch': {'correct_track_num': 3},
+}
+
+STALE_SUBJECT_ENTITY_TYPES = {
+    'genre_enrichment': 'artist',
 }
 
 
@@ -73,7 +78,8 @@ def test_a_bare_id_subject_is_declined_as_stale(finding_type, tmp_path: Path):
     audio.write_bytes(b'fake audio bytes')
 
     result = _worker(db, tmp_path)._execute_fix(
-        finding_type, 'track', '1', str(audio), dict(STALE_SUBJECT_CASES[finding_type]))
+        finding_type, STALE_SUBJECT_ENTITY_TYPES.get(finding_type, 'track'), '1',
+        str(audio), dict(STALE_SUBJECT_CASES[finding_type]))
 
     assert result['success'] is False, finding_type
     assert result.get('stale_subject') is True, finding_type
@@ -87,7 +93,8 @@ def test_declining_leaves_the_legacy_catalogue_untouched(finding_type, tmp_path:
     audio.write_bytes(b'fake audio bytes')
 
     _worker(db, tmp_path)._execute_fix(
-        finding_type, 'track', '1', str(audio), dict(STALE_SUBJECT_CASES[finding_type]))
+        finding_type, STALE_SUBJECT_ENTITY_TYPES.get(finding_type, 'track'), '1',
+        str(audio), dict(STALE_SUBJECT_CASES[finding_type]))
 
     conn = db._get_connection()
     try:

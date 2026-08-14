@@ -172,7 +172,7 @@ def read_enrichment_priority(service: str) -> str:
     Read every loop so the override applies without restarting the worker.
     Any error / unset / invalid value yields '' (no override)."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         val = (config_manager.get(f'{service}_enrichment_priority', '') or '')
         val = str(val).strip().lower()
         return val if val in PRIORITY_ENTITIES else ''

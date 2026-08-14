@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from 'react';
 
+import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 
 import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
@@ -76,7 +77,15 @@ function RailCard({
       onClick={onOpen}
     >
       <div className="ya-card-img">
-        {src && <img key={src} src={src} alt="" loading="lazy" onError={() => setRung(rung + 1)} />}
+        {src && (
+          <img
+            key={src}
+            src={thumb(src, 'grid')}
+            alt=""
+            loading="lazy"
+            onError={() => setRung(rung + 1)}
+          />
+        )}
         <div className="ya-card-placeholder" style={src ? { display: 'none' } : undefined}>
           ♫
         </div>

@@ -274,7 +274,7 @@ def check_album_completion(
 
         formats = []
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
 
             active_server = config_manager.get_active_media_server()
             db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
@@ -430,7 +430,7 @@ def check_single_completion(
 
         if album_type == 'ep' or total_tracks > 1:
             try:
-                from config.settings import config_manager
+                from core.settings import config_manager
 
                 active_server = config_manager.get_active_media_server()
                 db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
@@ -494,7 +494,7 @@ def check_single_completion(
             }
         else:
             try:
-                from config.settings import config_manager
+                from core.settings import config_manager
 
                 active_server = config_manager.get_active_media_server()
                 db_track, confidence = db.check_track_exists(
@@ -582,7 +582,7 @@ def iter_artist_discography_completion_events(
     candidate_albums = None
     candidate_tracks = None
     try:
-        from config.settings import config_manager as _cm_metadata
+        from core.settings import config_manager as _cm_metadata
 
         _active_server = _cm_metadata.get_active_media_server()
         _t0 = _time_metadata.perf_counter()

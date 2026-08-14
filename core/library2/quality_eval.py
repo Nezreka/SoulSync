@@ -61,7 +61,7 @@ def effective_track_profile(conn, track_id: int) -> Dict[str, Any]:
 
 def decide_track_upgrade(conn, track_id: int, incoming_path: str) -> UpgradeDecision:
     """Compare real old/new audio under the track's live profile and cutoff."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.imports.file_ops import probe_audio_quality
     from core.library2.paths import resolve_lib2_path
     from core.library2.track_files import primary_file_row

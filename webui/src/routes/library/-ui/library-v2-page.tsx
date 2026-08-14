@@ -14,6 +14,7 @@ import {
 } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
+import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -478,7 +479,7 @@ export function Artwork({
   src,
   alt,
   className,
-  thumb,
+  thumb: useThumbnail,
   remote,
 }: {
   src: string;
@@ -493,8 +494,10 @@ export function Artwork({
   // Only SoulSync's artwork endpoint understands ``size=thumb``. Appending it
   // to Spotify/Deezer/CDN URLs (the previous behavior) can invalidate signed
   // URLs; it also produced ``...?v=123?size=thumb`` for cache-busted local art.
-  const local = Boolean(src) && src.startsWith(LOCAL_ARTWORK_PREFIX);
-  const base = src && thumb && local ? `${src}${src.includes('?') ? '&' : '?'}size=thumb` : src;
+  const sized = useThumbnail ? thumb(src, 'card') : src;
+  const local = Boolean(sized) && sized.startsWith(LOCAL_ARTWORK_PREFIX);
+  const base =
+    sized && useThumbnail && local ? `${sized}${sized.includes('?') ? '&' : '?'}size=thumb` : sized;
   // rev25-12: this state is keyed to the base it belongs to and reset the
   // instant `base` changes — during render, not in a `[base]` effect. An
   // effect fires only after this render already committed, so a src change
@@ -3364,8 +3367,8 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
       <p className={styles.qpSubtitle}>
         The same recording released as a single and on an album. Unmonitor the version you don't
         want kept up to date; <strong>Move file</strong> re-homes all source file links onto the
-        other version (disk untouched — run Rename/Reorganize after); removing duplicate{' '}
-        <em>files</em> is the "Single/Album Dedup" job under Maintenance.
+        other version (disk untouched — run Rename/Reorganize after). Physical files you no longer
+        need can then be removed from the <strong>Files</strong> tab.
       </p>
       {rowError ? <div className={styles.searchError}>{rowError}</div> : null}
       <div className={styles.resultsWrap}>

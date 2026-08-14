@@ -17,7 +17,7 @@ import requests
 
 
 def _conn():
-    from config.settings import config_manager
+    from core.settings import config_manager
     base = str(config_manager.get("soulseek.slskd_url", "") or "").rstrip("/")
     key = config_manager.get("soulseek.api_key", "") or ""
     return base, ({"X-API-Key": key} if key else {})

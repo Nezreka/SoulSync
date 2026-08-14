@@ -128,6 +128,10 @@ def test_apply_manual_artwork_downloads_validates_and_caches(
 
     overrides = get_field_overrides(imported_conn, entity_type="release_group", entity_id=album_id)
     assert overrides["image_url"].value == "https://example.com/cover.jpg"
+    row = imported_conn.execute(
+        "SELECT image_url, art_locked FROM lib2_albums WHERE id=?", (album_id,)
+    ).fetchone()
+    assert tuple(row) == ("https://example.com/cover.jpg", 1)
 
     cached = artwork.artwork_file(database, "album", album_id)
     assert artwork.is_cached_jpeg(cached)

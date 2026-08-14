@@ -64,7 +64,7 @@ def test_config_off_means_literal(tmp_path, monkeypatch):
 
 
 def test_config_toggle_flips_the_default():
-    from config.settings import config_manager
+    from core.settings import config_manager
     original = config_manager.get('file_organization.artistletter_symbol_fallback', None)
     try:
         config_manager.set('file_organization.artistletter_symbol_fallback', True)

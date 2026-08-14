@@ -186,7 +186,7 @@ def dispatch_import_to_main_pipeline(
 ) -> BridgeDispatchResult:
     """Dispatch every unprocessed matched file through the shared pipeline."""
     if config_get is None:
-        from config.settings import config_manager
+        from core.settings import config_manager
         config_get = config_manager.get
     if runtime is None:
         from core.imports.pipeline import build_import_pipeline_runtime

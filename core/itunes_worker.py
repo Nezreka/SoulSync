@@ -567,7 +567,7 @@ class iTunesWorker:
             backfill['image_url'] = artist_obj.image_url
         if artist_obj.genres:
             from core.genre_filter import filter_genres
-            from config.settings import config_manager as _cfg
+            from core.settings import config_manager as _cfg
             _filtered = filter_genres(list(artist_obj.genres), _cfg)
             if _filtered:
                 backfill['genres'] = json.dumps(_filtered)

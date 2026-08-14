@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.file_ops import (
     cleanup_empty_directories,
     cleanup_slskd_dedup_siblings,
@@ -278,7 +278,7 @@ def _retire_lib2_path_after_redownload(old_path: str, new_path: str) -> None:
     """
     try:
         from core.library2.feature import library_v2_enabled
-        from config.settings import config_manager as _cm
+        from core.settings import config_manager as _cm
         if not library_v2_enabled(_cm):
             return
         from core.library2.track_files import retire_replaced_files
@@ -814,7 +814,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
             context, raise_on_error=True)
         if linked_lib2_file_id is None:
             raise RuntimeError("Library v2 did not create a file row")
-        from config.settings import config_manager
+        from core.settings import config_manager
         from database.music_database import get_database
         from core.library2.track_reconcile_trigger import (
             schedule_file_track_reconcile,

@@ -175,9 +175,16 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
 
 // ── Job settings drawer ──────────────────────────────────────────────────────
 
-function JobSettings({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
+function JobSettings({
+  job,
+  onSaved,
+  open,
+}: {
+  job: RepairJob;
+  onSaved: () => void;
+  open: boolean;
+}) {
   const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...job.settings }));
-  const [open, setOpen] = useState(false);
 
   const save = useCallback(async () => {
     const settings: Record<string, unknown> = {};
@@ -199,99 +206,89 @@ function JobSettings({ job, onSaved }: { job: RepairJob; onSaved: () => void }) 
   }, [job.interval_hours, job.job_id, onSaved, values]);
 
   return (
-    <>
-      <button
-        className="repair-settings-btn"
-        type="button"
-        title="Settings"
-        onClick={() => setOpen((previous) => !previous)}
-      >
-        &#9881;
-      </button>
-      <div
-        className="repair-job-settings"
-        id={`repair-settings-${job.job_id}`}
-        style={{ display: open ? '' : 'none' }}
-      >
-        {Object.entries(job.settings || {}).map(([key, value]) => {
-          const field = repairSettingInput(key, value, job.setting_options?.[key]);
-          if (field.kind === 'section') {
-            return (
-              <div className="repair-setting-section" key={key}>
-                {field.title}
-              </div>
-            );
-          }
-          const current = values[key];
+    <div
+      className="repair-job-settings"
+      id={`repair-settings-${job.job_id}`}
+      style={{ display: open ? '' : 'none' }}
+    >
+      {Object.entries(job.settings || {}).map(([key, value]) => {
+        const field = repairSettingInput(key, value, job.setting_options?.[key]);
+        if (field.kind === 'section') {
           return (
-            <div className="repair-setting-row" key={key}>
-              <label>{prettifyRepairSettingKey(key)}</label>
-              {field.kind === 'select' ? (
-                <select
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                >
-                  {field.options.map((option) => (
-                    <option value={option} key={option}>
-                      {prettifyRepairSettingKey(option)}
-                    </option>
-                  ))}
-                </select>
-              ) : field.kind === 'checkbox' ? (
-                <input
-                  type="checkbox"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  checked={Boolean(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.checked }))
-                  }
-                />
-              ) : field.kind === 'number' ? (
-                <input
-                  type="number"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  step="0.01"
-                  // A setting that is CURRENTLY negative gets no floor — some
-                  // thresholds are legitimately below zero and a min of 0 would
-                  // make them un-editable.
-                  {...(field.allowNegative ? {} : { min: '0' })}
-                  onChange={(event) =>
-                    setValues((previous) => ({
-                      ...previous,
-                      [key]: Number.parseFloat(event.target.value),
-                    }))
-                  }
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                />
-              )}
+            <div className="repair-setting-section" key={key}>
+              {field.title}
             </div>
           );
-        })}
-        <button className="repair-save-settings-btn" type="button" onClick={() => void save()}>
-          Save Settings
-        </button>
-      </div>
-    </>
+        }
+        const current = values[key];
+        return (
+          <div className="repair-setting-row" key={key}>
+            <label>{prettifyRepairSettingKey(key)}</label>
+            {field.kind === 'select' ? (
+              <select
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
+                }
+              >
+                {field.options.map((option) => (
+                  <option value={option} key={option}>
+                    {prettifyRepairSettingKey(option)}
+                  </option>
+                ))}
+              </select>
+            ) : field.kind === 'checkbox' ? (
+              <input
+                type="checkbox"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                checked={Boolean(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.checked }))
+                }
+              />
+            ) : field.kind === 'number' ? (
+              <input
+                type="number"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                step="0.01"
+                // A setting that is CURRENTLY negative gets no floor — some
+                // thresholds are legitimately below zero and a min of 0 would
+                // make them un-editable.
+                {...(field.allowNegative ? {} : { min: '0' })}
+                onChange={(event) =>
+                  setValues((previous) => ({
+                    ...previous,
+                    [key]: Number.parseFloat(event.target.value),
+                  }))
+                }
+              />
+            ) : (
+              <input
+                type="text"
+                className="repair-setting-input"
+                data-job={job.job_id}
+                data-key={key}
+                value={settingText(current)}
+                onChange={(event) =>
+                  setValues((previous) => ({ ...previous, [key]: event.target.value }))
+                }
+              />
+            )}
+          </div>
+        );
+      })}
+      <button className="repair-save-settings-btn" type="button" onClick={() => void save()}>
+        Save Settings
+      </button>
+    </div>
   );
 }
 
@@ -317,6 +314,7 @@ export function OperationTile({
 }: OperationTileProps) {
   const [enabled, setEnabled] = useState(job.enabled);
   const [stopping, setStopping] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => setEnabled(job.enabled), [job.enabled]);
 
   const badge = repairJobBadge(job);
@@ -474,7 +472,19 @@ export function OperationTile({
               &#9654;
             </button>
           )}
-          {hasSettings ? <JobSettings job={job} onSaved={onChanged} /> : null}
+          {hasSettings ? (
+            <button
+              className="repair-settings-btn"
+              type="button"
+              title="Settings"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSettingsOpen((previous) => !previous);
+              }}
+            >
+              &#9881;
+            </button>
+          ) : null}
           <button
             className="repair-help-btn"
             type="button"
@@ -508,6 +518,7 @@ export function OperationTile({
           </div>
         </div>
       ) : null}
+      {hasSettings ? <JobSettings job={job} onSaved={onChanged} open={settingsOpen} /> : null}
     </div>
   );
 }

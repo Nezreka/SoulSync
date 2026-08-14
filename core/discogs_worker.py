@@ -318,7 +318,7 @@ class DiscogsWorker:
             ]
         finally:
             conn.close()
-        for result, ok, reason in gate:
+        for result, ok, _reason in gate:
             if ok:
                 # Fetch full artist detail (uses cache)
                 data = self.client._fetch_and_cache_artist(result.id)
@@ -440,7 +440,7 @@ class DiscogsWorker:
                 backfill['image_url'] = image_url
             if genres:
                 from core.genre_filter import filter_genres
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 _filtered = filter_genres(list(genres), _cfg)
                 if _filtered:
                     backfill['genres'] = json.dumps(_filtered)

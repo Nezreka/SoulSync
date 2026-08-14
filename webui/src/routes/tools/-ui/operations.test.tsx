@@ -78,6 +78,11 @@ describe('the containers', () => {
   it('groups jobs into their served families, in the house order', () => {
     const { container } = renderOps([
       job({ job_id: 'genre_cleanup', display_name: 'Genre Cleanup', category: 'Tags & metadata' }),
+      job({
+        job_id: 'genre_enrichment',
+        display_name: 'Genre Enrichment',
+        category: 'Tags & metadata',
+      }),
       job({ job_id: 'orphan_file_detector', category: 'Files & storage' }),
       job({ job_id: 'cache_evictor', display_name: 'Cache Maintenance', category: 'System' }),
     ]);
@@ -85,6 +90,11 @@ describe('the containers', () => {
       node.getAttribute('data-category'),
     );
     expect(families).toEqual(['Files & storage', 'Tags & metadata', 'System']);
+    expect(
+      container
+        .querySelector('[data-category="Tags & metadata"]')
+        ?.querySelector('[data-job-id="genre_enrichment"]'),
+    ).not.toBeNull();
   });
 
   it('files a job with no category under Other, at the end', () => {
@@ -243,6 +253,21 @@ describe('the tile', () => {
 
     const second = renderOps([job({ settings: { dry_run: false } })]);
     expect(second.container.querySelector('.repair-settings-btn')).not.toBeNull();
+  });
+
+  it('renders the settings panel below the tile content, not beside the actions', () => {
+    const { container } = renderOps([job({ settings: { dry_run: false } })]);
+    const card = container.querySelector('.repair-job-card') as HTMLElement;
+    const actions = card.querySelector('.repair-job-actions') as HTMLElement;
+    const foot = card.querySelector('.repair-tile-foot') as HTMLElement;
+    const button = card.querySelector('.repair-settings-btn') as HTMLElement;
+
+    fireEvent.click(button);
+
+    const panel = card.querySelector('.repair-job-settings') as HTMLElement;
+    expect(actions.contains(panel)).toBe(false);
+    expect(foot.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(panel.style.display).toBe('');
   });
 
   it('runs a job', async () => {

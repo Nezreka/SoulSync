@@ -9,6 +9,8 @@ import {
   fetchLibraryV2AlbumArtOptions,
   fetchLibraryV2ArtistArtOptions,
   LIBRARY_V2_QUERY_KEY,
+  releaseLibraryV2AlbumArt,
+  releaseLibraryV2ArtistArt,
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
 
@@ -47,6 +49,7 @@ export function AlbumArtPickerModal({
     staleTime: 0,
   });
   const [busyUrl, setBusyUrl] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function apply(url: string) {
@@ -64,6 +67,20 @@ export function AlbumArtPickerModal({
       void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       setError(applyErrorMessage(caught, 'cover'));
       setBusyUrl(null);
+    }
+  }
+
+  async function release() {
+    if (busyUrl || releasing) return;
+    setReleasing(true);
+    setError(null);
+    try {
+      await releaseLibraryV2AlbumArt(albumId);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to release cover art');
+      setReleasing(false);
     }
   }
 
@@ -113,7 +130,7 @@ export function AlbumArtPickerModal({
                   key={`${c.source}:${c.url}:${i}`}
                   candidate={c}
                   busy={busyUrl === c.url}
-                  disabled={busyUrl !== null}
+                  disabled={busyUrl !== null || releasing}
                   onPick={() => void apply(c.url)}
                 />
               ))}
@@ -122,6 +139,15 @@ export function AlbumArtPickerModal({
         </div>
 
         <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            disabled={busyUrl !== null || releasing}
+            title="Stop overriding this cover and follow automatic/server artwork again"
+            onClick={() => void release()}
+          >
+            {releasing ? 'Releasing…' : 'Use server art'}
+          </button>
           <button type="button" className={styles.btnGhost} onClick={onClose}>
             Cancel
           </button>
@@ -152,6 +178,7 @@ export function ArtistImagePickerModal({
     staleTime: 0,
   });
   const [busyUrl, setBusyUrl] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function apply(url: string) {
@@ -166,6 +193,20 @@ export function ArtistImagePickerModal({
       void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       setError(applyErrorMessage(caught, 'photo'));
       setBusyUrl(null);
+    }
+  }
+
+  async function release() {
+    if (busyUrl || releasing) return;
+    setReleasing(true);
+    setError(null);
+    try {
+      await releaseLibraryV2ArtistArt(artistId);
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to release artist photo');
+      setReleasing(false);
     }
   }
 
@@ -215,7 +256,7 @@ export function ArtistImagePickerModal({
                   key={`${c.source}:${c.url}:${i}`}
                   candidate={c}
                   busy={busyUrl === c.url}
-                  disabled={busyUrl !== null}
+                  disabled={busyUrl !== null || releasing}
                   onPick={() => void apply(c.url)}
                 />
               ))}
@@ -224,6 +265,15 @@ export function ArtistImagePickerModal({
         </div>
 
         <div className={styles.modalActions}>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            disabled={busyUrl !== null || releasing}
+            title="Stop overriding this photo and follow automatic/server artwork again"
+            onClick={() => void release()}
+          >
+            {releasing ? 'Releasing…' : 'Use server art'}
+          </button>
           <button type="button" className={styles.btnGhost} onClick={onClose}>
             Cancel
           </button>

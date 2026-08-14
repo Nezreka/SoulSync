@@ -170,7 +170,7 @@ def _cookie_opts():
     report) got cookie-less video-side YouTube while the music side worked."""
     try:
         import os
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.youtube_cookies import build_youtube_cookie_opts
         mode = config_manager.get("youtube.cookies_browser", "")
         cookiefile = config_manager.get("youtube.cookies_file", "")

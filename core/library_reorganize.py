@@ -432,7 +432,7 @@ def _feat_in_title_enabled() -> bool:
     switch the download path does. Isolated in a helper so tests can
     monkeypatch it without a full config manager."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return bool(config_manager.get("metadata_enhancement.tags.feat_in_title", False))
     except Exception:
         return False
@@ -444,7 +444,7 @@ def _preserve_casing_enabled() -> bool:
     already-organized files were flagged for cosmetic re-casing). Default on.
     Isolated so tests can monkeypatch without a config manager."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return bool(config_manager.get("library.reorganize_preserve_casing", True))
     except Exception:
         return True

@@ -180,7 +180,7 @@ class WishlistService:
             # dropped again within the hour — so it silently stopped being
             # retried, the exact opposite of what queueing it meant.
             try:
-                from config.settings import config_manager
+                from core.settings import config_manager
                 from core.library2.monitor_sync import sync_wishlist_addition
                 sync_wishlist_addition(
                     self.database, config_manager,

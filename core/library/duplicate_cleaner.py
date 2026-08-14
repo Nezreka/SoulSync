@@ -7,7 +7,7 @@ helper all live in web_server.py.
 """
 import logging
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.runtime_state import add_activity_item
 
 logger = logging.getLogger(__name__)

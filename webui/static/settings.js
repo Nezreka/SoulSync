@@ -601,6 +601,9 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadYtdlpStatus === 'function') {
         try { loadYtdlpStatus(); } catch (e) { }
     }
+    if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
+        try { loadImageCacheStatus(); } catch (e) { }
+    }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
@@ -4472,6 +4475,12 @@ async function saveSettings(quiet = false) {
             jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
             bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
         },
+        image_cache: {
+            // Server-side resizing is opt-in; the cache itself keeps whatever
+            // it was already set to (on, for every install since it shipped).
+            thumbnails: document.getElementById('imgcache-thumbnails')?.checked === true,
+            max_cache_mb: parseInt(document.getElementById('imgcache-max-mb')?.value, 10) || 0,
+        },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
             api_key: document.getElementById('hydrabase-api-key').value,
@@ -6681,5 +6690,105 @@ async function runYtdlpUpdate() {
         if (typeof showToast === 'function') showToast('yt-dlp update failed', 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Update yt-dlp'; }
+    }
+}
+
+
+// == ARTWORK CACHE (Advanced tab, both sides)               ==
+// One cache serves album covers on the music side and posters on the video
+// side, so this panel is deliberately not marked video-only.
+
+function _imgCacheBytes(n) {
+    if (!n) return '0 MB';
+    const mb = n / (1024 * 1024);
+    return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
+}
+
+function _imgCacheStatus(message, tone) {
+    const el = document.getElementById('imgcache-status');
+    if (!el) return;
+    el.textContent = message;
+    el.style.display = 'block';
+    el.style.background = tone === 'error' ? 'rgba(255,80,80,.12)' : 'rgba(80,255,150,.10)';
+    el.style.color = tone === 'error' ? '#ff9a9a' : '#8ee7b0';
+}
+
+function onImageCacheSettingChanged() {
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+async function loadImageCacheStatus() {
+    try {
+        const resp = await fetch('/api/image-cache/status');
+        const data = await resp.json();
+        if (!data.success) return;
+        const entries = document.getElementById('imgcache-entries');
+        const size = document.getElementById('imgcache-size');
+        if (entries) entries.textContent = (data.entries || 0).toLocaleString();
+        if (size) {
+            size.textContent = data.max_bytes
+                ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`
+                : `${_imgCacheBytes(data.bytes)} (no limit)`;
+        }
+        // Reflect saved config without clobbering something the user is editing.
+        const maxEl = document.getElementById('imgcache-max-mb');
+        if (maxEl && document.activeElement !== maxEl) {
+            maxEl.value = Math.round((data.max_bytes || 0) / (1024 * 1024));
+        }
+        const thumbEl = document.getElementById('imgcache-thumbnails');
+        if (thumbEl) thumbEl.checked = data.thumbnails === true;
+    } catch (e) {
+        console.error('image cache status failed', e);
+    }
+}
+
+async function runImageCachePrune() {
+    const btn = document.getElementById('imgcache-prune-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Reclaiming...'; }
+    try {
+        const resp = await fetch('/api/image-cache/prune', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            const freed = (data.expired || 0) + (data.evicted || 0);
+            _imgCacheStatus(freed
+                ? `Removed ${freed} cached image${freed === 1 ? '' : 's'}.`
+                : 'Nothing to reclaim — the cache is already within its limits.', 'ok');
+            loadImageCacheStatus();
+        } else {
+            _imgCacheStatus(data.error || 'Could not reclaim space.', 'error');
+        }
+    } catch (e) {
+        _imgCacheStatus('Could not reclaim space: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Reclaim space now'; }
+    }
+}
+
+async function runImageCacheClear() {
+    const ok = await showConfirmDialog({
+        title: 'Clear the artwork cache?',
+        message: 'Every cached cover and poster is removed. Nothing is lost permanently — '
+               + 'images are downloaded again as pages need them, so the only cost is a '
+               + 'slower first load.',
+        confirmText: 'Clear cache',
+        cancelText: 'Cancel'
+    });
+    if (!ok) return;
+
+    const btn = document.getElementById('imgcache-clear-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Clearing...'; }
+    try {
+        const resp = await fetch('/api/image-cache/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            _imgCacheStatus(`Cleared ${data.removed || 0} cached image${data.removed === 1 ? '' : 's'}.`, 'ok');
+            loadImageCacheStatus();
+        } else {
+            _imgCacheStatus(data.error || 'Could not clear the cache.', 'error');
+        }
+    } catch (e) {
+        _imgCacheStatus('Could not clear the cache: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Clear cache'; }
     }
 }

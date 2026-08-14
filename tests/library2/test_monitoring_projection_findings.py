@@ -212,7 +212,7 @@ def test_a_wishlist_addition_that_matches_nothing_is_a_no_op(imported_conn, lega
 
 
 def test_the_forward_edge_is_admin_only(imported_conn, legacy_db):
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.library2.monitor_sync import sync_wishlist_addition
 
     conn = imported_conn

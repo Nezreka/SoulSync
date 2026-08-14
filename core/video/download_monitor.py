@@ -804,7 +804,7 @@ def _tick(db) -> None:
     if not active:
         _misses.clear()
         return
-    from config.settings import config_manager
+    from core.settings import config_manager
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads()
     organizer = _make_organizer(db)

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     musicbrainz_id TEXT,
     external_ids TEXT NOT NULL DEFAULT '{}',
     image_url TEXT,
+    art_locked INTEGER NOT NULL DEFAULT 0,             -- user-selected artwork survives server/provider refreshes
     genres TEXT NOT NULL DEFAULT '[]',
     summary TEXT,
     style TEXT,
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     external_ids TEXT NOT NULL DEFAULT '{}',
     enrichment TEXT NOT NULL DEFAULT '{}',            -- provider-keyed payload (lastfm stats/wiki, discogs release detail, bandcamp)
     image_url TEXT,
+    art_locked INTEGER NOT NULL DEFAULT 0,             -- user-selected artwork survives server/provider refreshes
     genres TEXT NOT NULL DEFAULT '[]',
     explicit INTEGER,
     label TEXT,
@@ -334,6 +336,13 @@ _ALL_DDL = (
 # Columns added after the initial schema shipped — applied to existing installs via
 # a PRAGMA-probe ALTER (SQLite has no ADD COLUMN IF NOT EXISTS). (table, column, ddl).
 _ADDED_COLUMNS = (
+    # Manual artwork is user intent, not server metadata. A non-empty URL alone
+    # cannot protect it because media-server refreshes legitimately replace
+    # non-empty server artwork.
+    ("lib2_artists", "art_locked",
+     "ALTER TABLE lib2_artists ADD COLUMN art_locked INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_albums", "art_locked",
+     "ALTER TABLE lib2_albums ADD COLUMN art_locked INTEGER NOT NULL DEFAULT 0"),
     # The media-server link. lib2 had no way to say "this row is the server's
     # <id>", which is the only handle a play-count sync or an incremental scan
     # has — see §50.4.4.25. Both halves are needed: the id is only unique

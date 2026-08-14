@@ -183,7 +183,7 @@ def test_ignore_ttl_reads_config(monkeypatch):
         def get(self, key, default=None):
             return self.v if key == 'wishlist.ignore_ttl_days' else default
 
-    import config.settings as cs
+    import core.settings as cs
     monkeypatch.setattr(cs, 'config_manager', _Cfg(7))
     assert ig.configured_ttl_days() == 7
     monkeypatch.setattr(cs, 'config_manager', _Cfg(9999))

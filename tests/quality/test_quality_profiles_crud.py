@@ -243,7 +243,7 @@ def test_delete_clears_matching_auto_import_override(db, monkeypatch):
         def set(self, key, value):
             calls[key] = value
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     ok, reason = db.delete_quality_profile(2)
     assert ok is True and reason == ""
@@ -267,7 +267,7 @@ def test_sync_default_quality_profile_from_config(db, monkeypatch):
                 "lossy_copy.delete_original": True,
             }.get(key, default)
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     assert db.sync_default_quality_profile_from_config() is True
 
@@ -374,7 +374,7 @@ def test_apply_quality_profile_to_settings_pushes_into_config_manager(db, monkey
         def set(self, key, value):
             calls[key] = value
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     pid = db.create_quality_profile("Strict Everything", _FULL_BUNDLE)
     applied = db.apply_quality_profile_to_settings(pid)

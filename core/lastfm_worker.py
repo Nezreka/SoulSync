@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.lastfm_client import LastFMClient
-from config.settings import config_manager
+from core.settings import config_manager
 from core.worker_utils import interruptible_sleep
 
 logger = get_logger("lastfm_worker")

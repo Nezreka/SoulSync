@@ -85,7 +85,7 @@ def _library_roots(config_manager: Any = None) -> List[str]:
     """Return existing, canonical roots explicitly configured by the user."""
     try:
         if config_manager is None:
-            from config.settings import config_manager as _config_manager
+            from core.settings import config_manager as _config_manager
             config_manager = _config_manager
         configured = config_manager.get("library.music_paths", []) or []
     except Exception:  # noqa: BLE001

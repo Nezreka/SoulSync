@@ -203,7 +203,7 @@ def test_seed_remove_data_flag_flows_to_adapter(db, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_config_defaults_present_and_off():
-    import config.settings as cs
+    import core.settings as cs
     src = Path(cs.__file__).read_text(encoding="utf-8")
     assert '"seed_ratio_goal": 0' in src
     assert '"seed_time_goal_hours": 0' in src

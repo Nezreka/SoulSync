@@ -99,7 +99,7 @@ class MediaServerEngine:
             self.registry.initialize()
 
         if active_server_resolver is None:
-            from config.settings import config_manager
+            from core.settings import config_manager
             active_server_resolver = config_manager.get_active_media_server
         self._resolve_active = active_server_resolver
 

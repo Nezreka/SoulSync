@@ -42,7 +42,7 @@ def _get_configured_library_discography_source() -> str:
     """
 
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
 
         raw_source = config_manager.get(
             "metadata.library_discography_source",

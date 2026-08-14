@@ -42,6 +42,48 @@ _OFFICIAL_PREFIX = re.compile(r"^\s*(?:the\s+)?official\s+", re.IGNORECASE)
 # Trailing VEVO, attached ("ColdplayVEVO") or spaced ("Coldplay VEVO").
 _VEVO_SUFFIX = re.compile(r"\s*vevo\s*$", re.IGNORECASE)
 
+# Scripts that YouTube Music restates in Latin alongside the original title.
+_NON_LATIN = re.compile(
+    "["
+    "぀-ヿ"              # hiragana + katakana
+    "㐀-䶿一-鿿"  # CJK ideographs
+    "가-힯"              # hangul
+    "Ѐ-ӿ"              # cyrillic
+    "Ͱ-Ͽ"              # greek
+    "֐-׿"              # hebrew
+    "؀-ۿ"              # arabic
+    "฀-๿"              # thai
+    "ऀ-ॿ"              # devanagari
+    "]"
+)
+
+# Decoration around the *same* title: "(Album Mix)", "[HD]", "-Naruto Mix-".
+_BRACKETED = re.compile(r"[（(\[【｢「].*?[)）\]】｣」]")
+_DASHED_TAIL = re.compile(r"\s-[^-]+-\s*$")
+
+# A segment only counts as "the Latin statement" if it actually contains a
+# Latin letter — NOT merely because it fails to match _NON_LATIN. _NON_LATIN
+# is a fixed list of scripts; a script it doesn't list (Armenian, Georgian,
+# ...) would otherwise slip through as "not non-Latin" and could itself get
+# returned as the "Latin" candidate, which is nonsense for callers expecting
+# Latin text back.
+_HAS_LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏḀ-ỿ]")
+
+# A generic upload/performance credit ("Live at Budokan", "Official Music
+# Video") describes a DIFFERENT thing from the title before it — it is not
+# evidence of a restatement just because it happens to be in a different
+# script. Real restatements are two statements of the SAME title; this is a
+# title plus a credit that says nothing about the title itself.
+_GENERIC_CREDIT = re.compile(
+    r"^(?:"
+    r"live\s+(?:at|in|from)\s+.+"
+    r"|official\s+(?:music\s+)?video"
+    r"|official\s+audio"
+    r"|lyrics?\s+video"
+    r")$",
+    re.IGNORECASE,
+)
+
 
 def clean_source_artist(artist: str) -> str:
     """Strip well-known streaming-channel decoration from an artist name.
@@ -90,16 +132,93 @@ def strip_artist_prefix(title: str, artist: str) -> str:
     return title
 
 
+def _title_core(text: str) -> str:
+    """The title with same-title decoration removed, normalized for comparison.
+
+    ``"Rain (Long Ver.)"`` and ``"Rain (Long Version)"`` both reduce to ``"rain"``,
+    which is what makes them recognizable as one title stated twice."""
+    s = _BRACKETED.sub(" ", text or "")
+    s = _DASHED_TAIL.sub(" ", s)
+    return normalize_for_comparison(" ".join(s.split()))
+
+
+def restated_title(title: str) -> str | None:
+    """For a title that states the SAME track twice, return the Latin statement.
+
+    YouTube Music serves localized titles with a transliteration appended:
+    ``"狂乱 Hey Kids!! - Kyouran Hey Kids!!"``, ``"すずめ - Suzume (feat. Toaka)"``.
+    Providers index the transliteration, so scoring the raw string against
+    ``"Kyouran Hey Kids!!"`` finds nothing. The same shape appears within Latin
+    text when a mix is renamed: ``"COLORS (Album Mix) - Colors (Ailu Mix)"``.
+
+    Returns ``None`` unless the two halves are demonstrably the same title, by
+    one of two independent tests:
+
+    * **different scripts** — one half contains a genuine Latin letter and no
+      recognized non-Latin script, the other contains a recognized non-Latin
+      script (or otherwise has no Latin letter of its own — an unlisted
+      script never gets returned as "the Latin half"); the Latin half is
+      returned unless it reads as a generic upload/performance credit
+      ("Live at Budokan", "Official Music Video"), which is a genuine
+      subtitle rather than a restatement.
+    * **same core** — both halves reduce to the same string once bracketed and
+      dash-delimited decoration is dropped.
+
+    Everything else is left alone, so ``"Sketchy - Molly And The Zombies"``
+    (title then band) and ``"Last Kiss (cover) - Brian Fallon"`` are untouched.
+    Callers use the result as an ADDITIONAL candidate, never a replacement."""
+    if not title:
+        return None
+
+    # A title can be stated more than twice — "烏 - Raven - Karasu - Raven"
+    # carries the original, a translation and a transliteration. Splitting on
+    # every separator and taking the first Latin-only statement handles those
+    # as well as the plain two-part case.
+    segments = [s.strip() for s in _SEP_SPLIT.split(title)]
+    segments = [s for s in segments if s]
+    if len(segments) < 2:
+        return None
+
+    latin = [
+        s for s in segments
+        if _HAS_LATIN_LETTER.search(s) and not _NON_LATIN.search(s)
+    ]
+    if latin and len(latin) != len(segments):
+        candidate = latin[0]
+        if candidate != title and not _GENERIC_CREDIT.match(candidate):
+            return candidate
+        return None
+
+    # All one script: only a demonstrable restatement counts — both halves
+    # reduce to the same string once decoration is dropped.
+    if len(segments) == 2:
+        left_core, right_core = _title_core(segments[0]), _title_core(segments[1])
+        if left_core and left_core == right_core:
+            return segments[1]
+    return None
+
+
 def canonical_source_track(title: str, artist: str) -> tuple[str, str]:
     """Best-effort clean (title, artist) for matching a streaming/YouTube source
     against clean library metadata. Cleans the artist first, then strips a
     leading artist prefix from the title using EITHER the cleaned or the raw
-    artist (YouTube titles prepend the real artist, not the channel name)."""
+    artist (YouTube titles prepend the real artist, not the channel name).
+
+    Falls back to :func:`restated_title` when no artist prefix was found, so a
+    title stated twice ("original - transliteration") contributes its Latin
+    statement as the canonical candidate."""
     cleaned_artist = clean_source_artist(artist)
     new_title = strip_artist_prefix(title, cleaned_artist)
     if new_title == title and cleaned_artist != artist:
         new_title = strip_artist_prefix(title, artist)
+    if new_title == title:
+        new_title = restated_title(title) or title
     return new_title, cleaned_artist
 
 
-__all__ = ["clean_source_artist", "strip_artist_prefix", "canonical_source_track"]
+__all__ = [
+    "canonical_source_track",
+    "clean_source_artist",
+    "restated_title",
+    "strip_artist_prefix",
+]

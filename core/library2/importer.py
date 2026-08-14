@@ -733,7 +733,10 @@ class _ArtistResolver:
                              if row_ids else "{}")
             self.cursor.execute(
                 "UPDATE lib2_artists SET name=?, name_key=?, sort_name=?, spotify_id=?, "
-                "musicbrainz_id=?, external_ids=?, image_url=?, genres=?, summary=?, "
+                "musicbrainz_id=?, external_ids=?, "
+                "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END, "
+                "art_locked=MAX(COALESCE(art_locked,0),COALESCE(?,0)), "
+                "genres=?, summary=?, "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
                 "label=COALESCE(?, label), banner_url=COALESCE(?, banner_url), "
                 "aliases=?, soul_id=COALESCE(?, soul_id), "
@@ -744,7 +747,8 @@ class _ArtistResolver:
                 (fields["name"], normalize_name(fields["name"]),
                  fields["sort_name"], row_ids.get("spotify"),
                  row_ids.get("musicbrainz"),
-                 external_json, fields["image_url"], fields["genres"],
+                 external_json, fields["image_url"], fields.get("art_locked"),
+                 fields["genres"],
                  fields["summary"], fields["style"], fields["mood"],
                  fields["label"], fields["banner_url"], fields["aliases"],
                  fields["soul_id"], fields.get("server_source"),
@@ -759,15 +763,16 @@ class _ArtistResolver:
         spotify_col, mbid_col = ids.get("spotify"), ids.get("musicbrainz")
         self.cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, spotify_id, musicbrainz_id, "
-            "external_ids, image_url, genres, summary, style, mood, label, "
+            "external_ids, image_url, art_locked, genres, summary, style, mood, label, "
             "banner_url, aliases, soul_id, server_source, server_id, "
             "legacy_artist_id, quality_profile_id, "
             "legacy_import_run_id, monitored, added_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
             "       COALESCE(?, CURRENT_TIMESTAMP))",
             (fields["name"], normalize_name(fields["name"]),
              fields["sort_name"], spotify_col, mbid_col, external_json,
-             fields["image_url"], fields["genres"], fields["summary"],
+             fields["image_url"], fields.get("art_locked") or 0,
+             fields["genres"], fields["summary"],
              fields["style"], fields["mood"], fields["label"], fields["banner_url"],
              fields["aliases"], fields["soul_id"], fields.get("server_source"),
              fields.get("server_id"), legacy_id,
@@ -1129,6 +1134,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "deezer_artist_id", "deezer_id", "tidal_artist_id", "tidal_id",
                 "qobuz_artist_id", "qobuz_id", "thumb_url", "banner_url",
                 "genres", "summary", "style", "mood", "label", "aliases",
+                "art_locked",
                 "soul_id",
                 "lastfm_bio", "lastfm_listeners", "lastfm_tags",
                 "lastfm_similar", "lastfm_url", "genius_description",
@@ -1187,6 +1193,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     ),
                 },
                 "image_url": _pick(row, "thumb_url", "banner_url"),
+                "art_locked": _pick(row, "art_locked"),
                 "genres": _normalize_genres(_pick(row, "genres")),
                 "summary": _pick(row, "summary"),
                 # §17.7 remainder: AudioDB-sourced fields + MusicBrainz aliases
@@ -1228,6 +1235,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "track_count", "album_type", "release_type", "type", "year",
                 "api_track_count", "release_date", "spotify_album_id",
                 "musicbrainz_release_id", "thumb_url", "genres", "explicit",
+                "art_locked",
                 "label", "upc", "style", "mood", "soul_id", "deezer_album_id",
                 "deezer_id", "tidal_album_id", "tidal_id", "qobuz_album_id",
                 "qobuz_id", "record_type", "server_source", "created_at",
@@ -1291,7 +1299,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 lib2_artist, row["title"], album_type,
                 _pick(row, "release_date"), year,
                 _legacy_spotify_id(row, "spotify_album_id"), _pick(row, "musicbrainz_release_id"),
-                _pick(row, "thumb_url"), _normalize_genres(_pick(row, "genres")),
+                _pick(row, "thumb_url"), _pick(row, "art_locked") or 0,
+                _normalize_genres(_pick(row, "genres")),
                 track_count, expected,
                 _pick(row, "explicit"), _pick(row, "label"), _pick(row, "upc"),
                 # §48: rich-metadata-edit parity — same AudioDB-sourced fields
@@ -1325,7 +1334,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "UPDATE lib2_albums SET primary_artist_id=?, title=?, album_type=?, "
                     "release_date=?, year=?, spotify_id=COALESCE(?, spotify_id), "
                     "musicbrainz_id=COALESCE(?, musicbrainz_id), "
-                    "image_url=COALESCE(?, image_url), "
+                    "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
+                    "               ELSE COALESCE(?, image_url) END, "
+                    "art_locked=MAX(COALESCE(art_locked,0),COALESCE(?,0)), "
                     "genres=?, track_count=?, expected_track_count=?, "
                     "explicit=COALESCE(?, explicit), label=COALESCE(?, label), "
                     "upc=COALESCE(?, upc), "
@@ -1357,7 +1368,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 )
                 cursor.execute(
                     "INSERT INTO lib2_albums(primary_artist_id, title, album_type, "
-                    "release_date, year, spotify_id, musicbrainz_id, image_url, genres, "
+                    "release_date, year, spotify_id, musicbrainz_id, image_url, art_locked, genres, "
                     "track_count, expected_track_count, explicit, label, upc, "
                     "style, mood, soul_id, "
                     "canonical_source, canonical_album_id, canonical_score, "
@@ -1365,7 +1376,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "server_source, server_id, "
                     "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id, "
                     "added_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
                     "       COALESCE(?, CURRENT_TIMESTAMP))",
                     (*fields, row["id"], default_profile_id, album_monitored, run_id,
                      _pick(row, "created_at")),

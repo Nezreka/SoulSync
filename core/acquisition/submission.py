@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Protocol
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.acquisition.candidates import redact_sensitive_text
 from core.acquisition.grabs import (
     STATUS_QUEUED,

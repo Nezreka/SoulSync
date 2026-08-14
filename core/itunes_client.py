@@ -270,7 +270,7 @@ class iTunesClient:
         if self._fixed_country:
             return self._fixed_country
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             return (config_manager.get('itunes.country', 'US') or 'US').upper()
         except Exception:
             return 'US'

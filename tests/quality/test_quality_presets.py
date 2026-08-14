@@ -53,7 +53,7 @@ _V2_LOSSLESS = {
 
 
 def _migrate(profile, cfg_values, monkeypatch):
-    monkeypatch.setattr('config.settings.config_manager', _FakeCfg(cfg_values), raising=False)
+    monkeypatch.setattr('core.settings.config_manager', _FakeCfg(cfg_values), raising=False)
     db = MusicDatabase.__new__(MusicDatabase)
     return db._migrate_v2_to_v3(profile)
 

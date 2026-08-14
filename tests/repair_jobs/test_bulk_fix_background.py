@@ -159,3 +159,31 @@ def test_sync_bulk_fix_unchanged_by_refactor(tmp_path):
     _add_genre_finding(db, 'AR0', 0)
     result = _worker(db, tmp_path).bulk_fix_findings(job_id='genre_cleanup')
     assert result['fixed'] == 1 and result['total'] == 1
+
+
+def test_a_finished_run_never_reports_already_running(tmp_path):
+    """Waiting for a run to finish must be enough to start the next one.
+
+    The single-flight guard reads `_bulk_fix_thread.is_alive()`; callers wait on
+    `state['running']`. Those are two signals for one condition, and the flag
+    used to flip while the thread was still winding down — so a caller that had
+    correctly waited was told "a bulk fix is already running". It passed locally
+    and failed on CI, which is exactly the profile of a timing window.
+
+    Asserted as an invariant rather than by racing it: anyone who observes
+    running=False must also observe a released thread reference.
+    """
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    for i in range(3):
+        _add_genre_finding(db, f'AR{i}', i)
+    w = _worker(db, tmp_path)
+
+    assert w.start_bulk_fix()['started'] is True
+    _wait_done(w)
+
+    assert w._bulk_fix_thread is None, (
+        "the run reported finished while still holding its thread — the next "
+        "start will be refused with already_running")
+
+    again = w.start_bulk_fix()
+    assert 'already_running' not in again, again

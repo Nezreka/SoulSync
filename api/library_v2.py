@@ -2574,7 +2574,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _art_options_cache[album_id] = (now, candidates)
         return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
 
-    @app.route("/api/library/v2/albums/<int:album_id>/art", methods=["POST"])
+    @app.route("/api/library/v2/albums/<int:album_id>/art", methods=["POST", "DELETE"])
     def lib2_album_art_apply(album_id):
         """Apply a cover chosen in the picker (docs §49). Body: ``{"url": "<image url>"}``.
         Pins the choice as a metadata override so a later refresh won't clobber
@@ -2582,6 +2582,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
+        if request.method == "DELETE":
+            from core.library2.artwork import invalidate_artwork
+            from core.library2.metadata_overrides import clear_field_override
+
+            conn = _conn()
+            try:
+                removed = clear_field_override(
+                    conn, entity_type="release_group", entity_id=album_id,
+                    field_name="image_url", profile_id=_profile(),
+                )
+                updated = conn.execute(
+                    "UPDATE lib2_albums SET art_locked=0, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?", (album_id,),
+                ).rowcount
+                if not updated:
+                    conn.rollback()
+                    return jsonify({"success": False, "error": "Album not found"}), 404
+                conn.commit()
+            finally:
+                conn.close()
+            invalidate_artwork(get_database(), "album", album_id)
+            return jsonify({
+                "success": True, "album_id": album_id,
+                "art_locked": False, "override_removed": bool(removed),
+            })
         body = request.get_json(silent=True) or {}
         url = str(body.get("url") or "").strip()
         if not url:
@@ -2734,7 +2759,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _artist_art_options_cache[artist_id] = (now, candidates)
         return jsonify({"success": True, "count": len(candidates), "candidates": candidates})
 
-    @app.route("/api/library/v2/artists/<int:artist_id>/art", methods=["POST"])
+    @app.route("/api/library/v2/artists/<int:artist_id>/art", methods=["POST", "DELETE"])
     def lib2_artist_art_apply(artist_id):
         """Apply a photo chosen in the picker (deep-dive A9). Body:
         ``{"url": "<image url>"}``. Pins the choice as a metadata override
@@ -2743,6 +2768,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         guard = _guard()
         if guard:
             return guard
+        if request.method == "DELETE":
+            from core.library2.artwork import invalidate_artwork
+            from core.library2.metadata_overrides import clear_field_override
+
+            conn = _conn()
+            try:
+                removed = clear_field_override(
+                    conn, entity_type="artist", entity_id=artist_id,
+                    field_name="image_url", profile_id=_profile(),
+                )
+                updated = conn.execute(
+                    "UPDATE lib2_artists SET art_locked=0, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?", (artist_id,),
+                ).rowcount
+                if not updated:
+                    conn.rollback()
+                    return jsonify({"success": False, "error": "Artist not found"}), 404
+                conn.commit()
+            finally:
+                conn.close()
+            invalidate_artwork(get_database(), "artist", artist_id)
+            return jsonify({
+                "success": True, "artist_id": artist_id,
+                "art_locked": False, "override_removed": bool(removed),
+            })
         body = request.get_json(silent=True) or {}
         url = str(body.get("url") or "").strip()
         if not url:
@@ -4223,8 +4273,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ``canonical_track_id`` links a single release to the same recording on
         a regular album (linked by the importer). Each side carries its file's
         quality and monitor state so the user can decide which version to keep
-        wanted; the actual file dedup stays with the ``single_album_dedup``
-        maintenance job."""
+        wanted. File links can be consolidated onto either recording and
+        unwanted physical files are removed explicitly from Manage Tracks."""
         guard = _guard()
         if guard:
             return guard
@@ -4514,8 +4564,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     @app.route("/api/library/v2/upgrade-scan", methods=["POST"])
     def lib2_upgrade_scan():
         """Queue every monitored track whose file is an upgrade candidate under
-        its ``until_top`` quality profile into the wishlist (lib2-aware pass;
-        the legacy quality_upgrade worker only scans the legacy tables)."""
+        its ``until_top`` quality profile into the wishlist using Library v2."""
         guard = _guard()
         if guard:
             return guard

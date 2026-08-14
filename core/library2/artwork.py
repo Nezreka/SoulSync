@@ -1049,6 +1049,12 @@ def apply_manual_artwork(
             field_name="image_url", value=url, profile_id=profile_id,
             reason="manual cover pick",
         )
+        table = {"artist": "lib2_artists", "album": "lib2_albums"}[kind]
+        conn.execute(
+            f"UPDATE {table} SET image_url=?, art_locked=1, "
+            "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (url, int(entity_id)),
+        )
         out = artwork_file(database, kind, entity_id)
         try:
             tmp = _unique_tmp_path(out, ".writing")

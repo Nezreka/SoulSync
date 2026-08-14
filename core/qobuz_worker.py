@@ -594,7 +594,7 @@ class QobuzWorker:
             genre if isinstance(genre, str) else None)
         if genre_name:
             from core.genre_filter import filter_genres
-            from config.settings import config_manager as _cfg
+            from core.settings import config_manager as _cfg
             _filtered = filter_genres([genre_name], _cfg)
             if _filtered:
                 backfill['genres'] = json.dumps(_filtered)

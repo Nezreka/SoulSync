@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Optional, Sequence, Tuple
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.acquisition.search_contract import (
     CandidateParseError,
     ParsedCandidate,

@@ -345,7 +345,7 @@ def test_materialized_simple_download_is_no_longer_an_orphan(tmp_path: Path,
     downloaded.parent.mkdir(parents=True)
     downloaded.write_bytes(b"no DB match")
 
-    from config.settings import config_manager
+    from core.settings import config_manager
     real_get = config_manager.get
     monkeypatch.setattr(
         config_manager, "get",

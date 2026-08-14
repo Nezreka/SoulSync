@@ -689,7 +689,14 @@ export function FindingsSurface({
             const jobIds = group.job_ids || [];
             const result =
               jobIds.length === 1
-                ? await clearFindings(jobIds[0], 'pending')
+                ? await clearFindings({
+                    jobId: jobIds[0],
+                    status: 'pending',
+                    // Scope to THIS type. Without it a job that emits several
+                    // finding types would lose all of its pending rows when
+                    // you cleared one group (the #1142 family).
+                    findingType: group.finding_type,
+                  })
                 : {
                     success: true,
                     deleted: (await dismissFindingType(group.finding_type)).updated,
@@ -832,17 +839,32 @@ export function FindingsSurface({
 
   /** `clearRepairFindings` — deletes rows outright, filter-scoped. */
   const clearAll = useCallback(async () => {
+    const needle = query.trim();
     const scopeLabel = jobFilter ? jobLabel(jobFilter) : 'all jobs';
     const statusLabel = statusFilter ? ` (${statusFilter})` : '';
+    // Spell out EVERY filter being applied. The button deletes rows for good,
+    // and its old message named only the job and status — so a user who had
+    // narrowed by severity or search read a prompt describing a far wider
+    // delete than they expected, and got one (#1142).
+    const extra = [
+      severityFilter ? `severity ${severityFilter}` : '',
+      needle ? `matching "${needle}"` : '',
+    ].filter(Boolean);
+    const extraLabel = extra.length ? `, ${extra.join(', ')}` : '';
     const confirmed = await window.showConfirmDialog?.({
       title: 'Clear Findings',
-      message: `Delete all findings for ${scopeLabel}${statusLabel}? This cannot be undone.`,
+      message: `Delete all findings for ${scopeLabel}${statusLabel}${extraLabel}? This cannot be undone.`,
       confirmText: 'Clear',
       destructive: true,
     });
     if (!confirmed) return;
     try {
-      const result = await clearFindings(jobFilter, statusFilter);
+      const result = await clearFindings({
+        jobId: jobFilter,
+        status: statusFilter,
+        severity: severityFilter,
+        q: needle,
+      });
       toast(
         result.success
           ? `Cleared ${result.deleted} findings`
@@ -853,7 +875,7 @@ export function FindingsSurface({
     } catch {
       toast('Error clearing findings', 'error');
     }
-  }, [jobFilter, jobLabel, refreshAll, statusFilter]);
+  }, [jobFilter, jobLabel, query, refreshAll, severityFilter, statusFilter]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 

@@ -189,7 +189,7 @@ def materialize_wishlist_intent(
             return None
         if int(profile_id) != ADMIN_PROFILE_ID:
             return None
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.library2.feature import library_v2_enabled
         library_v2_enabled(config_manager)
         from database.music_database import get_database

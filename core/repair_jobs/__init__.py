@@ -41,6 +41,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'expired_download_cleaner': 'filesystem',
     'library_reorganize': 'lib2',
     'genre_cleanup': 'lib2',
+    'genre_enrichment': 'lib2',
     'comma_artist_splitter': 'lib2',
     'path_drift_reconcile': 'lib2',
 }
@@ -99,6 +100,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'library_reorganize': frozenset({'observe', 'path'}),
     # Rewrites artists.genres / albums.genres to the kept (whitelisted) list.
     'genre_cleanup': frozenset({'observe', 'metadata'}),
+    'genre_enrichment': frozenset({'observe', 'metadata'}),
     # Re-tags the affected files' embedded artist fields; the DB artist row
     # itself isn't touched by the fix.
     'comma_artist_splitter': frozenset({'observe', 'tags'}),
@@ -218,6 +220,7 @@ _JOB_MODULES = [
     'core.repair_jobs.short_preview_track',
     'core.repair_jobs.audio_corruption_detector',
     'core.repair_jobs.genre_cleanup',
+    'core.repair_jobs.genre_enrichment',
     'core.repair_jobs.comma_artist_splitter',
     'core.repair_jobs.lib2_upgrade_scan',
     'core.repair_jobs.lib2_skips_cleanup',

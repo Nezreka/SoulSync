@@ -358,7 +358,7 @@ class DeezerClient:
     def _load_token(self):
         """Load OAuth access token from config if available."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             self._access_token = config_manager.get('deezer.access_token', None)
         except Exception:
             self._access_token = None

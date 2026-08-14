@@ -8,7 +8,7 @@ flag mirrored from web_server's own flag in ``_shutdown_runtime_components``.
 import threading
 import time
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.downloads.source_policy import (
     RELEASE_SOURCE_NAMES as _RELEASE_SOURCE_NAMES,
     STREAMING_SOURCE_NAMES as _STREAMING_SOURCE_NAMES,

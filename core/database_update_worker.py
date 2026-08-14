@@ -8,7 +8,7 @@ import time
 
 from database import get_database, MusicDatabase
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 logger = get_logger("database_update_worker")
 

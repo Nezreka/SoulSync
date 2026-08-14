@@ -93,8 +93,17 @@ class NativeEnrichmentSweepJob(RepairJob):
     auto_fix = True
 
     def _batch_size(self, context: JobContext) -> int:
+        settings = {}
+        if context.config_manager:
+            raw = context.config_manager.get(
+                'repair.jobs.native_enrichment_sweep.settings', {})
+            if isinstance(raw, dict):
+                settings = raw
         try:
-            return max(1, int((context.settings or {}).get('batch_size', DEFAULT_BATCH)))
+            value = settings.get('batch_size', DEFAULT_BATCH)
+            if isinstance(value, bool):
+                raise ValueError
+            return max(1, int(value))
         except (TypeError, ValueError):
             return DEFAULT_BATCH
 

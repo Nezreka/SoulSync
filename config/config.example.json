@@ -76,5 +76,16 @@
   "features": {
     "_comment": "library_v2 is retained only for config compatibility. Library V2 is now the non-disableable native catalogue and repair engine; false is ignored with a migration warning.",
     "library_v2": true
+  },
+  "image_cache": {
+    "enabled": true,
+    "thumbnails": false,
+    "max_cache_mb": 2048,
+    "ttl_seconds": 2592000,
+    "max_download_mb": 15,
+    "fetch_timeout": 10,
+    "variant_grid_px": 240,
+    "variant_card_px": 480,
+    "variant_hero_px": 1200
   }
 }

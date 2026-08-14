@@ -117,7 +117,7 @@ def register_routes(bp):
             ok = db.remove_artist_from_watchlist(artist_id, profile_id=profile_id)
             if ok:
                 try:
-                    from config.settings import config_manager
+                    from core.settings import config_manager
                     from core.library2.monitor_sync import sync_watchlist_removal
                     sync_watchlist_removal(db, config_manager, descriptor,
                                            profile_id=profile_id)
