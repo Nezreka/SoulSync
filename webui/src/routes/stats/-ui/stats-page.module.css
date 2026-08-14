@@ -856,3 +856,30 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Tile delta — the comparison that turns a total into a signal (stats P1).
+   Absent entirely when there is nothing honest to compare against. */
+.statsCardDelta {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+
+.statsCardDelta_up {
+  color: #4ade80;
+}
+
+.statsCardDelta_down {
+  color: #f87171;
+}
+
+/* Flat is deliberately NOT red or green — no change is not bad news. */
+.statsCardDelta_flat {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.statsCardDeltaNew {
+  color: rgb(var(--accent-rgb));
+}

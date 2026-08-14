@@ -33,6 +33,13 @@ describe('stats route', () => {
             unique_albums: 4,
             unique_tracks: 12,
           },
+          previous: {
+            total_plays: 12,
+            total_time_ms: 3_300_000,
+            unique_artists: 3,
+            unique_albums: 2,
+            unique_tracks: 6,
+          },
           top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
           top_albums: [],
           top_tracks: [],
@@ -174,6 +181,71 @@ describe('stats route', () => {
 
     await waitFor(() => expect(history.location.pathname).toBe('/discover'));
   });
+  /**
+   * The tiles printed totals with nothing to measure them against. The delta is
+   * the whole point of stats P1 — a render guard so it cannot quietly stop
+   * appearing (the download-chip lesson: half a feature can ship inert).
+   */
+  it('shows each tile its change against the previous period', async () => {
+    renderStatsRoute();
+    // plays 24/12, time 6.6M/3.3M, albums 4/2, tracks 12/6 all doubled.
+    const doubled = await screen.findAllByText(/↑ 100% vs previous 7 days/);
+    expect(doubled).toHaveLength(4);
+    // Artists were 3 both periods — flat, and deliberately not an arrow.
+    expect(screen.getByText(/· 0% vs previous 7 days/)).toBeTruthy();
+  });
+
+  /**
+   * Defence against a STALE cache. The worker writes previous: null for 'all',
+   * but a cache written before that existed — or a future backend slip — could
+   * hand the page a previous it has no label for, and the tile would read
+   * "↑ 5% undefined". The label is the gate, not just the data.
+   */
+  it('renders no delta for a range it has no label for, even with data', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 24, total_time_ms: 1, unique_artists: 1,
+                      unique_albums: 1, unique_tracks: 1 },
+          // A previous window that should not exist for 'all'.
+          previous: { total_plays: 12, total_time_ms: 1, unique_artists: 1,
+                      unique_albums: 1, unique_tracks: 1 },
+          top_artists: [], top_albums: [], top_tracks: [],
+          timeline: [], genres: [], recent: [],
+          health: { total_tracks: 12 },
+        }),
+      ),
+    );
+    renderStatsRoute(['/stats?range=all']);
+    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    // The symptom is NOT the string "undefined" — React renders a null label
+    // as empty. It is a naked "↑ 100%" with nothing saying what it is against.
+    expect(screen.queryByText(/↑\s*100%/)).toBeNull();
+    expect(screen.queryByText(/vs previous/)).toBeNull();
+  });
+
+  it('omits the comparison entirely on the all-time range', async () => {
+    // 'all' has no period before it — the backend sends previous: null and the
+    // page must render nothing rather than a delta against zero.
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 24, total_time_ms: 1, unique_artists: 1,
+                      unique_albums: 1, unique_tracks: 1 },
+          previous: null,
+          top_artists: [], top_albums: [], top_tracks: [],
+          timeline: [], genres: [], recent: [],
+          health: { total_tracks: 12 },
+        }),
+      ),
+    );
+    renderStatsRoute(['/stats?range=all']);
+    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    expect(screen.queryByText(/vs previous/)).toBeNull();
+  });
+
 });
 
 describe('stats route survives a backend outage', () => {

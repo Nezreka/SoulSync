@@ -51,8 +51,10 @@ import {
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
+  isNewSincePrevious,
   STATS_DB_STORAGE_COLORS,
   STATS_GENRE_COLORS,
+  statDelta,
   visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
 import { Route } from '../route';
@@ -203,7 +205,11 @@ export function StatsPage() {
         <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
       ) : hasData ? (
         <>
-          <OverviewCards overview={overview} />
+          <OverviewCards
+            overview={overview}
+            previous={cachedStats?.previous ?? null}
+            periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
+          />
           <div className={styles.statsMainGrid}>
             <div className={styles.statsLeftCol}>
               <StatsSectionCard title="Listening Activity">
@@ -262,24 +268,44 @@ export function StatsPage() {
   );
 }
 
+type OverviewShape = Partial<{
+  total_plays: number;
+  total_time_ms: number;
+  unique_artists: number;
+  unique_albums: number;
+  unique_tracks: number;
+}>;
+
+/**
+ * What the delta is measured against, per range. 'all' is absent on purpose —
+ * there is no period before everything, so its tiles carry no comparison.
+ */
+const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
+  '7d': 'vs previous 7 days',
+  '30d': 'vs previous 30 days',
+  '12m': 'vs previous 12 months',
+};
+
 function OverviewCards({
   overview,
+  periodLabel,
+  previous,
 }: {
-  overview: Partial<{
-    total_plays: number;
-    total_time_ms: number;
-    unique_artists: number;
-    unique_albums: number;
-    unique_tracks: number;
-  }>;
+  overview: OverviewShape;
+  periodLabel: string | null;
+  previous: OverviewShape | null;
 }) {
   const cards = [
-    { label: 'Total Plays', value: formatCompactNumber(overview.total_plays) },
-    { label: 'Listening Time', value: formatListeningTime(overview.total_time_ms) },
-    { label: 'Artists', value: formatCompactNumber(overview.unique_artists) },
-    { label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
-    { label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
-  ];
+    { key: 'total_plays', label: 'Total Plays', value: formatCompactNumber(overview.total_plays) },
+    {
+      key: 'total_time_ms',
+      label: 'Listening Time',
+      value: formatListeningTime(overview.total_time_ms),
+    },
+    { key: 'unique_artists', label: 'Artists', value: formatCompactNumber(overview.unique_artists) },
+    { key: 'unique_albums', label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
+    { key: 'unique_tracks', label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
+  ] as const;
 
   return (
     <div id="stats-overview" className={styles.statsOverview}>
@@ -287,8 +313,49 @@ function OverviewCards({
         <div key={card.label} className={styles.statsCard}>
           <div className={styles.statsCardValue}>{card.value}</div>
           <div className={styles.statsCardLabel}>{card.label}</div>
+          <StatsCardDelta
+            current={overview[card.key]}
+            previous={previous?.[card.key]}
+            periodLabel={periodLabel}
+          />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The change against the equivalent previous period.
+ *
+ * Renders NOTHING rather than something misleading, in three cases: no
+ * previous period at all (range 'all'), a previous period of zero (there is no
+ * honest percentage for growth from nothing — that shows "new" instead), and a
+ * partial payload. A stats page that invents "+∞%" is worse than one that says
+ * less.
+ */
+function StatsCardDelta({
+  current,
+  periodLabel,
+  previous,
+}: {
+  current: number | undefined;
+  periodLabel: string | null;
+  previous: number | undefined;
+}) {
+  if (!periodLabel) return null;
+  if (isNewSincePrevious(current, previous)) {
+    return (
+      <div className={`${styles.statsCardDelta} ${styles.statsCardDeltaNew}`}>
+        new {periodLabel}
+      </div>
+    );
+  }
+  const delta = statDelta(current, previous);
+  if (!delta) return null;
+  const arrow = delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : '·';
+  return (
+    <div className={`${styles.statsCardDelta} ${styles[`statsCardDelta_${delta.direction}`]}`}>
+      {arrow} {delta.pct}% {periodLabel}
     </div>
   );
 }

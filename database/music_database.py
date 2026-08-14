@@ -5252,12 +5252,23 @@ class MusicDatabase:
         Returns:
             Dict with total_plays, total_time_ms, unique_artists, unique_albums, unique_tracks
         """
+        return self._listening_overview(self._listening_time_filter(time_range))
+
+    _EMPTY_OVERVIEW = {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0,
+                       'unique_albums': 0, 'unique_tracks': 0}
+
+    def _listening_overview(self, where):
+        """The overview aggregate for an arbitrary WHERE clause.
+
+        One query body shared by the current window and the previous one, so the
+        two can never drift into measuring subtly different things — which is
+        exactly what would make a "vs last month" delta lie."""
+        if not where:
+            return dict(self._EMPTY_OVERVIEW)
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
-
             cursor.execute(f"""
                 SELECT
                     COUNT(*) as total_plays,
@@ -5278,10 +5289,20 @@ class MusicDatabase:
             }
         except Exception as e:
             logger.error(f"Error getting listening stats: {e}")
-            return {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0, 'unique_albums': 0, 'unique_tracks': 0}
+            return dict(self._EMPTY_OVERVIEW)
         finally:
             if conn:
                 conn.close()
+
+    def get_listening_stats_previous(self, time_range='all'):
+        """The overview for the period immediately BEFORE ``time_range``.
+
+        Returns None when there is no previous window ('all'), so the UI omits
+        the comparison instead of rendering a delta against nothing."""
+        where = self._listening_previous_filter(time_range)
+        if not where:
+            return None
+        return self._listening_overview(where)
 
     def get_top_artists(self, time_range='all', limit=10):
         """Get top artists by play count."""
@@ -5652,6 +5673,33 @@ class MusicDatabase:
             return f"WHERE {prefix}played_at >= datetime('now', '-12 months')"
         else:
             return "WHERE 1=1"
+
+    # The window of the SAME length immediately before the current one, so a
+    # stat can say "vs last month" instead of standing alone. A total with no
+    # reference point is trivia; the comparison is what makes it a signal.
+    #
+    # 'all' has no previous window by definition — the caller must not render a
+    # delta for it rather than us inventing a zero to compare against.
+    _PREVIOUS_WINDOW = {
+        '7d': ('-14 days', '-7 days'),
+        '30d': ('-60 days', '-30 days'),
+        '12m': ('-24 months', '-12 months'),
+    }
+
+    @staticmethod
+    def _listening_previous_filter(time_range, alias=''):
+        """WHERE clause for the period immediately BEFORE ``time_range``.
+
+        Returns None for 'all' (and anything unrecognised) — there is no
+        "before everything", and a caller that gets None must omit the
+        comparison rather than compare against nothing."""
+        window = MusicDatabase._PREVIOUS_WINDOW.get(time_range)
+        if not window:
+            return None
+        start, end = window
+        prefix = f"{alias}." if alias else ""
+        return (f"WHERE {prefix}played_at >= datetime('now', '{start}') "
+                f"AND {prefix}played_at < datetime('now', '{end}')")
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:

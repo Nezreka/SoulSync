@@ -87,6 +87,10 @@ export interface StatsRecentTrack {
 export interface StatsCachedPayload {
   success: boolean;
   overview?: Partial<StatsOverview>;
+  /** The same aggregate over the period BEFORE this range, powering the tile
+   *  deltas. null for 'all' — there is no period before everything, and the UI
+   *  omits the comparison rather than comparing against nothing. */
+  previous?: Partial<StatsOverview> | null;
   top_artists?: StatsArtistRow[];
   top_albums?: StatsAlbumRow[];
   top_tracks?: StatsTrackRow[];

@@ -231,6 +231,12 @@ class ListeningStatsWorker:
                 granularity = 'month' if time_range in ('12m', 'all') else 'day'
                 cache = {
                     'overview': self.db.get_listening_stats(time_range),
+                    # The same aggregate over the window immediately before this
+                    # one, so the page can say "vs last month" instead of
+                    # printing a total that stands alone. None for 'all' —
+                    # there is no period before everything, and the UI omits the
+                    # comparison rather than inventing a zero to beat.
+                    'previous': self.db.get_listening_stats_previous(time_range),
                     'top_artists': self.db.get_top_artists(time_range, 25),
                     'top_albums': self.db.get_top_albums(time_range, 25),
                     'top_tracks': self.db.get_top_tracks(time_range, 25),

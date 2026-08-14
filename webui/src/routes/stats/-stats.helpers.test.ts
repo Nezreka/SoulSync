@@ -8,6 +8,8 @@ import {
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
+  isNewSincePrevious,
+  statDelta,
   visibleStatsEnrichmentServices,
 } from './-stats.helpers';
 import { statsSearchSchema } from './-stats.types';
@@ -78,5 +80,55 @@ describe('stats helpers', () => {
     // Each toggles independently.
     expect(visibleStatsEnrichmentServices(false, true).map((s) => s.key)).toContain('bandcamp');
     expect(visibleStatsEnrichmentServices(false, true).map((s) => s.key)).not.toContain('jiosaavn');
+  });
+});
+
+// ── statDelta (stats P1) ─────────────────────────────────────────────────────
+
+describe('statDelta', () => {
+  it('reports growth and decline against the previous period', () => {
+    expect(statDelta(130, 100)).toEqual({ pct: 30, direction: 'up' });
+    expect(statDelta(70, 100)).toEqual({ pct: 30, direction: 'down' });
+  });
+
+  it('calls no change flat rather than a 0% arrow', () => {
+    expect(statDelta(100, 100)).toEqual({ pct: 0, direction: 'flat' });
+  });
+
+  it('rounds before choosing a direction', () => {
+    // A +0.4% change displays as "0%". An up-arrow beside "0%" reads as a bug.
+    expect(statDelta(1004, 1000)).toEqual({ pct: 0, direction: 'flat' });
+    expect(statDelta(996, 1000)).toEqual({ pct: 0, direction: 'flat' });
+  });
+
+  it('refuses to turn growth from zero into a percentage', () => {
+    // 0 → 5 is not 500% and not ∞. It is "new", which the caller renders
+    // instead. Returning a number here is how a stats page starts lying.
+    expect(statDelta(5, 0)).toBeNull();
+    expect(isNewSincePrevious(5, 0)).toBe(true);
+  });
+
+  it('has no delta when there is no previous period at all', () => {
+    // range 'all' — the backend sends null, not zeros.
+    expect(statDelta(5, null)).toBeNull();
+    expect(statDelta(5, undefined)).toBeNull();
+    // ...and that is NOT "new" — there is no previous period to be new against.
+    expect(isNewSincePrevious(5, null)).toBe(false);
+  });
+
+  it('has no delta on a partial payload', () => {
+    expect(statDelta(undefined, 100)).toBeNull();
+    expect(statDelta(Number.NaN, 100)).toBeNull();
+    expect(statDelta(100, Number.NaN)).toBeNull();
+  });
+
+  it('handles a drop to zero — that is a real -100%', () => {
+    expect(statDelta(0, 40)).toEqual({ pct: 100, direction: 'down' });
+  });
+
+  it('is not fooled by both sides being zero', () => {
+    // No plays then, no plays now. Not "new", not a percentage.
+    expect(statDelta(0, 0)).toBeNull();
+    expect(isNewSincePrevious(0, 0)).toBe(false);
   });
 });

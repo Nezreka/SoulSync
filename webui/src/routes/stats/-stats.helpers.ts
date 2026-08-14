@@ -170,3 +170,53 @@ export function getTopArtistBubbles(artists: StatsArtistRow[]) {
 function stripTrailingZero(value: string): string {
   return value.replace(/\.0$/, '');
 }
+
+/**
+ * A stat's change against the equivalent previous period.
+ *
+ * The stats page printed totals with nothing to measure them against — "1,247
+ * plays" says nothing about whether that is a lot. The delta is what turns a
+ * trivia number into a signal.
+ *
+ * Returns null whenever a percentage would be a lie rather than a fact:
+ *
+ * - `previous` is null — the range is 'all', which has no period before it.
+ * - `previous` is 0 — "up from nothing" has no honest percentage. Growth from
+ *   0 to 5 is not 500%, it is not a ratio at all. The caller shows "new"
+ *   instead of inventing ∞.
+ * - either side is missing/NaN — a partial payload must not render a delta.
+ *
+ * Zero change returns a delta with pct 0 and direction 'flat' — "no change" is
+ * a real answer and worth showing, unlike the cases above.
+ */
+export interface StatDelta {
+  pct: number;
+  direction: 'up' | 'down' | 'flat';
+}
+
+export function statDelta(
+  current: number | undefined | null,
+  previous: number | undefined | null,
+): StatDelta | null {
+  if (typeof current !== 'number' || !Number.isFinite(current)) return null;
+  if (typeof previous !== 'number' || !Number.isFinite(previous)) return null;
+  // Up from zero is not a percentage. Callers render "new".
+  if (previous === 0) return null;
+
+  const change = ((current - previous) / previous) * 100;
+  if (!Number.isFinite(change)) return null;
+
+  const pct = Math.round(Math.abs(change));
+  // Round BEFORE deciding direction: a +0.4% change displays as "0%", and an
+  // arrow next to "0%" reads as a rendering bug.
+  if (pct === 0) return { pct: 0, direction: 'flat' };
+  return { pct, direction: change > 0 ? 'up' : 'down' };
+}
+
+/** True when there is a previous period and it was empty — "new", not "+∞%". */
+export function isNewSincePrevious(
+  current: number | undefined | null,
+  previous: number | undefined | null,
+): boolean {
+  return previous === 0 && typeof current === 'number' && current > 0;
+}
