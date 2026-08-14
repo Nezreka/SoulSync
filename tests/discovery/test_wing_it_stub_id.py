@@ -32,9 +32,9 @@ def test_same_input_gives_same_id():
 @pytest.mark.parametrize("artist,track,expected", [
     # Pinned so a future change of hashing scheme is a deliberate, visible act:
     # stub ids already persisted in user databases would stop resolving.
-    ("Yorushika", "Ghost in a Flower", "wing_it_e6e3736d43fb"),
-    ("LiSA", "紅蓮華 - Gurenge", "wing_it_bc442918ee92"),
-    ("", "", "wing_it_b14a7b8059d9"),
+    ("Yorushika", "Ghost in a Flower", "wing_it_4099cdee0c37"),
+    ("LiSA", "紅蓮華 - Gurenge", "wing_it_19ec3ec87a86"),
+    ("", "", "wing_it_d8f6008c2af3"),
 ])
 def test_id_is_pinned_to_a_known_value(artist, track, expected):
     assert stub_track_id(artist, track) == expected
@@ -96,6 +96,13 @@ def test_different_tracks_get_different_ids():
 def test_none_and_empty_are_the_same_track():
     # Both mean "the source gave us nothing", so they must not split into two ids.
     assert stub_track_id(None, None) == stub_track_id("", "")
+
+
+def test_underscore_in_name_does_not_collide_across_the_boundary():
+    # A literal "_" in either field used to be indistinguishable from the
+    # artist/track separator: ("A_B", "C") and ("A", "B_C") both built the key
+    # "A_B_C". Length-prefixing fixes that.
+    assert stub_track_id("A_B", "C") != stub_track_id("A", "B_C")
 
 
 # ── is_stub_id ────────────────────────────────────────────────────────────
