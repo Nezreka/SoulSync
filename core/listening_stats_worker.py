@@ -246,6 +246,10 @@ class ListeningStatsWorker:
                     # first stats that are about a person rather than a total.
                     'clock': self.db.get_listening_clock(time_range),
                     'rhythm': self.db.get_listening_rhythm(time_range),
+                    # The one thing only SoulSync can answer: what you own
+                    # against what you actually play.
+                    'own_vs_play': self.db.get_genre_own_vs_play(time_range),
+                    'neglected': self.db.get_neglected_albums(),
                 }
 
                 # Enrich with images/IDs so the endpoint doesn't have to

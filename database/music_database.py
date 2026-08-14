@@ -5587,6 +5587,136 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ── Own vs play (stats P4) ───────────────────────────────────────────
+    #
+    # The one thing only SoulSync can say. Spotify has no library; Plex has no
+    # acquisition history. We have both halves, so we can answer "you own 40%
+    # metal and play 12% of it" — which is a fact about the user, not a number
+    # about the software.
+
+    @staticmethod
+    def _accumulate_genres(genre_counts, genres_str, weight):
+        """Fold one artist's genre payload into a running tally.
+
+        Shared by the owned and played sides so a genre can never be spelled
+        one way in one half and another way in the other — the percentages sit
+        beside each other and a parsing difference would read as a real gap."""
+        if not genres_str:
+            return
+        try:
+            import json
+            genres = json.loads(genres_str)
+            if isinstance(genres, list):
+                names = [str(g).strip() for g in genres]
+            else:
+                names = [str(genres).strip()]
+        except (ValueError, TypeError):
+            names = [g.strip() for g in str(genres_str).split(',')]
+        for name in names:
+            if name:
+                genre_counts[name] = genre_counts.get(name, 0) + weight
+
+    def get_genre_own_vs_play(self, time_range='all', limit=12):
+        """What share of the library each genre is, against what share of plays.
+
+        Both sides are percentages of the GENRE-KNOWN population (tracks whose
+        artist carries genres), so they are directly comparable — an untagged
+        artist is absent from both, not counted as zero on one side.
+
+        Returns rows sorted by the size of the gap, because the interesting
+        rows are the ones where owning and listening disagree — not the
+        biggest genre, which you already know."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            owned = {}
+            cursor.execute("""
+                SELECT a.genres, COUNT(*) AS owned_tracks
+                FROM tracks t
+                JOIN artists a ON a.id = t.artist_id
+                WHERE a.genres IS NOT NULL AND a.genres != ''
+                GROUP BY a.genres
+            """)
+            for genres_str, count in cursor.fetchall():
+                self._accumulate_genres(owned, genres_str, count)
+
+            played = {}
+            where = self._listening_time_filter(time_range, alias='lh')
+            cursor.execute(f"""
+                SELECT a.genres, COUNT(*) AS plays
+                FROM listening_history lh
+                JOIN tracks t ON t.id = lh.db_track_id
+                JOIN artists a ON a.id = t.artist_id
+                {where}
+                AND a.genres IS NOT NULL AND a.genres != ''
+                GROUP BY a.genres
+            """)
+            for genres_str, count in cursor.fetchall():
+                self._accumulate_genres(played, genres_str, count)
+
+            owned_total = sum(owned.values())
+            played_total = sum(played.values())
+            if not owned_total:
+                return []
+
+            rows = []
+            for genre in set(owned) | set(played):
+                owned_pct = owned.get(genre, 0) / owned_total * 100
+                # No plays at all in range: every genre is 0% played, which is
+                # honest — "you have not listened to anything" — rather than a
+                # division by zero.
+                played_pct = (played.get(genre, 0) / played_total * 100) if played_total else 0.0
+                rows.append({
+                    'genre': genre,
+                    'owned_pct': round(owned_pct, 1),
+                    'played_pct': round(played_pct, 1),
+                    'gap': round(played_pct - owned_pct, 1),
+                    'owned_tracks': owned.get(genre, 0),
+                    'plays': played.get(genre, 0),
+                })
+
+            rows.sort(key=lambda r: abs(r['gap']), reverse=True)
+            return rows[:limit]
+        except Exception as e:
+            logger.error(f"Error building own-vs-play: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_neglected_albums(self, limit=12):
+        """Albums you own where nothing has ever been played.
+
+        ``unplayed_count`` was already on the page as a dead number. An album
+        you can act on is worth more than a total you cannot."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT al.id, al.title, ar.name AS artist, COUNT(t.id) AS tracks,
+                       MAX(COALESCE(t.play_count, 0)) AS best_play_count
+                FROM albums al
+                JOIN tracks t ON t.album_id = al.id
+                JOIN artists ar ON ar.id = al.artist_id
+                GROUP BY al.id
+                HAVING best_play_count = 0 AND tracks > 0
+                ORDER BY tracks DESC
+                LIMIT ?
+            """, (limit,))
+            return [
+                {'id': row[0], 'name': row[1], 'artist': row[2], 'tracks': row[3]}
+                for row in cursor.fetchall()
+            ]
+        except Exception as e:
+            logger.error(f"Error finding neglected albums: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def get_library_health(self):
         """Get library health metrics."""
         conn = None

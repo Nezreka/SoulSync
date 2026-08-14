@@ -68,7 +68,7 @@ is off by the server's UTC offset (a few hours on a 7-day window). Pre-existing
 and untouched here — changing it moves every existing number, so it wants its
 own change with its own before/after.
 
-## P4 — Own vs play (the thing only SoulSync can say)
+## P4 — Own vs play (the thing only SoulSync can say) ✅ SHIPPED
 
 Join `listening_history` to `tracks`: you *own* 40% metal and *play* 12% of it.
 Genre, decade, and format gaps between the library and actual listening.
@@ -76,9 +76,19 @@ Genre, decade, and format gaps between the library and actual listening.
 Nobody else can show this — Spotify has no library, Plex has no acquisition
 history. This is the page's strongest claim to being worth visiting.
 
-Also unlocks: **unplayed but owned** (already have `unplayed_count`, but it is a
-dead number today — make it a *list* you can act on) and **rediscovered**
-(not played in 6 months, then played again).
+Shipped as genre share-of-library vs share-of-plays, sorted by the size of the
+DISAGREEMENT (the biggest genre is something you already know), plus a
+"never played" album shelf — `unplayed_count` was a dead number, an album you
+can act on is worth more.
+
+Both sides are percentages of the GENRE-KNOWN population and share one parser
+(`_accumulate_genres`), so an untagged artist is absent from both rather than
+counted as a zero on one, and a genre cannot be spelled differently on the two
+halves — which would render as a real gap.
+
+Decade and format gaps NOT built: `tracks.year` is sparse and format lives only
+in `file_path`, so both would be gaps in the metadata dressed up as gaps in
+taste. **Rediscovered** still to do.
 
 ## P5 — Year in Listening (the big one)
 

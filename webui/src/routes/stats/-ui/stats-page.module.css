@@ -997,3 +997,82 @@
   font-size: 11px;
   color: rgba(255, 255, 255, 0.45);
 }
+
+/* Own vs Play — library share against listening share. */
+.statsOwnPlay { display: flex; flex-direction: column; gap: 8px; }
+
+.statsOwnPlayRow {
+  display: grid;
+  grid-template-columns: 92px 1fr 46px;
+  gap: 10px;
+  align-items: center;
+}
+
+.statsOwnPlayGenre {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statsOwnPlayBars { display: flex; flex-direction: column; gap: 3px; }
+
+.statsOwnPlayOwned,
+.statsOwnPlayPlayed {
+  height: 6px;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.statsOwnPlayOwned { background: rgba(255, 255, 255, 0.28); }
+.statsOwnPlayPlayed { background: rgb(var(--accent-rgb)); }
+
+.statsOwnPlayGap { font-size: 12px; font-weight: 700; text-align: right; }
+.statsOwnPlayGapUp { color: #4ade80; }
+.statsOwnPlayGapDown { color: #f87171; }
+
+.statsOwnPlayLegend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsOwnPlayKeyOwned,
+.statsOwnPlayKeyPlayed {
+  width: 12px;
+  height: 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+}
+
+.statsOwnPlayKeyOwned { background: rgba(255, 255, 255, 0.28); margin-left: 0; }
+.statsOwnPlayKeyPlayed { background: rgb(var(--accent-rgb)); }
+
+.statsNeglected {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsNeglectedTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
+}
+
+.statsNeglectedRow {
+  display: grid;
+  grid-template-columns: 1fr auto 28px;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.statsNeglectedName { color: rgba(255, 255, 255, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statsNeglectedArtist { color: rgba(255, 255, 255, 0.4); }
+.statsNeglectedCount { color: rgba(255, 255, 255, 0.35); text-align: right; }

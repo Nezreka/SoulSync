@@ -53,6 +53,11 @@ describe('stats route', () => {
             busiest_day: { date: '2026-08-12', plays: 9 },
             active_days: 20,
           },
+          own_vs_play: [
+            { genre: 'Metal', owned_pct: 80, played_pct: 0, gap: -80, owned_tracks: 8, plays: 0 },
+            { genre: 'Pop', owned_pct: 20, played_pct: 100, gap: 80, owned_tracks: 2, plays: 4 },
+          ],
+          neglected: [{ id: 1, name: 'Dusty Record', artist: 'Someone', tracks: 11 }],
           top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
           top_albums: [],
           top_tracks: [],
@@ -289,9 +294,12 @@ describe('stats route', () => {
 
   it('shows listening as a habit, not just a total', async () => {
     renderStatsRoute();
-    expect(await screen.findByText('longest streak')).toBeTruthy();
-    expect(screen.getByText('11')).toBeTruthy();
-    expect(screen.getByText('days in a row')).toBeTruthy();
+    // Pair the value to ITS label — a bare getByText('11') collides with any
+    // other 11 on the page (it did, once the neglected shelf arrived).
+    const longest = await screen.findByText('longest streak');
+    expect(longest.previousSibling?.textContent).toBe('11');
+    const inARow = screen.getByText('days in a row');
+    expect(inARow.previousSibling?.textContent).toBe('4');
   });
 
   it('says so plainly when there are no plays to shape', async () => {
@@ -312,6 +320,43 @@ describe('stats route', () => {
     );
     renderStatsRoute();
     expect(await screen.findByText(/No plays in this range yet/)).toBeTruthy();
+  });
+
+  /**
+   * P4: the page's strongest claim to being worth visiting. Spotify has no
+   * library, Plex has no acquisition history — only SoulSync holds both halves.
+   */
+  it('shows what you own against what you actually play', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Own vs Play')).toBeTruthy();
+    expect(screen.getByText('Metal')).toBeTruthy();
+    // Owning far more than you play reads as a negative gap.
+    expect(screen.getByText('-80')).toBeTruthy();
+    expect(screen.getByText('+80')).toBeTruthy();
+  });
+
+  it('lists albums you own and have never played', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Dusty Record')).toBeTruthy();
+    expect(screen.getByText(/Never played \(1\)/)).toBeTruthy();
+  });
+
+  it('says so plainly when there is not enough tagged metadata to compare', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: { total_plays: 3, total_time_ms: 1, unique_artists: 1,
+                      unique_albums: 1, unique_tracks: 1 },
+          own_vs_play: [],
+          top_artists: [], top_albums: [], top_tracks: [],
+          timeline: [], genres: [], recent: [],
+          health: { total_tracks: 1 },
+        }),
+      ),
+    );
+    renderStatsRoute();
+    expect(await screen.findByText(/Not enough tagged artists/)).toBeTruthy();
   });
 
   it('omits the comparison entirely on the all-time range', async () => {

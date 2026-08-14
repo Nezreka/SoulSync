@@ -25,6 +25,8 @@ import type {
   StatsDbStoragePayload,
   StatsHealth,
   StatsLibraryDiskUsagePayload,
+  StatsNeglectedAlbum,
+  StatsOwnVsPlay,
   StatsRange,
   StatsRecentTrack,
   StatsRhythm,
@@ -272,6 +274,12 @@ export function StatsPage() {
                   <StatsActivityChart timeline={cachedStats?.timeline ?? []} />
                 </div>
               </StatsSectionCard>
+              <StatsSectionCard title="Own vs Play">
+                <StatsOwnVsPlayCard
+                  rows={cachedStats?.own_vs_play ?? []}
+                  neglected={cachedStats?.neglected ?? []}
+                />
+              </StatsSectionCard>
               <StatsSectionCard title="Genre Breakdown">
                 <div className={styles.statsGenreChartContainer}>
                   <div id="stats-genre-chart" className={styles.statsGenreChartWrap}>
@@ -487,6 +495,90 @@ function StatsListeningClock({
           </>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * What share of the library a genre is, against what share of the listening.
+ *
+ * The page's strongest claim to being worth visiting: Spotify has no library
+ * and Plex has no acquisition history, so nobody else can tell you that you
+ * own 40% metal and play 12% of it.
+ *
+ * Sorted by the size of the DISAGREEMENT, not by size — the biggest genre is
+ * something the user already knows.
+ */
+function StatsOwnVsPlayCard({
+  neglected,
+  rows,
+}: {
+  neglected: StatsNeglectedAlbum[];
+  rows: StatsOwnVsPlay[];
+}) {
+  if (!rows.length) {
+    return (
+      <div className={styles.statsClockEmpty}>
+        Not enough tagged artists to compare yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.statsOwnPlay}>
+      {rows.map((row) => (
+        <div key={row.genre} className={styles.statsOwnPlayRow}>
+          <span className={styles.statsOwnPlayGenre} title={row.genre}>
+            {row.genre}
+          </span>
+          <span className={styles.statsOwnPlayBars}>
+            <span
+              className={styles.statsOwnPlayOwned}
+              style={{ width: `${Math.min(row.owned_pct, 100)}%` }}
+              title={`${row.owned_pct}% of your library (${row.owned_tracks} tracks)`}
+            />
+            <span
+              className={styles.statsOwnPlayPlayed}
+              style={{ width: `${Math.min(row.played_pct, 100)}%` }}
+              title={`${row.played_pct}% of your plays (${row.plays})`}
+            />
+          </span>
+          <span
+            className={`${styles.statsOwnPlayGap} ${
+              row.gap >= 0 ? styles.statsOwnPlayGapUp : styles.statsOwnPlayGapDown
+            }`}
+            title={
+              row.gap >= 0
+                ? 'You play this more than you own it'
+                : 'You own this more than you play it'
+            }
+          >
+            {row.gap > 0 ? '+' : ''}
+            {row.gap}
+          </span>
+        </div>
+      ))}
+
+      <div className={styles.statsOwnPlayLegend}>
+        <span className={styles.statsOwnPlayKeyOwned} /> owned
+        <span className={styles.statsOwnPlayKeyPlayed} /> played
+      </div>
+
+      {neglected.length ? (
+        <div className={styles.statsNeglected}>
+          <div className={styles.statsNeglectedTitle}>
+            Never played ({neglected.length})
+          </div>
+          {neglected.slice(0, 5).map((album) => (
+            <div key={album.id} className={styles.statsNeglectedRow}>
+              <span className={styles.statsNeglectedName}>{album.name}</span>
+              <span className={styles.statsNeglectedArtist}>{album.artist}</span>
+              <span className={styles.statsNeglectedCount}>{album.tracks}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

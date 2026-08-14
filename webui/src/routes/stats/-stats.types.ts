@@ -107,6 +107,8 @@ export interface StatsCachedPayload {
   previous?: Partial<StatsOverview> | null;
   clock?: StatsClock;
   rhythm?: StatsRhythm;
+  own_vs_play?: StatsOwnVsPlay[];
+  neglected?: StatsNeglectedAlbum[];
   top_artists?: StatsArtistRow[];
   top_albums?: StatsAlbumRow[];
   top_tracks?: StatsTrackRow[];
@@ -183,4 +185,25 @@ export interface StatsRhythm {
   longest_streak: number;
   busiest_day: { date: string | null; plays: number };
   active_days: number;
+}
+
+/** A genre's share of the library against its share of plays. Both are
+ *  percentages of the genre-known population, so they compare honestly. */
+export interface StatsOwnVsPlay {
+  genre: string;
+  owned_pct: number;
+  played_pct: number;
+  gap: number;
+  owned_tracks: number;
+  plays: number;
+}
+
+/** An album you own where nothing has ever been played. */
+export interface StatsNeglectedAlbum {
+  id: number | string;
+  /** The album's display name. The backend selects albums.title AS the second
+   *  column and emits it under `name` — keep the two in step. */
+  name: string;
+  artist: string;
+  tracks: number;
 }
