@@ -1430,9 +1430,13 @@ describe('the background bulk run', () => {
     clickPrompt('_dbf-dismiss');
     await flush();
 
+    // finding_type scopes it to THIS group. A job that emits several finding
+    // types would otherwise lose all of its pending rows when you cleared one
+    // group — the same missing-filter bug as #1142, one level down.
     expect(bodyOf('/findings/clear')).toEqual({
       job_id: 'orphan_file_detector',
       status: 'pending',
+      finding_type: 'missing_discography_track',
     });
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('bulk-fix-start'))).toBe(false);
     expect(toastSpy).toHaveBeenCalledWith('Cleared 40 findings', 'success');
@@ -1474,14 +1478,21 @@ describe('clear findings', () => {
     fireEvent.click(screen.getByText('Clear Findings'));
     await flush();
 
+    // `renderList` types 'a' into the search box, so this test has always run
+    // with a search active — and it used to assert that Clear sent only the
+    // job and status. That WAS #1142, pinned as a passing test: the prompt
+    // described a wider delete than the user's filters, and the request
+    // performed one. Both now carry the search term.
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Delete all findings for Dead File Cleaner (pending)? This cannot be undone.',
+        message:
+          'Delete all findings for Dead File Cleaner (pending), matching "a"? This cannot be undone.',
       }),
     );
     expect(bodyOf('/findings/clear')).toEqual({
       job_id: 'dead_file_cleaner',
       status: 'pending',
+      q: 'a',
     });
   });
 

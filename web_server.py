@@ -40948,8 +40948,16 @@ def repair_findings_clear():
         data = request.get_json(silent=True) or {}
         job_id = data.get('job_id')
         status = data.get('status')
+        # severity / finding_type / q were missing here, so "clear findings
+        # matching current filters" ignored three of the five filters the list
+        # view offers and deleted the wider set (#1142).
+        severity = data.get('severity')
+        finding_type = data.get('finding_type')
+        q = data.get('q')
 
-        count = repair_worker.clear_findings(job_id=job_id, status=status)
+        count = repair_worker.clear_findings(
+            job_id=job_id, status=status, severity=severity,
+            finding_type=finding_type, q=q)
         return jsonify({'success': True, 'deleted': count}), 200
     except Exception as e:
         logger.error(f"Error clearing findings: {e}")

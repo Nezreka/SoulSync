@@ -1133,6 +1133,46 @@ class RepairWorker:
         'path': 'file_path IS NULL, file_path ASC, created_at DESC',
     }
 
+    @staticmethod
+    def _findings_filter(job_id: str = None, status: str = None,
+                         severity: str = None, finding_type: str = None,
+                         q: str = None):
+        """Build the WHERE clause shared by listing and clearing findings.
+
+        This is ONE function on purpose. "Clear findings matching current
+        filters" used to build its own clause supporting only job_id and
+        status, so a user who narrowed by severity or typed in the search box
+        and hit Clear destroyed every finding the WIDER filter matched — the
+        button deleted rows that were never on screen (#1142). Two hand-rolled
+        clauses for one concept will drift again; a caller that forgets an
+        argument here degrades to a broader match, so new filters must be
+        added in this one place and passed by both callers.
+
+        Returns ``(where_sql, params)`` — ``where_sql`` is '' when unfiltered.
+        """
+        where_parts = []
+        params = []
+
+        if job_id:
+            where_parts.append("job_id = ?")
+            params.append(job_id)
+        if status:
+            where_parts.append("status = ?")
+            params.append(status)
+        if severity:
+            where_parts.append("severity = ?")
+            params.append(severity)
+        if finding_type:
+            where_parts.append("finding_type = ?")
+            params.append(finding_type)
+        if q and str(q).strip():
+            needle = f"%{str(q).strip()}%"
+            where_parts.append("(title LIKE ? OR file_path LIKE ?)")
+            params.extend([needle, needle])
+
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        return where, params
+
     def get_findings(self, job_id: str = None, status: str = None,
                      severity: str = None, page: int = 0, limit: int = 50,
                      finding_type: str = None, sort: str = None,
@@ -1150,27 +1190,9 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            where_parts = []
-            params = []
-
-            if job_id:
-                where_parts.append("job_id = ?")
-                params.append(job_id)
-            if status:
-                where_parts.append("status = ?")
-                params.append(status)
-            if severity:
-                where_parts.append("severity = ?")
-                params.append(severity)
-            if finding_type:
-                where_parts.append("finding_type = ?")
-                params.append(finding_type)
-            if q and str(q).strip():
-                needle = f"%{str(q).strip()}%"
-                where_parts.append("(title LIKE ? OR file_path LIKE ?)")
-                params.extend([needle, needle])
-
-            where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+            where, params = self._findings_filter(
+                job_id=job_id, status=status, severity=severity,
+                finding_type=finding_type, q=q)
             order_by = self._FINDING_SORTS.get(sort or 'newest',
                                                self._FINDING_SORTS['newest'])
 
@@ -5000,28 +5022,32 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def clear_findings(self, job_id: str = None, status: str = None) -> int:
-        """Delete findings from the database. Optionally filter by job_id and/or status. Returns count deleted."""
+    def clear_findings(self, job_id: str = None, status: str = None,
+                       severity: str = None, finding_type: str = None,
+                       q: str = None) -> int:
+        """Delete findings matching the SAME filters the list view applies.
+
+        Every argument here must be forwarded from the UI's current filter
+        state. This deletes rows outright, so a filter the caller drops widens
+        the blast radius silently — which is exactly how #1142 destroyed
+        findings the user had filtered away.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            conditions = []
-            params = []
-            if job_id:
-                conditions.append("job_id = ?")
-                params.append(job_id)
-            if status:
-                conditions.append("status = ?")
-                params.append(status)
-            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-            cursor.execute(f"SELECT COUNT(*) FROM repair_findings{where}", params)
+            where, params = self._findings_filter(
+                job_id=job_id, status=status, severity=severity,
+                finding_type=finding_type, q=q)
+            cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
             count = cursor.fetchone()[0]
-            cursor.execute(f"DELETE FROM repair_findings{where}", params)
+            cursor.execute(f"DELETE FROM repair_findings {where}", params)
             conn.commit()
-            logger.info("Cleared %d findings%s%s", count,
+            logger.info("Cleared %d findings%s%s%s%s", count,
                          f" for job {job_id}" if job_id else "",
-                         f" with status {status}" if status else "")
+                         f" with status {status}" if status else "",
+                         f" severity {severity}" if severity else "",
+                         f" matching {q!r}" if q and str(q).strip() else "")
             return count
         except Exception as e:
             logger.error("Error clearing findings: %s", e)
