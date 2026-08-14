@@ -16520,13 +16520,41 @@ class MusicDatabase:
     # Wing It Pool: two states on a mirrored track's extra_data. Both key off wing_it_fallback,
     # which is set by the wing-it stub and SURVIVES a manual fix (update_mirrored_track_extra_data
     # merges rather than replaces), so the only difference is the manual_match flag:
-    #   needs attention : wing_it_fallback=true AND NOT manual_match  (unverified guess)
+    #   needs attention : still a stub AND NOT manual_match  (unverified guess)
     #   resolved        : wing_it_fallback=true AND manual_match=true (user fixed it — incl. fixes
     #                     made before this feature existed, since the flag was never wiped)
-    _WING_IT_ATTENTION = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
-                          "AND mpt.extra_data NOT LIKE '%\"manual_match\": true%'")
-    _WING_IT_RESOLVED = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
-                         "AND mpt.extra_data LIKE '%\"manual_match\": true%'")
+    #
+    # That the flag survives is what makes "resolved" work, but it also means the
+    # flag alone cannot answer "is this STILL a guess?". Discovery re-runs every
+    # sync, and a track that wing-it'd once and matched at 0.99 on a later pass
+    # keeps the flag — the writer only ever sets it, and the merge preserves what
+    # it omits. So "needs attention" tests the thing that actually regenerates
+    # each pass: whether matched_data is still a stub. Stub ids carry the
+    # ``wing_it_`` prefix (see core.discovery.wing_it.stub_track_id); a real
+    # match overwrites matched_data wholesale, prefix and all.
+    #
+    # json_extract, not a raw substring LIKE. Scoping to $.matched_data.id —
+    # rather than matching `"id": "wing_it_..."` anywhere in the blob — is what
+    # rules out a same-shaped key elsewhere in the document ever being mistaken
+    # for the stub id. json_extract yields SQL NULL for a missing path/row,
+    # which the comparisons below treat as "not a match" rather than erroring —
+    # but for a MALFORMED value (not just an absent key) it raises instead,
+    # and SQLite evaluates that error for the whole statement, not just the
+    # offending row: one corrupt extra_data would blank the entire pool through
+    # the try/except below, where the LIKE version it replaced would have just
+    # silently not matched that row's garbage text. json_valid() as the first
+    # AND-clause is what keeps a single bad row's failure scoped to that row.
+    _WING_IT_ATTENTION = (
+        "json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.wing_it_fallback') = 1 "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') LIKE 'wing\\_it\\_%' ESCAPE '\\' "
+        "AND IFNULL(json_extract(mpt.extra_data, '$.manual_match'), 0) != 1"
+    )
+    _WING_IT_RESOLVED = (
+        "json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.wing_it_fallback') = 1 "
+        "AND json_extract(mpt.extra_data, '$.manual_match') = 1"
+    )
 
     def get_wing_it_pool(self, profile_id: int = None, playlist_id: int = None,
                          resolved: bool = False) -> list:
