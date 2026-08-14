@@ -37,6 +37,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.canonical import canonical_best_score
 from core.discovery.manual_match import should_rediscover
 
 logger = logging.getLogger(__name__)
@@ -55,28 +56,10 @@ def _matched_primary_artist(matched_data) -> str:
         return ''
 
 
-def _canonical_best_score(deps, title, artist, duration_ms, results):
-    """Score search results against the source track, trying the canonicalized
-    title/artist too and keeping the better confidence (#785).
-
-    YouTube playlists have their "Artist - Title" / channel decoration stripped
-    at ingest, but file/CSV-imported playlists keep raw titles — so a track
-    titled "Arctic Monkeys - Do I Wanna Know?" scored verbatim against the
-    library's "Do I Wanna Know?" never matched. canonical_source_track is
-    conservative (only strips an "<artist> - " prefix when it equals the
-    artist), so this can only ADD a better candidate, never weaken a match.
-    Returns (match, confidence)."""
-    match, confidence, _ = deps.discovery_score_candidates(title, artist, duration_ms, results)
-    try:
-        from core.text.source_title import canonical_source_track
-        canon_title, canon_artist = canonical_source_track(title or '', artist or '')
-    except Exception:
-        return match, confidence
-    if (canon_title, canon_artist) != (title, artist):
-        alt_match, alt_conf, _ = deps.discovery_score_candidates(canon_title, canon_artist, duration_ms, results)
-        if alt_match and alt_conf > confidence:
-            return alt_match, alt_conf
-    return match, confidence
+# Moved to core.discovery.canonical so the YouTube worker can share it rather
+# than grow a second copy (#785 introduced it here). Kept under the old private
+# name because this module's callers and tests reference it.
+_canonical_best_score = canonical_best_score
 
 
 @dataclass
