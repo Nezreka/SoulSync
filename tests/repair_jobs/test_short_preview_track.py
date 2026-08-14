@@ -20,8 +20,6 @@ class _EnabledConfig:
 
 def _seed(db: MusicDatabase):
     conn = db._get_connection()
-    conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'A-ha')")
-    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Hunting High and Low')")
     from core.library2.schema import ensure_library_v2_schema
 
     ensure_library_v2_schema(conn)
@@ -37,14 +35,7 @@ def _seed(db: MusicDatabase):
 
 
 def _track(db, tid: int, duration_ms, path, spotify_id=None):
-    # tid is an INTEGER id, exactly like production (tracks.id is INTEGER PRIMARY KEY) — so the
-    # test exercises the real round-trip: the finding stores str(id) and the fix queries WHERE id=?.
     conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, artist_id, album_id, title, duration, file_path, spotify_track_id) "
-        "VALUES (?, 'ar1', 'al1', ?, ?, ?, ?)",
-        (tid, f"Track {tid}", duration_ms, path, spotify_id),
-    )
     conn.execute(
         "INSERT INTO lib2_tracks(id, album_id, title, duration, spotify_id) "
         "VALUES(?, 1, ?, ?, ?)",

@@ -1850,6 +1850,9 @@ bounded read-only Scan, re-verifizierendes Apply), Repair-Job
 `path_drift_reconcile` samt Worker-Fix-Handler, und der Deckel auf
 `missing_suspected` in `rescan_files`. Umfang und bewusste Grenzen stehen in
 [status.md §20](library-v2-status.md#20-pfad-desync-reconcile-werkzeug-und-missing-lifecycle-schutz-26-juli).
+Der am 14. August ergänzte Upgrade-Pfad führt den sicheren Teil dieses
+Abgleichs noch vor Öffnung der Migration-Gate automatisch aus: eindeutige
+Treffer werden repointed, mehrdeutige nur als `missing_suspected` geschützt.
 
 ### <a name="manualmatch25-01"></a> Finding 2 — Manual Match (Artist) läuft in den Client-Timeout durch synchrone Artwork-Nachladung
 
@@ -5675,6 +5678,7 @@ dem Cutover nicht mehr am Runtime-Pfad hängen.
 | LV2-CUT-04 | Neue Katalog-/Besitzdaten entstehen nur durch die Upgrade-/Import-Pipeline. Wishlist-/Watchlist-Akquisitionen zählen erst nach erfolgreichem Download und Import dazu. Provider/Watchlist dürfen Katalogzeilen ohne Besitz anlegen. | Nur der erfolgreiche Importpfad ruft die gemeinsamen Upserts mit explizitem `allow_create=True` auf und stempelt File-Provenienz. |
 | LV2-CUT-05 | Server-Cleanup darf nie Katalogidentität oder physisches Eigentum löschen. | Full Refresh, Stale Detection und Orphan Cleanup lösen nur `server_source/server_id`; File-State wird allein durch Datei-/Pfad-Lifecycle entschieden. |
 | LV2-CUT-06 | Legacy ist nach dem Cutover keine zweite Bibliothek. | Keine Runtime-SQL-Reads/-Writes, keine Mirror-Trigger, kein Mirror-Drainer und keine Legacy-Divergenzprüfung; ausschließlich der Upgrade-Importer liest die alte Quelle. |
+| LV2-CUT-07 | Ein nichtleerer Legacy-Pfad beweist nach einem externen Rename noch keinen gegenwärtigen Besitz. | Vor Gate-Freigabe eindeutigen Filename-Drift automatisch und re-verifiziert repointen; mehrdeutige Treffer niemals wählen, sondern bei `missing_suspected` schützen. |
 
 **Einordnung von LV2-AUD-18:** Der Review-Kommentar verlangte zunächst, neue
 Media-Server-Tracks wieder als `inserted` zu behandeln. Mit LV2-CUT-03 ist

@@ -15,6 +15,7 @@ scan's refusal to confirm a miss while such a candidate exists.
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -285,3 +286,32 @@ def test_apply_refuses_when_the_row_resolves_again(drift_db, monkeypatch):
     assert conn.execute(
         "SELECT path FROM lib2_track_files WHERE id=?", (ids["file_id"],)
     ).fetchone()["path"] == ids["stored"]
+
+
+def test_post_import_auto_repoints_an_unambiguous_legacy_path(drift_db):
+    db, conn, ids = drift_db
+    conn.execute("UPDATE lib2_track_files SET legacy_import_run_id='upgrade'")
+    conn.commit()
+
+    stats = PD.reconcile_imported_path_drift(db, batch_size=1)
+
+    row = conn.execute(
+        "SELECT path, file_state FROM lib2_track_files WHERE id=?", (ids["file_id"],)
+    ).fetchone()
+    assert (row["path"], row["file_state"]) == (ids["real"], "active")
+    assert stats["repointed"] == 1
+
+
+def test_post_import_leaves_ambiguous_drift_suspected(drift_db):
+    db, conn, ids = drift_db
+    (Path(ids["dir"]) / "1-01 - Bunny Girl.flac").write_bytes(b"audio-bytes")
+    conn.execute("UPDATE lib2_track_files SET legacy_import_run_id='upgrade'")
+    conn.commit()
+
+    stats = PD.reconcile_imported_path_drift(db)
+
+    row = conn.execute(
+        "SELECT path, file_state FROM lib2_track_files WHERE id=?", (ids["file_id"],)
+    ).fetchone()
+    assert (row["path"], row["file_state"]) == (ids["stored"], "missing_suspected")
+    assert stats["repointed"] == 0 and stats["protected"] == 1

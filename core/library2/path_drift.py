@@ -15,11 +15,11 @@ consumer then treats a physically present file as absent:
 
 LV2-017's correction contract promised a read-only backfill for installations
 that drifted *before* the forward fix (H-13) landed.  This module is that
-tool.  It is deliberately a proposal generator, not an auto-repair: it looks
-for one plausible, real, unclaimed file in the row's own directory and hands
-the decision to the operator.  Ambiguous matches are reported and never
-guessed — pointing a catalogue row at the wrong file is far worse than leaving
-it unresolved.
+tool. Its repair job is deliberately review-only. During an exclusive legacy
+upgrade, however, the same conservative matcher automatically applies its one
+unambiguous, reverified proposal so existing users need no cleanup click.
+Ambiguous matches are never guessed — pointing a catalogue row at the wrong
+file is far worse than leaving it unresolved.
 
 Nothing here mutates the filesystem.  The only write is
 :func:`apply_path_drift_fix`, which re-verifies every precondition and then
@@ -393,12 +393,65 @@ def apply_path_drift_fix(
         conn.close()
 
 
+def reconcile_imported_path_drift(
+    database,
+    *,
+    batch_size: int = DEFAULT_LIMIT,
+    config_manager: Any = None,
+) -> Dict[str, int]:
+    """Repair safe legacy filename drift before the migration gate opens.
+
+    Only rows imported from Legacy participate. The existing conservative
+    matcher and apply guards decide what is safe; anything ambiguous is merely
+    observed so it becomes ``missing_suspected`` instead of false ownership or
+    a redownload. Paging by id keeps large upgrades bounded without stalls.
+    """
+    stats = {"checked": 0, "repointed": 0, "unresolved": 0, "protected": 0}
+    after = 0
+    size = max(1, int(batch_size))
+    while True:
+        conn = database._get_connection()
+        try:
+            ids = [int(row[0]) for row in conn.execute(
+                "SELECT id FROM lib2_track_files WHERE id>? "
+                "AND legacy_import_run_id IS NOT NULL AND path IS NOT NULL "
+                "AND TRIM(path)<>'' AND COALESCE(file_state,'active')<>'deleted' "
+                "ORDER BY id LIMIT ?", (after, size),
+            ).fetchall()]
+        finally:
+            conn.close()
+        if not ids:
+            break
+        after = ids[-1]
+        report = scan_path_drift(
+            database, file_ids=ids, limit=len(ids), config_manager=config_manager,
+        )
+        stats["checked"] += int(report.get("checked") or 0)
+        unresolved = {int(row["file_id"]) for row in report.get("unresolved", [])}
+        for proposal in report.get("proposals", []):
+            result = apply_path_drift_fix(
+                database, int(proposal["file_id"]), proposal["candidate_path"],
+                config_manager=config_manager,
+            )
+            if result.get("success"):
+                stats["repointed"] += 1
+            else:
+                unresolved.add(int(proposal["file_id"]))
+        if unresolved:
+            from core.library2.scan import rescan_files
+            observed = rescan_files(database, file_ids=sorted(unresolved))
+            stats["protected"] += int(observed.get("missing") or 0)
+            stats["unresolved"] += len(unresolved)
+    return stats
+
+
 __all__ = [
     "DEFAULT_LIMIT",
     "DriftMatch",
     "apply_path_drift_fix",
     "has_drift_candidate",
     "match_drifted_filename",
+    "reconcile_imported_path_drift",
     "split_track_numbering",
     "scan_path_drift",
 ]

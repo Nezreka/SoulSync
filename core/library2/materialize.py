@@ -147,7 +147,7 @@ def materialize_from_spotify_track(
     # the id fields of this "spotify-shaped" dict hold THAT provider's ids.
     source = str(
         spotify_track_data.get("source") or spotify_track_data.get("provider") or ""
-    ).strip().lower() or None
+    ).strip().lower() or "spotify"
     track_id_raw = (str(spotify_track_data["id"])
                     if spotify_track_data.get("id") else None)
     return materialize_track_intent(

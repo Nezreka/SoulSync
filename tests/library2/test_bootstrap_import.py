@@ -64,6 +64,42 @@ def test_run_bootstrap_if_needed_first_run_imports_and_marks_done(legacy_db):
     assert row["n"] >= 1
 
 
+def test_bootstrap_repairs_stale_imported_path_before_marking_done(
+        legacy_db, tmp_path, monkeypatch):
+    folder = tmp_path / "music" / "Bunny Girl"
+    folder.mkdir(parents=True)
+    real = folder / "01 - Bunny Girl.flac"
+    real.write_bytes(b"audio-bytes")
+    stored = folder / "01-01 - Bunny Girl.flac"
+    conn = legacy_db._get_connection()
+    conn.execute("UPDATE tracks SET title='Bunny Girl', file_path=?, file_size=? WHERE id=100",
+                 (str(stored), len(b"audio-bytes")))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("core.library2.completeness.precache_tracklists",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr("core.library2.tag_cache.precache_tag_cache",
+                        lambda *_a, **_k: None)
+
+    def post_import(progress):
+        from core.library2.post_import import run_post_import_precache
+        run_post_import_precache(legacy_db, object(), progress=progress)
+        check = legacy_db._get_connection()
+        try:
+            assert check.execute(
+                "SELECT path FROM lib2_track_files WHERE legacy_track_id='100'"
+            ).fetchone()["path"] == str(real)
+            assert lib2_bootstrap.get_state(legacy_db)["status"] == "running"
+        finally:
+            check.close()
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(
+        legacy_db, _enabled, post_import=post_import,
+    )
+    assert result["success"] is True
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
+
+
 def test_run_bootstrap_if_needed_skips_when_already_done(legacy_db, monkeypatch):
     first = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
     assert first["success"] is True

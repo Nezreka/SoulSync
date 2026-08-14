@@ -816,6 +816,12 @@ Modul `core/library2/path_drift.py` plus Repair-Job `path_drift_reconcile`
 `JOB_LIBRARY_V2_EFFECTS = {observe, path}`) und Fix-Handler
 `_fix_stale_index_path` in `core/repair_worker.py`. Bewusste Grenzen:
 
+Seit 14. August läuft derselbe konservative Abgleich zusätzlich automatisch
+in der exklusiven Post-Import-Phase, bevor die Worker wieder freigegeben
+werden. Eindeutige, beim Anwenden erneut geprüfte Treffer werden umgehängt;
+mehrdeutige Treffer bleiben unverändert und werden nur auf
+`missing_suspected` geschützt. Der spätere Repair-Job bleibt review-only.
+
 - Der Scan schreibt nichts und bewegt keine Datei; er schlägt vor.
 - Präzision vor Vollständigkeit: gleiche Endung + gleicher Titelschlüssel
   (Numerierung abgeschält, Unicode-erhaltend); eine abweichende Tracknummer
@@ -4802,7 +4808,7 @@ Headless-Browser-/PTY-Sitzung jedoch keinen belastbaren Endstatus.
 
 ## 52. Cutover-, Ownership- und Media-Server-Härtung (14. August 2026)
 
-Stand: **Implemented im Arbeitsbaum, nicht committed.** Dieser Abschnitt setzt
+Stand: **Committed als `dfbc052ad`.** Dieser Abschnitt setzt
 den in [Issues §34](library-v2-issues.md#34-finaler-cutover--ownership--und-media-server-vertrag-14-august-2026)
 festgelegten Endzustand um.
 
@@ -4843,3 +4849,26 @@ wird die Legacy-Quelle nicht weiter gepollt.
 bestand mit **566 Tests**. Ein zusätzlicher Nachbarlauf über Automation-API,
 Media-Server-Adapter, Explorer, Runtime-State und Sync-Status bestand mit
 **182 Tests**; vollständige Repository-Release-Zertifizierung bleibt separat.
+
+## 53. Automatische Stale-Path-Heilung beim Upgrade (14. August 2026)
+
+Der Upgrade-Importer übernahm bislang einen nichtleeren, aber durch Rename
+veralteten Legacy-Pfad zunächst als `active`. Jetzt läuft als verpflichtender
+letzter Importerschritt, noch unter dem Migration-Gate, ein stabil nach File-ID paginierter Abgleich:
+eindeutige Kandidaten werden mit allen vorhandenen Apply-Guards repointed;
+mehrdeutige oder inzwischen kollidierende Kandidaten werden nicht gewählt und
+durch genau eine Missing-Beobachtung gegen falsches Ownership und Redownload
+geschützt. Erst danach folgen Tracklist-/Tag-Precache und Worker-Freigabe.
+
+Ein breiter Prüflauf deckte daneben einen unabhängigen Einzeiler auf:
+Spotify-geformte Payloads ohne explizites `source` wurden nicht mehr als
+Spotify qualifiziert. Der spezialisierte Adapter verwendet wieder `spotify`
+als Default; fremde Provider bleiben über ihr explizites `source` getrennt.
+Vollständig obsolete Tests der entfernten Runtime-Legacy-Divergenzprüfung
+wurden entfernt, Repair-Fixtures auf ihre bereits native lib2-Identität
+umgestellt.
+
+**Nachweis:** 72 fokussierte Bootstrap-/Path-Drift-Tests und anschließend die
+gesamten `tests/library2`- und `tests/repair_jobs`-Bäume: **1816 bestanden**, 4
+reine Python-3.12-SQLite-Deprecation-Warnungen. Der Produktionsdelta dieser
+Runde beträgt netto **+55 Zeilen**.

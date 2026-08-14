@@ -1748,6 +1748,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["dedup_repair"] = repair_duplicate_artists(database)
     except Exception as repair_error:  # noqa: BLE001
         logger.warning("Post-import duplicate repair failed: %s", repair_error)
+    from core.library2.path_drift import reconcile_imported_path_drift
+    stats["path_drift"] = reconcile_imported_path_drift(database)
     return stats
 
 

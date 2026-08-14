@@ -373,21 +373,24 @@ def test_bulk_fix_now_fixes_genre_cleanup_findings(tmp_path):
     fixed by bulk-fix (it used to be silently filtered out → 'Fixed 0')."""
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, genres, server_source) VALUES "
-                     "('AR1', 'Dirty', ?, 'test')", (json.dumps(['Rock', 'junk']),))
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists (name, genres) VALUES ('Dirty', ?)",
+            (json.dumps(['Rock', 'junk']),)).lastrowid
         conn.execute(
             "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
             "entity_type, entity_id, title, details_json) VALUES "
-            "('genre_cleanup', 'genre_cleanup', 'info', 'pending', 'artist', 'AR1', "
+            "('genre_cleanup', 'genre_cleanup', 'info', 'pending', 'artist', ?, "
             "'Off-whitelist genres: Dirty', ?)",
-            (json.dumps({'kept_genres': ['Rock'], 'removed_genres': ['junk']}),))
+            (f'lib2:{artist_id}',
+             json.dumps({'kept_genres': ['Rock'], 'removed_genres': ['junk']})))
         conn.commit()
 
     result = _worker(db, tmp_path).bulk_fix_findings(job_id='genre_cleanup')
     assert result.get('fixed') == 1
 
     with db._get_connection() as conn:
-        genres = conn.execute("SELECT genres FROM artists WHERE id = 'AR1'").fetchone()[0]
+        genres = conn.execute(
+            "SELECT genres FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0]
         status = conn.execute("SELECT status FROM repair_findings").fetchone()[0]
     assert json.loads(genres) == ['Rock']
     assert status == 'resolved'
