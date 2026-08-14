@@ -10,6 +10,7 @@ trivially inside a single process either way.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -55,10 +56,12 @@ def test_id_survives_a_different_hash_seed():
     )
     ids = set()
     for seed in ("0", "1", "12345"):
+        env = dict(os.environ)
+        env["PYTHONHASHSEED"] = seed
         out = subprocess.run(
             [sys.executable, "-c", script, str(REPO_ROOT)],
             capture_output=True, text=True, check=True,
-            env={"PYTHONHASHSEED": seed, "PATH": "/usr/bin:/bin"},
+            env=env,
         )
         ids.add(out.stdout.strip())
     assert len(ids) == 1, f"stub id varies with PYTHONHASHSEED: {ids}"
