@@ -27,6 +27,11 @@ import json
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
+from core.library2.media_mappings import (
+    is_media_server_source,
+    resolve_mapping,
+    upsert_mapping,
+)
 
 logger = get_logger("library2.media_server_sync")
 
@@ -57,43 +62,45 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
     ``allow_create`` is exclusively for the successful import pipeline.  A
     normal media-server scan only stamps an existing row.
     """
-    row = cursor.execute(
+    mapped_id = resolve_mapping(cursor, "artist", server_source, server_id)
+    row = ((mapped_id,) if mapped_id is not None else cursor.execute(
         "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=? AND (? OR"
         " EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id"
         " JOIN lib2_track_files f ON f.track_id=t.id WHERE al.primary_artist_id=lib2_artists.id"
         " AND f.file_state='active' AND TRIM(f.path)<>''))",
         (server_source, str(server_id), allow_create),
-    ).fetchone()
+    ).fetchone())
     if row is None:
         # A rescan re-keyed the artist, or the row came from an import/download.
         # Same artist either way — take it over and stamp the new id on it.
-        row = cursor.execute(
+        candidates = cursor.execute(
             "SELECT id FROM lib2_artists "
             " WHERE name_key=? AND canonical_artist_id IS NULL "
-            "   AND (server_id IS NULL OR server_source=?) "
             "   AND EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t"
             "                ON t.album_id=al.id JOIN lib2_track_files f ON f.track_id=t.id"
             "                WHERE al.primary_artist_id=lib2_artists.id"
             "                  AND f.file_state='active' AND TRIM(f.path)<>'') "
-            " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
-            (_name_key(name), server_source),
-        ).fetchone()
+            " ORDER BY id LIMIT 2",
+            (_name_key(name),),
+        ).fetchall()
+        # A name-only match is safe only when it identifies one owned artist.
+        row = candidates[0] if len(candidates) == 1 else None
     if row is None:
         if not allow_create:
             return None
-        return int(cursor.execute(
+        artist_id = int(cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, image_url, genres,"
             "                         server_source, server_id, monitored)"
             " VALUES(?,?,?,?,COALESCE(?, '[]'),?,?,0)",
             (name, _name_key(name), name, image_url, genres_json,
              server_source, str(server_id)),
         ).lastrowid)
+        if is_media_server_source(server_source):
+            upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
+        return artist_id
     artist_id = int(row[0])
     if not allow_create:
-        cursor.execute(
-            "UPDATE lib2_artists SET server_source=?,server_id=?,"
-            "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (server_source, str(server_id), artist_id))
+        upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
         return artist_id
     image_set = ("image_url=CASE WHEN image_url IS NULL OR image_url='' "
                  "THEN COALESCE(?, image_url) ELSE image_url END"
@@ -112,10 +119,15 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
         (name, _name_key(name), image_url, genres_json, server_source,
          str(server_id), artist_id),
     )
+    if is_media_server_source(server_source):
+        upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
     return artist_id
 
 
 def resolve_artist(cursor, server_source: str, server_id: Any) -> Optional[int]:
+    mapped = resolve_mapping(cursor, "artist", server_source, server_id)
+    if mapped is not None:
+        return mapped
     row = cursor.execute(
         "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=?",
         (server_source, str(server_id)),
@@ -124,8 +136,22 @@ def resolve_artist(cursor, server_source: str, server_id: Any) -> Optional[int]:
 
 
 def resolve_album(cursor, server_source: str, server_id: Any) -> Optional[int]:
+    mapped = resolve_mapping(cursor, "album", server_source, server_id)
+    if mapped is not None:
+        return mapped
     row = cursor.execute(
         "SELECT id FROM lib2_albums WHERE server_source=? AND server_id=?",
+        (server_source, str(server_id)),
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
+def resolve_track(cursor, server_source: str, server_id: Any) -> Optional[int]:
+    mapped = resolve_mapping(cursor, "track", server_source, server_id)
+    if mapped is not None:
+        return mapped
+    row = cursor.execute(
+        "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=?",
         (server_source, str(server_id)),
     ).fetchone()
     return int(row[0]) if row else None
@@ -137,23 +163,24 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
                  track_count=None, duration=None,
                  allow_create: bool = False) -> Optional[int]:
     """Map a server release; imports alone may create/own the row."""
-    row = cursor.execute(
+    mapped_id = resolve_mapping(cursor, "album", server_source, server_id)
+    row = ((mapped_id,) if mapped_id is not None else cursor.execute(
         "SELECT id FROM lib2_albums WHERE server_source=? AND server_id=? AND (? OR"
         " EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
         " WHERE t.album_id=lib2_albums.id AND f.file_state='active' AND TRIM(f.path)<>''))",
         (server_source, str(server_id), allow_create),
-    ).fetchone()
+    ).fetchone())
     if row is None:
-        row = cursor.execute(
+        candidates = cursor.execute(
             "SELECT id FROM lib2_albums"
             " WHERE primary_artist_id=? AND LOWER(title)=LOWER(?)"
-            "   AND (server_id IS NULL OR server_source=?)"
             "   AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f"
             "                ON f.track_id=t.id WHERE t.album_id=lib2_albums.id"
             "                  AND f.file_state='active' AND TRIM(f.path)<>'')"
-            " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
-            (artist_id, title, server_source),
-        ).fetchone()
+            " ORDER BY id LIMIT 2",
+            (artist_id, title),
+        ).fetchall()
+        row = candidates[0] if len(candidates) == 1 else None
     if row is None:
         if not allow_create:
             return None
@@ -170,9 +197,10 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
         if not allow_create:
             cursor.execute(
                 "UPDATE lib2_albums SET track_count=COALESCE(?,track_count),"
-                "duration=COALESCE(?,duration),server_source=?,server_id=?,"
+                "duration=COALESCE(?,duration),"
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (track_count, duration, server_source, str(server_id), album_id))
+                (track_count, duration, album_id))
+            upsert_mapping(cursor, "album", album_id, server_source, server_id)
             return album_id
         cursor.execute(
             "UPDATE lib2_albums"
@@ -187,6 +215,8 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
             (artist_id, title, year, image_url, genres_json, track_count, duration,
              server_source, str(server_id), album_id),
         )
+    if is_media_server_source(server_source):
+        upsert_mapping(cursor, "album", album_id, server_source, server_id)
     cursor.execute(
         "DELETE FROM lib2_album_artists WHERE album_id=? AND role='primary' "
         "AND artist_id<>?", (album_id, artist_id))
@@ -205,32 +235,33 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                  bitrate=None, allow_create: bool = False,
                  file_source: Optional[str] = None) -> Optional[int]:
     """The catalogue id for a track the server reported, plus its file row."""
-    row = cursor.execute(
+    mapped_id = resolve_mapping(cursor, "track", server_source, server_id)
+    row = ((mapped_id,) if mapped_id is not None else cursor.execute(
         "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=? AND (? OR"
         " EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=lib2_tracks.id"
         " AND f.file_state='active' AND TRIM(f.path)<>''))",
         (server_source, str(server_id), allow_create),
-    ).fetchone()
+    ).fetchone())
     if row is None:
         row = cursor.execute(
             "SELECT t.id FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
             " WHERE f.path=? AND f.file_state='active' LIMIT 1", (file_path,)
         ).fetchone() if file_path else None
     if row is None:
-        row = cursor.execute(
+        candidates = cursor.execute(
             "SELECT id FROM lib2_tracks"
             " WHERE album_id=? AND LOWER(title)=LOWER(?)"
-            "   AND (server_id IS NULL OR server_source=?)"
             "   AND ((NULLIF(?, '') IS NOT NULL AND musicbrainz_id=?)"
             "     OR (? IS NOT NULL AND track_number=?"
             "         AND COALESCE(disc_number,1)=COALESCE(?,1)))"
             "   AND EXISTS (SELECT 1 FROM lib2_track_files f"
             "                WHERE f.track_id=lib2_tracks.id AND f.file_state='active'"
             "                  AND TRIM(f.path)<>'')"
-            " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
-            (album_id, title, server_source, musicbrainz_id, musicbrainz_id,
+            " ORDER BY id LIMIT 2",
+            (album_id, title, musicbrainz_id, musicbrainz_id,
              track_number, track_number, disc_number),
-        ).fetchone()
+        ).fetchall()
+        row = candidates[0] if len(candidates) == 1 else None
     if row is None:
         if not allow_create:
             return None
@@ -249,9 +280,10 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                 "UPDATE lib2_tracks SET track_number=COALESCE(?,track_number),"
                 "disc_number=COALESCE(?,disc_number),duration=COALESCE(?,duration),"
                 "track_artist=COALESCE(?,track_artist),"
-                "server_source=?,server_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (track_number, disc_number, duration, track_artist,
-                 server_source, str(server_id), track_id))
+                 track_id))
+            upsert_mapping(cursor, "track", track_id, server_source, server_id)
             if file_path:
                 cursor.execute(
                     "UPDATE lib2_track_files SET size=COALESCE(?,size),"
@@ -271,6 +303,8 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
             (album_id, title, track_number, disc_number, duration, track_artist,
              musicbrainz_id, server_source, str(server_id), track_id),
         )
+    if is_media_server_source(server_source):
+        upsert_mapping(cursor, "track", track_id, server_source, server_id)
     cursor.execute(
         "DELETE FROM lib2_track_artists WHERE track_id=? AND role='primary' "
         "AND artist_id<>?", (track_id, artist_id))
@@ -320,6 +354,6 @@ def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
 
 
 __all__ = [
-    "resolve_album", "resolve_artist", "upsert_album", "upsert_artist",
+    "resolve_album", "resolve_artist", "resolve_track", "upsert_album", "upsert_artist",
     "upsert_track", "_genres_json",
 ]

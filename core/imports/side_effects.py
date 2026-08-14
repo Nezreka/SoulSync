@@ -288,8 +288,13 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         logger.debug("library history record failed: %s", e)
 
 
-def record_download_provenance(context: Dict[str, Any]) -> None:
-    """Record source provenance for a completed download."""
+def record_download_provenance(context: Dict[str, Any],
+                               require_library: bool = False) -> Optional[int]:
+    """Record provenance and register the imported file in Library v2.
+
+    ``require_library`` is used by terminal pipeline paths: registration then
+    becomes part of success instead of a debug-only best effort.
+    """
     try:
         search_result = context.get("original_search_result") or context.get("search_result") or {}
         username = search_result.get("username", context.get("_download_username", ""))
@@ -401,14 +406,24 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
     except Exception as e:
         logger.debug("record_download_provenance failed: %s", e)
 
-    # Library v2 auto-link (opt-in, best-effort): make the imported file appear
-    # in the v2 library immediately instead of waiting for a full re-import.
+    # Register the imported file in the native catalogue immediately. Repair
+    # callers may keep this best-effort; terminal completion paths make it a
+    # required part of success via ``require_library``.
     linked_lib2_file_id = None
     try:
         from core.library2.autolink import link_download_into_library_v2
-        linked_lib2_file_id = link_download_into_library_v2(context)
+        linked_lib2_file_id = link_download_into_library_v2(
+            context, raise_on_error=require_library)
     except Exception as e:
+        if require_library:
+            raise RuntimeError(
+                "The file was written, but Library v2 could not register it"
+            ) from e
         logger.debug("library v2 autolink skipped: %s", e)
+    if require_library and linked_lib2_file_id is None:
+        raise RuntimeError(
+            "The file was written, but Library v2 did not create a file row"
+        )
 
     # The canonical tracklist deliberately comes from one provider, but a
     # confirmed album can carry several provider release IDs. Reconcile those
@@ -457,35 +472,17 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         notify_manual_grab_import_success(context)
     except Exception as e:
         logger.debug("manual grab callback skipped: %s", e)
+    return linked_lib2_file_id
 
 
 def is_active_media_server_ready() -> tuple[bool, str]:
-    """Standalone ('soulsync') is always ready — no external connection needed.
+    """Imports are local and never depend on Plex/Jellyfin/Navidrome uptime.
 
-    Otherwise the active media server must actually be connected, or an
-    import copies files into place fully tagged but never registers them:
-    record_soulsync_library_entry() below only writes the local DB when
-    active_media_server == 'soulsync', and the alternative path (a
-    Plex/Jellyfin/Navidrome library scan syncing into the DB) silently
-    no-ops without a live connection too. Files land on disk; the Library
-    view never learns about them. Shared by the HTTP import routes
-    (core.imports.routes) and the auto-import background worker
-    (core.auto_import_worker) so neither path can leave files stranded."""
-    active = _get_config_manager().get_active_media_server()
-    if active == "soulsync":
-        return True, ""
-
-    from core.media_server.engine import get_media_server_engine
-
-    if get_media_server_engine().is_connected():
-        return True, ""
-
-    label = active.replace("_", " ").title() if active else "Your media server"
-    return False, (
-        f"{label} isn't connected, so importing now would copy files into "
-        f"place without adding them to your Library. Connect {label} in "
-        f"Settings, or switch to Standalone mode, then try again."
-    )
+    Library v2 is registered synchronously by the import pipeline.  A media
+    server may recognise that row later and add its scoped mapping, but being
+    offline cannot make a valid local import unsafe.
+    """
+    return True, ""
 
 
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:

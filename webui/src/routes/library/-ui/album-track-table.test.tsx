@@ -216,6 +216,38 @@ describe('library v2 album track table', () => {
     expect(await screen.findByText('Downloading 55%')).toBeInTheDocument();
   });
 
+  it('shows media-server recognition next to the imported track title', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([track({ media_server_sources: ['navidrome', 'plex'] })]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('✓ Navidrome')).toBeInTheDocument();
+    expect(screen.getByText('✓ Plex')).toBeInTheDocument();
+  });
+
   it('renders the generic Check column separately from verification provenance', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

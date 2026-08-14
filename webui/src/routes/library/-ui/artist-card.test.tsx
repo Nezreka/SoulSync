@@ -28,6 +28,22 @@ const artist: LibraryV2ArtistSummary = {
 };
 
 describe('library v2 artist card semantics', () => {
+  it('shows every positive media-server recognition without changing ownership', () => {
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <ArtistCard
+            artist={{ ...artist, media_server_sources: ['jellyfin', 'plex'] }}
+            onOpen={vi.fn()}
+          />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText('✓ Jellyfin')).toBeInTheDocument();
+    expect(screen.getByText('✓ Plex')).toBeInTheDocument();
+  });
+
   it('keeps card navigation and monitoring as sibling buttons', async () => {
     const onOpen = vi.fn();
     let monitorWrites = 0;

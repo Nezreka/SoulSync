@@ -4894,3 +4894,35 @@ und anschließend die vollständigen Suites mit **14303 Python-Tests bestanden,
 3 übersprungen, 2 abgewählt** sowie **6459 Frontendtests bestanden**.
 `compileall`, Legacy-Ratsche, Frontend-Typecheck und Produktions-Build sind
 grün.
+
+## 55. Unabhängige Media-Server-Erkennung und Post-Cutover-Audit (14. August 2026)
+
+Stand: **Implemented in diesem Remediation-Commit.** Plex, Jellyfin und Navidrome
+besitzen den Katalog nicht und können keine unbekannten Library-v2-Entities
+mehr erzeugen. Ihre positive Erkennung liegt nun mehrwertig in
+`lib2_media_server_mappings`; Artist- und Track-UI zeigen die erkannten Server
+als grünen Haken. Die bisherigen Entity-Spalten bleiben ausschließlich als
+Upgrade-Kompatibilitätsprojektion erhalten und werden durch einen
+fortsetzbaren Backfill in die neue Tabelle überführt.
+
+Gleichzeitig sind die sieben Befunde aus
+[Issues §37](library-v2-issues.md#37-post-remediation-audit-des-lib2-cutovers-14-august-2026)
+geschlossen: alle unsafe HTTP-Verben liegen hinter dem Upgrade-Gate, lokale
+Imports hängen nicht mehr von Server-Uptime ab, ihr lib2-Commit ist Teil der
+Completion-Boundary, Standalone Full/Deep Scan benutzen native Import-/Missing-
+Verträge und ein Media-Server-Full-Refresh löst bestehende Mappings erst nach
+einem verifizierten Read. Ein einzelner Server-Detach erhält die Mappings der
+anderen Server sowie Katalog, Files, Providerdaten und Monitoring-Intent.
+Auch Race Guards, bereits vorhandene Ziele und der äußere Download-Wrapper
+melden erst nach nachgewiesener File-Row Erfolg; bloße Dateiexistenz kann einen
+fehlgeschlagenen lib2-Write nicht mehr verdecken.
+Standalone-Reindex und Server-Detach teilen große ID-Mengen in 500er-Batches,
+damit große Libraries nicht am SQLite-Parameterlimit scheitern.
+
+**Nachweis:** Die vollständigen `tests/library2`- und `tests/imports`-Bäume samt
+Completion-Wrapper-Regressionen bestanden mit **2495 Tests**. Weitere **22**
+Scan-, DB-I/O-, Empty-Library- und Standalone-Lifecycle-Regressionen sowie
+**14** gezielte Artist-/Track-UI-Tests bestanden. Python-Compile,
+`git diff --check`, Frontend-Format/Typecheck und der Produktions-Build sind
+grün; der Frontend-Check meldet weiterhin die bereits vorhandenen 377
+Warnungen, aber keine Fehler.

@@ -46,7 +46,13 @@ _OWNED_ALBUMS_SQL = """
 """
 
 _OWNED_TRACKS_SQL = """
-    SELECT t.title, ar.name, COALESCE(t.server_id, t.legacy_track_id), t.id,
+    SELECT t.title, ar.name,
+           COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m
+                      WHERE m.entity_type='track' AND m.entity_id=t.id
+                        AND m.server_source=? LIMIT 1),
+                    CASE WHEN t.server_source=? THEN t.server_id END,
+                    t.legacy_track_id),
+           t.id,
            al.title, al.image_url,
            (SELECT f.path FROM lib2_track_files f
              WHERE f.track_id = t.id
@@ -56,10 +62,14 @@ _OWNED_TRACKS_SQL = """
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-     WHERE (t.server_source = ? OR t.server_source IS NULL)
-       AND EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
+     WHERE EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
                    AND owned_f.file_state='active' AND TRIM(owned_f.path)<>'')
-     ORDER BY t.server_source = ? DESC, t.id
+     ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings active_m
+                        WHERE active_m.entity_type='track'
+                          AND active_m.entity_id=t.id
+                          AND active_m.server_source=?)
+               OR t.server_source=?) DESC,
+              t.id
 """
 
 
@@ -124,7 +134,10 @@ def check_library_presence(
         active_server = getattr(
             config_manager, 'get_active_media_server',
             lambda: config_manager.get('media_server.type', 'plex'))()
-        cursor.execute(_OWNED_TRACKS_SQL, (active_server, active_server))
+        cursor.execute(
+            _OWNED_TRACKS_SQL,
+            (active_server, active_server, active_server, active_server),
+        )
         owned_tracks: dict[str, dict] = {}
         for r in cursor.fetchall():
             key = _presence_key(r[0], r[1])

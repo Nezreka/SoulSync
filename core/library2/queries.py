@@ -24,6 +24,41 @@ _SORTS = {
 }
 
 
+def _media_server_sources_many(conn, entity_type: str, entity_ids: List[int]
+                               ) -> Dict[int, List[str]]:
+    """Positive Plex/Jellyfin/Navidrome recognitions for API projections."""
+    ids = sorted({int(value) for value in entity_ids if value is not None})
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    if entity_type == "artist":
+        rows = conn.execute(
+            f"""SELECT COALESCE(a.canonical_artist_id,a.id) AS entity_id,
+                       m.server_source
+                  FROM lib2_media_server_mappings m
+                  JOIN lib2_artists a ON a.id=m.entity_id
+                 WHERE m.entity_type='artist'
+                   AND COALESCE(a.canonical_artist_id,a.id) IN ({marks})
+                   AND m.match_status='recognized'
+                 GROUP BY COALESCE(a.canonical_artist_id,a.id),m.server_source
+                 ORDER BY m.server_source""",
+            ids,
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"""SELECT entity_id,server_source
+                  FROM lib2_media_server_mappings
+                 WHERE entity_type=? AND entity_id IN ({marks})
+                   AND match_status='recognized'
+                 GROUP BY entity_id,server_source ORDER BY server_source""",
+            [entity_type, *ids],
+        ).fetchall()
+    result = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        result.setdefault(int(row[0]), []).append(str(row[1]))
+    return result
+
+
 def _artist_page_order(sort: str) -> str:
     """Choose page ids before running the expensive catalog roll-ups."""
 
@@ -580,6 +615,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         entity_type="artist",
         provider_fields={int(row["id"]): dict(row) for row in rows},
     )
+    media_sources = _media_server_sources_many(
+        conn, "artist", [int(row["id"]) for row in rows])
     artists = []
     for r in rows:
         effective, overrides = projected[int(r["id"])]
@@ -607,6 +644,7 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "tracks_present": present,
             "tracks_missing": max(0, track_count - present),
             "total_size_bytes": r["total_size_bytes"] or 0,
+            "media_server_sources": media_sources.get(int(r["id"]), []),
             "user_overrides": overrides,
         })
     return artists, total
@@ -849,6 +887,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # lib2 row id is not one. Expose what the row already stores instead
         # of making the client take a second round trip to /match-status.
         "provider_ids": _artist_provider_ids(a),
+        "media_server_sources": _media_server_sources_many(
+            conn, "artist", [int(a["id"])]).get(int(a["id"]), []),
         # iss32-E02: "both show as matched so you can't tell them apart."
         # An artist with a legacy counterpart is walked by the twelve metadata
         # workers and can carry provider bios; one born inside lib2 is served
@@ -1202,6 +1242,7 @@ def _serialize_track(
     artists: Optional[List[Dict[str, Any]]] = None,
     projection: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     provenance: Optional[Dict[str, Any]] = None,
+    media_server_sources: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
     if file_row is _NOT_LOADED:
@@ -1323,6 +1364,7 @@ def _serialize_track(
         "file_status": fstat,
         "metadata_gaps": gaps,
         "metadata_scan_status": scan_status,
+        "media_server_sources": media_server_sources or [],
         "user_overrides": overrides,
     }
 
@@ -1356,6 +1398,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         album,
         artists,
     )
+    media_sources = _media_server_sources_many(conn, "track", track_ids)
     return [
         _serialize_track(
             conn,
@@ -1365,6 +1408,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             artists=artists.get(int(track["id"]), []),
             projection=projections[int(track["id"])],
             provenance=provenance.get(int(track["id"]), {}),
+            media_server_sources=media_sources.get(int(track["id"]), []),
         )
         for track in tracks
     ]
@@ -1405,6 +1449,7 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
         "file": None,
         "file_status": "missing",
         "metadata_gaps": [],
+        "media_server_sources": [],
         "is_missing": True,
     }
 

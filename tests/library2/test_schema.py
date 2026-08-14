@@ -17,7 +17,7 @@ _EXPECTED_TABLES = {
     "lib2_entity_history", "lib2_metadata_overrides",
     "lib2_file_delete_operations", "lib2_file_delete_items",
     "lib2_ui_preferences", "lib2_maintenance_events", "lib2_bootstrap_state",
-    "lib2_provider_attempts",
+    "lib2_provider_attempts", "lib2_media_server_mappings",
 }
 
 

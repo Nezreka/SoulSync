@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from core.library2.media_server_sync import upsert_album, upsert_artist, upsert_track
 from database.music_database import MusicDatabase
 from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
@@ -104,6 +105,116 @@ def test_orphan_cleanup_only_detaches_server_mapping(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?", (album,)).fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE id=?", (artist,)).fetchone()[0] == 1
     assert result['orphaned_albums_removed'] == 1
+
+
+def test_each_media_server_keeps_its_own_track_id_and_detaches_independently(tmp_path):
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        artist = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key) VALUES('Muse','muse')"
+        ).lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,origin) "
+            "VALUES(?,'Absolution','library')", (artist,),
+        ).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title,track_number,disc_number) "
+            "VALUES(?,'Time Is Running Out',4,1)", (album,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?, '/music/song.flac', 1, 'active')", (track,),
+        )
+        for source, prefix in (("plex", "p"), ("jellyfin", "j")):
+            assert upsert_artist(
+                conn, server_source=source, server_id=f"{prefix}-artist", name="Muse",
+            ) == artist
+            assert upsert_album(
+                conn, server_source=source, server_id=f"{prefix}-album",
+                artist_id=artist, title="Absolution",
+            ) == album
+            assert upsert_track(
+                conn, server_source=source, server_id=f"{prefix}-track",
+                album_id=album, artist_id=artist, title="Time Is Running Out",
+                track_number=4, disc_number=1, file_path="/music/song.flac",
+            ) == track
+
+    assert db.search_tracks(
+        title="Time Is Running Out", server_source="plex",
+    )[0].id == "p-track"
+    assert db.search_tracks(
+        title="Time Is Running Out", server_source="jellyfin",
+    )[0].id == "j-track"
+    assert db.server_track_id(track, "plex") == "p-track"
+    assert db.server_track_id(track, "jellyfin") == "j-track"
+
+    db.clear_server_data("plex")
+
+    assert db.search_tracks(
+        title="Time Is Running Out", server_source="plex",
+    ) == []
+    assert db.search_tracks(
+        title="Time Is Running Out", server_source="jellyfin",
+    )[0].id == "j-track"
+    with db._get_connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks WHERE id=?", (track,),
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_track_files WHERE track_id=?", (track,),
+        ).fetchone()[0] == 1
+        assert [tuple(row) for row in conn.execute(
+            "SELECT server_source,server_id FROM lib2_media_server_mappings "
+            "WHERE entity_type='track' AND entity_id=?", (track,),
+        )] == [("jellyfin", "j-track")]
+
+
+def test_large_server_detach_is_batched_and_keeps_catalogue(tmp_path):
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        artist = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key) VALUES('Large','large')"
+        ).lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Set')",
+            (artist,),
+        ).lastrowid
+        conn.executemany(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)",
+            [(album, f"Track {index}") for index in range(1201)],
+        )
+        track_ids = [row[0] for row in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=?", (album,),
+        )]
+        conn.executemany(
+            "INSERT INTO lib2_media_server_mappings("
+            "entity_type,entity_id,server_source,server_id) "
+            "VALUES('track',?,'plex',?)",
+            [(track_id, f"plex-{track_id}") for track_id in track_ids],
+        )
+
+    class _LimitedCursor:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def execute(self, sql, params=()):
+            assert len(params or ()) <= 501  # server source + 500 entity ids
+            return self._cursor.execute(sql, params)
+
+    with db._get_connection() as conn:
+        result = db._detach_server_contribution(
+            _LimitedCursor(conn.cursor()), "plex",
+        )
+        conn.commit()
+
+    with db._get_connection() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_media_server_mappings WHERE server_source='plex'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,),
+        ).fetchone()[0] == 1201
+    assert result["tracks_removed"] == 1201
 
 
 def test_duplicate_merge_preserves_structured_and_user_state(tmp_path):

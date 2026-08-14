@@ -612,9 +612,9 @@ class ListeningStatsWorker:
     def _map_play_counts_to_db(self, server_counts, server_source):
         """Map server track ids onto catalogue rows for play-count updates.
 
-        The counts arrive keyed by the media server's own id, which the
-        catalogue stores as ``lib2_tracks.server_id`` (§50.4.4.25) — scoped by
-        ``server_source``, because that id is only unique within one server.
+        The counts arrive keyed by the media server's own id. Library v2 keeps
+        that identity in the server-scoped mapping table; the singular track
+        columns are only an upgrade fallback.
         Rows the catalogue has not been told about yet are skipped, exactly as
         before.
         """
@@ -633,9 +633,12 @@ class ListeningStatsWorker:
                 chunk = ids[i:i + chunk_size]
                 placeholders = ','.join(['?'] * len(chunk))
                 cursor.execute(
-                    f"SELECT server_id, id FROM lib2_tracks "
-                    f"WHERE server_source = ? AND server_id IN ({placeholders})",
-                    [server_source, *chunk],
+                    f"SELECT m.server_id, m.entity_id FROM lib2_media_server_mappings m "
+                    f"WHERE m.entity_type='track' AND m.server_source=? "
+                    f"AND m.server_id IN ({placeholders}) UNION "
+                    f"SELECT t.server_id, t.id FROM lib2_tracks t "
+                    f"WHERE t.server_source=? AND t.server_id IN ({placeholders})",
+                    [server_source, *chunk, server_source, *chunk],
                 )
                 for server_id, track_id in cursor.fetchall():
                     by_server_id.setdefault(str(server_id), track_id)

@@ -248,7 +248,7 @@ def test_manual_grab_with_lib2_entity_routes_through_full_pipeline(
 
 
 def test_manual_grab_without_lib2_entity_keeps_simple_download_shortcut(
-    tmp_path, monkeypatch, legacy_db
+    tmp_path, monkeypatch, legacy_db, imported_conn
 ):
     """A plain "search page" manual download with NO Library-v2 target must
     keep its pre-existing behavior: dump to /Transfer, heuristic autolink.
@@ -316,3 +316,6 @@ def test_manual_grab_without_lib2_entity_keeps_simple_download_shortcut(
     final_path = context.get("_final_path")
     assert final_path and os.path.exists(final_path)
     assert str(transfer_root) in final_path
+    assert imported_conn.execute(
+        "SELECT COUNT(*) FROM lib2_track_files WHERE path=?", (final_path,),
+    ).fetchone()[0] == 1

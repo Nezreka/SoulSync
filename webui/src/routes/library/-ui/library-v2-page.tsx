@@ -4466,6 +4466,20 @@ export function ArtistCard({
           className={styles.artistThumb}
           thumb
         />
+        {artist.media_server_sources?.length ? (
+          <span className={styles.mediaServerBadges} aria-label="Media server recognition">
+            {artist.media_server_sources.map((source) => (
+              <span
+                key={source}
+                className={styles.mediaServerBadge}
+                title={`${source[0]?.toUpperCase()}${source.slice(1)} recognised this artist`}
+              >
+                ✓ {source[0]?.toUpperCase()}
+                {source.slice(1)}
+              </span>
+            ))}
+          </span>
+        ) : null}
         <span className={styles.artistInfo}>
           <span className={styles.artistName}>{artist.name}</span>
           <span className={styles.artistMeta}>
@@ -9042,6 +9056,17 @@ function TrackRow({
         {/* Legacy parity: present/missing shown inline right after the title. */}
         <span className={styles.trackTitleCell}>
           <span className={missing ? styles.muted : undefined}>{label}</span>
+          {track.media_server_sources?.map((source) => (
+            <span
+              key={source}
+              className={styles.mediaServerTrackBadge}
+              title={`${source[0]?.toUpperCase()}${source.slice(1)} recognised this track`}
+              aria-label={`${source} recognised`}
+            >
+              ✓ {source[0]?.toUpperCase()}
+              {source.slice(1)}
+            </span>
+          ))}
           <InlineFileStatus status={track.file_status} />
           <QueueStatusBadge status={queueStatus} />
         </span>

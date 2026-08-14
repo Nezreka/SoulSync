@@ -74,6 +74,30 @@ def test_rescan_files_with_empty_scope_probes_nothing(scoped_conn, tmp_path):
     assert stats == {"scanned": 0, "updated": 0, "missing": 0, "path_drift": 0}
 
 
+def test_explicit_file_scope_is_batched_below_sqlite_parameter_limits():
+    class _Result:
+        def __init__(self, values):
+            self._values = values
+
+        def fetchall(self):
+            return [(value,) for value in self._values]
+
+    class _Connection:
+        def __init__(self):
+            self.batch_sizes = []
+
+        def execute(self, _sql, params):
+            self.batch_sizes.append(len(params))
+            assert len(params) <= 500
+            return _Result(params)
+
+    conn = _Connection()
+    rows = _file_rows_in_scope(conn, file_ids=list(range(1, 1202)))
+
+    assert conn.batch_sizes == [500, 500, 201]
+    assert len(rows) == 1201
+
+
 def test_rescan_refreshes_tag_and_gap_cache_independently_of_quality(
         scoped_conn, tmp_path, monkeypatch):
     from core.library2.scan import rescan_files

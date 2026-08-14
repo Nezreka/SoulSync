@@ -37,6 +37,12 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.migration_gate")
 
 POLL_INTERVAL_SECONDS = 5.0
+SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def request_can_mutate(method: Any) -> bool:
+    """Whether an HTTP method must be held behind the migration barrier."""
+    return str(method or "").upper() not in SAFE_HTTP_METHODS
 
 # In-process heavy work that is NOT a claimed bootstrap run: the deferred
 # convergence passes (iss32-M03). They deserve the same quiet as the import —

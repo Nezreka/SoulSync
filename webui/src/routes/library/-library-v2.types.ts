@@ -115,6 +115,8 @@ export interface LibraryV2ArtistSummary {
   tracks_missing: number;
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
+  /** Media servers that positively mapped this imported catalogue artist. */
+  media_server_sources?: string[];
   user_overrides: Record<string, unknown>;
 }
 
@@ -160,6 +162,8 @@ export interface LibraryV2ArtistDetail {
   /** ldp-05: qualified provider ids (guide §2.5) so the rich header can ask
    *  the shared top-tracks endpoint about this artist. */
   provider_ids?: Partial<Record<string, string>>;
+  /** Independent recognition mappings; never Library ownership. */
+  media_server_sources?: string[];
   summary: string | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   style: string | null;
@@ -426,6 +430,8 @@ export interface LibraryV2Track {
    *  file's tags. Absent (older cached responses / test fixtures) is treated
    *  as 'scanned' for backward compatibility. */
   metadata_scan_status?: 'scanned' | 'pending' | 'unreadable';
+  /** Plex/Jellyfin/Navidrome instances that recognised this imported track. */
+  media_server_sources?: string[];
   is_missing?: boolean;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;

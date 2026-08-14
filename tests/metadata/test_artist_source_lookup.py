@@ -167,6 +167,24 @@ class TestFindLibraryArtistForSource:
         )
         assert result == row_id
 
+    def test_name_fallback_uses_scoped_mapping_not_last_server_projection(self, db):
+        row_id = _insert_artist(
+            db, artist_id="j-id", name="Mapped Artist", server_source="jellyfin",
+        )
+        with db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO lib2_media_server_mappings "
+                "(entity_type,entity_id,server_source,server_id) "
+                "VALUES('artist',?,'plex','p-id')", (row_id,),
+            )
+
+        result = find_library_artist_for_source(
+            db, "deezer", "no-id-match", artist_name="Mapped Artist",
+            active_server="plex",
+        )
+
+        assert result == row_id
+
     def test_name_fallback_skips_other_servers(self, db):
         """Active-server scope is required so we don't jump the user across
         server contexts on a name collision."""

@@ -205,10 +205,12 @@ class _FakeDatabase:
             CREATE TABLE lib2_tracks (
                 id INTEGER PRIMARY KEY, album_id INTEGER, title TEXT,
                 spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT DEFAULT '{}',
-                soul_id TEXT, isrc TEXT, server_source TEXT);
+                soul_id TEXT, isrc TEXT, server_source TEXT, server_id TEXT);
             CREATE TABLE lib2_track_files (
                 id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
                 file_state TEXT DEFAULT 'active', is_primary INTEGER DEFAULT 1);
+            CREATE TABLE lib2_media_server_mappings (
+                entity_type TEXT, entity_id INTEGER, server_source TEXT, server_id TEXT);
             INSERT INTO lib2_albums(id,title) VALUES(1,'Album');
         """)
         self._conn.commit()
@@ -248,6 +250,15 @@ class _FakeDatabase:
             self._conn.execute(
                 "INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
                 (cur.lastrowid, f"/{cur.lastrowid}.flac"))
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def map(self, track_id, server_source, server_id):
+        self._conn.execute(
+            "INSERT INTO lib2_media_server_mappings "
+            "(entity_type,entity_id,server_source,server_id) VALUES('track',?,?,?)",
+            (track_id, server_source, server_id),
+        )
         self._conn.commit()
 
 
@@ -374,13 +385,23 @@ class TestFindLibraryTrackServerSourceFilter:
         )
         assert result is not None
 
-    def test_server_source_mismatch_with_filter(self, db):
+    def test_server_source_mismatch_does_not_hide_local_ownership(self, db):
         db.insert(title='Hello', spotify_track_id='sp1', server_source='jellyfin')
         result = find_library_track_by_external_id(
             db, external_ids={'spotify_id': 'sp1'}, server_source='plex',
         )
-        # Filter excludes jellyfin, so no match.
-        assert result is None
+        assert result is not None
+
+    def test_requested_media_mapping_wins_when_external_id_is_duplicated(self, db):
+        db.insert(title='Other', spotify_track_id='sp1', server_source='jellyfin')
+        mapped = db.insert(title='Mapped', spotify_track_id='sp1', server_source='jellyfin')
+        db.map(mapped, 'plex', 'plex-track')
+
+        result = find_library_track_by_external_id(
+            db, external_ids={'spotify_id': 'sp1'}, server_source='plex',
+        )
+
+        assert result['id'] == mapped
 
     def test_null_server_source_passes_filter(self, db):
         """Older library rows may have NULL server_source — those should

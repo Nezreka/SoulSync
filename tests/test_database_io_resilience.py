@@ -40,6 +40,9 @@ def test_clear_server_data_does_not_vacuum_detached_rows():
 
     conn = _Conn()
     db._get_connection = lambda: conn
+    db._detach_server_contribution = lambda *_args, **_kwargs: {
+        'artists_removed': 20, 'albums_removed': 200, 'tracks_removed': 1500,
+    }
 
     db.clear_server_data("jellyfin")
 
@@ -88,6 +91,15 @@ def test_clear_server_data_retries_transient_disk_io_before_commit(monkeypatch):
         return conn
 
     db._get_connection = _connect
+    detach_calls = []
+
+    def _detach(*_args, **_kwargs):
+        detach_calls.append(1)
+        if len(detach_calls) == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        return {'artists_removed': 1, 'albums_removed': 1, 'tracks_removed': 1}
+
+    db._detach_server_contribution = _detach
     monkeypatch.setattr("database.music_database.time.sleep", lambda _seconds: None)
 
     db.clear_server_data("jellyfin")

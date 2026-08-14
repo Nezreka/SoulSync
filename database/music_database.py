@@ -5918,7 +5918,7 @@ class MusicDatabase:
             logger.error(f"find_track_id_by_file_path error: {e}")
             return None
 
-    def server_track_id(self, track_id) -> Optional[str]:
+    def server_track_id(self, track_id, server_source: Optional[str] = None) -> Optional[str]:
         """The media server's own id for a catalogue track, or None.
 
         The two used to be the same value — a legacy row's id WAS the server's
@@ -5930,9 +5930,18 @@ class MusicDatabase:
             return None
         try:
             with self._get_connection() as conn:
-                row = conn.execute(
-                    "SELECT server_id FROM lib2_tracks WHERE id = ?",
-                    (track_id,)).fetchone()
+                if server_source:
+                    row = conn.execute(
+                        "SELECT server_id FROM lib2_media_server_mappings "
+                        "WHERE entity_type='track' AND entity_id=? AND server_source=? "
+                        "UNION ALL SELECT server_id FROM lib2_tracks WHERE id=? "
+                        "AND server_source=? LIMIT 1",
+                        (track_id, server_source, track_id, server_source),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT server_id FROM lib2_tracks WHERE id = ?",
+                        (track_id,)).fetchone()
             return str(row[0]) if row and row[0] else None
         except Exception as e:
             logger.debug(f"server_track_id lookup failed for {track_id}: {e}")
@@ -6457,25 +6466,31 @@ class MusicDatabase:
                     # Server mappings are counted only where owned file evidence
                     # exists; the server never owns the catalogue row itself.
                     cursor.execute(
-                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE "
-                        "a.server_source=? AND EXISTS (SELECT 1 FROM lib2_albums al "
+                        "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a WHERE ("
+                        "EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+                        "WHERE m.entity_type='artist' AND m.entity_id=a.id "
+                        "AND m.server_source=?) OR a.server_source=?) AND EXISTS (SELECT 1 FROM lib2_albums al "
                         "JOIN lib2_tracks t ON t.album_id=al.id JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE al.primary_artist_id=a.id AND "
                         "f.path IS NOT NULL AND TRIM(f.path)<>'' AND "
-                        "COALESCE(f.file_state,'active')='active')", (server_source,))
+                        "COALESCE(f.file_state,'active')='active')", (server_source, server_source))
                     artist_count = cursor.fetchone()[0]
 
                     cursor.execute(
-                        "SELECT COUNT(*) FROM lib2_albums al WHERE al.server_source=? AND "
+                        "SELECT COUNT(*) FROM lib2_albums al WHERE (EXISTS (SELECT 1 "
+                        "FROM lib2_media_server_mappings m WHERE m.entity_type='album' "
+                        "AND m.entity_id=al.id AND m.server_source=?) OR al.server_source=?) AND "
                         "EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
                         "ON f.track_id=t.id WHERE t.album_id=al.id AND f.path IS NOT NULL "
                         "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active')",
-                        (server_source,))
+                        (server_source, server_source))
                     album_count = cursor.fetchone()[0]
 
                     cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t "
-                                   f"WHERE t.server_source=? AND {_OWNED_TRACK}",
-                                   (server_source,))
+                                   f"WHERE (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+                                   f"WHERE m.entity_type='track' AND m.entity_id=t.id "
+                                   f"AND m.server_source=?) OR t.server_source=?) AND {_OWNED_TRACK}",
+                                   (server_source, server_source))
                     track_count = cursor.fetchone()[0]
                 return {
                     'artists': artist_count,
@@ -6493,48 +6508,101 @@ class MusicDatabase:
     @staticmethod
     def _detach_server_contribution(cursor, server_source: str, scope="all", ids=()):
         """Detach one server without deleting shared catalogue/provider state."""
-        marks = ','.join('?' * len(ids))
-        artist_scope = "SELECT id FROM lib2_artists WHERE server_source=?"
-        album_scope = "SELECT id FROM lib2_albums WHERE server_source=?"
-        if scope == "artist":
-            artist_scope += f" AND server_id IN ({marks})"
-            album_scope += f" AND primary_artist_id IN ({artist_scope})"
-            album_params = [server_source, server_source, *ids]
-        elif scope == "album":
-            album_scope += f" AND server_id IN ({marks})"
-            album_params = [server_source, *ids]
+        source = str(server_source)
+        ids = [str(value) for value in ids]
+
+        def chunks(values, size=500):
+            values = list(values)
+            for start in range(0, len(values), size):
+                yield values[start:start + size]
+
+        def mapped(entity_type, server_ids=None):
+            sql = ("SELECT entity_id FROM lib2_media_server_mappings "
+                   "WHERE entity_type=? AND server_source=?")
+            table = {'artist': 'lib2_artists', 'album': 'lib2_albums',
+                     'track': 'lib2_tracks'}[entity_type]
+            legacy_sql = f"SELECT id FROM {table} WHERE server_source=?"
+            if server_ids is None:
+                found = {int(row[0]) for row in cursor.execute(
+                    sql, [entity_type, source]).fetchall()}
+                found.update(int(row[0]) for row in cursor.execute(
+                    legacy_sql, [source]).fetchall())
+                return found
+            found = set()
+            for chunk in chunks(server_ids):
+                marks = ",".join("?" for _ in chunk)
+                found.update(int(row[0]) for row in cursor.execute(
+                    sql + f" AND server_id IN ({marks})",
+                    [entity_type, source, *chunk],
+                ).fetchall())
+                found.update(int(row[0]) for row in cursor.execute(
+                    legacy_sql + f" AND server_id IN ({marks})",
+                    [source, *chunk],
+                ).fetchall())
+            return found
+
+        artist_ids = mapped("artist", ids if scope == "artist" else None) \
+            if scope in ("all", "artist") else set()
+        if scope == "album":
+            album_ids = mapped("album", ids)
+        elif scope == "artist":
+            if artist_ids:
+                album_ids = set()
+                for chunk in chunks(artist_ids):
+                    marks = ",".join("?" for _ in chunk)
+                    album_ids.update(int(row[0]) for row in cursor.execute(
+                        f"SELECT al.id FROM lib2_albums al WHERE "
+                        f"(al.server_source=? OR EXISTS (SELECT 1 FROM "
+                        f"lib2_media_server_mappings m WHERE m.entity_type='album' "
+                        f"AND m.entity_id=al.id AND m.server_source=?)) "
+                        f"AND al.primary_artist_id IN ({marks})",
+                        [source, source, *chunk]))
+            else:
+                album_ids = set()
         else:
-            album_params = [server_source]
-        track_scope = "SELECT id FROM lib2_tracks WHERE server_source=?"
-        track_params = [server_source]
+            album_ids = mapped("album") if scope == "all" else set()
         if scope == "track":
-            track_scope += f" AND server_id IN ({marks})"
-            track_params += list(ids)
-        elif scope in ("album", "artist"):
-            track_scope += f" AND album_id IN ({album_scope})"
-            track_params += album_params
-        cursor.execute(
-            f"UPDATE lib2_track_files SET server_source=NULL, "
-            f"updated_at=CURRENT_TIMESTAMP "
-            f"WHERE track_id IN ({track_scope}) AND server_source=?",
-            [*track_params, server_source])
-        cursor.execute(
-            f"UPDATE lib2_tracks SET server_source=NULL, server_id=NULL, "
-            f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({track_scope})", track_params)
-        tracks = cursor.rowcount
-        albums = artists = 0
-        if scope != "track":
-            cursor.execute(
-                f"UPDATE lib2_albums SET server_source=NULL, server_id=NULL, "
-                f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({album_scope})",
-                album_params)
-            albums = cursor.rowcount
-        if scope in ("all", "artist"):
-            artist_params = [server_source, *ids] if scope == "artist" else [server_source]
-            cursor.execute(
-                f"UPDATE lib2_artists SET server_source=NULL, server_id=NULL, "
-                f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({artist_scope})", artist_params)
-            artists = cursor.rowcount
+            track_ids = mapped("track", ids)
+        elif scope in ("artist", "album"):
+            if album_ids:
+                track_ids = set()
+                for chunk in chunks(album_ids):
+                    marks = ",".join("?" for _ in chunk)
+                    track_ids.update(int(row[0]) for row in cursor.execute(
+                        f"SELECT t.id FROM lib2_tracks t WHERE "
+                        f"(t.server_source=? OR EXISTS (SELECT 1 FROM "
+                        f"lib2_media_server_mappings m WHERE m.entity_type='track' "
+                        f"AND m.entity_id=t.id AND m.server_source=?)) "
+                        f"AND t.album_id IN ({marks})", [source, source, *chunk]))
+            else:
+                track_ids = set()
+        else:
+            track_ids = mapped("track")
+
+        def detach(entity_type, table, entity_ids):
+            if not entity_ids:
+                return 0
+            for chunk in chunks(entity_ids):
+                marks = ",".join("?" for _ in chunk)
+                params = [source, *chunk]
+                cursor.execute(
+                    f"DELETE FROM lib2_media_server_mappings WHERE server_source=? "
+                    f"AND entity_type='{entity_type}' AND entity_id IN ({marks})", params)
+                cursor.execute(
+                    f"UPDATE {table} SET server_source=NULL,server_id=NULL,"
+                    f"updated_at=CURRENT_TIMESTAMP WHERE server_source=? "
+                    f"AND id IN ({marks})", params)
+            return len(entity_ids)
+
+        if track_ids:
+            for chunk in chunks(track_ids):
+                marks = ",".join("?" for _ in chunk)
+                cursor.execute(
+                    f"UPDATE lib2_track_files SET server_source=NULL,updated_at=CURRENT_TIMESTAMP "
+                    f"WHERE server_source=? AND track_id IN ({marks})", [source, *chunk])
+        tracks = detach("track", "lib2_tracks", track_ids)
+        albums = detach("album", "lib2_albums", album_ids)
+        artists = detach("artist", "lib2_artists", artist_ids)
         return {'artists_removed': artists, 'albums_removed': albums,
                 'tracks_removed': tracks}
     
@@ -6584,7 +6652,9 @@ class MusicDatabase:
                 # retires its mapping.
                 orphan_artists = """
                     SELECT id FROM lib2_artists a
-                     WHERE a.server_id IS NOT NULL
+                     WHERE (a.server_id IS NOT NULL OR EXISTS (
+                            SELECT 1 FROM lib2_media_server_mappings m
+                             WHERE m.entity_type='artist' AND m.entity_id=a.id))
                        AND NOT EXISTS (SELECT 1 FROM lib2_albums al
                                         JOIN lib2_tracks t ON t.album_id=al.id
                                         JOIN lib2_track_files f ON f.track_id=t.id
@@ -6599,7 +6669,9 @@ class MusicDatabase:
                 """
                 orphan_albums = """
                     SELECT id FROM lib2_albums al
-                     WHERE al.server_id IS NOT NULL
+                     WHERE (al.server_id IS NOT NULL OR EXISTS (
+                            SELECT 1 FROM lib2_media_server_mappings m
+                             WHERE m.entity_type='album' AND m.entity_id=al.id))
                        AND NOT EXISTS (SELECT 1 FROM lib2_tracks t
                                         JOIN lib2_track_files f ON f.track_id=t.id
                                         WHERE t.album_id=al.id AND TRIM(f.path)<>''
@@ -6608,6 +6680,9 @@ class MusicDatabase:
                 cursor.execute(f"SELECT COUNT(*) FROM ({orphan_albums})")
                 orphaned_albums_count = cursor.fetchone()[0]
                 if orphaned_albums_count > 0:
+                    cursor.execute(
+                        "DELETE FROM lib2_media_server_mappings WHERE entity_type='album' "
+                        f"AND entity_id IN ({orphan_albums})")
                     cursor.execute(f"UPDATE lib2_albums SET server_source=NULL,server_id=NULL "
                                    f"WHERE id IN ({orphan_albums})")
                     logger.info(f"Detached %d orphaned album mappings", orphaned_albums_count)
@@ -6615,6 +6690,9 @@ class MusicDatabase:
                 cursor.execute(f"SELECT COUNT(*) FROM ({orphan_artists})")
                 orphaned_artists_count = cursor.fetchone()[0]
                 if orphaned_artists_count > 0:
+                    cursor.execute(
+                        "DELETE FROM lib2_media_server_mappings WHERE entity_type='artist' "
+                        f"AND entity_id IN ({orphan_artists})")
                     cursor.execute(f"UPDATE lib2_artists SET server_source=NULL,server_id=NULL "
                                    f"WHERE id IN ({orphan_artists})")
                     logger.info(f"Detached %d orphaned artist mappings", orphaned_artists_count)
@@ -6692,6 +6770,28 @@ class MusicDatabase:
                     for aid, donor in rows.items():
                         if aid == best_id:
                             continue
+                        # Preserve every independent server recognition when
+                        # folding duplicate catalogue artists. If the keeper
+                        # already has that server, its mapping wins.
+                        for mapping in cursor.execute(
+                            "SELECT id,server_source FROM lib2_media_server_mappings "
+                            "WHERE entity_type='artist' AND entity_id=?", (aid,)
+                        ).fetchall():
+                            already = cursor.execute(
+                                "SELECT 1 FROM lib2_media_server_mappings WHERE "
+                                "entity_type='artist' AND entity_id=? AND server_source=?",
+                                (best_id, mapping['server_source']),
+                            ).fetchone()
+                            if already:
+                                cursor.execute(
+                                    "DELETE FROM lib2_media_server_mappings WHERE id=?",
+                                    (mapping['id'],),
+                                )
+                            else:
+                                cursor.execute(
+                                    "UPDATE lib2_media_server_mappings SET entity_id=? WHERE id=?",
+                                    (best_id, mapping['id']),
+                                )
                         set_parts, values = [], []
                         for col in enrichment_cols:
                             donor_val = donor[col]
@@ -6801,8 +6901,10 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_artists WHERE server_source = ?"
-                               "  AND server_id IS NOT NULL", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
+                               "WHERE entity_type='artist' AND server_source=? UNION "
+                               "SELECT server_id FROM lib2_artists WHERE server_source=? "
+                               "AND server_id IS NOT NULL", (server_source, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting artist IDs for {server_source}: {e}")
@@ -6813,8 +6915,10 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_albums WHERE server_source = ?"
-                               "  AND server_id IS NOT NULL", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
+                               "WHERE entity_type='album' AND server_source=? UNION "
+                               "SELECT server_id FROM lib2_albums WHERE server_source=? "
+                               "AND server_id IS NOT NULL", (server_source, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting album IDs for {server_source}: {e}")
@@ -6825,8 +6929,10 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT server_id FROM lib2_tracks WHERE server_source = ?"
-                               "  AND server_id IS NOT NULL", (server_source,))
+                cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
+                               "WHERE entity_type='track' AND server_source=? UNION "
+                               "SELECT server_id FROM lib2_tracks WHERE server_source=? "
+                               "AND server_id IS NOT NULL", (server_source, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -7313,8 +7419,10 @@ class MusicDatabase:
             
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
-            cursor.execute("SELECT 1 FROM lib2_tracks WHERE server_id = ? LIMIT 1",
-                           (track_id_str,))
+            cursor.execute(
+                "SELECT 1 FROM lib2_media_server_mappings WHERE entity_type='track' "
+                "AND server_id=? UNION ALL SELECT 1 FROM lib2_tracks "
+                "WHERE server_id=? LIMIT 1", (track_id_str, track_id_str))
             result = cursor.fetchone()
             
             return result is not None
@@ -7331,8 +7439,11 @@ class MusicDatabase:
             
             # Convert to string to handle both Plex integers and Jellyfin GUIDs
             track_id_str = str(track_id)
-            cursor.execute("SELECT 1 FROM lib2_tracks WHERE server_id = ? "
-                           "AND server_source = ? LIMIT 1", (track_id_str, server_source))
+            cursor.execute(
+                "SELECT 1 FROM lib2_media_server_mappings WHERE entity_type='track' "
+                "AND server_id=? AND server_source=? UNION ALL SELECT 1 FROM "
+                "lib2_tracks WHERE server_id=? AND server_source=? LIMIT 1",
+                (track_id_str, server_source, track_id_str, server_source))
             result = cursor.fetchone()
             
             return result is not None
@@ -7348,10 +7459,16 @@ class MusicDatabase:
     def get_track_by_server_id(self, track_id, server_source: str) -> Optional[DatabaseTrackWithMetadata]:
         """Get a track by a server-scoped media-server ID."""
         return self._get_track_with_metadata(
-            "t.server_source = ? AND t.server_id = ?",
-            (server_source, str(track_id)), "t.server_id")
+            "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
+            "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
+            "AND m.server_id=?) OR (t.server_source=? AND t.server_id=?))",
+            (server_source, str(track_id), server_source, str(track_id)),
+            "COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m WHERE "
+            "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
+            "LIMIT 1),t.server_id)",
+            (server_source,))
 
-    def _get_track_with_metadata(self, where, params, id_column):
+    def _get_track_with_metadata(self, where, params, id_column, id_params=()):
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -7366,7 +7483,7 @@ class MusicDatabase:
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
                 WHERE {where}
-            """, params)
+            """, (*id_params, *params))
             
             row = cursor.fetchone()
             if row:
@@ -7611,8 +7728,10 @@ class MusicDatabase:
                    "WHERE files.path IS NOT NULL AND files.path != ''")
             params: list = []
             if server_source:
-                sql += " AND tracks.server_source = ?"
-                params.append(server_source)
+                sql += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+                        "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
+                        "AND m.server_source=?) OR tracks.server_source=?)")
+                params.extend((server_source, server_source))
             cursor.execute(sql, params)
             return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
                     for r in cursor.fetchall()]
@@ -7624,7 +7743,7 @@ class MusicDatabase:
                              rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
         rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source, rank_artist)
-        return self._rows_to_tracks(rows)
+        return self._rows_to_tracks(rows, server_source=server_source)
 
     def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
                                   server_source: Optional[str] = None, rank_artist: Optional[str] = None):
@@ -7647,8 +7766,11 @@ class MusicDatabase:
 
         # Add server filter if specified
         if server_source:
-            where_conditions.append("tracks.server_source = ?")
-            params.append(server_source)
+            where_conditions.append(
+                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
+                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
+                "OR tracks.server_source=?)")
+            params.extend((server_source, server_source))
 
         if not where_conditions:
             return []
@@ -7683,8 +7805,19 @@ class MusicDatabase:
         params.extend(order_params)
         params.append(limit)
 
+        mapping_projection = "NULL AS requested_server_id"
+        mapping_params = []
+        if server_source:
+            mapping_projection = (
+                "(SELECT m.server_id FROM lib2_media_server_mappings m "
+                "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
+                "AND m.server_source=? LIMIT 1) AS requested_server_id"
+            )
+            mapping_params.append(server_source)
+
         cursor.execute(f"""
-            SELECT tracks.*, albums.primary_artist_id AS artist_id,
+            SELECT tracks.*, {mapping_projection},
+                   albums.primary_artist_id AS artist_id,
                    artists.name as artist_name, albums.title as album_title,
                    albums.image_url as album_thumb_url,
                    files.path AS file_path, files.bitrate AS bitrate
@@ -7697,14 +7830,14 @@ class MusicDatabase:
             WHERE {where_clause}
             ORDER BY {order_by}
             LIMIT ?
-        """, params)
+        """, [*mapping_params, *params])
 
         return cursor.fetchall()
     
     def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Broadest fuzzy search - partial word matching"""
         rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
-        return self._rows_to_tracks(rows)
+        return self._rows_to_tracks(rows, server_source=server_source)
 
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
                                   server_source: Optional[str] = None):
@@ -7734,14 +7867,28 @@ class MusicDatabase:
 
         where_parts = [f"({' OR '.join(like_conditions)})"]
         if server_source:
-            where_parts.append("tracks.server_source = ?")
-            params.append(server_source)
+            where_parts.append(
+                "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
+                "m.entity_type='track' AND m.entity_id=tracks.id AND m.server_source=?) "
+                "OR tracks.server_source=?)")
+            params.extend((server_source, server_source))
 
         where_clause = " AND ".join(where_parts)
         params.append(limit * 3)
 
+        mapping_projection = "NULL AS requested_server_id"
+        mapping_params = []
+        if server_source:
+            mapping_projection = (
+                "(SELECT m.server_id FROM lib2_media_server_mappings m "
+                "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
+                "AND m.server_source=? LIMIT 1) AS requested_server_id"
+            )
+            mapping_params.append(server_source)
+
         cursor.execute(f"""
-            SELECT tracks.*, albums.primary_artist_id AS artist_id,
+            SELECT tracks.*, {mapping_projection},
+                   albums.primary_artist_id AS artist_id,
                    artists.name as artist_name, albums.title as album_title,
                    albums.image_url as album_thumb_url,
                    files.path AS file_path, files.bitrate AS bitrate
@@ -7754,7 +7901,7 @@ class MusicDatabase:
             WHERE {where_clause}
             ORDER BY tracks.title, artists.name
             LIMIT ?
-        """, params)
+        """, [*mapping_params, *params])
 
         rows = cursor.fetchall()
 
@@ -7775,13 +7922,32 @@ class MusicDatabase:
         scored_results.sort(key=lambda x: x[0], reverse=True)
         return [row for score, row in scored_results[:limit]]
     
-    def _rows_to_tracks(self, rows) -> List[DatabaseTrack]:
+    def _rows_to_tracks(self, rows, server_source: Optional[str] = None) -> List[DatabaseTrack]:
         """Convert database rows to DatabaseTrack objects"""
         tracks = []
         for row in rows:
+            row_keys = row.keys()
+            requested_server_id = (
+                row['requested_server_id']
+                if 'requested_server_id' in row_keys else None
+            )
+            if (
+                server_source
+                and not requested_server_id
+                and 'server_source' in row_keys
+                and row['server_source'] == server_source
+            ):
+                # Upgrade compatibility for a legacy singular mapping which has
+                # not reached the mapping-table backfill yet.
+                requested_server_id = row['server_id']
+            public_id = requested_server_id
+            if not public_id and not server_source:
+                public_id = (
+                    row['server_id']
+                    if 'server_id' in row_keys and row['server_id'] else None
+                )
             track = DatabaseTrack(
-                id=(row['server_id'] if 'server_id' in row.keys() and row['server_id']
-                    else row['id']),
+                id=public_id or row['id'],
                 album_id=row['album_id'],
                 artist_id=row['artist_id'],
                 title=row['title'],
@@ -7789,22 +7955,22 @@ class MusicDatabase:
                 duration=row['duration'],
                 file_path=row['file_path'],
                 bitrate=row['bitrate'],
-                created_at=_as_datetime(row['added_at'] if 'added_at' in row.keys()
+                created_at=_as_datetime(row['added_at'] if 'added_at' in row_keys
                                         else None),
-                updated_at=_as_datetime(row['updated_at'] if 'updated_at' in row.keys()
+                updated_at=_as_datetime(row['updated_at'] if 'updated_at' in row_keys
                                         else None),
             )
             # Add artist and album info for compatibility with Plex responses
             track.artist_name = row['artist_name']
             track.album_title = row['album_title']
-            track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
-            track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+            track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row_keys else ''
+            track.server_source = server_source or (row['server_source'] if 'server_source' in row_keys else '')
             # Per-track artist (from ID3 ARTIST tag) for compilations/soundtracks where
             # the track artist differs from the album artist. Used by
             # _calculate_track_confidence so soundtrack tracks credited to the song's
             # actual performer match correctly when the album sits under a different
             # primary artist (Plex's track.originalTitle, Jellyfin's ArtistItems[0]).
-            track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
+            track.track_artist = row['track_artist'] if 'track_artist' in row_keys else None
             tracks.append(track)
         return tracks
     
@@ -7827,8 +7993,11 @@ class MusicDatabase:
                 params.append(f"%{self._normalize_for_comparison(artist)}%")
 
             if server_source:
-                where_conditions.append("albums.server_source = ?")
-                params.append(server_source)
+                where_conditions.append(
+                    "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
+                    "m.entity_type='album' AND m.entity_id=albums.id AND m.server_source=?) "
+                    "OR albums.server_source=?)")
+                params.extend((server_source, server_source))
 
             if not where_conditions:
                 # If no search criteria, return empty list
@@ -7995,8 +8164,13 @@ class MusicDatabase:
 
                         conn = self._get_connection()
                         cursor = conn.cursor()
-                        source_filter = "AND t.server_source = ?" if server_source else ""
-                        params = [album_candidate.id] + ([server_source] if server_source else [])
+                        source_filter = (
+                            "AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+                            "WHERE m.entity_type='track' AND m.entity_id=t.id "
+                            "AND m.server_source=?) OR t.server_source=?)" if server_source else ""
+                        )
+                        params = [album_candidate.id] + (
+                            [server_source, server_source] if server_source else [])
                         cursor.execute(f"""
                             SELECT t.*, al.primary_artist_id AS artist_id,
                                    a.name as artist_name, al.title as album_title,
@@ -8327,12 +8501,25 @@ class MusicDatabase:
             where = f"al.primary_artist_id IN ({placeholders})"
             params: list = list(artist_ids)
             if server_source:
-                where += " AND t.server_source = ?"
-                params.append(server_source)
+                where += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+                          "WHERE m.entity_type='track' AND m.entity_id=t.id "
+                          "AND m.server_source=?) OR t.server_source=?)")
+                params.extend((server_source, server_source))
             params.append(limit)
 
+            mapping_projection = "NULL AS requested_server_id"
+            mapping_params = []
+            if server_source:
+                mapping_projection = (
+                    "(SELECT m.server_id FROM lib2_media_server_mappings m "
+                    "WHERE m.entity_type='track' AND m.entity_id=t.id "
+                    "AND m.server_source=? LIMIT 1) AS requested_server_id"
+                )
+                mapping_params.append(server_source)
+
             cursor.execute(f"""
-                SELECT t.*, al.primary_artist_id AS artist_id,
+                SELECT t.*, {mapping_projection},
+                       al.primary_artist_id AS artist_id,
                        a.name as artist_name, al.title as album_title,
                        al.image_url as album_thumb_url,
                        f.path AS file_path, f.bitrate AS bitrate
@@ -8343,8 +8530,8 @@ class MusicDatabase:
                        ON f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}
                 WHERE {where}
                 LIMIT ?
-            """, params)
-            return self._rows_to_tracks(cursor.fetchall())
+            """, [*mapping_params, *params])
+            return self._rows_to_tracks(cursor.fetchall(), server_source=server_source)
         except Exception as e:
             logger.error(f"Error fetching indexed artist tracks for '{name}': {e}")
             return []
@@ -12744,8 +12931,13 @@ class MusicDatabase:
                     cursor.execute(f"""
                         SELECT name, {ARTIST_IDS_SQL}
                         FROM lib2_artists
-                        WHERE server_source = ?
-                    """, (exclude_library_server,))
+                        WHERE server_source = ? OR EXISTS (
+                            SELECT 1 FROM lib2_media_server_mappings m
+                             WHERE m.entity_type='artist'
+                               AND m.entity_id=lib2_artists.id
+                               AND m.server_source=?
+                        )
+                    """, (exclude_library_server, exclude_library_server))
                     library_rows = cursor.fetchall()
                     library_artist_keys = {
                         'spotify': {r['spotify_artist_id'] for r in library_rows if r['spotify_artist_id']},
@@ -13465,8 +13657,11 @@ class MusicDatabase:
                     SELECT updated_at FROM lib2_albums WHERE server_source = ?
                     UNION ALL
                     SELECT updated_at FROM lib2_tracks WHERE server_source = ?
+                    UNION ALL
+                    SELECT last_seen_at AS updated_at
+                      FROM lib2_media_server_mappings WHERE server_source = ?
                 )
-            """, (server_source, server_source, server_source))
+            """, (server_source, server_source, server_source, server_source))
             
             result = cursor.fetchone()
             last_update = result['last_update'] if result and result['last_update'] else None

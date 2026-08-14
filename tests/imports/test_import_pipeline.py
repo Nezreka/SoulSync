@@ -108,7 +108,9 @@ def test_post_move_recovery_reconciles_real_destination_without_append_only_repl
     monkeypatch.setattr(
         autolink,
         "link_download_into_library_v2",
-        lambda ctx: calls.append(("lib2", ctx["_final_processed_path"])),
+        lambda ctx, **_kwargs: (
+            calls.append(("lib2", ctx["_final_processed_path"])) or 123
+        ),
     )
     monkeypatch.setattr(
         acquisition_callback,
@@ -151,6 +153,24 @@ def test_post_move_recovery_requires_a_real_destination(tmp_path, monkeypatch):
 
     assert recovered is False
     assert calls == []
+
+
+def test_existing_destination_is_not_success_when_library_registration_fails(
+    tmp_path, monkeypatch,
+):
+    destination = tmp_path / "Library" / "Track.flac"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"audio")
+    context = {"_final_processed_path": str(destination)}
+    monkeypatch.setattr(
+        import_pipeline, "_recover_moved_file_bookkeeping", lambda *args: False,
+    )
+
+    confirmed = import_pipeline._confirm_existing_file_bookkeeping(context)
+
+    assert confirmed is False
+    assert context.get("_pipeline_import_succeeded") is not True
+    assert "Library v2" in context["_context_failure_msg"]
 
 
 def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):

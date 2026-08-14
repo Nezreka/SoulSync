@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS lib2_artists (
     quality_profile_explicit INTEGER NOT NULL DEFAULT 0,
     canonical_artist_id INTEGER REFERENCES lib2_artists(id) ON DELETE SET NULL, -- self-ref; NULL = canonical/standalone. Set = alias of that row (§40 registry: same real artist under a different, unlinked provider identity — see core/library2/artist_aliases.py)
     soul_id TEXT,                                     -- deterministic content id every SoulSync node computes alike (core/soulid_worker.py); Hydrabase's key, not a provider's answer
-    server_source TEXT,                               -- media server that reported this row ('plex'|'jellyfin'|'navidrome'|'soulsync')
-    server_id TEXT,                                   -- that server's own id (Plex ratingKey, Jellyfin ItemId, ...) — the only handle play counts and scans have
+    server_source TEXT,                               -- compatibility projection; durable media identities live in lib2_media_server_mappings
+    server_id TEXT,                                   -- compatibility projection of the last observed server id
     legacy_artist_id INTEGER,                         -- source row in legacy `artists`
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1111,6 +1111,13 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_provider_attempt_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("provider-attempt migration failed (will retry next start): %s", e)
+    # Media servers are independent observers.  This table replaces the old
+    # single server_source/server_id slot with one scoped mapping per server.
+    try:
+        from core.library2.media_mappings import ensure_media_mapping_schema
+        ensure_media_mapping_schema(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("media-server mapping schema failed (will retry next start): %s", e)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library v2 schema ensured")
@@ -1162,6 +1169,17 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("artist name_key backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.media_mappings import backfill_legacy_mappings
+            stats["media_server_mappings"] = backfill_legacy_mappings(
+                cursor, connection=connection if commit else None,
+                batch_size=batch_size, on_batch=on_batch,
+                should_stop=should_stop)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("media-server mapping backfill failed (will retry next start): %s", e)
 
     if not _stopped():
         try:

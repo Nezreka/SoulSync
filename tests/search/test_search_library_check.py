@@ -290,6 +290,32 @@ def test_track_in_library_returns_full_match_metadata(db):
     assert track['album_thumb_url'].startswith('https://plex.local:32400')
 
 
+def test_track_presence_projects_the_active_servers_mapping(db):
+    aid = _seed_artist(db, 'Mapped Artist')
+    alb = _seed_album(db, aid, 'Mapped Album')
+    legacy_track_id = _seed_track(db, alb, aid, 'Mapped Song')
+    with db._get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM lib2_tracks WHERE legacy_track_id=?", (legacy_track_id,),
+        ).fetchone()
+        conn.execute(
+            "UPDATE lib2_tracks SET server_source='jellyfin',server_id='j-track' "
+            "WHERE id=?", (row['id'],),
+        )
+        conn.execute(
+            "INSERT INTO lib2_media_server_mappings "
+            "(entity_type,entity_id,server_source,server_id) "
+            "VALUES('track',?,'plex','p-track')", (row['id'],),
+        )
+
+    result = library_check.check_library_presence(
+        db, _FakePlexClient(), _FakeConfigManager({}), profile_id=1,
+        albums=[], tracks=[{'name': 'Mapped Song', 'artist': 'Mapped Artist'}],
+    )
+
+    assert result['tracks'][0]['track_id'] == 'p-track'
+
+
 def test_track_not_in_library_returns_minimal_shape(db):
     cfg = _FakeConfigManager({})
     result = library_check.check_library_presence(

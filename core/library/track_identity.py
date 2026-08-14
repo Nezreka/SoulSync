@@ -149,9 +149,9 @@ def find_library_track_by_external_id(
 
     Returns a sqlite3.Row-like dict so callers can read whatever fields
     they want (id, title, file_path, etc.). When ``server_source`` is
-    set, restrict matches to tracks scanned from that media server —
-    avoids false positives when a user binds the same DB into multiple
-    profiles/servers.
+    set, its recognition mapping is preferred. Ownership itself remains local
+    and server-independent, so an offline or not-yet-scanned server cannot make
+    an existing file look absent and trigger a duplicate download.
 
     Performance: every external_id column is indexed in the schema, so
     each OR clause hits an index. Limit 1 because we only need to know
@@ -185,8 +185,10 @@ def find_library_track_by_external_id(
               "FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id ")
     if server_source:
         sql = (f"{select} WHERE {owned} AND ({where_external}) "
-               "AND (t.server_source = ? OR t.server_source IS NULL) LIMIT 1")
-        params.append(server_source)
+               "ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+               "WHERE m.entity_type='track' AND m.entity_id=t.id "
+               "AND m.server_source=?) OR t.server_source=?) DESC, t.id LIMIT 1")
+        params.extend((server_source, server_source))
     else:
         sql = f"{select} WHERE {owned} AND ({where_external}) LIMIT 1"
 

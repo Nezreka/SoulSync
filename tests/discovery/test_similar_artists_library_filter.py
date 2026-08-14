@@ -62,6 +62,12 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
                 "                         ELSE json_set(external_ids,'$.deezer',?) END"
                 " WHERE id=?",
                 (spotify, mbid, deezer, deezer, artist_id))
+            if name == "Different Server Artist":
+                conn.execute(
+                    "INSERT INTO lib2_media_server_mappings "
+                    "(entity_type,entity_id,server_source,server_id) "
+                    "VALUES('artist',?,'navidrome','nav-mapped')", (artist_id,),
+                )
         conn.commit()
 
     artists = db.get_top_similar_artists(
@@ -70,7 +76,7 @@ def test_top_similar_artists_can_exclude_active_server_library_artists(tmp_path)
         exclude_library_server="navidrome",
     )
 
-    assert _names(artists) == {"Different Server Artist", "Fresh Artist"}
+    assert _names(artists) == {"Fresh Artist"}
 
 
 def test_top_similar_artists_can_require_musicbrainz_source(tmp_path):

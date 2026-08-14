@@ -5702,3 +5702,203 @@ Import-/Downloadpfad, der auch die physische Datei besitzt.
 | LV2-DL-01 | P1 | `Your Albums` übergibt Tracks und Albumkontext korrekt, setzt aber `is_album_download=true` und aktiviert damit den Album-Bundle-Pfad. Bricht SABnzbd die `addurl`-Antwort mit `Connection reset by peer` ab, liefert das Usenet-Plugin kein `fallback`; der Dispatcher markiert den gesamten Batch terminal als `failed`, bevor eine einzige Per-Track-Task entsteht. | Eine abgebrochene Client-Einreichung als unsicheren Submit behandeln: zuerst bounded gegen Queue/History korrelieren, um Doppelgrabs auszuschließen; nur ein bestätigter externer Job wird weiter beobachtet, andernfalls in den normalen Per-Track-/Quellen-Fallback wechseln. |
 | LV2-DL-02 | P2 | Ein terminaler Album-Bundle-Fehler vor der Task-Erzeugung hinterlässt einen Batch ohne `queued`/`searching`/`downloading`-Rows. Die task-zentrierte UI zeigt dadurch nur pauschal `failed` und verbirgt Quelle, Release und konkrete Ursache. | Für den Bundle-Lifecycle eine sichtbare synthetische Statuszeile samt Phase, Quelle, Release und Fehler rendern; ein Batch ohne Tasks darf nicht informationslos erscheinen. |
 | LV2-DL-03 | P1 | Die Release-Auswahl akzeptierte für den Basistrack „Legends Never Die“ eine NZB der „Alan Walker Remix“-Version; zuvor wurde „Bitch Lasagna (instrumental)“ für „Bitch Lasagna“ gewählt. Die aktuelle Wortabdeckung bestätigt nur den Kerntitel und behandelt zusätzliche Variantenqualifier als harmlos. | Provider-/Release-Identität und Variantenqualifier gemeinsam prüfen. `remix`, `instrumental`, `live`, `acoustic`, `remaster` usw. dürfen nur gewählt werden, wenn die Anfrage dieselbe Variante verlangt; bei Unsicherheit Bundle ablehnen und Per-Track-Fallback verwenden. |
+
+## 37. Post-Remediation-Audit des lib2-Cutovers (14. August 2026)
+
+Geprüft wurde der aktuelle Branch-Head `c04ac26fd` über die letzten 50 Commits
+(`20f43a337..c04ac26fd`). Die 25 Befunde aus §33 wurden dabei nicht erneut als
+offen gezählt; der Schwerpunkt lag auf Verhaltensänderungen, die durch ihre
+Remediation, den finalen Cutover und die danach gelandeten Regression-Fixes
+selbst entstanden oder erst jetzt kritisch wurden.
+
+### LV2-PAUD-01 — P1 — Die Upgrade-Barriere lässt alle Nicht-POST-Mutationen durch
+
+`web_server.py:363-369` beendet den zentralen Upgrade-Guard für jede Methode
+außer `POST`, obwohl die Library-v2-API zahlreiche schreibende `PUT`, `PATCH`
+und `DELETE`-Routen besitzt. Beispielsweise können während eines laufenden
+Legacy-Imports Alias-Links entfernt (`api/library_v2.py:1709`),
+Metadaten-Overrides verändert sowie ganze Artists oder Alben gelöscht werden
+(`api/library_v2.py:4160-4218`). `_guard()` prüft nur Feature, Seitenrecht und
+Adminprofil, nicht den Migrationszustand. Damit können Nutzerwrites mit dem
+exklusiven Importer konkurrieren oder gerade importierte Rows wieder löschen;
+LV2-CUT-01s HTTP-Jobbarriere gilt nur scheinbar.
+
+**Korrekturvertrag:** Alle nicht sicheren HTTP-Methoden (`POST`, `PUT`,
+`PATCH`, `DELETE`) an Katalog-/Import-/Download-/Repair-Grenzen müssen denselben
+persistierten Migration-Guard durchlaufen. Ausnahmen werden als kleine
+explizite Allowlist geführt; der Bootstrap-Endpunkt bleibt über seinen
+Claim/Lease-Mechanismus serialisiert. Regressionstests müssen mindestens einen
+destruktiven `DELETE`- und einen `PATCH`-Endpunkt während `migration_required`
+mit `409` belegen.
+
+### LV2-PAUD-02 — P1 — Standalone „Full Refresh“ kann die Library nicht mehr neu aufbauen
+
+`_run_soulsync_full_refresh()` verspricht weiterhin „wipe … rebuild“
+(`web_server.py:17196-17197`), ruft nach `clear_server_data('soulsync')` aber
+`upsert_artist`, `upsert_album` und `upsert_track` ohne `allow_create=True` auf
+(`web_server.py:17266-17307`). Seit `dfbc052ad` sind diese Helfer standardmäßig
+`mapping-only`; auf einer leeren oder zurückgesetzten DB liefert schon der
+erste Artist `None`, und alle Files werden übersprungen. Neue Files in einer
+bestehenden Standalone-Library werden aus demselben Grund nicht aufgenommen.
+Umgekehrt löscht `clear_server_data` jetzt absichtlich nichts mehr, sondern
+entfernt nur Serverstempel: nicht mehr vorhandene Files bleiben deshalb als
+aktive Ownership-Zeilen stehen und verlieren dabei den `soulsync`-Scope, über
+den der Deep Scan sie später finden würde.
+
+**Korrekturvertrag:** Der Standalone-Full-Refresh ist ein lokaler Importpfad,
+kein Media-Server-Mapping. Neu gefundene Files müssen die gemeinsame
+Validierungs-/Importpipeline durchlaufen und erst nach erfolgreichem Import
+Katalog- und File-Rows erzeugen. Nicht mehr beobachtete Files laufen durch den
+zentralen Missing-/File-Lifecycle; ein Refresh darf weder nur remappen noch
+Rows direkt löschen. Fresh-DB-, neues-File-, entferntes-File- und
+Restart-Tests gehören an diesen Pfad.
+
+### LV2-PAUD-03 — P1 — Ein Import wird trotz fehlgeschlagenem lib2-Write als erfolgreich abgeschlossen
+
+Der nach dem Cutover autoritative Katalogwrite bleibt als „best effort“
+implementiert: `link_download_into_library_v2()` fängt jede Exception, loggt
+nur auf Debug-Level und gibt `None` zurück (`core/library2/autolink.py:883-885`).
+`record_download_provenance()` verschluckt dieses Ergebnis; danach ist auch
+`record_soulsync_library_entry()` vollständig fail-open
+(`core/imports/side_effects.py:491-495,693-694`) und läuft bei Plex, Jellyfin
+oder Navidrome überhaupt nicht. `post_process_matched_download()` markiert den
+Task anschließend trotzdem als `completed` und setzt
+`_pipeline_import_succeeded=True` (`core/imports/pipeline.py:2065-2068,
+2111-2119`). Weil Media-Server-Scans unbekannte Entities nun ausdrücklich
+nicht mehr erzeugen, existiert außerhalb des Standalone-Modus kein späterer
+Fallback: Das File liegt final auf Disk, Download/Acquisition können terminal
+sein, aber Library, Wanted und Repair kennen es nicht.
+
+Der Abschlussaudit fand denselben Denkfehler zusätzlich in den Race-/Duplicate-
+Abkürzungen: „Source ist weg, Zieldatei existiert“ und der äußere Verification-
+Wrapper behandelten die bloße Dateiexistenz beziehungsweise das Ausbleiben
+eines Fehlermarkers als Erfolg. Scheiterte der lib2-Write erst nach dem Move,
+konnte genau dieser Fallback den Task beim nächsten Durchlauf doch wieder grün
+abschließen.
+
+**Korrekturvertrag:** Das Registrieren der finalen File-Row ist Teil der
+Import-Completion-Boundary. Entweder schlägt der Import sichtbar und
+restart-sicher fehl, oder ein persistenter, idempotenter Retry-/Outbox-Anker
+hält ihn bis zum erfolgreichen lib2-Commit offen. `completed` und Acquisition-
+Success dürfen erst danach gesetzt werden. Ein Failure-Injection-Test muss
+einen DB-Fehler nach dem physischen Move auslösen und beweisen, dass der Task
+nicht terminal erfolgreich und das File nicht kataloglos bleibt. Das gilt
+auch für Race Guards, bereits vorhandene Ziele, übersprungene Duplikate und die
+Post-Move-Recovery; „Datei existiert“ allein ist kein Completion-Nachweis.
+
+### LV2-PAUD-04 — P2 — Eine Media-Server-Verbindung ist weiterhin falsche Import-Voraussetzung
+
+`is_active_media_server_ready()` lehnt Manual- und Auto-Import ab, sobald der
+konfigurierte Plex-/Jellyfin-/Navidrome-Client nicht verbunden ist
+(`core/imports/side_effects.py:462-487`). Die Begründung im Docstring beschreibt
+noch die alte Architektur: Der Server-Scan müsse das File später in die DB
+bringen. Nach LV2-CUT-03 ist genau das verboten; der gemeinsame Importpfad kann
+und muss lib2 selbst schreiben. Dadurch blockiert ein optionaler, ausgefallener
+Media-Server heute einen vollständig lokalen Import und verletzt die
+Media-Server-Unabhängigkeit aus Guide §2.1. Bestehende Tests pinnen noch das
+alte Verhalten (`tests/imports/test_import_side_effects.py:733-769`).
+
+**Korrekturvertrag:** Import-Eligibility hängt nur von Storage-, Pfad- und
+Pipeline-Gesundheit ab. Eine fehlende Media-Server-Verbindung darf höchstens
+die nachgelagerte ID-Projektion als retrybar markieren, nicht den Katalogimport
+verhindern. Tests müssen Offline-Import für alle drei externen Servermodi und
+die spätere Mapping-Nachlieferung abdecken.
+
+### LV2-PAUD-05 — P1 — Der Standalone Deep Scan umgeht den File-Lifecycle und löscht Katalogidentität
+
+`_run_soulsync_deep_scan()` prüft gespeicherte Pfade mit rohem
+`os.path.exists()` (`web_server.py:17443-17450`) und löscht einen vermeintlich
+stalen Pfad anschließend direkt aus `lib2_track_files`. Danach löscht er
+filelose Tracks sowie leere Alben und Artists physisch aus dem Katalog
+(`web_server.py:17470-17498`). Damit gehen File-Historie, Providerdaten,
+Monitor-Regeln, Wanted-/Outbox-Zustand und filelose Trackidentität verloren;
+Path-Mapping, `missing_suspected`/`missing_confirmed`, Root-Health und der
+zentrale Delete-Vertrag werden vollständig umgangen. Der prozentuale
+Flood-Guard verhindert nur große Löschwellen, nicht denselben Datenverlust in
+kleinen Libraries oder bei einzelnen gemappten Pfaden.
+
+**Korrekturvertrag:** Pfade ausschließlich über `resolve_lib2_path` und den
+Root-Health-Guard beobachten. Fehlende Files werden über den gemeinsamen
+zweistufigen File-Lifecycle markiert und lösen Wanted/History erst nach
+Bestätigung aus; Entity-Rows bleiben als Katalog-/Monitoring-Wahrheit bestehen.
+Direkte `DELETE FROM lib2_track_files|tracks|albums|artists`-Statements gehören
+aus dem Scan entfernt.
+
+### LV2-PAUD-06 — P1 — Full Refresh entkoppelt alle Server-IDs vor dem ersten verifizierten Fetch
+
+`DatabaseUpdateWorker.run()` ruft bei `full_refresh` zuerst
+`clear_server_data(server_type)` auf (`core/database_update_worker.py:119-121`)
+und fragt erst danach den Server ab. Liefert `_get_all_artists()` wegen eines
+Verbindungsfehlers oder einer transient leeren Antwort nichts, endet der Lauf
+sofort (`:140-144`). Der Katalog und die Files bleiben zwar erhalten, aber alle
+Artist-/Album-/Track-Server-IDs sind bereits in einer separaten bestätigten
+Transaktion entfernt. Playback, Playlist-Sync und Server-Deep-Links verlieren
+damit ihre Identität bis zu einem späteren vollständig erfolgreichen Scan. Der
+Deep-Scan-Pfad besitzt bereits eine doppelte Empty-Verifikation; der gewöhnliche
+Full Refresh nicht.
+
+**Korrekturvertrag:** Zuerst einen verifizierten Server-Snapshot lesen, dann
+IDs per Run-Marker/upsert erneuern und erst nach einem vollständig erfolgreichen
+Lauf die ungesehenen Stempel detach-en. Fehler, Stop und unbestätigtes Empty
+lassen den vorherigen Mapping-Snapshot unverändert; ein bestätigtes leeres
+Library-Set wird mindestens doppelt verifiziert.
+
+### LV2-PAUD-07 — P2 — Der `soulsync`-Stempel verhindert einen späteren Media-Server-Wechsel
+
+Standalone-Imports stempeln Artist, Album und Track mit
+`server_source='soulsync'` und einer synthetischen `server_id`
+(`core/imports/side_effects.py:629-672`). Die mapping-only-Fallbacks akzeptieren
+eine namens-/releasegleiche vorhandene Row aber nur, wenn deren `server_id`
+leer ist oder `server_source` bereits dem neuen Server entspricht
+(`core/library2/media_server_sync.py:70-80,147-156,221-238`). Wechselt der
+Nutzer später über die vorhandene Settings-Funktion von Standalone zu Plex,
+Jellyfin oder Navidrome, kann der neue Server dieselbe owned Row deshalb nicht
+claimen. Eine isolierte SQLite-Reproduktion mit einer aktiven
+`soulsync`-Artist-Row ergab für `upsert_artist(... server_source='plex' ...)`
+reproduzierbar `None`; der alte Stempel blieb unverändert.
+
+**Korrekturvertrag:** Importprovenienz und Media-Server-Mappings dürfen nicht
+dieselbe einzelne Spalte beanspruchen. Server-IDs gehören in eine gescopte
+Mapping-Tabelle mit mindestens `(entity_type, entity_id, server_source,
+server_id)`; `source='import'` bleibt File-/History-Provenienz. Mindestens der
+Wechsel `soulsync → plex/jellyfin/navidrome → soulsync` muss ohne Verlust alter
+Mappings und ohne Katalogduplikat getestet werden.
+
+### Verifikation dieses Audits
+
+- Relevante Guide-, Feature-, Status-, Issue-, Handoff- und Rewrite-Audit-
+  Dokumente wurden gegen den aktuellen Codevertrag gelesen.
+- Die gezielten bestehenden Suiten für Media-Server-Sync, Import-Side-Effects,
+  Empty-Deep-Scan und Migration-Hardening bestanden mit **63 Tests**. Das ist
+  wichtig, weil es zeigt, dass die Befunde außerhalb der bislang gepinnten
+  Fälle liegen; insbesondere erzeugt das Media-Sync-Fixture importierte Rows
+  ohne den realen `server_source='soulsync'`-Stempel.
+- Die Cross-Source-Blockade wurde zusätzlich gegen eine temporäre
+  In-Memory-SQLite-DB mit dem echten Schema reproduziert: vorhandener owned
+  Artist `('soulsync', 'import-a')`, Ergebnis der Plex-Zuordnung `None`.
+
+### Umsetzung und Produktentscheidung (14. August 2026)
+
+Die sieben Befunde sind in einem gemeinsamen Remediation-Commit umgesetzt.
+Die dabei festgelegte, für Nutzer sichtbare Semantik lautet:
+
+| Befund | Status | Was vorher passiert wäre | Umgesetztes Verhalten |
+|---|---|---|---|
+| LV2-PAUD-01 | Behoben | Während des Upgrades konnten `PATCH`, `PUT` und `DELETE` weiter Daten ändern; ein laufender Import konnte die Änderung überschreiben oder mit ihr kollidieren. | Der zentrale Guard behandelt jede nicht sichere HTTP-Methode als Write. `GET`, `HEAD` und `OPTIONS` bleiben lesbar; der Bootstrap behält seine eigene Claim-/Lease-Serialisierung. |
+| LV2-PAUD-02 | Behoben | „Full Refresh“ fand die Files, konnte auf einer leeren DB aber keine Rows erzeugen und hatte zuvor bereits Serverstempel gelöst. | Der Standalone-Refresh ist jetzt ein ausdrücklicher lokaler Recovery-Import über den nativen Auto-Link/Import-Writer. Er löscht vorher nichts; bereits bekannte, verschwundene Files gehen in den normalen Rescan-Lifecycle. |
+| LV2-PAUD-03 | Behoben | Ein File konnte fertig auf Disk liegen und Task/Acquisition wurden trotzdem als erfolgreich beendet, obwohl lib2 es nicht kannte; Race-/Duplicate-Fallbacks konnten denselben Fehler später erneut als Erfolg maskieren. | Die finale File-Registrierung kann am Completion-Pfad nicht mehr fail-open sein. `completed`, `_pipeline_import_succeeded` und Acquisition-Success folgen erst auf eine echte File-Row; Post-Move-Recovery, bereits vorhandene Ziele und der äußere Verification-Wrapper verlangen denselben Nachweis. |
+| LV2-PAUD-04 | Behoben | Ein offline Plex/Jellyfin/Navidrome blockierte Manual- und Auto-Import, obwohl der Import vollständig lokal ist. | Die Connectivity-Prüfung bleibt im Media-Server-System, ist aber keine Import-Eligibility mehr. Offline-Import ist erlaubt und die Server-Zuordnung wird bei einem späteren Scan nachgeliefert. |
+| LV2-PAUD-05 | Behoben | Deep Scan benutzte rohe Pfade und löschte bei einzelnen vermeintlich fehlenden Files File-, Track-, Album- und Artist-Rows direkt. | DB-Pfade werden zentral aufgelöst; Missing-Beobachtungen gehen durch `rescan_files` und den zweistufigen Lifecycle. Der Scan enthält keine direkten Katalog-Deletes mehr. |
+| LV2-PAUD-06 | Behoben | Full Refresh entfernte alle bisherigen Server-IDs, bevor überhaupt klar war, ob der Server erreichbar ist. Bei einem Netzwerkfehler blieben Library und Files zwar da, aber Playback-/Playlist-Zuordnungen waren weg. | Alte Mappings bleiben während Fetch und Verarbeitung aktiv. Fehler und unbestätigtes Empty verändern sie nicht; ein leeres Resultat braucht zwei verifizierte Antworten. Refresh- und Detach-Scopes werden für große Libraries in 500er-SQL-Batches verarbeitet. |
+| LV2-PAUD-07 | Behoben | Artist/Album/Track hatten zusammen nur einen Server-Steckplatz. Ein Standalone-Stempel konnte Plex blockieren; Plex und Jellyfin konnten sich gegenseitig überschreiben. | `lib2_media_server_mappings` speichert pro Entity und Server eine eigene Zuordnung. Die UI projiziert die positiven Artist-/Track-Erkennungen als `✓ Plex`, `✓ Jellyfin` oder `✓ Navidrome`; das Entfernen eines Servers löscht nur dessen Mapping. |
+
+Die gewünschte Grenze ist damit explizit: Media-Server dürfen keine Library-
+Einträge erzeugen. Sie erkennen ausschließlich bereits importierte Rows,
+liefern servereigene IDs/technische Beobachtungen für Playback und Playlist-
+Funktionen und machen diese Erkennung in der Library sichtbar.
+
+**Abschlussnachweis:** 2495 Library-v2-/Import-/Completion-Tests, 22 zusätzliche
+Scan-/Datenbank-/Standalone-Regressionen und 14 gezielte UI-Tests bestanden.
+Python-Compile, Diff-Whitespace-Prüfung, Frontend-Format/Typecheck und
+Produktions-Build sind grün (0 neue Frontend-Fehler; 377 bereits vorhandene
+Warnungen).

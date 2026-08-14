@@ -118,6 +118,37 @@ Der verwaltete Cache liegt unter `<db_dir>/lib2_artwork/` und wird über
 können read-only sein; `artist.jpg`/`cover.jpg` dort sind höchstens optionale
 Exports, nie die verlässliche Primärquelle.
 
+#### Media-Server sind Erkennungs- und Playback-Adapter, keine Importquelle
+
+- Katalog- und File-Ownership entstehen ausschließlich durch Bootstrap,
+  manuellen Import, Auto-Import, Download-Import oder den ausdrücklich
+  ausgelösten lokalen Standalone-Reindex. Ein Plex-, Jellyfin- oder
+  Navidrome-Scan darf unbekannte Artists, Releases, Tracks und Files nicht
+  anlegen.
+- Eine erfolgreiche Server-Erkennung wird separat in
+  `lib2_media_server_mappings(entity_type, entity_id, server_source,
+  server_id, match_status, first_seen_at, last_seen_at)` gespeichert. Ein
+  Katalogeintrag kann dadurch gleichzeitig von Plex, Jellyfin und Navidrome
+  erkannt sein. Die alten einzelnen `server_source/server_id`-Spalten sind nur
+  noch eine Upgrade-Kompatibilitätsprojektion und keine Mapping-Wahrheit.
+- Die Library zeigt positive Erkennungen als grünen Haken/Badge am Artist und
+  Track. Kein Badge bedeutet nur „von diesem Server noch nicht sicher
+  zugeordnet“, niemals „nicht in deiner Library“.
+- Ein offline Media-Server blockiert keinen lokalen Import. Der Import gilt
+  allerdings erst als erfolgreich, nachdem die autoritative
+  `lib2_track_files`-Row committed ist; ein fehlgeschlagener Katalogwrite darf
+  nicht als erfolgreicher Download/Import abgeschlossen werden. Das gilt auch
+  für Race-/Duplicate-Fälle, in denen die Zieldatei bereits existiert:
+  Dateiexistenz allein ersetzt den Library-v2-Nachweis nicht.
+- Full Refresh liest und verifiziert den Server zuerst. Ein Fehler oder ein
+  unbestätigtes leeres Resultat lässt die bisherigen Zuordnungen unberührt;
+  ein wirklich leeres Server-Library-Set wird zweimal bestätigt. Erst ein
+  erfolgreicher Lauf darf nicht mehr beobachtete Zuordnungen lösen.
+- Standalone Full Refresh ist ein expliziter lokaler Recovery-Import über den
+  nativen Import-Writer. Deep Scan löst für fehlende Files ausschließlich den
+  gemeinsamen `missing_suspected → missing_confirmed`-Lifecycle aus und löscht
+  keine Artist-/Album-/Trackidentität direkt.
+
 ### 2.2 Monitoring nutzt vorhandene Systeme
 
 - Artist-Monitoring entspricht der Watchlist.

@@ -108,6 +108,32 @@ def test_list_artists_stats(imported_conn):
     assert drake["total_size_bytes"] == 10000
 
 
+def test_queries_project_media_server_recognition_badges(imported_conn):
+    artist = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'"
+    ).fetchone()[0]
+    track = imported_conn.execute(
+        "SELECT t.id,t.album_id FROM lib2_tracks t "
+        "JOIN lib2_track_artists ta ON ta.track_id=t.id WHERE ta.artist_id=? LIMIT 1",
+        (artist,),
+    ).fetchone()
+    imported_conn.execute(
+        "INSERT INTO lib2_media_server_mappings"
+        "(entity_type,entity_id,server_source,server_id) VALUES"
+        "('artist',?,'plex','artist-p'),('artist',?,'jellyfin','artist-j'),"
+        "('track',?,'plex','track-p')",
+        (artist, artist, track[0]),
+    )
+
+    artists, _total = Q.list_artists(imported_conn)
+    drake = next(row for row in artists if row["id"] == artist)
+    album = Q.get_album(imported_conn, track[1])
+    projected_track = next(row for row in album["tracks"] if row["id"] == track[0])
+
+    assert drake["media_server_sources"] == ["jellyfin", "plex"]
+    assert projected_track["media_server_sources"] == ["plex"]
+
+
 def test_list_artists_materializes_requested_page_before_catalog_rollups(
     imported_conn,
 ):

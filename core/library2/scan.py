@@ -42,26 +42,36 @@ def _file_rows_in_scope(
     if file_ids is not None:
         if not file_ids:
             return []
-        marks = ",".join("?" for _ in file_ids)
-        return conn.execute(
-            f"""SELECT id, path, size, file_state, missing_scan_count
-                  FROM lib2_track_files
-                 WHERE id IN ({marks}) AND path IS NOT NULL AND path <> ''
-                   AND COALESCE(file_state,'active')<>'deleted'""",
-            [int(file_id) for file_id in file_ids],
-        ).fetchall()
+        rows = []
+        ids = list(dict.fromkeys(int(file_id) for file_id in file_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            rows.extend(conn.execute(
+                f"""SELECT id, path, size, file_state, missing_scan_count
+                      FROM lib2_track_files
+                     WHERE id IN ({marks}) AND path IS NOT NULL AND path <> ''
+                       AND COALESCE(file_state,'active')<>'deleted'""",
+                chunk,
+            ).fetchall())
+        return rows
     if album_ids is not None:
         if not album_ids:
             return []
-        marks = ",".join("?" for _ in album_ids)
-        return conn.execute(
-            f"""SELECT tf.id, tf.path, tf.size, tf.file_state, tf.missing_scan_count
-                  FROM lib2_track_files tf
-               JOIN lib2_tracks t ON t.id = tf.track_id
-               WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''
-                 AND COALESCE(tf.file_state,'active')<>'deleted'""",
-            album_ids,
-        ).fetchall()
+        rows = []
+        ids = list(dict.fromkeys(int(album_id) for album_id in album_ids))
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            rows.extend(conn.execute(
+                f"""SELECT tf.id, tf.path, tf.size, tf.file_state, tf.missing_scan_count
+                      FROM lib2_track_files tf
+                   JOIN lib2_tracks t ON t.id = tf.track_id
+                   WHERE t.album_id IN ({marks}) AND tf.path IS NOT NULL AND tf.path <> ''
+                     AND COALESCE(tf.file_state,'active')<>'deleted'""",
+                chunk,
+            ).fetchall())
+        return rows
     return conn.execute(
         """SELECT id, path, size, file_state, missing_scan_count
              FROM lib2_track_files WHERE path IS NOT NULL AND path <> ''

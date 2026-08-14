@@ -717,6 +717,37 @@ def test_provenance_labels_auto_import(monkeypatch):
     assert captured.get("source_service") == "auto_import"
 
 
+def test_required_library_registration_fails_before_completion_callbacks(monkeypatch):
+    class _DBStub:
+        def record_track_download(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: _DBStub())
+    import core.library2.autolink as autolink
+    import core.acquisition.pipeline_callback as callbacks
+
+    monkeypatch.setattr(
+        autolink, "link_download_into_library_v2",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("db unavailable")),
+    )
+    completed = []
+    monkeypatch.setattr(
+        callbacks, "notify_pipeline_import_success",
+        lambda _context: completed.append("pipeline"),
+    )
+    monkeypatch.setattr(
+        callbacks, "notify_manual_grab_import_success",
+        lambda _context: completed.append("grab"),
+    )
+
+    with pytest.raises(RuntimeError, match="Library v2 could not register"):
+        side_effects.record_download_provenance(
+            {"_final_processed_path": "/library/song.flac"},
+            require_library=True,
+        )
+    assert completed == []
+
+
 def test_is_active_media_server_ready_standalone_always_ready(monkeypatch):
     monkeypatch.setattr(
         side_effects,
@@ -751,7 +782,7 @@ def test_is_active_media_server_ready_true_when_server_connected(monkeypatch):
     assert reason == ""
 
 
-def test_is_active_media_server_ready_false_when_server_not_connected(monkeypatch):
+def test_is_active_media_server_ready_does_not_block_local_import_when_server_offline(monkeypatch):
     monkeypatch.setattr(
         side_effects,
         "_get_config_manager",
@@ -768,9 +799,5 @@ def test_is_active_media_server_ready_false_when_server_not_connected(monkeypatc
 
     ready, reason = side_effects.is_active_media_server_ready()
 
-    assert ready is False
-    assert reason == (
-        "Jellyfin isn't connected, so importing now would copy files into "
-        "place without adding them to your Library. Connect Jellyfin in "
-        "Settings, or switch to Standalone mode, then try again."
-    )
+    assert ready is True
+    assert reason == ""

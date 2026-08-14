@@ -810,20 +810,23 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
         logger.warning("Post-move standalone-library reconciliation failed: %s", exc)
     try:
         from core.library2.autolink import link_download_into_library_v2
-        linked_lib2_file_id = link_download_into_library_v2(context)
-        if linked_lib2_file_id is not None:
-            from config.settings import config_manager
-            from database.music_database import get_database
-            from core.library2.track_reconcile_trigger import (
-                schedule_file_track_reconcile,
-            )
-            schedule_file_track_reconcile(
-                get_database(),
-                linked_lib2_file_id,
-                config_manager,
-            )
-    except Exception as exc:  # noqa: BLE001 - reconciliation must remain fail-open
+        linked_lib2_file_id = link_download_into_library_v2(
+            context, raise_on_error=True)
+        if linked_lib2_file_id is None:
+            raise RuntimeError("Library v2 did not create a file row")
+        from config.settings import config_manager
+        from database.music_database import get_database
+        from core.library2.track_reconcile_trigger import (
+            schedule_file_track_reconcile,
+        )
+        schedule_file_track_reconcile(
+            get_database(),
+            linked_lib2_file_id,
+            config_manager,
+        )
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Post-move Library-v2 reconciliation failed: %s", exc)
+        return False
     try:
         from core.acquisition.pipeline_callback import notify_pipeline_import_success
         notify_pipeline_import_success(context)
@@ -835,6 +838,27 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
     except Exception as exc:  # noqa: BLE001
         logger.warning("Post-move correlated-grab reconciliation failed: %s", exc)
     return True
+
+
+def _confirm_existing_file_bookkeeping(context, artist_context=None, album_info=None):
+    """Treat an already-moved destination as success only after lib2 owns it.
+
+    Race guards and duplicate-download protection legitimately encounter a
+    destination after the source has gone.  The file is safe, but its presence
+    alone is not the import-success contract: Library v2 must also have an
+    active file row.  Recovery is idempotent, so it is safe both after another
+    worker completed and after an earlier attempt stopped between move+link.
+    """
+    if context.get('_pipeline_import_succeeded'):
+        return True
+    if _recover_moved_file_bookkeeping(context, artist_context, album_info):
+        context['_pipeline_import_succeeded'] = True
+        return True
+    context.setdefault(
+        '_context_failure_msg',
+        'the file is at its destination, but Library v2 could not register it',
+    )
+    return False
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
@@ -869,7 +893,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     f"[Race Guard] Source gone but destination exists — already processed by another thread: "
                     f"{os.path.basename(existing_final)}"
                 )
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(context)
                 return
             # File was intentionally moved to quarantine by a concurrent/earlier
             # post-process call — this is a stale duplicate dispatch, not a race.
@@ -1488,17 +1512,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     daemon=True,
                 ).start()
 
+            context['_final_path'] = str(destination)
+            _persist_verification_status(context, destination)
+            _attach_manual_skip_path(context_key, destination)
+            record_download_provenance(context, True)
             activity_target = f"{album_name}/{filename}" if album_name else filename
             add_activity_item("", "Download Complete", activity_target, "Now")
             logger.info(f"Simple download post-processing complete: {activity_target}")
-            context['_simple_download_completed'] = True
-            context['_final_path'] = str(destination)
-            context['_pipeline_import_succeeded'] = True
-            _persist_verification_status(context, destination)
-            _attach_manual_skip_path(context_key, destination)
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
-            record_download_provenance(context)
+            context['_simple_download_completed'] = True
+            context['_pipeline_import_succeeded'] = True
             try:
                 check_and_remove_from_wishlist(context)
             except Exception as wishlist_error:
@@ -1794,7 +1818,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
                 logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             # THE backstop for sella's incident: an upgrade/replace must NEVER
             # swap a good library file for a materially shorter one. Before any
@@ -1867,9 +1892,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                                 pass
                             except Exception as e:
                                 logger.error(f"[Protection] Error removing redundant file: {e}")
-                            context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
-                            if not context['_pipeline_import_succeeded']:
+                            if os.path.exists(file_path):
                                 context['_context_failure_msg'] = 'could not remove redundant import source'
+                            else:
+                                _confirm_existing_file_bookkeeping(
+                                    context, artist_context, album_info)
                             return
                     else:
                         logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
@@ -1880,9 +1907,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                             logger.error(f"[Protection] Could not remove redundant file (already gone): {file_path}")
                         except Exception as e:
                             logger.error(f"[Protection] Error removing redundant file: {e}")
-                        context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
-                        if not context['_pipeline_import_succeeded']:
+                        if os.path.exists(file_path):
                             context['_context_failure_msg'] = 'could not remove redundant import source'
+                        else:
+                            _confirm_existing_file_bookkeeping(
+                                context, artist_context, album_info)
                         return
                 elif is_enhance_download or force_replace:
                     if is_enhance_download:
@@ -1902,7 +1931,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 logger.info(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
                 download_cover_art(album_info, os.path.dirname(final_path), context)
                 generate_lrc_file(final_path, context, artist_context, album_info)
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             expected_dir = os.path.dirname(final_path)
             expected_stem = os.path.splitext(os.path.basename(final_path))[0]
@@ -1927,7 +1957,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 context['_final_processed_path'] = found_variant
                 download_cover_art(album_info, expected_dir, context)
                 generate_lrc_file(found_variant, context, artist_context, album_info)
-                context['_pipeline_import_succeeded'] = True
+                _confirm_existing_file_bookkeeping(
+                    context, artist_context, album_info)
                 return
             logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
@@ -2062,9 +2093,9 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
+        record_download_provenance(context, True)
         emit_track_downloaded(context, automation_engine)
         record_library_history_download(context)
-        record_download_provenance(context)
         record_soulsync_library_entry(context, artist_context, album_info)
 
         try:
@@ -2141,12 +2172,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 locals().get('artist_context'),
                 locals().get('album_info'),
             ):
+                context['_pipeline_import_succeeded'] = True
                 logger.warning(
                     "Source consumed but destination exists; recovered library "
                     "bookkeeping for %s",
                     context_key,
                 )
             else:
+                context.setdefault(
+                    '_context_failure_msg',
+                    'the file was moved, but Library v2 could not register it',
+                )
                 logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
         file_lock.release()
@@ -2413,9 +2449,15 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         expected_final_path = context.get('_final_processed_path')
-        if not expected_final_path and context.get('_context_failure_msg'):
-            # dd28-39: an explicit early bail-out, not an unverifiable success.
-            failure_msg = str(context['_context_failure_msg'])
+        if not context.get('_pipeline_import_succeeded'):
+            # A file on disk is only half an import.  Every successful path in
+            # the inner pipeline now sets this flag *after* the strict lib2
+            # registration (including race/recovery paths), so absence is an
+            # explicit failure rather than an unverifiable success.
+            failure_msg = str(context.get(
+                '_context_failure_msg',
+                'post-processing did not complete Library v2 registration',
+            ))
             logger.error(
                 "Post-processing did not import (task=%s): %s", task_id, failure_msg,
             )
@@ -2429,20 +2471,16 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             _notify_download_completed(batch_id, task_id, success=False)
             return
         if not expected_final_path:
-            logger.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
+            failure_msg = 'post-processing reported success without a destination path'
+            logger.error("Task %s: %s", task_id, failure_msg)
             with tasks_lock:
                 if task_id in download_tasks:
-                    _mark_task_completed(task_id, context.get('track_info'))
-                    if context.get('_verification_status'):
-                        download_tasks[task_id]['verification_status'] = context['_verification_status']
-                    if context.get('_history_id'):
-                        download_tasks[task_id]['history_id'] = context['_history_id']
-                    if context.get('_audio_quality'):
-                        download_tasks[task_id]['quality'] = context['_audio_quality']
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = failure_msg
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
-            _notify_download_completed(batch_id, task_id, success=True)
+            _notify_download_completed(batch_id, task_id, success=False)
             return
 
         if os.path.exists(expected_final_path):

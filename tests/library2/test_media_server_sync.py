@@ -183,3 +183,53 @@ def test_server_ids_are_provider_scoped(cur):
     upsert_artist(cur, server_source="plex", server_id="7", name="Muse")
     assert resolve_artist(cur, "jellyfin", "7") is None
     assert resolve_artist(cur, "plex", "7") == artist
+
+
+def test_same_catalogue_rows_keep_multiple_media_server_mappings(cur):
+    artist, album, track, _file = _imported(cur)
+    for source, prefix in (("plex", "p"), ("jellyfin", "j")):
+        assert upsert_artist(
+            cur, server_source=source, server_id=f"{prefix}-a", name="Muse"
+        ) == artist
+        assert upsert_album(
+            cur, server_source=source, server_id=f"{prefix}-al",
+            artist_id=artist, title="Absolution",
+        ) == album
+        assert upsert_track(
+            cur, server_source=source, server_id=f"{prefix}-t",
+            album_id=album, artist_id=artist, title="Time Is Running Out",
+            track_number=4, disc_number=1, file_path="/music/song.flac",
+        ) == track
+
+    assert resolve_artist(cur, "plex", "p-a") == artist
+    assert resolve_artist(cur, "jellyfin", "j-a") == artist
+    rows = cur.execute(
+        "SELECT entity_type,server_source,server_id "
+        "FROM lib2_media_server_mappings ORDER BY entity_type,server_source"
+    ).fetchall()
+    assert {(r[0], r[1], r[2]) for r in rows} == {
+        ("artist", "plex", "p-a"), ("artist", "jellyfin", "j-a"),
+        ("album", "plex", "p-al"), ("album", "jellyfin", "j-al"),
+        ("track", "plex", "p-t"), ("track", "jellyfin", "j-t"),
+    }
+
+
+def test_mapping_delete_trigger_removes_only_deleted_entity(cur):
+    artist, album, track, _file = _imported(cur)
+    upsert_artist(cur, server_source="plex", server_id="p-a", name="Muse")
+    upsert_album(cur, server_source="plex", server_id="p-al",
+                 artist_id=artist, title="Absolution")
+    upsert_track(cur, server_source="plex", server_id="p-t",
+                 album_id=album, artist_id=artist, title="Time Is Running Out",
+                 track_number=4, disc_number=1, file_path="/music/song.flac")
+
+    cur.execute("DELETE FROM lib2_tracks WHERE id=?", (track,))
+
+    assert cur.execute(
+        "SELECT COUNT(*) FROM lib2_media_server_mappings "
+        "WHERE entity_type='track' AND entity_id=?", (track,),
+    ).fetchone()[0] == 0
+    assert cur.execute(
+        "SELECT COUNT(*) FROM lib2_media_server_mappings "
+        "WHERE entity_type='artist' AND entity_id=?", (artist,),
+    ).fetchone()[0] == 1

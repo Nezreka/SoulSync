@@ -326,9 +326,17 @@ def _reconcile_library2(conn, read_tags, track_ids, page_size, on_progress,
             break
         page = ids[start:start + page_size]
         marks = ','.join('?' * len(page))
-        where = (f"t.server_source=? AND t.server_id IN ({marks})" if by_server
-                 else f"t.id IN ({marks})")
-        params = [server_source, *page] if by_server else page
+        where = (
+            f"(EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
+            f"WHERE m.entity_type='track' AND m.entity_id=t.id "
+            f"AND m.server_source=? AND m.server_id IN ({marks})) "
+            f"OR (t.server_source=? AND t.server_id IN ({marks})))"
+            if by_server else f"t.id IN ({marks})"
+        )
+        params = (
+            [server_source, *page, server_source, *page]
+            if by_server else page
+        )
         rows = cur.execute(f"""
             SELECT t.id, t.album_id, al.primary_artist_id AS artist_id, t.title,
                    (SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id

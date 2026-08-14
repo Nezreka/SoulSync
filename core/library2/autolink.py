@@ -577,12 +577,14 @@ def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
     return cur.lastrowid
 
 
-def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
+def link_download_into_library_v2(context: Dict[str, Any], *,
+                                  raise_on_error: bool = False) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
-    Safe to call unconditionally from the pipeline: it never raises and is
-    idempotent (an existing path on the same track is updated,
-    not duplicated).
+    Idempotent: an existing path on the same track is updated, not duplicated.
+    Background repair callers keep the historical best-effort default;
+    completion paths pass ``raise_on_error=True`` so an import cannot be
+    reported successful while its Library-v2 row is missing.
     """
     try:
         from config.settings import config_manager
@@ -882,6 +884,8 @@ def link_download_into_library_v2(context: Dict[str, Any]) -> Optional[int]:
             conn.close()
     except Exception as e:  # noqa: BLE001
         logger.debug("library v2 autolink failed: %s", e)
+        if raise_on_error:
+            raise
         return None
 
 

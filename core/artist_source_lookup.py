@@ -99,8 +99,11 @@ def find_library_artist_for_source(
                 # folds A-Z, so a searched "björk" never met a stored "Björk".
                 cursor.execute(
                     "SELECT id FROM lib2_artists "
-                    "WHERE name_key = ? AND server_source = ? LIMIT 1",
-                    (normalize_name(artist_name), active_server),
+                    "WHERE name_key = ? AND (server_source = ? OR EXISTS ("
+                    "SELECT 1 FROM lib2_media_server_mappings m "
+                    "WHERE m.entity_type='artist' AND m.entity_id=lib2_artists.id "
+                    "AND m.server_source=?)) LIMIT 1",
+                    (normalize_name(artist_name), active_server, active_server),
                 )
                 row = cursor.fetchone()
                 if row:

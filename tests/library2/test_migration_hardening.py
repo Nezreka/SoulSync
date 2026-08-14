@@ -25,6 +25,16 @@ from core.library2.schema import ensure_library_v2_schema, run_library_v2_backfi
 from core.library2.wanted import recompute_wanted
 
 
+def test_upgrade_barrier_treats_every_unsafe_http_verb_as_a_write():
+    assert migration_gate.request_can_mutate("POST") is True
+    assert migration_gate.request_can_mutate("PUT") is True
+    assert migration_gate.request_can_mutate("PATCH") is True
+    assert migration_gate.request_can_mutate("DELETE") is True
+    assert migration_gate.request_can_mutate("GET") is False
+    assert migration_gate.request_can_mutate("HEAD") is False
+    assert migration_gate.request_can_mutate("OPTIONS") is False
+
+
 def _conn(db):
     conn = db._get_connection()
     conn.row_factory = sqlite3.Row

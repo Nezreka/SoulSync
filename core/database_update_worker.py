@@ -117,8 +117,11 @@ class DatabaseUpdateWorker:
                 return
 
             if self.full_refresh:
-                logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
-                self.database.clear_server_data(self.server_type)
+                logger.info(
+                    "Performing full database refresh for %s - existing mappings stay "
+                    "live until the server read is verified",
+                    self.server_type,
+                )
 
                 # Show cache preparation phase for Jellyfin and set up progress callback
                 if self.server_type == "jellyfin":
@@ -140,8 +143,32 @@ class DatabaseUpdateWorker:
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
                 if not artists_to_process:
-                    self._emit_signal('error', f"No artists found in {self.server_type} library or connection failed")
-                    return
+                    if not getattr(self, '_artists_fetch_verified', False):
+                        self._emit_signal(
+                            'error',
+                            f"Could not read {self.server_type}; existing server mappings were kept",
+                        )
+                        return
+                    # A real empty library is destructive too: confirm it once
+                    # more before detaching every recognition mapping.
+                    self._emit_signal(
+                        'phase_changed',
+                        f"{self.server_type.title()} returned no artists — verifying...",
+                    )
+                    artists_to_process = self._get_all_artists()
+                    if (not artists_to_process
+                            and not getattr(self, '_artists_fetch_verified', False)):
+                        self._emit_signal(
+                            'error',
+                            f"Could not verify empty {self.server_type} library; existing mappings were kept",
+                        )
+                        return
+                    if not artists_to_process:
+                        logger.info(
+                            "Full refresh: %s library verified empty twice; detaching mappings",
+                            self.server_type,
+                        )
+                        self.database.clear_server_data(self.server_type)
                 logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
@@ -1157,12 +1184,15 @@ class DatabaseUpdateWorker:
                         # goes artist server_id -> catalogue row -> its albums
                         # -> their server ids.
                         cursor.execute(
-                            f"SELECT al.server_id FROM lib2_albums al"
-                            f"  JOIN lib2_artists ar ON ar.id = al.primary_artist_id"
-                            f" WHERE ar.server_id IN ({placeholders})"
-                            f"   AND ar.server_source = ? AND al.server_source = ?"
-                            f"   AND al.server_id IS NOT NULL",
-                            batch + [self.server_type, self.server_type])
+                            f"SELECT am.server_id FROM lib2_media_server_mappings am "
+                            f"JOIN lib2_albums al ON al.id=am.entity_id "
+                            f"JOIN lib2_media_server_mappings arm "
+                            f" ON arm.entity_type='artist' "
+                            f"AND arm.entity_id=al.primary_artist_id "
+                            f"AND arm.server_source=am.server_source "
+                            f"WHERE am.entity_type='album' AND am.server_source=? "
+                            f"AND arm.server_id IN ({placeholders})",
+                            [self.server_type, *batch])
                         cascade_album_ids.update(row[0] for row in cursor.fetchall())
                     removed_album_ids -= cascade_album_ids
             except Exception as e:

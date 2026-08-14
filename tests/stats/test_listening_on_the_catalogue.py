@@ -66,6 +66,20 @@ def test_a_server_id_only_counts_for_its_own_server(db):
     assert _worker(db)._map_play_counts_to_db({'7': 3}, 'jellyfin') == []
 
 
+def test_play_counts_use_requested_mapping_when_another_server_was_seen_last(db):
+    track_id = _track(db, server_source='jellyfin', server_id='j-track')
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO lib2_media_server_mappings "
+            "(entity_type,entity_id,server_source,server_id) "
+            "VALUES('track',?,'plex','p-track')", (track_id,),
+        )
+
+    updates = _worker(db)._map_play_counts_to_db({'p-track': 4}, 'plex')
+
+    assert updates[0]['lib2_track_id'] == track_id
+
+
 def test_a_track_the_catalogue_never_saw_is_skipped(db):
     _track(db, server_source='plex', server_id='rk-1')
 

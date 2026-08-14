@@ -984,6 +984,37 @@ button.featureTag:disabled {
   font: inherit;
 }
 
+.mediaServerBadges {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.mediaServerBadge,
+.mediaServerTrackBadge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(74, 222, 128, 0.38);
+  border-radius: 999px;
+  background: rgba(20, 83, 45, 0.86);
+  color: #bbf7d0;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.mediaServerTrackBadge {
+  font-size: 9px;
+  padding: 3px 5px;
+}
+
 .artistCard:hover,
 .artistCard:focus-within {
   transform: translateY(-3px);

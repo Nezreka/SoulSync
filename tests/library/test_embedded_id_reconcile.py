@@ -391,3 +391,25 @@ def test_reconcile_library_native_scope_uses_server_ids():
     assert conn.execute(
         "SELECT COUNT(*) FROM lib2_provider_attempts WHERE service='spotify' "
         "AND status='matched'").fetchone()[0] == 3
+
+
+def test_reconcile_library_native_scope_uses_mapping_after_server_switch():
+    conn, _cur = _make_library_db()
+    conn.execute(
+        "UPDATE lib2_tracks SET server_source='jellyfin',server_id='j-track' WHERE id=1"
+    )
+    conn.execute(
+        "INSERT INTO lib2_media_server_mappings "
+        "(entity_type,entity_id,server_source,server_id) "
+        "VALUES('track',1,'plex','p-track')"
+    )
+
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'spotify_track_id': 'mapped'}}),
+        track_ids=['p-track'], server_source='plex',
+    )
+
+    assert totals.processed == 1
+    assert conn.execute(
+        "SELECT spotify_id FROM lib2_tracks WHERE id=1"
+    ).fetchone()[0] == 'mapped'
