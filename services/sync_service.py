@@ -553,8 +553,12 @@ class PlaylistSyncService:
                         # Wing-it stubs are unverified guesses, so they stay off the
                         # wishlist unless wishlist.wing_it_guesses says otherwise —
                         # and then only when the source gave a real artist + title.
+                        # Normalize the artist first — should_wishlist_stub does a
+                        # placeholder-name check and a raw {"name": ...} dict would
+                        # stringify past it instead of matching "unknown artist".
+                        stub_artist = _artist_name((spotify_track.artists or [None])[0])
                         if is_stub_id(spotify_track.id) and not should_wishlist_stub(
-                            (spotify_track.artists or [None])[0], spotify_track.name,
+                            stub_artist, spotify_track.name,
                         ):
                             logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
                             continue

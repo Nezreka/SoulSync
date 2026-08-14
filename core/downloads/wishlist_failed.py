@@ -132,7 +132,12 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
                         if isinstance(_artist, dict):
                             _artist = _artist.get('name')
-                        if is_stub_id(sp_id) and not should_wishlist_stub(_artist, track_name):
+                        # Use the source's own title for the predicate, not track_name's
+                        # "Track {i+1}" logging fallback — that placeholder isn't a
+                        # placeholder should_wishlist_stub recognizes, so it would read
+                        # as a real title and let a nameless stub through.
+                        _source_title = track_data.get('name', '') if isinstance(track_data, dict) else ''
+                        if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title):
                             wing_it_skipped += 1
                             logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                             continue

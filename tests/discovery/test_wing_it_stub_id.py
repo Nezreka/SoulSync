@@ -196,3 +196,12 @@ def test_wishlist_gate_fails_closed_without_a_config_manager(monkeypatch):
 
     monkeypatch.setattr(cs, "config_manager", _Broken())
     assert wishlist_guesses_enabled() is False
+
+
+def test_wishlist_gate_rejects_a_truthy_non_bool_value(monkeypatch):
+    # bool("false") is True — a malformed config value (e.g. the literal
+    # string "false", written by hand or by a bad migration) must not enable
+    # the gate. Only the actual Python bool True does.
+    import config.settings as cs
+    monkeypatch.setattr(cs, "config_manager", _Cfg("false"))
+    assert wishlist_guesses_enabled() is False

@@ -79,7 +79,7 @@ def wishlist_guesses_enabled() -> bool:
     Isolated so tests can monkeypatch without a config manager."""
     try:
         from core.settings import config_manager
-        return bool(config_manager.get("wishlist.wing_it_guesses", False))
+        return config_manager.get("wishlist.wing_it_guesses", False) is True
     except Exception:
         return False
 
