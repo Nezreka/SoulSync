@@ -262,6 +262,57 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
     }
 
+    case 'genre_enrichment': {
+      const proposed = list<string>(d.proposed_genres);
+      const added = list<string>(d.added_genres);
+      const ambiguous = list<{
+        raw_genre?: unknown;
+        raw?: unknown;
+        candidates?: unknown[];
+        score?: unknown;
+      }>(d.ambiguous_genres);
+      const omitted = list<string>(d.omitted_due_to_cap);
+      const rejected = list<string>(d.rejected_genres);
+      rows.push(['Current genres', list<string>(d.original_genres).join(', ') || '— none']);
+      rows.push(['Proposed genres', proposed.join(', ') || '— none']);
+      rows.push(['Added', added.join(', ') || '— none']);
+      rows.push(['Omitted at cap', omitted.join(', ') || '— none']);
+      rows.push(['Rejected', rejected.join(', ') || '— none']);
+      if (ambiguous.length) {
+        rows.push([
+          'Ambiguous',
+          ambiguous
+            .map((item) => {
+              const candidates = list<string>(item.candidates).join(', ');
+              const score = Math.round((Number(item.score) || 0) * 100);
+              return `${text(item.raw_genre || item.raw)}: ${candidates} (${score}%)`;
+            })
+            .join('; '),
+        ]);
+      }
+      if (d.sources && typeof d.sources === 'object') {
+        rows.push([
+          'Sources',
+          Object.entries(d.sources as Record<string, unknown>)
+            .map(([genre, sources]) => `${genre}: ${list<string>(sources).join(', ')}`)
+            .join('; '),
+        ]);
+      }
+      if (d.cache_stats && typeof d.cache_stats === 'object') {
+        const stats = d.cache_stats as Record<string, unknown>;
+        rows.push([
+          'Cache / external calls',
+          `metadata ${text(stats.metadata_cache_hits) || '0'}, live ${text(stats.live_calls) || '0'}`,
+        ]);
+      }
+      return (
+        <>
+          {media}
+          <DetailGrid rows={rows} />
+        </>
+      );
+    }
+
     case 'comma_artist_split': {
       // jadux — the contract: exactly what the artist tag becomes.
       const parts = list<string>(d.split_artists);

@@ -218,6 +218,7 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   quality_upgrade: 'Low Quality',
   short_preview_track: 'Preview Clip',
   genre_cleanup: 'Genres',
+  genre_enrichment: 'Genre Enrichment',
   comma_artist_split: 'Comma Artist',
 };
 
@@ -249,6 +250,7 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   library_retag: 'Apply Tags',
   short_preview_track: 'Re-download',
   genre_cleanup: 'Clean Genres',
+  genre_enrichment: 'Apply Genres',
   comma_artist_split: 'Split Artists',
 };
 
@@ -269,6 +271,7 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   applied_lyrics: 'Lyrics Applied',
   deleted_expired: 'Deleted',
   removed_duplicates: 'Duplicates Removed',
+  genres_applied: 'Genres Applied',
 };
 
 /** The badge shown on a non-pending finding: the user action if we have a label
