@@ -487,7 +487,13 @@ class MusicMatchingEngine:
             # - Is reasonable length (4-30 chars)
             # - Doesn't look like a feature/remix indicator
             exclude_patterns = [
-                r'\b(remix|mix|edit|version|live|acoustic|instrumental|demo|feat|ft|featuring)\b'
+                r'\b(remix|mix|edit|version|live|acoustic|instrumental|demo|feat|ft|featuring)\b',
+                # Edition/master decoration ("Song - Deluxe", "Song - Mono")
+                # is not an album name either — without this, this heuristic
+                # strips it here before generate_download_queries' Priority 5
+                # last-resort ever gets a chance to, so the faithful
+                # "artist song deluxe" query is never tried at all.
+                r'\b(' + '|'.join(re.escape(tok) for tok in self._VERSION_TOKENS) + r')\b',
             ]
             
             is_likely_album = True
@@ -527,6 +533,119 @@ class MusicMatchingEngine:
         cleaned = " ".join(str(title or "").split())
         return len(cleaned) >= cls._TITLE_ONLY_MIN_CHARS
 
+    # EDITION decoration only: markers that distinguish two masters/releases of
+    # THE SAME RECORDING. Stripping these can only change which pressing you get.
+    #
+    # Performance markers — live, remix, acoustic, instrumental, radio/club/
+    # extended edits, demos, slowed/sped-up edits — are deliberately NOT here.
+    # They name a different take, and the version gate in
+    # calculate_slskd_match_confidence only rejects on the CANDIDATE's version:
+    # a plain studio file classifies as 'original' and is never rejected, so a
+    # query stripped down to "Song" would happily return the studio cut for a
+    # source that asked for "Song (Live)" — silently substituting a different
+    # performance. An edition strip has no such failure mode.
+    _VERSION_TOKENS = (
+        'remaster', 'remastered', 'mono', 'stereo', 'anniversary',
+        'deluxe', 'expanded', 'reissue', 'tv size', 'tv-size', 'edition',
+    )
+    # Performance markers that keep a decoration from being edition-only even
+    # when an edition token also appears in it — "(Live at the Deluxe
+    # Anniversary Tour)" contains "deluxe" and "anniversary", but it also
+    # names a different TAKE, and stripping the whole bracket would lose that
+    # along with the edition note. See the safety note below _VERSION_TOKENS'
+    # own docstring: this is the same failure mode, reached through a mixed
+    # label instead of a bare performance one.
+    _PERFORMANCE_TOKENS = (
+        'live', 'remix', 'mix', 'edit', 'acoustic', 'instrumental', 'radio',
+        'extended', 'club', 'demo', 'slowed', 'sped up', 'spedup', 'mashup',
+        'bootleg', 'version', 'ver',
+    )
+    # Connector words/numbers allowed alongside an edition token without
+    # disqualifying the decoration — "30th Anniversary Remaster" is still
+    # edition-only even though "30th" isn't itself a token.
+    _EDITION_STOPWORDS = frozenset({'the', 'a', 'an', 'of', 'and'})
+    _EDITION_NUMBER = re.compile(r"\d{1,4}(st|nd|rd|th)?")
+    _BRACKETED_GROUP = re.compile(r'\s*[\(\[]([^)\]]*)[)\]]')
+    _DASH_CHAR = re.compile(r'[-–—]')
+
+    def _is_edition_only_text(self, text: str) -> bool:
+        """Is `text` composed ENTIRELY of edition decoration (tokens, numbers/
+        ordinals, light connector words) with no performance marker and no
+        unrelated content? Used to decide whether a bracket/dash-tail is safe
+        to drop outright."""
+        low = text.lower()
+        if not any(tok in low for tok in self._VERSION_TOKENS):
+            return False
+        if any(re.search(r'\b' + re.escape(tok) + r'\b', low)
+               for tok in self._PERFORMANCE_TOKENS):
+            return False
+        # Whole-content check: every remaining word must be a number/ordinal,
+        # a stopword, or part of a recognized edition token — otherwise the
+        # text carries unrelated content ("Stereo Hearts" is a real title,
+        # not a mono/stereo mix note) and stripping it would drop more than
+        # the edition note.
+        residual = low
+        # Longest first: 'remaster' is a prefix of 'remastered', so removing
+        # it first would leave a stray "ed" that isn't a stopword/number and
+        # wrongly fail this check.
+        for tok in sorted(self._VERSION_TOKENS, key=len, reverse=True):
+            residual = residual.replace(tok, ' ')
+        for word in re.findall(r"[a-z0-9']+", residual):
+            if word in self._EDITION_STOPWORDS:
+                continue
+            if self._EDITION_NUMBER.fullmatch(word):
+                continue
+            return False
+        return True
+
+    def _dash_tail_edition_split(self, title: str) -> Optional[str]:
+        """`title` with a trailing "-<edition>" segment removed, or None if
+        none qualifies.
+
+        Tries every -/–/— position, RIGHT TO LEFT, and takes the first whose
+        trailing segment is edition-only. Whitespace around the separator is
+        optional (`"Nevermind–30th Anniversary Remaster"` must strip same as
+        the spaced form), which makes a naive "split on any dash" ambiguous
+        for a tail with its own internal hyphen — "the WORLD - TV-Size" has a
+        candidate split inside "TV-Size" itself. Right-to-left resolves it for
+        free: that inner candidate's tail is just "Size", which isn't
+        edition-only, so it's rejected and the search continues left to the
+        real separator, whose tail "TV-Size" IS a recognized token.
+        """
+        positions = [m.start() for m in self._DASH_CHAR.finditer(title)]
+        for pos in reversed(positions):
+            prefix = title[:pos].rstrip(' -–—')
+            tail = title[pos + 1:].strip()
+            if not prefix or not tail:
+                continue
+            if self._is_edition_only_text(tail):
+                return prefix
+        return None
+
+    def _strip_version_decoration(self, title: str) -> str:
+        """`title` with version-bearing decoration removed.
+
+        Drops bracketed groups and a trailing "-<edition>" segment ONLY when
+        their COMPLETE content is edition-only, so "Africa" is untouched, "Old
+        Town Road (feat. Billy Ray Cyrus)" keeps its credit (no edition
+        token), "Sweet Dreams (Are Made of This) [2005 Remaster]" loses just
+        the remaster note, and "(Live at the Deluxe Anniversary Tour)" is left
+        alone entirely — an edition token sharing a bracket with a performance
+        marker does not make it safe to drop the performance marker too.
+        Returns '' if stripping would leave nothing.
+        """
+        if not title:
+            return ''
+
+        stripped = self._BRACKETED_GROUP.sub(
+            lambda m: '' if self._is_edition_only_text(m.group(1)) else m.group(0), title)
+
+        dash_stripped = self._dash_tail_edition_split(stripped)
+        if dash_stripped is not None:
+            stripped = dash_stripped
+
+        return ' '.join(stripped.split()).strip(' -–—')
+
     def generate_download_queries(self, spotify_track: SpotifyTrack) -> List[str]:
         """
         Generate multiple search query variations for better matching.
@@ -537,6 +656,15 @@ class MusicMatchingEngine:
         if not spotify_track.artists:
             # No artist info - just use track name variations
             queries.append(self.clean_title(spotify_track.name))
+            # Deliberately NOT extended with a Priority 5 stripped-title query:
+            # calculate_slskd_match_confidence's minimum artist gate rejects
+            # any non-YouTube candidate with artist_score < 0.25, and with no
+            # source artist at all the loop that computes artist_score never
+            # runs, so it is unconditionally 0.0 — every candidate a search
+            # here could return is mathematically rejected before scoring
+            # finishes. Firing an extra broadcast-guarded query for a result
+            # that can never be accepted is pure network cost for zero
+            # possible benefit — worse than doing nothing.
             return queries
 
         # If artist or title contains non-ASCII (e.g. Japanese, Chinese, Korean),
@@ -592,10 +720,10 @@ class MusicMatchingEngine:
             # Define version keywords that should be preserved
             preserve_keywords = [
                 'slowed', 'reverb', 'sped up', 'speed up', 'spedup', 'slowdown',
-                'remix', 'mix', 'edit', 'version', 'remaster', 'acoustic', 
+                'remix', 'mix', 'edit', 'version', 'remaster', 'acoustic',
                 'live', 'demo', 'instrumental', 'radio', 'extended', 'club',
                 'original', 'clean', 'explicit', 'mashup', 'bootleg'
-            ]
+            ] + list(self._VERSION_TOKENS)
             
             # Check if the dash content contains version keywords
             should_preserve = any(keyword in dash_content for keyword in preserve_keywords)
@@ -660,6 +788,46 @@ class MusicMatchingEngine:
                 logger.debug(
                     f"PRIORITY 4: skipping title-only query for short title "
                     f"'{original_track_clean}' — too broad to search without an artist")
+
+        # PRIORITY 5: LAST RESORT — drop EDITION decoration ("[2005 Remaster]",
+        # "(Deluxe)", "(Mono)").
+        #
+        # Priorities 1-2 deliberately PRESERVE version info so a search for a
+        # specific cut doesn't return a different one. That is right, but it is
+        # also absolute: every rung of the ladder above carries the suffix, so
+        # when no peer happens to share that exact pressing the track never
+        # resolves at all. On a live library that is what a wishlist entry stuck
+        # at retry 6 looks like — "Sweet Dreams (Are Made of This) [2005
+        # Remaster]", "KAZENO LONELY WAY (2022 Remaster)" — tracks that are
+        # trivially available in some other edition of the same recording.
+        #
+        # Two things keep this safe. _VERSION_TOKENS covers editions only, never
+        # a different take (see its comment). And ordering: this query runs only
+        # after every version-faithful one has come up empty, so a wrong-edition
+        # result can never displace a right-edition one.
+        version_stripped = self._strip_version_decoration(original_title)
+        if version_stripped and version_stripped.lower() != original_title.strip().lower():
+            stripped_clean = self.clean_title(version_stripped)
+            if stripped_clean:
+                candidates = []
+                # A punctuation-only source artist ("...", "- - -") cleans to
+                # '', and f"{artist} {x}".strip() would then silently BECOME
+                # the unqualified broadcast form — skipping the distinctiveness
+                # gate below entirely. Only add the artist-qualified candidate
+                # when there is actually an artist to qualify it with.
+                if artist:
+                    candidates.append(f"{artist} {stripped_clean}".strip())
+                # The unqualified variant is still a broadcast, and stripping
+                # decoration only makes the title SHORTER — "Kid A (2009
+                # Remaster)" strips to "kid a". So it has to clear the same
+                # distinctiveness bar as PRIORITY 4 (#1102); the artist-qualified
+                # query above is unaffected either way.
+                if self._title_is_distinctive_enough_to_broadcast(stripped_clean):
+                    candidates.append(stripped_clean)
+                for candidate in candidates:
+                    if candidate.lower() not in [q.lower() for q in queries]:
+                        queries.append(candidate)
+                        logger.debug(f"PRIORITY 5: Version-stripped last resort: '{candidate}'")
 
         # Remove duplicates while preserving order
         unique_queries = []
