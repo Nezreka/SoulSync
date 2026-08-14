@@ -61,6 +61,13 @@ _NON_LATIN = re.compile(
 _BRACKETED = re.compile(r"[（(\[【｢「].*?[)）\]】｣」]")
 _DASHED_TAIL = re.compile(r"\s-[^-]+-\s*$")
 
+# A live-recording credit ("Live at Budokan", "Live in Paris") describes a
+# DIFFERENT thing from the title before it — it is not evidence of a
+# restatement just because it happens to be in a different script. Real
+# restatements are two statements of the SAME title; this is a title plus a
+# performance note.
+_LIVE_MARKER = re.compile(r"^live\s+(?:at|in|from)\s+", re.IGNORECASE)
+
 
 def clean_source_artist(artist: str) -> str:
     """Strip well-known streaming-channel decoration from an artist name.
@@ -132,7 +139,9 @@ def restated_title(title: str) -> str | None:
     one of two independent tests:
 
     * **different scripts** — one half contains non-Latin script and the other
-      does not, so they cannot be title-and-subtitle; the Latin half is returned.
+      does not, so they cannot be title-and-subtitle; the Latin half is returned
+      unless it reads as a live-recording credit ("Live at Budokan"), which is
+      a genuine subtitle rather than a restatement.
     * **same core** — both halves reduce to the same string once bracketed and
       dash-delimited decoration is dropped.
 
@@ -153,7 +162,10 @@ def restated_title(title: str) -> str | None:
 
     latin = [s for s in segments if not _NON_LATIN.search(s)]
     if latin and len(latin) != len(segments):
-        return latin[0] if latin[0] != title else None
+        candidate = latin[0]
+        if candidate != title and not _LIVE_MARKER.match(candidate):
+            return candidate
+        return None
 
     # All one script: only a demonstrable restatement counts — both halves
     # reduce to the same string once decoration is dropped.

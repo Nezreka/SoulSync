@@ -152,6 +152,9 @@ def test_restated_title_returns_the_latin_statement(raw, expected):
     "KAZE - Run With You",
     # Both halves non-Latin: nothing to prefer between them.
     "金木犀 - 水野あつ",
+    # A live-recording credit is a genuine subtitle, not a restatement — even
+    # though the title before it is a single non-Latin character.
+    "夜 - Live at Budokan",
     # No separator at all.
     "だから僕は音楽を辞めた",
     "Yellow",
