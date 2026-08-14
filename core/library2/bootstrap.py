@@ -208,9 +208,8 @@ def ensure_bootstrap_schema(cursor) -> None:
 def source_watermark(database: Any) -> str:
     """Return a stable snapshot of the legacy source population.
 
-    The bootstrap must run again when a fresh install receives its first media
-    server scan after startup. Counts plus max ids are intentionally cheap and
-    sufficient to distinguish that empty -> populated transition.
+    Counts plus max ids are intentionally cheap and sufficient to detect a
+    changed upgrade source while the compatibility tables still exist.
     """
     conn = database._get_connection()
     try:
@@ -727,15 +726,10 @@ def run_deferred_backfills(database: Any, *,
 def should_stop_autostart(result: Dict[str, Any]) -> bool:
     """Whether the periodic autostart caller may retire for good.
 
-    Only a genuinely migrated library ends the loop. ``waiting_for_source``
-    also reports success — a fresh installation has nothing to import yet —
-    and treating that as finished used to retire the thread before the first
-    media-server scan ever produced rows, so nothing reached ``lib2_*`` until
-    the next restart.
+    A fresh installation with no legacy rows is already converged: media-server
+    scans no longer create catalogue ownership after the Library-v2 cutover.
     """
-    if result.get("waiting_for_source"):
-        return False
-    if result.get("skipped") == "already_done":
+    if result.get("skipped") in {"already_done", "empty_source"}:
         return True
     return result.get("success") is True
 
@@ -832,6 +826,10 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             mark_failed(database, owner_token, str(exc))
             return {"success": False, "error": str(exc)}
 
+        if source_row_count(current_watermark):
+            from core.maintenance.dedupe_source_ids import repair_imported_state
+            repair_imported_state(database)
+
         if post_import is not None:
             try:
                 post_import(_progress)
@@ -848,19 +846,9 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
         _checkpoint_wal(database)
 
     # iss29-A04: stamp the watermark the walks actually saw, not the one the
-    # source has now. The three walks are keyset scans taken at three different
-    # moments and the whole post-import precache runs after them, while
-    # auto-import, wishlist downloads and the media-server sync keep writing to
-    # the legacy tables. An artist created after the artists walk is never
-    # walked — but a watermark taken here would count it, so the next tick
-    # answers `already_done`, `should_stop_autostart` returns True, and that
-    # artist stays invisible in V2 for the rest of the process lifetime.
-    # Stamping the pre-run snapshot leaves the difference visible, so the next
-    # tick runs again and picks the row up.
-    if source_row_count(current_watermark) == 0:
-        mark_waiting_for_source(database, owner_token, watermark=current_watermark)
-        logger.info("Library v2 bootstrap is waiting for the first legacy library scan")
-        return {"success": True, "stats": stats, "waiting_for_source": True}
+    # source had when this exclusive upgrade began.  Keeping the pre-run
+    # snapshot also makes a resume deterministic if an older process wrote one
+    # last legacy row immediately before the upgrade barrier took effect.
     if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
     logger.info("Library v2 bootstrap import completed: %s", stats)

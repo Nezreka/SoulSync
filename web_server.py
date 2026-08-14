@@ -308,6 +308,78 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
+_MIGRATION_BLOCKED_ENDPOINTS = frozenset({
+    'start_download', 'start_matched_download', 'process_wishlist_api',
+    'start_wishlist_missing_downloads', 'start_playlist_missing_downloads',
+    'start_missing_downloads', 'start_database_update', 'start_watchlist_scan',
+    'update_similar_artists_endpoint', 'start_metadata_update', 'repair_job_run',
+    'repair_finding_fix', 'repair_findings_bulk_fix',
+    'repair_findings_bulk_fix_start', 'import_album_process',
+    'import_singles_process', 'start_duplicate_cleaner', 'start_popularity_backfill',
+    'listening_stats_sync', 'start_sync', 'start_playlist_sync',
+    'start_tidal_sync', 'start_deezer_sync', 'start_qobuz_sync',
+    'start_spotify_public_sync', 'start_itunes_link_sync', 'start_youtube_sync',
+    'start_listenbrainz_sync', 'start_beatport_sync',
+    'start_tidal_discovery', 'start_deezer_discovery', 'start_qobuz_discovery',
+    'start_spotify_public_discovery', 'start_itunes_link_discovery',
+    'start_youtube_discovery', 'start_listenbrainz_discovery',
+    'start_beatport_discovery', 'retry_failed_mirrored_discovery',
+    'run_mirrored_playlist_pipeline_endpoint', 'start_missing_tracks_process',
+    'rebuild_playlist_materialization_endpoint', 'download_music_video',
+    'clear_quarantine', 'approve_quarantine_item', 'approve_verification_item',
+    'delete_verification_item', 'deezer_download_test_download',
+    'clean_orphan_verification_items', 'recover_quarantine_item',
+    'delete_download_origins', 'write_artist_image_to_disk',
+    'set_album_art', 'set_artist_art', 'enhance_artist_quality',
+    'reorganize_album_files', 'reorganize_all_artist_albums',
+    'library_enrich_entity',
+    'download_selected_candidate', 'manual_search_for_task',
+    'request_media_scan', 'download_discography',
+    'library_import_existing_track_for_missing_slot',
+    'redownload_search_sources', 'redownload_start',
+    'refresh_spotify_library', 'enrich_similar_artists', 'wing_it_sync',
+    'enrich_beatport_tracks', 'repair_toggle', 'repair_resume',
+    'repair_job_toggle', 'auto_import_approve', 'auto_import_scan_now',
+    'auto_import_approve_all',
+    'auto_import_toggle', 'hydrabase_worker_resume',
+    'cleanup_wishlist', 'backup_database_endpoint', 'restore_backup_endpoint',
+    'database_vacuum', 'enable_incremental_vacuum', 'metadata_cache_evict',
+    'metadata_cache_save_mb_match', 'server_playlist_align',
+    'server_playlist_replace_track', 'server_playlist_add_track',
+    'server_playlist_remove_track', 'start_playlist_export_listenbrainz',
+    'start_playlist_export_service', 'watchlist_all_unwatched_library_artists',
+    'refresh_discover_data', 'refresh_seasonal_content',
+    'personalized_refresh_playlist', 'refresh_your_artists',
+    'refresh_your_albums', 'refresh_listenbrainz', 'lastfm_radio_generate',
+    'extract_beatport_chart_tracks', 'scrape_beatport_releases',
+    'mirror_playlist_endpoint',
+    'run_automation_endpoint',
+    'reconcile_embedded_ids',
+    'enrichment_api.enrichment_resume', 'enrichment_api.enrichment_retry',
+    'enrichment_api.enrichment_retry_all_failed',
+})
+
+
+@app.before_request
+def _hold_catalogue_jobs_during_upgrade():
+    lib2_write = (request.path.startswith('/api/library/v2/')
+                  and request.endpoint != 'lib2_import')
+    if (request.method != 'POST'
+            or (request.endpoint not in _MIGRATION_BLOCKED_ENDPOINTS and not lib2_write)):
+        return None
+    try:
+        from core.library2.migration_gate import migration_required
+        blocked = migration_required(get_database())
+    except Exception as exc:  # fail closed: a half-known migration state is not writable
+        logger.warning("Could not verify Library v2 upgrade barrier: %s", exc)
+        blocked = True
+    if blocked:
+        return jsonify({
+            'success': False,
+            'error': 'Library upgrade in progress; this job will be available when it finishes.',
+        }), 409
+    return None
+
 
 # Cache-bust query string for static assets. Computed once per process
 # start so each server restart invalidates the browser's cached copy of
@@ -12119,7 +12191,8 @@ def get_write_tags_batch_status():
 # the API lookup entirely — large API savings on an already-tagged library.
 # Gap-fill only: an existing id is never overwritten (see
 # core/library/embedded_id_reconcile.py).
-def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_stop=None):
+def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_stop=None,
+                              server_source=None):
     """Run the embedded-ID reconcile with web-server path resolution injected.
 
     Thin wrapper over core.library.embedded_id_reconcile.reconcile_library that
@@ -12138,50 +12211,8 @@ def _reconcile_library_tracks(conn, track_ids=None, on_progress=None, should_sto
         return info.get('tags') if info.get('available') else None
 
     return reconcile_library(conn, _read_tags, track_ids=track_ids,
-                             on_progress=on_progress, should_stop=should_stop)
-
-
-def _reconcile_after_scan(worker):
-    """Gap-fill embedded provider IDs for tracks a scan newly inserted.
-
-    Runs after a library scan/deep-scan completes, scoped to the rows the
-    worker actually INSERTED this run (``worker._new_track_ids``). New files
-    are written with empty provider-id columns, so this reads their tags and
-    fills any IDs present — keeping the DB current without a manual backfill.
-    Best-effort: never raises into the scan flow.
-    """
-    try:
-        new_ids = list(getattr(worker, '_new_track_ids', None) or [])
-        if not new_ids:
-            return
-        n = len(new_ids)
-        try:
-            _db_update_phase_callback(
-                f"Reading file tags for {n} new track{'s' if n != 1 else ''}…")
-        except Exception:  # noqa: S110 — best-effort UI phase, never block the reconcile
-            pass
-
-        def _on_progress(totals, title):
-            try:
-                pct = (totals.processed / totals.total * 100) if totals.total else 100
-                _db_update_progress_callback(title, totals.processed, totals.total, pct)
-            except Exception:  # noqa: S110 — best-effort UI progress tick
-                pass
-
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            totals = _reconcile_library_tracks(conn, track_ids=new_ids, on_progress=_on_progress)
-            logger.info(
-                "[Reconcile] Post-scan: filled %d id(s) across %d row(s) from %d new "
-                "track(s) (%d unreadable, %d conflicts)",
-                totals.ids_filled, totals.entities_updated, totals.processed,
-                totals.unreadable, totals.conflicts,
-            )
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.warning("[Reconcile] Post-scan reconcile failed (non-fatal): %s", e)
+                             on_progress=on_progress, should_stop=should_stop,
+                             server_source=server_source)
 
 
 _reconcile_ids_state = {
@@ -12830,9 +12861,11 @@ def _build_issue_snapshot(database, entity_type, entity_id):
 
         elif entity_type == 'album':
             cursor.execute("""
-                SELECT al.id, al.title, al.year, al.track_count, al.thumb_url,
-                       al.genres, al.label, al.record_type, al.duration,
-                       al.spotify_album_id, al.musicbrainz_release_id,
+                SELECT al.id, al.title, al.year, al.track_count,
+                       al.image_url AS thumb_url, al.genres, al.label,
+                       al.album_type AS record_type, al.duration,
+                       al.spotify_id AS spotify_album_id,
+                       al.musicbrainz_id AS musicbrainz_release_id,
                        json_extract(al.external_ids, '$.deezer') as album_deezer_id,
                        json_extract(al.external_ids, '$.tidal') as album_tidal_id,
                        json_extract(al.external_ids, '$.qobuz') as album_qobuz_id, al.upc,
@@ -13098,7 +13131,7 @@ def _build_library_stream_url(track_id, file_path):
     SoulSync filesystem (#809 — play via the server's API, no disk mount).
 
     Navidrome/Subsonic only for now (it has a clean token-authed stream
-    endpoint). ``track_id`` is the server's song id (the tracks-table id for a
+    endpoint). ``track_id`` is the server's song id (`lib2_tracks.server_id` for a
     Navidrome row); if missing, look it up by file_path. Returns None when the
     active server isn't Navidrome or no id resolves."""
     try:
@@ -13116,11 +13149,11 @@ def _build_library_stream_url(track_id, file_path):
                 db = get_database()
                 with db._get_connection() as conn:
                     row = conn.cursor().execute(
-                        "SELECT t.id FROM lib2_tracks t JOIN lib2_track_files f"
+                        "SELECT t.server_id FROM lib2_tracks t JOIN lib2_track_files f"
                         "       ON f.track_id = t.id"
                         " WHERE f.path = ? AND t.server_source = 'navidrome' LIMIT 1",
                         (file_path,)).fetchone()
-                if row:
+                if row and row[0]:
                     song_id = str(row[0])
             except Exception as e:
                 logger.debug("navidrome stream id lookup failed: %s", e)
@@ -13277,16 +13310,6 @@ def library_enrich_entity():
                 results[service] = {"success": False, "error": str(e)}
         finally:
             lock.release()
-
-        # iss32-E01: the worker wrote the legacy row; carry it into lib2 NOW
-        # rather than at the next drain tick, because the user is looking at
-        # the result. The trigger has already queued it — this only applies
-        # that one entity early, so a failure here costs nothing.
-        try:
-            from core.library2.legacy_mirror import drain as _mirror_drain
-            _mirror_drain(get_database(), entity_type=entity_type, legacy_id=entity_id)
-        except Exception as _mirror_err:
-            logger.debug(f"immediate lib2 mirror after enrich skipped: {_mirror_err}")
 
         # Re-fetch updated data to return fresh state
         database = get_database()
@@ -17243,6 +17266,8 @@ def _run_soulsync_full_refresh():
                         catalogue_artist = upsert_artist(
                             cursor, server_source='soulsync', server_id=artist_id,
                             name=artist_name, overwrite=False)
+                        if catalogue_artist is None:
+                            continue
                     except Exception as e:
                         logger.debug("soulsync artist upsert failed: %s", e)
                         continue
@@ -17263,6 +17288,8 @@ def _run_soulsync_full_refresh():
                                 cursor, server_source='soulsync', server_id=album_id,
                                 artist_id=catalogue_artist, title=album_name,
                                 year=year or None, track_count=len(tracks))
+                            if catalogue_album is None:
+                                continue
                         except Exception as e:
                             logger.debug("soulsync album upsert failed: %s", e)
                             continue
@@ -17270,7 +17297,7 @@ def _run_soulsync_full_refresh():
                         for file_path, tags in tracks:
                             track_id = _stable_id(file_path) + '::soulsync'
                             try:
-                                upsert_track(
+                                mapped_track = upsert_track(
                                     cursor, server_source='soulsync',
                                     server_id=track_id, album_id=catalogue_album,
                                     artist_id=catalogue_artist, title=tags['title'],
@@ -17278,7 +17305,10 @@ def _run_soulsync_full_refresh():
                                     disc_number=tags['disc_number'] or 1,
                                     duration=tags['duration_ms'],
                                     file_path=file_path, bitrate=tags['bitrate'])
-                                successful += 1
+                                if mapped_track is not None:
+                                    successful += 1
+                                else:
+                                    failed += 1
                             except Exception as e:
                                 failed += 1
                                 logger.error(f"[SoulSync Full Refresh] Track insert error: {e}")
@@ -17546,11 +17576,6 @@ def _run_db_update_task(full_refresh, server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
-    # Auto-reconcile runs as the FINAL scan phase (inside run(), before the
-    # 'finished' signal) so status stays 'running' through it — automations,
-    # the dashboard card, and the Tools page all treat it as part of the scan.
-    db_update_worker.post_scan_hook = _reconcile_after_scan
-
     # This is a blocking call that runs the worker logic
     db_update_worker.run()
 
@@ -17598,9 +17623,6 @@ def _run_deep_scan_task(server_type):
             db_update_worker.connect_callback('artist_processed', _db_update_artist_callback)
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
-
-    # Auto-reconcile runs as the final scan phase (see _run_database_update_task).
-    db_update_worker.post_scan_hook = _reconcile_after_scan
 
     # Run deep scan instead of normal run()
     db_update_worker.run_deep_scan()
@@ -30995,6 +31017,10 @@ def _autostart_popularity_backfill():
             from core.discovery import popularity_backfill as pb
             if not pb.is_running():
                 database = get_database()
+                from core.library2.migration_gate import migration_required
+                if migration_required(database):
+                    _t.sleep(30)
+                    continue
                 missing = database.count_similar_artists_missing_popularity(1)
                 if missing > 0:
                     spotify_free, lastfm, deezer = _resolve_popularity_sources()
@@ -31025,6 +31051,7 @@ def _enrichment_workers():
             spotify_enrichment_worker, itunes_enrichment_worker, lastfm_worker,
             genius_worker, bandcamp_worker, tidal_enrichment_worker,
             qobuz_enrichment_worker, soulid_worker, listening_stats_worker,
+            hydrabase_worker, repair_worker, auto_import_worker,
         ) if w is not None
     ]
 
@@ -31044,9 +31071,8 @@ def _autostart_library_v2_bootstrap_import():
       migration continues in seconds instead of waiting out the stale window;
     - finishing the same post-import work the manual button does (tracklists,
       tag facts, artwork), which used to be wired to the button only;
-    - retrying with backoff, and only retiring once the library is actually
-      migrated — a fresh install reports success with nothing to import, and
-      has to keep watching for its first media-server scan.
+    - retrying with backoff, and retiring once the library is migrated (an
+      empty fresh install is already converged; media scans do not import it).
     """
     import time as _t
     from core.library2 import bootstrap as lib2_bootstrap
@@ -31085,23 +31111,21 @@ def _autostart_library_v2_bootstrap_import():
     # iss29-A06: the backoff must describe how long we have been waiting for
     # something to happen, not how many times we have looked.
     #
-    # It used to double on EVERY tick, including the no-op ticks that are the
-    # normal state of a fresh install waiting for its first media-server scan,
-    # and it was never reset. Twelve quiet ticks reach the 30-minute ceiling,
-    # so a first scan that finished just after a tick sat unimported for up to
-    # half an hour — on exactly the install where the user is watching for the
-    # library to appear.
+    # It used to double on every retry and was never reset. Twelve quiet ticks
+    # reach the 30-minute ceiling, so failures became unnecessarily slow to
+    # recover from.
     base_delay = 30
     max_delay = 1800
     delay = base_delay
     while True:
-        _t.sleep(delay)
         try:
             database = get_database()
             result = lib2_bootstrap.run_bootstrap_if_needed(
                 database, config_manager.get, post_import=_post_import,
             )
             if lib2_bootstrap.should_stop_autostart(result):
+                from core.library2.migration_gate import start_deferred_workers
+                start_deferred_workers(database)
                 return
             # A tick that actually migrated something means the source is live;
             # start checking frequently again. Only genuinely idle ticks back off.
@@ -31112,6 +31136,7 @@ def _autostart_library_v2_bootstrap_import():
         except Exception as e:
             delay = min(delay * 2, max_delay)
             logger.debug(f"lib2 bootstrap import tick skipped: {e}")
+        _t.sleep(delay)
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
@@ -31686,7 +31711,9 @@ def get_discover_undiscovered_albums():
                 SELECT LOWER(al.title), LOWER(ar.name)
                 FROM lib2_albums al
                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                WHERE al.origin = 'library'
+                WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                              ON f.track_id=t.id WHERE t.album_id=al.id
+                              AND f.file_state='active' AND TRIM(f.path)<>'')
             """)
             library_keys = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
 
@@ -31722,8 +31749,11 @@ def get_discover_label_explorer():
         with database._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT label FROM lib2_albums
-                WHERE label IS NOT NULL AND label != '' AND origin = 'library'
+                SELECT DISTINCT al.label FROM lib2_albums al
+                WHERE al.label IS NOT NULL AND al.label != ''
+                  AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                              ON f.track_id=t.id WHERE t.album_id=al.id
+                              AND f.file_state='active' AND TRIM(f.path)<>'')
                 LIMIT 30
             """)
             labels = {r[0] for r in cursor.fetchall()}
@@ -33179,20 +33209,26 @@ def get_your_artist_info(artist_id):
             row = cursor.fetchone()
             if row:
                 r = dict(row)
+                from core.library2.provider_ids import parse_external_ids
+                ids = parse_external_ids(r.get('external_ids'))
+                try:
+                    lastfm = (json.loads(r.get('enrichment') or '{}').get('lastfm') or {})
+                except (TypeError, ValueError):
+                    lastfm = {}
                 result.update({
                     'name': r.get('name', artist_name),
                     'genres': json.loads(r['genres']) if r.get('genres') else [],
                     'summary': r.get('summary', ''),
-                    'image_url': r.get('thumb_url', ''),
-                    'spotify_artist_id': r.get('spotify_artist_id'),
+                    'image_url': r.get('image_url', ''),
+                    'spotify_artist_id': r.get('spotify_id'),
                     'musicbrainz_id': r.get('musicbrainz_id'),
-                    'deezer_id': r.get('deezer_id'),
-                    'itunes_artist_id': r.get('itunes_artist_id'),
-                    'discogs_id': r.get('discogs_id'),
-                    'lastfm_url': r.get('lastfm_url'),
-                    'tidal_id': r.get('tidal_id'),
-                    'lastfm_listeners': r.get('lastfm_listeners', 0),
-                    'lastfm_playcount': r.get('lastfm_playcount', 0),
+                    'deezer_id': ids.get('deezer'),
+                    'itunes_artist_id': ids.get('itunes'),
+                    'discogs_id': ids.get('discogs'),
+                    'lastfm_url': ids.get('lastfm') or lastfm.get('url'),
+                    'tidal_id': ids.get('tidal'),
+                    'lastfm_listeners': lastfm.get('listeners', 0),
+                    'lastfm_playcount': lastfm.get('playcount', 0),
                 })
                 return jsonify(result)
         except Exception as e:
@@ -38078,6 +38114,8 @@ def start_oauth_callback_servers():
 # ================================================================================================
 
 # --- MusicBrainz Worker Initialization ---
+from core.library2.migration_gate import defer_or_start
+
 mb_worker = None
 try:
     from database.music_database import MusicDatabase
@@ -38089,7 +38127,7 @@ try:
         contact_email=""
     )
     # Start worker automatically (can be paused via UI)
-    mb_worker.start()
+    defer_or_start(mb_worker, mb_db)
     if config_manager.get('musicbrainz_enrichment_paused', False):
         mb_worker.pause()
         logger.info("MusicBrainz enrichment worker initialized (paused — restored from config)")
@@ -38118,7 +38156,7 @@ try:
     from database.music_database import MusicDatabase
     audiodb_db = MusicDatabase()
     audiodb_worker = AudioDBWorker(database=audiodb_db)
-    audiodb_worker.start()
+    defer_or_start(audiodb_worker, audiodb_db)
     if config_manager.get('audiodb_enrichment_paused', False):
         audiodb_worker.pause()
         logger.info("AudioDB enrichment worker initialized (paused — restored from config)")
@@ -38142,7 +38180,7 @@ try:
     from database.music_database import MusicDatabase
     discogs_db = MusicDatabase()
     discogs_worker = DiscogsWorker(database=discogs_db)
-    discogs_worker.start()
+    defer_or_start(discogs_worker, discogs_db)
     if config_manager.get('discogs_enrichment_paused', False):
         discogs_worker.pause()
         logger.info("Discogs enrichment worker initialized (paused — restored from config)")
@@ -38165,7 +38203,7 @@ try:
     from database.music_database import MusicDatabase
     deezer_db = MusicDatabase()
     deezer_worker = DeezerWorker(database=deezer_db)
-    deezer_worker.start()
+    defer_or_start(deezer_worker, deezer_db)
     if config_manager.get('deezer_enrichment_paused', False):
         deezer_worker.pause()
         logger.info("Deezer enrichment worker initialized (paused — restored from config)")
@@ -38191,7 +38229,7 @@ try:
     from database.music_database import MusicDatabase
     jiosaavn_db = MusicDatabase()
     jiosaavn_worker = JioSaavnWorker(database=jiosaavn_db)
-    jiosaavn_worker.start()
+    defer_or_start(jiosaavn_worker, jiosaavn_db)
     if config_manager.get('jiosaavn_enrichment_paused', False):
         jiosaavn_worker.pause()
         logger.info("JioSaavn enrichment worker initialized (paused — restored from config)")
@@ -38212,7 +38250,7 @@ amazon_worker = None
 try:
     amazon_db = MusicDatabase()
     amazon_worker = AmazonWorker(database=amazon_db)
-    amazon_worker.start()
+    defer_or_start(amazon_worker, amazon_db)
     # Opt-in by default: Amazon enrichment depends on an external public proxy
     # (T2Tunes) that can be down, so it stays paused unless the user has
     # explicitly enabled it (amazon_enrichment_paused=False). This stops an
@@ -38237,7 +38275,7 @@ try:
     from core.similar_artists_worker import SimilarArtistsWorker
     similar_artists_db = MusicDatabase()
     similar_artists_worker = SimilarArtistsWorker(database=similar_artists_db)
-    similar_artists_worker.start()
+    defer_or_start(similar_artists_worker, similar_artists_db)
     if config_manager.get('similar_artists_enrichment_paused', False):
         similar_artists_worker.pause()
         logger.info("Similar Artists worker initialized (paused — restored from config)")
@@ -38275,7 +38313,7 @@ try:
     _user_paused = config_manager.get('spotify_enrichment_paused', False)
     if _user_paused or _primary != 'spotify':
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
-    spotify_enrichment_worker.start()
+    defer_or_start(spotify_enrichment_worker, spotify_enrichment_db)
     if not spotify_enrichment_worker.paused:
         logger.info("Spotify enrichment worker initialized and started")
     elif _user_paused:
@@ -38322,7 +38360,7 @@ try:
     from database.music_database import MusicDatabase
     itunes_enrichment_db = MusicDatabase()
     itunes_enrichment_worker = iTunesWorker(database=itunes_enrichment_db)
-    itunes_enrichment_worker.start()
+    defer_or_start(itunes_enrichment_worker, itunes_enrichment_db)
     if config_manager.get('itunes_enrichment_paused', False):
         itunes_enrichment_worker.pause()
         logger.info("iTunes enrichment worker initialized (paused — restored from config)")
@@ -38349,7 +38387,7 @@ try:
     from database.music_database import MusicDatabase
     lastfm_db = MusicDatabase()
     lastfm_worker = LastFMWorker(database=lastfm_db)
-    lastfm_worker.start()
+    defer_or_start(lastfm_worker, lastfm_db)
     if config_manager.get('lastfm_enrichment_paused', False):
         lastfm_worker.pause()
         logger.info("Last.fm enrichment worker initialized (paused — restored from config)")
@@ -38516,7 +38554,7 @@ try:
     genius_worker = GeniusWorker(database=genius_db)
     if config_manager.get('genius_enrichment_paused', False):
         genius_worker.paused = True
-    genius_worker.start()
+    defer_or_start(genius_worker, genius_db)
     if genius_worker.paused:
         logger.info("Genius enrichment worker initialized (paused — restored from config)")
     else:
@@ -38552,7 +38590,7 @@ try:
     bandcamp_worker = BandcampWorker(database=bandcamp_db)
     if config_manager.get('bandcamp_enrichment_paused', False):
         bandcamp_worker.paused = True
-    bandcamp_worker.start()
+    defer_or_start(bandcamp_worker, bandcamp_db)
     if bandcamp_worker.paused:
         logger.info("Bandcamp enrichment worker initialized (paused — restored from config)")
     else:
@@ -38578,7 +38616,7 @@ try:
     from database.music_database import MusicDatabase
     tidal_enrich_db = MusicDatabase()
     tidal_enrichment_worker = TidalWorker(database=tidal_enrich_db, client=tidal_client)
-    tidal_enrichment_worker.start()
+    defer_or_start(tidal_enrichment_worker, tidal_enrich_db)
     if config_manager.get('tidal_enrichment_paused', False):
         tidal_enrichment_worker.pause()
         logger.info("Tidal enrichment worker initialized (paused — restored from config)")
@@ -38604,7 +38642,7 @@ try:
     qobuz_enrich_db = MusicDatabase()
     qobuz_enrich_client = QobuzClient()  # Separate client instance for thread safety
     qobuz_enrichment_worker = QobuzWorker(database=qobuz_enrich_db, client=qobuz_enrich_client)
-    qobuz_enrichment_worker.start()
+    defer_or_start(qobuz_enrichment_worker, qobuz_enrich_db)
     if config_manager.get('qobuz_enrichment_paused', False):
         qobuz_enrichment_worker.pause()
         logger.info("Qobuz enrichment worker initialized (paused — restored from config)")
@@ -38650,7 +38688,7 @@ try:
     def _get_hydrabase_ws_and_lock():
         return (_hydrabase_ws, _hydrabase_lock)
     hydrabase_worker = HydrabaseWorker(get_ws_and_lock=_get_hydrabase_ws_and_lock)
-    hydrabase_worker.start()
+    defer_or_start(hydrabase_worker, get_database())
     hydrabase_client = HydrabaseClient(get_ws_and_lock=_get_hydrabase_ws_and_lock)
     logger.info("Hydrabase P2P mirror worker and metadata client initialized")
     # Update API blueprint references
@@ -38813,7 +38851,7 @@ try:
     from database.music_database import MusicDatabase
     soulid_db = MusicDatabase()
     soulid_worker = SoulIDWorker(database=soulid_db)
-    soulid_worker.start()
+    defer_or_start(soulid_worker, soulid_db)
     logger.info("SoulID worker initialized and started")
 except Exception as e:
     logger.error(f"SoulID worker initialization failed: {e}")
@@ -38845,7 +38883,7 @@ try:
         config_manager=config_manager,
         media_server_engine=media_server_engine,
     )
-    listening_stats_worker.start()
+    defer_or_start(listening_stats_worker, listening_stats_db)
     logger.info("Listening stats worker initialized and started")
 except Exception as e:
     logger.error(f"Listening stats worker initialization failed: {e}")
@@ -39179,7 +39217,7 @@ try:
     # Raised' / 'Maintenance Scan Done' triggers — music parity with video)
     if automation_engine is not None:
         repair_worker._event_emit = automation_engine.emit
-    repair_worker.start()
+    defer_or_start(repair_worker, repair_db)
     logger.info("Repair worker initialized and started")
 except Exception as e:
     logger.error(f"Repair worker initialization failed: {e}")
@@ -39706,7 +39744,7 @@ try:
         automation_engine=automation_engine,
     )
     if config_manager.get('auto_import.enabled', False):
-        auto_import_worker.start()
+        defer_or_start(auto_import_worker, _ai_db)
         logger.info("Auto-import worker started")
     else:
         logger.info("Auto-import worker initialized (disabled)")
@@ -39730,7 +39768,7 @@ def auto_import_toggle():
     if enabled:
         config_manager.set('auto_import.enabled', True)
         if not auto_import_worker.running:
-            auto_import_worker.start()
+            defer_or_start(auto_import_worker, _ai_db)
     else:
         config_manager.set('auto_import.enabled', False)
         auto_import_worker.stop()
@@ -41666,13 +41704,23 @@ def start_runtime_services():
             # Sweep must not crash startup — log and continue.
             logger.warning("[Startup] Album-bundle staging sweep failed: %s", _sweep_err)
 
-        # Start simple background monitor when server starts
-        logger.info("Starting simple background monitor...")
-        start_simple_background_monitor()
-        logger.info("Simple background monitor started (includes automatic search cleanup)")
+        # Establish the barrier before any runtime service that can mutate the
+        # music catalogue. It treats an unclaimed-but-required upgrade as
+        # active too, closing the old startup race before try_claim().
+        try:
+            from core.library2.migration_gate import (
+                MigrationPauseSupervisor, defer_or_call,
+            )
+            library_v2_migration_gate = MigrationPauseSupervisor(
+                get_database(), _enrichment_workers, automation_engine,
+            ).start()
+            library_v2_migration_gate.tick()
+        except Exception as _lib2_gate_err:
+            logger.debug(f"could not start lib2 migration pause supervisor: {_lib2_gate_err}")
 
+        defer_or_call(start_simple_background_monitor, get_database(), "download monitor")
         if usenet_acquisition_monitor is not None:
-            usenet_acquisition_monitor.start()
+            defer_or_call(usenet_acquisition_monitor.start, get_database(), "acquisition monitor")
 
         # Existing-installation bootstrap: import legacy -> lib2_* on its own the
         # native catalogue bootstrap, no UI click required (§78).
@@ -41681,29 +41729,6 @@ def start_runtime_services():
                              name='Lib2BootstrapImportAutostart').start()
         except Exception as _lib2_bootstrap_err:
             logger.debug(f"could not start lib2 bootstrap import autostart: {_lib2_bootstrap_err}")
-
-        # iss32-M02: give the migration SQLite's single writer for its
-        # duration. Without this the enrichment workers and the automation
-        # engine spend the whole import colliding with it — both sides lose.
-        try:
-            from core.library2.migration_gate import MigrationPauseSupervisor
-            library_v2_migration_gate = MigrationPauseSupervisor(
-                get_database(),
-                _enrichment_workers,
-                automation_engine,
-            ).start()
-        except Exception as _lib2_gate_err:
-            logger.debug(f"could not start lib2 migration pause supervisor: {_lib2_gate_err}")
-
-        # iss32-E01: carry enrichment the twelve metadata workers write into
-        # the legacy rows over into lib2_*. Transitional bridge — see
-        # core/library2/legacy_mirror.py for why it is a trigger and not a
-        # call, and docs §32.3.1 for when it goes away.
-        try:
-            from core.library2.legacy_mirror import MirrorDrainer
-            library_v2_mirror_drainer = MirrorDrainer(get_database()).start()
-        except Exception as _lib2_mirror_err:
-            logger.debug(f"could not start lib2 legacy mirror drainer: {_lib2_mirror_err}")
 
         # Name the holder when SQLite's single write lock gets stuck. Without
         # this the log only ever shows victims ("database is locked" from
@@ -41720,7 +41745,7 @@ def start_runtime_services():
 
         # Pre-build import suggestions cache in background
         logger.info("Pre-building import suggestions cache...")
-        start_import_suggestions_cache()
+        defer_or_call(start_import_suggestions_cache, get_database(), "import suggestions cache")
 
         # Initialize app start time for uptime tracking
         app.start_time = time.time()
@@ -41777,10 +41802,12 @@ def start_runtime_services():
         threading.Thread(target=_growth_triggered_gc, daemon=True, name='gc-sweeper').start()
         logger.info("GC sweeper started (collect + malloc_trim on +200MB growth, backstop 120s)")
 
-        # Register action handlers and start automation engine
+        # Register action handlers; the engine itself starts only after the
+        # exclusive Library-v2 upgrade barrier has cleared.
         _register_automation_handlers()
         if automation_engine:
-            try:
+            def _start_automation_after_upgrade():
+                automation_engine.resume_after_migration()
                 logger.info("Starting automation engine...")
                 automation_engine.start()
                 logger.info("Automation engine started")
@@ -41788,6 +41815,9 @@ def start_runtime_services():
                     automation_engine.emit('app_started', {})
                 except Exception as e:
                     logger.debug("app_started emit failed: %s", e)
+            try:
+                defer_or_call(
+                    _start_automation_after_upgrade, get_database(), "automation engine")
             except AttributeError as e:
                 logger.error(f"Automation engine failed to start: {e}")
                 logger.info("   If using Docker, check that your volume mount is /app/data (not /app/database)")

@@ -70,10 +70,10 @@ def seed_track(conn, *, server_id: str, title: str, album_id: int,
             " VALUES(?,?,'primary',0)", (track_id, artist_id))
     if file_path is not None:
         conn.execute(
-            "INSERT INTO lib2_track_files(track_id, path, size, bitrate, is_primary,"
+            "INSERT INTO lib2_track_files(track_id, path, size, bitrate, server_source, is_primary,"
             "                             file_state, import_status)"
-            " VALUES(?,?,?,?,1,'active','imported')",
-            (track_id, file_path, file_size, bitrate))
+            " VALUES(?,?,?,?,?,1,'active','imported')",
+            (track_id, file_path, file_size, bitrate, server_source))
     return track_id
 
 

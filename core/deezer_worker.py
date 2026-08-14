@@ -366,6 +366,7 @@ class DeezerWorker:
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
             logger.debug(f"Preserving existing Deezer ID for artist '{artist_name}': {existing_id}")
+            self._mark_status('artist', artist_id, 'matched')
             return
 
         # Multi-candidate search (was single search_artist) so same-name artists

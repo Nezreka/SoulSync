@@ -94,7 +94,7 @@ def _normalize_album_tracks(api_tracks):
 
 SUPPORTED_SOURCES = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
 
-# Per-source album-ID column mapping on the `albums` table row.
+# Compatibility aliases projected by :func:`load_album_and_tracks`.
 _ALBUM_ID_COLUMNS = {
     'spotify': 'spotify_album_id',
     'itunes': 'itunes_album_id',
@@ -759,9 +759,15 @@ def load_album_and_tracks(db, album_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT al.*, ar.name as artist_name
-            FROM albums al
-            JOIN artists ar ON al.artist_id = ar.id
+            SELECT al.*, al.primary_artist_id AS artist_id,
+                   al.spotify_id AS spotify_album_id,
+                   al.musicbrainz_id AS musicbrainz_release_id,
+                   json_extract(al.external_ids, '$.itunes') AS itunes_album_id,
+                   json_extract(al.external_ids, '$.deezer') AS deezer_id,
+                   json_extract(al.external_ids, '$.discogs') AS discogs_id,
+                   ar.name AS artist_name
+            FROM lib2_albums al
+            JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE al.id = ?
             """,
             (str(album_id),),
@@ -773,11 +779,17 @@ def load_album_and_tracks(db, album_id):
 
         cursor.execute(
             """
-            SELECT t.*, ar.name as artist_name
-            FROM tracks t
-            JOIN artists ar ON t.artist_id = ar.id
+            SELECT t.*, ar.name AS artist_name,
+                   (SELECT f.path FROM lib2_track_files f
+                     WHERE f.track_id=t.id AND f.file_state='active'
+                     ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON t.album_id = al.id
+            JOIN lib2_artists ar ON al.primary_artist_id = ar.id
             WHERE t.album_id = ?
-            ORDER BY t.track_number
+              AND EXISTS (SELECT 1 FROM lib2_track_files f
+                           WHERE f.track_id=t.id AND f.file_state='active')
+            ORDER BY COALESCE(t.disc_number, 1), t.track_number, t.id
             """,
             (str(album_id),),
         )

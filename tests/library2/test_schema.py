@@ -17,10 +17,6 @@ _EXPECTED_TABLES = {
     "lib2_entity_history", "lib2_metadata_overrides",
     "lib2_file_delete_operations", "lib2_file_delete_items",
     "lib2_ui_preferences", "lib2_maintenance_events", "lib2_bootstrap_state",
-    # iss32-E01 transitional: queue of legacy rows an enrichment worker
-    # changed, drained into lib2 by core.library2.legacy_mirror. Goes away
-    # with the triggers when the producers write lib2 directly.
-    "lib2_legacy_dirty",
     "lib2_provider_attempts",
 }
 

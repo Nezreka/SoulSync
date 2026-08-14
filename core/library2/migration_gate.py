@@ -46,9 +46,11 @@ POLL_INTERVAL_SECONDS = 5.0
 # An in-memory counter is the right shape here and a wrong one for the import:
 # this work only ever exists inside the process holding the counter, so it
 # cannot outlive its owner the way a claim row can.
-_local_activity = threading.local()
 _local_lock = threading.Lock()
 _active_sections = 0
+_deferred_workers: list = []
+_deferred_callbacks: list = []
+_deferred_lock = threading.Lock()
 
 
 @contextmanager
@@ -67,6 +69,71 @@ def migration_activity() -> Iterator[None]:
 def local_migration_active() -> bool:
     with _local_lock:
         return _active_sections > 0
+
+
+def migration_required(database: Any) -> bool:
+    """True from upgrade detection through the final committed import step."""
+    try:
+        from core.library2.bootstrap import (
+            bootstrap_is_active, get_state, source_row_count, source_watermark,
+        )
+        if local_migration_active() or bootstrap_is_active(database):
+            return True
+        state = get_state(database)
+        # Legacy is immutable after cutover. Once imported, runtime never polls it.
+        if state.get("status") == "done":
+            return False
+        return source_row_count(source_watermark(database)) > 0
+    except Exception as exc:  # half-known upgrade state must never admit writers
+        logger.warning("Could not verify Library v2 upgrade state: %s", exc)
+        return True
+
+
+def defer_or_start(worker: Any, database: Any) -> bool:
+    """Start a worker now, or hold it unstarted until migration completes."""
+    if not migration_required(database):
+        worker.start()
+        return True
+    with _deferred_lock:
+        if worker not in _deferred_workers:
+            _deferred_workers.append(worker)
+    logger.info("Library v2 upgrade pending — deferred %s", _worker_name(worker))
+    return False
+
+
+def defer_or_call(callback: Callable[[], Any], database: Any, label: str) -> bool:
+    """Run a background-service starter now, or after the upgrade barrier."""
+    if not migration_required(database):
+        callback()
+        return True
+    with _deferred_lock:
+        _deferred_callbacks.append((label, callback))
+    logger.info("Library v2 upgrade pending — deferred %s", label)
+    return False
+
+
+def start_deferred_workers(database: Any) -> int:
+    if migration_required(database):
+        return 0
+    with _deferred_lock:
+        workers, _deferred_workers[:] = list(_deferred_workers), []
+        callbacks, _deferred_callbacks[:] = list(_deferred_callbacks), []
+    started = 0
+    for worker in workers:
+        try:
+            worker.start()
+            started += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("could not start deferred %s: %s", _worker_name(worker), exc)
+    for label, callback in callbacks:
+        try:
+            callback()
+            started += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("could not start deferred %s: %s", label, exc)
+    if started:
+        logger.info("Library v2 upgrade complete — started %d deferred worker(s)", started)
+    return started
 
 
 def _worker_name(worker: Any) -> str:
@@ -117,9 +184,7 @@ class MigrationPauseSupervisor:
     def _active(self) -> bool:
         if self._is_active is not None:
             return bool(self._is_active(self._database))
-        from core.library2.bootstrap import bootstrap_is_active
-
-        return local_migration_active() or bootstrap_is_active(self._database)
+        return migration_required(self._database)
 
     def tick(self) -> bool:
         """One poll. Returns whether a migration is currently active.
@@ -131,7 +196,8 @@ class MigrationPauseSupervisor:
             active = self._active()
         except Exception as exc:  # noqa: BLE001 - never kill the supervisor
             logger.debug("migration gate poll failed: %s", exc)
-            return False
+            self._pause_all()
+            return True
         if active:
             self._pause_all()
         else:
@@ -176,6 +242,8 @@ class MigrationPauseSupervisor:
                 logger.debug("could not pause the automation engine: %s", exc)
 
     def _resume_ours(self) -> None:
+        if self._is_active is None:
+            start_deferred_workers(self._database)
         if not self._paused_by_us and not self._engine_paused:
             return
         resumed = 0
@@ -200,6 +268,10 @@ class MigrationPauseSupervisor:
 __all__ = [
     "POLL_INTERVAL_SECONDS",
     "MigrationPauseSupervisor",
+    "defer_or_call",
+    "defer_or_start",
     "local_migration_active",
+    "migration_required",
     "migration_activity",
+    "start_deferred_workers",
 ]

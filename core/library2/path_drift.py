@@ -23,8 +23,7 @@ it unresolved.
 
 Nothing here mutates the filesystem.  The only write is
 :func:`apply_path_drift_fix`, which re-verifies every precondition and then
-updates the stored index path (plus its legacy twin, when that one is stale
-too) so both indices stay coherent.
+updates the stored native index path.
 """
 
 from __future__ import annotations
@@ -223,33 +222,6 @@ def _claimed_by_other_row(conn, file_id: int, stored_candidate: str) -> bool:
     return row is not None
 
 
-def _legacy_path(conn, track_id: Any) -> Optional[str]:
-    """The legacy row's own idea of this track's file, when it still exists.
-
-    A reorganize that updated ``tracks.file_path`` but not the lib2 row is one
-    documented way to end up here, and then the legacy value is not a guess at
-    all — it is the answer.
-    """
-    if track_id is None:
-        return None
-    try:
-        has_tracks = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tracks'"
-        ).fetchone()
-        if not has_tracks:
-            return None
-        row = conn.execute(
-            "SELECT t.file_path FROM lib2_tracks lt JOIN tracks t "
-            "  ON t.id = lt.legacy_track_id WHERE lt.id=?",
-            (int(track_id),),
-        ).fetchone()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("legacy path lookup failed (%s): %s", track_id, exc)
-        return None
-    value = str((row["file_path"] if row else "") or "").strip()
-    return value or None
-
-
 def scan_path_drift(
     database,
     *,
@@ -314,19 +286,6 @@ def scan_path_drift(
                 "reason": "",
                 "alternatives": [],
             }
-
-            legacy = _legacy_path(conn, row["track_id"])
-            legacy_resolved = (
-                resolve_lib2_path(legacy, config_manager) if legacy else None
-            )
-            if legacy_resolved and legacy != stored and not _claimed_by_other_row(
-                conn, int(row["id"]), legacy
-            ):
-                entry.update(status="proposed", reason="legacy index path",
-                             candidate_path=legacy_resolved,
-                             proposed_stored_path=legacy)
-                proposals.append(entry)
-                continue
 
             directory = resolve_lib2_directory(stored, config_manager)
             if not directory:
@@ -423,19 +382,6 @@ def apply_path_drift_fix(
             from core.library2.track_files import set_file_state
             set_file_state(conn, int(file_id), "active")
 
-        # H-11: a native path fix must not leave the legacy twin stale.  Only
-        # touched when legacy is itself unresolvable — a legacy row that still
-        # resolves is either already correct or points at a different file, and
-        # neither case is ours to overwrite.
-        legacy = _legacy_path(conn, row["track_id"])
-        if legacy and legacy != proposed_stored and not resolve_lib2_path(
-            legacy, config_manager
-        ):
-            conn.execute(
-                "UPDATE tracks SET file_path=? WHERE id=("
-                "  SELECT legacy_track_id FROM lib2_tracks WHERE id=?)",
-                (proposed_stored, int(row["track_id"])),
-            )
         conn.commit()
         return {"success": True, "action": "path_repointed",
                 "path": proposed_stored}

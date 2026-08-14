@@ -4779,3 +4779,67 @@ Bibliothek, aber eine Verhaltensregression: lib2 leitet die Chips daraus ab,
 gefunden" nicht. Nach dem Update fragt jeder Provider-Worker die ganze
 Bibliothek erneut ab. Das gehört ins Provider-Versuchs-Ledger und damit in
 seine eigene Runde.
+
+## 51. Remediation des Rewrite-Audits vom 13. August 2026
+
+Stand: **Implemented, 14. August 2026**. Alle 25 bestätigten Befunde aus
+[Issues §33](library-v2-issues.md#33-rewrite-audit-vom-13-august-2026) sind im
+Arbeitsbaum korrigiert. Der Status ist bewusst noch keine vollständige
+Repository-Release-Zertifizierung.
+
+| Finding-Gruppe | Status | Umsetzung / Nachweis |
+|---|---|---|
+| LV2-AUD-01–05 | Implemented | Fortsetzbares Attempt-Seeding, Similar-Historie, nutzbare Graph-IDs und Preserved-ID-Ledger; Provider-/Queue-Regressionen grün. |
+| LV2-AUD-06–09 | Implemented | Disc-/Trackidentität, ersetzte Primary-Credits und dateibezogene `server_source`-Ownership; Mixed-Origin-Cleanup-Test grün. |
+| LV2-AUD-10–12, 16, 20 | Implemented | Gemeinsame Owned-Semantik und konsistente `name_key`-Lookups; Disk-/Stats-/Playlist-Regressionen grün. |
+| LV2-AUD-13–15, 22–25 | Implemented | Zentrale API-Projektion, getrennte ID-Domänen sowie korrigierte Snapshot-/Modal-/Playback-Projektionen; API-/ID-Kollisionstests und Compile-Checks grün. |
+| LV2-AUD-17–19, 21 | Implemented | Strukturierter Artist-Merge, native Post-Scan-Side-Effects, Live-File-Auflösung und File-only-Delete; gezielte Regressionen grün. |
+
+Der abschließende gebündelte Regressionslauf bestand mit **356 Tests**;
+`py_compile` und `git diff --check` waren ebenfalls grün. Ein zusätzlicher
+repository-weiter Lauf wurde gestartet, lieferte wegen einer verwaisten
+Headless-Browser-/PTY-Sitzung jedoch keinen belastbaren Endstatus.
+
+## 52. Cutover-, Ownership- und Media-Server-Härtung (14. August 2026)
+
+Stand: **Implemented im Arbeitsbaum, nicht committed.** Dieser Abschnitt setzt
+den in [Issues §34](library-v2-issues.md#34-finaler-cutover--ownership--und-media-server-vertrag-14-august-2026)
+festgelegten Endzustand um.
+
+- Der Upgrade-Gate beginnt bereits bei einer erkannten, noch nicht geclaimten
+  Legacy-Quelle. Provider-/Metadata-/Similar-/Listening-/SoulID-/Repair- und
+  Auto-Import-Worker werden bis zum Abschluss nicht gestartet; laufende
+  Automationen werden migrationspausiert. Download-/Acquisition-Monitore,
+  manuell startbare Katalog-, Playlist-/Discovery- und Enrichment-Jobs sowie
+  Media-Scans liegen hinter derselben Barriere. Danach werden nur die vom Gate zurückgehaltenen Komponenten
+  gestartet bzw. fortgesetzt.
+- Der paginierte Provider-Attempt-Backfill (einschließlich Similar Artists)
+  läuft nun innerhalb des exklusiven Importers. Der entfernte
+  `MirrorDrainer` wird dafür nicht mehr benötigt.
+- Media-Server-Upserts sind standardmäßig `mapping-only`. Unbekannte Artists,
+  Alben und Tracks werden übersprungen; bestehende Provider-/Katalogmetadaten
+  und Filepfade bleiben unangetastet. Nur `core/imports/side_effects.py` setzt
+  explizit `allow_create=True` und schreibt `source='import'` auf die Datei.
+- Full Refresh, Stale Detection und Orphan Cleanup detachen Serverstempel,
+  löschen aber weder Katalogzeilen noch aktive Dateien. Damit bleibt Besitz
+  eine Eigenschaft der physischen Datei und nicht des Servers.
+- Statistik, Disk Usage, Playlist-Ownership, Explorer und Worker-
+  Disambiguierung verwenden denselben Nachweis: aktive File-Row plus
+  nichtleerer Pfad. `origin='library'` allein ist kein Besitzbeweis mehr.
+  Die Detailseite zeigt einen ersten Scan-Fehltreffer weiterhin separat als
+  `missing_suspected` und löst erst nach Bestätigung Missing/Redownload aus;
+  diese Zwei-Phasen-Sicherung ist kein zweiter Ownership-Nachweis.
+- Die Übergangsverkabelung ist entfernt: keine Mirror-Triggerinstallation,
+  kein manueller Legacy-Drain und keine Runtime-Divergenzprüfung gegen die
+  alten Tabellen.
+
+**Ratsche:** Runtime-Produktionscode steht bei **0 Legacy-Reads / 0
+Legacy-Writes**. Der einmalige Upgrade-Importer ist getrennt auf **5 Reads / 0
+Writes** gepinnt. Dynamisch gebaute Watermark-/Attempt-Abfragen gehören
+ebenfalls ausschließlich zum gehaltenen Upgrade-Gate; nach `status='done'`
+wird die Legacy-Quelle nicht weiter gepollt.
+
+**Nachweis dieser Runde:** der Lauf über alle im Arbeitsbaum geänderten Tests
+bestand mit **566 Tests**. Ein zusätzlicher Nachbarlauf über Automation-API,
+Media-Server-Adapter, Explorer, Runtime-State und Sync-Status bestand mit
+**182 Tests**; vollständige Repository-Release-Zertifizierung bleibt separat.

@@ -728,7 +728,7 @@ class PlaylistSyncService:
                     sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
                     if server_track_id is None:
                         return None
-                    dbt = cache_db.get_track_by_id(server_track_id)
+                    dbt = cache_db.get_track_by_server_id(server_track_id, active_server)
                     if not dbt:
                         return None
                     if server_type in ("jellyfin", "navidrome", "soulsync"):

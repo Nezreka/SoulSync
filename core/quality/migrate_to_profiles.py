@@ -309,7 +309,7 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         # follow whichever profile is default at read time.
         try:
             cursor.execute(
-                "UPDATE tracks SET quality_profile_id = ? WHERE quality_profile_id IS NULL",
+                "UPDATE lib2_tracks SET quality_profile_id = ? WHERE quality_profile_id IS NULL",
                 (default_profile_id,),
             )
             library_backfilled = cursor.rowcount

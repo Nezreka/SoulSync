@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS lib2_albums (
     tracklist_attempts INTEGER NOT NULL DEFAULT 0,
     tracklist_error TEXT,
     tracklist_retry_at TIMESTAMP,
-    origin TEXT NOT NULL DEFAULT 'library',            -- 'library' (has/had files) | 'discography' (provider-only)
+    origin TEXT NOT NULL DEFAULT 'library',            -- provenance only; ownership lives in active file rows
     stable_id TEXT,                                    -- provider-less identity (audit P1-12); minted once, survives reset+reimport
     soul_id TEXT,                                      -- deterministic content id (see lib2_artists.soul_id); NOT stable_id, which is lib2's own minted identity
     monitored INTEGER NOT NULL DEFAULT 1,
@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     format TEXT,                                      -- 'flac'|'mp3'|'m4a'|...
     quality_tier TEXT,                                -- computed: 'lossless'|'lossy_high'|...
     source TEXT,                                      -- where it came from (soulseek|tidal|...)
+    server_source TEXT,                               -- independent media-server contribution
     import_status TEXT NOT NULL DEFAULT 'imported',   -- 'imported'|'staged'|'pending'|'failed'
     processing_status TEXT,                           -- mirrors download pipeline state
     verification_status TEXT,                         -- 'verified'|'unverified'|'force_imported'
@@ -399,6 +400,8 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0"),
     ("lib2_track_files", "file_state",
      "ALTER TABLE lib2_track_files ADD COLUMN file_state TEXT NOT NULL DEFAULT 'active'"),
+    ("lib2_track_files", "server_source",
+     "ALTER TABLE lib2_track_files ADD COLUMN server_source TEXT"),
     # Snapshot ownership (audit P1-02): a complete import marks every row it
     # observed. Only rows with explicit legacy ownership are reconciled away;
     # provider/manual rows and secondary files remain outside that boundary.
@@ -1095,15 +1098,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_bootstrap_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("bootstrap-state migration failed (will retry next start): %s", e)
-    # iss32-E01 transitional bridge: legacy enrichment writes are queued by
-    # trigger and applied to lib2 by core.library2.legacy_mirror. Deleted
-    # together with the triggers once the producers write lib2 directly
-    # (docs §32.3.1 Stufe 2).
-    try:
-        from core.library2.legacy_mirror import ensure_legacy_mirror_schema
-        ensure_legacy_mirror_schema(cursor)
-    except Exception as e:  # noqa: BLE001
-        logger.error("legacy-mirror migration failed (will retry next start): %s", e)
+    # Every producer is native after cutover.  Retire triggers left by an older
+    # transitional build so no later compatibility write can re-open legacy.
+    for table in ("artists", "albums", "tracks"):
+        cursor.execute(f"DROP TRIGGER IF EXISTS trg_lib2_mirror_{table}")
     # Stage-2 groundwork: per-provider enrichment bookkeeping, which every
     # enrichment worker needs in order to pick a batch from lib2 instead of from
     # the legacy `*_match_status`/`*_last_attempted` columns. DDL only here — the

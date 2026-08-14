@@ -25,9 +25,8 @@ logger = get_logger("personalized_playlists")
 # over. ``AS MATERIALIZED`` pins it to one pass: the JSON is unpacked once into
 # a narrow three-column table the NOT EXISTS then scans.
 #
-# ``origin='library'`` because a discography row is a release we know of, not
-# one we have — excluding those would hide exactly the tracks discovery exists
-# to surface. The column-name asymmetry legacy warned about survives on the
+# Ownership requires an active physical file; provenance alone must not hide a
+# missing/provider track from discovery. The column-name asymmetry survives on the
 # discovery side: ``discovery_pool.deezer_track_id``, not ``deezer_id``.
 _OWNED_PROVIDER_IDS_CTE = """
                 WITH owned AS MATERIALIZED (
@@ -35,8 +34,8 @@ _OWNED_PROVIDER_IDS_CTE = """
                            json_extract(t.external_ids, '$.itunes') AS itunes_id,
                            json_extract(t.external_ids, '$.deezer') AS deezer_id
                     FROM lib2_tracks t
-                    JOIN lib2_albums al ON al.id = t.album_id
-                    WHERE al.origin = 'library'
+                    WHERE EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
                       AND (t.spotify_id IS NOT NULL OR t.external_ids NOT IN ('', '{}'))
                 )"""
 
@@ -714,8 +713,10 @@ class PersonalizedPlaylistsService:
                 cursor.execute("""
                     SELECT al.genres AS genres
                     FROM lib2_albums al
-                    WHERE al.origin = 'library'
-                      AND al.genres IS NOT NULL AND al.genres NOT IN ('', '[]')
+                    WHERE al.genres IS NOT NULL AND al.genres NOT IN ('', '[]')
+                      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                  ON f.track_id=t.id WHERE t.album_id=al.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
                 """)
 
                 # Parse genres (JSON array, or a comma-separated legacy value)
@@ -743,7 +744,9 @@ class PersonalizedPlaylistsService:
                     FROM lib2_tracks t
                     JOIN lib2_albums al ON al.id = t.album_id
                     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE al.origin = 'library' AND ar.name IS NOT NULL AND ar.name != ''
+                    WHERE ar.name IS NOT NULL AND ar.name != ''
+                      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                  AND f.file_state='active' AND TRIM(f.path)<>'')
                     GROUP BY ar.name
                     ORDER BY count DESC
                     LIMIT ?

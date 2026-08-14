@@ -403,15 +403,16 @@ def _extract_volume_marker(normalized_name: str):
 def library_random_albums(conn, limit: int = 5) -> List[Any]:
     """A few of the user's OWN releases, for discovery-pool variety.
 
-    ``origin='library'`` is the whole filter: v2 also stores the discography of
-    a tracked artist, and seeding the pool from one of those would ask a
-    provider for a record the user was never given.
+    Physical active-file evidence is the filter: catalogue provenance alone
+    does not say that the user still has the release.
     """
     return conn.execute(
         """SELECT DISTINCT al.title, ar.name AS artist_name
              FROM lib2_albums al
              JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            WHERE al.origin = 'library'
+            WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                          ON f.track_id=t.id WHERE t.album_id=al.id
+                          AND f.file_state='active' AND TRIM(f.path)<>'')
             ORDER BY RANDOM()
             LIMIT ?""",
         (int(limit),),
@@ -471,7 +472,8 @@ def library_owned_and_seed_ids(conn, seed_names) -> Tuple[set, List[str], Dict[s
         if lowered not in seed_names:
             continue
         known = parse_external_ids(row["external_ids"])
-        for value in (row["spotify_id"], row["musicbrainz_id"], *known.values()):
+        for value in (row["spotify_id"], known.get("itunes"), known.get("deezer"),
+                      row["musicbrainz_id"]):
             provider_id = str(value or '').strip()
             if provider_id and provider_id not in seed_id_to_name:
                 seed_source_ids.append(provider_id)

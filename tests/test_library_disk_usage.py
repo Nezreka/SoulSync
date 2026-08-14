@@ -132,15 +132,15 @@ def test_existing_tracks_have_null_file_size_after_migration(db: MusicDatabase) 
     file_size (relies on column default = NULL)."""
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'A')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('a1', 'ar1', 'Al')")
+    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (1, 'A')")
+    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (1, 1, 'Al')")
     # Note: NOT specifying file_size — should default to NULL
     cur.execute(
         "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES ('legacy_t', 'a1', 'ar1', 'L', '/x/legacy.flac')"
+        "VALUES (1, 1, 1, 'L', '/x/legacy.flac')"
     )
     conn.commit()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'legacy_t'")
+    cur.execute("SELECT file_size FROM tracks WHERE id = 1")
     row = cur.fetchone()
     conn.close()
     # Could be sqlite3.Row or tuple; both index by 0
@@ -242,8 +242,8 @@ def test_aggregator_skips_empty_file_path(db: MusicDatabase) -> None:
     _insert_track(db, track_id='t2', file_path='/x/song.flac', file_size=10_000_000)
 
     result = db.get_library_disk_usage()
-    # Total still includes the empty-path track (it was measured)
-    assert result['total_bytes'] == 15_000_000
+    # No configured path means no physical ownership evidence.
+    assert result['total_bytes'] == 10_000_000
     # But by_format only has the one with a real extension
     assert result['by_format'] == {'flac': 10_000_000}
 
@@ -256,6 +256,18 @@ def test_aggregator_skips_implausibly_long_extension(db: MusicDatabase) -> None:
 
     result = db.get_library_disk_usage()
     assert result['by_format'] == {'flac': 10_000_000}
+
+
+def test_provider_only_catalogue_is_not_owned_or_missing_size(db: MusicDatabase) -> None:
+    with db._get_connection() as conn:
+        artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Provider')").lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,origin) "
+            "VALUES(?,'Catalog','discography')", (artist,)).lastrowid
+        conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'No File')", (album,))
+
+    assert db.get_library_disk_usage()['tracks_without_size'] == 0
+    assert db.get_statistics_for_server() == {'artists': 0, 'albums': 0, 'tracks': 0}
 
 
 # ---------------------------------------------------------------------------
@@ -284,14 +296,23 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
     artist = cur.execute(
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Artist', 'artist', 'jellyfin', 'ar2')").lastrowid
-    cur.execute(
+    album = cur.execute(
         "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
-        " VALUES (?, 'Album', 'library', 'jellyfin', 'al2')", (artist,))
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al2')", (artist,)
+    ).lastrowid
+    track = cur.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,'Test Track',1)",
+        (album,),
+    ).lastrowid
+    cur.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,?,1)",
+        (track, '/library/Artist/Album/01 - track.flac'),
+    )
     conn.commit()
     conn.close()
 
-    db.insert_or_update_media_track(_FakeTrack(), album_id='al2', artist_id='ar2',
-                                    server_source='jellyfin')
+    result = db.insert_or_update_media_track(
+        _FakeTrack(), album_id='al2', artist_id='ar2', server_source='jellyfin')
 
     conn = db._get_connection()
     cur = conn.cursor()
@@ -299,8 +320,12 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
                 " JOIN lib2_tracks t ON t.id = f.track_id"
                 " WHERE t.server_id = 'fake_track_id_1'")
     row = cur.fetchone()
+    history = cur.execute(
+        "SELECT COUNT(*) FROM library_history WHERE event_type='import'"
+    ).fetchone()[0]
     conn.close()
     assert row[0] == 42_000_000
+    assert result == 'updated' and history == 0
 
 
 def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDatabase) -> None:
@@ -325,9 +350,18 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
     artist = cur.execute(
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Artist', 'artist', 'jellyfin', 'ar3')").lastrowid
-    cur.execute(
+    album = cur.execute(
         "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
-        " VALUES (?, 'Album', 'library', 'jellyfin', 'al3')", (artist,))
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al3')", (artist,)
+    ).lastrowid
+    track = cur.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,'Test',1)",
+        (album,),
+    ).lastrowid
+    cur.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,?,1)",
+        (track, '/library/Artist/Album/02 - track.flac'),
+    )
     conn.commit()
     conn.close()
 
@@ -336,8 +370,8 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
                                     artist_id='ar3', server_source='jellyfin')
 
     # Second sync — server reports None (didn't include Size in MediaSources this time)
-    db.insert_or_update_media_track(_FakeTrack(size=None), album_id='al3',
-                                    artist_id='ar3', server_source='jellyfin')
+    result = db.insert_or_update_media_track(_FakeTrack(size=None), album_id='al3',
+                                             artist_id='ar3', server_source='jellyfin')
 
     conn = db._get_connection()
     cur = conn.cursor()
@@ -348,3 +382,4 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
     conn.close()
     # Original size preserved
     assert row[0] == 30_000_000
+    assert result == 'updated'

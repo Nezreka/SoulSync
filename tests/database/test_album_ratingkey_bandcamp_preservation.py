@@ -46,15 +46,22 @@ def _seed_bandcamp(db, catalogue_album_id):
 def test_a_new_rating_key_keeps_the_album_and_its_enrichment(tmp_path):
     db = MusicDatabase(database_path=str(tmp_path / "test.db"))
     conn = db._get_connection()
-    conn.execute(
+    artist = conn.execute(
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
-        " VALUES ('Full Body Recordings', 'full body recordings', 'navidrome', 'artist-1')")
+        " VALUES ('Full Body Recordings', 'full body recordings', 'navidrome', 'artist-1')"
+    ).lastrowid
+    original = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,origin) "
+        "VALUES(?,'Episode 1','library')", (artist,)
+    ).lastrowid
+    track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Track')",
+                         (original,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?, '/music/track.flac')",
+                 (track,))
     conn.commit()
 
     assert db.insert_or_update_media_album(_Album("old-key"), "artist-1",
                                            server_source="navidrome")
-    original = db._get_connection().execute(
-        "SELECT id FROM lib2_albums WHERE server_id = 'old-key'").fetchone()["id"]
     _seed_bandcamp(db, original)
 
     # A rescan re-imports the same album under a new rating key.

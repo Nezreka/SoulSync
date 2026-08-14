@@ -107,11 +107,7 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> None:
 
             conn = db._get_connection()
             try:
-                # Native first: the legacy write-through must not be able to
-                # take the catalogue down with it if it fails.
                 repoint_file_path(conn, staged_path, final_path)
-                conn.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                             (final_path, staged_path))
                 conn.commit()
             finally:
                 conn.close()

@@ -2479,14 +2479,8 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     if lib_track_id and expected_final_path:
                         _rd_db = get_database()
                         _rd_conn = _rd_db._get_connection()
-                        _rd_cursor = _rd_conn.cursor()
-                        _rd_cursor.execute(
-                            """
-                            UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                            """,
-                            (expected_final_path, lib_track_id),
-                        )
+                        from core.library2.track_files import repoint_file_path
+                        repoint_file_path(_rd_conn, old_path, expected_final_path)
                         _rd_conn.commit()
                         _rd_conn.close()
                         logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")

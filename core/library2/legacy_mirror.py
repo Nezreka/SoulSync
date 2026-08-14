@@ -342,8 +342,11 @@ class MirrorDrainer:
             # so the first worker to move does not re-ask every provider about
             # the whole library. Idempotent, but pointless to repeat, and it
             # belongs off the startup path (iss32-M03).
-            self._seeded_provider_attempts = True
-            stats.update(self._seed_provider_attempts())
+            try:
+                stats.update(self._seed_provider_attempts())
+                self._seeded_provider_attempts = True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("provider-attempt seeding failed: %s", exc)
         sweep = reconcile_divergent(
             self._database, scan_limit=self._sweep_scan_limit,
             after=self._sweep_cursor)
@@ -359,9 +362,6 @@ class MirrorDrainer:
             seeded = backfill_from_legacy(conn)
             conn.commit()
             return seeded
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("provider-attempt seeding failed: %s", exc)
-            return {"seeded": 0, "scanned": 0}
         finally:
             conn.close()
 

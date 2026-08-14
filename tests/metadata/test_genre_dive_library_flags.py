@@ -67,9 +67,14 @@ def cache(tmp_path, monkeypatch):
             (name, normalize_name(name), name, legacy_id)).lastrowid
 
     def _album(artist_row, title, origin='library'):
-        conn.execute(
+        album_id = conn.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, origin) VALUES(?,?,?)",
-            (artist_row, title, origin))
+            (artist_row, title, origin)).lastrowid
+        if origin == 'library':
+            track_id = conn.execute(
+                "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (album_id, title)).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                         (track_id, f'/music/{title}.flac'))
 
     owned = _artist('Björk', 4242)
     _album(owned, 'Homogenic')

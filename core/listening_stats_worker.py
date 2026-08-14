@@ -197,7 +197,7 @@ class ListeningStatsWorker:
             id_map = self._resolve_db_track_ids_batch(events)
             for ev in events:
                 title_l = (ev.get('title') or '').strip().lower()
-                artist_l = (ev.get('artist') or '').strip().lower()
+                artist_l = _name_key((ev.get('artist') or '').strip())
                 if title_l:
                     ev['lib2_track_id'] = id_map.get((title_l, artist_l))
 
@@ -384,7 +384,7 @@ class ListeningStatsWorker:
                 pairs = set()
                 for t in top_tracks:
                     name = (t.get('name') or '').lower()
-                    artist = (t.get('artist') or '').lower()
+                    artist = _name_key(t.get('artist'))
                     if name:
                         pairs.add((name, artist))
                 track_rows = {}
@@ -394,8 +394,7 @@ class ListeningStatsWorker:
                     for i in range(0, len(pair_list), chunk):
                         sub = pair_list[i:i + chunk]
                         placeholders = ','.join(['(?,?)'] * len(sub))
-                        flat = [v for title_l, artist_l in sub
-                                for v in (title_l, _name_key(artist_l))]
+                        flat = [v for pair in sub for v in pair]
                         cursor.execute(
                             f"""
                             SELECT LOWER(t.title), ar.name_key,
@@ -413,7 +412,7 @@ class ListeningStatsWorker:
 
                 for track in top_tracks:
                     key = ((track.get('name') or '').lower(),
-                           (track.get('artist') or '').lower())
+                           _name_key(track.get('artist')))
                     r = track_rows.get(key)
                     if r:
                         track['image_url'] = _fix_image(r[2]) or None
@@ -569,7 +568,7 @@ class ListeningStatsWorker:
             title = (ev.get('title') or '').strip()
             artist = (ev.get('artist') or '').strip()
             if title:
-                pairs.add((title.lower(), artist.lower()))
+                pairs.add((title.lower(), _name_key(artist)))
 
         result = {}
         if not pairs:
@@ -587,8 +586,7 @@ class ListeningStatsWorker:
                 placeholders = ','.join(['(?,?)'] * len(chunk))
                 # The artist half is matched on the indexed, accent-preserving
                 # fold `name_key`; SQLite's LOWER() is ASCII-only (iss29-D13).
-                flat_args = [v for title_l, artist_l in chunk
-                             for v in (title_l, _name_key(artist_l))]
+                flat_args = [v for pair in chunk for v in pair]
                 cursor.execute(
                     f"""
                     SELECT LOWER(t.title), ar.name_key, t.id

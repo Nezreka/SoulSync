@@ -1,12 +1,4 @@
-"""Flask-level tests for the lib2 reorganize routes (docs §50).
-
-``core.library_reorganize``/``core.reorganize_queue`` are core-level (no
-circular-import risk, unlike ``run_enrichment``) so the routes import them
-directly rather than taking them injected — these tests monkeypatch those
-module functions instead, mirroring ``test_enrich_endpoint.py``'s shape:
-legacy-id resolution, the "no legacy record" 409, and that a successful call
-delegates to the right planner/queue call with the right args.
-"""
+"""Flask-level tests for native Library-v2 reorganize routes."""
 
 from __future__ import annotations
 
@@ -30,8 +22,10 @@ class FakeDB:
         conn = self._get_connection()
         row = conn.execute(
             """SELECT al.title AS album_title, ar.id AS artist_id, ar.name AS artist_name
-               FROM albums al JOIN artists ar ON al.artist_id = ar.id WHERE al.id=?""",
-            (str(album_id),),
+               FROM lib2_albums al JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+               WHERE al.id=? AND EXISTS (
+                 SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+                 WHERE t.album_id=al.id AND f.file_state='active')""", (album_id,),
         ).fetchone()
         conn.close()
         return dict(row) if row else None
@@ -40,10 +34,11 @@ class FakeDB:
         conn = self._get_connection()
         rows = conn.execute(
             """SELECT al.id AS album_id, al.title AS album_title, ar.id AS artist_id,
-                      ar.name AS artist_name
-               FROM albums al JOIN artists ar ON al.artist_id = ar.id WHERE ar.id=?
-               ORDER BY al.year ASC, al.title ASC""",
-            (str(artist_id),),
+                      ar.name AS artist_name FROM lib2_albums al
+               JOIN lib2_artists ar ON al.primary_artist_id = ar.id WHERE ar.id=?
+               AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+                 WHERE t.album_id=al.id AND f.file_state='active')
+               ORDER BY al.year ASC, al.title ASC""", (artist_id,),
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
@@ -64,19 +59,7 @@ def api(tmp_path):
     conn.row_factory = sqlite3.Row
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
-    conn.executescript(
-        """
-        CREATE TABLE artists(id INTEGER PRIMARY KEY, name TEXT);
-        CREATE TABLE albums(
-            id INTEGER PRIMARY KEY, artist_id INTEGER, title TEXT, year INTEGER
-        );
-        """
-    )
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists(id, name) VALUES(501, 'Drake')")
-    cur.execute("INSERT INTO albums(id, artist_id, title, year) VALUES(601, 501, 'Views', 2016)")
-    cur.execute("INSERT INTO albums(id, artist_id, title, year) VALUES(602, 501, 'One Dance', 2016)")
-
     cur.execute(
         "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Drake', 501)"
     )
@@ -86,6 +69,16 @@ def api(tmp_path):
         "VALUES(?, 'Views', 601)", (artist_id,)
     )
     album_id = cur.lastrowid
+    second_album_id = cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,year) VALUES(?,'One Dance',2016)",
+        (artist_id,),
+    ).lastrowid
+    for owned_album, title in ((album_id, 'One Dance'), (second_album_id, 'Hotline Bling')):
+        track_id = cur.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (owned_album, title),
+        ).lastrowid
+        cur.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,?,1)",
+                    (track_id, f'/music/{title}.flac'))
 
     # A discography-only album/artist — never had a legacy counterpart.
     cur.execute(
@@ -136,17 +129,17 @@ def test_album_sources_404_for_missing_album(api):
     assert resp.status_code == 404
 
 
-def test_album_sources_409_for_discography_only(api):
+def test_album_sources_are_empty_for_discography_only(api):
     client, _db, ids = api
     resp = client.get(f"/api/library/v2/albums/{ids['no_legacy_album']}/reorganize/sources")
-    assert resp.status_code == 409
-    assert "Update Discography" in resp.get_json()["error"]
+    assert resp.status_code == 200
+    assert resp.get_json()["sources"] == []
 
 
 # -- preview ---------------------------------------------------------------
 
 
-def test_preview_delegates_with_resolved_legacy_id(monkeypatch, api):
+def test_preview_delegates_with_native_id(monkeypatch, api):
     client, _db, ids = api
     captured = {}
 
@@ -163,15 +156,15 @@ def test_preview_delegates_with_resolved_legacy_id(monkeypatch, api):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "planned"
-    assert captured["album_id"] == "601"
+    assert captured["album_id"] == ids["album"]
     assert captured["primary_source"] == "spotify"
     assert captured["metadata_source"] == "tags"
 
 
-def test_preview_409_for_discography_only(api):
+def test_preview_404_for_discography_only(api):
     client, _db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['no_legacy_album']}/reorganize/preview", json={})
-    assert resp.status_code == 409
+    assert resp.status_code == 404
 
 
 def test_preview_defaults_to_api_mode_with_empty_body(monkeypatch, api):
@@ -208,13 +201,13 @@ def test_apply_enqueues_resolved_legacy_album(api):
     snap = get_queue().snapshot()
     queued_ids = [item["album_id"] for item in snap["queued"]]
     active_id = snap["active"]["album_id"] if snap["active"] else None
-    assert "601" in (queued_ids + ([active_id] if active_id else []))
+    assert str(ids["album"]) in (queued_ids + ([active_id] if active_id else []))
 
 
-def test_apply_409_for_discography_only_album(api):
+def test_apply_404_for_discography_only_album(api):
     client, _db, ids = api
     resp = client.post(f"/api/library/v2/albums/{ids['no_legacy_album']}/reorganize", json={})
-    assert resp.status_code == 409
+    assert resp.status_code == 404
 
 
 def test_apply_404_for_missing_album(api):
@@ -236,10 +229,10 @@ def test_reorganize_all_enqueues_every_album(api):
     assert body["enqueued"] == 2
 
 
-def test_reorganize_all_409_for_discography_only_artist(api):
+def test_reorganize_all_404_for_artist_without_owned_albums(api):
     client, _db, ids = api
     resp = client.post(f"/api/library/v2/artists/{ids['no_legacy_artist']}/reorganize-all", json={})
-    assert resp.status_code == 409
+    assert resp.status_code == 404
 
 
 def test_reorganize_all_404_for_missing_artist(api):

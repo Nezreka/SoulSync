@@ -1,13 +1,9 @@
 """Resolve + enrich native Library-v2 entities.
 
 Artists born inside lib2 — featured credits (``_featured_names_for_import``),
-wishlist rows, discography discoveries — carry ``legacy_artist_id = NULL``. The
-whole metadata/enrichment machine is legacy-row-based (``web_server.
-_run_single_enrichment`` writes the legacy ``artists`` row, then
-``core.library2.enrich.resync_entity_from_legacy`` mirrors it back), so a native
-artist can never be reached by it: the Enrich endpoint rejects it and a manual
-match records an id but pulls no artwork. Result: every provider chip is stuck
-``pending`` and no cover art loads.
+wishlist rows and discography discoveries — may have no legacy back-reference.
+Provider enrichment therefore resolves and updates their native catalogue row
+directly.
 
 This module gives native artists the missing path. It resolves the provider
 identity *by name* through SoulSync's existing source-priority search

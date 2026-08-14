@@ -233,7 +233,11 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
                     artist_rows = cursor.fetchall()
                     for ar in artist_rows:
                         cursor.execute(
-                            "SELECT title FROM lib2_albums WHERE primary_artist_id = ?",
+                            "SELECT title FROM lib2_albums WHERE primary_artist_id = ? "
+                            "AND EXISTS (SELECT 1 FROM lib2_tracks t "
+                            "JOIN lib2_track_files f ON f.track_id=t.id "
+                            "WHERE t.album_id=lib2_albums.id AND f.path IS NOT NULL "
+                            "AND TRIM(f.path)<>'' AND COALESCE(f.file_state,'active')='active')",
                             (ar['id'],))
                         for alb_row in cursor.fetchall():
                             owned_titles.add((alb_row['title'] or '').strip().lower())
@@ -372,5 +376,3 @@ def playlist_explorer_build_tree(deps: PlaylistExplorerDeps):
         import traceback
         traceback.print_exc()
         return deps.flask_jsonify({"success": False, "error": str(e)}), 500
-
-

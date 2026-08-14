@@ -138,6 +138,13 @@ def test_statistics_count_the_owned_catalogue(db):
     assert db.get_statistics() == {'artists': 1, 'albums': 1, 'tracks': 1}
 
 
+def test_statistics_do_not_treat_library_origin_without_a_file_as_owned(db):
+    artist = _artist(db, 'Muse')
+    _track(db, artist, title='Missing', path=None, album_title='Known Album')
+
+    assert db.get_statistics() == {'artists': 0, 'albums': 0, 'tracks': 0}
+
+
 def test_statistics_count_an_artist_name_once(db):
     """Two rows for the same name are one artist to the user — the legacy count
     said ``COUNT(DISTINCT name)`` for exactly that reason."""

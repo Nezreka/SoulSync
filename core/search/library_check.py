@@ -24,10 +24,8 @@ logger = logging.getLogger(__name__)
 # Ownership is asked of Library v2 (docs §50.4.4.14). Three things the port had
 # to settle:
 #
-# **"Owned" is ``origin='library'``.** lib2 also holds provider-only
-# discography rows — releases listed for an artist we follow, with no files.
-# Badging those "in your library" is exactly the claim this endpoint exists to
-# refuse.
+# **"Owned" requires a physical active file.** ``origin`` records provenance,
+# not whether a usable file is still present.
 #
 # **The comparison key is built in Python on both sides.** It always was on the
 # search-result side; the catalogue side used SQL ``LOWER()``, which is
@@ -37,17 +35,19 @@ logger = logging.getLogger(__name__)
 # it.
 #
 # **A path is a file row.** ``file_path`` comes from the primary active file
-# (ADR-03), and a track row without one is still owned — it is a known,
-# unfetched track, which is what ``in_library`` without a path has always meant.
+# (ADR-03); a known, unfetched catalogue track is not reported as owned.
 _OWNED_ALBUMS_SQL = """
     SELECT al.title, ar.name
       FROM lib2_albums al
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-     WHERE al.origin = 'library'
+     WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                   ON f.track_id=t.id WHERE t.album_id=al.id
+                   AND f.file_state='active' AND TRIM(f.path)<>'')
 """
 
 _OWNED_TRACKS_SQL = """
-    SELECT t.title, ar.name, t.legacy_track_id, al.title, al.image_url,
+    SELECT t.title, ar.name, COALESCE(t.server_id, t.legacy_track_id), t.id,
+           al.title, al.image_url,
            (SELECT f.path FROM lib2_track_files f
              WHERE f.track_id = t.id
                AND COALESCE(f.file_state, 'active') = 'active'
@@ -55,9 +55,11 @@ _OWNED_TRACKS_SQL = """
              ORDER BY f.is_primary DESC, f.id LIMIT 1)
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
-      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-     WHERE al.origin = 'library'
-     ORDER BY t.id
+     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE (t.server_source = ? OR t.server_source IS NULL)
+       AND EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
+                   AND owned_f.file_state='active' AND TRIM(owned_f.path)<>'')
+     ORDER BY t.server_source = ? DESC, t.id
 """
 
 
@@ -119,18 +121,22 @@ def check_library_presence(
         cursor.execute(_OWNED_ALBUMS_SQL)
         owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
-        cursor.execute(_OWNED_TRACKS_SQL)
+        active_server = getattr(
+            config_manager, 'get_active_media_server',
+            lambda: config_manager.get('media_server.type', 'plex'))()
+        cursor.execute(_OWNED_TRACKS_SQL, (active_server, active_server))
         owned_tracks: dict[str, dict] = {}
         for r in cursor.fetchall():
             key = _presence_key(r[0], r[1])
             if key not in owned_tracks:  # keep first match only
                 owned_tracks[key] = {
                     'track_id': r[2],
-                    'file_path': r[5],
+                    'lib2_track_id': r[3],
+                    'file_path': r[6],
                     'title': r[0],
                     'artist_name': r[1],
-                    'album_title': r[3],
-                    'album_thumb_url': r[4],
+                    'album_title': r[4],
+                    'album_thumb_url': r[5],
                 }
 
         wishlist_keys = _load_wishlist_keys(cursor, profile_id)

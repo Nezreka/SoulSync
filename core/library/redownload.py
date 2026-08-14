@@ -104,7 +104,10 @@ def redownload_start(track_id):
         database = get_database()
         conn = database._get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+        cursor.execute(
+            "SELECT path AS file_path FROM lib2_track_files WHERE track_id=? "
+            "AND COALESCE(file_state,'active')='active' "
+            "ORDER BY is_primary DESC, id LIMIT 1", (track_id,))
         row = cursor.fetchone()
         conn.close()
 

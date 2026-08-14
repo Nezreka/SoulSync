@@ -477,17 +477,13 @@ def test_reclaim_is_a_no_op_when_nothing_is_running(legacy_db):
     [
         ({"skipped": "already_done"}, True),
         ({"success": True, "stats": {}}, True),
-        ({"success": True, "stats": {}, "waiting_for_source": True}, False),
-        ({"skipped": "empty_source"}, False),
+        ({"success": True, "stats": {}, "waiting_for_source": True}, True),
+        ({"skipped": "empty_source"}, True),
         ({"skipped": "already_running"}, False),
         ({"success": False, "error": "boom"}, False),
     ],
 )
-def test_autostart_stops_only_once_the_library_is_actually_migrated(result, expected):
-    """A fresh install reports success with an empty source. Treating that as
-    "done" retired the autostart thread for good, so the first media-server
-    scan after startup never reached ``lib2_*`` until the next restart.
-    """
+def test_autostart_stops_once_the_catalogue_is_converged(result, expected):
     assert lib2_bootstrap.should_stop_autostart(result) is expected
 
 

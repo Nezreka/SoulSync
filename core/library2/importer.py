@@ -1682,6 +1682,8 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         stats["monitoring_reconciled"] = reconcile_import_monitoring(
             cursor, profile_id=profile_id or 1
         )
+        from core.library2.provider_attempts import backfill_from_legacy
+        stats["provider_attempts"] = backfill_from_legacy(conn)
         conn.commit()
         checkpoint(FINALIZE_STAGE, 4, _FINALIZE_STEPS)
         # Mint provider-less stable ids for everything this run inserted

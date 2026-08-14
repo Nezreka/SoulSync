@@ -5625,3 +5625,59 @@ ist ein Scan schnell und jeder Test grün. Zwei Query-Plan-Tests in
 `tests/library2/test_migration_hardening.py` halten das für `lib2_recordings`
 fest, einer davon pinnt bewusst, *dass* die naive Form die Falle ist, damit die
 „redundanten" Prädikate nicht wegoptimiert werden.
+
+## 33. Rewrite-Audit vom 13. August 2026
+
+Die vollständigen Reproduktionen und Auswirkungen stehen im
+[Rewrite-Audit](audits/library-v2-rewrite-audit-2026-08-13.md). Dieses Register
+hält alle 25 bestätigten Befunde verbindlich fest; ihr Umsetzungsstand steht
+ausschließlich in [Status §51](library-v2-status.md#51-remediation-des-rewrite-audits-vom-13-august-2026).
+
+| ID | Prio | Diagnose | Korrekturvertrag |
+|---|---|---|---|
+| LV2-AUD-01 | P1 | Attempt-Backfill blieb nach dem ersten 100k-Slice stehen. | Stabil paginieren; Abschluss erst nach allen erfolgreichen Seiten. |
+| LV2-AUD-02 | P2 | Legacy-Status für Similar Artists wurde nicht übernommen. | Den abgeleiteten Service samt Timestamp in das Attempt-Ledger säen. |
+| LV2-AUD-03 | P2 | Similar-Queue akzeptierte nicht nutzbare Fremd-IDs. | Nur Spotify, iTunes, Deezer und MusicBrainz als Quell-IDs zulassen. |
+| LV2-AUD-04 | P2 | Unqualifizierte Graph-IDs konnten providerübergreifend kollidieren. | Scanner und Chat auf die vier unterstützten Namensräume begrenzen. |
+| LV2-AUD-05 | P1 | Vorhandene iTunes-/Amazon-/Deezer-IDs ließen die Queue stehen. | Preserved-ID-Kurzpfade als `matched` protokollieren. |
+| LV2-AUD-06 | P1 | Title-only-Fallback verschmolz gleichnamige Tracks. | MBID oder Disc-/Trackposition zur Identität verlangen. |
+| LV2-AUD-07 | P2 | Ein Medienserver-Pfadwechsel ließ den alten Scan-Pfad aktiv. | Alte Server-Beiträge ausmustern, echte Alternate Files erhalten. |
+| LV2-AUD-08 | P2 | Ein Primary-Artist-Wechsel ließ alte Junctions stehen. | Primary-Junction ersetzen bzw. auf `primary` hochstufen. |
+| LV2-AUD-09 | P1 | Server-Cleanup löschte gemeinsam genutzte Katalog-/Provider-/Dateidaten. | Medienserver-Beitrag separat markieren und ausschließlich detach-en. |
+| LV2-AUD-10 | P2 | Provider-only-Tracks erschienen als nicht vermessene Dateien. | Disk-Usage auf owned Releases/live Files begrenzen. |
+| LV2-AUD-11 | P2 | Globale Library-Stats zählten den Provider-Katalog mit. | Dieselbe Owned-Semantik wie `get_statistics()` verwenden. |
+| LV2-AUD-12 | P2 | Listening-Lookups mischten `name_key` mit `.lower()`. | Produzenten und Konsumenten durchgehend mit `_name_key()` normalisieren. |
+| LV2-AUD-13 | P1 | Public API gab rohe lib2-Spalten an Legacy-Serializer. | Native IDs, Artwork, Status und Metadata zentral auf das API-Schema projizieren. |
+| LV2-AUD-14 | P1 | Katalog-PK und Server-ID wurden in einem ungetypten Lookup vermischt. | Getrennte Katalog- und servergescoped Lookups anbieten. |
+| LV2-AUD-15 | P1 | Kompatibilitätssuche gab lokale PKs an Medienserver weiter. | An Servergrenzen die gescopete `server_id` zurückgeben. |
+| LV2-AUD-16 | P2 | Playlist Explorer behandelte Discography-Alben als owned. | `owned_titles` auf `origin='library'` begrenzen. |
+| LV2-AUD-17 | P1 | Duplicate-Merge verlor komplementäre IDs und Nutzerzustände. | JSON per Key mergen und Rules, Attempts, Overrides sowie Snapshots umhängen. |
+| LV2-AUD-18 | P1 | Neue Scan-Tracks lieferten kein `inserted`; Reconcile/History liefen nicht. | Insert-vs.-Update wieder liefern und Side Effects nativ auf lib2 ausführen. |
+| LV2-AUD-19 | P2 | Gelöschte File-Historie löste weiterhin Trackbesitz auf. | Exakte und Basename-Auflösung auf lebende File-States begrenzen. |
+| LV2-AUD-20 | P2 | Playlist-Status zählte Provider-Tracks als lokal. | Batch- und Einzelstatus auf owned Releases begrenzen. |
+| LV2-AUD-21 | P1 | Delete-by-path entfernte Track und alle Alternate Files. | Nur die angefragte File-Row über den File-Lifecycle löschen. |
+| LV2-AUD-22 | P2 | Album-Issue-Snapshot selektierte nicht vorhandene Legacy-Spalten. | Native Albumspalten unter den stabilen Snapshot-Namen aliasen. |
+| LV2-AUD-23 | P2 | Navidrome-Fallback streamte mit dem lokalen PK. | Gespopte `server_id` als Subsonic Song-ID verwenden. |
+| LV2-AUD-24 | P2 | Your-Artists-Modal las Legacy-Schlüssel aus rohen lib2-Rows. | Artwork, IDs und Last.fm-Daten aus nativen/JSON-Feldern projizieren. |
+| LV2-AUD-25 | P2 | Library-Check gab bei nativen Scans `track_id: null` zurück. | Aktive Server-ID plus separate lib2-Katalog-ID zurückgeben. |
+
+## 34. Finaler Cutover-, Ownership- und Media-Server-Vertrag (14. August 2026)
+
+Dieser Abschnitt ersetzt für den Endzustand die Übergangsarchitektur aus
+§32.3.1. Die Legacy-Spiegelung war nur ein Migrationshilfsmittel und darf nach
+dem Cutover nicht mehr am Runtime-Pfad hängen.
+
+| ID | Diagnose / verbindlicher Vertrag | Abnahmebedingung |
+|---|---|---|
+| LV2-CUT-01 | Ein Upgrade muss Legacy automatisch und fortsetzbar nach `lib2_*` importieren. Vom Erkennen der alten Quelle bis zum erfolgreichen Abschluss dürfen keine Library-Worker, Automationen, Scans, Downloads, Imports oder Repair-Schreiber anlaufen. | Persistierter Claim/Heartbeat, Startbarriere vor Worker-Start, HTTP-Jobbarriere und automatisches Fortsetzen nach Erfolg. |
+| LV2-CUT-02 | `lib2_*` ist der vollständige Katalog. Eine Zeile beweist keinen Besitz: Provider-, Wanted- und Missing-Tracks dürfen ohne Datei existieren. | `owned` wird ausschließlich aus einer aktiven `lib2_track_files`-Zeile mit Pfad abgeleitet; Wanted bleibt eine eigene Projektion. |
+| LV2-CUT-03 | Plex/Jellyfin/Navidrome sind nach dem Cutover keine Import- oder Ownership-Autorität. | Ein Scan darf keine Artist-/Album-/Track-/File-Zeile erzeugen und keinen Dateipfad übernehmen; er darf nur gescopte Server-IDs und technische Beobachtungen auf vorhandene aktive File-Identitäten mappen. |
+| LV2-CUT-04 | Neue Katalog-/Besitzdaten entstehen nur durch die Upgrade-/Import-Pipeline. Wishlist-/Watchlist-Akquisitionen zählen erst nach erfolgreichem Download und Import dazu. Provider/Watchlist dürfen Katalogzeilen ohne Besitz anlegen. | Nur der erfolgreiche Importpfad ruft die gemeinsamen Upserts mit explizitem `allow_create=True` auf und stempelt File-Provenienz. |
+| LV2-CUT-05 | Server-Cleanup darf nie Katalogidentität oder physisches Eigentum löschen. | Full Refresh, Stale Detection und Orphan Cleanup lösen nur `server_source/server_id`; File-State wird allein durch Datei-/Pfad-Lifecycle entschieden. |
+| LV2-CUT-06 | Legacy ist nach dem Cutover keine zweite Bibliothek. | Keine Runtime-SQL-Reads/-Writes, keine Mirror-Trigger, kein Mirror-Drainer und keine Legacy-Divergenzprüfung; ausschließlich der Upgrade-Importer liest die alte Quelle. |
+
+**Einordnung von LV2-AUD-18:** Der Review-Kommentar verlangte zunächst, neue
+Media-Server-Tracks wieder als `inserted` zu behandeln. Mit LV2-CUT-03 ist
+dieser Zweig absichtlich unzulässig: Ein Scan kann keinen neuen Track erzeugen.
+Die benötigten History-/Embedded-ID-Side-Effects laufen stattdessen im echten
+Import-/Downloadpfad, der auch die physische Datei besitzt.

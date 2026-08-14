@@ -222,6 +222,9 @@ def backfill_from_legacy(conn, *, limit: int = 100000) -> Dict[str, int]:
             (service, f"{service}_match_status", f"{service}_last_attempted")
             for service, _label, ids in SERVICES if ids.get(entity)
         ]
+        if entity == "artist":
+            pairs.append(("similar_artists", "similar_artists_match_status",
+                          "similar_artists_last_attempted"))
         pairs = [
             (service, status_column, time_column)
             for service, status_column, time_column in pairs
@@ -232,30 +235,35 @@ def backfill_from_legacy(conn, *, limit: int = 100000) -> Dict[str, int]:
         selected = ", ".join(
             f"l.{status}, l.{stamp}" if stamp in legacy_columns else f"l.{status}"
             for _service, status, stamp in pairs)
-        rows = conn.execute(
-            f"""SELECT v.id AS lib2_id, {selected}
-                  FROM {_TABLES[entity]} v
-                  JOIN {legacy_table} l ON l.id = v.{link_column}
-                 WHERE v.{link_column} IS NOT NULL
-                 LIMIT ?""", (int(limit),)).fetchall()
-        for row in rows:
-            stats["scanned"] += 1
-            for service, status_column, time_column in pairs:
-                raw = row[status_column] if status_column in row.keys() else None
-                status = str(raw or "").strip().lower()
-                if status not in STATUSES:
-                    continue
-                stamp = row[time_column] if time_column in row.keys() else None
-                inserted = conn.execute(
-                    """
-                    INSERT OR IGNORE INTO lib2_provider_attempts
-                           (entity_type, entity_id, service, status, attempts,
-                            last_attempted_at)
-                    VALUES (?, ?, ?, ?, 1, COALESCE(?, CURRENT_TIMESTAMP))
-                    """,
-                    (entity, int(row["lib2_id"]), service, status, stamp),
-                ).rowcount
-                stats["seeded"] += max(0, int(inserted or 0))
+        after = 0
+        while True:
+            rows = conn.execute(
+                f"""SELECT v.id AS lib2_id, {selected}
+                      FROM {_TABLES[entity]} v
+                      JOIN {legacy_table} l ON l.id = v.{link_column}
+                     WHERE v.{link_column} IS NOT NULL AND v.id > ?
+                     ORDER BY v.id LIMIT ?""", (after, max(1, int(limit)))).fetchall()
+            if not rows:
+                break
+            after = int(rows[-1]["lib2_id"])
+            for row in rows:
+                stats["scanned"] += 1
+                for service, status_column, time_column in pairs:
+                    raw = row[status_column] if status_column in row.keys() else None
+                    status = str(raw or "").strip().lower()
+                    if status not in STATUSES:
+                        continue
+                    stamp = row[time_column] if time_column in row.keys() else None
+                    inserted = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO lib2_provider_attempts
+                               (entity_type, entity_id, service, status, attempts,
+                                last_attempted_at)
+                        VALUES (?, ?, ?, ?, 1, COALESCE(?, CURRENT_TIMESTAMP))
+                        """,
+                        (entity, int(row["lib2_id"]), service, status, stamp),
+                    ).rowcount
+                    stats["seeded"] += max(0, int(inserted or 0))
     if stats["seeded"]:
         logger.info("Seeded %s provider-attempt row(s) from legacy", stats["seeded"])
     return stats

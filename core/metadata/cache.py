@@ -1596,9 +1596,8 @@ class MetadataCache:
                 )[:12]
 
                 # Step 5: Check which albums are in the library (docs §50.4.4.16).
-                # Owned means `origin='library'`: lib2 also holds provider-only
-                # discography rows, and marking one "in library" on the discover
-                # page is the badge telling the user not to fetch it.
+                # Owned means an active physical file; catalogue provenance
+                # alone must not suppress a download on the discover page.
                 #
                 # The artist half is narrowed in SQL through the indexed
                 # `name_key`; the title is compared in Python, because lib2 has
@@ -1612,7 +1611,10 @@ class MetadataCache:
                         SELECT al.title, ar.name
                         FROM lib2_albums al
                         JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                        WHERE al.origin = 'library' AND ar.name_key IN ({key_ph})
+                        WHERE ar.name_key IN ({key_ph})
+                          AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                      ON f.track_id=t.id WHERE t.album_id=al.id
+                                      AND f.file_state='active' AND TRIM(f.path)<>'')
                     """, artist_keys)
                     lib_set = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
                     for album in albums:

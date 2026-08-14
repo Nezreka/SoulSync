@@ -215,6 +215,7 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
     row = conn.execute(
         f"SELECT track_id FROM lib2_track_files"
         f" WHERE path = ? AND track_id IS NOT NULL"
+        f" AND COALESCE(file_state,'active') <> 'deleted'"
         f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
     if row:
         return int(row[0])
@@ -225,6 +226,7 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
     rows = conn.execute(
         "SELECT DISTINCT track_id FROM lib2_track_files"
         " WHERE track_id IS NOT NULL"
+        "   AND COALESCE(file_state,'active') <> 'deleted'"
         "   AND (path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')"
         " LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
     return int(rows[0][0]) if len(rows) == 1 else None

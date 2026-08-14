@@ -102,7 +102,8 @@ def test_export_is_ordered_by_artist_album_track(db):
 
 def test_album_names_are_the_owned_pairs(db):
     artist = _artist(db, 'Muse')
-    _album(db, artist, 'The Resistance')
+    owned = _album(db, artist, 'The Resistance')
+    _track(db, owned, 'Uprising', path='/m/uprising.flac')
     _album(db, artist, 'Listed Only', origin='discography')
 
     assert db.get_library_album_names() == {('muse', 'the resistance')}
@@ -113,14 +114,16 @@ def test_album_names_fold_beyond_ascii(db):
     Python. SQLite's LOWER() stops at ASCII, so a stored 'Björk' folded to
     'Björk' and never matched the 'björk' on the other side."""
     artist = _artist(db, 'BJÖRK')
-    _album(db, artist, 'HOMOGENIC')
+    owned = _album(db, artist, 'HOMOGENIC')
+    _track(db, owned, 'Jóga', path='/m/joga.flac')
 
     assert db.get_library_album_names() == {('björk', 'homogenic')}
 
 
 def test_spotify_album_ids_are_the_owned_ones(db):
     artist = _artist(db, 'Muse')
-    _album(db, artist, 'The Resistance', spotify_id='SP-OWNED')
+    owned = _album(db, artist, 'The Resistance', spotify_id='SP-OWNED')
+    _track(db, owned, 'Uprising', path='/m/uprising.flac')
     _album(db, artist, 'Listed Only', origin='discography', spotify_id='SP-LISTED')
 
     assert db.get_library_spotify_album_ids() == {'SP-OWNED'}

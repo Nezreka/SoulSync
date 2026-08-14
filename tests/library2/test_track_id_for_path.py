@@ -90,6 +90,14 @@ def test_a_live_file_outvotes_a_deleted_one_at_the_same_path(imported_conn):
     assert track_id_for_path(conn, '/library/A/01 - Song.flac') == current
 
 
+def test_a_deleted_file_alone_is_not_owned(imported_conn):
+    conn = imported_conn
+    track = _seed_track(conn)
+    _add_file(conn, track, '/library/A/gone.flac', state='deleted')
+
+    assert track_id_for_path(conn, '/library/A/gone.flac') is None
+
+
 def test_an_unlinked_staging_file_is_not_an_answer(imported_conn):
     """A file row may exist before it is linked to a track (manual import)."""
     conn = imported_conn

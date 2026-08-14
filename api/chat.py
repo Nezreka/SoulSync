@@ -1341,8 +1341,8 @@ def create_blueprint() -> Blueprint:
                     (normalize_for_comparison(artist),),
                 ).fetchall():
                     known = parse_external_ids(row["external_ids"])
-                    for value in (row["spotify_id"], row["musicbrainz_id"],
-                                  *known.values()):
+                    for value in (row["spotify_id"], known.get("itunes"),
+                                  known.get("deezer"), row["musicbrainz_id"]):
                         text = str(value or "").strip()
                         if text and text not in source_ids:
                             source_ids.append(text)

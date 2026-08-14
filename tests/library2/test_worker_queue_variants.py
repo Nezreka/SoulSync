@@ -115,6 +115,12 @@ class TestTheProviderMatchedUniverse:
 
         assert item is not None and item["id"] == artist
 
+    def test_an_unsupported_external_id_does_not_enter_the_queue(self, conn):
+        _artist(conn, "Rone", external_ids={"discogs": "dc-1"})
+
+        assert next_pending(conn, "similar_artists", entity_types=("artist",),
+                            require_provider_id=True) is None
+
     def test_without_the_restriction_everyone_is_offered(self, conn):
         artist = _artist(conn, "Unmatched")
 

@@ -372,7 +372,8 @@ def _upsert_target_track(
                 "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"
                 " VALUES(?,?,'primary',0)", (target_track_id, artist_id))
         from core.library2.media_server_sync import _upsert_file
-        _upsert_file(cursor, target_track_id, final_path, file_size, bitrate)
+        _upsert_file(cursor, target_track_id, final_path, file_size, bitrate,
+                     source='missing_track_import')
 
         if expected_track_id and metadata_source:
             # The provider id this track was matched against — a promoted

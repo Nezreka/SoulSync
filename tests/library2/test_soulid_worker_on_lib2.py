@@ -51,6 +51,8 @@ def worker(tmp_path):
     track = conn.execute(
         "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'One Dance')",
         (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?, '/music/one.flac')",
+                 (track,))
     # The featured credit legacy kept out of the hash.
     guest = conn.execute(
         "INSERT INTO lib2_artists(name) VALUES('Wizkid')").lastrowid

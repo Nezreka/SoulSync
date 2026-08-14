@@ -27,6 +27,7 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 # legitimately build a legacy fixture table for as long as legacy exists.
 _TREES: Tuple[str, ...] = ("core", "database", "api", "utils", "services")
 _ROOT_FILES: Tuple[str, ...] = ("web_server.py", "dev.py")
+UPGRADE_ONLY_FILES: Tuple[str, ...] = ("core/library2/importer.py",)
 
 _SKIP_PARTS = frozenset({
     "__pycache__", ".venv", "node_modules", "webui", "tests", "docs",
@@ -67,6 +68,8 @@ class Usage:
 class TreeUsage:
     total: Usage
     by_file: Dict[str, Usage]
+    upgrade_total: Usage
+    upgrade_by_file: Dict[str, Usage]
 
 
 def _without_comments(source: str) -> str:
@@ -121,16 +124,23 @@ def _production_files() -> Iterable[pathlib.Path]:
 
 def scan_production_tree() -> TreeUsage:
     total = Usage()
+    upgrade_total = Usage()
     by_file: Dict[str, Usage] = {}
+    upgrade_by_file: Dict[str, Usage] = {}
     for path in _production_files():
         usage = count_legacy_usage(path.read_text(encoding="utf-8", errors="replace"))
         if usage:
-            by_file[str(path.relative_to(_ROOT))] = usage
-            total = total + usage
-    return TreeUsage(total=total, by_file=by_file)
+            relative = str(path.relative_to(_ROOT))
+            if relative in UPGRADE_ONLY_FILES:
+                upgrade_by_file[relative] = usage
+                upgrade_total = upgrade_total + usage
+            else:
+                by_file[relative] = usage
+                total = total + usage
+    return TreeUsage(total, by_file, upgrade_total, upgrade_by_file)
 
 
 __all__ = [
-    "LEGACY_TABLES", "TreeUsage", "Usage", "count_legacy_usage",
+    "LEGACY_TABLES", "UPGRADE_ONLY_FILES", "TreeUsage", "Usage", "count_legacy_usage",
     "scan_production_tree",
 ]

@@ -25,6 +25,7 @@ from core.library.embedded_id_reconcile import (
     reconcile_library,
     reconcile_track_row,
 )
+from core.library2.schema import ensure_library_v2_schema
 
 
 # ---------------------------------------------------------------------------
@@ -290,20 +291,13 @@ def test_reconcile_track_row_handles_null_parent_ids():
 def _make_library_db():
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
     cur = conn.cursor()
-    cur.execute("""CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
-        file_path TEXT, title TEXT, spotify_track_id TEXT, spotify_match_status TEXT,
-        spotify_last_attempted TIMESTAMP)""")
-    cur.execute("""CREATE TABLE albums (id TEXT PRIMARY KEY, spotify_album_id TEXT,
-        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
-    cur.execute("""CREATE TABLE artists (id TEXT PRIMARY KEY, spotify_artist_id TEXT,
-        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
     # Two tracks on the same album/artist, one orphan track with no file.
-    cur.execute("INSERT INTO artists (id) VALUES ('ar1')")
-    cur.execute("INSERT INTO albums (id) VALUES ('al1')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t1','al1','ar1','/a.flac','A')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t2','al1','ar1','/b.flac','B')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t3','al1','ar1','','NoFile')")
+    cur.execute("INSERT INTO lib2_artists(id,name) VALUES (1,'Artist')")
+    cur.execute("INSERT INTO lib2_albums(id,primary_artist_id,title) VALUES (1,1,'Album')")
+    cur.execute("INSERT INTO lib2_tracks(id,album_id,title) VALUES (1,1,'A'),(2,1,'B'),(3,1,'NoFile')")
+    cur.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES (1,'/a.flac',1),(2,'/b.flac',1)")
     conn.commit()
     return conn, cur
 
@@ -325,34 +319,34 @@ def test_reconcile_library_whole_library_fills_all():
     assert totals.total == 2 and totals.processed == 2
     # t1: track+album+artist (3); t2: only its own track id (parents already filled) (1)
     assert totals.ids_filled == 4
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=2")
     assert cur.fetchone()[0] == 'TB'
-    cur.execute("SELECT spotify_album_id FROM albums WHERE id='al1'")
+    cur.execute("SELECT spotify_id FROM lib2_albums WHERE id=1")
     assert cur.fetchone()[0] == 'ALB'
 
 
 def test_reconcile_library_scoped_to_given_ids():
     conn, cur = _make_library_db()
     tags = {'/b.flac': {'spotify_track_id': 'TB'}, '/a.flac': {'spotify_track_id': 'TA'}}
-    totals = reconcile_library(conn, _reader(tags), track_ids=['t2'])
+    totals = reconcile_library(conn, _reader(tags), track_ids=[2])
     assert totals.total == 1 and totals.ids_filled == 1
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=2")
     assert cur.fetchone()[0] == 'TB'
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t1'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=1")
     assert cur.fetchone()[0] is None  # not in scope
 
 
 def test_reconcile_library_unreadable_counted():
     conn, cur = _make_library_db()
-    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'])  # reader returns None
+    totals = reconcile_library(conn, _reader({}), track_ids=[1, 2])  # reader returns None
     assert totals.unreadable == 2 and totals.ids_filled == 0
 
 
 def test_reconcile_library_is_idempotent():
     conn, cur = _make_library_db()
     tags = {'/a.flac': {'spotify_track_id': 'TA', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'}}
-    first = reconcile_library(conn, _reader(tags), track_ids=['t1'])
-    second = reconcile_library(conn, _reader(tags), track_ids=['t1'])
+    first = reconcile_library(conn, _reader(tags), track_ids=[1])
+    second = reconcile_library(conn, _reader(tags), track_ids=[1])
     assert first.ids_filled == 3
     assert second.ids_filled == 0  # nothing left to fill
 
@@ -361,11 +355,39 @@ def test_reconcile_library_progress_and_stop():
     conn, cur = _make_library_db()
     seen = []
     reconcile_library(conn, _reader({'/a.flac': {'spotify_track_id': 'TA'}}),
-                      track_ids=['t1', 't2'],
+                      track_ids=[1, 2],
                       on_progress=lambda totals, title: seen.append(title))
     assert seen == ['A', 'B']
 
     # should_stop halts before processing anything
-    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'],
+    totals = reconcile_library(conn, _reader({}), track_ids=[1, 2],
                                should_stop=lambda: True)
     assert totals.processed == 0
+
+
+def test_reconcile_library_native_scope_uses_server_ids():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    artist = conn.execute(
+        "INSERT INTO lib2_artists(name,server_source,server_id) VALUES('A','plex','a')"
+    ).lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,server_source,server_id) "
+        "VALUES(?,'Album','plex','al')", (artist,)).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title,server_source,server_id) "
+        "VALUES(?,'Song','plex','server-track')", (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) "
+                 "VALUES(?, '/song.flac', 1)", (track,))
+
+    totals = reconcile_library(
+        conn, _reader({'/song.flac': {'spotify_track_id': 't',
+                                      'spotify_album_id': 'al',
+                                      'spotify_artist_id': 'a'}}),
+        track_ids=['server-track'], server_source='plex')
+
+    assert totals.ids_filled == 3
+    assert conn.execute(
+        "SELECT COUNT(*) FROM lib2_provider_attempts WHERE service='spotify' "
+        "AND status='matched'").fetchone()[0] == 3

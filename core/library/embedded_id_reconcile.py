@@ -271,6 +271,7 @@ def reconcile_library(
     page_size: int = 500,
     on_progress=None,
     should_stop=None,
+    server_source=None,
 ) -> ReconcileTotals:
     """Gap-fill embedded provider IDs into the DB for a set of tracks.
 
@@ -297,58 +298,80 @@ def reconcile_library(
     Returns:
         :class:`ReconcileTotals`.
     """
-    from utils.logging_config import get_logger
-    logger = get_logger("library.reconcile")
+    return _reconcile_library2(conn, read_tags, track_ids, page_size,
+                               on_progress, should_stop, server_source)
+
+
+def _reconcile_library2(conn, read_tags, track_ids, page_size, on_progress,
+                        should_stop, server_source) -> ReconcileTotals:
+    """Native counterpart of :func:`reconcile_library` for the lib2 catalogue."""
+    from core.library2.provider_attempts import record_attempt
+    from core.library2.worker_support import stored_provider_id
+    from core.library2.provider_writes import write_provider_enrichment
 
     totals = ReconcileTotals()
     cur = conn.cursor()
-
     if track_ids is None:
-        cur.execute("SELECT id FROM tracks WHERE file_path IS NOT NULL AND TRIM(file_path) != ''")
-        ids = [str(r[0]) for r in cur.fetchall()]
+        ids = [row[0] for row in cur.execute(
+            "SELECT t.id FROM lib2_tracks t WHERE EXISTS (SELECT 1 FROM lib2_track_files f "
+            "WHERE f.track_id=t.id AND COALESCE(f.file_state,'active')<>'deleted')")]
+        by_server = False
     else:
-        ids = [str(t) for t in track_ids if t is not None]
+        ids = [str(value) for value in track_ids if value is not None]
+        by_server = bool(server_source)
     totals.total = len(ids)
-
-    album_map: Dict[str, Dict[str, Any]] = {}
-    artist_map: Dict[str, Dict[str, Any]] = {}
-
+    touched = set()
     for start in range(0, len(ids), page_size):
         if should_stop and should_stop():
             break
         page = ids[start:start + page_size]
-        ph = ','.join('?' * len(page))
-        cur.execute(f"SELECT * FROM tracks WHERE id IN ({ph})", page)
-        rows = [dict(r) for r in cur.fetchall()]
-
-        _load_missing_rows(cur, [str(r['album_id']) for r in rows if r.get('album_id') is not None],
-                           'albums', album_map)
-        _load_missing_rows(cur, [str(r['artist_id']) for r in rows if r.get('artist_id') is not None],
-                           'artists', artist_map)
-
-        for tr in rows:
+        marks = ','.join('?' * len(page))
+        where = (f"t.server_source=? AND t.server_id IN ({marks})" if by_server
+                 else f"t.id IN ({marks})")
+        params = [server_source, *page] if by_server else page
+        rows = cur.execute(f"""
+            SELECT t.id, t.album_id, al.primary_artist_id AS artist_id, t.title,
+                   (SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id
+                     AND COALESCE(f.file_state,'active')<>'deleted'
+                     ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path
+              FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
+             WHERE {where}
+        """, params).fetchall()
+        for row in rows:
             if should_stop and should_stop():
                 break
-            title = tr.get('title') or '?'
             try:
-                tags = read_tags(tr.get('file_path'))
-                result = reconcile_track_row(cur, tr, album_map, artist_map, tags)
-                if not result.readable:
+                tags = read_tags(row['file_path'])
+                if not tags:
                     totals.unreadable += 1
-                else:
-                    totals.ids_filled += result.applied.ids_filled
-                    totals.entities_updated += result.applied.rows_updated
-                    totals.conflicts += result.conflicts
-            except Exception as e:
-                logger.debug("reconcile: skipped track %s: %s", tr.get('id'), e)
+                    continue
+                entity_ids = {'track': row['id'], 'album': row['album_id'],
+                              'artist': row['artist_id']}
+                for tag, entity, _column, status_column in _RECONCILE_FIELDS:
+                    value = _clean(tags.get(tag))
+                    if not value:
+                        continue
+                    service = status_column.removesuffix('_match_status')
+                    entity_id = entity_ids[entity]
+                    existing = stored_provider_id(conn, entity, entity_id, service)
+                    if existing:
+                        totals.conflicts += int(existing != value)
+                        continue
+                    write_provider_enrichment(
+                        conn, entity_type=entity, entity_id=entity_id,
+                        service=service, provider_id=value)
+                    record_attempt(conn, entity_type=entity, entity_id=entity_id,
+                                   service=service, status='matched')
+                    totals.ids_filled += 1
+                    touched.add((entity, entity_id))
+            except Exception:
                 totals.unreadable += 1
             finally:
                 totals.processed += 1
                 if on_progress:
-                    on_progress(totals, title)
-
+                    on_progress(totals, row['title'])
         conn.commit()
-
+    totals.entities_updated = len(touched)
     return totals
 
 

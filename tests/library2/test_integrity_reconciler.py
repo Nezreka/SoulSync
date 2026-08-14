@@ -94,19 +94,13 @@ def _codes(report):
     return [finding.code for finding in report.findings]
 
 
-def test_report_compares_real_legacy_and_lib2_files_without_writes(tmp_path):
+def test_report_checks_native_files_without_writes(tmp_path):
     conn = _connection()
     lib2_file = tmp_path / "lib2.flac"
     lib2_file.write_bytes(b"lib2")
-    legacy_file = tmp_path / "legacy.flac"
-    legacy_file.write_bytes(b"legacy")
     missing_file = tmp_path / "missing.flac"
     _track(conn, lib2_file)
     _track(conn, missing_file)
-    conn.execute(
-        "INSERT INTO tracks(file_path,server_source) VALUES(?, 'plex')",
-        (str(legacy_file),),
-    )
     conn.commit()
     before = conn.total_changes
 
@@ -118,8 +112,6 @@ def test_report_compares_real_legacy_and_lib2_files_without_writes(tmp_path):
     assert report.read_only is True
     assert report.coverage["destructive_actions"] is False
     assert "lib2_active_file_missing" in _codes(report)
-    assert "legacy_only_indexed_file" in _codes(report)
-    assert "lib2_only_indexed_file" in _codes(report)
     assert report.counts["severity:error"] == 1
 
 
@@ -226,14 +218,14 @@ def test_completed_import_and_recovery_waiting_without_files_are_reported(tmp_pa
 def test_findings_are_bounded_but_counts_cover_full_scan(tmp_path):
     conn = _connection()
     for index in range(3):
-        path = tmp_path / f"legacy-{index}.flac"
-        path.write_bytes(b"x")
-        conn.execute("INSERT INTO tracks(file_path) VALUES(?)", (str(path),))
+        _track(conn, tmp_path / f"missing-{index}.flac")
     conn.commit()
 
-    report = build_integrity_report(conn, max_findings=1)
+    report = build_integrity_report(
+        conn, max_findings=1, config_manager=_Config([str(tmp_path)]),
+    )
 
     assert len(report.findings) == 1
     assert report.findings_total == 3
     assert report.truncated is True
-    assert report.counts["legacy_only_indexed_file"] == 3
+    assert report.counts["lib2_active_file_missing"] == 3

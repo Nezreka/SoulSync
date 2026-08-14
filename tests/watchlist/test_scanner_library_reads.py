@@ -41,9 +41,15 @@ def _artist(conn, name, *, genres=None, spotify_id=None, musicbrainz_id=None,
 
 
 def _album(conn, artist_id, title, *, origin='library') -> int:
-    return int(conn.execute(
+    album_id = int(conn.execute(
         "INSERT INTO lib2_albums(primary_artist_id, title, origin) VALUES(?,?,?)",
         (artist_id, title, origin)).lastrowid)
+    if origin == 'library':
+        track_id = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (album_id, title)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                     (track_id, f'/music/{album_id}.flac'))
+    return album_id
 
 
 # ── albums for pool variety ────────────────────────────────────────────────
@@ -68,6 +74,14 @@ def test_random_albums_respect_the_limit(conn):
         _album(conn, artist, f'Album {n}')
 
     assert len(watchlist_scanner.library_random_albums(conn, limit=2)) == 2
+
+
+def test_library_provenance_without_a_file_is_not_owned(conn):
+    artist = _artist(conn, 'Muse')
+    album = _album(conn, artist, 'Missing')
+    conn.execute("DELETE FROM lib2_track_files WHERE track_id IN "
+                 "(SELECT id FROM lib2_tracks WHERE album_id=?)", (album,))
+    assert watchlist_scanner.library_random_albums(conn) == []
 
 
 # ── the genre map behind affinity scoring ──────────────────────────────────

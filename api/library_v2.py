@@ -5114,6 +5114,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress,
                                               profile_id=active_profile)
+                from core.maintenance.dedupe_source_ids import repair_imported_state
+                repair_imported_state(get_database())
                 _import_state.update(stats=stats, stage="tracklists", current=0, total=0)
 
                 # Shared with the automatic migration so the two cannot drift.
@@ -5152,6 +5154,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         "lib2_bootstrap_state",
         # Column layouts and provider visibility — the user's, not the library's.
         "lib2_ui_preferences",
+        "lib2_upgrade_repairs",
         # An audit of decisions the user made about FILES, which outlives any
         # rebuild of the rows those files hang off (same contract as the
         # importer's own reset).

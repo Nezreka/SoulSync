@@ -1,8 +1,9 @@
-"""Writing what a media server reports into the Library v2 catalogue.
+"""Map media-server identities onto an existing Library-v2 catalogue.
 
-The scan is the one path on which rows come into existence, and until now it
-wrote the legacy tables. It writes the catalogue now, keyed by the server's own
-id (``server_source`` + ``server_id``, §50.4.4.25).
+After the upgrade, a server scan is not an ownership/import path. Catalogue and
+file rows come from the import/download pipeline; a server only stamps its own
+IDs and technical observations onto those existing rows. ``allow_create`` is
+reserved for that pipeline's shared helpers.
 
 Three rules run through every upsert here:
 
@@ -12,11 +13,9 @@ carried a whole "ratingKey migrated" dance that copied enrichment onto a new
 row. A catalogue row has its own id, so a changed rating key is nothing but a
 new stamp on the row we already had.
 
-**The server is authoritative for what the server knows** (title, track number,
-duration, path) **and for nothing else.** Everything a provider enriched —
-artwork, genres, bios, provider ids — is only ever filled in, never cleared, by
-a scan: ``COALESCE`` on the way in, and no write at all when the server sent
-nothing.
+**The server is only an identity/technical observer.** It may stamp its own id
+and refresh track/disc number, duration, size and bitrate.  It does not create
+catalogue or file ownership and does not replace provider/import metadata.
 
 **A file is a row** (ADR-03). The server's path/size/bitrate land on
 ``lib2_track_files``, not on the track.
@@ -51,17 +50,19 @@ def _genres_json(obj: Any) -> Optional[str]:
 def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
                   image_url: Optional[str] = None,
                   genres_json: Optional[str] = None,
-                  overwrite: bool = True) -> int:
+                  overwrite: bool = True,
+                  allow_create: bool = False) -> Optional[int]:
     """The catalogue id for an artist the server reported.
 
-    ``overwrite=False`` fills artwork and genres only where the row has none.
-    That is the import path's rule (SoulSync-as-media-server): a re-import must
-    not trample what a provider enriched, while a real media server IS the
-    authority on what it reports.
+    ``allow_create`` is exclusively for the successful import pipeline.  A
+    normal media-server scan only stamps an existing row.
     """
     row = cursor.execute(
-        "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=?",
-        (server_source, str(server_id)),
+        "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=? AND (? OR"
+        " EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id"
+        " JOIN lib2_track_files f ON f.track_id=t.id WHERE al.primary_artist_id=lib2_artists.id"
+        " AND f.file_state='active' AND TRIM(f.path)<>''))",
+        (server_source, str(server_id), allow_create),
     ).fetchone()
     if row is None:
         # A rescan re-keyed the artist, or the row came from an import/download.
@@ -70,10 +71,16 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
             "SELECT id FROM lib2_artists "
             " WHERE name_key=? AND canonical_artist_id IS NULL "
             "   AND (server_id IS NULL OR server_source=?) "
+            "   AND EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t"
+            "                ON t.album_id=al.id JOIN lib2_track_files f ON f.track_id=t.id"
+            "                WHERE al.primary_artist_id=lib2_artists.id"
+            "                  AND f.file_state='active' AND TRIM(f.path)<>'') "
             " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
             (_name_key(name), server_source),
         ).fetchone()
     if row is None:
+        if not allow_create:
+            return None
         return int(cursor.execute(
             "INSERT INTO lib2_artists(name, name_key, sort_name, image_url, genres,"
             "                         server_source, server_id, monitored)"
@@ -82,6 +89,12 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
              server_source, str(server_id)),
         ).lastrowid)
     artist_id = int(row[0])
+    if not allow_create:
+        cursor.execute(
+            "UPDATE lib2_artists SET server_source=?,server_id=?,"
+            "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (server_source, str(server_id), artist_id))
+        return artist_id
     image_set = ("image_url=CASE WHEN image_url IS NULL OR image_url='' "
                  "THEN COALESCE(?, image_url) ELSE image_url END"
                  if not overwrite else
@@ -121,26 +134,29 @@ def resolve_album(cursor, server_source: str, server_id: Any) -> Optional[int]:
 def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
                  title: str, year=None, image_url: Optional[str] = None,
                  genres_json: Optional[str] = None,
-                 track_count=None, duration=None) -> int:
-    """The catalogue id for a release the server reported.
-
-    ``origin='library'`` is the point of the whole row: the server has the
-    files, so the user owns it — as opposed to the discography rows v2 keeps
-    for artists it merely follows.
-    """
+                 track_count=None, duration=None,
+                 allow_create: bool = False) -> Optional[int]:
+    """Map a server release; imports alone may create/own the row."""
     row = cursor.execute(
-        "SELECT id FROM lib2_albums WHERE server_source=? AND server_id=?",
-        (server_source, str(server_id)),
+        "SELECT id FROM lib2_albums WHERE server_source=? AND server_id=? AND (? OR"
+        " EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
+        " WHERE t.album_id=lib2_albums.id AND f.file_state='active' AND TRIM(f.path)<>''))",
+        (server_source, str(server_id), allow_create),
     ).fetchone()
     if row is None:
         row = cursor.execute(
             "SELECT id FROM lib2_albums"
             " WHERE primary_artist_id=? AND LOWER(title)=LOWER(?)"
             "   AND (server_id IS NULL OR server_source=?)"
+            "   AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f"
+            "                ON f.track_id=t.id WHERE t.album_id=lib2_albums.id"
+            "                  AND f.file_state='active' AND TRIM(f.path)<>'')"
             " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
             (artist_id, title, server_source),
         ).fetchone()
     if row is None:
+        if not allow_create:
+            return None
         album_id = int(cursor.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, year, image_url,"
             "                        genres, track_count, duration, origin,"
@@ -151,6 +167,13 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
         ).lastrowid)
     else:
         album_id = int(row[0])
+        if not allow_create:
+            cursor.execute(
+                "UPDATE lib2_albums SET track_count=COALESCE(?,track_count),"
+                "duration=COALESCE(?,duration),server_source=?,server_id=?,"
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (track_count, duration, server_source, str(server_id), album_id))
+            return album_id
         cursor.execute(
             "UPDATE lib2_albums"
             "   SET primary_artist_id=?, title=?, year=COALESCE(?, year),"
@@ -165,8 +188,12 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
              server_source, str(server_id), album_id),
         )
     cursor.execute(
-        "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)"
-        " VALUES(?,?,'primary')", (album_id, artist_id))
+        "DELETE FROM lib2_album_artists WHERE album_id=? AND role='primary' "
+        "AND artist_id<>?", (album_id, artist_id))
+    cursor.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role)"
+        " VALUES(?,?,'primary') ON CONFLICT(album_id, artist_id)"
+        " DO UPDATE SET role='primary'", (album_id, artist_id))
     return album_id
 
 
@@ -175,21 +202,38 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                  duration=None, track_artist: Optional[str] = None,
                  musicbrainz_id: Optional[str] = None,
                  file_path: Optional[str] = None, file_size=None,
-                 bitrate=None) -> int:
+                 bitrate=None, allow_create: bool = False,
+                 file_source: Optional[str] = None) -> Optional[int]:
     """The catalogue id for a track the server reported, plus its file row."""
     row = cursor.execute(
-        "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=?",
-        (server_source, str(server_id)),
+        "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=? AND (? OR"
+        " EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=lib2_tracks.id"
+        " AND f.file_state='active' AND TRIM(f.path)<>''))",
+        (server_source, str(server_id), allow_create),
     ).fetchone()
+    if row is None:
+        row = cursor.execute(
+            "SELECT t.id FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
+            " WHERE f.path=? AND f.file_state='active' LIMIT 1", (file_path,)
+        ).fetchone() if file_path else None
     if row is None:
         row = cursor.execute(
             "SELECT id FROM lib2_tracks"
             " WHERE album_id=? AND LOWER(title)=LOWER(?)"
             "   AND (server_id IS NULL OR server_source=?)"
+            "   AND ((NULLIF(?, '') IS NOT NULL AND musicbrainz_id=?)"
+            "     OR (? IS NOT NULL AND track_number=?"
+            "         AND COALESCE(disc_number,1)=COALESCE(?,1)))"
+            "   AND EXISTS (SELECT 1 FROM lib2_track_files f"
+            "                WHERE f.track_id=lib2_tracks.id AND f.file_state='active'"
+            "                  AND TRIM(f.path)<>'')"
             " ORDER BY (server_id IS NOT NULL) DESC, id LIMIT 1",
-            (album_id, title, server_source),
+            (album_id, title, server_source, musicbrainz_id, musicbrainz_id,
+             track_number, track_number, disc_number),
         ).fetchone()
     if row is None:
+        if not allow_create:
+            return None
         track_id = int(cursor.execute(
             "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,"
             "                        duration, track_artist, musicbrainz_id,"
@@ -200,6 +244,22 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
         ).lastrowid)
     else:
         track_id = int(row[0])
+        if not allow_create:
+            cursor.execute(
+                "UPDATE lib2_tracks SET track_number=COALESCE(?,track_number),"
+                "disc_number=COALESCE(?,disc_number),duration=COALESCE(?,duration),"
+                "track_artist=COALESCE(?,track_artist),"
+                "server_source=?,server_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (track_number, disc_number, duration, track_artist,
+                 server_source, str(server_id), track_id))
+            if file_path:
+                cursor.execute(
+                    "UPDATE lib2_track_files SET size=COALESCE(?,size),"
+                    "bitrate=COALESCE(?,bitrate),server_source=?,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE track_id=? AND path=?"
+                    " AND file_state='active'",
+                    (file_size, bitrate, server_source, track_id, file_path))
+            return track_id
         cursor.execute(
             "UPDATE lib2_tracks"
             "   SET album_id=?, title=?, track_number=?, disc_number=?,"
@@ -212,14 +272,20 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
              musicbrainz_id, server_source, str(server_id), track_id),
         )
     cursor.execute(
-        "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"
-        " VALUES(?,?,'primary',0)", (track_id, artist_id))
-    if file_path:
-        _upsert_file(cursor, track_id, file_path, file_size, bitrate)
+        "DELETE FROM lib2_track_artists WHERE track_id=? AND role='primary' "
+        "AND artist_id<>?", (track_id, artist_id))
+    cursor.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
+        " VALUES(?,?,'primary',0) ON CONFLICT(track_id, artist_id)"
+        " DO UPDATE SET role='primary', position=0", (track_id, artist_id))
+    if file_path and allow_create:
+        _upsert_file(cursor, track_id, file_path, file_size, bitrate,
+                     server_source=server_source, source=file_source)
     return track_id
 
 
-def _upsert_file(cursor, track_id: int, path: str, size, bitrate) -> None:
+def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
+                 server_source=None, source=None) -> None:
     """The track's file row. One primary per track (ADR-03)."""
     row = cursor.execute(
         "SELECT id FROM lib2_track_files WHERE track_id=? AND path=?",
@@ -230,16 +296,24 @@ def _upsert_file(cursor, track_id: int, path: str, size, bitrate) -> None:
             "UPDATE lib2_track_files"
             "   SET size=COALESCE(?, size), bitrate=COALESCE(?, bitrate),"
             "       format=COALESCE(format, ?), file_state='active',"
+            "       server_source=COALESCE(?, server_source),"
+            "       source=COALESCE(source, ?),"
             "       is_primary=1, updated_at=CURRENT_TIMESTAMP"
             " WHERE id=?",
-            (size, bitrate, fmt, int(row[0])))
+            (size, bitrate, fmt, server_source, source, int(row[0])))
         primary_id = int(row[0])
     else:
         primary_id = int(cursor.execute(
             "INSERT INTO lib2_track_files(track_id, path, size, bitrate, format,"
-            "                             is_primary, file_state, import_status)"
-            " VALUES(?,?,?,?,?,1,'active','imported')",
-            (track_id, path, size, bitrate, fmt)).lastrowid)
+            " server_source, source, is_primary, file_state, import_status)"
+            " VALUES(?,?,?,?,?,?,?,1,'active','imported')",
+            (track_id, path, size, bitrate, fmt, server_source, source)).lastrowid)
+    cursor.execute(
+        "UPDATE lib2_track_files SET file_state=CASE WHEN source IS NULL "
+        "AND legacy_track_id IS NULL THEN 'deleted' ELSE file_state END,"
+        " server_source=NULL, is_primary=0, updated_at=CURRENT_TIMESTAMP"
+        " WHERE track_id=? AND id<>? AND server_source=?",
+        (track_id, primary_id, server_source))
     cursor.execute(
         "UPDATE lib2_track_files SET is_primary=0 WHERE track_id=? AND id<>?",
         (track_id, primary_id))

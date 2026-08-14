@@ -1,18 +1,8 @@
-"""A ratchet on legacy-table usage in production code (docs §50.4.4).
+"""Pin the cutover: runtime has zero legacy SQL; upgrade reads are isolated.
 
-docs §32.3.1 commits to one library: everything reads and writes ``lib2_*`` and
-the legacy tables disappear. That happens over three stages, in a lot of files,
-across more than one PR. Nothing in the test suite notices a new
-``UPDATE artists SET …`` appearing in the meantime, and a half-migrated
-codebase is exactly where one would slip in unnoticed.
-
-So the count is pinned. It may only ever go down. When it does, the baseline
-comes down with it in the same commit, which turns the number into the progress
-bar for the whole legacy removal: reads and writes both to zero.
-
-Reads and writes are counted separately on purpose. Stage 2 moves the
-producers, stage 3 the readers, so a single combined figure would barely move
-during stage 2 and tell nobody anything.
+Any new ``artists``/``albums``/``tracks`` access outside the one-shot importer
+is a regression.  The importer remains separately measured until support for
+upgrading legacy installations can eventually be retired.
 """
 
 from __future__ import annotations
@@ -23,7 +13,7 @@ import pathlib
 import pytest
 
 from tests.library2.legacy_usage import (
-    LEGACY_TABLES, count_legacy_usage, scan_production_tree,
+    LEGACY_TABLES, UPGRADE_ONLY_FILES, count_legacy_usage, scan_production_tree,
 )
 
 _BASELINE = pathlib.Path(__file__).with_name("legacy_usage_baseline.json")
@@ -125,6 +115,12 @@ class TestTheRatchet:
         baseline = json.loads(_BASELINE.read_text())
         assert measured.total.reads == baseline["reads"], _explain(
             "reads", measured, baseline)
+
+    def test_upgrade_reader_is_pinned_separately(self, measured):
+        baseline = json.loads(_BASELINE.read_text())
+        assert set(measured.upgrade_by_file) == set(UPGRADE_ONLY_FILES)
+        assert measured.upgrade_total.reads == baseline["upgrade_reads"]
+        assert measured.upgrade_total.writes == baseline["upgrade_writes"]
 
 
 def _explain(kind, measured, baseline) -> str:

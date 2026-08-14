@@ -1,10 +1,8 @@
-"""Read-side helpers for browsing the items an enrichment source hasn't matched.
+"""Browse Library-v2 entities that a provider has not matched.
 
 The dashboard "Manage Enrichment Workers" modal lists, per source, the
-artists / albums / tracks whose ``<service>_match_status`` is ``'not_found'``
-(or still pending = ``NULL``) so the user can manually match them. Every
-enrichment source writes a uniform ``<service>_match_status`` column, so one
-parametric query serves all 11 workers.
+artists / albums / tracks whose provider-attempt ledger entry is ``not_found``
+(or absent, meaning pending) so the user can manually match them.
 
 This module owns the column mapping and SQL construction. ``service`` and
 ``entity_type`` are whitelisted against :data:`SERVICE_ENTITY_SUPPORT` and the
@@ -48,19 +46,19 @@ SERVICE_ENTITY_SUPPORT = {
 # tracks carry no artwork column of their own, so we borrow the parent album's.
 _ENTITY_TABLE = {
     'artist': {
-        'table': 'artists', 'name': 'name',
-        'image': 'artists.thumb_url', 'join': '', 'parent': None,
+        'table': 'lib2_artists', 'name': 'name',
+        'image': 'e.image_url', 'join': '', 'parent': None,
     },
     'album': {
-        'table': 'albums', 'name': 'title',
-        'image': 'albums.thumb_url',
-        'join': 'LEFT JOIN artists par ON albums.artist_id = par.id',
+        'table': 'lib2_albums', 'name': 'title',
+        'image': 'e.image_url',
+        'join': 'LEFT JOIN lib2_artists par ON e.primary_artist_id = par.id',
         'parent': 'par.name',
     },
     'track': {
-        'table': 'tracks', 'name': 'title',
-        'image': 'al.thumb_url',
-        'join': 'LEFT JOIN albums al ON tracks.album_id = al.id',
+        'table': 'lib2_tracks', 'name': 'title',
+        'image': 'al.image_url',
+        'join': 'LEFT JOIN lib2_albums al ON e.album_id = al.id',
         'parent': 'al.title',
     },
 }
@@ -104,11 +102,9 @@ def _validate(service: str, entity_type: str) -> None:
 def _status_predicate(service: str, status: str, qualifier: str) -> str:
     """SQL predicate selecting rows in the requested match state.
 
-    ``qualifier`` (the table name/alias) is always prefixed so the predicate is
-    unambiguous even when the query joins a second table that also carries a
-    ``<service>_match_status`` column (tracks LEFT JOIN albums).
+    ``qualifier`` is always prefixed so joined queries stay unambiguous.
     """
-    col = f"{qualifier}.{match_status_column(service)}"
+    col = f"{qualifier}.status"
     if status == 'not_found':
         return f"{col} = 'not_found'"
     if status == 'pending':
@@ -138,24 +134,22 @@ def build_unmatched_query(
     table, name_col, image_expr, join = (
         meta['table'], meta['name'], meta['image'], meta['join'],
     )
-    ms = match_status_column(service)
-    la = last_attempted_column(service)
-
-    where = [_status_predicate(service, status, table)]
-    params: List = []
+    where = [_status_predicate(service, status, 'pa')]
+    params: List = [entity_type, service]
     if query:
-        where.append(f"{table}.{name_col} LIKE ?")
+        where.append(f"e.{name_col} LIKE ?")
         params.append(f"%{query}%")
 
     parent_expr = meta.get('parent')
     parent_select = f"{parent_expr} AS parent" if parent_expr else "NULL AS parent"
     sql = (
-        f"SELECT {table}.id AS id, {table}.{name_col} AS name, "
-        f"{image_expr} AS image_url, {parent_select}, {table}.{ms} AS status, "
-        f"{table}.{la} AS last_attempted "
-        f"FROM {table} {join} "
+        f"SELECT e.id AS id, e.{name_col} AS name, "
+        f"{image_expr} AS image_url, {parent_select}, pa.status AS status, "
+        f"pa.last_attempted_at AS last_attempted "
+        f"FROM {table} e {join} LEFT JOIN lib2_provider_attempts pa "
+        f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
         f"WHERE {' AND '.join(where)} "
-        f"ORDER BY {table}.{name_col} COLLATE NOCASE "
+        f"ORDER BY e.{name_col} COLLATE NOCASE "
         f"LIMIT ? OFFSET ?"
     ).replace('  ', ' ')
 
@@ -178,13 +172,15 @@ def build_count_query(
     meta = _ENTITY_TABLE[entity_type]
     table, name_col = meta['table'], meta['name']
 
-    where = [_status_predicate(service, status, table)]
-    params: List = []
+    where = [_status_predicate(service, status, 'pa')]
+    params: List = [entity_type, service]
     if query:
-        where.append(f"{table}.{name_col} LIKE ?")
+        where.append(f"e.{name_col} LIKE ?")
         params.append(f"%{query}%")
 
-    sql = f"SELECT COUNT(*) FROM {table} WHERE {' AND '.join(where)}"
+    sql = (f"SELECT COUNT(*) FROM {table} e LEFT JOIN lib2_provider_attempts pa "
+           f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
+           f"WHERE {' AND '.join(where)}")
     return sql, params
 
 
@@ -198,14 +194,7 @@ def build_reset_query(
     scope: str = 'item',
     entity_id=None,
 ) -> Tuple[str, List]:
-    """Build the UPDATE that re-queues item(s) for enrichment.
-
-    Re-queuing means clearing ``<service>_match_status`` back to NULL (and
-    ``<service>_last_attempted`` to NULL): every worker's pending query selects
-    ``match_status IS NULL`` first, so the item is retried on the next pass.
-    Nulling last_attempted alone is NOT enough — the not_found retry path uses
-    ``last_attempted < cutoff`` and ``NULL < cutoff`` is false, so the item
-    would never be picked up.
+    """Select the native entity IDs whose attempts should be cleared.
 
       * scope='item'   -> a single row (requires entity_id)
       * scope='failed' -> every 'not_found' row for this entity type
@@ -216,38 +205,14 @@ def build_reset_query(
 
     meta = _ENTITY_TABLE[entity_type]
     table = meta['table']
-    ms = match_status_column(service)
-    la = last_attempted_column(service)
-    set_parts = [f"{ms} = NULL", f"{la} = NULL"]
-
-    # Also forget the stored source ID so re-matching actually RE-RESOLVES the
-    # entity. Without this, the worker hits its existing-id short-circuit, sees
-    # the old (possibly WRONG) id and just re-confirms it — which is why "click
-    # to rematch" never fixed a mis-matched same-name artist (#868). Tracks keep
-    # their ids in file tags rather than a column, so only artist/album clear one
-    # — except Bandcamp, whose canonical match handle (bandcamp_url) lives in a
-    # real column on BOTH albums and tracks, so it must be nulled for tracks too
-    # or the worker re-confirms the old release from bandcamp_url.
-    if entity_type in ('artist', 'album') or service == 'bandcamp':
-        try:
-            from core.source_ids import id_column
-            id_col = id_column(service, entity_type)
-        except Exception:
-            id_col = None
-        if id_col:
-            set_parts.append(f"{id_col} = NULL")
-    # Bandcamp carries a supplementary numeric id alongside its canonical URL;
-    # clear it too so a stale id can't linger past a reset.
-    if service == 'bandcamp':
-        set_parts.append("bandcamp_id = NULL")
-    set_clause = "SET " + ", ".join(set_parts)
-
     if scope == 'item':
         if not entity_id:
             raise UnmatchedQueryError("entity_id is required for an item reset")
-        return f"UPDATE {table} {set_clause} WHERE id = ?", [entity_id]
+        return f"SELECT id FROM {table} WHERE id = ?", [entity_id]
     # 'failed' — re-queue everything this source explicitly gave up on.
-    return f"UPDATE {table} {set_clause} WHERE {ms} = 'not_found'", []
+    return (f"SELECT e.id FROM {table} e JOIN lib2_provider_attempts pa "
+            "ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
+            "WHERE pa.status='not_found'", [entity_type, service])
 
 
 def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
@@ -255,16 +220,17 @@ def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
     _validate(service, entity_type)
     meta = _ENTITY_TABLE[entity_type]
     table = meta['table']
-    ms = f"{table}.{match_status_column(service)}"
+    ms = "pa.status"
     sql = (
         "SELECT "
         f"SUM(CASE WHEN {ms} = 'matched' THEN 1 ELSE 0 END) AS matched, "
         f"SUM(CASE WHEN {ms} = 'not_found' THEN 1 ELSE 0 END) AS not_found, "
         f"SUM(CASE WHEN {ms} IS NULL THEN 1 ELSE 0 END) AS pending, "
         f"COUNT(*) AS total "
-        f"FROM {table}"
+        f"FROM {table} e LEFT JOIN lib2_provider_attempts pa "
+        f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=?"
     )
-    return sql, []
+    return sql, [entity_type, service]
 
 
 def _clamp_limit(limit) -> int:

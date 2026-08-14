@@ -112,3 +112,19 @@ def test_delete_track_by_file_path(tmp_path):
     assert db.delete_track_by_file_path('/music/k/squabble.flac') == 1
     assert db.delete_track_by_file_path('/music/k/squabble.flac') == 0
     assert db.delete_track_by_file_path('') == 0
+
+
+def test_delete_track_by_file_path_keeps_other_files_and_catalogue(tmp_path):
+    from tests.support.catalogue_seed import seed_library_track
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        track = seed_library_track(conn, artist='A', album='Al', title='Song',
+                                   file_path='/music/a.flac')
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) "
+                     "VALUES(?, '/music/b.flac', 0)", (track,))
+
+    assert db.delete_track_by_file_path('/music/a.flac') == 1
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?", (track,)).fetchone()
+        assert conn.execute("SELECT is_primary FROM lib2_track_files "
+                            "WHERE path='/music/b.flac'").fetchone()[0] == 1

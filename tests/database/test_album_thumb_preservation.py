@@ -48,11 +48,15 @@ def _seed(db):
     artist = cur.execute(
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Tyler', 'tyler', 'navidrome', 'artist-1')").lastrowid
-    cur.execute(
+    album = cur.execute(
         "INSERT INTO lib2_albums (primary_artist_id, title, year, image_url, origin,"
         "                         server_source, server_id)"
         " VALUES (?, 'Flower Boy', 2017, '/rest/getCoverArt?id=correct-cover',"
-        "         'library', 'navidrome', 'album-1')", (artist,))
+        "         'library', 'navidrome', 'album-1')", (artist,)).lastrowid
+    track = cur.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Track')",
+                        (album,)).lastrowid
+    cur.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?, '/music/track.flac')",
+                (track,))
     db._conn.commit()
 
 
@@ -67,7 +71,7 @@ def test_album_refresh_preserves_existing_thumb_when_incoming_thumb_missing():
     assert row["image_url"] == "/rest/getCoverArt?id=correct-cover"
 
 
-def test_album_refresh_updates_existing_thumb_when_incoming_thumb_present():
+def test_album_refresh_does_not_replace_catalogue_thumb():
     db = _InMemoryDB()
     _seed(db)
 
@@ -78,4 +82,4 @@ def test_album_refresh_updates_existing_thumb_when_incoming_thumb_present():
 
     row = db._conn.execute(
         "SELECT image_url FROM lib2_albums WHERE server_id = 'album-1'").fetchone()
-    assert row["image_url"] == "/rest/getCoverArt?id=new-cover"
+    assert row["image_url"] == "/rest/getCoverArt?id=correct-cover"

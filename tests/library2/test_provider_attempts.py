@@ -205,3 +205,34 @@ class TestSeedingFromLegacy:
         """After the legacy tables are dropped (§32.3.1 stage 4) this must go
         quiet on its own rather than raise on every start."""
         assert backfill_from_legacy(conn) == {"seeded": 0, "scanned": 0}
+
+    def test_all_pages_and_similar_artist_state_are_seeded(self, conn):
+        conn.execute("CREATE TABLE artists(id INTEGER PRIMARY KEY, "
+                     "similar_artists_match_status TEXT)")
+        for entity_id in range(1, 4):
+            conn.execute("INSERT INTO artists VALUES(?, 'matched')", (entity_id,))
+            conn.execute("UPDATE lib2_artists SET legacy_artist_id=? WHERE id=?",
+                         (entity_id, entity_id))
+
+        assert backfill_from_legacy(conn, limit=1) == {"seeded": 3, "scanned": 3}
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_provider_attempts WHERE service='similar_artists'"
+        ).fetchone()[0] == 3
+
+
+def test_upgrade_import_itself_seeds_attempt_history(legacy_db):
+    from core.library2.importer import import_legacy_library
+
+    with legacy_db._get_connection() as source:
+        source.execute("ALTER TABLE artists ADD COLUMN similar_artists_match_status TEXT")
+        source.execute(
+            "UPDATE artists SET similar_artists_match_status='matched' WHERE id=1")
+        source.commit()
+
+    import_legacy_library(legacy_db)
+
+    with legacy_db._get_connection() as conn:
+        assert conn.execute(
+            "SELECT status FROM lib2_provider_attempts "
+            "WHERE entity_type='artist' AND service='similar_artists'"
+        ).fetchone()[0] == "matched"

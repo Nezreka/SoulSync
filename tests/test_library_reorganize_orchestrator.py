@@ -119,43 +119,43 @@ def _setup_album(db, *, album_id='alb-1', spotify_id='', deezer_id='',
     `tracks` is a list of `(track_id, track_number, title, file_path)`.
     """
     cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
+    cur.execute("CREATE TABLE lib2_artists (id TEXT PRIMARY KEY, name TEXT)")
     cur.execute("""
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id TEXT PRIMARY KEY,
-            artist_id TEXT,
+            primary_artist_id TEXT,
             title TEXT,
-            spotify_album_id TEXT,
-            deezer_id TEXT,
-            itunes_album_id TEXT,
-            discogs_id TEXT,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            external_ids TEXT,
             soul_id TEXT
         )
     """)
     cur.execute("""
-        CREATE TABLE tracks (
+        CREATE TABLE lib2_tracks (
             id TEXT PRIMARY KEY,
             album_id TEXT,
-            artist_id TEXT,
             title TEXT,
             track_number INTEGER,
-            file_path TEXT,
+            disc_number INTEGER,
             updated_at TEXT
         )
     """)
-    cur.execute("INSERT INTO artists VALUES (?, ?)", ('artist-1', 'Aerosmith'))
+    cur.execute("CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id TEXT, path TEXT, file_state TEXT, is_primary INTEGER)")
+    cur.execute("INSERT INTO lib2_artists VALUES (?, ?)", ('artist-1', 'Aerosmith'))
     cur.execute(
-        "INSERT INTO albums (id, artist_id, title, spotify_album_id, deezer_id, "
-        "itunes_album_id, discogs_id, soul_id) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO lib2_albums (id, primary_artist_id, title, spotify_id, external_ids, soul_id) "
+        "VALUES (?,?,?,?,json_object('deezer',?,'itunes',?,'discogs',?),?)",
         (album_id, 'artist-1', 'Aerosmith (1973)', spotify_id, deezer_id,
          itunes_id, discogs_id, soul_id),
     )
-    for tid, tn, title, fp in tracks:
+    for index, (tid, tn, title, fp) in enumerate(tracks, 1):
         cur.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) "
-            "VALUES (?,?,?,?,?,?)",
-            (tid, album_id, 'artist-1', title, tn, fp),
+            "INSERT INTO lib2_tracks (id, album_id, title, track_number, disc_number) "
+            "VALUES (?,?,?,?,1)", (tid, album_id, title, tn),
         )
+        cur.execute("INSERT INTO lib2_track_files VALUES (?,?,?,'active',1)",
+                    (index, tid, fp))
     db._conn.commit()
 
 
@@ -1643,16 +1643,16 @@ def test_returns_no_album_when_id_does_not_exist(tmpdirs):
     _library, staging, _transfer = tmpdirs
     db = _FakeDB()
     cur = db._conn.cursor()
-    cur.execute("CREATE TABLE artists (id TEXT, name TEXT)")
+    cur.execute("CREATE TABLE lib2_artists (id TEXT, name TEXT)")
     cur.execute(
-        "CREATE TABLE albums (id TEXT, artist_id TEXT, title TEXT, "
-        "spotify_album_id TEXT, deezer_id TEXT, itunes_album_id TEXT, "
-        "discogs_id TEXT, soul_id TEXT)"
+        "CREATE TABLE lib2_albums (id TEXT, primary_artist_id TEXT, title TEXT, "
+        "spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT, soul_id TEXT)"
     )
     cur.execute(
-        "CREATE TABLE tracks (id TEXT, album_id TEXT, artist_id TEXT, "
-        "title TEXT, track_number INTEGER, file_path TEXT, updated_at TEXT)"
+        "CREATE TABLE lib2_tracks (id TEXT, album_id TEXT, title TEXT, "
+        "track_number INTEGER, disc_number INTEGER, updated_at TEXT)"
     )
+    cur.execute("CREATE TABLE lib2_track_files (id INTEGER, track_id TEXT, path TEXT, file_state TEXT, is_primary INTEGER)")
     db._conn.commit()
 
     summary = library_reorganize.reorganize_album(

@@ -619,10 +619,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         with db._get_connection() as conn:
             cursor = conn.cursor()
 
-            # SoulSync-as-media-server writes the catalogue through the very
-            # same upserts the Plex/Jellyfin/Navidrome scan uses — `soulsync`
-            # is just another server_source, and the stable hash ids are its
-            # server ids (§50.4.4.29).
+            # A completed import is an ownership path.  It alone opts into
+            # catalogue/file creation; media-server scans use these helpers in
+            # mapping-only mode.
             from core.library2.media_server_sync import (
                 upsert_album, upsert_artist, upsert_track,
             )
@@ -630,7 +629,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             catalogue_artist = upsert_artist(
                 cursor, server_source="soulsync", server_id=artist_id,
                 name=artist_name, image_url=image_url or None,
-                genres_json=genres_json or None, overwrite=False)
+                genres_json=genres_json or None, overwrite=False,
+                allow_create=True)
             _fill_external_id(cursor, "lib2_artists", catalogue_artist, source, artist_source_id)
 
             # Group by CANONICAL release id when we have one (not just the name
@@ -659,7 +659,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     artist_id=catalogue_artist, title=album_name, year=year,
                     image_url=image_url or None, genres_json=genres_json or None,
                     track_count=total_tracks or None,
-                    duration=album_total_duration_ms or None)
+                    duration=album_total_duration_ms or None,
+                    allow_create=True)
             _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
 
             catalogue_track = upsert_track(
@@ -667,7 +668,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 album_id=catalogue_album, artist_id=catalogue_artist,
                 title=track_name, track_number=track_number, duration=duration_ms,
                 track_artist=track_artist, musicbrainz_id=track_mbid,
-                file_path=final_path, file_size=file_size, bitrate=bitrate)
+                file_path=final_path, file_size=file_size, bitrate=bitrate,
+                allow_create=True, file_source="import")
             cursor.execute("UPDATE lib2_tracks SET isrc=COALESCE(?, isrc) WHERE id=?",
                            (track_isrc, catalogue_track))
             if track_quality_profile_id:

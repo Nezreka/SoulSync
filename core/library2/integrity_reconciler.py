@@ -185,48 +185,6 @@ def _quarantine_disk_findings(
     return observed
 
 
-def _mirror_divergence_findings(
-    collector: _Collector, conn: Any,
-) -> Tuple[bool, Dict[str, int]]:
-    """Turn the legacy↔lib2 mirror comparison into findings (iss32-T01a).
-
-    docs §32.3.1 promise 2: while both table worlds exist, their disagreement
-    is a figure in this report with an expected value of 0, not a matter of
-    trust. The walk and the compared field set both live in
-    ``core.library2.enrich`` — the same module the mirror writes through, so
-    the audit cannot fall behind what the mirror copies, and this auditor stays
-    what it says it is: a reader.
-    """
-    from core.library2.enrich import iter_mirror_divergences, mirror_check_ran
-
-    observed = {"mirror_checked": 0, "mirror_pending": 0, "mirror_dangling": 0}
-    ran = mirror_check_ran(conn)
-    if not ran:
-        return False, observed
-    for item in iter_mirror_divergences(conn):
-        if item.status == "pending":
-            observed["mirror_pending"] += 1
-        elif item.status == "dangling":
-            observed["mirror_dangling"] += 1
-            collector.add(
-                "lib2_mirror_legacy_row_missing", "info", "mirror_divergence",
-                item.lib2_id,
-                "Library-v2 row points at a legacy row that no longer exists",
-                entity_type=item.entity_type, legacy_id=item.legacy_id,
-            )
-        else:
-            observed["mirror_checked"] += 1
-            if item.status == "divergent":
-                collector.add(
-                    "lib2_mirror_divergence", "error", "mirror_divergence",
-                    item.lib2_id,
-                    "Mirrored legacy enrichment has not reached the Library-v2 row",
-                    entity_type=item.entity_type, legacy_id=item.legacy_id,
-                    fields=sorted(item.fields), values=item.fields,
-                )
-    return ran, observed
-
-
 def build_integrity_report(
     conn: Any,
     *,
@@ -314,45 +272,7 @@ def build_integrity_report(
                     track_ids=sorted(track_ids),
                 )
 
-    legacy_real: set[str] = set()
-    legacy_rows: list[dict] = []
-    if tables["tracks"] and "file_path" in _columns(conn, "tracks"):
-        select = "id, file_path"
-        if "server_source" in _columns(conn, "tracks"):
-            select += ", server_source"
-        legacy_rows = _dict_rows(
-            conn, f"SELECT {select} FROM tracks WHERE file_path IS NOT NULL AND file_path<>''",
-        )
-        observed["legacy_files"] = len(legacy_rows)
-        for row in legacy_rows:
-            resolved = _resolved(row["file_path"], config_manager=config_manager)
-            if not resolved:
-                healthy = missing_path_root_is_healthy(
-                    row["file_path"], config_manager=config_manager,
-                )
-                if healthy:
-                    collector.add(
-                        "legacy_index_file_missing", "warning", "legacy_index",
-                        row["id"], "Legacy/media-server projection points to a missing file",
-                        path=row["file_path"], storage_root_healthy=True,
-                    )
-                continue
-            key = _normalized(resolved)
-            legacy_real.add(key)
-            if key not in lib2_real:
-                collector.add(
-                    "legacy_only_indexed_file", "warning", "index_divergence",
-                    row["id"], "Real file is indexed by Legacy but not active Library v2",
-                    path=row["file_path"], resolved_path=resolved,
-                    server_source=row.get("server_source"),
-                )
-    for key in sorted(lib2_real - legacy_real):
-        collector.add(
-            "lib2_only_indexed_file", "info", "index_divergence", key,
-            "Real file is indexed by Library v2 but not the Legacy/media-server projection",
-            resolved_path=key,
-        )
-    indexed_real = lib2_real | legacy_real
+    indexed_real = lib2_real
 
     for table, component in (
         ("track_downloads", "download_provenance"),
@@ -520,11 +440,6 @@ def build_integrity_report(
             )
 
     observed.update(_quarantine_disk_findings(collector, quarantine_dir))
-
-    mirror_ran, mirror_observed = _mirror_divergence_findings(collector, conn)
-    coverage["mirror_divergence"] = mirror_ran
-    if mirror_ran:
-        observed.update(mirror_observed)
 
     clients = {
         str(key): dict(value)

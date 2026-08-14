@@ -54,6 +54,15 @@ def _album(conn, artist_id, title, **columns):
     return album_id
 
 
+def _own(conn, album_id, name="Song"):
+    track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (album_id, name)
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+        "VALUES(?,?,1,'active')", (track, f"/music/{album_id}.flac"))
+
+
 class TestTheProviderIdConflictCheck:
     """Whether a differently-named artist already holds this provider id."""
 
@@ -164,10 +173,10 @@ class TestOwnedAlbumTitles:
         from core.library2.worker_support import owned_album_titles
 
         artist = _artist(conn, "Rone")
-        _album(conn, artist, "Tohu Bohu")
-        _album(conn, artist, "Creatures")
+        _own(conn, _album(conn, artist, "Tohu Bohu"))
+        _own(conn, _album(conn, artist, "Creatures"))
         other = _artist(conn, "Someone Else")
-        _album(conn, other, "Not Mine")
+        _own(conn, _album(conn, other, "Not Mine"))
 
         assert sorted(owned_album_titles(conn, artist)) == ["Creatures", "Tohu Bohu"]
 
@@ -177,7 +186,7 @@ class TestOwnedAlbumTitles:
         from core.library2.worker_support import owned_album_titles
 
         artist = _artist(conn, "Rone")
-        _album(conn, artist, "Owned")
+        _own(conn, _album(conn, artist, "Owned"))
         _album(conn, artist, "Provider Only", origin="discography")
 
         assert owned_album_titles(conn, artist) == ["Owned"]
@@ -190,6 +199,7 @@ class TestOwnedAlbumTitles:
         artist = _artist(conn, "Rone")
         various = _artist(conn, "Various Artists")
         album = _album(conn, various, "A Compilation")
+        _own(conn, album)
         conn.execute(
             "INSERT INTO lib2_album_artists(album_id,artist_id,role) "
             "VALUES(?,?,'featured')", (album, artist))

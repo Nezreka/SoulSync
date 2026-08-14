@@ -1,17 +1,4 @@
-"""Tests for core.library2.reorganize_bridge (docs §50, Interactive Reorganize).
-
-The bridge resolves a lib2 album/artist to its legacy back-reference and
-delegates to the existing (legacy-schema) reorganize planner/queue — see the
-module docstring for why reimplementing that pipeline against lib2 tables
-would be a second implementation to keep in sync. These tests pin:
-
-1. Legacy-id resolution: found-with-link, found-without-link (409), missing
-   entity (404).
-2. Each public function resolves the id THEN delegates to the right
-   core.library_reorganize / core.reorganize_queue call with the right args.
-3. Planner-level failure statuses (no_album/no_tracks) surface as
-   ReorganizeBridgeError, not a raw dict the caller has to re-inspect.
-"""
+"""Tests for the native Library-v2 interactive reorganize bridge."""
 
 import sys
 import types
@@ -56,8 +43,10 @@ def _attach_reorganize_helpers(db):
         try:
             row = conn.execute(
                 """SELECT al.title AS album_title, ar.id AS artist_id, ar.name AS artist_name
-                   FROM albums al JOIN artists ar ON al.artist_id = ar.id WHERE al.id=?""",
-                (str(album_id),),
+                   FROM lib2_albums al JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+                   WHERE al.id=? AND EXISTS (
+                     SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+                     WHERE t.album_id=al.id AND f.file_state='active')""", (album_id,),
             ).fetchone()
         finally:
             conn.close()
@@ -68,10 +57,11 @@ def _attach_reorganize_helpers(db):
         try:
             rows = conn.execute(
                 """SELECT al.id AS album_id, al.title AS album_title, ar.id AS artist_id,
-                          ar.name AS artist_name
-                   FROM albums al JOIN artists ar ON al.artist_id = ar.id WHERE ar.id=?
-                   ORDER BY al.year ASC, al.title ASC""",
-                (str(artist_id),),
+                          ar.name AS artist_name FROM lib2_albums al
+                   JOIN lib2_artists ar ON al.primary_artist_id = ar.id WHERE ar.id=?
+                   AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id
+                     WHERE t.album_id=al.id AND f.file_state='active')
+                   ORDER BY al.year ASC, al.title ASC""", (artist_id,),
             ).fetchall()
         finally:
             conn.close()
@@ -121,19 +111,16 @@ def reset_queue_singleton():
 # -- resolve_legacy_album_id / resolve_legacy_artist_id ----------------------
 
 
-def test_resolve_legacy_album_id_returns_the_backref(imported_legacy_db):
+def test_resolve_album_id_returns_the_native_id(imported_legacy_db):
     conn = imported_legacy_db._get_connection()
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
-    assert resolve_legacy_album_id(imported_legacy_db._get_connection(), lib2_album_id) == 10
+    assert resolve_legacy_album_id(imported_legacy_db._get_connection(), lib2_album_id) == lib2_album_id
 
 
-def test_resolve_legacy_album_id_raises_409_without_backref(discography_only_album, imported_legacy_db):
+def test_resolve_album_id_accepts_catalogue_only_rows(discography_only_album, imported_legacy_db):
     conn = imported_legacy_db._get_connection()
-    with pytest.raises(ReorganizeBridgeError) as exc_info:
-        resolve_legacy_album_id(conn, discography_only_album)
-    assert exc_info.value.status == 409
-    assert "Update Discography" in str(exc_info.value)
+    assert resolve_legacy_album_id(conn, discography_only_album) == discography_only_album
 
 
 def test_resolve_legacy_album_id_raises_404_for_missing_album(imported_legacy_db):
@@ -143,16 +130,16 @@ def test_resolve_legacy_album_id_raises_404_for_missing_album(imported_legacy_db
     assert exc_info.value.status == 404
 
 
-def test_resolve_legacy_artist_id_returns_the_backref(imported_legacy_db):
+def test_resolve_artist_id_returns_the_native_id(imported_legacy_db):
     conn = imported_legacy_db._get_connection()
     lib2_artist_id = conn.execute(
         "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
     ).fetchone()["id"]
     conn.close()
-    assert resolve_legacy_artist_id(imported_legacy_db._get_connection(), lib2_artist_id) == 1
+    assert resolve_legacy_artist_id(imported_legacy_db._get_connection(), lib2_artist_id) == lib2_artist_id
 
 
-def test_resolvers_preserve_text_legacy_backrefs(imported_legacy_db):
+def test_resolvers_ignore_legacy_backrefs(imported_legacy_db):
     album_legacy_id = "01MoTj8w4VkVtgdPOijUUE"
     artist_legacy_id = "base62-artist-key"
     conn = imported_legacy_db._get_connection()
@@ -172,21 +159,19 @@ def test_resolvers_preserve_text_legacy_backrefs(imported_legacy_db):
     )
     conn.commit()
 
-    assert resolve_legacy_album_id(conn, album_id) == album_legacy_id
-    assert resolve_legacy_artist_id(conn, artist_id) == artist_legacy_id
+    assert resolve_legacy_album_id(conn, album_id) == album_id
+    assert resolve_legacy_artist_id(conn, artist_id) == artist_id
     conn.close()
 
 
-def test_resolve_legacy_artist_id_raises_409_without_backref(imported_legacy_db):
+def test_resolve_artist_id_accepts_native_rows_without_backref(imported_legacy_db):
     conn = imported_legacy_db._get_connection()
     conn.execute(
         "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES ('New Artist', NULL)"
     )
     conn.commit()
     artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='New Artist'").fetchone()["id"]
-    with pytest.raises(ReorganizeBridgeError) as exc_info:
-        resolve_legacy_artist_id(conn, artist_id)
-    assert exc_info.value.status == 409
+    assert resolve_legacy_artist_id(conn, artist_id) == artist_id
 
 
 # -- album_reorganize_sources / global_reorganize_sources --------------------
@@ -211,10 +196,8 @@ def test_album_reorganize_sources_delegates_after_resolving(monkeypatch, importe
     assert captured['album_data']['title'] == 'Views'
 
 
-def test_album_reorganize_sources_raises_for_discography_only(discography_only_album, imported_legacy_db):
-    with pytest.raises(ReorganizeBridgeError) as exc_info:
-        album_reorganize_sources(imported_legacy_db, discography_only_album)
-    assert exc_info.value.status == 409
+def test_album_reorganize_sources_for_discography_only_are_empty(discography_only_album, imported_legacy_db):
+    assert album_reorganize_sources(imported_legacy_db, discography_only_album) == []
 
 
 def test_global_reorganize_sources_delegates(monkeypatch):
@@ -247,7 +230,7 @@ def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_l
         source="spotify", mode="tags",
     )
     assert result["status"] == "planned"
-    assert captured['album_id'] == '10'
+    assert captured['album_id'] == lib2_album_id
     assert captured['primary_source'] == 'spotify'
     assert captured['strict_source'] is True
     assert captured['metadata_source'] == 'tags'
@@ -255,10 +238,10 @@ def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_l
     assert callable(captured['build_final_path_fn'])
 
 
-def test_preview_album_reorganize_raises_for_discography_only(discography_only_album, imported_legacy_db):
+def test_preview_album_reorganize_rejects_album_without_files(discography_only_album, imported_legacy_db):
     with pytest.raises(ReorganizeBridgeError) as exc_info:
         preview_album_reorganize(imported_legacy_db, config_manager=None, lib2_album_id=discography_only_album)
-    assert exc_info.value.status == 409
+    assert exc_info.value.status == 404
 
 
 def test_preview_album_reorganize_translates_no_source_id_status_through(monkeypatch, imported_legacy_db):
@@ -306,13 +289,13 @@ def test_enqueue_album_reorganize_resolves_and_enqueues(imported_legacy_db):
     snap = get_queue().snapshot()
     all_ids = [snap['active']['album_id']] if snap['active'] else []
     all_ids += [item['album_id'] for item in snap['queued']]
-    assert '10' in all_ids
+    assert str(lib2_album_id) in all_ids
 
 
-def test_enqueue_album_reorganize_raises_for_discography_only(discography_only_album, imported_legacy_db):
+def test_enqueue_album_reorganize_rejects_album_without_files(discography_only_album, imported_legacy_db):
     with pytest.raises(ReorganizeBridgeError) as exc_info:
         enqueue_album_reorganize(imported_legacy_db, discography_only_album)
-    assert exc_info.value.status == 409
+    assert exc_info.value.status == 404
 
 
 # -- enqueue_artist_reorganize_all --------------------------------------------
@@ -332,7 +315,7 @@ def test_enqueue_artist_reorganize_all_resolves_and_enqueues_every_album(importe
     assert result["already_queued"] == 0
 
 
-def test_enqueue_artist_reorganize_all_raises_for_missing_backref(imported_legacy_db):
+def test_enqueue_artist_reorganize_all_rejects_artist_without_owned_albums(imported_legacy_db):
     conn = imported_legacy_db._get_connection()
     conn.execute(
         "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES ('New Artist', NULL)"
@@ -342,7 +325,7 @@ def test_enqueue_artist_reorganize_all_raises_for_missing_backref(imported_legac
     conn.close()
     with pytest.raises(ReorganizeBridgeError) as exc_info:
         enqueue_artist_reorganize_all(imported_legacy_db, artist_id)
-    assert exc_info.value.status == 409
+    assert exc_info.value.status == 404
 
 
 def test_enqueue_artist_reorganize_all_includes_linked_alias_legacy_artist(
@@ -352,16 +335,18 @@ def test_enqueue_artist_reorganize_all_includes_linked_alias_legacy_artist(
     canonical_id = conn.execute(
         "SELECT id FROM lib2_artists WHERE legacy_artist_id=1"
     ).fetchone()["id"]
-    conn.execute(
-        "INSERT INTO artists VALUES(2, 'Alias Artist', NULL, NULL, NULL, NULL, NULL)"
-    )
     alias_id = conn.execute(
         "INSERT INTO lib2_artists(name, legacy_artist_id) VALUES('Alias Artist', 2)"
     ).lastrowid
-    conn.execute(
-        "INSERT INTO albums(id, artist_id, title, year) "
-        "VALUES(999, 2, 'Alias Legacy Album', 2026)"
-    )
+    alias_album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,year) VALUES(?,'Alias Album',2026)",
+        (alias_id,),
+    ).lastrowid
+    alias_track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Alias Track')", (alias_album,),
+    ).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,'/alias.flac',1)",
+                 (alias_track,))
     from core.library2.artist_aliases import link_artist_alias
     link_artist_alias(conn, alias_id, canonical_id)
     conn.commit()

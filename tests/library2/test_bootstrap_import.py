@@ -210,7 +210,7 @@ def test_try_claim_concurrent_race_has_exactly_one_winner(legacy_db):
     assert len(results) == 8
 
 
-def test_empty_fresh_install_retries_after_first_library_rows_arrive(legacy_db):
+def test_empty_fresh_install_is_immediately_converged(legacy_db):
     conn = legacy_db._get_connection()
     try:
         conn.execute("DELETE FROM tracks")
@@ -222,28 +222,10 @@ def test_empty_fresh_install_retries_after_first_library_rows_arrive(legacy_db):
 
     first = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
     assert first["success"] is True
-    assert first["waiting_for_source"] is True
-    assert lib2_bootstrap.get_state(legacy_db)["status"] == "waiting_for_source"
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
     assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled) == {
-        "skipped": "empty_source"
+        "skipped": "already_done"
     }
-
-    conn = legacy_db._get_connection()
-    try:
-        conn.execute("INSERT INTO artists(id, name) VALUES(90001, 'Late Artist')")
-        conn.commit()
-    finally:
-        conn.close()
-
-    second = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
-    assert second["success"] is True
-    conn = legacy_db._get_connection()
-    try:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM lib2_artists WHERE legacy_artist_id=90001"
-        ).fetchone()[0] == 1
-    finally:
-        conn.close()
 
 
 # --- iss29-A08: a working migration must never look dead ------------------

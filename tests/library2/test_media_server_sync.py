@@ -1,13 +1,7 @@
-"""The media-server scan writing into the catalogue.
-
-The scan is the one path on which rows come into existence. What has to hold:
-it finds the row it already wrote (even after the server re-keyed it), it never
-clears what a provider enriched, and a file is a row of its own.
-"""
+"""Media servers map existing Library-v2 rows; only imports create them."""
 
 from __future__ import annotations
 
-import json
 import sqlite3
 
 import pytest
@@ -23,156 +17,169 @@ def cur():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
-    conn.commit()
     yield conn.cursor()
     conn.close()
 
 
-# ── artists ────────────────────────────────────────────────────────────────
-
-def test_the_same_artist_twice_is_one_row(cur):
-    first = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    again = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-
-    assert first == again
-    assert cur.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 1
-
-
-def test_a_rekeyed_artist_keeps_its_row(cur):
-    """A rescan hands out new rating keys. The legacy scan answered that by
-    building a new row and copying enrichment across; the catalogue row simply
-    takes the new stamp."""
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    cur.execute("UPDATE lib2_artists SET spotify_id='SP1' WHERE id=?", (artist_id,))
-
-    again = upsert_artist(cur, server_source='plex', server_id='999', name='Muse')
-
-    assert again == artist_id
-    row = cur.execute("SELECT server_id, spotify_id FROM lib2_artists").fetchone()
-    assert (row['server_id'], row['spotify_id']) == ('999', 'SP1')
+def _imported(cur, *, origin="library", path="/music/song.flac"):
+    artist = cur.execute(
+        "INSERT INTO lib2_artists(name,name_key,image_url) VALUES('Muse','muse','provider.jpg')"
+    ).lastrowid
+    album = cur.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,origin) VALUES(?,'Absolution',?)",
+        (artist, origin),
+    ).lastrowid
+    track = cur.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number,disc_number) "
+        "VALUES(?,'Time Is Running Out',4,1)", (album,),
+    ).lastrowid
+    file_id = cur.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state,size) "
+        "VALUES(?,?,1,'active',4096)", (track, path),
+    ).lastrowid
+    return artist, album, track, file_id
 
 
-def test_a_scan_never_clears_enrichment(cur):
-    """The server knows the name. It does not know the artwork a provider
-    resolved, and a scan that sent none must not take it away."""
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse',
-                              image_url='provider.jpg', genres_json='["Rock"]')
-
-    upsert_artist(cur, server_source='plex', server_id='7', name='Muse',
-                  image_url=None, genres_json=None)
-
-    row = cur.execute("SELECT image_url, genres FROM lib2_artists WHERE id=?",
-                      (artist_id,)).fetchone()
-    assert (row['image_url'], row['genres']) == ('provider.jpg', '["Rock"]')
-
-
-def test_an_artist_that_arrived_by_download_is_adopted(cur):
-    """A download or an import may have created the artist first. The scan takes
-    that row over instead of forking a second one under the same name."""
-    cur.execute("INSERT INTO lib2_artists(name, name_key) VALUES('Muse','muse')")
-    existing = cur.lastrowid
-
-    adopted = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-
-    assert adopted == existing
-    assert cur.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 1
+def test_unknown_server_entities_never_create_catalogue_rows(cur):
+    assert upsert_artist(
+        cur, server_source="plex", server_id="7", name="Unknown"
+    ) is None
+    assert upsert_album(
+        cur, server_source="plex", server_id="70", artist_id=999, title="Unknown"
+    ) is None
+    assert upsert_track(
+        cur, server_source="plex", server_id="700", album_id=999,
+        artist_id=999, title="Unknown", file_path="/media/unknown.flac",
+    ) is None
+    assert cur.execute("SELECT COUNT(*) FROM lib2_artists").fetchone()[0] == 0
+    assert cur.execute("SELECT COUNT(*) FROM lib2_albums").fetchone()[0] == 0
+    assert cur.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 0
+    assert cur.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == 0
 
 
-# ── albums ─────────────────────────────────────────────────────────────────
+def test_server_maps_existing_imported_rows_and_preserves_catalogue_metadata(cur):
+    artist, album, track, _file = _imported(cur)
 
-def test_an_album_from_the_server_is_owned(cur):
-    """`origin='library'` is the whole point: the server has the files."""
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
+    assert upsert_artist(
+        cur, server_source="plex", server_id="7", name="Muse",
+        image_url=None, genres_json=None,
+    ) == artist
+    assert upsert_album(
+        cur, server_source="plex", server_id="70", artist_id=artist,
+        title="absolution", track_count=12, duration=1000,
+    ) == album
+    assert upsert_track(
+        cur, server_source="plex", server_id="700", album_id=album,
+        artist_id=artist, title="Time Is Running Out", track_number=4,
+        disc_number=1, file_path="/music/song.flac", file_size=5000,
+        bitrate=1411,
+    ) == track
 
-    album_id = upsert_album(cur, server_source='plex', server_id='70',
-                            artist_id=artist_id, title='Absolution')
-
-    row = cur.execute("SELECT origin, primary_artist_id FROM lib2_albums WHERE id=?",
-                      (album_id,)).fetchone()
-    assert (row['origin'], row['primary_artist_id']) == ('library', artist_id)
+    assert resolve_artist(cur, "plex", "7") == artist
+    assert resolve_album(cur, "plex", "70") == album
     assert cur.execute(
-        "SELECT COUNT(*) FROM lib2_album_artists WHERE album_id=?",
-        (album_id,)).fetchone()[0] == 1
-
-
-def test_an_album_the_catalogue_already_listed_becomes_owned(cur):
-    """v2 keeps a followed artist's discography. When the files show up, that
-    row is the one to fill in — a second row would list the album twice, once
-    as wanted and once as owned."""
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    cur.execute(
-        "INSERT INTO lib2_albums(primary_artist_id, title, origin) "
-        "VALUES(?, 'Absolution', 'discography')", (artist_id,))
-    listed = cur.lastrowid
-
-    album_id = upsert_album(cur, server_source='plex', server_id='70',
-                            artist_id=artist_id, title='absolution')
-
-    assert album_id == listed
-    assert cur.execute("SELECT origin FROM lib2_albums WHERE id=?",
-                       (album_id,)).fetchone()['origin'] == 'library'
-
-
-# ── tracks and their files ─────────────────────────────────────────────────
-
-def test_a_track_puts_its_path_on_a_file_row(cur):
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    album_id = upsert_album(cur, server_source='plex', server_id='70',
-                            artist_id=artist_id, title='Absolution')
-
-    track_id = upsert_track(cur, server_source='plex', server_id='700',
-                            album_id=album_id, artist_id=artist_id,
-                            title='Time Is Running Out', track_number=4,
-                            file_path='/m/04 - time.flac', file_size=4096,
-                            bitrate=1411)
-
-    row = cur.execute(
-        "SELECT path, size, bitrate, format, is_primary FROM lib2_track_files "
-        " WHERE track_id=?", (track_id,)).fetchone()
-    assert row['path'] == '/m/04 - time.flac'
-    assert (row['size'], row['bitrate'], row['format'], row['is_primary']) == (
-        4096, 1411, 'flac', 1)
+        "SELECT image_url FROM lib2_artists WHERE id=?", (artist,)
+    ).fetchone()[0] == "provider.jpg"
     assert cur.execute(
-        "SELECT COUNT(*) FROM lib2_track_artists WHERE track_id=?",
-        (track_id,)).fetchone()[0] == 1
+        "SELECT origin FROM lib2_albums WHERE id=?", (album,)
+    ).fetchone()[0] == "library"
+    file_row = cur.execute(
+        "SELECT path,size,bitrate FROM lib2_track_files WHERE track_id=?", (track,)
+    ).fetchone()
+    assert tuple(file_row) == ("/music/song.flac", 5000, 1411)
 
 
-def test_a_rescan_without_a_size_keeps_the_one_it_had(cur):
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    album_id = upsert_album(cur, server_source='plex', server_id='70',
-                            artist_id=artist_id, title='Absolution')
-    common = dict(server_source='plex', server_id='700', album_id=album_id,
-                  artist_id=artist_id, title='Time', file_path='/m/t.flac')
-    upsert_track(cur, **common, file_size=4096, bitrate=1411)
+def test_server_does_not_stamp_catalogue_only_release(cur):
+    artist, album, track, file_id = _imported(cur, origin="discography")
+    cur.execute("DELETE FROM lib2_track_files WHERE id=?", (file_id,))
 
-    upsert_track(cur, **common, file_size=None, bitrate=None)
-
-    row = cur.execute("SELECT size, bitrate FROM lib2_track_files").fetchone()
-    assert (row['size'], row['bitrate']) == (4096, 1411)
-
-
-def test_a_moved_file_leaves_exactly_one_primary(cur):
-    artist_id = upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
-    album_id = upsert_album(cur, server_source='plex', server_id='70',
-                            artist_id=artist_id, title='Absolution')
-    common = dict(server_source='plex', server_id='700', album_id=album_id,
-                  artist_id=artist_id, title='Time')
-    track_id = upsert_track(cur, **common, file_path='/old/t.flac')
-
-    upsert_track(cur, **common, file_path='/new/t.flac')
-
-    primaries = cur.execute(
-        "SELECT path FROM lib2_track_files WHERE track_id=? AND is_primary=1",
-        (track_id,)).fetchall()
-    assert [r['path'] for r in primaries] == ['/new/t.flac']
+    assert upsert_artist(
+        cur, server_source="plex", server_id="7", name="Muse",
+    ) is None
+    assert upsert_album(
+        cur, server_source="plex", server_id="70", artist_id=artist,
+        title="Absolution",
+    ) is None
+    assert upsert_track(
+        cur, server_source="plex", server_id="700", album_id=album,
+        artist_id=artist, title="Time Is Running Out", track_number=4,
+        file_path="/server/not-imported.flac",
+    ) is None
+    assert tuple(cur.execute(
+        "SELECT origin,server_id FROM lib2_albums WHERE id=?", (album,)
+    ).fetchone()) == ("discography", None)
+    assert cur.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == 0
 
 
-# ── resolving the server's ids ─────────────────────────────────────────────
+def test_server_path_never_replaces_or_adds_imported_file_evidence(cur):
+    artist, album, track, _file = _imported(cur)
+    upsert_artist(cur, server_source="plex", server_id="7", name="Muse")
+    upsert_album(cur, server_source="plex", server_id="70", artist_id=artist,
+                 title="Absolution")
+    assert upsert_track(
+        cur, server_source="plex", server_id="700", album_id=album,
+        artist_id=artist, title="Time Is Running Out", track_number=4,
+        disc_number=1, file_path="/server/moved.flac",
+    ) == track
+    assert [row[0] for row in cur.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=?", (track,)
+    )] == ["/music/song.flac"]
 
-def test_ids_are_scoped_to_their_server(cur):
-    """Two servers hand out the same small numbers."""
-    upsert_artist(cur, server_source='plex', server_id='7', name='Muse')
 
-    assert resolve_artist(cur, 'jellyfin', '7') is None
-    assert resolve_artist(cur, 'plex', '7') is not None
-    assert resolve_album(cur, 'plex', 'nope') is None
+def test_import_pipeline_helpers_can_create_rows_and_keep_disc_identity(cur):
+    artist = upsert_artist(
+        cur, server_source="soulsync", server_id="a", name="Muse",
+        allow_create=True,
+    )
+    album = upsert_album(
+        cur, server_source="soulsync", server_id="al", artist_id=artist,
+        title="Live", allow_create=True,
+    )
+    for server_id, disc in (("t1", 1), ("t2", 2)):
+        upsert_track(
+            cur, server_source="soulsync", server_id=server_id,
+            album_id=album, artist_id=artist, title="Intro", track_number=1,
+            disc_number=disc, file_path=f"/music/{disc}.flac", allow_create=True,
+        )
+    assert cur.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 2
+    assert cur.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == 2
+
+
+def test_pipeline_file_has_ownership_provenance(cur):
+    artist = upsert_artist(cur, server_source="soulsync", server_id="a", name="Muse",
+                           allow_create=True)
+    album = upsert_album(cur, server_source="soulsync", server_id="al", artist_id=artist,
+                         title="Album", allow_create=True)
+    track = upsert_track(
+        cur, server_source="soulsync", server_id="tr", album_id=album,
+        artist_id=artist, title="Song", file_path="/music/song.flac",
+        allow_create=True, file_source="import",
+    )
+    assert tuple(cur.execute(
+        "SELECT source,file_state FROM lib2_track_files WHERE track_id=?", (track,)
+    ).fetchone()) == ("import", "active")
+
+
+def test_pipeline_primary_artist_corrections_replace_junctions(cur):
+    old = upsert_artist(cur, server_source="soulsync", server_id="old", name="Old",
+                        allow_create=True)
+    new = upsert_artist(cur, server_source="soulsync", server_id="new", name="New",
+                        allow_create=True)
+    album = upsert_album(cur, server_source="soulsync", server_id="al", artist_id=old,
+                         title="Album", allow_create=True)
+    track = upsert_track(cur, server_source="soulsync", server_id="tr", album_id=album,
+                         artist_id=old, title="Song", allow_create=True)
+    upsert_album(cur, server_source="soulsync", server_id="al", artist_id=new,
+                 title="Album", allow_create=True)
+    upsert_track(cur, server_source="soulsync", server_id="tr", album_id=album,
+                 artist_id=new, title="Song", allow_create=True)
+    assert cur.execute("SELECT artist_id FROM lib2_album_artists").fetchone()[0] == new
+    assert cur.execute("SELECT artist_id FROM lib2_track_artists WHERE track_id=?",
+                       (track,)).fetchone()[0] == new
+
+
+def test_server_ids_are_provider_scoped(cur):
+    artist, _album, _track, _file = _imported(cur)
+    upsert_artist(cur, server_source="plex", server_id="7", name="Muse")
+    assert resolve_artist(cur, "jellyfin", "7") is None
+    assert resolve_artist(cur, "plex", "7") == artist

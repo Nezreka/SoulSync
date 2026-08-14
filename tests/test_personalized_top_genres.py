@@ -51,9 +51,12 @@ class _Db:
             (artist_id, title, json.dumps(genres) if genres is not None else '[]',
              origin)).lastrowid
         for n in range(tracks):
-            self._conn.execute(
+            track_id = self._conn.execute(
                 "INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
-                (album_id, f"{title} {n}"))
+                (album_id, f"{title} {n}")).lastrowid
+            if origin == 'library':
+                self._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                                   (track_id, f'/music/{track_id}.flac'))
         self._conn.commit()
 
 
@@ -79,6 +82,10 @@ class TestGenres:
         db._conn.execute(
             "INSERT INTO lib2_albums(primary_artist_id, title, genres, origin) "
             "VALUES(1, 'Three', 'jazz, soul', 'library')")
+        track_id = db._conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(1,'Three 1')").lastrowid
+        db._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                         (track_id, '/music/three.flac'))
         db._conn.commit()
 
         assert dict(svc.get_top_genres_from_library(limit=5)) == {'jazz': 1, 'soul': 1}

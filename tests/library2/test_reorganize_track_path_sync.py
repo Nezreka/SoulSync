@@ -64,7 +64,7 @@ def imported_legacy_db(legacy_db):
     return legacy_db
 
 
-def test_legacy_path_update_atomically_updates_linked_lib2_file(
+def test_native_path_update_changes_only_primary_lib2_file(
     monkeypatch, tmp_path, imported_legacy_db
 ):
     conn = imported_legacy_db._get_connection()
@@ -86,8 +86,7 @@ def test_legacy_path_update_atomically_updates_linked_lib2_file(
 
     def fake_reorganize_album(*, update_track_path_fn, **kwargs):
         captured['update_track_path_fn'] = update_track_path_fn
-        # track 100 ("One Dance") is the legacy track id from the fixture seed.
-        update_track_path_fn('100', '/library/Drake/Views/01 One Dance.flac')
+        update_track_path_fn(track_id, '/library/Drake/Views/01 One Dance.flac')
         return {'status': 'completed', 'source': None, 'total': 1, 'moved': 1,
                 'skipped': 0, 'failed': 0, 'errors': []}
 
@@ -110,11 +109,6 @@ def test_legacy_path_update_atomically_updates_linked_lib2_file(
 
     conn = imported_legacy_db._get_connection()
     try:
-        legacy_row = conn.execute(
-            "SELECT file_path FROM tracks WHERE id=100"
-        ).fetchone()
-        assert legacy_row['file_path'] == '/library/Drake/Views/01 One Dance.flac'
-
         lib2_row = conn.execute(
             "SELECT path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
@@ -129,10 +123,8 @@ def test_legacy_path_update_atomically_updates_linked_lib2_file(
         conn.close()
 
 
-def test_update_track_path_without_lib2_schema_does_not_raise(monkeypatch, tmp_path):
-    """A plain legacy-only DB (lib2 tables never created — e.g. library_v2
-    feature never enabled) must still update the legacy row without the lib2
-    sync attempt blowing up the whole reorganize."""
+def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_path):
+    """After cutover, missing native state must stop the move before deletion."""
     import sqlite3
 
     path = str(tmp_path / 'legacy_only.db')
@@ -168,10 +160,10 @@ def test_update_track_path_without_lib2_schema_does_not_raise(monkeypatch, tmp_p
         get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
     )
-    summary = runner(_make_item())
-    assert summary['status'] == 'completed'
+    with pytest.raises(RuntimeError, match="no unambiguous file row"):
+        runner(_make_item())
 
     conn = sqlite3.connect(path)
     row = conn.execute("SELECT file_path FROM tracks WHERE id=100").fetchone()
     conn.close()
-    assert row[0] == '/new/path.flac'
+    assert row[0] == '/old/path.flac'

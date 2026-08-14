@@ -13,7 +13,7 @@ from config.settings import config_manager
 logger = get_logger("database_update_worker")
 
 class DatabaseUpdateWorker:
-    """Worker for updating SoulSync database with media server library data."""
+    """Map media-server identities onto imported Library-v2 rows."""
     
     def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
         # Force sequential processing for web server mode to avoid threading issues
@@ -41,18 +41,6 @@ class DatabaseUpdateWorker:
         self.database_path = database_path
         self.full_refresh = full_refresh
         self.should_stop = False
-
-        # Track ids of rows newly INSERTED this run (not updates). The web
-        # layer reads this to gap-fill embedded provider IDs for the new files
-        # (auto-reconcile), so newly-added music contributes its
-        # Spotify/MusicBrainz/etc. ids without a manual backfill.
-        self._new_track_ids = set()
-
-        # Optional callback(worker) run as the FINAL scan phase, immediately
-        # before the 'finished' signal — so the auto-reconcile is inside the
-        # scan's running window (automations/UI treat it as a normal phase and
-        # wait for it). Injected by the web layer (which owns path resolution).
-        self.post_scan_hook = None
 
         # Statistics tracking
         self.processed_artists = 0
@@ -93,21 +81,7 @@ class DatabaseUpdateWorker:
                 logger.error(f"Error in callback for {signal_name}: {e}")
 
     def _emit_finished(self, *args):
-        """Run the post-scan hook (auto-reconcile) as the final phase, THEN
-        emit 'finished'.
-
-        Running the hook before 'finished' keeps the scan's status at
-        'running' through the reconcile, so every caller (automations that
-        poll for completion, the dashboard card, the Tools page) treats it as
-        a normal scan phase and waits for it — rather than seeing 'finished'
-        and missing the tail. Best-effort: a hook failure never blocks the
-        completion signal.
-        """
-        if self.post_scan_hook:
-            try:
-                self.post_scan_hook(self)
-            except Exception as e:
-                logger.warning(f"post-scan hook failed (non-fatal): {e}")
+        """Complete a mapping-only media scan."""
         self._emit_signal('finished', *args)
 
 
@@ -137,6 +111,10 @@ class DatabaseUpdateWorker:
         try:
             # Initialize database
             self.database = get_database(self.database_path)
+            from core.library2.migration_gate import migration_required
+            if migration_required(self.database):
+                self._emit_signal('error', "Library upgrade in progress; media scan deferred")
+                return
 
             if self.full_refresh:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
@@ -291,11 +269,14 @@ class DatabaseUpdateWorker:
             self._emit_signal('error', f"Database update failed: {str(e)}")
     
     def run_deep_scan(self):
-        """Deep library scan: fetch ALL content, insert only NEW tracks, remove STALE tracks.
-        Never calls clear_server_data() — preserves all enrichment data."""
+        """Deep scan: map all known content and detach stale server identities."""
         try:
             # Initialize database
             self.database = get_database(self.database_path)
+            from core.library2.migration_gate import migration_required
+            if migration_required(self.database):
+                self._emit_signal('error', "Library upgrade in progress; media scan deferred")
+                return
 
             logger.info(f"Starting deep library scan for {self.server_type}")
             self._emit_signal('phase_changed', "Deep scan: Connecting to media server...")
@@ -1004,8 +985,6 @@ class DatabaseUpdateWorker:
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
-                                                if track_success == 'inserted':
-                                                    self._new_track_ids.add(str(track.ratingKey))
                                                 logger.debug(f"Processed new track: {track.title}")
                                         except Exception as e:
                                             logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
@@ -1049,7 +1028,7 @@ class DatabaseUpdateWorker:
                     track_id = str(track.ratingKey)
                     
                     # Get current data from database
-                    db_track = self.database.get_track_by_id(track_id)
+                    db_track = self.database.get_track_by_server_id(track_id, self.server_type)
                     if not db_track:
                         continue  # Track doesn't exist in DB, not a metadata change
                     
@@ -1468,16 +1447,14 @@ class DatabaseUpdateWorker:
                                         if seen_track_ids is not None:
                                             seen_track_ids.add(track_id_str)
 
-                                        # Deep scan: always call insert_or_update to refresh file_path
-                                        # and other server-provided fields. UPDATE preserves enrichment.
+                                        # Always refresh the mapping/technical observations;
+                                        # catalogue and file ownership stay import-controlled.
                                         is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
                                         track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
                                         if is_existing:
                                             skipped_count += 1
                                         elif track_success:
                                             track_count += 1
-                                            if track_success == 'inserted':
-                                                self._new_track_ids.add(track_id_str)
                                     except Exception as e:
                                         logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
 
@@ -1488,7 +1465,7 @@ class DatabaseUpdateWorker:
                         logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
 
             if skip_existing_tracks:
-                details = f"{album_count} albums, {track_count} new tracks ({skipped_count} existing updated)"
+                details = f"{album_count} albums, {track_count} newly mapped tracks ({skipped_count} existing updated)"
             else:
                 details = f"Updated with {album_count} albums, {track_count} tracks"
             return True, details, album_count, track_count

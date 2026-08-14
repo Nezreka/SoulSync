@@ -570,8 +570,8 @@ def _link_companion_file(conn, track_id: int, file_path: str) -> Optional[int]:
         size = None
     cur = conn.execute(
         """INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate,
-               bit_depth, format, quality_tier, import_status)
-           VALUES(?,?,?,?,?,?,?,?, 'imported')""",
+               bit_depth, format, quality_tier, source, import_status)
+           VALUES(?,?,?,?,?,?,?,?,'companion', 'imported')""",
         (track_id, file_path, size, bitrate, sample_rate, bit_depth, fmt, tier),
     )
     return cur.lastrowid

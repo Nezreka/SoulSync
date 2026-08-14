@@ -69,12 +69,13 @@ _TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_trac
 _RETRYABLE = ("not_found",)
 _STATUSES = frozenset({"matched", "not_found", "error", "skipped"})
 
-# "This entity is matched to some metadata source." lib2 keeps Spotify and
-# MusicBrainz in promoted columns and everything else in external_ids, so all
-# three have to be consulted.
+# Similar Artists can source only these four provider namespaces.
 _HAS_PROVIDER_ID = (
     "COALESCE(e.spotify_id,'') <> '' OR COALESCE(e.musicbrainz_id,'') <> '' "
-    "OR COALESCE(e.external_ids,'{}') NOT IN ('', '{}')"
+    "OR COALESCE(json_extract(e.external_ids,'$.spotify'),'') <> '' "
+    "OR COALESCE(json_extract(e.external_ids,'$.itunes'),'') <> '' "
+    "OR COALESCE(json_extract(e.external_ids,'$.deezer'),'') <> '' "
+    "OR COALESCE(json_extract(e.external_ids,'$.musicbrainz'),'') <> ''"
 )
 
 

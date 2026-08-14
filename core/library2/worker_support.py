@@ -129,7 +129,11 @@ def owned_album_titles(conn, artist_id: Any) -> List[str]:
               FROM lib2_albums al
               LEFT JOIN lib2_album_artists aa ON aa.album_id = al.id
              WHERE (al.primary_artist_id = ? OR aa.artist_id = ?)
-               AND COALESCE(al.origin, 'library') <> 'discography'
+               AND EXISTS (SELECT 1 FROM lib2_tracks t
+                            JOIN lib2_track_files f ON f.track_id=t.id
+                           WHERE t.album_id=al.id AND f.path IS NOT NULL
+                             AND TRIM(f.path)<>''
+                             AND COALESCE(f.file_state,'active')='active')
             """,
             (artist_id, artist_id),
         ).fetchall()

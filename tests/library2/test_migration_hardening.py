@@ -20,6 +20,7 @@ from core.library2 import bootstrap as lib2_bootstrap
 from core.library2.editions import backfill_editions
 from core.library2.importer import import_legacy_library
 from core.library2.migration_gate import MigrationPauseSupervisor
+from core.library2 import migration_gate
 from core.library2.schema import ensure_library_v2_schema, run_library_v2_backfills
 from core.library2.wanted import recompute_wanted
 
@@ -334,6 +335,9 @@ class _FakeWorker:
     def resume(self):
         self.paused = False
 
+    def start(self):
+        self.running = True
+
 
 class _FakeEngine:
     def __init__(self):
@@ -414,6 +418,48 @@ class TestMigrationPauseSupervisor:
             assert worker.paused is True
         supervisor.tick()
         assert worker.paused is False
+
+    def test_workers_are_not_started_between_detection_and_claim(self, monkeypatch):
+        worker = _FakeWorker(running=False)
+        required = {"value": True}
+        monkeypatch.setattr(migration_gate, "migration_required",
+                            lambda _db: required["value"])
+
+        assert migration_gate.defer_or_start(worker, object()) is False
+        assert worker.running is False
+        required["value"] = False
+        assert migration_gate.start_deferred_workers(object()) == 1
+        assert worker.running is True
+
+    def test_completed_upgrade_never_reads_retired_source(self, monkeypatch):
+        monkeypatch.setattr(lib2_bootstrap, "bootstrap_is_active", lambda _db: False)
+        monkeypatch.setattr(lib2_bootstrap, "get_state",
+                            lambda _db: {"status": "done", "source_watermark": "old"})
+        monkeypatch.setattr(
+            lib2_bootstrap, "source_watermark",
+            lambda _db: pytest.fail("runtime touched the retired legacy catalogue"),
+        )
+
+        assert migration_gate.migration_required(object()) is False
+
+    def test_an_unreadable_upgrade_state_fails_closed(self, monkeypatch):
+        monkeypatch.setattr(lib2_bootstrap, "bootstrap_is_active", lambda _db: False)
+        monkeypatch.setattr(lib2_bootstrap, "get_state",
+                            lambda _db: (_ for _ in ()).throw(OSError("unreadable")))
+        assert migration_gate.migration_required(object()) is True
+
+    def test_runtime_starter_is_deferred_then_released(self, monkeypatch):
+        required = {"value": True}
+        called = []
+        monkeypatch.setattr(migration_gate, "migration_required",
+                            lambda _db: required["value"])
+
+        assert migration_gate.defer_or_call(
+            lambda: called.append("started"), object(), "runtime") is False
+        assert called == []
+        required["value"] = False
+        assert migration_gate.start_deferred_workers(object()) == 1
+        assert called == ["started"]
 
 
 class TestSidecarHealthCheckIsOffTheStartupPath:

@@ -43,10 +43,10 @@ def db_with_feat_track(tmp_path: Path):
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Artist1', 'artist1', 'jellyfin', 'ar-1')",
     ).lastrowid
-    cursor.execute(
+    album = cursor.execute(
         "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
-        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,),
-    )
+        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,)
+    ).lastrowid
     from tests.support.catalogue_seed import seed_track
 
     cursor.execute(
@@ -181,10 +181,16 @@ def test_jellyfin_scanner_stores_all_track_artists(tmp_path: Path) -> None:
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Artist1', 'artist1', 'jellyfin', 'ar-1')",
     ).lastrowid
-    cursor.execute(
+    album = cursor.execute(
         "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
-        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,),
-    )
+        " VALUES (?, 'Super Album', 'library', 'jellyfin', 'al-1')", (artist,)
+    ).lastrowid
+    track = cursor.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,'Super Single',1)",
+        (album,),
+    ).lastrowid
+    cursor.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,'/m/x.mp3',1)",
+                   (track,))
     conn.commit()
     conn.close()
 

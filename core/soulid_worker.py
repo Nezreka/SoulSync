@@ -76,11 +76,8 @@ def generate_soul_id(*parts: str) -> str:
 # this recording" — would hand ``Drake feat. Wizkid`` to the hash and re-key the
 # track away from every other node.
 #
-# **Only owned releases are in the id space.** lib2 also holds
-# ``origin='discography'`` rows: releases a provider listed for an artist we
-# follow, which have no files and no legacy counterpart. Legacy's soul-id space
-# was the owned library, and every reader (the Hydrabase album lookup, the
-# import identity match) asks about owned material.
+# **Only physically owned releases are in the id space.** Catalogue provenance
+# is not ownership; an active file with a real path is the evidence.
 _PENDING = "(%(alias)ssoul_id IS NULL OR %(alias)ssoul_id = '')"
 
 PENDING_ALBUMS_SQL = f"""
@@ -90,7 +87,9 @@ PENDING_ALBUMS_SQL = f"""
     WHERE {_PENDING % {'alias': 'al.'}}
       AND al.title IS NOT NULL AND al.title != ''
       AND ar.name IS NOT NULL AND ar.name != ''
-      AND al.origin = 'library'
+      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                  ON f.track_id=t.id WHERE t.album_id=al.id
+                  AND f.file_state='active' AND TRIM(f.path)<>'')
 """
 
 PENDING_TRACKS_SQL = f"""
@@ -101,7 +100,8 @@ PENDING_TRACKS_SQL = f"""
     WHERE {_PENDING % {'alias': 't.'}}
       AND t.title IS NOT NULL AND t.title != ''
       AND ar.name IS NOT NULL AND ar.name != ''
-      AND al.origin = 'library'
+      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                  AND f.file_state='active' AND TRIM(f.path)<>'')
 """
 
 PENDING_ARTISTS_SQL = f"""
@@ -109,6 +109,14 @@ PENDING_ARTISTS_SQL = f"""
     FROM lib2_artists
     WHERE {_PENDING % {'alias': ''}}
       AND name IS NOT NULL AND name != ''
+      AND EXISTS (
+          SELECT 1 FROM lib2_tracks t
+          JOIN lib2_track_files f ON f.track_id=t.id
+          JOIN lib2_albums al ON al.id=t.album_id
+          LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id AND ta.artist_id=lib2_artists.id
+          WHERE f.file_state='active' AND TRIM(f.path)<>''
+            AND (al.primary_artist_id=lib2_artists.id OR ta.artist_id IS NOT NULL)
+      )
 """
 
 # The two disambiguators the artist hash reaches for, in legacy's order: the
@@ -119,16 +127,21 @@ OWNED_TRACK_TITLE_SQL = """
     SELECT t.title
     FROM lib2_tracks t
     JOIN lib2_albums al ON al.id = t.album_id
-    WHERE al.primary_artist_id = ? AND al.origin = 'library'
+    WHERE al.primary_artist_id = ?
+      AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                  AND f.file_state='active' AND TRIM(f.path)<>'')
       AND t.title IS NOT NULL AND t.title != ''
     ORDER BY t.title ASC
     LIMIT 1
 """
 
 OWNED_ALBUM_TITLE_SQL = """
-    SELECT title
-    FROM lib2_albums
-    WHERE primary_artist_id = ? AND origin = 'library'
+    SELECT al.title
+    FROM lib2_albums al
+    WHERE al.primary_artist_id = ?
+      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                  ON f.track_id=t.id WHERE t.album_id=al.id
+                  AND f.file_state='active' AND TRIM(f.path)<>'')
       AND title IS NOT NULL AND title != ''
     ORDER BY title ASC
     LIMIT 1

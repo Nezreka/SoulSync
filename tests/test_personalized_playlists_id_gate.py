@@ -128,11 +128,14 @@ class _FakeDatabase:
             "INSERT INTO lib2_albums(primary_artist_id, title, origin) VALUES(?,'Al',?)",
             (artist_id, origin),
         ).lastrowid
-        self._conn.execute(
+        track_id = self._conn.execute(
             "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) "
             "VALUES(?, 'T', ?, ?)",
             (album_id, spotify_track_id, _json.dumps(external)),
-        )
+        ).lastrowid
+        if origin == 'library':
+            self._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                               (track_id, f'/music/{track_id}.flac'))
         self._conn.commit()
 
 
@@ -667,4 +670,3 @@ def test_a_provider_only_release_does_not_count_as_owned(service):
         source='spotify', order_by='track_name', fetch_limit=100,
     )
     assert [t['track_name'] for t in tracks] == ['NotActuallyOwned']
-

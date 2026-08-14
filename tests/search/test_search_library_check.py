@@ -90,6 +90,11 @@ def _seed_album(db, artist_legacy_id, title, thumb=None, origin='library'):
         "WHERE legacy_artist_id = ?",
         (title, thumb, origin, legacy, artist_legacy_id),
     )
+    if origin == 'library':
+        _lib2(db, "INSERT INTO lib2_tracks(album_id,title) SELECT id,? FROM lib2_albums "
+                  "WHERE legacy_album_id=?", (f'owned-{legacy}', legacy))
+        _lib2(db, "INSERT INTO lib2_track_files(track_id,path) SELECT id,? FROM lib2_tracks "
+                  "WHERE title=?", (f'/seed/{legacy}.flac', f'owned-{legacy}'))
     return legacy
 
 
@@ -101,7 +106,9 @@ def _seed_track(db, album_legacy_id, artist_legacy_id, title, file_path=None):
         "SELECT id, ?, ? FROM lib2_albums WHERE legacy_album_id = ?",
         (title, legacy, album_legacy_id),
     )
-    if file_path is not None:
+    if file_path is None:
+        file_path = f'/seed/track-{legacy}.flac'
+    if file_path:
         _lib2(
             db,
             "INSERT INTO lib2_track_files (track_id, path, is_primary) "
@@ -229,6 +236,18 @@ def test_a_provider_only_release_is_not_owned(db):
         albums=[{'name': 'The Wall', 'artist': 'Pink Floyd'}],
         tracks=[],
     )
+    assert result['albums'] == [False]
+
+
+def test_library_provenance_without_a_live_file_is_not_owned(db):
+    aid = _seed_artist(db, 'Pink Floyd')
+    album = _seed_album(db, aid, 'Missing')
+    _lib2(db, "DELETE FROM lib2_track_files WHERE track_id IN "
+              "(SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
+              "WHERE al.legacy_album_id=?)", (album,))
+    result = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager({}), profile_id=1,
+        albums=[{'name': 'Missing', 'artist': 'Pink Floyd'}], tracks=[])
     assert result['albums'] == [False]
 
 
