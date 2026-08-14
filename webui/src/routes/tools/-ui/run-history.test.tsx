@@ -14,12 +14,26 @@ import type { RepairJobRun } from '../-tools.types';
 
 import { RunHistory } from './run-history';
 
+/**
+ * 9am TODAY, not a fixed calendar date.
+ *
+ * `dayLabel` compares a run's day key against the real clock, so it only says
+ * "Today" for a run that actually happened today. This fixture was pinned to
+ * 2026-08-12, which meant the grouping test below passed on exactly one day
+ * and failed every day after — it broke on its own with no code change.
+ */
+function todayAt9am(): Date {
+  const d = new Date();
+  d.setHours(9, 0, 0, 0);
+  return d;
+}
+
 const run = (over: Partial<RepairJobRun> = {}): RepairJobRun => ({
   id: 1,
   job_id: 'orphan_file_detector',
   display_name: 'Orphan File Detector',
-  started_at: new Date(2026, 7, 12, 9, 0, 0).toISOString(),
-  finished_at: new Date(2026, 7, 12, 9, 0, 12).toISOString(),
+  started_at: todayAt9am().toISOString(),
+  finished_at: new Date(todayAt9am().getTime() + 12_000).toISOString(),
   duration_seconds: 12.3,
   items_scanned: 1234,
   findings_created: 0,
