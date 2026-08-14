@@ -74,8 +74,7 @@ describe('Library v2 global Automatic Search', () => {
     const automaticSearch = screen.getByRole('button', {
       name: 'Automatic Search',
     });
-    const reimport = screen.getByRole('button', { name: 'Re-import library' });
-    expect(automaticSearch.className.split(' ')).toContain(reimport.className);
+    expect(screen.queryByRole('button', { name: 'Re-import library' })).not.toBeInTheDocument();
     expect(automaticSearch.querySelector('svg')).toBeInTheDocument();
     fireEvent.click(automaticSearch);
 

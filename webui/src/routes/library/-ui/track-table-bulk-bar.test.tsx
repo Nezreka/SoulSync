@@ -10,6 +10,30 @@ import type { LibraryV2Track } from '../-library-v2.types';
 import { LibraryV2CanWriteContext, TrackTableBulkBar } from './library-v2-page';
 
 describe('TrackTableBulkBar', () => {
+  it('keeps the quality-profile label accessible without rendering it twice', async () => {
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <TrackTableBulkBar
+            albumId={4}
+            tracks={[{ id: 1, file: null } as LibraryV2Track]}
+            onClear={vi.fn()}
+          />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Quality profile for the selected tracks' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Quality profile', { selector: 'span' }).className).toMatch(/srOnly/);
+  });
+
   it('invalidates partial writes, reports ids and retries only failures', async () => {
     const calls: string[] = [];
     let rejectTrack2 = true;

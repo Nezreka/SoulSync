@@ -209,7 +209,7 @@ describe('library v2 import progress', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <LibraryV2CanWriteContext.Provider value>
-          <ImportButton hasArtists pollIntervalMs={20} />
+          <ImportButton hasArtists={false} pollIntervalMs={20} />
         </LibraryV2CanWriteContext.Provider>
       </QueryClientProvider>,
     );
@@ -217,7 +217,27 @@ describe('library v2 import progress', () => {
     expect(
       await screen.findByText('Failed: Legacy database became unavailable'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Re-import library' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Import library' })).toBeEnabled();
+  });
+
+  it('removes the import action once lib2 already contains artists', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(importState({ running: false, stage: 'done' })),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <ImportButton hasArtists pollIntervalMs={20} />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /import library/i })).not.toBeInTheDocument(),
+    );
   });
 });
 

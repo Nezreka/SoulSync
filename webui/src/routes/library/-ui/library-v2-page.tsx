@@ -8036,7 +8036,7 @@ export function TrackTableBulkBar({
           trips through the per-row picker. "Inherit" posts `inherit: true`,
           the same payload the picker's inherit option sends. */}
       <label className={styles.bulkBarSelect}>
-        <span className="sr-only">Quality profile</span>
+        <span className={styles.srOnly}>Quality profile</span>
         <select
           aria-label="Quality profile for the selected tracks"
           data-requires-write=""
@@ -10775,32 +10775,33 @@ export function ImportButton({
             )
           : null;
 
+  // Once lib2 contains artists it is the live catalogue, not a mirror that
+  // needs an ongoing "Re-import" action. Keep this component mounted while an
+  // import/migration is active so its progress remains visible, and keep the
+  // empty-state trigger below for installations that genuinely have nothing.
+  // Completion/artwork/error text may still be useful without presenting a
+  // misleading action that starts the legacy bootstrap again.
+  const hideImportAction = hasArtists && !running && !migrating && !startImport.isPending;
+  const showStatusOnly = hideImportAction && Boolean(statusMessage);
+
+  if (hideImportAction && !showStatusOnly) return null;
+
   return (
     <span className={styles.importWrap}>
-      <button
-        type="button"
-        className={prominent ? styles.btnPrimary : styles.btnGhost}
-        data-requires-write=""
-        disabled={busy || artworkRunning || !canWrite}
-        title={
-          migrating
-            ? 'Your library is being migrated in the background'
-            : artworkRunning
-              ? 'The library is ready; wait for background artwork caching before re-importing'
-              : undefined
-        }
-        onClick={() => {
-          if (canWrite) startImport.mutate();
-        }}
-      >
-        {migrating
-          ? 'Migrating…'
-          : busy
-            ? 'Importing…'
-            : hasArtists
-              ? 'Re-import library'
-              : 'Import library'}
-      </button>
+      {!hideImportAction ? (
+        <button
+          type="button"
+          className={prominent ? styles.btnPrimary : styles.btnGhost}
+          data-requires-write=""
+          disabled={busy || artworkRunning || !canWrite}
+          title={migrating ? 'Your library is being migrated in the background' : undefined}
+          onClick={() => {
+            if (canWrite) startImport.mutate();
+          }}
+        >
+          {migrating ? 'Migrating…' : busy ? 'Importing…' : 'Import library'}
+        </button>
+      ) : null}
       {statusMessage ? (
         <span className={styles.importStatus} role="status" aria-live="polite">
           <span className={styles.importMsg}>{statusMessage}</span>
