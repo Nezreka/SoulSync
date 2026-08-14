@@ -19,6 +19,22 @@ _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
+
+def _row_value(row, column: str, default=None):
+    """Read a column off a sqlite3.Row that may not have it.
+
+    Upgraded databases can lag the code by a migration, and indexing a Row for a
+    missing column raises IndexError rather than returning None. The upsert paths
+    read columns that only newer schemas carry, and a raised IndexError there
+    would fail the whole scan, so absent means default."""
+    if row is None:
+        return default
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return default
+    return default if value is None else value
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -1210,6 +1226,7 @@ class MusicDatabase:
             self._backfill_native_quality_profile_assignments(cursor)
 
             self._ensure_core_media_schema_columns(cursor)
+            self._ensure_art_lock_columns(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -1462,8 +1479,67 @@ class MusicDatabase:
                 if album_cols and _col not in album_cols:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
+
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
+
+    def _art_lock_supported(self, cursor, table: str) -> bool:
+        """Does this database have ``<table>.art_locked`` yet?
+
+        The sync upserts REFERENCE the column, and SQLite raises "no such
+        column" for the whole statement if it is absent — which the upsert's
+        broad ``except`` swallows into a False return, losing the row silently.
+        A scan that quietly stops saving albums is far worse than art that
+        forgets it was pinned, so the lock degrades instead of exploding:
+        no column ⇒ exactly the pre-lock behaviour.
+
+        Reachable whenever the schema is older than the code: a database whose
+        migration failed, and any caller that builds a bare albums table and
+        drives the upsert directly (which several tests legitimately do).
+
+        Memoized per instance — a PRAGMA per upsert would be a real cost on a
+        full library scan. `getattr` because callers may bypass ``__init__``."""
+        cache = getattr(self, '_art_lock_cols', None)
+        if cache is None:
+            cache = {}
+            self._art_lock_cols = cache
+        if table not in cache:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cache[table] = any(row[1] == 'art_locked' for row in cursor.fetchall())
+            except Exception:
+                cache[table] = False
+        return cache[table]
+
+    def _ensure_art_lock_columns(self, cursor):
+        """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
+        a manual pick must survive every automatic writer.
+
+        The art picker used to be "pinned" only by accident — enrichment workers
+        fill art solely ``WHERE thumb_url IS NULL OR ''``, so a non-empty value
+        happened to survive them. A library sync is a different writer with
+        different rules, and it overwrote the pick with whatever the media server
+        returned. Nothing in the row said a human chose this, so nothing could
+        protect it. Additive, defaults to 0 = "follow the server", i.e. exactly
+        today's behaviour for every existing row.
+
+        Deliberately its OWN method with its OWN try, not part of
+        ``_ensure_core_media_schema_columns``: that one wraps every repair in a
+        single try, so one unrelated failure would skip everything after it. The
+        sync upserts now REFERENCE ``art_locked``, and a missing column there
+        raises "no such column" for every album and artist — swallowed by the
+        upsert's broad except, which would silently lose the whole scan. This
+        column has to be the one thing that cannot be skipped by someone else's
+        error."""
+        for table in ('albums', 'artists'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'art_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN art_locked INTEGER DEFAULT 0")
+                    logger.info("Added art_locked column to %s table (custom artwork)", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.art_locked: %s", table, e)
 
     def _ensure_wishlist_quality_columns(self, cursor):
         """Give every wishlist row a pointer to its own quality profile.
@@ -7025,9 +7101,20 @@ class MusicDatabase:
 
                 if exists:
                     # Update existing artist
-                    cursor.execute("""
+                    # art_locked = the user picked this photo by hand; the server
+                    # does not get to replace it. Everything else still tracks
+                    # the server, and an unlocked row behaves exactly as before.
+                    # Both spellings take the same parameters, so only the
+                    # thumb_url expression changes when the column is absent.
+                    thumb_expr = (
+                        "CASE WHEN COALESCE(art_locked, 0) = 1 THEN thumb_url ELSE ? END"
+                        if self._art_lock_supported(cursor, 'artists') else "?"
+                    )
+                    cursor.execute(f"""
                         UPDATE artists
-                        SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                        SET name = ?,
+                            thumb_url = {thumb_expr},
+                            genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND server_source = ?
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                     logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
@@ -7051,18 +7138,27 @@ class MusicDatabase:
                             'style', 'mood', 'label', 'banner_url',
                             'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                             'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
+                            # See the album rekey path: without this, rebuilding the
+                            # row under a new id silently unlocks a hand-picked photo.
+                            'art_locked',
                         ]
 
                         # Read enrichment data from old artist
                         cursor.execute("SELECT * FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
                         old_row = cursor.fetchone()
 
+                        # A locked photo survives the rekey; otherwise the server wins,
+                        # exactly as before.
+                        preserved_thumb_url = thumb_url
+                        if _row_value(old_row, 'art_locked'):
+                            preserved_thumb_url = _row_value(old_row, 'thumb_url') or thumb_url
+
                         # Insert new artist with fresh server metadata + preserved created_at
                         old_created = old_row['created_at'] if old_row else None
                         cursor.execute("""
                             INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, thumb_url, genres_json, summary, server_source, old_created))
+                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, old_created))
 
                         # Copy enrichment data from old record to new record
                         if old_row:
@@ -7195,9 +7291,25 @@ class MusicDatabase:
 
             if existing:
                 # Album exists - update it (update server_source if different)
-                cursor.execute("""
+                # THE bug TheHomeGuy hit. COALESCE(NULLIF(?, '')) alone only
+                # protects the row when the SERVER sends nothing — and Navidrome
+                # always sends a cover URL, including for its own blue-vinyl
+                # placeholder. So a hand-picked cover lost to a manual sync every
+                # time. art_locked says a person chose it; leave it alone.
+                # Same parameters either way — only the expression differs, so a
+                # database that predates the column keeps the old behaviour
+                # instead of failing every album (see _art_lock_supported).
+                thumb_expr = (
+                    "CASE WHEN COALESCE(art_locked, 0) = 1 "
+                    "THEN thumb_url ELSE COALESCE(NULLIF(?, ''), thumb_url) END"
+                    if self._art_lock_supported(cursor, 'albums')
+                    else "COALESCE(NULLIF(?, ''), thumb_url)"
+                )
+                cursor.execute(f"""
                     UPDATE albums
-                    SET artist_id = ?, title = ?, year = ?, thumb_url = COALESCE(NULLIF(?, ''), thumb_url), genres = ?,
+                    SET artist_id = ?, title = ?, year = ?,
+                        thumb_url = {thumb_expr},
+                        genres = ?,
                         track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
@@ -7228,12 +7340,22 @@ class MusicDatabase:
                         # losing it on a ratingKey rekey would force the next
                         # completeness scan back to live API lookups (kettui PR #374).
                         'api_track_count',
+                        # Without this the rekey path quietly UNLOCKS custom art:
+                        # the row is rebuilt under a new id, art_locked defaults
+                        # back to 0, and the next sync overwrites the pick.
+                        'art_locked',
                     ]
 
                     # Read enrichment data from old album
                     cursor.execute("SELECT * FROM albums WHERE id = ?", (old_id,))
                     old_row = cursor.fetchone()
-                    preserved_thumb_url = thumb_url or (old_row['thumb_url'] if old_row and 'thumb_url' in old_row.keys() else None)
+                    old_thumb_url = _row_value(old_row, 'thumb_url')
+                    if _row_value(old_row, 'art_locked'):
+                        # Hand-picked art outranks the server even here, where the
+                        # server has just handed us a brand-new id for this album.
+                        preserved_thumb_url = old_thumb_url or thumb_url
+                    else:
+                        preserved_thumb_url = thumb_url or old_thumb_url
 
                     # Insert new album with fresh server metadata + preserved created_at
                     old_created = old_row['created_at'] if old_row else None
@@ -14355,15 +14477,27 @@ class MusicDatabase:
             return {'success': False, 'error': str(e)}
 
     def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
-        """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
-        every enrichment worker fills art only ``WHERE thumb_url IS NULL OR = ''``, so none will
-        overwrite a user pick. Returns True when a row was updated."""
+        """Set an album's cover-art URL (the user's art-picker choice) and LOCK it.
+
+        Two different protections, because there are two kinds of writer:
+
+        * enrichment workers fill art only ``WHERE thumb_url IS NULL OR = ''``,
+          so a non-empty value is enough to survive them;
+        * a library sync writes whatever the media server returned, and does not
+          care whether the value it is replacing was chosen by a human. That is
+          what wiped TheHomeGuy's covers — Navidrome always returns a cover URL
+          (its own placeholder counts), so the "non-empty" protection above
+          never applied. ``art_locked`` is the flag that says a person picked
+          this, and the sync upserts leave locked art alone.
+
+        Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE albums SET thumb_url = ?, art_locked = 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
                 (thumb_url, album_id))
             conn.commit()
             return cursor.rowcount > 0
@@ -14375,20 +14509,55 @@ class MusicDatabase:
                 conn.close()
 
     def set_artist_thumb_url(self, artist_id, thumb_url: str) -> bool:
-        """Set an artist's photo URL (the user's image-picker choice). A non-empty value also PINS
-        it: every enrichment worker fills artist thumbs only ``WHERE thumb_url IS NULL OR = ''``,
-        so none will overwrite a user pick. Returns True when a row was updated."""
+        """Set an artist's photo URL (the user's image-picker choice) and LOCK it.
+
+        See :meth:`set_album_thumb_url` for why the non-empty value alone was not
+        enough. The artist upsert was the worse of the two: it wrote the server's
+        photo with a plain ``SET thumb_url = ?``, with not even the empty-value
+        guard the album path had. Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE artists SET thumb_url = ?, art_locked = 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
                 (thumb_url, artist_id))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"set_artist_thumb_url failed for artist {artist_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_art_lock(self, kind: str, entity_id) -> bool:
+        """Release a hand-picked image so the media server owns the art again.
+
+        Without this the lock is a one-way door. The picker offers covers from
+        external sources only (Cover Art Archive, Deezer, iTunes, …) and can
+        legitimately return NOTHING — TheHomeGuy's own screenshot reads "No
+        alternative covers found for this album" — so a user who locked art they
+        no longer want would have no candidate to switch to and no way back.
+
+        The current image is deliberately left in place: it stays until the next
+        library sync refreshes it, so "unlock" never blanks the page. Returns
+        True when a row was updated."""
+        table = {'album': 'albums', 'artist': 'artists'}.get(kind)
+        if table is None:
+            raise ValueError(f"clear_art_lock: kind must be 'album' or 'artist', got {kind!r}")
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE {table} SET art_locked = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (entity_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"clear_art_lock failed for {kind} {entity_id}: {e}")
             return False
         finally:
             if conn:

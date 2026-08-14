@@ -4,6 +4,7 @@ import type { ArtCandidate, ArtPickerTarget } from '../-artist-detail.manage-act
 
 import {
   applyArtRequest,
+  releaseArtRequest,
   artistArtAppliedMessage,
   fetchArtOptions,
 } from '../-artist-detail.manage-actions';
@@ -40,6 +41,7 @@ export function ArtPicker({ target, currentUrl, subtitle, onApplied, onClose }: 
   const [dead, setDead] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const [customUrl, setCustomUrl] = useState('');
   const [customTile, setCustomTile] = useState<string | null>(null);
   const [customError, setCustomError] = useState(false);
@@ -87,6 +89,33 @@ export function ArtPicker({ target, currentUrl, subtitle, onApplied, onClose }: 
     },
     [],
   );
+
+  /**
+   * Hand the image back to the media server. Applying a pick locks it so a
+   * library sync can't overwrite it; this is the way out, since the picker can
+   * legitimately offer zero alternatives to switch to.
+   */
+  const release = async () => {
+    if (applying || releasing) return;
+    setReleasing(true);
+    try {
+      const result = await releaseArtRequest(target);
+      if (result && result.success) {
+        window.showToast?.(
+          target.kind === 'artist'
+            ? 'Following your server’s artist photo again'
+            : 'Following your server’s cover art again',
+          'success',
+        );
+        onClose();
+        return;
+      }
+      window.showToast?.((result && result.error) || 'Could not release the image', 'error');
+    } catch {
+      window.showToast?.('Could not release the image', 'error');
+    }
+    setReleasing(false);
+  };
 
   const apply = async () => {
     if (!selected || applying) return;
@@ -236,6 +265,15 @@ export function ArtPicker({ target, currentUrl, subtitle, onApplied, onClose }: 
               : ''}
           </div>
           <div className="art-picker-actions">
+            <button
+              className="art-picker-btn art-picker-release"
+              type="button"
+              disabled={applying || releasing}
+              title="Stop overriding this image — the next library sync restores your media server's own art."
+              onClick={release}
+            >
+              {releasing ? 'Releasing…' : 'Use server art'}
+            </button>
             <button className="art-picker-btn art-picker-cancel" type="button" onClick={onClose}>
               Cancel
             </button>

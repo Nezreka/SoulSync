@@ -2478,6 +2478,22 @@ class RepairWorker:
             logger.error("Error fixing track number for %s: %s", file_path, e)
             return {'success': False, 'error': str(e)}
 
+    @staticmethod
+    def _art_lock_column(cursor, table: str) -> bool:
+        """Does ``<table>.art_locked`` exist on this database?
+
+        Asked with the cursor we already hold rather than through the database
+        object: the repair worker is handed whatever exposes ``_get_connection``
+        (the real MusicDatabase in production, a plain fake in the tests), so
+        reaching for a method on it is an AttributeError waiting to happen — as
+        it was. Not memoized on purpose; a repair apply is a single user action,
+        not a scan loop, so one PRAGMA costs nothing."""
+        try:
+            cursor.execute(f"PRAGMA table_info({table})")
+            return any(row[1] == 'art_locked' for row in cursor.fetchall())
+        except Exception:
+            return False
+
     def _fix_artist_art(self, album_id, details):
         """Apply the found ARTIST image to the album's artist (DB thumb only —
         artist art has no per-file embed). Pache711: independently applyable
@@ -2489,12 +2505,26 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            # Never over-write a photo the user chose by hand (see the album
+            # twin below). Locked rows are simply left alone. On a schema that
+            # predates the column there is nothing to protect, so the clause is
+            # dropped rather than raising "no such column" at the user.
+            has_lock = self._art_lock_column(cursor, 'artists')
             cursor.execute(
                 "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)"
+                + (" AND COALESCE(art_locked, 0) = 0" if has_lock else ""),
                 (artist_url, album_id))
             conn.commit()
             if cursor.rowcount == 0:
+                if has_lock:
+                    cursor.execute("SELECT COALESCE(art_locked, 0) FROM artists "
+                                   "WHERE id = (SELECT artist_id FROM albums WHERE id = ?)",
+                                   (album_id,))
+                    row = cursor.fetchone()
+                    if row is not None and row[0]:
+                        return {'success': True, 'action': 'kept_chosen_artist_art',
+                                'message': 'Kept your chosen artist photo'}
                 return {'success': False, 'error': 'Artist not found for this album'}
         finally:
             if conn:
@@ -2542,11 +2572,38 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                           (artwork_url, album_id))
-            conn.commit()
-            if cursor.rowcount == 0:
+            # Selecting a column the schema doesn't have raises, and this is a
+            # user-facing repair action — it must not 500 on a database that
+            # predates the column. No column ⇒ nothing can be locked.
+            has_lock = self._art_lock_column(cursor, 'albums')
+            cursor.execute(
+                "SELECT thumb_url, %s FROM albums WHERE id = ?"
+                % ("COALESCE(art_locked, 0)" if has_lock else "0"),
+                (album_id,))
+            existing = cursor.fetchone()
+            if existing is None:
                 return {'success': False, 'error': 'Album not found in database'}
+
+            # A hand-picked cover outranks whatever this job found. The scan flags
+            # an album whose art is missing in the DB *or* on disk, so an album
+            # with locked art but no cover.jpg WOULD land here and the plain
+            # UPDATE below would overwrite the user's pick — the very bug the
+            # lock exists to stop. Keep the DB value and push the USER's art to
+            # disk instead of a stranger's.
+            locked = bool(existing[1]) and bool((existing[0] or '').strip())
+            if locked:
+                if artwork_url:
+                    artwork_url = existing[0]
+                logger.info("[repair] album %s art is locked — keeping the chosen cover, "
+                            "writing it to disk instead", album_id)
+            elif artwork_url:
+                cursor.execute(
+                    "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (artwork_url, album_id))
+                conn.commit()
+            # else: sidecar_from_embedded with no URL — the disk write below comes
+            # from the file's own embedded art. Writing NULL here would have
+            # blanked the album's DB art while "fixing" a missing sidecar.
 
             # Pull album metadata + local track paths so we can write art to disk.
             cursor.execute("""

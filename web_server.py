@@ -10734,8 +10734,9 @@ def _overwrite_cover_jpg(url, folder):
 @app.route('/api/album/<album_id>/art', methods=['POST'])
 def set_album_art(album_id):
     """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
-    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
-    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    album folder. This also sets ``albums.art_locked``, which is what makes the choice stick — the
+    old "non-empty thumb_url pins it" reasoning only held against enrichment workers, and a library
+    sync happily wrote the server's cover back over it. Body: ``{"url": "<image url>"}``."""
     try:
         data = request.get_json(silent=True) or {}
         url = (data.get('url') or '').strip()
@@ -10762,6 +10763,42 @@ def set_album_art(album_id):
                         "cover_written": cover_written})
     except Exception as e:
         logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/album/<album_id>/art', methods=['DELETE'])
+def clear_album_art_lock(album_id):
+    """Hand this album's cover back to the media server.
+
+    The art picker can only offer covers it finds on external sources, and for
+    an obscure release it finds none — so without this there is no way to undo a
+    pick. The current image stays until the next library sync replaces it."""
+    try:
+        db = get_database()
+        if not db.clear_art_lock('album', album_id):
+            return jsonify({"error": "Album not found"}), 404
+        logger.info("[set-art] album %s art unlocked — the server owns it again", album_id)
+        return jsonify({"success": True, "album_id": album_id, "art_locked": False})
+    except Exception as e:
+        logger.error("[set-art] unlock failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/artist/<artist_id>/art', methods=['DELETE'])
+def clear_artist_art_lock(artist_id):
+    """Hand this artist's photo back to the media server. See the album twin."""
+    try:
+        # #1069: TEXT ids (Navidrome/Jellyfin) — never int() an artist id.
+        artist_id = str(artist_id or '').strip()
+        if not artist_id:
+            return jsonify({"error": "Invalid artist id"}), 400
+        db = get_database()
+        if not db.clear_art_lock('artist', artist_id):
+            return jsonify({"error": "Artist not found"}), 404
+        logger.info("[set-artist-art] artist %s art unlocked — the server owns it again", artist_id)
+        return jsonify({"success": True, "artist_id": artist_id, "art_locked": False})
+    except Exception as e:
+        logger.error("[set-artist-art] unlock failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -10816,8 +10853,8 @@ def get_artist_art_options(artist_id):
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
 
-    1. SoulSync DB (``artists.thumb_url``; a non-empty value pins it, the
-       enrichment workers only fill empty thumbs)
+    1. SoulSync DB (``artists.thumb_url`` + ``artists.art_locked``, which is what
+       stops the next library sync writing the server's photo back over it)
     2. the active media server (Plex/Jellyfin poster upload; Navidrome has no
        API and is covered by step 3)
     3. ``artist.jpg`` in the artist's folder on disk (what Navidrome reads;
