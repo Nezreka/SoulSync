@@ -33,6 +33,7 @@ import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
 
 import { fetchAccountPlaylist, fetchSourcePlaylists, postMirrorPlaylist } from '../-sync.api';
+import { mapWithConcurrency } from '../-sync.core';
 import { buildMirrorPayload } from '../-sync.import';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { freshSourceState } from '../-sync.state';
@@ -41,6 +42,15 @@ import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
 import { SourceCard } from './source-card';
 import { hydrateStatesForLoaded } from './url-import-tab';
+
+/**
+ * How many playlists the background track crawl fetches at once.
+ *
+ * Three, matching the vanilla fix: one-at-a-time is what made Tidal's refresh
+ * take 3-5 minutes for a large account, and unbounded would fire a request per
+ * playlist simultaneously and earn a rate limit.
+ */
+const TRACK_CRAWL_CONCURRENCY = 3;
 
 /** The qobuz fresh-click track projection (sync-services.js 1657-1661). */
 function qobuzFreshTracks(tracks: unknown[]): Record<string, unknown>[] {
@@ -101,6 +111,55 @@ function AccountVerticalTab({
     );
   }, []);
 
+  /**
+   * The per-playlist track crawl that feeds auto-mirroring (27-59).
+   *
+   * Split out of `load` so it can run AFTER the refresh button is released —
+   * see the note in `load`. Declared before `load` because `load` lists it as a
+   * dependency, and a `const` referenced above its declaration is a TDZ error.
+   */
+  const crawlTracks = useCallback(
+    async (rows: UrlTabPlaylist[], generation: number) => {
+      const mirror = (p: UrlTabPlaylist, tracks: unknown[]) =>
+        void postMirrorPlaylist(
+          buildMirrorPayload(
+            config.id,
+            p.id as string | number,
+            asString(p.name),
+            deezerMirrorTracks(tracks),
+            {
+              owner: p.owner as string | undefined,
+              image_url: p.image_url as string | undefined,
+              description: p.description as string | undefined,
+            },
+          ),
+        ).catch(() => undefined);
+
+      await mapWithConcurrency(rows, TRACK_CRAWL_CONCURRENCY, async (p) => {
+        // A newer refresh supersedes this one — stop crawling for the old list.
+        if (generation !== loadGeneration.current) return;
+        const existingTracks = Array.isArray(p.tracks) ? (p.tracks as unknown[]) : [];
+        if (existingTracks.length > 0) {
+          mirror(p, existingTracks);
+          return;
+        }
+        try {
+          const fullData = await fetchAccountPlaylist(chrome.base, String(p.id));
+          if (generation !== loadGeneration.current) return;
+          const tracks = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
+          if (tracks.length > 0) {
+            p.tracks = tracks;
+            setPlaylistTracks(String(p.id), tracks);
+            mirror(p, tracks);
+          }
+        } catch {
+          // Per-playlist track fetch is best-effort (56-58).
+        }
+      });
+    },
+    [config, chrome, setPlaylistTracks],
+  );
+
   /** loadTidalPlaylists / loadQobuzPlaylists (4-71 / 1516-1579). */
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
@@ -125,53 +184,22 @@ function AccountVerticalTab({
       );
       if (generation !== loadGeneration.current) return;
 
-      // Background per-playlist track fetch + auto-mirror (27-59) — cards are
-      // already rendered; this must not block them. Sequential, like the
-      // vanilla's awaited for-of.
-      for (const p of rows) {
-        if (generation !== loadGeneration.current) return;
-        const existingTracks = Array.isArray(p.tracks) ? (p.tracks as unknown[]) : [];
-        if (existingTracks.length > 0) {
-          void postMirrorPlaylist(
-            buildMirrorPayload(
-              config.id,
-              p.id as string | number,
-              asString(p.name),
-              deezerMirrorTracks(existingTracks),
-              {
-                owner: p.owner as string | undefined,
-                image_url: p.image_url as string | undefined,
-                description: p.description as string | undefined,
-              },
-            ),
-          ).catch(() => undefined);
-          continue;
-        }
-        try {
-          const fullData = await fetchAccountPlaylist(chrome.base, String(p.id));
-          if (generation !== loadGeneration.current) return;
-          const tracks = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
-          if (tracks.length > 0) {
-            p.tracks = tracks;
-            setPlaylistTracks(String(p.id), tracks);
-            void postMirrorPlaylist(
-              buildMirrorPayload(
-                config.id,
-                p.id as string | number,
-                asString(p.name),
-                deezerMirrorTracks(tracks),
-                {
-                  owner: p.owner as string | undefined,
-                  image_url: p.image_url as string | undefined,
-                  description: p.description as string | undefined,
-                },
-              ),
-            ).catch(() => undefined);
-          }
-        } catch {
-          // Per-playlist track fetch is best-effort (56-58).
-        }
-      }
+      // The cards are on screen — the button stops saying "Loading" HERE, not
+      // after the crawl below.
+      //
+      // Specialmed (Discord, Aug 11): Tidal's refresh sat on "Loading" for 3-5
+      // minutes after the playlists had visibly rendered, while Deezer snapped
+      // back instantly. The crawl fetches every playlist's full track list to
+      // feed auto-mirroring; awaiting it before releasing the button made the
+      // button report the CRAWL rather than the list. Fixed once in the vanilla
+      // page (75aa6720b) — but three days AFTER /sync flipped to React
+      // (89b61d3fd), so that fix landed in a file which no longer runs, and the
+      // port had already inherited the original blocking shape.
+      setLoading(false);
+
+      // Genuinely in the background now, three at a time: sequential is what
+      // took minutes, unbounded would hammer Tidal for a large account.
+      void crawlTracks(rows, generation);
     } catch (error) {
       if (generation !== loadGeneration.current) return;
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -180,7 +208,7 @@ function AccountVerticalTab({
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
-  }, [config, chrome, vertical, setPlaylistTracks]);
+  }, [config, chrome, vertical, crawlTracks]);
 
   /** The shared non-fresh open (handleTidalCardClick 168-195 and the clone). */
   const openSettled = useCallback(
