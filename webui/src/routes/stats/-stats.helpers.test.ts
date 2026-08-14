@@ -16,11 +16,20 @@ import { statsSearchSchema } from './-stats.types';
 
 describe('statsSearchSchema', () => {
   it('falls back to 7d for unknown ranges', () => {
-    expect(statsSearchSchema.parse({ range: 'bad' })).toEqual({ range: '7d' });
+    expect(statsSearchSchema.parse({ range: 'bad' })).toEqual({ range: '7d', tab: 'listening' });
   });
 
   it('keeps known ranges', () => {
-    expect(statsSearchSchema.parse({ range: '12m' })).toEqual({ range: '12m' });
+    expect(statsSearchSchema.parse({ range: '12m' })).toEqual({ range: '12m', tab: 'listening' });
+  });
+
+  it('defaults to the listening tab — the personal facts are the point', () => {
+    expect(statsSearchSchema.parse({}).tab).toBe('listening');
+  });
+
+  it('keeps a known tab and falls back on a bad one', () => {
+    expect(statsSearchSchema.parse({ tab: 'library' }).tab).toBe('library');
+    expect(statsSearchSchema.parse({ tab: 'nonsense' }).tab).toBe('listening');
   });
 });
 

@@ -225,6 +225,45 @@ describe('stats route', () => {
     expect(screen.queryByText(/vs previous/)).toBeNull();
   });
 
+  /**
+   * P2: the page carried two kinds of fact in one visual language — your top
+   * artists sitting beside database table sizes. They are read by different
+   * people at different frequencies. Split, with the tab in the URL so it is
+   * linkable and survives a reload.
+   */
+  it('shows listening facts by default and hides the operational ones', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Top Artists')).toBeTruthy();
+    expect(screen.queryByText('Library Disk Usage')).toBeNull();
+    expect(screen.queryByText('Database Storage')).toBeNull();
+  });
+
+  it('the library tab shows the operational facts and none of the personal ones', async () => {
+    renderStatsRoute(['/stats?tab=library']);
+    expect(await screen.findByText('Library Disk Usage')).toBeTruthy();
+    expect(screen.getByText('Database Storage')).toBeTruthy();
+    expect(screen.getByText('Library Health')).toBeTruthy();
+    expect(screen.queryByText('Top Artists')).toBeNull();
+  });
+
+  it('hides the range picker on the library tab', async () => {
+    // Disk usage is what it is today — a range picker there is a control that
+    // does nothing, which is worse than no control.
+    const { container } = renderStatsRoute(['/stats?tab=library']);
+    await screen.findByText('Library Disk Usage');
+    expect(container.querySelector('#stats-time-range')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('keeps the chosen range when switching tabs', async () => {
+    // Switching to Library and back must not silently reset a chosen range.
+    const { history } = renderStatsRoute(['/stats?range=30d']);
+    await screen.findByText('Top Artists');
+    fireEvent.click(screen.getByRole('tab', { name: 'Library' }));
+    await screen.findByText('Library Disk Usage');
+    expect(history.location.search).toContain('range=30d');
+    expect(history.location.search).toContain('tab=library');
+  });
+
   it('omits the comparison entirely on the all-time range', async () => {
     // 'all' has no period before it — the backend sends previous: null and the
     // page must render nothing rather than a delta against zero.

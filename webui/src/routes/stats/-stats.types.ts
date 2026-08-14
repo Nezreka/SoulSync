@@ -3,8 +3,22 @@ import { z } from 'zod';
 export const STATS_RANGE_VALUES = ['7d', '30d', '12m', 'all'] as const;
 export type StatsRange = (typeof STATS_RANGE_VALUES)[number];
 
+/**
+ * The page carries two different kinds of fact that were sharing one surface.
+ *
+ * 'listening' is personal — your plays, your artists, your genres. 'library'
+ * is operational — disk usage, database size, format spread. They are read by
+ * different people for different reasons at different frequencies, and mixing
+ * them meant the personal numbers were buried under storage tables.
+ *
+ * In the URL so a tab is linkable and survives a reload, same as `range`.
+ */
+export const STATS_TAB_VALUES = ['listening', 'library'] as const;
+export type StatsTab = (typeof STATS_TAB_VALUES)[number];
+
 export const statsSearchSchema = z.object({
   range: z.enum(STATS_RANGE_VALUES).default('7d').catch('7d'),
+  tab: z.enum(STATS_TAB_VALUES).default('listening').catch('listening'),
 });
 
 export type StatsSearch = z.infer<typeof statsSearchSchema>;

@@ -883,3 +883,33 @@
 .statsCardDeltaNew {
   color: rgb(var(--accent-rgb));
 }
+
+/* Listening | Library — two kinds of fact that used to share one surface. */
+.statsTabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.statsTab {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.statsTab:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.statsTabActive {
+  background: rgb(var(--accent-rgb));
+  color: #0c0c0c;
+}

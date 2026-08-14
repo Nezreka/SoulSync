@@ -15,7 +15,7 @@ Phases are ordered by *feel-change per unit of work*, not by ambition.
 
 ---
 
-## P1 — Comparison layer (the cheapest thing that changes everything)
+## P1 — Comparison layer ✅ SHIPPED (cc23bdad7)
 
 Every overview tile gains "vs previous period": 1,247 plays **↑31% vs last
 month**. Same for time, artists, albums, tracks.
@@ -30,17 +30,19 @@ month**. Same for time, artists, albums, tracks.
 **Why first:** turns ten trivia numbers into ten signals for one extra query per
 range. Nothing else on the list has this ratio.
 
-## P2 — Split the page in two
+## P2 — Split the page in two ✅ SHIPPED
 
 Library Health, Format Breakdown, Database Storage, Library Disk Usage are
 operator facts. Top Artists / Albums / Tracks / Genres / Recently Played are
 personal facts. They want different visual languages and different visit
 frequencies.
 
-- Personal stays at `/stats`. Ops moves to a "Library" tab on the same route
-  (or folds into Tools, which is where operators already live — decide during
-  the phase, don't pre-commit).
-- Pure re-arrangement. No new data.
+**Decided: a tab on `/stats`, not a move into Tools.** Tools is where you go to
+RUN things; these are reference facts, and burying them one page deeper would
+have made findable things less findable — the opposite of the wider problem.
+The tab lives in the URL (`?tab=library`) so it is linkable and survives a
+reload, and the range picker hides there because disk usage is not
+range-scoped — an inert control is worse than no control.
 
 ## P3 — The two charts that are actually personal
 
@@ -99,7 +101,6 @@ on the stats page. Revisit only after P5 ships and is worth landing on.
 
 ## Open questions
 
-- Where do the ops stats live after P2 — a tab here, or Tools?
 - Is Wrapped year-bound (Jan–Dec) or rolling twelve months? Rolling is more
   useful year-round; fixed is more shareable in December.
 - Does the shareable card render server-side (Pillow, like the overlay

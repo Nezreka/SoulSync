@@ -26,6 +26,7 @@ import type {
   StatsLibraryDiskUsagePayload,
   StatsRange,
   StatsRecentTrack,
+  StatsTab,
   StatsTrackRow,
 } from '../-stats.types';
 
@@ -57,6 +58,7 @@ import {
   statDelta,
   visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
+import { STATS_TAB_VALUES } from '../-stats.types';
 import { Route } from '../route';
 import styles from './stats-page.module.css';
 
@@ -82,7 +84,7 @@ export function StatsPage() {
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const { range } = Route.useSearch();
+  const { range, tab } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -136,7 +138,17 @@ export function StatsPage() {
   const onRangeChange = (nextRange: StatsRange) => {
     void navigate({
       to: Route.fullPath,
-      search: { range: nextRange },
+      search: { range: nextRange, tab },
+      replace: true,
+    });
+  };
+
+  const onTabChange = (nextTab: StatsTab) => {
+    // Range travels with the tab so switching to Library and back does not
+    // silently reset a range the user chose.
+    void navigate({
+      to: Route.fullPath,
+      search: { range, tab: nextTab },
       replace: true,
     });
   };
@@ -148,11 +160,28 @@ export function StatsPage() {
         title="Listening Stats"
         actions={
           <>
+            <div className={styles.statsTabs} role="tablist" aria-label="Stats section">
+              {STATS_TAB_VALUES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === option}
+                  className={`${styles.statsTab} ${tab === option ? styles.statsTabActive : ''}`}
+                  onClick={() => onTabChange(option)}
+                >
+                  {option === 'listening' ? 'Listening' : 'Library'}
+                </button>
+              ))}
+            </div>
+            {/* Library stats are not range-scoped — disk usage is what it is
+                today — so the picker is hidden rather than left inert. */}
             <div
               id="stats-time-range"
               className={styles.statsTimeRange}
               role="tablist"
               aria-label="Listening stats range"
+              hidden={tab !== 'listening'}
             >
               {(['7d', '30d', '12m', 'all'] as const).map((option) => (
                 <button
@@ -203,6 +232,23 @@ export function StatsPage() {
         <SectionLoadingState />
       ) : cachedStatsQuery.error ? (
         <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
+      ) : tab === 'library' ? (
+        /* Operational facts. Deliberately NOT range-scoped — disk usage and
+           database size are what they are right now, so the range picker is
+           hidden on this tab rather than sitting there doing nothing. */
+        <>
+          <StatsSectionCard title="Library Health" fullWidth>
+            <StatsLibraryHealth health={cachedStats?.health ?? {}} />
+          </StatsSectionCard>
+
+          <StatsSectionCard title="Library Disk Usage" fullWidth>
+            <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
+          </StatsSectionCard>
+
+          <StatsSectionCard title="Database Storage" fullWidth>
+            <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
+          </StatsSectionCard>
+        </>
       ) : hasData ? (
         <>
           <OverviewCards
@@ -249,17 +295,6 @@ export function StatsPage() {
             </div>
           </div>
 
-          <StatsSectionCard title="Library Health" fullWidth>
-            <StatsLibraryHealth health={cachedStats?.health ?? {}} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Library Disk Usage" fullWidth>
-            <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Database Storage" fullWidth>
-            <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
-          </StatsSectionCard>
         </>
       ) : (
         <StatsEmptyState />
