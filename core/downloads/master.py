@@ -553,6 +553,23 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 _mlm.get_match_for_track(db, batch_profile_id, track_data, default_source=batch_source)
                 if (not ignore_manual_matches and _stid) else None
             )
+            # A saved match whose library track no longer exists is not a
+            # match — it is a stale row (#1138). Trusting it marked the track
+            # "found", pulled it OFF the wishlist and skipped the download, so
+            # a song whose file the user had deleted silently disappeared from
+            # every reprocess: never synced, never re-downloaded, never
+            # wishlisted. Dropping it here sends the track down the normal
+            # path, which downloads it or wishlists it like any other missing
+            # track.
+            if _manual_match and not _mlm.match_is_live(db, _manual_match):
+                logger.warning(
+                    "[Manual Match] '%s' has a saved library match (track %s) whose file is "
+                    "no longer in the library — ignoring the stale match and processing the "
+                    "track normally. Remove it under Tools -> Manual Library Match to stop "
+                    "this warning.",
+                    track_name, _manual_match.get('library_track_id'),
+                )
+                _manual_match = None
             if _manual_match:
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:

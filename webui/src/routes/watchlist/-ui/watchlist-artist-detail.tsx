@@ -35,14 +35,37 @@ export function pickDiscographySource(
     | 'discogs_artist_id'
     | 'musicbrainz_artist_id'
     | 'global_metadata_source'
+    | 'available_sources'
+    | 'library_resolvable_sources'
   >,
 ): { id: string; source: string } | null {
   const active = (payload.global_metadata_source || '').toLowerCase();
-  const spotify = payload.spotify_artist_id || null;
-  const itunes = payload.itunes_artist_id || null;
-  const deezer = payload.deezer_artist_id || null;
-  const discogs = payload.discogs_artist_id || null;
-  const musicbrainz = payload.musicbrainz_artist_id || null;
+
+  // A pinned source is safe in exactly two cases, and the server reports both:
+  // its provider is alive (`available_sources`), or its id resolves straight
+  // to a LIBRARY artist (`library_resolvable_sources` — the artist page
+  // upgrades to the library view off the id column, no provider call). Pinning
+  // anything else navigates into a guaranteed 503 ("Could not access spotify …
+  // provider is unavailable") — the Discord report where the watchlist failed
+  // but Discover worked: Spotify fully off, artist matched only on Spotify,
+  // not in the library, and the old ladder pinned it anyway.
+  //
+  // With no server knowledge at all (older backend, callers that don't fetch
+  // it) every source stays eligible — exactly the previous behaviour.
+  const available = payload.available_sources;
+  const resolvable = payload.library_resolvable_sources;
+  const serverKnows = available != null || resolvable != null;
+  const pick = (source: string, id: string | null | undefined): string | null => {
+    if (!id) return null;
+    if (!serverKnows) return id;
+    return available?.includes(source) || resolvable?.includes(source) ? id : null;
+  };
+
+  const spotify = pick('spotify', payload.spotify_artist_id);
+  const itunes = pick('itunes', payload.itunes_artist_id);
+  const deezer = pick('deezer', payload.deezer_artist_id);
+  const discogs = pick('discogs', payload.discogs_artist_id);
+  const musicbrainz = pick('musicbrainz', payload.musicbrainz_artist_id);
 
   if (active.includes('spotify') && spotify) return { id: spotify, source: 'spotify' };
   if (active.includes('discogs') && discogs) return { id: discogs, source: 'discogs' };
@@ -239,9 +262,20 @@ export function WatchlistArtistDetail({ profileId, artistId, onClose, onOpenSett
             className="watchlist-detail-discog-btn"
             disabled={!discography}
             aria-disabled={!discography}
-            style={
-              discography ? undefined : { pointerEvents: 'none', opacity: 0.5, color: 'inherit' }
+            // Disabled means every provider this artist is matched on is
+            // switched off AND none of those ids are in the library — say so,
+            // and name the way out, instead of a silent grey button (the old
+            // behaviour navigated into a "provider is unavailable" error).
+            title={
+              payload && !discography
+                ? 'This artist is only matched on disabled metadata sources. ' +
+                  'Use Settings → Provider Links to match it to your active source.'
+                : undefined
             }
+            // No pointerEvents:'none' here — `disabled` already blocks the
+            // click (the vanilla rule was for an <a>), and it would swallow
+            // the hover that shows the title above.
+            style={discography ? undefined : { opacity: 0.5, color: 'inherit' }}
             onClick={() => {
               if (!discography) return;
               onClose();

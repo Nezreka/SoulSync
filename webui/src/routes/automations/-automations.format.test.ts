@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   automationMeta,
+  automationOutcome,
+  automationSchedule,
   formatAction,
   formatTrigger,
   humanizeType,
@@ -198,5 +200,241 @@ describe('automationMeta', () => {
   it('drops a zero run_count rather than showing "Runs: 0"', () => {
     expect(automationMeta({ ...base, run_count: 0 }, NOW).runs).toBeUndefined();
     expect(automationMeta({ ...base, run_count: 3 }, NOW).runs).toBe(3);
+  });
+});
+
+describe('automationMeta while the side is paused', () => {
+  const base = { id: 1, name: 'a' };
+  const next = ahead(3_600_000);
+
+  it('drops the countdown — the engine is skipping that slot', () => {
+    // The stored next_run is REAL (the engine keeps the schedule alive so
+    // resuming does not cause a catch-up burst); what would be false is the
+    // implication that it is going to fire.
+    const timer = { ...base, trigger_type: 'schedule', enabled: 1, next_run: next };
+    expect(automationMeta(timer, NOW, false).nextRun).toBe('in 1h');
+    expect(automationMeta(timer, NOW, true).nextRun).toBeUndefined();
+  });
+
+  it('stops claiming to listen for events it will ignore', () => {
+    const event = { ...base, trigger_type: 'app_started', enabled: 1 };
+    expect(automationMeta(event, NOW, false).listening).toBe(true);
+    expect(automationMeta(event, NOW, true).listening).toBe(false);
+  });
+
+  it('says paused for both trigger kinds', () => {
+    expect(
+      automationMeta({ ...base, trigger_type: 'schedule', enabled: 1 }, NOW, true).paused,
+    ).toBe(true);
+    expect(
+      automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW, true).paused,
+    ).toBe(true);
+  });
+
+  it('says nothing about pause for an automation that is switched off anyway', () => {
+    // It is already not running on its own account; "paused" would be a second
+    // reason for the same silence and reads as though flipping the master back
+    // on would start it.
+    expect(automationMeta({ ...base, enabled: 0 }, NOW, true).paused).toBe(false);
+  });
+
+  it('leaves the history alone — last run, run count and errors are facts', () => {
+    const meta = automationMeta(
+      { ...base, enabled: 1, last_run: '2026-08-12 09:00:00', run_count: 7, last_error: 'boom' },
+      NOW,
+      true,
+    );
+    expect(meta.runs).toBe(7);
+    expect(meta.error).toBe('boom');
+    expect(meta.lastRun).toBeTruthy();
+  });
+
+  it('defaults to not paused, so every existing caller keeps its behaviour', () => {
+    expect(
+      automationMeta({ ...base, trigger_type: 'app_started', enabled: 1 }, NOW).listening,
+    ).toBe(true);
+  });
+});
+
+describe('automationOutcome — the handler stops speaking its own dialect', () => {
+  it('says what a watchlist scan accomplished', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 42,
+        new_tracks_found: 9,
+        tracks_added_to_wishlist: 7,
+      }),
+    ).toEqual({ text: 'Checked 42 artists, wishlisted 7 tracks', kind: 'ok' });
+  });
+
+  it('distinguishes found-but-not-wishlisted from nothing at all', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 5,
+        new_tracks_found: 3,
+        tracks_added_to_wishlist: 0,
+      })?.text,
+    ).toBe('Checked 5 artists, found 3 new tracks');
+    expect(
+      automationOutcome('scan_watchlist', { status: 'completed', artists_scanned: 5 })?.text,
+    ).toBe('Checked 5 artists, nothing new');
+  });
+
+  it('singularises rather than printing "1 artists"', () => {
+    expect(
+      automationOutcome('scan_watchlist', {
+        status: 'completed',
+        artists_scanned: 1,
+        tracks_added_to_wishlist: 1,
+      })?.text,
+    ).toBe('Checked 1 artist, wishlisted 1 track');
+  });
+
+  it('reports the duplicate cleaner in files, not keys', () => {
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'completed',
+        files_scanned: 12000,
+        duplicates_found: 8,
+        files_deleted: 8,
+        space_freed_mb: 240.5,
+      })?.text,
+    ).toBe('Found 8 duplicates, removed 8 files (240.5 MB)');
+    // A clean library is the common case and deserves a sentence of its own.
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'completed',
+        files_scanned: 12000,
+        duplicates_found: 0,
+      })?.text,
+    ).toBe('Checked 12,000 files, no duplicates');
+  });
+
+  it('reads counters the handler stringified', () => {
+    // refresh_mirrored returns str(n) for both of these.
+    expect(
+      automationOutcome('refresh_mirrored', { status: 'completed', refreshed: '3', errors: '0' })
+        ?.text,
+    ).toBe('Refreshed 3 playlists');
+    expect(
+      automationOutcome('refresh_mirrored', { status: 'completed', refreshed: '3', errors: '1' })
+        ?.text,
+    ).toBe('Refreshed 3 playlists, 1 error');
+  });
+
+  it('explains a skip instead of printing the word "reason"', () => {
+    expect(
+      automationOutcome('run_duplicate_cleaner', {
+        status: 'skipped',
+        reason: 'Duplicate cleaner already running',
+      }),
+    ).toEqual({ text: 'Skipped — Duplicate cleaner already running', kind: 'skipped' });
+    expect(automationOutcome('anything', { status: 'skipped' })?.text).toBe('Skipped');
+  });
+
+  it('does not claim a result for a run that handed off to a worker', () => {
+    // discover_playlist returns status:'started' — the real outcome lands later.
+    expect(
+      automationOutcome('discover_playlist', { status: 'started', playlist_count: '4' }),
+    ).toEqual({ text: 'Handed off — still working', kind: 'skipped' });
+  });
+
+  it('falls back to the generic facts for an action with no sentence', () => {
+    expect(automationOutcome('some_future_action', { status: 'completed', widgets: 3 })).toEqual({
+      text: 'widgets: 3',
+      kind: 'ok',
+    });
+  });
+
+  it('says nothing when there is nothing worth saying', () => {
+    expect(automationOutcome('process_wishlist', { status: 'completed' })).toBeNull();
+    expect(automationOutcome('process_wishlist', null)).toBeNull();
+    // Arrays are not results; index-keyed nonsense must not reach a card.
+    expect(automationOutcome('process_wishlist', [1, 2])).toBeNull();
+  });
+});
+
+describe('automationSchedule', () => {
+  const NOW = Date.UTC(2026, 7, 12, 12, 0, 0);
+  const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
+
+  it('puts a run in flight above every other state', () => {
+    // It IS happening — nothing the stored row says can outrank that, not the
+    // automation's own switch and not the side's.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 0, trigger_type: 'schedule' },
+        NOW,
+        true,
+        true,
+      ),
+    ).toEqual({ state: 'running', label: 'Running now', ticking: false });
+  });
+
+  it('reads its own switch before the side"s', () => {
+    // A disabled automation is already off on its own account; calling it
+    // "paused" would blame the master switch for a state the user chose.
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 0, trigger_type: 'schedule' }, NOW, true),
+    ).toEqual({ state: 'off', label: 'Switched off', ticking: false });
+  });
+
+  it('says paused, and says nothing about a next run, while the side is held', () => {
+    // The engine skips the slot but keeps next_run alive, so the timestamp is
+    // real — what would be false is the implication that it will fire.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(3_600_000) },
+        NOW,
+        true,
+      ),
+    ).toEqual({ state: 'paused', label: 'Paused', ticking: false });
+  });
+
+  it('counts down for an armed timer, and asks to be ticked', () => {
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(7_200_000) },
+        NOW,
+      ),
+    ).toEqual({ state: 'waiting', label: 'Next in 2h', ticking: true });
+  });
+
+  it('says due, not overdue, once the stored time has passed', () => {
+    // The scheduler arms next_run and picks the row up on its next pass, so a
+    // timestamp in the recent past is normal operation, not a fault. Nothing
+    // here claims to know how late is late.
+    const due = automationSchedule(
+      { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: at(-600_000) },
+      NOW,
+    );
+    expect(due).toEqual({ state: 'due', label: 'Due now', ticking: false });
+  });
+
+  it('marks a timer with no armed next_run as unscheduled', () => {
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 1, trigger_type: 'daily_time' }, NOW),
+    ).toEqual({ state: 'unscheduled', label: 'Not scheduled yet', ticking: false });
+  });
+
+  it('says Listening for an armed event automation', () => {
+    // Event triggers have no next_run at all — a countdown would be a lie and
+    // an empty line would read as broken.
+    expect(
+      automationSchedule({ id: 1, name: 'x', enabled: 1, trigger_type: 'app_started' }, NOW),
+    ).toEqual({ state: 'listening', label: 'Listening', ticking: false });
+  });
+
+  it('reads a naive server timestamp as UTC, like every other label here', () => {
+    // "2026-08-12 14:00:00" is UTC; new Date() would read it as LOCAL and the
+    // countdown would be wrong by the viewer"s offset in either direction.
+    expect(
+      automationSchedule(
+        { id: 1, name: 'x', enabled: 1, trigger_type: 'schedule', next_run: '2026-08-12 14:00:00' },
+        NOW,
+      ).label,
+    ).toBe('Next in 2h');
   });
 });

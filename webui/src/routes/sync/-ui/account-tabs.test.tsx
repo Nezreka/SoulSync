@@ -170,6 +170,7 @@ describe('AccountDetailsModal', () => {
         onClose={vi.fn()}
         closeBeforeDownload={false}
         onDownloadMissing={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
     expect(screen.getByText('Road Trip')).toBeInTheDocument();
@@ -195,13 +196,14 @@ describe('AccountDetailsModal', () => {
         onClose={vi.fn()}
         closeBeforeDownload={false}
         onDownloadMissing={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
     expect(document.querySelector('.playlist-description')).toBeNull();
   });
 
   it('ARL closes BEFORE handing off; Spotify does not (2639 vs 1948)', () => {
-    const arl = { onClose: vi.fn(), onDownloadMissing: vi.fn() };
+    const arl = { onClose: vi.fn(), onDownloadMissing: vi.fn(), onSync: vi.fn() };
     const { unmount } = render(
       <AccountDetailsModal
         modalId="deezer-arl-playlist-details-modal"
@@ -218,7 +220,7 @@ describe('AccountDetailsModal', () => {
     expect(arl.onDownloadMissing).toHaveBeenCalled();
     unmount();
 
-    const spotify = { onClose: vi.fn(), onDownloadMissing: vi.fn() };
+    const spotify = { onClose: vi.fn(), onDownloadMissing: vi.fn(), onSync: vi.fn() };
     render(
       <AccountDetailsModal
         modalId="playlist-details-modal"
@@ -233,6 +235,32 @@ describe('AccountDetailsModal', () => {
     fireEvent.click(screen.getByText('📥 Download Missing Tracks'));
     expect(spotify.onClose).not.toHaveBeenCalled();
     expect(spotify.onDownloadMissing).toHaveBeenCalled();
+  });
+
+  it('the restored sync footer: mode select with the engine-read id + Sync button (Boulder: lost in port)', () => {
+    const onSync = vi.fn();
+    render(
+      <AccountDetailsModal
+        modalId="playlist-details-modal"
+        playlistId="p1"
+        row={SPOTIFY_ROW}
+        detail={detail}
+        trackCount={40}
+        onClose={vi.fn()}
+        closeBeforeDownload={false}
+        onDownloadMissing={vi.fn()}
+        onSync={onSync}
+      />,
+    );
+    // startPlaylistSync reads THIS id for the mode (downloads.js:3848).
+    const select = document.querySelector('#sync-mode-p1') as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(select.value).toBe('');
+    // The engine mutates THIS id while syncing (adopted, downloads.js:3873).
+    const btn = document.querySelector('#sync-btn-p1') as HTMLButtonElement;
+    expect(btn.textContent).toBe('Sync Playlist');
+    fireEvent.click(btn);
+    expect(onSync).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -306,6 +334,7 @@ describe('the header count is per-tab drift (1901 vs 2592)', () => {
         onClose={vi.fn()}
         closeBeforeDownload={false}
         onDownloadMissing={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
     expect(screen.getByText('0 tracks')).toBeInTheDocument();
@@ -322,6 +351,7 @@ describe('the header count is per-tab drift (1901 vs 2592)', () => {
         onClose={vi.fn()}
         closeBeforeDownload
         onDownloadMissing={vi.fn()}
+        onSync={vi.fn()}
       />,
     );
     expect(screen.getByText('2 tracks')).toBeInTheDocument();

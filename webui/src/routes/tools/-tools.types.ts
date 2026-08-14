@@ -19,11 +19,19 @@ export type LiteralUnion<T extends string> = T | (string & Record<never, never>)
 
 // ── Library Maintenance ──────────────────────────────────────────────────────
 
-export type RepairTab = 'jobs' | 'findings' | 'history';
+/** The four anchors of the maintenance surface, in scroll order. They were
+ *  tabs; tabs hid the findings you came for behind a room you had to know to
+ *  enter, and hid whether the library was alright at all. */
+export type RepairSection = 'health' | 'findings' | 'operations' | 'history';
 
 export type RepairFindingStatus = 'pending' | 'resolved' | 'dismissed';
 
-export type RepairSeverity = 'info' | 'warning' | 'critical';
+/** What the JOBS actually emit. `critical` was in this union for a long time
+ *  and nothing ever produced it, while `error` — the corruption detector's
+ *  severity, the most urgent findings in the system — was missing, so those
+ *  rows were unreachable by every severity filter and count. The CSS class is
+ *  still `.critical`; see `findingSeverityClass`. */
+export type RepairSeverity = 'info' | 'warning' | 'error';
 
 /** One row of a job's editable settings. `_section_*` keys are group headers,
  *  and `_interval_hours` is synthesised by the UI rather than sent by the API. */
@@ -40,6 +48,11 @@ export interface RepairJobRun {
   status?: string | null;
   display_name?: string | null;
   job_id?: string | null;
+  id?: number | null;
+  /** Why a run failed. Recorded since phase 1 and read by nobody until the
+   *  run history learned to expand — 'failed' with no reason is the one thing
+   *  a failed run is worth opening for. */
+  error_text?: string | null;
 }
 
 export interface RepairJob {
@@ -47,6 +60,10 @@ export interface RepairJob {
   display_name: string;
   description?: string | null;
   help_text?: string | null;
+  /** The family the backend files this job under — served, not guessed, so a
+   *  new job cannot be grouped differently here than it is there. */
+  category?: string | null;
+  icon?: string | null;
   enabled: boolean;
   is_running: boolean;
   auto_fix?: boolean;
@@ -112,7 +129,10 @@ export interface RepairFindingCounts {
   pending?: number;
   resolved?: number;
   dismissed?: number;
+  /** Its own STATUS, not a flavour of resolved — a sum of the other three
+   *  misses these rows entirely, which is why `total` exists. */
   auto_fixed?: number;
+  total?: number;
   by_job?: Record<
     string,
     { total: number; warning?: number; info?: number; display_name?: string }

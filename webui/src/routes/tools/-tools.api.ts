@@ -16,6 +16,7 @@
  * not re-implemented. Their endpoints stay there.
  */
 
+import type { FindingGroup, FindingTypeInfo } from './-tools.groups';
 import type {
   BackupListResponse,
   BulkFixStatus,
@@ -148,6 +149,12 @@ export interface FindingsQuery {
   jobId?: string;
   severity?: string;
   status?: string;
+  /** Scopes the list to one finding type — the unit the inbox works in. */
+  findingType?: string;
+  /** Whitelisted server-side: newest | oldest | severity | path. */
+  sort?: string;
+  /** Title + path search. Non-empty search escapes the grouping entirely. */
+  q?: string;
   page: number;
   limit: number;
 }
@@ -161,11 +168,27 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   if (query.jobId) params.set('job_id', query.jobId);
   if (query.severity) params.set('severity', query.severity);
   if (query.status) params.set('status', query.status);
+  if (query.findingType) params.set('finding_type', query.findingType);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.q) params.set('q', query.q);
   params.set('page', String(query.page));
   params.set('limit', String(query.limit));
 
   const response = await fetch(`/api/repair/findings?${params}`);
-  if (!response.ok) throw new Error('Failed to fetch findings');
+  if (!response.ok) {
+    // Carry the server's own message. The endpoint returns {error: "..."} on a
+    // 500, and discarding it left users staring at a bare "Error loading
+    // findings" with no way to tell us what broke — unfixable from their side
+    // and undiagnosable from ours.
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body?.error) detail = body.error;
+    } catch {
+      /* non-JSON body — the status is all we have */
+    }
+    throw new Error(detail);
+  }
   const data = (await response.json()) as Partial<RepairFindingsPage>;
   return { items: data.items || [], total: data.total || 0, page: data.page || 0 };
 }
@@ -175,6 +198,67 @@ export async function fetchFindingCounts(): Promise<RepairFindingCounts> {
   const response = await fetch('/api/repair/findings/counts');
   if (!response.ok) throw new Error('Failed to fetch counts');
   return (await response.json()) as RepairFindingCounts;
+}
+
+/**
+ * The inbox payload: one row per finding TYPE with per-status counts.
+ *
+ * Empty array rather than a throw on failure — the inbox degrading to "no
+ * groups" alongside a visible error beats the whole maintenance surface
+ * disappearing because one of three parallel loads lost its connection.
+ */
+export async function fetchFindingGroups(): Promise<FindingGroup[]> {
+  try {
+    const response = await fetch('/api/repair/findings/groups');
+    if (!response.ok) return [];
+    const data = (await response.json()) as { groups?: FindingGroup[] };
+    return data.groups || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The finding-type catalog — label, verb, fixable, destructive, per type.
+ *
+ * The single source of truth for what the UI may offer. Same degradation as
+ * the groups call: an empty catalog renders review-only rows, which is the
+ * safe way to be wrong.
+ */
+export async function fetchFindingTypes(): Promise<FindingTypeInfo[]> {
+  try {
+    const response = await fetch('/api/repair/finding-types');
+    if (!response.ok) return [];
+    const data = (await response.json()) as { types?: FindingTypeInfo[] };
+    return data.types || [];
+  } catch {
+    return [];
+  }
+}
+
+/** The undo half of dismiss — dismiss is permanent by design, which is only
+ *  safe to offer freely if it can be taken back. */
+export async function reopenFinding(id: number): Promise<boolean> {
+  try {
+    const response = await postJson(`/api/repair/findings/${id}/reopen`);
+    const data = (await response.json()) as { success?: boolean };
+    return Boolean(data.success);
+  } catch {
+    return false;
+  }
+}
+
+/** Dismiss every PENDING finding of one type — the group-level dismiss.
+ *  Scoped by type server-side; the alternative was shipping thousands of ids
+ *  to the browser only to post them straight back. */
+export async function dismissFindingType(
+  findingType: string,
+): Promise<{ success?: boolean; updated?: number; error?: string }> {
+  const response = await postJson('/api/repair/findings/bulk', {
+    finding_type: findingType,
+    action: 'dismiss',
+  });
+  return (await response.json()) as { success?: boolean; updated?: number; error?: string };
 }
 
 export interface FixResult {
@@ -249,11 +333,19 @@ export async function startBulkFix(options: {
   jobId?: string;
   severity?: string;
   fixAction?: string | null;
+  /** Scopes the run to one finding type. A `fixAction` is only accepted when
+   *  the resolved selection is a single type — the backend 400s otherwise,
+   *  because one type's "delete" is another's "track id to keep". */
+  findingType?: string;
+  /** Skips every destructive type. What "Fix all safe" sends. */
+  safeOnly?: boolean;
 }): Promise<BulkFixStartResult> {
-  const body: Record<string, string> = {};
+  const body: Record<string, string | boolean> = {};
   if (options.jobId) body.job_id = options.jobId;
   if (options.severity) body.severity = options.severity;
   if (options.fixAction) body.fix_action = options.fixAction;
+  if (options.findingType) body.finding_type = options.findingType;
+  if (options.safeOnly) body.safe_only = true;
   const response = await postJson('/api/repair/findings/bulk-fix-start', body);
   return (await response.json()) as BulkFixStartResult;
 }

@@ -113,6 +113,12 @@ export function useAdlDownloads({
     void refreshHistory();
 
     const downloadsTimer = setInterval(() => {
+      // A backgrounded tab kept pulling the full 300-row payload every 2s
+      // (and the quarantine tick behind it runs a server-side filesystem
+      // scan) — the dashboard cards hidden-gate their polls, this one never
+      // did (perf sweep, Aug 2026). Skipped ticks catch up on the first
+      // tick after the tab is visible again.
+      if (document.hidden) return;
       void refresh();
       pollCountRef.current += 1;
       if (pollCountRef.current % ADL_QUARANTINE_EVERY_N_POLLS === 0) {
@@ -120,7 +126,10 @@ export function useAdlDownloads({
       }
     }, ADL_POLL_MS);
 
-    const historyTimer = setInterval(() => void refreshHistory(), ADL_BATCH_HISTORY_POLL_MS);
+    const historyTimer = setInterval(() => {
+      if (document.hidden) return;
+      void refreshHistory();
+    }, ADL_BATCH_HISTORY_POLL_MS);
 
     return () => {
       clearInterval(downloadsTimer);

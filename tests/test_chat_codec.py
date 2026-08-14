@@ -84,7 +84,7 @@ class TestApiIntegration:
         client = _FakeChatClient()
         state = {"client": client}
         chat_api.configure(client_getter=lambda: state["client"],
-                           run_async=lambda v: v,
+                           run_async=lambda v, timeout=None: v,
                            config_get=lambda k, d=None: d)
         app = Flask(__name__)
 
@@ -113,6 +113,21 @@ class TestApiIntegration:
         assert msgs[0]["message"] == "*rich* message" and msgs[0]["rich"] is True
         assert msgs[1]["message"] == "plain from nicotine+" and "rich" not in msgs[1]
 
+    def test_room_send_carries_the_edit_tag_and_read_returns_it(self):
+        http, client = self._app()
+        key = "me|2026-08-11T02:59:00Z|typo'd words"
+        assert http.post("/api/chat/room/message",
+                         json={"message": "fixed words",
+                               "edit": key}).status_code == 200
+        room, wire = client.sent_room[0]
+        assert decode(wire)["ed"] == key
+        client.get_room_messages = lambda room: [
+            {"username": "me", "message": wire, "timestamp": "3"},
+        ]
+        msgs = http.get("/api/chat/room").get_json()["messages"]
+        assert msgs[0]["message"] == "fixed words"
+        assert msgs[0]["ed"] == key
+
     def test_pms_are_never_enveloped(self):
         http, client = self._app()
         assert http.post("/api/chat/conversations/pal",
@@ -127,3 +142,30 @@ def test_autoprove_replies_stay_plaintext():
     src = (Path(__file__).resolve().parent.parent / "core" / "chat_autoprove.py").read_text(
         encoding="utf-8", errors="replace")
     assert "chat_codec" not in src and "encode(" not in src
+
+
+class TestEditTag:
+    """Message edits: 'ed' names the sender's own earlier message by key
+    (user|timestamp|text — the thread-key format); the envelope's own text is
+    the replacement. Soulseek cannot unsend, so both messages stay real —
+    the client fold does the replacing and keeps the history."""
+
+    def test_round_trips_through_the_envelope(self):
+        from core.chat_codec import edit_of
+        wire = encode("the corrected words", {"ed": "boulder|2026-08-11T01:00:00Z|typo'd words"})
+        dec = decode(wire)
+        assert dec["t"] == "the corrected words"
+        assert edit_of(dec) == "boulder|2026-08-11T01:00:00Z|typo'd words"
+
+    def test_rejects_junk_shapes(self):
+        from core.chat_codec import edit_of
+        assert edit_of({"ed": ""}) is None
+        assert edit_of({"ed": "no-separator"}) is None      # not a message key
+        assert edit_of({"ed": 42}) is None
+        assert edit_of({}) is None
+        assert edit_of(None) is None
+
+    def test_bounds_the_key(self):
+        from core.chat_codec import edit_of
+        long_key = "user|" + "x" * 500
+        assert len(edit_of({"ed": long_key})) == 160

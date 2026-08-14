@@ -42,14 +42,12 @@ function refreshRateMonitorExperimentalVisibility() {
 
 
 function _handleRateMonitorUpdate(data) {
-    // Re-broadcast for the React dashboard's equalizer (tools-seam rule).
+    // Re-broadcast on the window seam (tools-seam rule); the React
+    // equalizer that consumed this retired when the grid left the Services
+    // card — rate graphs open from the Manage Workers modal now.
     window.dispatchEvent(new CustomEvent('ss:rate-monitor', { detail: data }));
-    // The equalizer is React-rendered from that frame since the dashboard
-    // flip (rate-equalizer.tsx). What stays vanilla is the DETAIL MODAL
-    // (_openRateModal, opened from the React bars through the window seam) —
-    // record every service's latest payload for it. The old renderer only
-    // recorded state while its grid happened to be visible; the modal wants
-    // it regardless.
+    // The DETAIL MODAL is vanilla (_openRateModal) — record every service's
+    // latest payload for it regardless of which page is showing.
     if (typeof isJiosaavnExperimentalEnabled === 'function' && !isJiosaavnExperimentalEnabled()) {
         _removeJiosaavnRateGauge();
     }
@@ -516,8 +514,22 @@ function _searchWishlistTrackManually(artistName, trackName) {
     setTimeout(tryHandoff, 200);
 }
 
-// Enhancement 8: navigate to the Search page pre-filled with this artist's name
-function _navigateToArtistFromWishlist(artistName) {
+// Enhancement 8: open the artist. A wishlist group carries only a NAME (its
+// rows are born from failed downloads, which have no artist id) — so resolve
+// the name against the library first and jump STRAIGHT to the artist page on
+// an exact match; the pre-filled Search is only the fallback for artists not
+// in the library at all.
+async function _navigateToArtistFromWishlist(artistName) {
+    try {
+        const resp = await fetch(`/api/library/artists?search=${encodeURIComponent(artistName)}&limit=5`);
+        const data = await resp.json();
+        const lower = String(artistName || '').toLowerCase();
+        const exact = ((data && data.artists) || []).find(a => (a.name || '').toLowerCase() === lower);
+        if (exact && exact.id != null) {
+            navigateToPage('artist-detail', { artistId: exact.id, artistName: exact.name });
+            return;
+        }
+    } catch (_e) { /* library unreachable — the search fallback still works */ }
     navigateToPage('search');
     setTimeout(() => {
         const searchInput = document.getElementById('enhanced-search-input');

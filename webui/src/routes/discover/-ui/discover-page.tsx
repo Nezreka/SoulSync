@@ -249,10 +249,47 @@ export function DiscoverPage() {
   // re-renders with a real 4-tile mosaic and an honest track count.
   const lbCoversRef = useRef(lbCovers);
   lbCoversRef.current = lbCovers;
+  // Deferred: the eager version fetched EVERY LB playlist and EVERY decade
+  // playlist at mount just to paint 4-tile mosaics — dozens of requests
+  // before the user scrolled anywhere near those shelves. Each shelf now
+  // hydrates when it actually enters the viewport. Environments without
+  // IntersectionObserver (jsdom) keep the eager behaviour.
+  const [mosaicsWanted, setMosaicsWanted] = useState<{ lb: boolean; decades: boolean }>(() => {
+    const eager = typeof IntersectionObserver === 'undefined';
+    return { lb: eager, decades: eager };
+  });
   useEffect(() => {
-    // The decade cards are lazy too (2675) — the vanilla's hydration pass
-    // runs on every grid it renders, so decades get their mosaics with LB.
-    for (const mix of [...lb.mixes, ...mixes.decadeMixes]) {
+    if (typeof IntersectionObserver === 'undefined') return;
+    if (mosaicsWanted.lb && mosaicsWanted.decades) return;
+    const anchors: [keyof typeof mosaicsWanted, HTMLElement | null][] = [
+      ['lb', document.getElementById('listenbrainz')],
+      ['decades', document.getElementById('year-mixes-grid')],
+    ];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const hit = anchors.find(([, el]) => el === entry.target)?.[0];
+          if (hit) {
+            setMosaicsWanted((w) => (w[hit] ? w : { ...w, [hit]: true }));
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      // Start the fetch a screen early so the mosaics are painted by arrival.
+      { rootMargin: '600px' },
+    );
+    for (const [key, el] of anchors) {
+      if (el && !mosaicsWanted[key]) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [mosaicsWanted, lb.mixes.length, mixes.decadeMixes.length]);
+  useEffect(() => {
+    const due = [
+      ...(mosaicsWanted.lb ? lb.mixes : []),
+      ...(mosaicsWanted.decades ? mixes.decadeMixes : []),
+    ];
+    for (const mix of due) {
       if (mix.tracks?.length || lbCoversRef.current[mix.key]) continue;
       const lazy = defaultLazySource(mix) ?? lbLazy(mix);
       if (!lazy) continue;
@@ -261,7 +298,7 @@ export function DiscoverPage() {
         .then((tracks) => setLbCovers((prev) => ({ ...prev, [mix.key]: tracks })))
         .catch(() => {});
     }
-  }, [lb.mixes, mixes.decadeMixes, lbLazy]);
+  }, [lb.mixes, mixes.decadeMixes, lbLazy, mosaicsWanted]);
   const decadeMixesHydrated = useMemo(
     () =>
       mixes.decadeMixes.map((mix) =>
@@ -470,8 +507,8 @@ export function DiscoverPage() {
         return (
           <MixShelf
             id={id}
-            title="Your Mixes"
-            subtitle="Fresh playlists built from your listening — open one to see the tracks"
+            title="Made For You"
+            subtitle="Fresh mixes built from your listening — open one to see the tracks"
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
@@ -482,8 +519,8 @@ export function DiscoverPage() {
         return (
           <MixShelf
             id={id}
-            title="Year Mixes"
-            subtitle="Jump into the sound of a decade — open one to see the tracks"
+            title="Decades"
+            subtitle="The sound of every era in your collection"
             mixes={decadeMixesHydrated}
             loaded={true}
             gridId="year-mixes-grid"
@@ -514,8 +551,8 @@ export function DiscoverPage() {
             watchingIds={rec.watchingIds}
             images={rec.images}
             buildDetailPath={detailPath}
-            onAddToWatchlist={(artistId, artistName) =>
-              void rec.toggleWatchlist(artistId, artistName)
+            onAddToWatchlist={(artistId, artistName, source) =>
+              void rec.toggleWatchlist(artistId, artistName, source)
             }
             onViewAll={kind === 'recommended' ? () => setRecModalOpen(true) : undefined}
           />
@@ -725,6 +762,7 @@ export function DiscoverPage() {
         <div className="discover-container">
           <DiscoverHero
             artist={hero.artist}
+            loading={page.hero.isPending}
             count={hero.artists.length}
             index={hero.index}
             watchlist={hero.watchlist}
@@ -741,14 +779,19 @@ export function DiscoverPage() {
             onViewRecommended={() => setRecModalOpen(true)}
             onOpenBlacklist={blacklist.openModal}
           />
-          <ArtistMapHub
-            onOpenWatchlist={() => void map.openWatchlist()}
-            onOpenGenre={() => void map.openGenre()}
-            // Explorer asks for an artist FIRST (9633) — the prompt resolves a
-            // real name, then the map explores it.
-            onOpenExplorer={() => setExplorerPromptOpen(true)}
-          />
-          <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+          {/* One row, not two stacked billboards: the hero is the page's
+              only full-width statement — the viz hubs share a line beneath
+              it so the first SHELF arrives a screen earlier. */}
+          <div className="discover-hub-row">
+            <ArtistMapHub
+              onOpenWatchlist={() => void map.openWatchlist()}
+              onOpenGenre={() => void map.openGenre()}
+              // Explorer asks for an artist FIRST (9633) — the prompt resolves
+              // a real name, then the map explores it.
+              onOpenExplorer={() => setExplorerPromptOpen(true)}
+            />
+            <ArtistWebHub onOpenLens={(lens) => setWebRequest({ lens })} />
+          </div>
           {rows.map((row) =>
             row.kind === 'full' ? (
               <div key={row.id}>{renderSection(row.id)}</div>

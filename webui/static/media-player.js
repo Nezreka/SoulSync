@@ -464,6 +464,18 @@ async function startStream(searchResult) {
             return;
         }
 
+        // Same track clicked while PAUSED with audio still loaded — resume
+        // instead of tearing the stream down and re-downloading it. readyState
+        // guards the case where the stream never actually became playable, and
+        // !ended keeps a click after natural completion on the restart path
+        // (resuming at the very end would just instantly re-fire 'ended').
+        if (currentTrackId === newTrackId && audioPlayer && audioPlayer.paused
+                && !audioPlayer.ended && audioPlayer.src && audioPlayer.readyState >= 2) {
+            console.log("▶️ Resuming paused stream for same track");
+            togglePlayback();
+            return;
+        }
+
         // Lock to prevent duplicate stream starts
         _streamLock = true;
 
@@ -929,9 +941,21 @@ function togglePlayback() {
 // AUDIO EVENT HANDLERS
 // ===============================
 
+// Whether playback is past the 3s "prev restarts the track" threshold — the
+// prev button's enabled state depends on it, but buttons only refresh on
+// track/queue changes, so on queue item 0 prev sat disabled for the whole
+// song. Refresh the buttons exactly when this boolean flips.
+let _npPastRestartThreshold = false;
+
 function updateAudioProgress() {
     // Update progress bar based on audio playback time
     if (!audioPlayer || !audioPlayer.duration) return;
+
+    const pastRestart = audioPlayer.currentTime > 3;
+    if (pastRestart !== _npPastRestartThreshold) {
+        _npPastRestartThreshold = pastRestart;
+        updateNpPrevNextButtons();
+    }
 
     const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
 
@@ -1435,7 +1459,15 @@ function npSetRadioMode(enabled, options = {}) {
             : 'Radio mode - auto-add similar tracks';
     }
     if (toast) {
-        showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
+        // Radio seeds from the current track's LIBRARY id — a streamed
+        // (non-library) track has none, so promising auto-queue would be a
+        // lie. Mode stays armed either way: it engages on the next library
+        // track that plays.
+        if (npRadioMode && currentTrack && !currentTrack.id) {
+            showToast('Radio armed - it kicks in when a library track plays', 'info');
+        } else {
+            showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
+        }
     }
     // Context label: only set the generic "Radio" if a more specific one (e.g.
     // "<Artist> Radio") wasn't already set by the caller.
@@ -1868,12 +1900,16 @@ function npCancelCrossfade() {
 
 function npCrossfadeTick() {
     if (!npCrossfadeOn || npXfadeActive || npRepeatMode === 'one') return;
+    // Shuffle picks its next track at 'ended' time; a crossfade preloads the
+    // SEQUENTIAL next and its finish handler advances to that index — with
+    // shuffle on that silently overrode every shuffled pick. Hard cut instead.
+    if (npShuffleOn) return;
     if (!audioPlayer || !audioPlayer.duration || !isFinite(audioPlayer.duration)) return;
     const remaining = audioPlayer.duration - audioPlayer.currentTime;
     if (remaining > NP_CROSSFADE_SECONDS || remaining <= 0.2) return;
 
-    // Determine the next track (respects shuffle/repeat-all the same way
-    // playNextInQueue does, but we only crossfade plain sequential next).
+    // Determine the sequential next track (crossfade never shuffles — see bail
+    // above; repeat-all's wrap is also a hard cut, next is undefined at tail).
     const nextIdx = npQueueIndex + 1;
     const next = npQueue[nextIdx];
     if (!next || !next.is_library || !next.file_path) return; // only library→library
@@ -2185,7 +2221,15 @@ function clearQueue() {
 }
 
 function playNextInQueue() {
-    if (npQueue.length === 0) return;
+    if (npQueue.length === 0) {
+        // Radio with an empty queue (e.g. cleared mid-session): a skip should
+        // re-seed from the current track, not go dead.
+        if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+            npEnsureCurrentTrackInQueue();
+            npFetchRadioTracks(true);
+        }
+        return;
+    }
     if (npShuffleOn) {
         // Pick a random index that is not the current one
         const candidates = [];
@@ -2201,6 +2245,13 @@ function playNextInQueue() {
             // End of queue — repeat-all wraps to start
             if (npRepeatMode === 'all') {
                 playQueueItem(0);
+                return;
+            }
+            // Radio mode: a skip at the tail of the fetched batch used to do
+            // nothing (more tracks only arrived when the song ENDED naturally)
+            // — fetch the next batch now and advance as soon as it lands.
+            if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+                npFetchRadioTracks(true);
             }
             return;
         }
@@ -2510,7 +2561,12 @@ function npCycleSleepTimer() {
         if (label) label.textContent = `Sleep ${npSleepMinutes}m`;
         if (btn) btn.classList.add('active');
         npSleepTimerId = setTimeout(() => {
-            handleStop();
+            // Pause, don't stop: handleStop() runs clearTrack(), which wipes
+            // the queue (including the persisted copy) — falling asleep to a
+            // playlist shouldn't cost the playlist. Pause keeps track + queue
+            // so the morning is one tap to resume.
+            if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+            setPlayingState(false);
             npSleepMinutes = 0;
             if (label) label.textContent = 'Sleep';
             if (btn) btn.classList.remove('active');
@@ -2523,7 +2579,10 @@ function npCycleSleepTimer() {
 
 function updateNpPrevNextButtons() {
     const canPrev = npQueueIndex > 0 || (audioPlayer && audioPlayer.currentTime > 3);
-    const canNext = npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
+    // Radio keeps next alive at the batch tail — a skip there fetches more.
+    const radioCanFetch = npRadioMode && currentTrack && currentTrack.id;
+    const canNext = (npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all')))
+        || Boolean(radioCanFetch);
 
     // Full Now Playing modal buttons
     const prevBtn = document.getElementById('np-prev-btn');
@@ -3053,7 +3112,85 @@ document.addEventListener('change', (e) => {
 // RADIO MODE
 // ===============================
 
-async function npFetchRadioTracks() {
+// Map a /api/library/radio row into a queue entry (shared by the seeded
+// refill fetch and the Library Radio starter).
+function npMapRadioTrack(t) {
+    return {
+        title: t.title || 'Unknown Track',
+        artist: t.artist || 'Unknown Artist',
+        album: t.album || 'Unknown Album',
+        file_path: t.file_path,
+        filename: t.file_path,
+        is_library: true,
+        image_url: t.image_url || null,
+        id: t.id,
+        artist_id: t.artist_id,
+        album_id: t.album_id,
+        bitrate: t.bitrate,
+        sample_rate: t.sample_rate
+    };
+}
+
+// Library Radio: a seedless station across the WHOLE library (ranked-random
+// server side — popularity nudges, not pure noise). Entry point is the Radio
+// button on the library page. Once the first batch plays, refills go through
+// the normal seeded radio path (each playing track has a library id).
+async function startLibraryRadio() {
+    try {
+        const resp = await fetch('/api/library/radio?library=1&limit=50');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            showToast('No playable library tracks found for radio', 'error');
+            return;
+        }
+        // Fresh station: replace the queue + any prior radio state, exactly
+        // like startArtistRadioById does.
+        npCancelCrossfade();
+        npRadioMode = false;
+        clearQueue();
+        if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+        npQueue = data.tracks.map(npMapRadioTrack);
+        renderNpQueue();
+        // Context BEFORE enabling radio — npSetRadioMode keeps a specific
+        // "<X> Radio" label when one is already set.
+        npSetPlayContext('Library Radio');
+        npSetRadioMode(true, { toast: false });
+        await playQueueItem(0);
+        showToast('Library Radio on - shuffling your whole library', 'success');
+    } catch (e) {
+        console.warn('Library radio failed:', e);
+        showToast(`Failed to start Library Radio: ${e.message}`, 'error');
+    }
+}
+window.startLibraryRadio = startLibraryRadio;
+
+// Play a resolved LIBRARY track list as the queue (a synced playlist, a mix —
+// anything already shaped like /api/library/radio rows). Replaces the queue,
+// plays from the top, labels the "Playing from" context. Radio mode is left
+// OFF: a playlist has an end, and auto-queueing similar tracks after it is
+// the radio button's call, not this one's.
+async function playTrackList(tracks, contextName) {
+    var list = (tracks || []).filter(function (t) { return t && t.file_path; });
+    if (!list.length) {
+        showToast('None of these tracks are in your library yet', 'info');
+        return;
+    }
+    npCancelCrossfade();
+    npRadioMode = false;
+    clearQueue();
+    if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+    npQueue = list.map(npMapRadioTrack);
+    renderNpQueue();
+    npSetPlayContext(contextName || 'Playlist');
+    await playQueueItem(0);
+}
+window.playTrackList = playTrackList;
+
+async function npFetchRadioTracks(forceAdvance = false) {
+    // forceAdvance: a manual skip at the tail of the fetched batch (next
+    // button / 'n' key) — the user asked for the next track, so advance as
+    // soon as the new batch lands even though something is still playing.
     if (!currentTrack || !currentTrack.id) return;
     try {
         npLoadingQueueItem = true;
@@ -3068,28 +3205,14 @@ async function npFetchRadioTracks() {
         // Bail if radio was toggled off during the fetch
         if (!npRadioMode) { npLoadingQueueItem = false; return; }
         if (data.tracks && data.tracks.length > 0) {
-            data.tracks.forEach(t => {
-                npQueue.push({
-                    title: t.title || 'Unknown Track',
-                    artist: t.artist || 'Unknown Artist',
-                    album: t.album || 'Unknown Album',
-                    file_path: t.file_path,
-                    filename: t.file_path,
-                    is_library: true,
-                    image_url: t.image_url || null,
-                    id: t.id,
-                    artist_id: t.artist_id,
-                    album_id: t.album_id,
-                    bitrate: t.bitrate,
-                    sample_rate: t.sample_rate
-                });
-            });
+            data.tracks.forEach(t => { npQueue.push(npMapRadioTrack(t)); });
             showToast(`Radio: Added ${data.tracks.length} similar tracks`, 'success');
             renderNpQueue();
             updateNpPrevNextButtons();
             npLoadingQueueItem = false;
-            // Only auto-advance if nothing is currently playing (triggered by onAudioEnded)
-            if (!isPlaying) {
+            // Advance when idle (triggered by onAudioEnded) or when the user
+            // explicitly skipped at the batch tail (forceAdvance).
+            if (!isPlaying || forceAdvance) {
                 playNextInQueue();
             }
         } else {

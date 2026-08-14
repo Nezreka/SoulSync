@@ -69,6 +69,19 @@ def _parse_text(hit) -> str:
     return title
 
 
+def _external_ids(body) -> dict:
+    """The tvdb/imdb/tmdb ids a manual search may carry, as prowlarr_search kwargs.
+
+    Prowlarr routes each id to the indexers that can resolve it, which is how the
+    *arr apps stop depending on a title matching scene spelling. Absent keys are
+    dropped rather than passed as None so the strategy builder sees exactly what
+    the caller actually knew."""
+    body = body if isinstance(body, dict) else {}
+    ids = {"imdb_id": body.get("imdb_id"), "tmdb_id": body.get("tmdb_id"),
+           "tvdb_id": body.get("tvdb_id")}
+    return {k: v for k, v in ids.items() if v}
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -104,10 +117,16 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     for hit in raw:
         parsed = parse_release(_parse_text(hit))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
+        # Swarm health is a TORRENT concept. Usenet and Soulseek hits have no
+        # seeders (Prowlarr leaves the field None for usenet), and a defensive 0
+        # from an indexer must not be read as a dead swarm for them — so the
+        # count only reaches the judge when the hit is actually a torrent.
+        proto = str(hit.get("protocol") or "").lower()
+        seeders = hit.get("seeders") if proto == "torrent" else None
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title, want_date=want_date,
-                                   want_absolute=want_absolute)
+                                   want_absolute=want_absolute, seeders=seeders)
         # Custom formats: matched formats ADD their (per-profile) score; a
         # summed score under the profile's floor hard-rejects (Radarr's
         # min custom format score).
@@ -121,12 +140,22 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
                            "rejected": "Format score %d is below your minimum %d" % (fscore, floor)}
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
+        # ``rejected`` is a STRING contract everywhere ('rejected says why') —
+        # this branch used to append a LIST onto it, which crashed the whole
+        # wishlist drain with "can only concatenate str (not 'list') to str"
+        # whenever a blocklisted uploader's hit ALSO failed a quality check
+        # (Boulder's Auto-Process Episode Wishlist error), and silently broke
+        # the contract with a bare list when it didn't.
         if user and user in blocked_users:
+            prior = verdict.get("rejected")
             verdict = {**verdict, "accepted": False,
-                       "rejected": (verdict.get("rejected") or []) + ["Uploader blocklisted"]}
+                       "rejected": ("Uploader blocklisted · %s" % prior) if prior
+                       else "Uploader blocklisted"}
         elif (user, hit.get("filename")) in blocked:
+            prior = verdict.get("rejected")
             verdict = {**verdict, "accepted": False,
-                       "rejected": (verdict.get("rejected") or []) + ["Blocklisted release"]}
+                       "rejected": ("Blocklisted release · %s" % prior) if prior
+                       else "Blocklisted release"}
         # Availability = how downloadable the source is (slskd: free slot/queue/speed score
         # from group_video_files; torrents/mock: seeders/peers). Ranks within a quality tier
         # so we grab a free-slot/empty-queue release over one stuck behind a huge queue.
@@ -152,7 +181,8 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "repack": parsed.get("repack") or parsed.get("proper"),
             # torrent/usenet grab carriers (present only for Prowlarr hits) — the magnet/NZB
             # URL + protocol the grab hands to the shared torrent/usenet client.
-            "download_url": hit.get("download_url"), "protocol": hit.get("protocol"),
+            "download_url": hit.get("download_url"), "magnet_uri": hit.get("magnet_uri"),
+            "protocol": hit.get("protocol"),
             "indexer_id": hit.get("indexer_id"), "guid": hit.get("guid"),
         })
     # accepted first, then quality-profile score, then availability, then bigger file.
@@ -636,7 +666,8 @@ def register_routes(bp):
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
                                 "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
@@ -681,7 +712,8 @@ def register_routes(bp):
             # (no polling id), so the client renders immediately.
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
             if pres.get("error"):
@@ -783,7 +815,8 @@ def register_routes(bp):
             # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
             # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
             from core.video.client_grab import grab
-            res = grab(source, body.get("download_url"))
+            res = grab(source, body.get("download_url"),
+                       fallback_magnet=body.get("magnet_uri"))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
             dl_id = db.add_video_download({**common, "source": source,
@@ -883,6 +916,30 @@ def register_routes(bp):
             ensure_started(get_video_db)
         return jsonify({"ok": started > 0, "started": started, "skipped": skipped, "ids": ids})
 
+    def _annotate_packs(rows) -> None:
+        """Mark the season-pack BATCH rows for the Downloads page.
+
+        The page groups a show's episodes into one card, keyed on show + season,
+        and it did that by reading ``search_ctx`` itself — which meant a pack row
+        (a season, no episode) matched nothing and rendered as a lonely card
+        beside the very episodes it produced. Live: pack #3911 sat outside the
+        group holding its own #3912–3919.
+
+        The verdict comes from ``core.video.season_pack.is_pack_download`` — the
+        same function the monitor uses to decide whether to map a finished folder.
+        Re-deriving it in JavaScript would be a second answer to one question, and
+        the two would drift the first time the shape changed."""
+        try:
+            from core.video.season_pack import is_pack_download
+        except Exception:   # noqa: BLE001 - the page must render even if this import breaks
+            logger.exception("pack annotation unavailable")
+            return
+        for r in rows or []:
+            try:
+                r["is_pack"] = bool(is_pack_download(r))
+            except Exception:   # noqa: BLE001 - one odd row must not blank the page
+                r["is_pack"] = False
+
     def _annotate_upgrade_watches(db, rows) -> None:
         """Mark COMPLETED movie/episode rows that still hold a wishlist row —
         the upgrade-until-cutoff watches. Without this, a below-cutoff grab
@@ -922,6 +979,7 @@ def register_routes(bp):
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         rows = db.list_video_downloads()
         _annotate_upgrade_watches(db, rows)
+        _annotate_packs(rows)
         return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])

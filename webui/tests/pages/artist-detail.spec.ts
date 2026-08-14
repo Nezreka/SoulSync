@@ -31,6 +31,15 @@ for (const viewport of viewports) {
 
     test('redirects provider artist links into ?discover=', async ({ page, baseURL }) => {
       await selectProfile(page, baseURL!);
+      await page.route('**/api/artist-detail/provider-id*', (route) =>
+        route.fulfill({
+          json: {
+            success: true,
+            artist: { id: 'provider-id', name: 'Provider Artist', image_url: '', genres: [] },
+            discography: { albums: [], eps: [], singles: [] },
+          },
+        }),
+      );
       await page.goto(
         new URL('/artist-detail/spotify/provider-id?name=Provider%20Artist', baseURL!).toString(),
         { waitUntil: 'domcontentloaded' },

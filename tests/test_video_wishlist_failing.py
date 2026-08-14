@@ -98,11 +98,12 @@ class TestDrainWiring:
     def _run(self, db, items, media_type, *, cands, enqueue_ok=True, search_ret=None):
         outcomes = []
 
-        def record(item, mt, ok):
+        def record(item, mt, ok, refusal=None):
             outcomes.append((item.get("tmdb_id") or item.get("show_tmdb_id"), ok))
-            # exercise the real recorder too
+            # exercise the real recorder too — including the refusal receipt, so
+            # the DB write path for it is covered here and not only in theory.
             from core.automation.handlers.video_process_wishlist import _default_record_outcome
-            _default_record_outcome(item, mt, ok)
+            _default_record_outcome(item, mt, ok, refusal)
 
         import api.video as videoapi
         videoapi._video_db = db
@@ -171,3 +172,87 @@ class TestSurface:
             encoding="utf-8", errors="replace")
         assert "vwsh-failing" in js and "search_attempts" in js
         assert ".vwsh-failing" in css and ".vwsh-failing-inline" in css
+
+
+# ── the receipt: WHY the last search came back empty ─────────────────────────
+# search_attempts told you a row had searched forty times; it never told you what
+# it found. Three rows on Boulder's install sit at thirteen fruitless searches
+# (Aussie Shore S02E03/E09/E10) with nothing on screen to explain any of them.
+# The drain already judges every candidate and then discards the verdicts — this
+# keeps the useful one.
+
+def test_the_refusal_is_stored_on_the_row(db):
+    """Real DB write through the real recorder, not a mock of it."""
+    _seed_movie(db, tmdb_id=501, title="Only In 720p")
+    db.record_wishlist_search_outcome(
+        "movie", 501, False,
+        refusal="Best found: 720p WEB — 720p WEB isn't in your enabled tiers (12 releases)",
+        refusal_quality="720p WEB")
+    row = db._get_connection().execute(
+        "SELECT search_attempts, last_refusal, last_refusal_quality "
+        "FROM video_wishlist WHERE tmdb_id=501").fetchone()
+    assert row["search_attempts"] == 1
+    assert "720p WEB" in row["last_refusal"] and "enabled tiers" in row["last_refusal"]
+    assert row["last_refusal_quality"] == "720p WEB"
+
+
+def test_a_grab_clears_the_receipt(db):
+    """Leaving it would explain a row that is no longer stuck."""
+    _seed_movie(db, tmdb_id=502, title="Landed Eventually")
+    db.record_wishlist_search_outcome("movie", 502, False, refusal="Best found: 720p — nope",
+                                      refusal_quality="720p")
+    db.record_wishlist_search_outcome("movie", 502, True)
+    row = db._get_connection().execute(
+        "SELECT search_attempts, last_refusal, last_refusal_quality "
+        "FROM video_wishlist WHERE tmdb_id=502").fetchone()
+    assert row["search_attempts"] == 0
+    assert row["last_refusal"] is None and row["last_refusal_quality"] is None
+
+
+def test_a_search_that_finds_nothing_clears_a_stale_explanation(db):
+    """Last week's "best found: 720p" must not stand over a search that found
+    nothing at all — it would describe a release no longer on offer."""
+    _seed_movie(db, tmdb_id=503, title="Vanished")
+    db.record_wishlist_search_outcome("movie", 503, False, refusal="Best found: 720p — nope",
+                                      refusal_quality="720p")
+    db.record_wishlist_search_outcome("movie", 503, False)          # nothing found this time
+    row = db._get_connection().execute(
+        "SELECT search_attempts, last_refusal FROM video_wishlist WHERE tmdb_id=503").fetchone()
+    assert row["search_attempts"] == 2, "it is still a fruitless search"
+    assert row["last_refusal"] is None
+
+
+def test_an_episode_row_records_against_its_own_episode(db):
+    """The WHERE clause carries season+episode; without it one episode's receipt
+    would land on every episode of the show."""
+    _seed_episode(db, tmdb_id=601, s=2, e=3)
+    _seed_episode(db, tmdb_id=601, s=2, e=9)
+    db.record_wishlist_search_outcome("episode", 601, False, season_number=2, episode_number=3,
+                                      refusal="Best found: 720p — not in your tiers",
+                                      refusal_quality="720p")
+    rows = {(r["season_number"], r["episode_number"]): r["last_refusal"] for r in
+            db._get_connection().execute(
+                "SELECT season_number, episode_number, last_refusal FROM video_wishlist "
+                "WHERE tmdb_id=601")}
+    assert rows[(2, 3)] and "720p" in rows[(2, 3)]
+    assert rows[(2, 9)] is None, "the other episode must be untouched"
+
+
+def test_the_wishlist_listing_returns_the_receipt(db):
+    """It has to reach the page, not just the table."""
+    _seed_movie(db, tmdb_id=504, title="Shown To The User")
+    db.record_wishlist_search_outcome("movie", 504, False,
+                                      refusal="Best found: 720p WEB — not in your tiers",
+                                      refusal_quality="720p WEB")
+    page = db.query_wishlist("movie")
+    item = [i for i in page["items"] if i["tmdb_id"] == 504][0]
+    assert "720p WEB" in (item.get("last_refusal") or "")
+    assert item.get("last_refusal_quality") == "720p WEB"
+
+
+def test_the_columns_ride_the_migration_list():
+    """Live installs upgrade in place — a column only in CREATE TABLE would be
+    missing on every existing database."""
+    src = (_ROOT / "database" / "video_database.py").read_text(encoding="utf-8")
+    assert '("video_wishlist", "last_refusal", "TEXT")' in src
+    assert '("video_wishlist", "last_refusal_quality", "TEXT")' in src

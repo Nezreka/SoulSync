@@ -100,6 +100,43 @@ def test_pause_and_resume_reflect_instantly_despite_cache(client):
     assert client.get("/api/enrichment/amazon/status").get_json()["paused"] is False
 
 
+class _IdleWorker(_CountingWorker):
+    def get_stats(self):
+        self.calls += 1
+        return {'enabled': True, 'running': False, 'paused': False, 'calls': self.calls}
+
+
+def test_idle_service_holds_its_answer_for_the_long_ttl(client, monkeypatch):
+    # Perf sweep (Aug 2026): each get_stats() is ~6 whole-table aggregates
+    # on a multi-GB db, and the 10s dashboard poll re-collected ~18 idle
+    # services through a 2s cache — always cold. An IDLE service now keeps
+    # its answer for 30s; only a RUNNING one earns the 2s freshness.
+    w = _IdleWorker()
+    register_services([EnrichmentService(id='amazon', display_name='Amazon',
+                                         worker_getter=lambda: w)])
+    t = [1000.0]
+    monkeypatch.setattr(eapi.time, 'monotonic', lambda: t[0])
+    client.get('/api/enrichment/amazon/status')
+    t[0] += eapi._STATUS_TTL_SECONDS + 0.1          # past the SHORT ttl...
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 1, 'idle: the short TTL must not apply'
+    t[0] += eapi._STATUS_IDLE_TTL_SECONDS           # ...past the long one
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 2
+
+
+def test_running_service_keeps_the_short_ttl(client, monkeypatch):
+    w = _CountingWorker()                            # reports running: True
+    register_services([EnrichmentService(id='amazon', display_name='Amazon',
+                                         worker_getter=lambda: w)])
+    t = [1000.0]
+    monkeypatch.setattr(eapi.time, 'monotonic', lambda: t[0])
+    client.get('/api/enrichment/amazon/status')
+    t[0] += eapi._STATUS_TTL_SECONDS + 0.1
+    client.get('/api/enrichment/amazon/status')
+    assert w.calls == 2, 'running: numbers move, freshness stays 2s'
+
+
 # ---------------------------------------------------------------------------
 # Client contract: fallback pollers slowed, websocket stays primary
 # ---------------------------------------------------------------------------

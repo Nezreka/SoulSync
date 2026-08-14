@@ -68,6 +68,83 @@ def test_free_not_selected_unauthed_is_disconnected(monkeypatch):
     assert status["source"] == "spotify"
 
 
+# ---------------------------------------------------------------------------
+# get_primary_source() — the same free-vs-auth gate, one function further down.
+#
+# The status dot above was fixed, but get_primary_source() kept probing
+# is_spotify_authenticated(). A Spotify-Free user has no credentials by design,
+# so their configured source was silently demoted to METADATA_SOURCE_PRIORITY[0]
+# (deezer) on EVERY call. The watchlist artist-config modal renders that value
+# as "Default (Deezer)" while settings still read Spotify, and watchlist scans
+# ran on Deezer — finding nothing for artists Deezer can't resolve.
+# ---------------------------------------------------------------------------
+
+
+class _AuthedClient:
+    def is_spotify_authenticated(self):
+        return True
+
+    def is_spotify_metadata_available(self):
+        return True
+
+
+def test_primary_source_keeps_spotify_when_only_free_is_available(monkeypatch):
+    """REGRESSION: configured spotify + no auth + free available → stays spotify.
+
+    Before the fix this returned 'deezer', so the whole app silently ran on the
+    fallback provider while the UI still said Spotify.
+    """
+    _patch_registry(monkeypatch, free_selected=True, client=_FreeClient())
+    assert registry.get_primary_source() == "spotify"
+
+
+def test_primary_source_still_demotes_when_spotify_is_truly_unavailable(monkeypatch):
+    """Not authed AND free unavailable → demotion to the default is still right.
+
+    This is the half of the old behaviour that must NOT change: a user who
+    picked Spotify but never connected it (and has no free source) genuinely
+    cannot serve Spotify metadata.
+    """
+    _patch_registry(monkeypatch, free_selected=False, client=_NoMetaClient())
+    assert registry.get_primary_source() == "deezer"
+
+
+def test_primary_source_keeps_spotify_when_authenticated(monkeypatch):
+    """The ordinary connected-Spotify path is unchanged."""
+    _patch_registry(monkeypatch, free_selected=False, client=_AuthedClient())
+    assert registry.get_primary_source() == "spotify"
+
+
+def test_primary_source_demotes_when_no_client_at_all(monkeypatch):
+    """No client object → demote rather than raise."""
+    _patch_registry(monkeypatch, free_selected=True, client=None)
+    assert registry.get_primary_source() == "deezer"
+
+
+def test_primary_source_demotes_when_the_probe_raises(monkeypatch):
+    """A client that blows up must not take the whole call down with it."""
+
+    class _Exploding:
+        def is_spotify_metadata_available(self):
+            raise RuntimeError("spotify is on fire")
+
+    _patch_registry(monkeypatch, free_selected=True, client=_Exploding())
+    assert registry.get_primary_source() == "deezer"
+
+
+def test_non_spotify_primary_never_probes_spotify(monkeypatch):
+    """A deezer/itunes user must not pay for a Spotify probe at all."""
+    cfg = {"metadata.fallback_source": "itunes"}
+    monkeypatch.setattr(registry, "_get_config_value", lambda k, d=None: cfg.get(k, d))
+    monkeypatch.setattr("core.boot_phase.is_boot_phase", lambda: False)
+
+    def _boom(client_factory=None):
+        raise AssertionError("get_spotify_client must not be called for itunes")
+
+    monkeypatch.setattr(registry, "get_spotify_client", _boom)
+    assert registry.get_primary_source() == "itunes"
+
+
 def test_free_selected_but_unavailable_is_disconnected(monkeypatch):
     """Free chosen but the package/path can't serve → not connected (no false green)."""
     _patch_registry(monkeypatch, free_selected=True, client=_NoMetaClient())

@@ -5,6 +5,8 @@ import type { DiscoverHeroArtist } from './-discover.types';
 import {
   HERO_EMPTY_SUBTITLE,
   HERO_EMPTY_TITLE,
+  HERO_LOADING_SUBTITLE,
+  HERO_LOADING_TITLE,
   HERO_MAX_GENRES,
   HERO_SLIDE_MS,
   HERO_WATCHLIST_ICON,
@@ -154,6 +156,21 @@ describe('the empty state', () => {
     expect(HERO_EMPTY_SUBTITLE).toBe(
       'Run a watchlist scan to generate personalized recommendations',
     );
+  });
+});
+
+describe('the loading state', () => {
+  it('promises a wait rather than an absence', () => {
+    // These two shipped untested, which the export-coverage guard caught. The
+    // distinction they carry is the whole point of the pair existing: while
+    // the warmer is running the hero must say "warming up", not "nothing to
+    // recommend" — the second is a verdict about the library, and it was the
+    // 23-second lie the hero used to tell on a cold start.
+    expect(HERO_LOADING_TITLE).toBe('Finding your next favorite artist…');
+    expect(HERO_LOADING_SUBTITLE).toBe(
+      'Warming up your recommendations — the first visit after a restart takes a few seconds.',
+    );
+    expect(HERO_LOADING_TITLE).not.toBe(HERO_EMPTY_TITLE);
   });
 });
 

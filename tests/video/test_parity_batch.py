@@ -78,9 +78,13 @@ def test_drain_enqueue_skips_when_low(monkeypatch, client):
     started = []
     monkeypatch.setattr("core.video.slskd_download.start_download",
                         lambda *a, **k: started.append(1) or {"ok": True})
-    ok = vpw._default_enqueue({"title": "Heat"}, {"username": "p", "filename": "f"},
-                              [], "movie", "/media/Movies")
-    assert ok is False and started == []          # refused before slskd was touched
+    out = vpw._default_enqueue({"title": "Heat"}, {"username": "p", "filename": "f"},
+                               [], "movie", "/media/Movies")
+    # The seam answers {ok, error} now — a bare False could not say WHY, and the
+    # reason is what stops "disk full" from being reported as a quality refusal.
+    assert vpw.enqueue_outcome(out)["ok"] is False
+    assert "free" in (out.get("error") or "")
+    assert started == []                          # refused before slskd was touched
 
 
 # ── iCal feed ────────────────────────────────────────────────────────────────

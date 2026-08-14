@@ -1113,18 +1113,35 @@ class DatabaseUpdateWorker:
             logger.info(f"Removal detection not supported for {self.server_type} — skipping")
             return None
 
-        # Fetch current IDs from media server (lightweight calls)
+        # Fetch current IDs from the media server. The flag is deliberately
+        # primed to failure before EACH call: clients that do not implement the
+        # verification contract therefore remain conservative, while a client
+        # that explicitly clears it may prove a genuinely empty catalogue.
         logger.info(f"Removal detection: fetching current IDs from {self.server_type}...")
         self._emit_signal('phase_changed', f"Fetching artist catalog from {self.server_type}...")
+        self.media_client.last_fetch_failed = True
         server_artist_ids = self.media_client.get_all_artist_ids()
+        artists_verified = not getattr(self.media_client, 'last_fetch_failed', True)
         self._emit_signal('phase_changed', f"Fetching album catalog from {self.server_type}...")
+        self.media_client.last_fetch_failed = True
         server_album_ids = self.media_client.get_all_album_ids()
+        albums_verified = not getattr(self.media_client, 'last_fetch_failed', True)
 
-        # Safety: if both come back empty, the server is unreachable
+        # Both empty is destructive only when BOTH independent reads vouched
+        # for that answer. An unverified empty is still treated as an outage.
         if not server_artist_ids and not server_album_ids:
-            logger.warning("SAFETY: Server returned zero artists AND zero albums — "
-                          "skipping removal detection")
-            return None
+            if not (artists_verified and albums_verified):
+                logger.warning(
+                    "SAFETY: Server returned zero artists AND zero albums, "
+                    "unverified (artists_verified=%s albums_verified=%s) — "
+                    "skipping removal detection",
+                    artists_verified, albums_verified,
+                )
+                return None
+            logger.info(
+                "Removal detection: %s verified EMPTY — removing stale mappings",
+                self.server_type,
+            )
 
         # Get current DB counts for safety threshold
         try:
@@ -1135,20 +1152,26 @@ class DatabaseUpdateWorker:
             db_artist_count = 0
             db_album_count = 0
 
-        # Per-type safety: skip removal for any type where the server returned
-        # empty or suspiciously few results. An empty set means the API call
-        # failed, not that the server has zero items.
-        check_artists = bool(server_artist_ids)
-        check_albums = bool(server_album_ids)
+        # A verified empty may be checked; an unverified empty may not.
+        check_artists = bool(server_artist_ids) or artists_verified
+        check_albums = bool(server_album_ids) or albums_verified
 
-        if check_artists and db_artist_count > 100:
+        # Exempt only a whole, internally consistent verified-empty library
+        # from the mass-shrink threshold. "No artists but some albums" is a
+        # partial read, not a possible catalogue state.
+        library_verified_empty = (
+            artists_verified and albums_verified
+            and not server_artist_ids and not server_album_ids
+        )
+
+        if check_artists and db_artist_count > 100 and not library_verified_empty:
             if len(server_artist_ids) < db_artist_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_artist_ids)} artists but "
                     f"database has {db_artist_count} — skipping artist removal check")
                 check_artists = False
 
-        if check_albums and db_album_count > 100:
+        if check_albums and db_album_count > 100 and not library_verified_empty:
             if len(server_album_ids) < db_album_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_album_ids)} albums but "

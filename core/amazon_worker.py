@@ -176,6 +176,10 @@ class AmazonWorker:
     def _name_matches(self, query_name: str, result_name: str) -> bool:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
         return similarity >= self.name_similarity_threshold
@@ -279,6 +283,14 @@ class AmazonWorker:
         ):
             self.stats['matched'] += 1
             return
+        # A stored/manual id whose provider refresh temporarily failed must not
+        # fall through to fuzzy search and be replaced by a different result.
+        if self._get_existing_id('album', album_id):
+            logger.debug(
+                "Preserving Amazon match for album '%s' despite a refresh miss",
+                album_name,
+            )
+            return
 
         query = f"{artist_name} {album_name}"
         results = self.client.search_albums(query, limit=10)
@@ -318,6 +330,12 @@ class AmazonWorker:
             log_prefix='Amazon',
         ):
             self.stats['matched'] += 1
+            return
+        if self._get_existing_id('track', track_id):
+            logger.debug(
+                "Preserving Amazon match for track '%s' despite a refresh miss",
+                track_name,
+            )
             return
 
         query = f"{artist_name} {track_name}"
@@ -425,8 +443,9 @@ class AmazonWorker:
         """Record the outcome of an attempt in the provider ledger.
 
         Replaces the legacy `amazon_match_status`/`_last_attempted` column pair.
-        `not_found` becomes due again after the retry window; `error` does not, so a
-        provider outage cannot turn into an infinite retry loop.
+        `not_found` and per-item `error` outcomes become due again after the retry
+        window. Source-wide outages remain untouched and use the worker backoff,
+        so an outage cannot turn into a tight retry loop.
         """
         conn = None
         try:

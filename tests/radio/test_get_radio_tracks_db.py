@@ -197,8 +197,7 @@ def test_smart_ranking_prefers_more_played_in_same_tier(db):
 
 
 def test_global_popularity_ranks_when_nothing_was_played_locally(db):
-    """`lastfm_playcount` is a column in legacy and a provider key inside the
-    catalogue's `enrichment` payload — the ranker must still see it."""
+    """Global popularity lives in the Library-v2 enrichment payload."""
     ar1 = _add_artist(db, "ar1", "Artist One")
     al1 = _add_album(db, "al1", ar1, "Seed Album")
     al2 = _add_album(db, "al2", ar1, "Other Album")
@@ -214,3 +213,57 @@ def test_global_popularity_ranks_when_nothing_was_played_locally(db):
 
     res = db.get_radio_tracks(seed, limit=5)
     assert [t["id"] for t in res["tracks"]][0] == famous
+
+
+# ── Library Radio (seedless mode) ─────────────────────────────────────────
+
+
+def test_library_radio_returns_tracks_with_no_seed_and_no_excludes(db):
+    """The seedless path with an EMPTY exclude set must not emit `NOT IN ()`
+    (a sqlite syntax error) — the clause is conditional."""
+    ar1 = _add_artist(db, "ar1", "A One")
+    ar2 = _add_artist(db, "ar2", "A Two")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    al2 = _add_album(db, "al2", ar2, "Album Two")
+    t1 = _add_track(db, "t1", al1, ar1, "T1")
+    t2 = _add_track(db, "t2", al2, ar2, "T2")
+
+    res = db.get_library_radio_tracks(limit=10)
+    assert res["success"] is True
+    assert {t["id"] for t in res["tracks"]} == {t1, t2}
+
+
+def test_library_radio_honors_excludes_and_file_filter(db):
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    keep = _add_track(db, "keep", al1, ar1, "Keep")
+    skip = _add_track(db, "skip", al1, ar1, "Skip Me")
+    _add_track(db, "nofile", al1, ar1, "No File", file_path="")
+
+    res = db.get_library_radio_tracks(limit=10, exclude_ids=[skip])
+    ids = [t["id"] for t in res["tracks"]]
+    assert ids == [keep]
+
+
+def test_library_radio_ranking_is_wired(db):
+    """Same wiring claim as the seeded test: the heavily-played track ranks
+    first out of the pooled random fetch."""
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    for i in range(15):
+        _add_track(db, f"rare{i}", al1, ar1, f"Rare {i}", play_count=0)
+    hit = _add_track(db, "hit", al1, ar1, "Big Hit", play_count=5000)
+
+    res = db.get_library_radio_tracks(limit=5)
+    assert res["success"] is True
+    assert res["tracks"][0]["id"] == hit
+
+
+def test_library_radio_respects_limit(db):
+    ar1 = _add_artist(db, "ar1", "A One")
+    al1 = _add_album(db, "al1", ar1, "Album One")
+    for i in range(30):
+        _add_track(db, f"t{i}", al1, ar1, f"T {i}")
+
+    res = db.get_library_radio_tracks(limit=5)
+    assert len(res["tracks"]) == 5

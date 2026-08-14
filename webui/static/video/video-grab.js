@@ -31,19 +31,26 @@
         return fetch(url).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
     }
 
-    // First configured download source — mirrors the modal's sourcesFromConfig.
-    var _srcCache;
-    function pickSource() {
-        if (_srcCache !== undefined) return Promise.resolve(_srcCache);
+    // Every configured download source, in order — mirrors the modal's
+    // sourcesFromConfig. pickSource() keeps returning just the first for callers
+    // that genuinely want one, but a season should ask them all: a show Soulseek
+    // has and Prowlarr doesn't was previously reported as unavailable without
+    // Soulseek ever being asked.
+    var _srcListCache;
+    function allSources() {
+        if (_srcListCache !== undefined) return Promise.resolve(_srcListCache);
         return getJSON('/api/video/downloads/config').then(function (c) {
             c = c || {};
             var list;
             if (c.download_mode === 'hybrid' && Array.isArray(c.hybrid_order) && c.hybrid_order.length) list = c.hybrid_order;
             else if (c.download_mode) list = [c.download_mode];
             else list = ['soulseek'];
-            _srcCache = list[0] || 'soulseek';
-            return _srcCache;
+            _srcListCache = list.length ? list : ['soulseek'];
+            return _srcListCache;
         });
+    }
+    function pickSource() {
+        return allSources().then(function (l) { return l[0] || 'soulseek'; });
     }
 
     // search/start → poll (until the results plateau) → return the accepted rows.
@@ -109,6 +116,7 @@
             } else {
                 // torrent / usenet — the magnet/NZB carriers the backend hands to the client
                 payload.download_url = best.download_url; payload.protocol = best.protocol;
+            payload.magnet_uri = best.magnet_uri;   // #1139 fallback if the .torrent fetch fails
                 payload.indexer_id = best.indexer_id; payload.guid = best.guid;
                 payload.username = best.username; payload.filename = best.filename || best.title;
                 payload.candidates = [];
@@ -123,18 +131,80 @@
         });
     }
 
-    // Auto-grab every listed (missing) episode in a season, 3 at a time.
+    // One source, one question: is there a whole-season pack? Resolves {ok, id}.
+    // scope 'season' is what rides into search_ctx and tells the monitor this lands
+    // as a FOLDER to be mapped onto episodes, not a file to be narrowed to one.
+    function seasonPack(opts, src) {
+        return runSearch({ scope: 'season', title: opts.title, season: opts.season, source: src })
+            .then(function (rows) {
+                var best = bestRow(rows);
+                if (!best) return { ok: false };
+                var payload = {
+                    kind: 'show', title: opts.title, release_title: best.title,
+                    source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
+                    media_id: opts.mediaId, media_source: opts.mediaSource, year: opts.year,
+                    poster_url: opts.poster,
+                    search_ctx: { scope: 'season', title: opts.title, year: opts.year,
+                        season: opts.season, episode: null }
+                };
+                if (src === 'soulseek') {
+                    payload.username = best.username; payload.filename = best.filename;
+                    payload.candidates = [];
+                } else {
+                    payload.download_url = best.download_url; payload.protocol = best.protocol;
+                    payload.magnet_uri = best.magnet_uri;
+                    payload.indexer_id = best.indexer_id; payload.guid = best.guid;
+                    payload.username = best.username; payload.filename = best.filename || best.title;
+                    payload.candidates = [];
+                }
+                return postJSON('/api/video/downloads/grab', payload).then(function (res) {
+                    if (res && res.ok) {
+                        document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                        return { ok: true, id: res.id };
+                    }
+                    return { ok: false };
+                });
+            });
+    }
+
+    // Auto-grab a season: try a PACK from each configured source first, then fall
+    // back to per-episode, 3 at a time. The pack is one grab and one swarm instead
+    // of 22 separate searches for a 22-episode season; the episode path is still
+    // the right answer for a half-owned season, so it stays.
     function season(opts, onEp) {
         opts = opts || {};
         var eps = (opts.episodes || []).slice().sort(function (a, b) { return a - b; });
         var total = eps.length;
         if (!total) return Promise.resolve({ grabbed: 0, total: 0 });
+        return allSources().then(function (sources) {
+            if (opts.source && sources.indexOf(opts.source) === -1) sources = [opts.source].concat(sources);
+            var i = 0;
+            function tryPack() {
+                if (i >= sources.length) return Promise.resolve({ ok: false });
+                return seasonPack(opts, sources[i++]).then(function (r) {
+                    return (r && r.ok) ? r : tryPack();
+                });
+            }
+            if (onEp) eps.forEach(function (en) { onEp(en, 'searching'); });
+            return tryPack().then(function (packed) {
+                if (packed && packed.ok) {
+                    if (onEp) eps.forEach(function (en) { onEp(en, 'grabbing'); });
+                    return { grabbed: total, total: total, pack: true, id: packed.id };
+                }
+                return perEpisode(opts, eps, total, sources, onEp);
+            });
+        });
+    }
+
+    function perEpisode(opts, eps, total, sources, onEp) {
         var idx = 0, active = 0, grabbed = 0, MAX = 3;
         return new Promise(function (resolve) {
-            function launch(en) {
+            function launch(en, n) {
                 active++;
                 if (onEp) onEp(en, 'searching');
-                episode({ title: opts.title, source: opts.source, season: opts.season, episode: en,
+                // Round-robin the sources so one dead indexer can't sink a season.
+                episode({ title: opts.title, source: sources[n % sources.length],
+                    season: opts.season, episode: en,
                     mediaId: opts.mediaId, mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster })
                     .then(function (r) {
                         active--;
@@ -144,7 +214,7 @@
                         else pump();
                     });
             }
-            function pump() { while (active < MAX && idx < eps.length) launch(eps[idx++]); }
+            function pump() { while (active < MAX && idx < eps.length) { launch(eps[idx], idx); idx++; } }
             pump();
         });
     }

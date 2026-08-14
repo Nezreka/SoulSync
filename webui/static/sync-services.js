@@ -22,19 +22,45 @@ async function loadTidalPlaylists() {
 
         console.log(`🎵 Loaded ${tidalPlaylists.length} Tidal playlists`);
 
-        // Auto-mirror Tidal playlists: fetch tracks in background then mirror
-        // Cards render instantly from metadata; tracks load per-playlist without blocking UI
-        for (const p of tidalPlaylists) {
+        // Load and apply saved discovery states from backend (like YouTube)
+        await loadTidalPlaylistStatesFromBackend();
+
+        // Auto-mirror: the per-playlist track crawl runs in the BACKGROUND
+        // (no await). It used to run inline, so the Refresh button sat on
+        // "Loading" for the whole crawl — 3-5 minutes on real accounts
+        // (Specialmed's report) even though the cards had long rendered.
+        void _prefetchTidalTracksAndMirror();
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Tidal playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+// The old inline crawl, extracted: fetch each playlist's full tracks and
+// mirror it, three at a time (sequential took minutes; unbounded would
+// hammer Tidal's API).
+async function _prefetchTidalTracksAndMirror() {
+    const queue = tidalPlaylists.slice();
+    const mirrorFromTracks = (p, tracks) => {
+        mirrorPlaylist('tidal', p.id, p.name, tracks.map(t => ({
+            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
+            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
+            source_track_id: t.id || ''
+        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+    };
+    const worker = async () => {
+        for (;;) {
+            const p = queue.shift();
+            if (!p) return;
             // Skip if already have tracks from a previous load
             if (p.tracks && p.tracks.length > 0) {
-                mirrorPlaylist('tidal', p.id, p.name, p.tracks.map(t => ({
-                    track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
-                    album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
-                    source_track_id: t.id || ''
-                })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                mirrorFromTracks(p, p.tracks);
                 continue;
             }
-            // Fetch tracks on-demand for this playlist
             try {
                 const fullResp = await fetch(`/api/tidal/playlist/${p.id}`);
                 if (fullResp.ok) {
@@ -45,29 +71,16 @@ async function loadTidalPlaylists() {
                         // Update card track count in UI
                         const countEl = document.querySelector(`#tidal-card-${p.id} .playlist-card-track-count`);
                         if (countEl) countEl.textContent = `${fullData.tracks.length} tracks`;
-                        // Mirror with full track data
-                        mirrorPlaylist('tidal', p.id, p.name, fullData.tracks.map(t => ({
-                            track_name: t.name || '', artist_name: Array.isArray(t.artists) ? t.artists[0] : (t.artists || ''),
-                            album_name: typeof t.album === 'string' ? t.album : '', duration_ms: t.duration_ms || 0,
-                            source_track_id: t.id || ''
-                        })), { owner: p.owner, image_url: p.image_url, description: p.description });
+                        mirrorFromTracks(p, fullData.tracks);
                     }
                 }
             } catch (e) {
                 console.warn(`Failed to fetch tracks for Tidal playlist ${p.name}: ${e.message}`);
             }
         }
-
-        // Load and apply saved discovery states from backend (like YouTube)
-        await loadTidalPlaylistStatesFromBackend();
-
-    } catch (error) {
-        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
-        showToast(`Error loading Tidal playlists: ${error.message}`, 'error');
-    } finally {
-        refreshBtn.disabled = false;
-        refreshBtn.textContent = '🔄 Refresh';
-    }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    console.log('🎵 Tidal track prefetch + mirroring complete');
 }
 
 function renderTidalPlaylists() {

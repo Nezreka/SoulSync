@@ -91,7 +91,41 @@ def _default_active_ids() -> List[Any]:
 
 def _default_failed_counts() -> Dict[Any, int]:
     from api.video import get_video_db
-    return get_video_db().youtube_failed_counts()
+    return get_video_db().youtube_failed_counts(max_fail=YT_MAX_FAIL)
+
+
+def _default_recent_errors(days: int = 3) -> list:
+    """Failure texts from the last few days, for the stale-yt-dlp check."""
+    from api.video import get_video_db
+    try:
+        return get_video_db().youtube_recent_failure_errors(days=days)
+    except Exception:   # noqa: BLE001 - a diagnostic must never break the drain
+        return []
+
+
+def _warn_if_ytdlp_is_stale(deps, automation_id, recent_errors) -> None:
+    """Say it ONCE, plainly, instead of leaving a pile of identical 'Forbidden'
+    rows. A cluster of these across different channels is not a coincidence — it is
+    YouTube's bot-detection having moved on while yt-dlp stayed still, and the fix
+    is a package update the user has to run. Left unsaid, each of those videos
+    quietly burns its three attempts and is skipped forever for a fixable reason."""
+    try:
+        from core.video.youtube_errors import looks_like_stale_ytdlp
+        errs = list(recent_errors() or []) if callable(recent_errors) else list(recent_errors or [])
+        if not looks_like_stale_ytdlp(errs):
+            return
+        msg = ("YouTube refused %d recent downloads — this is almost always an "
+               "out-of-date yt-dlp. Update it with: pip install -U yt-dlp"
+               % sum(1 for e in errs if _is_blocked(e)))
+        logger.warning(msg)
+        deps.update_progress(automation_id, log_line=msg, log_type='warning')
+    except Exception:   # noqa: BLE001 - diagnostics never break the drain
+        logger.debug("stale-yt-dlp check failed", exc_info=True)
+
+
+def _is_blocked(err) -> bool:
+    from core.video.youtube_errors import BLOCKED, classify
+    return classify(err) == BLOCKED
 
 
 def _default_running_count() -> int:
@@ -149,6 +183,7 @@ def auto_video_process_youtube_wishlist(
     start_next: Optional[Callable[[], Any]] = None,
     reap: Optional[Callable[[], int]] = None,
     failed_counts: Optional[Callable[[], Dict[Any, int]]] = None,
+    recent_errors: Optional[Callable[[], List[Any]]] = None,
 ) -> Dict[str, Any]:
     """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
 
@@ -161,6 +196,7 @@ def auto_video_process_youtube_wishlist(
     start_next = start_next or _default_start_next
     reap = reap or _default_reap
     failed_counts = failed_counts or _default_failed_counts
+    recent_errors = recent_errors or _default_recent_errors
     automation_id = config.get('_automation_id')
     max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
 
@@ -187,6 +223,7 @@ def auto_video_process_youtube_wishlist(
         wanted = fetch_wanted() or []
         already = list(active_ids() or [])
         new = videos_to_enqueue(wanted, already, failed_counts() or {})
+        _warn_if_ytdlp_is_stale(deps, automation_id, recent_errors)
 
         queued = 0
         for v in new:

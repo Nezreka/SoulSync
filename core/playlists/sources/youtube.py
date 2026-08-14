@@ -75,7 +75,9 @@ class YouTubePlaylistSource(PlaylistSource):
             position=position,
             track_name=track.get("name", "Unknown Track"),
             artist_name=artist_name,
-            album_name=None,
+            # Only the YouTube Music catalog path fills this in; yt-dlp's flat
+            # extraction has no album concept, so it stays None there.
+            album_name=(track.get("album") or "").strip() or None,
             duration_ms=int(track.get("duration_ms", 0) or 0),
             source_track_id=str(track.get("id", "")),
             needs_discovery=False,
@@ -83,5 +85,6 @@ class YouTubePlaylistSource(PlaylistSource):
                 "url": track.get("url"),
                 "raw_title": track.get("raw_title"),
                 "raw_artist": track.get("raw_artist"),
+                "video_type": track.get("video_type"),
             },
         )

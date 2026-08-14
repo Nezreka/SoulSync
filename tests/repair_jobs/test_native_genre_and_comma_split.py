@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 from pathlib import Path
 
 import pytest
@@ -182,8 +183,23 @@ def comma_db(tmp_path: Path):
     db, conn = _make_db(tmp_path)
     music = tmp_path / 'music'
     music.mkdir()
-    for name in ('01.flac', '02.flac'):
-        (music / name).write_bytes(b'audio')
+    from mutagen.flac import FLAC
+
+    for index, name in enumerate(('01.flac', '02.flac'), start=1):
+        path = music / name
+        stream_info = bytearray(34)
+        stream_info[0:2] = struct.pack(">H", 4096)
+        stream_info[2:4] = struct.pack(">H", 4096)
+        stream_info[10] = 0x0A
+        stream_info[12] = 0x70
+        path.write_bytes(
+            b"fLaC" + bytes([0x80, 0x00, 0x00, 0x22])
+            + bytes(stream_info) + bytes(range(256)) * 8
+        )
+        audio = FLAC(str(path))
+        audio['artist'] = ['Camellia, Toby Fox']
+        audio['title'] = [f'Track {index}']
+        audio.save()
 
     conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'Camellia, Toby Fox')")
     conn.execute("INSERT INTO lib2_artists(id, name) VALUES(2, 'Camellia')")
@@ -216,7 +232,7 @@ def test_native_comma_splitter_flags_the_native_artist(comma_db, monkeypatch):
     # is a real artist. Parts also resolve from the native library.
     monkeypatch.setattr(
         job, '_search_artist_names',
-        lambda source, query, memo: {'camellia', 'toby fox'},
+        lambda source, query, memo, symbols: {'camellia', 'toby fox'},
     )
 
     result = job.scan(_ctx(db, _Cfg(), findings))
@@ -237,7 +253,7 @@ def test_native_comma_splitter_resolves_parts_from_the_native_library(comma_db,
     job = get_all_jobs()['comma_artist_splitter']()
     queries = []
 
-    def _search(source, query, memo):
+    def _search(source, query, memo, symbols):
         queries.append(query)
         return set()  # the API knows nobody; only the library can vouch
 

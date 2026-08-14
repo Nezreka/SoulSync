@@ -49,6 +49,13 @@ function ownText(el: Element): string {
 const ATTRS = ['src', 'alt', 'title', 'aria-hidden'] as const;
 
 function compareTrees(vanilla: Element, ported: Element, path: string) {
+  // CARVE-OUT: the title block became the hello strip (greeting + live stats,
+  // the Aug 2026 header redesign) — the ONE region of this header that
+  // intentionally diverged from the vanilla fixture. Its behaviour is covered
+  // by -dash.hello.test.ts and the hello-strip cases below; everything else,
+  // above all the orb containers worker-orbs.js reads every frame, stays
+  // pinned 1:1.
+  if (vanilla.classList.contains('header-text')) return;
   expect(`${path} tag:${ported.tagName}`).toBe(`${path} tag:${vanilla.tagName}`);
   expect(`${path} id:${ported.id}`).toBe(`${path} id:${vanilla.id}`);
   expect(`${path} class:${Array.from(ported.classList).join('.')}`).toBe(
@@ -90,6 +97,7 @@ afterEach(() => {
   delete window.openWishlistFromHero;
   delete window.isJiosaavnExperimentalEnabled;
   delete window.SoulSyncWebRouter;
+  delete window.navigateToPage;
 });
 
 async function mountHeader() {
@@ -113,6 +121,23 @@ describe('the artefact differential', () => {
   });
 });
 
+describe('the hello strip', () => {
+  it('greets by the mirrored profile name, and plainly without one', async () => {
+    window._currentProfileName = 'BoulderBadgeDad';
+    const view = await mountHeader();
+    const greeting = view.container.querySelector('.hello-greeting span')!;
+    expect(greeting.textContent).toMatch(
+      /^(good (morning|afternoon|evening)|up late\?), BoulderBadgeDad$/,
+    );
+    view.unmount();
+
+    delete window._currentProfileName;
+    const bare = await mountHeader();
+    expect(bare.container.querySelector('.hello-greeting span')!.textContent).toMatch(
+      /^(good (morning|afternoon|evening)|up late\?)$/,
+    );
+  });
+});
 describe('state rendering', () => {
   it('writes the pill state class onto the button and the strings into the tooltip', async () => {
     const view = await mountHeader();
@@ -235,9 +260,9 @@ describe('click seams', () => {
     expect(openRepairModal).toHaveBeenCalledTimes(1);
   });
 
-  it('watchlist navigates through the router seam', async () => {
+  it('watchlist navigates through the global navigateToPage (the chrome-aware entry)', async () => {
     const navigateToPage = vi.fn(() => Promise.resolve(true));
-    window.SoulSyncWebRouter = { navigateToPage } as never;
+    window.navigateToPage = navigateToPage as never;
     const view = await mountHeader();
     fireEvent.click(view.container.querySelector('#watchlist-button')!);
     expect(navigateToPage).toHaveBeenCalledWith('watchlist');
@@ -246,7 +271,7 @@ describe('click seams', () => {
   it('wishlist prefers the init.js fast/slow path and falls back to navigation', async () => {
     const openWishlistFromHero = vi.fn();
     const navigateToPage = vi.fn(() => Promise.resolve(true));
-    window.SoulSyncWebRouter = { navigateToPage } as never;
+    window.navigateToPage = navigateToPage as never;
     window.openWishlistFromHero = openWishlistFromHero;
     const view = await mountHeader();
     fireEvent.click(view.container.querySelector('#wishlist-button')!);

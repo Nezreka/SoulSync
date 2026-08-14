@@ -59,12 +59,9 @@ def test_the_monitor_has_a_client_call_budget():
 def test_a_dead_loop_thread_is_rebuilt_instead_of_hanging(isolated_async_loop):
     """dd28-47 in its surviving form.
 
-    The finding was that a silently dead pump task left every later run_async
-    blocked forever. The pump is gone (PR #1121 review — the 3.14.6 lost
-    wakeup came from creating the loop outside its own thread, not from
-    run_coroutine_threadsafe itself), so what has to hold is the more general
-    guarantee: a loop thread that stops for any reason is REBUILT on the next
-    call rather than leaving callers hanging.
+    The finding was that a silently dead bridge left every later run_async
+    blocked forever. A loop thread that stops for any reason must be REBUILT on
+    the next call rather than leaving callers hanging.
 
     Runs on a PRIVATE loop: stopping the process-wide one strands every
     coroutine another subsystem has in flight on it, and those callers block on

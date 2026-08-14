@@ -37,15 +37,15 @@ export interface RecommendedShelfProps {
   /** Resolved images that arrived after the first paint. */
   images: Record<string, string>;
   buildDetailPath: (id: string, source: string | null) => string;
-  onAddToWatchlist: (artistId: string, artistName: string) => void;
+  onAddToWatchlist: (artistId: string, artistName: string, source?: string) => void;
   /** Only the 'recommended' shelf has a View All; 'listening' does not. */
   onViewAll?: () => void;
 }
 
 const TITLES: Record<RecommendedKind, { title: string; subtitle: string }> = {
   recommended: {
-    title: 'Recommended For You',
-    subtitle: 'Artists similar to ones across your library — not yet on your watchlist',
+    title: "Artists You'll Like",
+    subtitle: 'Similar to whole shelves of your library — not yet on your watchlist',
   },
   listening: {
     title: 'Based On Your Listening',
@@ -125,7 +125,7 @@ interface RecommendedMiniCardProps {
   imageOverride?: string;
   watching: boolean;
   buildDetailPath: (id: string, source: string | null) => string;
-  onAddToWatchlist: (artistId: string, artistName: string) => void;
+  onAddToWatchlist: (artistId: string, artistName: string, source?: string) => void;
 }
 
 function RecommendedMiniCard({
@@ -139,7 +139,8 @@ function RecommendedMiniCard({
   // an inline onerror that rewrites the parent; state is the React equivalent.
   const [broken, setBroken] = useState(false);
   const image = imageOverride || card.image;
-  const clickable = recWatchlistClickable(card.artistId, card.artistName);
+  // Clickable = there is a SENDABLE id; a name alone 400s at the endpoint.
+  const clickable = recWatchlistClickable(card.watchId, card.artistName) && card.watchId !== '';
 
   return (
     <div
@@ -192,7 +193,7 @@ function RecommendedMiniCard({
         // A card with neither an id nor a name cannot be watched — the request
         // would have nothing to identify.
         disabled={!clickable || watching}
-        onClick={() => onAddToWatchlist(card.artistId, card.artistName)}
+        onClick={() => onAddToWatchlist(card.watchId, card.artistName, card.watchSource)}
       >
         {watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}
       </button>

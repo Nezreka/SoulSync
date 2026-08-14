@@ -22,14 +22,15 @@ describe('the section order', () => {
     // Pinned verbatim. The vanilla moved DOM nodes to achieve this; React
     // renders it directly — but the ORDER is the observable behaviour and it
     // must not drift.
+    // The streaming-home order: most personal first, browse + tools last
+    // (was the vanilla's order until the Aug 2026 redesign).
     const flat = DISCOVER_LAYOUT.flatMap((e) => (e.kind === 'single' ? [e.id] : e.ids));
     expect(flat).toEqual([
-      'cache-genre-explorer',
       'your-mixes-section',
-      'year-mixes-section',
       'adv-wave',
       'listening-recs-section',
       'recommended-artists-section',
+      'discover-bylt-sections',
       'recent-releases',
       'cache-genre-releases',
       'seasonal-albums-section',
@@ -37,8 +38,9 @@ describe('the section order', () => {
       'cache-label-explorer',
       'your-albums-section',
       'your-artists-section',
-      'discover-bylt-sections',
+      'year-mixes-section',
       'cache-deep-cuts',
+      'cache-genre-explorer',
       'lastfm-radio',
       'listenbrainz',
       'build-a-playlist',
@@ -102,9 +104,9 @@ describe('buildLayoutRows', () => {
       only('cache-genre-explorer', 'cache-undiscovered', 'cache-deep-cuts'),
     );
     expect(rows).toEqual([
-      { kind: 'full', id: 'cache-genre-explorer' },
       { kind: 'full', id: 'cache-undiscovered' }, //  promoted from its pair, in place
       { kind: 'full', id: 'cache-deep-cuts' },
+      { kind: 'full', id: 'cache-genre-explorer' },
     ]);
   });
 

@@ -70,6 +70,48 @@ export function buildAutomationsView(automations: Automation[]): AutomationsView
 }
 
 /**
+ * The verdict the page opens with.
+ *
+ * The stats bar counted Active / System / Custom — how many rows are in a
+ * table, which is a question nobody has. What a person comes to this page to
+ * learn is whether automation is WORKING, and that has exactly three bad
+ * answers: something failed, something has never run, or the whole side is
+ * paused so nothing is running at all.
+ *
+ * `failing` counts the LAST run, not history: `last_error` is cleared on the
+ * next successful run (update_automation_run writes it every time), so this
+ * is "currently broken", not "has ever broken".
+ *
+ * `neverRun` deliberately excludes disabled rows. An automation you switched
+ * off has not run because you did not want it to; calling that out as a
+ * problem would train people to ignore the number.
+ */
+export function automationHealth(
+  automations: Automation[],
+  paused: boolean,
+): { failing: number; neverRun: number; armed: number; paused: boolean; ok: boolean } {
+  const enabled = automations.filter((a) => truthy(a.enabled));
+  const failing = automations.filter((a) => Boolean(a.last_error)).length;
+  const neverRun = enabled.filter((a) => !a.last_run).length;
+  return {
+    failing,
+    neverRun,
+    armed: enabled.length,
+    paused,
+    ok: failing === 0 && neverRun === 0 && !paused,
+  };
+}
+
+/** Rows matching a health lens. Kept beside the counter so the number and the
+ *  filter can never disagree about what they mean. */
+export function filterByHealth(automations: Automation[], lens: string): Automation[] {
+  if (lens === 'failing') return automations.filter((a) => Boolean(a.last_error));
+  if (lens === 'never') return automations.filter((a) => truthy(a.enabled) && !a.last_run);
+  if (lens === 'off') return automations.filter((a) => !truthy(a.enabled));
+  return automations;
+}
+
+/**
  * The three filter-bar controls, applied together.
  *
  * The text box matches the RENDERED labels, not the raw types: _filterAutomations
@@ -84,15 +126,20 @@ export function buildAutomationsView(automations: Automation[]): AutomationsView
  */
 export function filterAutomations(
   automations: Automation[],
-  filters: { q?: string; trigger?: string; action?: string },
+  filters: { q?: string; trigger?: string; action?: string; health?: string },
   labelFor: (a: Automation) => { trigger: string; action: string },
 ): Automation[] {
   const q = (filters.q ?? '').toLowerCase().trim();
   const trigger = filters.trigger ?? '';
   const action = filters.action ?? '';
-  if (!q && !trigger && !action) return automations;
+  const health = filters.health ?? '';
+  if (!q && !trigger && !action && !health) return automations;
 
-  return automations.filter((a) => {
+  // The health lens runs first and through the same helper the counter uses,
+  // so a chip that says "3 failing" can never open onto a different three.
+  const scoped = health ? filterByHealth(automations, health) : automations;
+
+  return scoped.filter((a) => {
     const labels = labelFor(a);
     const matchesQuery =
       !q ||
@@ -117,4 +164,52 @@ export function filterOptions(automations: Automation[]): {
   triggers.sort();
   actions.sort();
   return { triggers, actions };
+}
+
+/**
+ * A section's one-line status, so a COLLAPSED family still says something.
+ *
+ * Reads left to right in the order you would ask: is anything broken, is
+ * anything running blind, is anything switched off. A family with none of
+ * those says so rather than printing three zeros.
+ */
+export function sectionSummary(automations: Automation[]): string {
+  if (automations.length === 0) return 'empty';
+  const failing = automations.filter((a) => Boolean(a.last_error)).length;
+  const off = automations.filter((a) => !truthy(a.enabled)).length;
+  const neverRun = automations.filter((a) => truthy(a.enabled) && !a.last_run).length;
+  const parts: string[] = [];
+  if (failing) parts.push(`${failing} failing`);
+  if (neverRun) parts.push(`${neverRun} never run`);
+  if (off) parts.push(`${off} off`);
+  if (parts.length === 0) parts.push('all healthy');
+  return parts.join(' · ');
+}
+
+/**
+ * The glow a family carries, as `R,G,B` for `--tile-glow`.
+ *
+ * System and My Automations are fixed — they are the same two families on
+ * every install, and a colour that moved between installs would be noise.
+ * User groups hash their NAME into the palette, so a group keeps its colour
+ * across reloads and across machines without anything being stored.
+ */
+const FAMILY_PALETTE = [
+  '56,189,248',
+  '168,85,247',
+  '34,197,94',
+  '245,158,11',
+  '244,114,182',
+  '20,184,166',
+];
+
+export function sectionGlow(kind: 'system' | 'ungrouped' | 'group', name = ''): string {
+  if (kind === 'system') return '148,163,184';
+  // Indirection is legal in a custom property: --tile-glow: var(--accent-rgb)
+  // resolves before rgba() reads it, so the user's own automations always
+  // carry the accent they picked.
+  if (kind === 'ungrouped') return 'var(--accent-rgb)';
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return FAMILY_PALETTE[hash % FAMILY_PALETTE.length];
 }

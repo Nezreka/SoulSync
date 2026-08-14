@@ -21,7 +21,7 @@ MONITORING_COLUMNS = (
     "include_albums", "include_eps", "include_singles", "include_live",
     "include_remixes", "include_acoustic", "include_compilations",
     "include_instrumentals", "lookback_days", "preferred_metadata_source",
-    "auto_download",
+    "auto_download", "auto_download_pref",
 )
 
 
@@ -188,3 +188,71 @@ def test_unparseable_auto_download_is_rejected(client):
 
     assert response.status_code == 400
     assert _config(db) == before
+
+
+# ── auto-download: the global default an artist can override ─────────────────
+# swiftpawpaw: the Global Override only picked release FORMATS, so turning
+# auto-download off meant opening all 225 artists. `auto_download_pref` adds the
+# third state (null = follow the global) the NOT NULL boolean could not hold.
+
+def test_the_config_reports_the_preference_and_which_way_the_global_points(client):
+    test_client, _ = client
+    body = test_client.get("/api/watchlist/artist/sp-1/config").get_json()
+
+    assert body["config"]["auto_download_pref"] is None, "the fixture never chose"
+    # The global travels with it: "off" is ambiguous between "I set this" and
+    # "the global is off", and the UI cannot say which without this.
+    assert "global_auto_download" in body["config"]
+
+
+def test_the_preference_is_stored_verbatim(client):
+    test_client, db = client
+
+    response = test_client.post("/api/watchlist/artist/sp-1/config",
+                                json={"auto_download_pref": 0})
+
+    assert response.status_code == 200, response.get_json()
+    after = _config(db)
+    assert after["auto_download_pref"] == 0
+    # The legacy column follows so an older reader still sees the choice.
+    assert after["auto_download"] == 0
+
+
+def test_an_explicit_null_means_follow_the_global(client):
+    test_client, db = client
+    test_client.post("/api/watchlist/artist/sp-1/config", json={"auto_download_pref": 1})
+
+    response = test_client.post("/api/watchlist/artist/sp-1/config",
+                                json={"auto_download_pref": None})
+
+    assert response.status_code == 200, response.get_json()
+    assert _config(db)["auto_download_pref"] is None
+
+
+def test_an_old_client_sending_only_the_boolean_is_read_as_a_deliberate_choice(client):
+    """It has no way to say "inherit", and the user did just move a control.
+    Reading it as inherit would make the old follow-only toggle do nothing
+    whenever the global is on."""
+    test_client, db = client
+
+    response = test_client.post("/api/watchlist/artist/sp-1/config",
+                                json={"auto_download": False})
+
+    assert response.status_code == 200, response.get_json()
+    assert _config(db)["auto_download_pref"] == 0
+
+
+def test_a_save_that_never_mentions_auto_download_leaves_the_preference_alone(client):
+    """The important one: editing release types must not pin an untouched artist
+    out of every future global flip."""
+    test_client, db = client
+    before = _config(db)
+    assert before["auto_download_pref"] is None
+
+    response = test_client.post("/api/watchlist/artist/sp-1/config",
+                                json={"include_eps": True})
+
+    assert response.status_code == 200, response.get_json()
+    after = _config(db)
+    assert after["auto_download_pref"] is None
+    assert after["auto_download"] == before["auto_download"], "the legacy column too"

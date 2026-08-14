@@ -9,9 +9,9 @@ from :mod:`core.library2.provider_attempts`.
 Written once here rather than sixteen times, and it returns the exact dict shape
 the workers already consume, so the change inside each one stays small.
 
-Only ``not_found`` is retried. Legacy did the same, deliberately: an ``error``
-means the provider or the network misbehaved, and auto-retrying that turns a
-provider outage into an infinite loop. Errors clear on a user-triggered refresh.
+Both ``not_found`` and per-item ``error`` outcomes are retried after the configured
+window. Source-wide outages are handled before an attempt is recorded and use the
+workers' own backoff, so they cannot turn into a tight catalogue-wide retry loop.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def _sources(service: str) -> Dict[str, str]:
         """,
     }
 _TABLES = {"artist": "lib2_artists", "album": "lib2_albums", "track": "lib2_tracks"}
-_RETRYABLE = ("not_found",)
+_RETRYABLE = ("not_found", "error")
 _STATUSES = frozenset({"matched", "not_found", "error", "skipped"})
 
 # Similar Artists can source only these four provider namespaces.
@@ -135,10 +135,11 @@ def next_pending(
     normal order once it is exhausted — unset or exhausted behaves exactly like
     the default artist→album→track chain.
 
-    ``retry_statuses`` defaults to ``not_found`` only. Widen it to include
-    ``error`` only where the provider's errors really are transient and its own
-    fetch already sorts a definitive miss into ``not_found`` — Similar Artists is
-    the case. ``require_provider_id`` narrows the universe to entities already
+    ``retry_statuses`` defaults to both retryable terminal states. A definitive
+    miss is ``not_found`` and provider/network/write failures are ``error``;
+    freezing either forever would regress the legacy workers' retry contract.
+    Callers may narrow the tuple for a provider with different semantics.
+    ``require_provider_id`` narrows the universe to entities already
     matched to a metadata source, for work that is keyed by that id and has
     nothing to do without one.
 

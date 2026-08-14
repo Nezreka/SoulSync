@@ -159,6 +159,20 @@ describe('the search route', () => {
   });
 });
 
+describe('the download bubbles handoff', () => {
+  it('asks vanilla to repaint the bubbles on mount', async () => {
+    // The bubble store and painter are vanilla; this page recreates the
+    // #enhanced-main-results-area container with a static placeholder on
+    // every mount, so without this call in-flight downloads vanish after
+    // navigating away and back.
+    const repaint = vi.fn();
+    window.showSearchDownloadBubbles = repaint;
+    renderRoute('/search');
+    await waitFor(() => expect(repaint).toHaveBeenCalled());
+    delete window.showSearchDownloadBubbles;
+  });
+});
+
 describe('the dropdown state machine', () => {
   /** Type into the real input the way a keystroke does. */
   function type(value: string) {
@@ -237,7 +251,7 @@ describe('the dropdown state machine', () => {
     type('aphex twin');
 
     await waitFor(() => expect(visibleBody()).toBe('results'), { timeout: 3000 });
-    expect(screen.getByText('Drukqs')).toBeInTheDocument();
+    expect(screen.getAllByText('Drukqs').length).toBeGreaterThan(0);
     expect(document.getElementById('enhanced-dropdown')?.className).not.toContain('hidden');
   });
 
@@ -266,7 +280,7 @@ describe('the dropdown state machine', () => {
     renderRoute('/search');
     await settled();
     type('aphex twin');
-    await screen.findByText('Drukqs');
+    await screen.findAllByText('Drukqs');
 
     act(() => {
       document.body.click();
@@ -395,8 +409,11 @@ describe('where a result card points', () => {
     await settled();
     type('aphex twin');
 
-    const owned = await screen.findByText('Owned Artist', undefined, { timeout: 3000 });
-    expect(owned.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+    // Twice on screen — the spotlight and the card — both linking home.
+    const owned = await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
+    for (const el of owned) {
+      expect(el.closest('a')?.getAttribute('href')).toBe('/artist-detail/library/7');
+    }
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(

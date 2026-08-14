@@ -275,6 +275,14 @@ class MusicBrainzService:
                 # Calculate title similarity
                 title_similarity = self._calculate_similarity(album_name, mb_title)
 
+                # Hard floor, mirroring match_recording's: without it the
+                # bonuses (artist +20, version +10, mb_score up to +30) could
+                # walk a ~0.4-title-similarity release past the 70 gate — and
+                # that MBID feeds MBID-keyed cover art with no downstream
+                # validation.
+                if title_similarity < 0.6:
+                    continue
+
                 # If we have artist info, check artist match too
                 artist_bonus = 0
                 if artist_name and 'artist-credit' in result:

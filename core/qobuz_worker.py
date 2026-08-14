@@ -9,7 +9,11 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
 from core.worker_utils import idle_backoff_seconds, interruptible_sleep
-from core.library2.worker_support import accept_artist_match, honor_stored_match
+from core.library2.worker_support import (
+    accept_artist_match,
+    honor_stored_match,
+    provider_id_conflict,
+)
 
 logger = get_logger("qobuz_worker")
 
@@ -243,6 +247,10 @@ class QobuzWorker:
         """Check if Qobuz result name matches our query with fuzzy matching"""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
 
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         logger.debug(f"Name similarity: '{query_name}' vs '{result_name}' = {similarity:.2f}")
@@ -261,13 +269,13 @@ class QobuzWorker:
 
         if str(result_artist_id) != str(parent_qobuz_id):
             parent_name = item.get('artist') or ''
-            if (result_artist_name and parent_name
-                    and not self._name_matches(parent_name, result_artist_name)):
+            if not (result_artist_name and parent_name
+                    and self._name_matches(parent_name, result_artist_name)):
                 logger.info(
                     f"Skipping artist-ID correction from {item['type']} "
-                    f"'{item['name']}': result artist '{result_artist_name}' "
-                    f"≠ parent '{parent_name}' (collab/compilation, not a "
-                    f"correction)"
+                    f"'{item['name']}': cannot verify result artist "
+                    f"'{result_artist_name}' == parent '{parent_name}' "
+                    f"(collab/compilation or missing name, not a correction)"
                 )
                 return True
 
@@ -289,6 +297,20 @@ class QobuzWorker:
             conn = self.db._get_connection()
             artist_id = _parent_artist_id(conn, item['type'], item['id'])
             if artist_id is None:
+                return
+
+            row = conn.execute(
+                "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+            ).fetchone()
+            this_name = (row[0] if row else '') or (item.get('artist') or '')
+            conflict = provider_id_conflict(
+                conn, 'qobuz', correct_qobuz_id, artist_id, this_name)
+            if conflict:
+                logger.warning(
+                    "Refusing Qobuz-ID correction: id %s is already held by "
+                    "'%s' (≠ '%s') — avoiding a shared/duplicate id (artist #%s)",
+                    correct_qobuz_id, conflict, this_name, artist_id,
+                )
                 return
 
             write_provider_enrichment(
@@ -689,4 +711,3 @@ class QobuzWorker:
         finally:
             if conn:
                 conn.close()
-

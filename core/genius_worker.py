@@ -197,6 +197,33 @@ class GeniusWorker:
             if conn:
                 conn.close()
 
+    def _normalize_name(self, name: str) -> str:
+        """Normalize provider titles before fuzzy comparison."""
+        name = (name or '').lower().strip()
+        name = re.sub(r'\s+[-–—]\s+.*$', '', name)
+        name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
+        name = re.sub(r'\s*\[.*?\]\s*', ' ', name)
+        name = re.sub(r'\s*feat\.?\s+.*$', '', name)
+        name = re.sub(r'[^\w\s]', '', name)
+        return re.sub(r'\s+', ' ', name).strip()
+
+    def _name_matches(self, query_name: str, result_name: str) -> bool:
+        """Match names without treating two normalized-empty titles as equal."""
+        norm_query = self._normalize_name(query_name)
+        norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
+        similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
+        logger.debug(
+            "Name similarity: '%s' vs '%s' = %.2f",
+            query_name,
+            result_name,
+            similarity,
+        )
+        return similarity >= self.name_similarity_threshold
+
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist or track)"""
         try:

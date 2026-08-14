@@ -88,8 +88,13 @@ describe('wishlist route', () => {
     // "2 tracks" legitimately appears in the header count AND in the orb meta,
     // so scope to the header rather than asserting uniqueness.
     expect(document.querySelector('.wishlist-page-count')?.textContent).toBe('2 tracks');
-    // both album tracks land under one album tile on one orb
+    // both album tracks land under one orb...
     expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(1);
+    // ...whose album fan is NOT mounted until the orb is opened — a
+    // 400-track wishlist used to render every track row on first paint
+    // (perf sweep, Aug 2026). Expanding mounts the single grouped tile.
+    expect(document.querySelectorAll('.wl-album-tile')).toHaveLength(0);
+    fireEvent.click(document.querySelector('.wl-orb')!);
     expect(document.querySelectorAll('.wl-album-tile')).toHaveLength(1);
     expect(screen.getByText('Album Tracks')).toBeInTheDocument();
     // cycle 'albums' renders as the friendly label

@@ -4,10 +4,10 @@ The Similar Artists worker differs from the enrichment workers in two ways that
 are deliberate, not accidental, so ``worker_queue`` has to carry both rather than
 have that worker keep its own copy of the selection logic:
 
-* it retries ``error`` as well as ``not_found``, because its errors are MusicMap
-  timeouts and 5xx — transient by nature, and its own fetch already sorts a
-  genuine 400/404 into ``not_found``. The enrichment workers must NOT retry
-  ``error``, or a provider outage becomes an infinite loop;
+* it may narrow the shared retry states when a derived worker has a different
+  contract. Ordinary enrichment retries both ``error`` and ``not_found`` after
+  the configured window; source-wide outages are handled by worker backoff and
+  never recorded against every catalogue row;
 * its universe is only artists already matched to a metadata source, because the
   similars it stores are keyed by that source id. An unmatched artist has nothing
   to key by, and offering it would mark it failed forever.
@@ -57,22 +57,23 @@ def _stale(conn, entity_id, status, service="similar_artists"):
 
 
 class TestWhichFailuresComeBack:
-    def test_by_default_an_error_is_not_retried(self, conn):
-        """A provider outage must not become an infinite retry loop."""
+    def test_by_default_a_stale_error_is_retried(self, conn):
         artist = _artist(conn, "Rone", spotify_id="sp-1")
         _stale(conn, artist, "error")
 
-        assert next_pending(conn, "similar_artists",
-                            entity_types=("artist",)) is None
-
-    def test_an_error_can_be_made_retryable(self, conn):
-        artist = _artist(conn, "Rone", spotify_id="sp-1")
-        _stale(conn, artist, "error")
-
-        item = next_pending(conn, "similar_artists", entity_types=("artist",),
-                            retry_statuses=("error", "not_found"))
-
+        item = next_pending(conn, "similar_artists", entity_types=("artist",))
         assert item is not None and item["id"] == artist
+
+    def test_a_derived_worker_can_narrow_retry_states(self, conn):
+        artist = _artist(conn, "Rone", spotify_id="sp-1")
+        _stale(conn, artist, "error")
+
+        assert next_pending(
+            conn,
+            "similar_artists",
+            entity_types=("artist",),
+            retry_statuses=("not_found",),
+        ) is None
 
     def test_a_settled_match_never_comes_back(self, conn):
         artist = _artist(conn, "Rone", spotify_id="sp-1")

@@ -179,7 +179,8 @@ const HELPER_CONTENT = {
         tips: [
             'Green dot = connected and responding',
             'Red dot = disconnected or erroring',
-            'iTunes and Deezer work without authentication; Spotify requires OAuth'
+            'iTunes and Deezer work without authentication; Spotify requires OAuth',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'gs-connecting'
     },
@@ -189,7 +190,8 @@ const HELPER_CONTENT = {
         tips: [
             'Supports Plex, Jellyfin, and Navidrome',
             'Configure in Settings → Media Server Setup',
-            'Auto-scans your library after every successful download'
+            'Auto-scans your library after every successful download',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'set-media'
     },
@@ -199,7 +201,8 @@ const HELPER_CONTENT = {
         tips: [
             'Hybrid mode tries multiple sources in priority order',
             'Each streaming source has independent quality settings',
-            'Configure source priority via drag-and-drop in Settings'
+            'Configure source priority via drag-and-drop in Settings',
+            'The bolt button runs a live connection test'
         ],
         docsId: 'search-sources'
     },
@@ -234,50 +237,6 @@ const HELPER_CONTENT = {
         docsId: 'import'
     },
 
-    // ─── DASHBOARD: SERVICE CARDS ───────────────────────────────────
-
-    '#metadata-source-service-card': {
-        title: 'Metadata Source Status',
-        description: 'Detailed connection info for your active metadata source. Shows connection state, response latency, and allows manual connection testing.',
-        tips: [
-            '"Test Connection" verifies the API is responding',
-            'Response time indicates network latency to the service',
-            'If stuck on "Checking...", the service may be rate-limited'
-        ],
-        docsId: 'gs-connecting',
-        actions: [
-            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('gs-connecting') }
-        ]
-    },
-    '#media-server-service-card': {
-        title: 'Media Server Status',
-        description: 'Detailed connection info for your media server. Verifies SoulSync can communicate with Plex, Jellyfin, or Navidrome for library scanning and audio streaming.',
-        tips: [
-            '"Test Connection" verifies the server URL and credentials',
-            'Select your Music Library in Settings after first connecting',
-            'Navidrome auto-detects new files — no scan trigger needed'
-        ],
-        docsId: 'set-media',
-        actions: [
-            { label: 'Open Settings', onClick: () => navigateToPage('settings') },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('set-media') }
-        ]
-    },
-    '#soulseek-service-card': {
-        title: 'Download Source Status',
-        description: 'Connection status of your primary download source. For Soulseek, this checks the slskd API; for streaming sources, it verifies authentication.',
-        tips: [
-            '"Test Connection" confirms the source is ready for downloads',
-            'Soulseek requires a running slskd instance with API key',
-            'Streaming sources (Tidal, Qobuz) need active subscriptions'
-        ],
-        docsId: 'search-sources',
-        actions: [
-            { label: 'Open Settings', onClick: () => { navigateToPage('settings'); setTimeout(() => typeof switchSettingsTab === 'function' && switchSettingsTab('downloads'), 400); } },
-            { label: 'View Docs', onClick: () => _navigateToDocsSection('search-sources') }
-        ]
-    },
 
     // ─── DASHBOARD: SYSTEM STATS ────────────────────────────────────
 
@@ -1952,15 +1911,6 @@ const HELPER_CONTENT = {
 
     // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
 
-    '#enrichment-pills-section': {
-        title: 'Enrichment Service Workers',
-        description: 'Per-service enrichment workers that run in the background to enrich your library metadata. Each button shows the worker status and lets you start/stop individual services.',
-        tips: [
-            'Green = running, grey = stopped, red = error',
-            'Click a service pill to toggle its worker on/off',
-            'Workers process tracks in batches — hover for detailed stats'
-        ]
-    },
     '#musicbrainz-button': {
         title: 'MusicBrainz Enrichment',
         description: 'Looks up recording IDs, release groups, and artist MBIDs from MusicBrainz. Provides canonical identifiers used by other services.',
@@ -2005,8 +1955,13 @@ const HELPER_CONTENT = {
     // ─── DASHBOARD: RECENT SYNCS & RATE MONITOR ──────────────────────
 
     '#sync-history-cards': {
-        title: 'Recent Syncs',
-        description: 'Quick view of your most recent playlist sync operations. Shows playlist name, track counts, and completion status.',
+        title: 'Sync',
+        description: 'Every playlist in one band: its schedule and next run, the last run\'s matched/downloaded/failed results, and an ownership bar showing how much of it is in your library. Hover a row to Run its pipeline or Listen from your library; click for the full run detail.',
+        tips: [
+            'Rows with a cadence are on an Auto-Sync schedule; "manual" rows are one-off syncs',
+            'A running pipeline shows its live phase and progress on the row',
+            'Manage opens the full Auto-Sync schedule board'
+        ]
     },
     '#rate-monitor-section': {
         title: 'API Rate Monitor',
@@ -2342,13 +2297,12 @@ const HELPER_TOURS = {
             { page: 'dashboard', selector: '#wishlist-button', title: 'Wishlist', description: 'Tracks queued for download. Failed downloads, watchlist discoveries, and manual additions all land here for retry.' },
 
             // Main content — top to bottom
-            { page: 'dashboard', selector: '.service-status-grid', title: 'Service Status', description: 'Your three core connections at a glance: metadata source (Spotify/iTunes/Deezer), media server (Plex/Jellyfin/Navidrome), and download source. Each card shows live status, response time, and a Test button.' },
-            { page: 'dashboard', selector: '.stats-grid-dashboard', title: 'System Stats', description: 'Real-time metrics: active downloads, speed, sync operations, uptime, and memory usage. Updates live via WebSocket.' },
-            { page: 'dashboard', selector: '#library-status-card', title: 'Library', description: 'Your library at a glance — artists, albums, tracks, and total size — plus the scan buttons. Incremental scan picks up new content fast; Deep Scan re-reads everything and clears out stale entries.' },
-            { page: 'dashboard', selector: '#sync-history-cards', title: 'Recent Syncs', description: 'Your latest playlist sync runs — what matched, what downloaded, what failed. Click one to jump into the details.' },
-            { page: 'dashboard', selector: '.dash-card--quick-actions', title: 'Quick Actions', description: 'One-click shortcuts to the things you do most — start a sync, open the tool pages, jump to search. The bigger Tools collection lives on its own pages under the System section of the sidebar.' },
-            { page: 'dashboard', selector: '#dashboard-activity-feed', title: 'Recent Activity', description: 'Live stream of system events — downloads, syncs, enrichment updates, errors. Newest at the top, updates in real-time via WebSocket.' },
-            { page: 'dashboard', selector: '#enrichment-pills-section', title: 'Enrichment Services', description: 'Per-service enrichment coverage — how much of your library each metadata service has processed, with controls to manage priorities and intervals.' },
+            { page: 'dashboard', selector: '#library-status-card', title: 'Library', description: 'Your library at a glance — artists, albums, tracks, and total size — with a health dot on the title. Quick Scan picks up new content fast (incremental); Deep Scan re-reads everything and clears out stale entries.' },
+            { page: 'dashboard', selector: '.dash-card--rail', title: 'Recently Added & Fresh Releases', description: 'The latest albums to land in your library, and fresh releases from artists you follow — switch between them with the tabs. Click a cover to jump to the album.' },
+            { page: 'dashboard', selector: '.listen-hero', title: 'Library Radio', description: 'One click starts an endless shuffle through your own collection — the player keeps feeding the queue as you listen. The Mixes tile beside it jumps to your daily playlists on Discover.' },
+            { page: 'dashboard', selector: '.dash-autom-rows', title: 'Automations', description: 'Everything else the engine runs — watchlist scans, wishlist processing, backups, notifications — with each automation\'s trigger, last outcome, and next firing. Hover a row to run it now; the quick-settings switches below calm the visual effects on low-power devices.' },
+            { page: 'dashboard', selector: '#sync-history-cards', title: 'Sync', description: 'Every playlist in one band: its schedule and next run, the last run\'s results, and how much of it you own. Hover a row to Run its pipeline now or Listen to it from your library; click a row for the full run detail; Manage opens the Auto-Sync board.' },
+            { page: 'dashboard', selector: '.status-section', title: 'Service Status', description: 'Your three core connections live in the sidebar on every page: metadata source, media server, and download source. The dot is the health; hover a row for its bolt button to run a live connection test, or click the row to switch sources.' },
 
             // The shell around every page
             { page: 'dashboard', selector: '.side-toggle', title: 'Music / Video Toggle', description: 'SoulSync has two whole sides. This switch flips between the MUSIC app and the VIDEO app (movies + TV) — each has its own pages, library, and settings.' },
@@ -3496,18 +3450,26 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.1.9': [
-        { date: 'July 2026 · 3.1.9' },
-        { title: 'The Arcade', desc: 'the chat room gets games. chess, Connect 4, Battleship and a slot machine, played over Soulseek with NO SERVER anywhere — a match is just hidden messages in the room, and every client folds them into the same board independently. the board says so out loud: "no server · folded from 34 room messages", and you can click it to see the messages behind the position.' },
-        { title: 'Chess, properly', desc: 'full rules — castling, en passant, under-promotion, stalemate, threefold, fifty-move — with the engine checked against the standard perft positions so move generation is exactly right rather than roughly right. drag or click, legal-move dots, check and last-move highlights, algebraic move list, board flips for black. correspondence style with no clock: close the tab, come back tomorrow, the sidebar tells you whose move it is. resign, offer a draw, take over a seat idle 24h, and export a PGN that opens in Lichess like any other game.' },
-        { title: 'Connect 4, Battleship, Slots', desc: 'Connect 4 is click-a-column. Battleship is the clever one: your fleet never goes on the wire until the end, both players publish a fingerprint of their board up front, and at the reveal every client checks every answer you gave against the board you showed — lie about one miss and no board fits. your own client answers shots automatically so nobody waits on a prompt. Slots is solo with play money: 10k a day, topped back up at midnight if you are below it, and anything you win above it is yours.' },
-        { title: 'You vs the room, and a room ladder', desc: 'one seat is you and the other belongs to everybody else — they vote, and the move plays when enough of them agree. finished games feed an Elo ladder: persistent ratings with no server and no database of record.' },
-        { title: 'Games that survive real life', desc: 'a client that missed moves catches up from the position carried on the next one. if both sides are waiting on each other and nothing arrives, it asks the room where the game actually is — and the room is OUTVOTED rather than trusted, so one client claiming a fake board gets ignored. matches are archived too, so a game survives an slskd restart even when nobody is around to ask.' },
-        { title: 'Chat avatars', desc: 'pick from 100 presets in the chat settings cog. it shows on every message, in the member list and on your account strip, and it is saved to your account so it follows you to another browser.' },
-        { title: 'Mentions never actually worked', desc: 'SoulSync read your Soulseek name off an endpoint that does not carry it, so it was always blank — which meant @-pings never highlighted you and reserved avatars never appeared. it asks the endpoints that actually have it now.' },
-        { title: 'Spotify rate-limit popup, for people not using Spotify', desc: 'the ban modal appeared on installs whose metadata source is Deezer, announcing that search and enrichment were paused when neither was. it only shows when Spotify is genuinely your source now, and a 30-minute ban needs a real 429 rather than any error that happens to contain the letters "rate".' },
-        { title: 'Re-matching a TV show left the old episodes', desc: 'a show re-matched onto a different title kept the previous one\'s episode list, so "Lucky (2026)" showed two 2026 episodes stacked on six from a 2022 series. the old title\'s episodes are cleared now, while episodes you actually have files for keep their files and watch state.' },
-        { title: 'Earlier versions', desc: '3.1.8 rebuilt chat into a Discord-style app with channels + threads and made Quality Profiles govern every download. 3.1.7 turned chat into a hangout with a shared jukebox. 3.1.6 made video downloads land atomically. 3.1.5 made chat best-in-class.' },
+    '3.2.0': [
+        { date: 'August 2026 · 3.2.0' },
+        { title: 'The music interface is now React', desc: 'the big one. the music side has been moving off the old page scripts one page at a time, and this release lands the last of the large ones. dashboard, sync, search, discover, playlist explorer, watchlist, wishlist, automations, active downloads, import, library, tools, artist detail, label detail, stats and issues are all React now. pages hold their state properly, navigation does not throw away what you had loaded, and the whole thing is faster to move around. settings, help, hydrabase and chat are still the old pages for now.' },
+        { title: 'Sync and Discover rebuilt', desc: 'the two biggest ports in the release, roughly 80 commits each. sync keeps every source vertical (spotify, tidal, qobuz, deezer, youtube, itunes, file import and mirrored), the discovery pool, mirrored export and the auto-sync pipeline. discover keeps the artist map and artist web visualisations, about 4,450 lines of canvas and graph code, rebuilt rather than reskinned.' },
+        { title: 'How the port was done', desc: 'each page was read end to end first, then the logic ported with tests that check the new code against the old behaviour case by case, then the interface, then the route flipped and the old code deleted. the download engine itself was deliberately left alone, so nothing about how files are found, fetched or imported changed in this release.' },
+        { title: 'Upgraded tracks landing in your library root', desc: 'two separate bugs under one report (#1109). a configured library root was being treated as if it were an album folder, so an upgraded file landed loose at the top level instead of in artist/album. and after a successful upgrade the file it replaced was never removed, because the check for it ran against a path that had not been resolved yet. both fixed, and the old copy is resolved before it is compared so the right file gets retired.' },
+        { title: 'Albums starting with a dot went invisible', desc: 'a leading dot in an album or track name made a hidden folder on linux and mac, so the music was on disk but nothing could see it (#1129). leading dots are stripped when building paths now.' },
+        { title: 'Tools ignored your file organization template', desc: 'the path resolver assumed the album folder on disk matched what the database had, which stops being true the moment you customise your template (#1127). it resolves properly now.' },
+        { title: 'FLAC arriving despite an MP3-only profile', desc: 'the fallback path was honouring the profile\'s bitrate but not its format preference, so a Space Saver profile could still land lossless files (#1130).' },
+        { title: 'AcoustID flagging correct files', desc: 'two problems (#1132). correct files were flagged as mismatched when a variant happened to be listed first in the fingerprint response, and the scanner asserted an identity even for fingerprints that were genuinely ambiguous. it declines to guess now instead of guessing wrong.' },
+        { title: 'Manual track matches forgotten between syncs', desc: 'sync now marks rows that already carry a manual match, so a track you fixed by hand is not offered up for fixing again every run (#1128).' },
+        { title: 'Spotify Free was quietly running on Deezer', desc: 'if you picked Spotify without connecting an account, the check for "is Spotify usable" asked whether you were authenticated. a Spotify Free user never is, by design, so your configured source was silently swapped for the default on every single call. settings said Spotify while everything actually ran on Deezer, and watchlist scans for artists Deezer could not resolve came back empty. it checks whether Spotify metadata is available now, which is what the rest of the app already did.' },
+        { title: 'Mobile fixes', desc: 'the sidebar closes when you tap outside it, and a scroll gesture is no longer read as a tap. there is also an on-screen error console at ?debug=1 for phones and tablets that have no developer tools, and two startup bugs are fixed that could leave a React page blank.' },
+        { title: 'Tools and Automations rebuilt around what you go there to do', desc: 'the maintenance section opens with a health score and what is dragging it down instead of thirty identical job cards. findings are an inbox grouped by type, each with a plain-english line explaining it, so thousands of findings read as a dozen decisions. the thirty jobs are tiles grouped into families, and you can change how often each one runs right on the tile — previously every job ran on a fixed interval you could neither see nor change. the automations page opens with a verdict (how many armed, failing, never run) where every number is a filter, its cards carry the same tiles and the same editable schedule, and the builder\'s block palette is searchable and grouped by category on both the music and video sides.' },
+        { title: 'Automation cards stopped lying', desc: 'with automations paused, every card still advertised a countdown for a run that was not going to happen, and claimed to be listening for events it would ignore. a failed run was a grey text fragment at the end of a line, weighted the same as a run count. paused says paused now, a failure is visible from across the room, and last-run summaries are sentences — "added 4 tracks to 2 playlists" rather than raw handler keys.' },
+        { title: 'Your library is re-read every hour', desc: 'soulsync only re-read the library after it downloaded something itself. music you added any other way — dropped in by hand, ripped, moved from another machine — was indexed by plex or jellyfin within minutes but stayed outside soulsync\'s own database for up to a week, until the weekly deep scan. the video side has had an hourly safety net for a while; the music side has one now. it is the same cheap incremental read it always used, just on a clock, and it does nothing at all when nothing is new.' },
+        { title: 'Recently Played is playable', desc: 'clicking a card in the dashboard\'s recently played band plays that song again — your own copy first, the stream source if you do not have it — the way recently added already worked. the artist name still goes to the artist.' },
+        { title: 'Album torrents stalling for hours', desc: 'six problems behind one report (#1139). album grabs preferred a magnet when the indexer offered both, and a magnet gives the torrent client an info-hash and nothing else, so one that cannot reach the swarm sits on "downloading metadata" indefinitely. the stalled-torrent timeout you can configure was never consulted for album downloads. nothing refused a release with no seeders. a stalled grab was left in the client to be picked up again next time. and any of those failures killed the whole batch instead of falling back. also fixed: a torrent that finished could still report "no audio files found" — staging now asks the client exactly where that torrent\'s files are instead of guessing from the folder name.' },
+        { title: 'A manual match to a deleted file swallowed the track', desc: 'match a song to a library file, delete that file, reprocess the playlist, and the song was neither downloaded nor added to the wishlist — every run, with only a warning in the log (#1138). the download step treated the existence of a saved match as proof the file was there. it checks that the match still resolves now, and removing one from Tools → Manual Library Match tells you honestly whether it was removed.' },
+        { title: 'Earlier versions', desc: '3.1.9 added the Arcade — chess, Connect 4, Battleship and slots played over Soulseek with no server. 3.1.8 rebuilt chat into a Discord-style app and made Quality Profiles govern every download. 3.1.7 turned chat into a hangout with a shared jukebox. 3.1.6 made video downloads land atomically.' },
     ],
 };
 
@@ -3538,7 +3500,49 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "3.1.9: the chat room gets an arcade",
+        title: "3.2.0: the music interface is now react",
+        description: "the big structural release. the music side has been moving off the old page scripts one page at a time for months, and this is where the last of the large ones land — sixteen pages are react now, including the two biggest, sync and discover. the download engine underneath is deliberately untouched, so nothing changed about how files are found, fetched or imported. plus a batch of reported fixes, including two separate bugs behind upgraded tracks landing in the wrong place.",
+        features: [
+            "sixteen pages rebuilt: dashboard, sync, search, discover, playlist explorer, watchlist, wishlist, automations, active downloads, import, library, tools, artist detail, label detail, stats and issues. pages keep their state properly and moving between them no longer throws away what you had loaded. settings, help, hydrabase and chat are still the old pages",
+            "sync and discover were the two biggest ports, around 80 commits each. sync keeps every source vertical, the discovery pool, mirrored export and the auto-sync pipeline; discover keeps the artist map and artist web visualisations, roughly 4,450 lines of canvas and graph code, rebuilt rather than reskinned",
+            "each page was read end to end first, then its logic ported with tests checking the new code against the old behaviour case by case, then the interface, then the route flipped and the old code deleted",
+            "upgraded tracks landing in your library root (#1109): two bugs at once. a library root was being treated as an album folder so upgrades landed loose at the top level, and the file being replaced was never removed because the check ran against an unresolved path. both fixed",
+            "albums or tracks whose name starts with a dot no longer become hidden folders on linux and mac (#1129), and tools now honour a custom file organization template instead of assuming the folder on disk matches the database (#1127)",
+            "an mp3-only quality profile no longer lets lossless through on the fallback path (#1130), and acoustid stops flagging correct files when a variant is listed first — and now declines to identify a fingerprint that is genuinely ambiguous rather than guessing (#1132)",
+            "a track you matched by hand is remembered between syncs instead of being offered up again every run (#1128)",
+            "spotify free was quietly running on deezer: the 'is spotify usable' check asked whether you were authenticated, which a spotify free user never is by design, so your configured source was swapped for the default on every call. settings said spotify while everything ran on deezer, and watchlist scans found nothing for artists deezer could not resolve",
+            "mobile: the sidebar closes on an outside tap and a scroll is no longer read as a tap. an on-screen error console at ?debug=1 for devices with no developer tools, and two startup bugs fixed that could leave a page blank",
+        ],
+        usage_note: "nothing to turn on — the rebuilt pages are simply the pages. if something looks wrong on one of them, ?debug=1 puts an error console on screen, which is the quickest way to send a useful report.",
+    },
+    {
+        title: "3.2.0: tools and automations, rebuilt around the decisions",
+        description: "both pages got the treatment the dashboard and discover got — read end to end first, then rebuilt around what you actually go there to do rather than around what the code happened to expose. the theme in both is the same: say the true thing first, and put the control where you are already looking.",
+        features: [
+            "the maintenance section opens with a health score and what is dragging it down, instead of a wall of thirty identical job cards. findings are an inbox grouped by type, each with a plain-english line explaining what it means, so thousands of findings read as a dozen decisions",
+            "the thirty maintenance jobs are tiles now, grouped into families, and each one's schedule is editable on the tile face. before this, every job ran on a fixed interval you could neither see nor change — the same information the auto-sync page has always given you about syncs",
+            "recent runs became its own card that tells you what a run accomplished, not merely that it happened. it also used to say every run was 'just now', because the timestamps are stored in UTC and were being read as local time",
+            "automations opens with a verdict — how many are armed, how many are failing, how many have never run — and every number is a filter. sections became families that summarise themselves even when collapsed",
+            "automation cards stopped lying. with automations paused, every card still showed a countdown for a run that was not going to happen and claimed to be listening for events it would ignore. a failed run was a grey fragment at the end of a line, weighted the same as a run count. and last-run summaries now read as sentences — 'added 4 tracks to 2 playlists' instead of the raw keys the handler returned",
+            "the cards then got the same tiles as the maintenance jobs, so you can change when an automation runs without opening the builder. the builder's own block palette — 45 triggers and 52 actions — is searchable and grouped by category, on the video side too",
+            "your library is re-read every hour. soulsync only ever re-read it after downloading something itself, so music you added any other way sat outside its database for up to a week. same cheap incremental read as always, now on a clock, doing nothing when nothing is new",
+            "clicking a card in the dashboard's recently played band plays that song again — your own copy first, the stream source if you do not have it",
+        ],
+        usage_note: "the new schedules live on the tiles themselves: click the interval on a maintenance job or the 'every 6 hours' chip on an automation. both are system defaults you can change or switch off entirely.",
+    },
+    {
+        title: "3.2.0: torrent and library-match fixes",
+        description: "two reported bugs that each turned out to be several problems wearing one coat.",
+        features: [
+            "album torrent grabs could hold a batch for hours and then lose the file (#1139, Zombiehamser). six things: album downloads preferred a magnet over the .torrent, and a magnet gives the client an info-hash and nothing else, so one that cannot reach the swarm parks on 'downloading metadata' forever. the stalled-torrent timeout you can configure was never consulted for album bundles. nothing refused a release nobody was seeding. a stalled grab was left sitting in the torrent client to be re-grabbed next time. any of those failures killed the whole batch rather than falling back to per-track. and a torrent that finished could still report 'no audio files found', because staging guessed the folder from the torrent's display name instead of asking the client where that torrent's files actually are",
+            "a new minimum-seeders setting sits beside the stall timeout under Settings → Downloads, defaulting to 1 — releases the indexer reports as having no seeders are skipped rather than queued and waited on. releases that report no seeder count at all, like usenet, are never affected",
+            "a manual library match pointing at a deleted file silently swallowed the track (#1138, carlosjfcasero). match a song to a file, delete the file, reprocess the playlist, and the song was neither downloaded nor wishlisted — every run, with only a warning in the log. the download step took the existence of a saved match as proof the file was there, marked the track found, and removed it from the wishlist on the way past. it verifies the match still resolves now",
+            "removing an entry from Tools → Manual Library Match reports honestly. the delete is scoped to your profile, so one saved under a different profile matched nothing, reported success anyway, and reappeared on the next load",
+        ],
+        usage_note: "if a track has been quietly skipped for a while, Tools → Manual Library Match is where saved matches live, and stale ones can be removed there.",
+    },
+    {
+        title: "Earlier in 3.1.9: the chat room gets an arcade",
         description: "chess, connect 4, battleship and a slot machine, played over soulseek with no server anywhere. a match is nothing but hidden messages in the room, and every client folds them into the same board independently — the board tells you so, and lets you look at the messages behind the position. plus 100 preset avatars, and a fix for @-mentions that never worked.",
         features: [
             "the arcade: a games section in the chat sidebar with a lobby of what's on the tables. no game server exists — every board is folded out of chat messages, and yours and your opponent's clients each work it out on their own",
@@ -4044,7 +4048,7 @@ function _updateHelperBadge() {
 
 const TROUBLESHOOT_RULES = [
     {
-        selector: '#metadata-source-service-card .service-card-indicator.disconnected, #metadata-source-service-card .service-card-indicator.error',
+        selector: '#metadata-source-indicator .status-dot.disconnected, #metadata-source-indicator .status-dot.error',
         title: 'Metadata Source Disconnected',
         steps: [
             'Go to Settings → Connections and verify your API credentials',

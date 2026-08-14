@@ -136,8 +136,26 @@ export function MirroredTab({
     data: MirroredPlaylistDetail;
   } | null>(null);
   const exportJobs = useExportJobs();
+  /**
+   * `config` and `vertical` are read through a ref instead of being
+   * dependencies, so `load`'s identity is stable.
+   *
+   * As dependencies they made this self-feeding: `vertical` is a useMemo keyed
+   * on `states`, `load` calls hydrateStatesForLoaded which WRITES those states,
+   * so every load minted a new `vertical` -> a new `load` -> the mount effect
+   * below re-fired -> load again. An endless refetch throttled only by the
+   * round-trip, which read on screen as the list reloading every ~2s (and
+   * blanking each time, because load starts with setRows(null)).
+   *
+   * Same trap the registerReload ref below documents, and the one useAutoSync's
+   * `now` fell into. Only an explicit reload() should re-fetch this list.
+   */
+  const loadCtx = useRef({ config, vertical });
+  loadCtx.current = { config, vertical };
+
   /** loadMirroredPlaylists (500-524). */
   const load = useCallback(async () => {
+    const { config, vertical } = loadCtx.current;
     setPlaceholder('Loading mirrored playlists...');
     setRows(null);
     try {
@@ -163,8 +181,9 @@ export function MirroredTab({
       const message = err instanceof Error ? err.message : 'unknown error';
       setPlaceholder(`Error loading mirrored playlists: ${message}`);
     }
-  }, [config, vertical]);
+  }, []);
 
+  // Mount only — `load` is stable by construction now (see loadCtx above).
   useEffect(() => {
     void load();
   }, [load]);

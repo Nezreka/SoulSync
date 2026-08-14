@@ -701,6 +701,18 @@ def test_provenance_labels_auto_import(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setattr(side_effects, "get_database", lambda: _DBStub())
+    import core.library2.autolink as autolink
+    import core.library2.unmapped_trigger as unmapped_trigger
+
+    monkeypatch.setattr(
+        autolink, "link_download_into_library_v2", lambda *_args, **_kwargs: None,
+    )
+    scheduled = []
+    monkeypatch.setattr(
+        unmapped_trigger,
+        "schedule_unmapped_artist_reconcile",
+        lambda *_args, **_kwargs: scheduled.append(True),
+    )
 
     context = {
         "_download_username": "auto_import",
@@ -715,6 +727,7 @@ def test_provenance_labels_auto_import(monkeypatch):
     }
     side_effects.record_download_provenance(context)
     assert captured.get("source_service") == "auto_import"
+    assert scheduled == [], "no Lib2 row means there is no new artist to reconcile"
 
 
 def test_required_library_registration_fails_before_completion_callbacks(monkeypatch):

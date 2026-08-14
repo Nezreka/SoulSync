@@ -164,6 +164,14 @@ export interface WatchlistGlobalConfig {
   include_compilations: boolean;
   include_instrumentals: boolean;
   exclude_terms: string;
+  /**
+   * The DEFAULT for artists that have never chosen (`auto_download_pref` null).
+   * Deliberately NOT part of `global_override_enabled`: the format flags above
+   * OVERWRITE each artist at scan time, while this one only fills the gap an
+   * artist left. Reported by swiftpawpaw, who had to open 225 artists to turn
+   * auto-download off.
+   */
+  global_auto_download: boolean;
 }
 
 export interface WatchlistGlobalConfigResponse {
@@ -216,8 +224,13 @@ export interface WatchlistArtistConfig {
   lookback_days: number | null;
   /** null = follow the global metadata source. */
   preferred_metadata_source: WatchlistMetadataSource | null;
-  /** Absent on older rows, where it means true. */
+  /** Absent on older rows, where it means true. Legacy mirror of the field
+   *  below — read `auto_download_pref` for what the user actually chose. */
   auto_download: boolean;
+  /** null = follow the global default, 1 = always, 0 = never. */
+  auto_download_pref: number | null;
+  /** Which way "follow the global" currently resolves, so the row can say so. */
+  global_auto_download?: boolean;
   /** null = "Use default" rather than the first profile in the list. */
   quality_profile_id: number | null;
 }
@@ -265,6 +278,14 @@ export interface WatchlistArtistConfigResponse {
    *  provider's current name — the linking panel compares against this. */
   watchlist_name?: string | null;
   global_metadata_source?: string;
+  /** Providers that can actually serve right now (server-computed). */
+  available_sources?: string[];
+  /** Providers whose id resolves to a library artist by the id column alone
+   *  (server-computed). A source is safe to pin on the discography link iff it
+   *  appears in at least one of these two lists — the artist page treats a
+   *  pinned source as exclusive and 503s when neither holds. Both optional so
+   *  an older backend simply keeps every source eligible. */
+  library_resolvable_sources?: string[];
   quality_profiles?: QualityProfileSummary[];
 }
 

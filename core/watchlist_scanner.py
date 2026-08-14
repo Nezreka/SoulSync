@@ -1136,8 +1136,34 @@ class WatchlistScanner:
         logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
         return None
 
+    def _apply_auto_download_default(self, watchlist_artists: List[WatchlistArtist]):
+        """Resolve each artist's effective auto-download: its own choice, else the
+        global default.
+
+        Deliberately NOT gated behind ``global_override_enabled``. That switch
+        governs the FORMAT overrides, which overwrite an artist wholesale; this is
+        a default an artist's own setting beats, so it applies on its own terms.
+        Folding it into the format switch would force auto-download on everyone
+        already using that override for formats — silently undoing any deliberate
+        follow-only they had set."""
+        from core.watchlist_auto_download import effective_with_legacy
+        try:
+            from config.settings import config_manager
+            g_auto = config_manager.get('watchlist.global_auto_download', True)
+        except Exception:   # noqa: BLE001 - a config hiccup keeps today's behaviour
+            g_auto = True
+        for artist in watchlist_artists or []:
+            pref = getattr(artist, 'auto_download_pref', None)
+            # The stored boolean is passed too: a row the backfill never reached
+            # can still hold a deliberate follow-only, and the global must not
+            # switch downloads back on for it.
+            legacy = getattr(artist, 'auto_download', True)
+            artist.auto_download = effective_with_legacy(pref, legacy, g_auto)
+
     def _apply_global_watchlist_overrides(self, watchlist_artists: List[WatchlistArtist]):
         """Apply global watchlist release-type overrides to a batch of artists."""
+        # Runs first and unconditionally — see _apply_auto_download_default.
+        self._apply_auto_download_default(watchlist_artists)
         try:
             from config.settings import config_manager
         except Exception:
@@ -1726,8 +1752,24 @@ class WatchlistScanner:
                 logger.warning(f"API failure fetching albums for artist {artist_id}")
                 return None
             if not albums:
-                logger.debug(f"No albums found for artist {artist_id}")
-                return []
+                # RAW discography is empty — before any date filtering. A real
+                # artist always has releases, so this means the provider does
+                # not recognise this ID (commonly a foreign one: iTunes and
+                # Deezer IDs are both bare integers and get confused for each
+                # other). Returning [] said "success, nothing new", which ENDED
+                # the source fallback chain in
+                # get_artist_discography_for_watchlist — so a blind provider
+                # first in the priority order silently starved the wishlist and
+                # the sources that did know the artist were never asked.
+                #
+                # None means "this source failed, try the next one". A genuine
+                # "nothing new" still returns [] further down, AFTER the lookback
+                # filter, so the common fast path is unchanged and this costs no
+                # extra API calls.
+                logger.info(
+                    "No albums at all for artist %s — treating this source as unable "
+                    "to resolve it and falling through to the next", artist_id)
+                return None
 
             # Add small delay after fetching artist discography to be extra safe
             time.sleep(0.3)  # 300ms breathing room

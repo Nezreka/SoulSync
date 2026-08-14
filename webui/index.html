@@ -335,6 +335,11 @@
                     </button>
                 </div>
             </div>
+            <!-- Everything below the header scrolls as ONE block. The header used to
+                 be a sticky child of the scrolling .sidebar, which put it in its own
+                 compositing layer where z-index does not arbitrate — nav items rode
+                 up and painted THROUGH it. As siblings that cannot happen. -->
+            <div class="sidebar-scroll">
 
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
@@ -343,7 +348,7 @@
                     <span class="nav-text">Dashboard</span>
                 </a>
                 <button type="button" class="nav-section-label" data-section="find" onclick="toggleNavSection(this)">
-                    <span class="nav-section-title">Find</span>
+                    <span class="nav-section-title">Collect</span>
                     <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <a class="nav-button" data-page="search" href="/search">
@@ -363,7 +368,7 @@
                     <span class="nav-text">Sync</span>
                 </a>
                 <button type="button" class="nav-section-label" data-section="music" onclick="toggleNavSection(this)">
-                    <span class="nav-section-title">Music</span>
+                    <span class="nav-section-title">Manage</span>
                     <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <a class="nav-button" data-page="library" href="/library">
@@ -563,14 +568,17 @@
                 <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="metadata-source-name">Metadata Source</span>
+                    <button class="status-test-btn" id="metadata-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection(typeof getActiveMetadataSource === 'function' ? getActiveMetadataSource() : 'spotify')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="media-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="media-server-name">Media Server</span>
+                    <button class="status-test-btn" id="media-server-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection('server')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="soulseek-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="download-source-name">Download Source</span>
+                    <button class="status-test-btn" id="download-test-btn" title="Test connection" onclick="event.stopPropagation(); testDashboardConnection('soulseek')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
             </div>
             <!-- Status Section (video side) — its own sources: TMDB/TVDB metadata, video server,
@@ -581,15 +589,18 @@
                 <div class="status-indicator" id="video-metadata-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-metadata-name">Metadata (TMDB/TVDB)</span>
+                    <button class="status-test-btn" id="video-metadata-test-btn" title="Test connection" onclick="event.stopPropagation(); testVideoConnection('metadata')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="video-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-server-name">Media Server</span>
+                    <button class="status-test-btn" id="video-server-test-btn" title="Test connection" onclick="event.stopPropagation(); testVideoConnection('server')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></button>
                 </div>
                 <div class="status-indicator" id="video-download-indicator" data-status-ready="false" onclick="event.stopPropagation(); openVideoServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="video-download-name">Download Source</span>
                 </div>
+            </div>
             </div>
         </div>
 
@@ -3714,6 +3725,14 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Minimum seeders <span class="vq-hint" id="vq-seeders-label">At least 1 seeder</span></div>
+                                    <input type="range" id="vq-min-seeders" class="vq-slider" min="0" max="100" step="1" value="1">
+                                    <div class="setting-help-text">
+                                        A torrent nobody is seeding never finishes — it parks on "downloading metadata" or stalls at 0% and quietly fills your client with dead entries.
+                                        Set 0 to grab regardless. Usenet and Soulseek have no seeders and are never affected.
+                                    </div>
+                                </div>
                             </div>
                             <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
                             <div class="settings-group" data-stg="quality" data-video-only>
@@ -4754,6 +4773,13 @@
                                             <input type="text" id="torrent-download-path" placeholder="leave blank for the shared-volume default">
                                             <div class="setting-help-text">
                                                 Where <strong>SoulSync</strong> can read finished torrents — its own in-container path. Set this when your client saves to a category folder (e.g. a "Music" category at <code>/data/downloads/music</code>) that's mounted here at a different path. SoulSync finds the release by name under this folder. Blank = use the Soulseek download/transfer folders.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Minimum seeders:</label>
+                                            <input type="number" id="torrent-min-seeders" min="0" step="1" placeholder="1">
+                                            <div class="setting-help-text">
+                                                Skip releases the indexer reports as having fewer seeders than this, instead of queueing something nobody is serving and waiting for it to time out. Releases that report <strong>no</strong> seeder count (usenet, and indexers that omit the field) are never skipped. <strong>0 disables</strong>.
                                             </div>
                                         </div>
                                         <div class="form-group">
@@ -5933,6 +5959,47 @@
                             </div>
                             </div><!-- end Database Maintenance body -->
 
+                            <!-- yt-dlp updater. Deliberately NOT marked video-only: it is one
+                                 package, used by YouTube downloads on the video side and by
+                                 YouTube-sourced audio on the music side, so both sides get it. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>yt-dlp</h3>
+                                <span class="settings-section-hint">Version &amp; one-click update <span id="ytdlp-hint-badge" hidden>&#9679;</span></span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group" data-stg="advanced">
+
+                                <div class="form-group">
+                                    <label>Installed:</label>
+                                    <span id="ytdlp-installed" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Newest available:</label>
+                                    <span id="ytdlp-latest" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Release channel:</label>
+                                    <select id="ytdlp-channel" onchange="loadYtdlpStatus()">
+                                        <option value="nightly" selected>Nightly (recommended)</option>
+                                        <option value="stable">Stable</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly.</div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="ytdlp-update-btn" onclick="runYtdlpUpdate()">Update yt-dlp</button>
+                                </div>
+                                <div class="help-text">
+                                    When YouTube downloads start failing with <strong>403 Forbidden</strong>, an out-of-date yt-dlp is nearly always the cause.
+                                    <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the running process keeps using the version it loaded at startup.
+                                </div>
+                                <div id="ytdlp-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                                <pre id="ytdlp-detail" style="display: none; margin-top: 8px; max-height: 220px; overflow: auto; font-size: 0.75em; white-space: pre-wrap;"></pre>
+                            </div>
+                            </div><!-- end yt-dlp body -->
+
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
@@ -6478,6 +6545,31 @@
                                  inline: a live poll SHOULD interrupt the room's attention. -->
                             <div class="chat-pinbar" data-chat-pinbar hidden></div>
                             <div class="chat-pollcard" data-chat-poll hidden></div>
+                            <!-- room trivia (trv.* on the bus): first correct answer in
+                                 STREAM ORDER wins the pot — the room itself is the buzzer -->
+                            <div class="chat-pollcard chat-trivcard" data-chat-triv hidden></div>
+                            <!-- trivia ask modal (opened from the Arcade's Trivia tile) -->
+                            <div class="chat-settings-overlay" data-chat-triv-modal hidden>
+                                <div class="chat-settings-modal">
+                                    <h3 class="chat-settings-title">🎓 Ask the room</h3>
+                                    <label class="chat-settings-label">Question
+                                        <input class="chat-input" data-chat-triv-q type="text" maxlength="200"
+                                               placeholder="Which album did Aphex Twin release in 1992?" autocomplete="off">
+                                    </label>
+                                    <label class="chat-settings-label">Answer <span class="chat-settings-hint">kept secret — only its fingerprint is shared; spelling and caps don't matter</span>
+                                        <input class="chat-input" data-chat-triv-a type="text" maxlength="120"
+                                               placeholder="Selected Ambient Works 85-92" autocomplete="off">
+                                    </label>
+                                    <label class="chat-settings-label">Pot <span class="chat-settings-hint">🪙 from your bank to the winner (0–500, optional)</span>
+                                        <input class="chat-input" data-chat-triv-pot type="number" min="0" max="500"
+                                               placeholder="0" autocomplete="off">
+                                    </label>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-triv-close>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary" data-chat-triv-start>Ask the room</button>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- user popover card (click any username) -->
                             <div class="chat-settings-overlay" data-chat-user-card hidden>
                                 <div class="chat-settings-modal chat-user-card">
@@ -6485,6 +6577,7 @@
                                     <div class="chat-settings-actions">
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-close>Close</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-ignore>Mute</button>
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-card-challenge title="Invite them to a private Arcade game">⚔ Challenge</button>
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-card-browse>Browse files</button>
                                         <button type="button" class="modal-button modal-button--primary" data-chat-card-message>Message</button>
                                     </div>
@@ -6528,6 +6621,21 @@
                                     <div class="chat-jbx-searchgrid" data-chat-jbx-searchgrid></div>
                                     <div class="chat-settings-actions">
                                         <button type="button" class="modal-button modal-button--secondary" data-chat-jbx-searchclose>Close</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- movie night picker: nominate a movie or an episode for
+                                 the room's ballot (TMDB search via the video side) -->
+                            <div class="chat-settings-overlay" data-chat-watch-modal hidden>
+                                <div class="chat-settings-modal chat-watch-modal">
+                                    <h3 class="chat-settings-title">🎬 Nominate for movie night</h3>
+                                    <form class="chat-jbx-searchform" data-chat-watch-searchform>
+                                        <input class="chat-input" data-chat-watch-searchinput type="text" maxlength="200"
+                                               placeholder="Search your library — movies &amp; shows appear as you type…" autocomplete="off">
+                                    </form>
+                                    <div class="chat-watch-searchgrid" data-chat-watch-searchgrid></div>
+                                    <div class="chat-settings-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-watch-searchclose>Close</button>
                                     </div>
                                 </div>
                             </div>
@@ -6664,6 +6772,17 @@
                                 <div class="chat-jbx-player" data-chat-jbx-player hidden></div>
                                 <div class="chat-jbx-queue" data-chat-jbx-queue></div>
                             </div>
+                            <!-- movie night — the watch-together ballot (a pure fold
+                                 over watch.* carriers, chat-protocol.js reduceWatch).
+                                 Fully repainted by renderWatch; the video panel itself
+                                 is phase 2. -->
+                            <div class="chat-watch" data-chat-watch hidden></div>
+                            <!-- The party's screen lives OUTSIDE the card on purpose: the card's
+                                 innerHTML is rebuilt on every room event, and a <video> inside it
+                                 would be destroyed and re-created several times a minute — the film
+                                 restarting each time. This host is only touched when the showing
+                                 itself changes. -->
+                            <div class="chat-watch-stagehost" data-chat-watch-stage hidden></div>
                             <aside class="chat-users" data-chat-users></aside>
                         </div>
                     </div>
@@ -7351,21 +7470,17 @@
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
-    <!-- Ambient glow under the global search bar. Radial gradient, brightest
-         directly under the bar, tapering out toward the window corners.
-         Purely decorative (pointer-events: none). Visibility follows the bar
-         via _gsUpdateVisibility(). -->
-    <div class="gsearch-aura" id="gsearch-aura"></div>
-    <!-- Global Search Bar — Spotlight-style search from anywhere -->
-    <div class="gsearch-bar" id="gsearch-bar">
-        <div class="gsearch-icon">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        </div>
-        <input type="text" class="gsearch-input" id="gsearch-input" placeholder="Search everything…" autocomplete="off" spellcheck="false">
-        <button class="gsearch-clear" id="gsearch-clear" style="display:none" title="Clear">&times;</button>
-        <span class="gsearch-shortcut" id="gsearch-shortcut">/</span>
-    </div>
-    <div class="gsearch-results" id="gsearch-results"></div>
+    <!-- The floating global ("Search everything…") bar used to live here, above
+         the media player. Removed deliberately: it duplicated the Search page
+         and the two were easy to confuse for one another.
+
+         Nothing else needed changing to retire it. downloads.js's
+         initGlobalSearch() already bails on `if (!input || !bar || !results)
+         return;`, so the controller is never constructed and the `/`
+         focus-shortcut (bound inside that same guard) is never registered.
+         The .gsearch-* rules in style.css / mobile.css and the controller code
+         are intentionally left in place, so restoring the bar is purely a
+         matter of putting this markup back. -->
 
     {% include 'track-detail-modal.html' %}
 
@@ -7440,6 +7555,7 @@
     <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
+        <span class="notif-bell-dl" id="notif-bell-dl" style="display:none" title="Active downloads">0</span>
     </button>
     <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()" title="Interactive Help — click any element to learn about it">
         <span>?</span>

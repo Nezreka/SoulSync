@@ -13,6 +13,12 @@ import {
   watchlistArtistConfigQueryOptions,
   type WatchlistArtistConfigUpdate,
 } from '../-watchlist.api';
+import {
+  autoDownloadPrefFromSelect,
+  autoDownloadSelectValue,
+  describeAutoDownload,
+  effectiveAutoDownload,
+} from '../-watchlist.helpers';
 import { WatchlistLinkedProviders } from './watchlist-linked-providers';
 
 const RELEASE_TYPE_KEYS = ['include_albums', 'include_eps', 'include_singles'] as const;
@@ -157,7 +163,10 @@ export function WatchlistArtistConfigModal({
       include_acoustic: draft.include_acoustic,
       include_compilations: draft.include_compilations,
       include_instrumentals: draft.include_instrumentals,
-      auto_download: draft.auto_download,
+      // The preference, never the legacy boolean: the server reads
+      // `auto_download` as a deliberate choice, so sending it on every save
+      // would opt every artist the user ever opened out of the global default.
+      auto_download_pref: draft.auto_download_pref ?? null,
       quality_profile_id: draft.quality_profile_id,
       lookback_days: draft.lookback_days,
       preferred_metadata_source: draft.preferred_metadata_source,
@@ -259,18 +268,53 @@ export function WatchlistArtistConfigModal({
                     Turn off to <strong>follow only</strong> — still see new releases in scans, but
                     pick what to download yourself.
                   </p>
-                  <div className="config-options">
-                    <ConfigOption
-                      checked={draft.auto_download}
-                      onChange={(value) =>
+                  {/* Three states, not a checkbox. "Follow the global" is a real,
+                      distinct answer: it is what lets the Global Settings switch
+                      move every artist the user never had an opinion about. A
+                      checkbox can only say on or off, and every artist reading
+                      "on by default" would be indistinguishable from one the user
+                      deliberately switched on. */}
+                  <div className="form-group" style={{ margin: '12px 0 4px' }}>
+                    <label
+                      htmlFor="watchlist-config-auto-download"
+                      style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}
+                    >
+                      New releases from this artist
+                    </label>
+                    <select
+                      id="watchlist-config-auto-download"
+                      className="form-select"
+                      value={autoDownloadSelectValue(draft.auto_download_pref)}
+                      onChange={(event) =>
                         setDraft((previous) =>
-                          previous ? { ...previous, auto_download: value } : previous,
+                          previous
+                            ? {
+                                ...previous,
+                                auto_download_pref: autoDownloadPrefFromSelect(event.target.value),
+                                // Keep the legacy mirror in step so anything still
+                                // reading the boolean shows the same answer.
+                                auto_download: effectiveAutoDownload(
+                                  autoDownloadPrefFromSelect(event.target.value),
+                                  previous.global_auto_download ?? true,
+                                ),
+                              }
+                            : previous,
                         )
                       }
-                      icon="⬇️"
-                      title="Auto-download new releases"
-                      description="Off = follow only (discover but don't auto-add to wishlist)"
-                    />
+                    >
+                      <option value="inherit">
+                        Use the global default (currently{' '}
+                        {draft.global_auto_download === false ? 'off' : 'on'})
+                      </option>
+                      <option value="always">Always download</option>
+                      <option value="never">Never download — follow only</option>
+                    </select>
+                    <small style={{ display: 'block', marginTop: 6, opacity: 0.7 }}>
+                      {describeAutoDownload(
+                        draft.auto_download_pref,
+                        draft.global_auto_download ?? true,
+                      )}
+                    </small>
                   </div>
                 </div>
 

@@ -206,13 +206,21 @@ def build_bulk_override_lookup(
     a cache hit is only trusted while it points into THIS playlist, else the
     durable manual match applies, with the per-row file-path self-heal kept
     for the (rare) stale rows. Falls back to the per-row resolver when the DB
-    doesn't offer the bulk readers (stub DBs)."""
+    doesn't offer the bulk readers (stub DBs).
+
+    The returned callable carries ``dead_match_source_ids``: source ids that
+    HAVE a saved manual match which could not be applied by any route (#1138).
+    Callers must not present those rows as "already matched" — the saved match
+    points at something that no longer exists, and claiming otherwise costs the
+    user the Find & Add and download affordances, so the track is silently
+    neither synced nor wishlisted."""
     if not (hasattr(db, "read_sync_match_cache_bulk")
             and hasattr(db, "find_manual_library_matches_bulk")):
         def _per_row(src_id):
             return resolve_override_server_id(
                 db, profile_id, src_id, server_source, valid_server_ids,
                 getattr(db, "read_sync_match_cache", lambda *_a: None))
+        _per_row.dead_match_source_ids = set()
         return _per_row
 
     ids = [str(s.get("source_track_id")) for s in (source_tracks or [])
@@ -225,6 +233,8 @@ def build_bulk_override_lookup(
         durable_map = db.find_manual_library_matches_bulk(profile_id, ids, server_source) or {}
     except Exception:
         durable_map = {}
+
+    dead_ids: set = set()
 
     def _lookup(source_track_id):
         sid = str(source_track_id)
@@ -260,15 +270,23 @@ def build_bulk_override_lookup(
         # Every path exhausted — the user's confirmed match CANNOT apply. Say
         # exactly why, or this renders as a bare "missing" row and looks like
         # the match was never saved (the wolf39us report shape).
+        # Every path exhausted: this saved match is DEAD (its file was deleted,
+        # or the library row went away). Remember it so the caller stops
+        # advertising the row as "already matched" — see #1138, where a match
+        # to a since-deleted file left the track with no Find & Add and no
+        # download, so reprocessing the playlist silently skipped it forever.
+        dead_ids.add(sid)
         logger.warning(
             "Manual match for source %s (%s) cannot apply: library track %s is not "
-            "in this playlist and the file-path fallback %s. The track likely needs "
-            "re-adding to the playlist (Find & Add), or the library row was re-keyed.",
+            "in this playlist and the file-path fallback %s. Treating the saved match "
+            "as stale so the track can be re-matched or wishlisted; remove it from "
+            "Tools → Manual Library Match to stop this warning.",
             sid, server_source, lib_id,
             ("resolved nothing for %r" % (file_path,)) if file_path else "is empty (no stored path)",
         )
         return None
 
+    _lookup.dead_match_source_ids = dead_ids
     return _lookup
 
 

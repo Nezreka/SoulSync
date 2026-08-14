@@ -10,6 +10,8 @@ import {
   heroWatchlistLabel,
   HERO_EMPTY_SUBTITLE,
   HERO_EMPTY_TITLE,
+  HERO_LOADING_SUBTITLE,
+  HERO_LOADING_TITLE,
   HERO_WATCHLIST_ICON,
   watchAllState,
 } from '../-discover.hero';
@@ -48,6 +50,8 @@ export interface DiscoverHeroProps {
   onWatchAll: () => void;
   onViewRecommended: () => void;
   onOpenBlacklist: () => void;
+  /** The hero query is still in flight — show loading copy, not empty copy. */
+  loading?: boolean;
 }
 
 export function DiscoverHero({
@@ -63,6 +67,7 @@ export function DiscoverHero({
   onWatchAll,
   onViewRecommended,
   onOpenBlacklist,
+  loading = false,
 }: DiscoverHeroProps) {
   const empty = !artist;
   const watchLabel = watchlist?.label ?? heroWatchlistLabel(false);
@@ -131,7 +136,12 @@ export function DiscoverHero({
         <div className="discover-hero-info">
           <div className="discover-hero-label">FEATURED ARTIST</div>
           <h1 className="discover-hero-title" id="discover-hero-title">
-            {artist ? artist.artist_name : HERO_EMPTY_TITLE}
+            {/* Three states, not two: while the hero payload is in flight
+                (6-23s on the first visit after a restart — the server caches
+                it after that) the copy says LOADING. The old two-state render
+                told a 23-second lie: 'run a watchlist scan' while the scan's
+                own data was busy arriving. */}
+            {artist ? artist.artist_name : loading ? HERO_LOADING_TITLE : HERO_EMPTY_TITLE}
           </h1>
           <p
             className="discover-hero-subtitle"
@@ -142,7 +152,11 @@ export function DiscoverHero({
             {/* NOT static copy. The vanilla sets this to the "because you have
                 X, Y" line per artist (468); the static text is only the markup's
                 pre-load placeholder. Empty state still explains what to do. */}
-            {artist ? recommendationReason(artist as never) : HERO_EMPTY_SUBTITLE}
+            {artist
+              ? recommendationReason(artist as never)
+              : loading
+                ? HERO_LOADING_SUBTITLE
+                : HERO_EMPTY_SUBTITLE}
           </p>
           {/* The vanilla's meta markup verbatim (474-499): a content wrapper,
               a banded popularity tile with icon/value/label, and the genres in
@@ -158,6 +172,18 @@ export function DiscoverHero({
                   <span className="meta-icon">⭐</span>
                   <span className="meta-value">{artist.popularity}/100</span>
                   <span className="meta-label">Popularity</span>
+                </div>
+              )}
+              {artist && typeof artist.owned_album_count === 'number' && (
+                <div className="hero-meta-item">
+                  <span
+                    className={`hero-owned${artist.owned_album_count > 0 ? '' : ' hero-owned--none'}`}
+                    title="Albums by this artist in your library"
+                  >
+                    {artist.owned_album_count > 0
+                      ? `♛ ${artist.owned_album_count} album${artist.owned_album_count === 1 ? '' : 's'} in your library`
+                      : 'Not in your library yet — start here'}
+                  </span>
                 </div>
               )}
               {artist && heroGenres(artist).length > 0 && (

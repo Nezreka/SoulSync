@@ -181,7 +181,8 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
 
 
 def pick_best_album_release(candidates, quality_guess,
-                            album_name: str = "") -> Optional[object]:
+                            album_name: str = "",
+                            min_seeders: int = 0) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
@@ -191,6 +192,14 @@ def pick_best_album_release(candidates, quality_guess,
        different album. When ``album_name`` is given and NOTHING clears the
        relevance floor, return None — the caller then falls back to per-track
        rather than downloading a confident mismatch.
+    0b. Availability gate (#1139): drop candidates whose indexer-reported
+       seeder count is BELOW ``min_seeders``. Sorting by seeders was never
+       enough — with every candidate on zero, the sort still handed back a
+       release nobody is serving, and the download then sat on "downloading
+       metadata" until the deadline. Candidates that report NO seeder count
+       at all (``seeders is None``: usenet, and torrent indexers that omit
+       the field) are exempt — this only drops releases we positively know
+       are dead. ``min_seeders=0`` disables it.
     1. Reasonable album-ish size (40 MB – 3 GB) — drops single-track
        releases that snuck in and quarantines suspicious giants.
     2. Higher seeders > lower (dead torrents = dead downloads).
@@ -218,6 +227,22 @@ def pick_best_album_release(candidates, quality_guess,
             )
             return None
         candidates = relevant
+
+    if min_seeders > 0:
+        available = [c for c in candidates
+                     if c.seeders is None or (c.seeders or 0) >= min_seeders]
+        if not available:
+            logger.warning(
+                "[Album Bundle] Every candidate for '%s' reports fewer than %d "
+                "seeders (%d rejected as unavailable) — refusing the bundle so "
+                "the caller falls back rather than queueing a dead swarm.",
+                album_name or '?', min_seeders, len(candidates),
+            )
+            return None
+        if len(available) != len(candidates):
+            logger.info("[Album Bundle] Dropped %d candidate(s) below %d seeders",
+                        len(candidates) - len(available), min_seeders)
+        candidates = available
 
     sized = [c for c in candidates
              if ALBUM_PICK_MIN_BYTES <= (c.size or 0) <= ALBUM_PICK_MAX_BYTES]
@@ -458,6 +483,8 @@ def poll_album_download(
     monotonic: Callable[[], float] = time.monotonic,
     snapshot_path: Callable[[str], Optional[tuple]] = snapshot_incomplete_path,
     resolve_path: Callable[[str], str] = lambda p: p,
+    stall_check: Optional[Callable[[Any, float], bool]] = None,
+    on_stall: Optional[Callable[[], str]] = None,
     log_prefix: str = '[album_bundle]',
 ) -> Optional[str]:
     """Drive the per-poll status loop for an album-bundle download.
@@ -505,11 +532,27 @@ def poll_album_download(
       this window). Terminal ``failed`` only fires when there's no path of
       any kind to scan.
 
+    - ``stall_check(status, now)`` is an optional per-poll "is this job
+      making no forward progress" question, and ``on_stall()`` an optional
+      cleanup hook that returns the failure reason. Injected rather than
+      imported because what counts as a stall is protocol-specific: a
+      torrent can sit forever on "downloading metadata" with a byte counter
+      that ticks up from protocol noise, which is what
+      ``torrent_stall.StallTracker`` knows how to see through. Usenet has no
+      equivalent — SAB either downloads or errors — so the usenet caller
+      passes neither and the loop behaves exactly as before.
+
+      This is #1139: the per-track torrent path already tracked stalls, but
+      the album-bundle path did not, so a dead magnet held an album batch for
+      the FULL poll deadline (hours, thousands of polls) while
+      ``torrent_stall_timeout_seconds`` was configured and simply never
+      consulted.
+
     Returns the adapter's reported save_path (or, as a last resort, its
     stability-confirmed ``incomplete_path``) on terminal success, or
     ``None`` on any failure (timeout / disappeared / explicit failed /
-    shutdown). On every failure path emits ``'failed'`` once with an
-    ``error`` field describing why.
+    stalled / shutdown). On every failure path emits ``'failed'`` once with
+    an ``error`` field describing why.
     """
     interval = poll_interval if poll_interval is not None else get_poll_interval()
     deadline = monotonic() + (timeout if timeout is not None else get_poll_timeout())
@@ -727,6 +770,20 @@ def poll_album_download(
             if misses.record_miss():
                 _fail('Client returned unmapped state repeatedly')
                 return None
+
+        # Stall gate. Last, deliberately: a job that reached a terminal state
+        # this poll has already returned above, so nothing that actually
+        # finished can be killed here for not moving.
+        if stall_check is not None and stall_check(status, now):
+            reason = 'Stalled (no progress)'
+            if on_stall is not None:
+                try:
+                    reason = on_stall() or reason
+                except Exception as exc:      # noqa: BLE001 - cleanup is best-effort
+                    logger.warning("%s stall cleanup failed: %s", log_prefix, exc)
+            logger.error("%s '%s' stalled — %s", log_prefix, title, reason)
+            _fail(reason)
+            return None
 
         sleep(interval)
 

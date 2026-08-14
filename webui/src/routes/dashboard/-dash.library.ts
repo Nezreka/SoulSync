@@ -55,6 +55,34 @@ export interface DbStats {
   [key: string]: unknown;
 }
 
+// ── Last-known db stats, shared ──────────────────────────────────────────────
+// The header's status strip shows the same numbers this card fetches, and
+// /api/database/stats is not free on a big library — so the card PUBLISHES
+// every stats payload it applies (initial fetch, socket push, post-scan
+// refresh) and other components subscribe instead of fetching again. Shaped
+// for useSyncExternalStore: subscribe returns the unsubscriber, lastDbStats
+// is the snapshot.
+
+type DbStatsListener = () => void;
+let _lastDbStats: DbStats | null = null;
+const _dbStatsListeners = new Set<DbStatsListener>();
+
+export function publishDbStats(stats: DbStats | null): void {
+  _lastDbStats = stats;
+  for (const listener of _dbStatsListeners) listener();
+}
+
+export function subscribeDbStats(listener: DbStatsListener): () => void {
+  _dbStatsListeners.add(listener);
+  return () => {
+    _dbStatsListeners.delete(listener);
+  };
+}
+
+export function lastDbStats(): DbStats | null {
+  return _lastDbStats;
+}
+
 function capitalize(s: string | null | undefined): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
@@ -134,7 +162,7 @@ export function libraryCardView(
       subtitle: 'Connect a server to get started',
       scanVisible: false,
       scanScanning: false,
-      scanLabel: 'Refresh',
+      scanLabel: 'Quick Scan',
       deepVisible: false,
       statsVisible: false,
       stats: null,
@@ -151,7 +179,7 @@ export function libraryCardView(
       subtitle: 'Cannot reach your media server',
       scanVisible: false,
       scanScanning: false,
-      scanLabel: 'Refresh',
+      scanLabel: 'Quick Scan',
       deepVisible: false,
       statsVisible: false,
       stats: null,
@@ -186,10 +214,13 @@ export function libraryCardView(
   return {
     cardClass: 'library-status-card has-data',
     title: `${serverName} Library`,
-    subtitle: `Last refreshed ${lastRefreshText}`,
+    // The strip no longer renders its four-stat row — the header's hello
+    // strip owns tracks/artists now — so the two numbers the header does NOT
+    // show (albums, db size) fold into the subtitle instead of vanishing.
+    subtitle: `Last refreshed ${lastRefreshText} · ${albums.toLocaleString()} albums · ${formatDbSize(sizeMb)} db`,
     scanVisible: true,
     scanScanning: false,
-    scanLabel: 'Refresh',
+    scanLabel: 'Quick Scan',
     deepVisible: true,
     statsVisible: true,
     stats: {
@@ -223,6 +254,14 @@ export interface SyncCardView {
   pct: number;
   counts: string;
   thumbUrl: string | null;
+  /** Additive detail for the roomier dashboard card: the raw numbers split
+   *  out of `counts` (chips render them colored) and what KIND of sync it
+   *  was. (A wall-time chip lived here briefly — Boulder: irrelevant.) */
+  found: number;
+  total: number;
+  downloaded: number;
+  failed: number;
+  typeLabel: string | null;
 }
 
 export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardView {
@@ -252,6 +291,14 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     (downloaded > 0 ? ` · ${downloaded} ⬇` : '') +
     (failed > 0 ? ` · ${failed} ✗` : '');
 
+  // What kind of sync: an album download beats the raw sync_type for the
+  // label (the type says 'manual' for those; 'album' is what the row IS).
+  const typeLabel = entry.is_album_download
+    ? 'album'
+    : entry.sync_type
+      ? String(entry.sync_type).toLowerCase()
+      : null;
+
   return {
     id: entry.id,
     healthClass,
@@ -261,5 +308,10 @@ export function syncCardView(entry: SyncHistoryEntry, nowMs: number): SyncCardVi
     pct,
     counts,
     thumbUrl: (entry.thumb_url as string) || null,
+    found,
+    total,
+    downloaded,
+    failed,
+    typeLabel,
   };
 }

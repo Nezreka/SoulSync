@@ -215,6 +215,10 @@ class BandcampWorker:
         """Check if result name matches our query with fuzzy matching"""
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return bool(raw_query) and raw_query == raw_result
         similarity = SequenceMatcher(None, norm_query, norm_result).ratio()
         return similarity >= self.name_similarity_threshold
 

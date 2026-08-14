@@ -21,6 +21,7 @@ import time
 
 from utils.logging_config import get_logger
 
+from core.video import stall
 from core.video.download_pipeline import dest_path_for, find_completed_file
 from core.video.slskd_download import (
     classify_state,
@@ -135,6 +136,138 @@ def _make_organizer(db):
     return organize
 
 
+def pack_file_list(root, walker=None, sizer=None):
+    """Every file under a pack folder as ``{"path", "size_bytes"}``. Split out from
+    the importer so the mapping can be exercised without a real download on disk."""
+    walker = walker or _walk
+    if sizer is None:
+        def sizer(p):
+            try:
+                return os.path.getsize(p)
+            except OSError:
+                return None
+    return [{"path": p, "size_bytes": sizer(p)} for p in walker(root)]
+
+
+def _episode_row(dl, season, episode, path, size):
+    """The pack row re-cast as the single-episode row it stands in for. The importer
+    reads its identity from ``search_ctx`` and its release name from ``release_title``,
+    so both have to name THIS episode — a row still carrying the pack's name
+    ('Show.S01.1080p.WEB-GROUP') parses to no episode at all, which silently disables
+    the wrong-episode gate that keeps E04 out of E03's slot."""
+    ctx = dict(_pack_ctx(dl))
+    ctx.update({"scope": "episode", "season": season, "episode": episode})
+    base = os.path.basename(str(path))
+    return {**dl, "kind": "show", "release_title": base, "filename": base,
+            "size_bytes": int(size or 0), "search_ctx": json.dumps(ctx)}
+
+
+def _pack_ctx(dl):
+    try:
+        ctx = json.loads((dl or {}).get("search_ctx") or "{}")
+        return ctx if isinstance(ctx, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def _record_pack_episode(db, ep_dl, patch):
+    """Give an imported pack episode its own completed download row, so it appears on
+    the Downloads page and in history exactly like an individually-grabbed episode.
+    The pack row is the BATCH — mirroring the music album bundle, where the bundle
+    stages and the per-track rows do the importing. Best-effort: a bookkeeping failure
+    must never undo a file that is already correctly in the library."""
+    try:
+        child = db.add_video_download({
+            k: ep_dl.get(k) for k in
+            ("kind", "title", "release_title", "source", "username", "filename",
+             "size_bytes", "quality_label", "target_dir", "media_id", "media_source",
+             "year", "poster_url", "search_ctx", "quality_profile_id")
+        } | {"status": "completed", "attempts": 0})
+        db.update_video_download(child, dest_path=patch.get("dest_path"),
+                                 progress=100.0, completed_at=_now(),
+                                 quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
+        row = {**ep_dl, "id": child}
+        _archive_history(db, row, patch)
+        _publish_terminal(row, patch)
+        return child
+    except Exception:
+        logger.exception("pack: failed to record the row for %s", ep_dl.get("filename"))
+        return None
+
+
+def _make_pack_importer(db, organize):
+    """Import a finished season pack by fanning its folder out to the ORDINARY
+    per-episode import, one episode at a time.
+
+    This is the music album bundle's shape (``core.downloads.staging`` +
+    ``album_bundle_dispatch``): the pack download itself places nothing — it hands each
+    file to the same importer a single-episode grab uses, so there is one import path
+    (parse → ffprobe verify → template rename → replace/upgrade → sidecars) rather than
+    a second one that drifts.
+
+    Returns None when the job is not a folder, so a 'pack' that turned out to be a
+    single file falls back to the normal single-file path."""
+    from core.video.client_download import find_content_dir
+    from core.video.season_pack import map_pack, want_season_of
+
+    def import_pack(dl, root, name):
+        folder = find_content_dir(root, name)
+        if not folder:
+            return None
+        want = want_season_of(dl)
+        out = map_pack(pack_file_list(folder), want_season=want, root=folder)
+        claimed, skipped = out["claimed"], out["skipped"]
+        # #706/#708: on the music side a staged file that silently failed to match
+        # produced "download it, stage it, never claim it, re-add to the wishlist" —
+        # a loop nobody could diagnose from logs. Every skip says why, at INFO.
+        for s in skipped:
+            logger.info("pack %s: skipped %s — %s", dl.get("id"),
+                        os.path.basename(s["path"]), s["why"])
+        if not claimed:
+            return {"status": "import_failed", "progress": 100.0,
+                    "error": "Nothing in this pack looked like an episode (%d file%s checked)"
+                             % (len(skipped), "" if len(skipped) == 1 else "s")}
+
+        imported, failed = [], []
+        for (season, episode), info in sorted(claimed.items()):
+            ep_dl = _episode_row(dl, season, episode, info["path"], info.get("size_bytes"))
+            try:
+                patch = organize(ep_dl, info["path"])
+            except Exception:   # noqa: BLE001 - one bad episode must not abandon the rest
+                logger.exception("pack %s: S%02dE%02d import raised", dl.get("id"), season, episode)
+                failed.append((season, episode, "the import raised"))
+                continue
+            if patch.get("status") != "completed":
+                failed.append((season, episode, patch.get("error") or "import refused"))
+                logger.info("pack %s: S%02dE%02d not imported — %s", dl.get("id"),
+                            season, episode, patch.get("error") or "import refused")
+                continue
+            imported.append((season, episode, patch))
+            _record_pack_episode(db, ep_dl, patch)
+            # Per EPISODE, not per pack: the row that just landed is the only one this
+            # file satisfies, and a below-cutoff episode still keeps its row so the
+            # upgrade-until-cutoff sweep can better it later.
+            _wishlist_obtained(db, ep_dl, patch)
+
+        if not imported:
+            return {"status": "import_failed", "progress": 100.0,
+                    "error": "The pack held %d episode%s but none could be imported (%s)"
+                             % (len(claimed), "" if len(claimed) == 1 else "s",
+                                failed[0][2] if failed else "no reason given")}
+        logger.info("pack %s: imported %d of %d episode%s%s", dl.get("id"), len(imported),
+                    len(claimed), "" if len(claimed) == 1 else "s",
+                    "" if not failed else " (%d refused)" % len(failed))
+        # The pack row is the batch: it reports the outcome and points at the first
+        # episode. The episodes NOT in this pack keep their wishlist rows untouched,
+        # so the ordinary hourly drain chases them — one click never becomes twenty
+        # immediate searches.
+        return {"status": "completed", "progress": 100.0,
+                "dest_path": imported[0][2].get("dest_path"),
+                "_pack_imported": len(imported), "_pack_failed": len(failed)}
+
+    return import_pack
+
+
 def _media_ids(db, dl):
     """(tmdb_id, imdb_id) for a download's title — taken directly when it was grabbed
     from TMDB, or looked up from the LIBRARY row for an owned re-grab (whose ``media_id``
@@ -226,7 +359,10 @@ def _walk(root: str):
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
 _STALL_TIMEOUT = 1800    # seconds of zero % movement (queued or frozen) before giving up
-_stall: dict = {}        # download id -> (last_pct, monotonic time of last progress)
+# NB: the stall clock is NOT kept here any more — it lives on the row as
+# `progress_at`. A module dict keyed off process uptime was wiped by every
+# restart, so the longer a download had been stuck the less likely it was to be
+# caught (see core.video.stall).
 _db_provider = None      # set by ensure_started; used by the requery worker thread
 _requerying: set = set()  # download ids with a requery thread in flight
 
@@ -450,6 +586,12 @@ def _publish_terminal(dl, upd) -> None:
     """Relay a terminal outcome to the automation event bus (best-effort).
     completed → 'video_download_completed' (+ 'video_upgrade_completed' when the
     import REPLACED a library copy); import_failed → 'video_import_failed'."""
+    # A season pack already published one event per episode it imported — which is
+    # the useful granularity ("S01E04 landed"), and what a notification rule can
+    # actually match on. Publishing the batch row too would just add an eleventh
+    # message naming no episode at all.
+    if (upd or {}).get("_pack_imported"):
+        return
     try:
         from core.video.download_events import publish
         st = upd.get("status")
@@ -484,12 +626,21 @@ def _blocked_users(db):
         return frozenset()
 
 
-def _fail_or_retry(db, dl, error_msg) -> None:
+def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
-    put it back on the wishlist so it isn't silently lost."""
+    put it back on the wishlist so it isn't silently lost.
+
+    ``allow_retry=False`` skips straight to the terminal state. Retrying is the
+    right reflex for a bad release and exactly the wrong one when the download
+    ALREADY SUCCEEDED and only the file could not be located: re-downloading fixes
+    nothing, and — because the requery path clears the error on its way through —
+    it would replace a message naming the real cause with "No working release found
+    after retries", pointing the user at their indexer instead of at the path
+    mapping that actually broke."""
     from core.video.retry import plan_retry
-    plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
+    plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
+        if allow_retry else {"action": "fail"}
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
         return
     if plan["action"] in ("candidate", "requery"):
@@ -657,6 +808,7 @@ def _tick(db) -> None:
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads()
     organizer = _make_organizer(db)
+    pack_importer = _make_pack_importer(db, organizer)
     live_ids = set()
     completed_now = 0
     from core.video.client_download import process_active_client_download
@@ -664,7 +816,8 @@ def _tick(db) -> None:
         live_ids.add(dl["id"])
         if dl.get("source") in ("torrent", "usenet"):
             # torrent/usenet grabs are tracked via the shared client (by client_ref), not slskd.
-            upd = process_active_client_download(dl, organizer=organizer)
+            upd = process_active_client_download(dl, organizer=organizer,
+                                                 import_pack=pack_importer)
         else:
             upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move,
                                    organizer=organizer)
@@ -684,20 +837,33 @@ def _tick(db) -> None:
             _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
             continue
         # Stall/queue timeout — a transfer sitting with no % movement for too long
-        # (queued behind a dead peer, or frozen mid-download) is treated like a
-        # disappeared one: try alternates/requery, then fail + wishlist it.
+        # (queued behind a dead peer, frozen mid-download, or finished with its file
+        # nowhere SoulSync can see) is treated like a disappeared one: try
+        # alternates/requery, then fail + wishlist it.
+        #
+        # The clock lives ON THE ROW, in wall-clock. It used to be a module dict keyed
+        # off process uptime, which meant a restart wiped it — six torrents sat at the
+        # same percentage for 199 minutes against a 30-minute timeout, because the
+        # server had restarted inside the window. The longer something was stuck, the
+        # less likely the old design was to catch it.
         _st = upd.get("status")
-        if _st in ("queued", "downloading"):
-            _pct = upd.get("progress") or 0
-            _prev = _stall.get(dl["id"])
-            if _prev is None or _pct > _prev[0]:
-                _stall[dl["id"]] = (_pct, time.monotonic())   # progress (or first sight) → reset clock
-            elif time.monotonic() - _prev[1] > _STALL_TIMEOUT:
-                _stall.pop(dl["id"], None)
-                _fail_or_retry(db, dl, "Stalled — no progress for %d min" % (_STALL_TIMEOUT // 60))
+        if stall.tracks_stall(_st):
+            # A completed-but-unplaceable row carries progress and NO status; the old
+            # branch only looked at queued/downloading, so it fell through every guard
+            # and spun at 100% forever. That is what a path-mapping failure looks like.
+            _at_completion = _st is None and (upd.get("progress") or 0) >= 100
+            _verdict, _idle = stall.classify(
+                dl.get("progress"), upd.get("progress"), dl.get("progress_at"),
+                time.time(), timeout_seconds=_STALL_TIMEOUT)
+            if _verdict == stall.STALLED:
+                # A stalled DOWNLOAD deserves another release; a download that
+                # finished and then couldn't be found does not — the bytes are
+                # already on disk, and searching again just repeats the same import.
+                _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion),
+                               allow_retry=not _at_completion)
                 continue
-        else:
-            _stall.pop(dl["id"], None)
+            if _verdict in (stall.MOVED, stall.SEEDED):
+                upd["progress_at"] = _now()      # restart (or start) the clock
         # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
         # episode, not an upgrade, …). Terminal + needs manual import — NOT a download
         # failure, so don't burn the retry budget re-downloading the same good file.
@@ -723,8 +889,6 @@ def _tick(db) -> None:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
-    for k in [k for k in _stall if k not in live_ids]:
-        _stall.pop(k, None)
     # Batch complete: we finished ≥1 download this tick AND nothing is left in
     # flight (queued/downloading/searching). Fires once, on the transition to
     # empty — the next tick early-returns. Publishes to the event bridge so the

@@ -137,6 +137,27 @@ export async function assignAutomationGroup(id: number, groupName: string | null
 }
 
 /**
+ * Change WHEN an automation runs, without opening the builder.
+ *
+ * A partial PUT is enough: `update_automation` writes only the keys it is
+ * given, and — importantly — nulls `next_run` whenever the trigger shape
+ * changes, so the scheduler recomputes the slot instead of keeping the
+ * leftover timestamp from the old interval. Getting that for free is why this
+ * goes through the same endpoint the builder uses rather than a new one.
+ */
+export async function updateAutomationTrigger(
+  id: number,
+  triggerConfig: Record<string, unknown>,
+): Promise<void> {
+  assertOk(
+    await readJson<MutationResponse>(
+      apiClient.put(`automations/${id}`, { json: { trigger_config: triggerConfig } }),
+    ),
+    'Could not change the schedule',
+  );
+}
+
+/**
  * Bulk-set the group on many automations. Used for rename (same ids, new name)
  * and for dissolving a group (same ids, null). Returns how many changed.
  */

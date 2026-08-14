@@ -138,6 +138,20 @@
 
     .sidebar-header {
         text-align: right;
+        /* The header is already `position: sticky; z-index: 1`, which should put
+           it above the scrolling nav buttons (positioned, z-index auto). It
+           doesn't, and raising the z-index changes nothing — the giveaway that
+           these aren't being arbitrated in the same stacking context.
+           `backdrop-filter` promotes the header to its own compositing layer,
+           where z-index no longer decides the order, so nav items scroll over
+           it and stay clickable. Same root cause as #1040, which the opaque
+           base only half-fixed.
+
+           That opaque base is why dropping the blur here is nearly invisible:
+           the bottom of the gradient is already solid. Handled at the mobile
+           breakpoint only, so the desktop frosted look is untouched. */
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
     }
 
     .main-content {
@@ -170,11 +184,35 @@
         border-radius: 0;
         border-top-right-radius: 24px;
         border-bottom-right-radius: 24px;
-        overflow-y: auto;
+        /* The drawer itself does not scroll — .sidebar-scroll does (base
+           rule in style.css). Leaving overflow-y:auto here would re-arm the
+           old single-scroll-box behaviour at mobile widths only. */
+        overflow: hidden;
+    }
+
+    .sidebar-scroll {
+        /* Without this a drag inside the open drawer chains its scroll to the
+           page underneath: the list itself does not move, so the browser
+           resolves the gesture as a tap on whatever nav link is under the
+           finger — every scroll attempt navigates. */
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
     }
 
     .sidebar.mobile-open {
         transform: translateX(0);
+    }
+
+    /* init.js has always put this class on <body> when the drawer opens, but
+       nothing ever consumed it, so the page behind the drawer stayed live and
+       scrollable. `.main-content` is the real scroller on mobile, so locking
+       <body> alone is not enough. */
+    body.mobile-nav-open {
+        overflow: hidden;
+    }
+
+    body.mobile-nav-open .main-content {
+        overflow: hidden;
     }
 
     .page {
@@ -3617,4 +3655,274 @@
     .sidebar:not(.mobile-open) ~ .sidebar-visualizer {
         display: none !important;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOOLS PAGE REDESIGN — phone + tablet
+   Health hero, findings inbox, operation tiles, recent runs, tool containers.
+   The base rules live in style.css; everything responsive lives here, on the
+   house 768/480 breakpoints.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+    /* Tablet: two tile columns at most, so a tile never gets so narrow that
+       its cadence editor and action row fight for the same line. */
+    .repair-family-grid {
+        grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    /* THE important one. The hero is its own scroll container on desktop so
+       the section nav can stick to it — on a phone that is a scroll-within-a-
+       scroll, and the findings list nests a THIRD one inside it. Release both
+       and let the page scroll like a page. */
+    .tools-maintenance-hero {
+        max-height: none;
+        overflow: visible;
+    }
+    /* The hero clipped its own 3px top edge to the rounded corner. Released,
+       nothing clips it, so it rounds itself. */
+    .tools-maintenance-hero::before {
+        border-radius: 16px 16px 0 0;
+    }
+
+    .repair-inbox-body {
+        max-height: none;
+        overflow: visible;
+        padding: 0 10px 12px 10px;
+    }
+
+    /* Sticky needs a scroll container to stick to; with the hero released it
+       would pin against the app chrome instead. Let it scroll away — it is
+       four buttons and the sections are a swipe apart. */
+    .repair-section-nav {
+        position: static;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 6px 0;
+    }
+    .repair-section-nav::-webkit-scrollbar { display: none; }
+    .repair-section-link { flex-shrink: 0; }
+
+    /* ── Health hero ── */
+    .repair-health {
+        gap: 14px;
+        padding: 14px;
+    }
+    .repair-health-score-block {
+        min-width: 0;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 10px;
+    }
+    .repair-health-score { font-size: 42px; }
+    .repair-health-band { margin-top: 0; }
+    .repair-health-body { flex: 1 1 100%; }
+    .repair-health-actions-note { flex-basis: 100%; }
+    .repair-health-fix-safe { min-height: 40px; }
+
+    /* ── Filters ── */
+    .repair-findings-toolbar { gap: 8px; }
+    .repair-status-segments {
+        display: flex;
+        width: 100%;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .repair-status-segments::-webkit-scrollbar { display: none; }
+    .repair-status-seg { flex: 1 0 auto; justify-content: center; min-height: 38px; }
+    .repair-findings-search { flex: 1 1 100%; min-height: 38px; }
+    .repair-findings-filters { flex: 1 1 100%; }
+    .repair-findings-filters select { flex: 1 1 45%; min-height: 38px; }
+    .repair-clear-btn { flex: 1 1 100%; min-height: 38px; }
+
+    /* ── Findings inbox ── */
+    .repair-inbox-head {
+        flex-wrap: wrap;
+        row-gap: 6px;
+        padding: 11px 12px;
+    }
+    .repair-inbox-blurb { white-space: normal; }
+    .repair-inbox-actions {
+        width: 100%;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+    .repair-inbox-btn { min-height: 36px; }
+    .repair-list-controls { gap: 8px; }
+    .repair-list-controls select { flex: 1 1 45%; min-height: 36px; }
+
+    /* ── Operation tiles ── */
+    .repair-family { padding: 12px 11px 13px 11px; }
+    .repair-family-head { flex-wrap: wrap; row-gap: 4px; }
+    .repair-family-summary { flex-basis: 100%; order: 3; white-space: normal; }
+    .repair-family-grid { grid-template-columns: 1fr; }
+
+    /* Number + unit + Save + Cancel do not fit one line in a full-width
+       tile on a phone, and a clipped Save is a schedule you cannot change. */
+    .repair-tile-schedule { row-gap: 6px; }
+    .repair-tile-cadence-edit { flex-wrap: wrap; row-gap: 6px; }
+    .repair-tile-cadence,
+    .repair-tile-cadence-save,
+    .repair-tile-cadence-cancel { min-height: 34px; }
+    .repair-tile-cadence-edit input,
+    .repair-tile-cadence-edit select { min-height: 34px; }
+
+    /* ── Recent runs ── */
+    .repair-runs-toolbar { flex-direction: column; align-items: stretch; }
+    .repair-runs-tools { justify-content: flex-end; }
+    .repair-runs-chip,
+    .repair-runs-toggle { min-height: 32px; }
+    .repair-run-head { flex-wrap: wrap; row-gap: 3px; padding: 10px 12px; }
+    .repair-run-name { min-width: 0; }
+    /* Order 3 drops the summary onto its own line UNDER the row, leaving the
+       clock, name, age and chevron together on the first — without it the
+       summary splits the row and pushes age + chevron onto a third line. */
+    .repair-run-summary {
+        order: 3;
+        white-space: normal;
+        flex-basis: 100%;
+        padding-left: 29px;
+    }
+    .repair-run-age { margin-left: auto; }
+    .repair-run-detail { padding: 4px 12px 13px 12px; }
+    .repair-run-counters { gap: 14px; }
+    .repair-run-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+    /* ── Tool containers ── */
+    .tools-container { padding: 12px 11px 13px 11px; }
+    .tools-container-head { gap: 6px; }
+    .tools-container-blurb { flex-basis: 100%; }
+}
+
+@media (max-width: 480px) {
+    /* The trend line is the first thing to go: it is context, and the score
+       and the bar underneath it are the point. */
+    .repair-health-trend { display: none; }
+    .repair-health-score { font-size: 36px; }
+    .repair-health-actions { gap: 8px; }
+
+    .repair-section-link { padding: 6px 11px; }
+
+    .repair-inbox-count { min-width: 44px; font-size: 20px; }
+    .repair-inbox-head { gap: 9px; }
+    .repair-inbox-label { font-size: 13px; flex-wrap: wrap; row-gap: 4px; }
+    /* Two lines of explanation beats one line of ellipsis. */
+    .repair-inbox-blurb { font-size: 11px; }
+
+    .repair-tile { padding: 11px; }
+    .repair-tile-desc { -webkit-line-clamp: 3; }
+    .repair-tile-foot { flex-wrap: wrap; row-gap: 8px; }
+    .repair-tile .repair-job-actions { margin-left: auto; }
+
+    .repair-run-clock { min-width: 40px; }
+    .repair-run-counter-value { font-size: 15px; }
+    /* A stack trace does not need to eat the screen on a phone. */
+    .repair-run-error-text { max-height: 120px; font-size: 10px; }
+}
+
+@media (hover: none) {
+    /* Icon-only controls at desktop sizes are a miss on a fingertip. */
+    .repair-run-btn,
+    .repair-stop-btn,
+    .repair-settings-btn,
+    .repair-help-btn,
+    .repair-inbox-expand,
+    .repair-runs-refresh,
+    .repair-finding-expand-btn {
+        min-width: 34px;
+        min-height: 34px;
+    }
+
+    /* The cadence pill reads as editable on hover; on touch there is no
+       hover, so it carries its affordance all the time. */
+    .repair-tile-cadence {
+        border-style: solid;
+        border-color: rgba(var(--tile-glow), 0.35);
+    }
+
+    /* Same for the health bar segments — they are buttons. */
+    .repair-health-seg { min-width: 10px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTOMATIONS REDESIGN — phone + tablet
+   Verdict strip, family containers, and the builder palette.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+    /* The verdict chips are buttons now, so they need thumb-sized targets and
+       have to wrap rather than push the master toggle off the row. */
+    .automations-stats { padding: 12px 13px; gap: 8px; }
+    .automations-stats .auto-stat { padding: 7px 11px; min-height: 38px; }
+    .automations-stats .auto-master-toggle {
+        order: -1; margin-left: 0; width: 100%; justify-content: center; min-height: 42px;
+    }
+
+    .automations-section { padding: 11px 11px 12px; }
+    .automations-section-header { flex-wrap: wrap; row-gap: 4px; }
+    /* The family summary drops to its own line rather than squeezing the
+       label and the count into ellipsis. */
+    .automations-section-header .section-summary { flex-basis: 100%; order: 5; white-space: normal; }
+    .automations-section-header .section-line { display: none; }
+    .automations-section-header .section-action-btn { min-width: 34px; min-height: 34px; }
+
+    /* One card per row: the grid's 430px floor is wider than a phone. */
+    .automations-section .automations-grid { grid-template-columns: 1fr; }
+    .automation-card { padding: 12px 12px 11px 15px; }
+    .automation-card .automation-actions { flex-wrap: wrap; }
+
+    /* The tile's foot is a two-up row on desktop. On a phone the meta line
+       alone eats the width, so the controls take their own row underneath
+       rather than being squeezed to one button per line. */
+    .automation-card.automation-tile .auto-tile-foot {
+        flex-direction: column; align-items: stretch; gap: 8px;
+    }
+    .automation-card.automation-tile .automation-actions { justify-content: flex-end; }
+    /* Thumb targets: these were 28px squares built for a mouse. */
+    .automation-card.automation-tile .automation-actions button {
+        width: 38px; height: 38px; font-size: 14px;
+    }
+    /* The cadence editor is three controls in a chip-sized row — let it wrap
+       instead of overflowing the card. */
+    .automation-card.automation-tile .auto-cadence-edit { width: 100%; }
+    .automation-card.automation-tile .auto-cadence-edit input,
+    .automation-card.automation-tile .auto-cadence-edit select { min-height: 34px; }
+    .automation-card.automation-tile .auto-cadence-save,
+    .automation-card.automation-tile .auto-cadence-cancel { min-height: 34px; }
+
+    /* The builder is two columns on desktop; stack them, and cap the palette
+       so the canvas is reachable without scrolling past 100 blocks. */
+    .builder-content { flex-direction: column; }
+    .builder-sidebar {
+        width: 100%; max-width: none;
+        max-height: 45vh; overflow-y: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .automations-stats .auto-stat strong { font-size: 16px; }
+    .automation-card .automation-flow { flex-wrap: wrap; row-gap: 4px; }
+    .automation-card .auto-meta-fail { max-width: 100%; white-space: normal; }
+    /* The name and the runs badge stop competing for one line. */
+    .automation-card.automation-tile .auto-tile-head { flex-wrap: wrap; row-gap: 4px; }
+    .automation-card.automation-tile .automation-name { font-size: 13.5px; }
+    .automation-card.automation-tile .flow-trigger,
+    .automation-card.automation-tile .flow-action,
+    .automation-card.automation-tile .flow-notify { max-width: 100%; }
+    .builder-sidebar { max-height: 40vh; }
+}
+
+@media (hover: none) {
+    /* Drawer headers and block rows are the builder's whole interaction. */
+    .builder-sidebar .block-drawer-head { min-height: 38px; }
+    .builder-sidebar .block-item { min-height: 46px; }
+    .automations-stats .auto-stat-lens:hover { transform: none; }
+    .automation-card:hover { transform: none; }
+    /* No hover to reveal the tile's controls with, and the editable trigger
+       chip must be tappable rather than hover-hinted. */
+    .automation-card.automation-tile .automation-actions { opacity: 1; }
+    .automation-card.automation-tile .auto-flow-editable { min-height: 30px; }
+    .automation-card.automation-tile .auto-tile-badge { min-height: 30px; }
 }

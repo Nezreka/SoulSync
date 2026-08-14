@@ -40,14 +40,20 @@ describe('the page shell', () => {
 
     const grid = root.querySelector('.dash-grid')!;
     expect(Array.from(grid.children).map((card) => card.getAttribute('data-card'))).toEqual([
-      'services',
-      'stats',
+      // The calm grid: the AlertsBand renders NOTHING while healthy (and
+      // under the test's dead fetch mock — no payload, no false alarms);
+      // the ContentBand renders nothing until a feed has rows. The Library
+      // strip LEADS, the Listen band is the payoff row (Library Radio +
+      // Mixes doorway), then the Sync band — Auto Sync + Recent Syncs
+      // merged. Everything else is rehomed: Services card retired (status
+      // + Test on the sidebar rows), enrichment equalizer retired (orbs +
+      // Manage Workers modal), System Stats in the notification tray,
+      // Recent Activity in the tray, Quick Actions back in the sidebar.
       'library',
-      'syncs',
-      'tools',
-      'activity',
+      'listen',
+      'sync',
+      'automations',
       'active-downloads',
-      'enrichment',
     ]);
 
     // worker-orbs' anchor selector must resolve against this tree.

@@ -57,6 +57,32 @@ def get_stall_timeout() -> float:
     return DEFAULT_STALL_TIMEOUT_SECONDS
 
 
+# Releases with a reported seeder count below this are not queued at all.
+# 1 = "somebody is serving it" — the floor that separates a slow torrent from
+# a dead one. 0 disables the gate. Candidates that report NO seeder count
+# (usenet, and indexers that omit the field) are never gated by it.
+DEFAULT_MIN_SEEDERS = 1
+
+
+def get_min_seeders() -> int:
+    """Minimum indexer-reported seeders before SoulSync will queue a torrent.
+
+    #1139: picking by "most seeders" still picks a zero-seeder release when
+    that is all there is, and the grab then occupies the queue until the poll
+    deadline. Lives here beside the stall settings because it is the same
+    problem seen one step earlier — this stops the dead swarm being queued,
+    the stall timer catches the ones that die after we commit."""
+    raw = config_manager.get("download_source.torrent_min_seeders",
+                             DEFAULT_MIN_SEEDERS)
+    try:
+        value = int(raw)
+        if value >= 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_MIN_SEEDERS
+
+
 def get_stall_action() -> str:
     """What to do with a stalled torrent: 'abandon' (default) or 'pause'."""
     raw = config_manager.get("download_source.torrent_stall_action",

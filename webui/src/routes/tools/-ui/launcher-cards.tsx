@@ -47,6 +47,7 @@ export function DiscoveryPoolCard() {
 
   return (
     <ToolCard
+      variant="launcher"
       id="discovery-pool-card"
       title="Discovery Pool"
       info="View and fix matched/failed discovery results across all mirrored playlists"
@@ -76,6 +77,7 @@ export function DiscoveryPoolCard() {
 export function ManualLibraryMatchCard() {
   return (
     <ToolCard
+      variant="launcher"
       id="manual-library-match-card"
       title="Manual Library Match"
       info="Map wishlist and playlist source tracks to library tracks you already own"
@@ -97,6 +99,7 @@ export function ManualLibraryMatchCard() {
 export function ConfigMigrationCard() {
   return (
     <ToolCard
+      variant="launcher"
       id="config-migration-card"
       title="Config Migration"
       info="Export every setting (music + video) as one JSON file to move to a new install, or import one here."
@@ -140,6 +143,7 @@ export function MetadataCacheCard() {
 
   return (
     <ToolCard
+      variant="launcher"
       id="metadata-cache-card"
       title="Metadata Cache"
       helpTool="metadata-cache"
@@ -192,6 +196,7 @@ export function BlacklistCard() {
 
   return (
     <ToolCard
+      variant="launcher"
       id="blacklist-card"
       title="Download Blacklist"
       info="Blocked sources that won't be used for future downloads"

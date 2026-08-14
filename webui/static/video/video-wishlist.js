@@ -64,6 +64,17 @@
         if (it.upgrade_from) return 'upgrade';
         return STATUS[it.status] ? it.status : 'wanted';
     }
+    // Why a row keeps coming back empty. The count alone ("13") says a row is
+    // stuck but not whether to wait or act; the drain now stores the best release
+    // it refused and the rule that refused it (core.video.wishlist_evidence), and
+    // THAT is what turns the chip into a decision.
+    function failWhy(row, fails) {
+        var out = fails + ' searches without a grab';
+        if (row && row.last_search_at) out += ' · last tried ' + row.last_search_at;
+        if (row && row.last_refusal) return out + '\n' + row.last_refusal;
+        return out + ' — try Search now, or a different quality profile';
+    }
+
     function statusPill(status, tip) {
         var s = STATUS[status] || STATUS.wanted;
         return '<span class="vwsh-st ' + s[1] + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' + s[0] + '</span>';
@@ -115,9 +126,8 @@
         // downloading item isn't "failing".
         var fails = Number(it.search_attempts) || 0;
         var failChip = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
-            ? '<span class="vwsh-failing" title="' + esc(fails + ' searches without a grab' +
-                (it.last_search_at ? ' · last tried ' + it.last_search_at : '') +
-                ' — try Search now, or a different quality profile') + '">&#9888; ' + fails + '</span>'
+            ? '<span class="vwsh-failing" title="' + esc(failWhy(it, fails)) +
+                '">&#9888; ' + fails + '</span>'
             : '';
         return '<div class="vwsh-movie" data-vwsh-open-movie="' + esc(it.tmdb_id) +
             '" data-vwsh-src="' + (owned ? 'library' : 'tmdb') + '" data-vwsh-id="' + esc(owned ? it.library_id : it.tmdb_id) + '">' +
@@ -347,8 +357,8 @@
         // Repeatedly-failing marker (#liveleak-failing-hub) — same rule as movies.
         var fails = Number(e.search_attempts) || 0;
         var failTxt = (fails >= 3 && (st === 'wanted' || st === 'upgrade'))
-            ? ' · <span class="vwsh-failing-inline" title="' + esc(fails + ' searches without a grab' +
-                (e.last_search_at ? ' · last tried ' + e.last_search_at : '')) + '">&#9888; ' + fails + '</span>'
+            ? ' · <span class="vwsh-failing-inline" title="' + esc(failWhy(e, fails)) +
+                '">&#9888; ' + fails + '</span>'
             : '';
         var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') +
             (e.upgrade_from ? ' · ⇪ ' + esc(e.upgrade_from) : '') + failTxt);

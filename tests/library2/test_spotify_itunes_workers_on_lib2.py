@@ -337,8 +337,8 @@ class TestCounting:
         assert set(spotify._get_progress_breakdown()) == {
             'artists', 'albums', 'tracks'}
 
-    def test_an_error_is_not_retried(self, spotify):
-        """A provider outage must not become an infinite retry loop."""
+    def test_stale_errors_are_retried(self, spotify):
+        """Per-item failures recover after the shared retry window."""
         record_attempt_all = [('artist', 1), ('album', 1), ('track', 1)]
         conn = spotify.db._get_connection()
         for entity_type, entity_id in record_attempt_all:
@@ -349,7 +349,7 @@ class TestCounting:
         conn.commit()
         conn.close()
 
-        assert spotify._get_next_item() is None
+        assert spotify._get_next_item()['type'] == 'artist'
 
 
 def test_neither_worker_holds_any_legacy_sql():

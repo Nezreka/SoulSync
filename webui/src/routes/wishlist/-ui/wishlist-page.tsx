@@ -24,6 +24,7 @@ import {
 } from '../-wishlist.helpers';
 import { useLiveWishlist } from '../-wishlist.live';
 import { Route } from '../route';
+import { WishlistList } from './wishlist-list';
 import { WishlistOrb } from './wishlist-orb';
 
 export function WishlistPage() {
@@ -37,6 +38,23 @@ export function WishlistPage() {
   // Only one orb open at a time, matching the vanilla accordion which cleared
   // `.expanded` from every group before setting it on the clicked one.
   const [expandedArtist, setExpandedArtist] = useState<string | null>(null);
+  // Display-only view toggle: the nebula stays the default face; the list is
+  // its operational twin. Persisted so the choice survives navigation.
+  const [view, setView] = useState<'nebula' | 'list'>(() => {
+    try {
+      return window.localStorage.getItem('wishlistView') === 'list' ? 'list' : 'nebula';
+    } catch {
+      return 'nebula';
+    }
+  });
+  const pickView = (next: 'nebula' | 'list') => {
+    setView(next);
+    try {
+      window.localStorage.setItem('wishlistView', next);
+    } catch {
+      /* private mode — the toggle still works for the session */
+    }
+  };
 
   const statsQuery = useQuery(wishlistStatsQueryOptions(profileId));
   const cycleQuery = useQuery(wishlistCycleQueryOptions(profileId));
@@ -236,6 +254,28 @@ export function WishlistPage() {
               >
                 ⚠ Failing
               </button>
+              <div className="wl-view-toggle" role="tablist" aria-label="Wishlist view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === 'nebula'}
+                  className={`wl-chip${view === 'nebula' ? ' active' : ''}`}
+                  title="The orbital view"
+                  onClick={() => pickView('nebula')}
+                >
+                  ✦ Nebula
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={view === 'list'}
+                  className={`wl-chip${view === 'list' ? ' active' : ''}`}
+                  title="Dense list with retry status — sortable"
+                  onClick={() => pickView('list')}
+                >
+                  ☰ List
+                </button>
+              </div>
               <button
                 className="btn btn--primary"
                 type="button"
@@ -245,28 +285,38 @@ export function WishlistPage() {
               </button>
             </div>
 
-            <div className={`wl-nebula-field${processing ? ' nebula-processing' : ''}`}>
-              {groups.length === 0 ? (
-                <div className="wl-nebula-empty">Your wishlist is empty</div>
-              ) : (
-                visibleGroups.map((group, index) => (
-                  <WishlistOrb
-                    key={group.name}
-                    group={group}
-                    index={index}
-                    artistImages={artistImages}
-                    currentCycle={currentCycle}
-                    processing={processing}
-                    expanded={expandedArtist === group.name}
-                    onToggleExpand={() =>
-                      setExpandedArtist((current) => (current === group.name ? null : group.name))
-                    }
-                    onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
-                    onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
-                  />
-                ))
-              )}
-            </div>
+            {view === 'list' ? (
+              <WishlistList
+                groups={visibleGroups}
+                artistImages={artistImages}
+                filterActive={Boolean(search.q?.trim()) || search.failing}
+                onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+              />
+            ) : (
+              <div className={`wl-nebula-field${processing ? ' nebula-processing' : ''}`}>
+                {groups.length === 0 ? (
+                  <div className="wl-nebula-empty">Your wishlist is empty</div>
+                ) : (
+                  visibleGroups.map((group, index) => (
+                    <WishlistOrb
+                      key={group.name}
+                      group={group}
+                      index={index}
+                      artistImages={artistImages}
+                      currentCycle={currentCycle}
+                      processing={processing}
+                      expanded={expandedArtist === group.name}
+                      onToggleExpand={() =>
+                        setExpandedArtist((current) => (current === group.name ? null : group.name))
+                      }
+                      onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                      onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

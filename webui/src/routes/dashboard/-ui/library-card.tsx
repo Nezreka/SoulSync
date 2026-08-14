@@ -35,7 +35,7 @@ import {
   stopLibraryScan,
 } from '../-dash.api';
 import { useDashboardDbStatsEvent, useServiceStatusEvent } from '../-dash.events';
-import { libraryCardView } from '../-dash.library';
+import { libraryCardView, publishDbStats } from '../-dash.library';
 
 interface ScanProgress {
   phase: string;
@@ -64,6 +64,10 @@ export function useLibraryCard() {
     if (!mountedRef.current) return;
     setDbStats(stats);
     setDbStatsSeen(true);
+    // The header's status strip shows these same numbers; publishing here
+    // covers every arrival path (initial fetch, socket push, post-scan
+    // refresh) without a second /api/database/stats call.
+    publishDbStats(stats);
   }, []);
 
   useDashboardDbStatsEvent(useCallback((frame) => applyDbStats(frame as DbStats), [applyDbStats]));
@@ -252,7 +256,7 @@ const CHECKING: LibraryCardView = {
   subtitle: 'Checking status...',
   scanVisible: false,
   scanScanning: false,
-  scanLabel: 'Refresh',
+  scanLabel: 'Quick Scan',
   deepVisible: false,
   statsVisible: false,
   stats: null,
@@ -262,13 +266,31 @@ const CHECKING: LibraryCardView = {
 
 function SettingsLink() {
   return (
-    <span
-      className="link"
-      onClick={() => void window.SoulSyncWebRouter?.navigateToPage('settings')}
-    >
+    <span className="link" onClick={() => void window.navigateToPage?.('settings')}>
       Settings
     </span>
   );
+}
+
+/** One-click db backup — the same POST the Tools backup manager makes, with
+ *  the strip's own confirm + toasts. Never window.confirm (house rule). */
+async function backupNow(): Promise<void> {
+  const confirmed = await window.showConfirmDialog?.({
+    title: 'Back Up Database',
+    message:
+      'Creates a snapshot of the SoulSync database (library, wishlist, history, enrichment).\n\n' +
+      'Backups are managed on the Tools page. Continue?',
+  });
+  if (!confirmed) return;
+  window.showToast?.('Backup started...', 'info');
+  try {
+    const response = await fetch('/api/database/backup', { method: 'POST' });
+    const data = (await response.json()) as { success?: boolean; error?: string };
+    if (data.success) window.showToast?.('Database backup created', 'success');
+    else window.showToast?.(data.error || 'Backup failed', 'error');
+  } catch (error) {
+    window.showToast?.(`Backup failed: ${(error as Error).message}`, 'error');
+  }
 }
 
 export function LibraryCard() {
@@ -276,11 +298,11 @@ export function LibraryCard() {
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;
 
   return (
-    <article className="dash-card" data-card="library">
-      <header className="dash-card__head">
-        <h3 className="dash-card__title">Library</h3>
-        <p className="dash-card__sub">Your collection at a glance.</p>
-      </header>
+    // A full-width STRIP in the stats band's language, not a tall card: four
+    // numbers and two buttons were rattling around a card whose height the
+    // Services card set. The outer head went with the box — the inner
+    // library-status-card already carries its own title/subtitle/actions.
+    <article className="dash-card dash-card--strip" data-card="library">
       <div className="dash-card__body">
         <div className={view.cardClass} id="library-status-card">
           <div className="library-status-glow"></div>
@@ -351,83 +373,72 @@ export function LibraryCard() {
                 </svg>
                 Deep Scan
               </button>
-            </div>
-          </div>
-          <div
-            className="library-status-stats"
-            id="library-status-stats"
-            style={view.statsVisible ? undefined : { display: 'none' }}
-          >
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
+              {/* The strip went purely operational — these are the rest of the
+                  library's verbs (Boulder picked all four): go there, check
+                  the matches, repair it, back it up. */}
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-browse-btn"
+                onClick={() => void window.navigateToPage?.('library')}
+              >
                 <svg
-                  width="16"
-                  height="16"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
                 >
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
+                  <path d="M3 6h18M3 12h18M3 18h18" />
                 </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-artists">
-                  {view.stats ? view.stats.artists : '0'}
-                </span>
-                <span className="library-status-stat-label">Artists</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
+                Browse
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-verify-btn"
+                title="Open the enrichment manager's Verify Matches repair flow"
+                onClick={() => window.openEnrichmentManager?.()}
+              >
                 <svg
-                  width="16"
-                  height="16"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
                 >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
                 </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-albums">
-                  {view.stats ? view.stats.albums : '0'}
-                </span>
-                <span className="library-status-stat-label">Albums</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
+                Verify Matches
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-repair-btn"
+                title="Open the Tools maintenance center"
+                onClick={() => void window.navigateToPage?.('tools')}
+              >
                 <svg
-                  width="16"
-                  height="16"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
                 >
-                  <path d="M9 18V5l12-2v13" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="16" r="3" />
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
                 </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-tracks">
-                  {view.stats ? view.stats.tracks : '0'}
-                </span>
-                <span className="library-status-stat-label">Tracks</span>
-              </div>
-            </div>
-            <div className="library-status-stat">
-              <div className="library-status-stat-icon">
+                Repair
+              </button>
+              <button
+                className="library-status-btn library-status-btn-secondary"
+                id="library-status-backup-btn"
+                title="Back up the SoulSync database now"
+                onClick={() => void backupNow()}
+              >
                 <svg
-                  width="16"
-                  height="16"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -437,15 +448,14 @@ export function LibraryCard() {
                   <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
                   <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
                 </svg>
-              </div>
-              <div className="library-status-stat-text">
-                <span className="library-status-stat-value" id="library-status-size">
-                  {view.stats ? view.stats.size : '--'}
-                </span>
-                <span className="library-status-stat-label">DB Size</span>
-              </div>
+                Backup
+              </button>
             </div>
           </div>
+          {/* The four-stat row lived here until the header's hello strip
+              took tracks/artists; albums + db size moved into the subtitle.
+              The strip is now purely operational: status, scan buttons,
+              progress. */}
           <div
             className="library-status-progress"
             id="library-status-progress"

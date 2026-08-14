@@ -177,11 +177,23 @@ export function isRepairJobDryRun(job: Pick<RepairJob, 'settings'>): boolean {
 export const FINDING_SEVERITY_ICONS: Record<string, string> = {
   info: 'ℹ️',
   warning: '⚠️',
+  // The backend's top severity is `error`; `critical` stays mapped because
+  // older rows and the CSS class both use that word.
+  error: '🔴',
   critical: '🔴',
 };
 
 export function findingSeverityIcon(severity: string | null | undefined): string {
   return FINDING_SEVERITY_ICONS[severity as string] || FINDING_SEVERITY_ICONS.info;
+}
+
+/** CSS modifier for a severity. The stylesheet has `.repair-finding-card.critical`
+ *  and no `.error`, so the emitted `error` maps onto it rather than churning
+ *  the stylesheet (and losing the styling for rows already stored either way). */
+export function findingSeverityClass(severity: string | null | undefined): string {
+  const value = String(severity || 'info');
+  if (value === 'error' || value === 'critical') return 'critical';
+  return value === 'warning' ? 'warning' : 'info';
 }
 
 export const FINDING_TYPE_LABELS: Record<string, string> = {
@@ -440,12 +452,32 @@ export function formatFileSize(bytes: number | null | undefined): string {
 
 /** From `formatCacheAge` (wishlist-tools.js). Compact form: 'now', '5m', '3h',
  *  '2d', '4mo'. Months are a flat 30 days. */
+/**
+ * Parse a timestamp the way its WRITER meant it.
+ *
+ * Every timestamp on this page comes from SQLite's CURRENT_TIMESTAMP, which
+ * is UTC and formatted `YYYY-MM-DD HH:MM:SS` — no `T`, no zone. JS parses
+ * exactly that shape as LOCAL time, so west of Greenwich every run and every
+ * finding was read as happening in the future: ages came out negative and
+ * printed as "now", and a run from this morning claimed to be minutes old.
+ * That is what made the run history unreadable.
+ *
+ * Anything already carrying a `T`, a `Z` or an offset is a real ISO string
+ * and is left alone.
+ */
+export function parseDbTimestamp(timestamp: string): number {
+  const bare = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(timestamp.trim());
+  return new Date(bare ? `${timestamp.trim().replace(' ', 'T')}Z` : timestamp).getTime();
+}
+
 export function formatCacheAge(
   timestamp: string | null | undefined,
   now: number = Date.now(),
 ): string {
   if (!timestamp) return '—';
-  const minutes = Math.floor((now - new Date(timestamp).getTime()) / 60000);
+  const minutes = Math.floor((now - parseDbTimestamp(timestamp)) / 60000);
+  // A future stamp is clock skew, not a negative age. Say "now" rather than
+  // printing "-3h" at somebody.
   if (minutes < 1) return 'now';
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);

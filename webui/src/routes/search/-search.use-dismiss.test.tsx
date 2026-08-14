@@ -51,6 +51,28 @@ describe('shouldDismiss', () => {
     ).toBe(false);
   });
 
+  it('keeps it open for a click on a RESULT inside the dropdown', () => {
+    // The regression that broke music-video downloads: vanilla nested the
+    // dropdown inside the input wrapper so results were implicitly exempt;
+    // the React markup makes them siblings, so the dropdown must be exempt
+    // BY NAME or every result click throws the results away.
+    const target = targetInside(
+      '<div id="enhanced-dropdown"><div class="enh-video-card" id="t"></div></div>',
+      '#t',
+    );
+    expect(shouldDismiss(target)).toBe(false);
+  });
+  it('keeps it open for the overlays stacked ABOVE the download modal', () => {
+    // The candidates picker and the track-detail overlay are reachable from
+    // the download modal but are appended to <body> as siblings, so the
+    // modal exemption does not cover them.
+    expect(
+      shouldDismiss(targetInside('<div id="candidates-modal-overlay"><b id="t"></b></div>', '#t')),
+    ).toBe(false);
+    expect(
+      shouldDismiss(targetInside('<div id="track-detail-overlay"><b id="t"></b></div>', '#t')),
+    ).toBe(false);
+  });
   it('dismisses when the target is not an element at all', () => {
     // A click reported against the document itself is still a click outside.
     expect(shouldDismiss(document)).toBe(true);
@@ -93,6 +115,22 @@ describe('useDismissOnOutsideClick', () => {
     unmount();
 
     fireEvent.click(document.getElementById('outside')!);
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('survives the clicked node being re-rendered out of the dropdown', () => {
+    // A video click sets download-progress state, which can replace the
+    // clicked node before this document listener runs. closest() on the
+    // detached node misses the dropdown; composedPath() still holds the
+    // ancestry captured at dispatch.
+    document.body.innerHTML =
+      '<div id="enhanced-dropdown"><div class="enh-video-card" id="card"></div></div>';
+    const card = document.getElementById('card')!;
+    card.addEventListener('click', () => card.remove()); // the re-render, worst case
+    const onDismiss = vi.fn();
+    renderHook(() => useDismissOnOutsideClick(true, onDismiss));
+
+    fireEvent.click(card);
     expect(onDismiss).not.toHaveBeenCalled();
   });
 });

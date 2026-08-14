@@ -154,42 +154,25 @@ function shelfQuery<T>(key: string, fn: () => Promise<T>, enabled = true) {
 
 export function useDiscoverPage(): DiscoverPageController {
   // ── Tier 1: above the fold ────────────────────────────────────────────
+  //
+  // TRIMMED to what the viewport actually shows before scrolling: the hero,
+  // the dial (visible immediately — would otherwise snap from a default),
+  // and the first shelves. The original port put ELEVEN queries here, which
+  // meant eleven heavy Flask queries had to drain through the 5-slot limiter
+  // before the rest of the page was even ALLOWED to start. Five above-fold
+  // queries fill the pool exactly once; everything else streams in behind
+  // them — same data, same fail-soft, first paint several seconds sooner.
   const hero = useQuery(shelfQuery('hero', fetchHero));
-  /**
-   * The adventurousness dial's saved value.
-   *
-   * Above the fold in the vanilla (`loadAdventurousnessDial`) because the dial
-   * is visible immediately and would otherwise render at a default before
-   * snapping to the user's real setting.
-   */
   const adventurousness = useQuery(shelfQuery('adventurousness', asOutcome(fetchAdventurousness)));
-  const genreExplorer = useQuery(shelfQuery('genre-explorer', fetchGenreExplorer));
   const listeningRecs = useQuery(
     shelfQuery('listening-recs', asOutcome(fetchListeningRecommendations)),
   );
   const recommendedArtists = useQuery(
     shelfQuery('similar-artists', asOutcome(fetchSimilarArtists)),
   );
-  const popularPicks = useQuery(shelfQuery('popular-picks', fetchPopularPicks));
-  const hiddenGems = useQuery(shelfQuery('hidden-gems', fetchHiddenGems));
-  const shuffle = useQuery(shelfQuery('discovery-shuffle', fetchDiscoveryShuffle));
-  const listeningMix = useQuery(shelfQuery('listening-mix', fetchListeningMix));
   const recentReleases = useQuery(shelfQuery('recent-releases', fetchRecentReleases));
-  const genreNewReleases = useQuery(shelfQuery('genre-new-releases', fetchGenreNewReleases));
 
-  const aboveFold = [
-    hero,
-    adventurousness,
-    genreExplorer,
-    listeningRecs,
-    recommendedArtists,
-    popularPicks,
-    hiddenGems,
-    shuffle,
-    listeningMix,
-    recentReleases,
-    genreNewReleases,
-  ];
+  const aboveFold = [hero, adventurousness, listeningRecs, recommendedArtists, recentReleases];
 
   /**
    * Settled, not successful.
@@ -201,6 +184,20 @@ export function useDiscoverPage(): DiscoverPageController {
   const aboveFoldSettled = aboveFold.every((q) => !q.isPending);
 
   // ── Tier 2: below the fold, gated on tier 1 ───────────────────────────
+  // The four mix-registry feeders, the genre shelves and the caches all live
+  // here now — they render well below the first viewport.
+  const genreExplorer = useQuery(
+    shelfQuery('genre-explorer', fetchGenreExplorer, aboveFoldSettled),
+  );
+  const popularPicks = useQuery(shelfQuery('popular-picks', fetchPopularPicks, aboveFoldSettled));
+  const hiddenGems = useQuery(shelfQuery('hidden-gems', fetchHiddenGems, aboveFoldSettled));
+  const shuffle = useQuery(
+    shelfQuery('discovery-shuffle', fetchDiscoveryShuffle, aboveFoldSettled),
+  );
+  const listeningMix = useQuery(shelfQuery('listening-mix', fetchListeningMix, aboveFoldSettled));
+  const genreNewReleases = useQuery(
+    shelfQuery('genre-new-releases', fetchGenreNewReleases, aboveFoldSettled),
+  );
   const seasonal = useQuery(
     shelfQuery('seasonal', asOutcome(fetchSeasonalCurrent), aboveFoldSettled),
   );

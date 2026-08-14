@@ -242,7 +242,15 @@ export function watchlistRequest(
   }
   return {
     url: '/api/watchlist/add',
-    body: { artist_id: args.sourceId, artist_name: args.artistName, source: args.source },
+    // The source key is OMITTED when empty: the endpoint 400s 'Unknown
+    // source' for any present-but-unrecognized value (P1-05 strictness),
+    // and normalize_source('') is exactly that. Sending source:'' broke
+    // every discover-shelf add — Boulder's 400.
+    body: {
+      artist_id: args.sourceId,
+      artist_name: args.artistName,
+      ...(args.source ? { source: args.source } : {}),
+    },
   };
 }
 

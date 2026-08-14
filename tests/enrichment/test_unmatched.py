@@ -202,7 +202,8 @@ def test_reset_builder_selects_native_artist():
 
 
 def test_reset_builder_selects_native_track():
-    # Tracks have no source-id column (ids live in tags) — must not emit one.
+    # The builder only selects native ids. MusicDatabase.reset_enrichment owns
+    # clearing promoted ids, external_ids, provenance and the attempt ledger.
     sql, params = build_reset_query('spotify', 'track', 'item', entity_id=5)
     assert sql == 'SELECT id FROM lib2_tracks WHERE id = ?'
     assert params == [5]

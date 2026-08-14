@@ -46,6 +46,11 @@ _SCOPES = (
     # satellite surfaces that mount on document.body — scoped by their own
     # automations-specific class names
     ".automation-history-modal", ".auto-group-dropdown",
+    # The builder palette. Used by BOTH builders (#builder-sidebar and
+    # #vauto-builder-sidebar carry it) and by nothing else in the app, so the
+    # class is itself the scope — styling it under .automations-builder-view
+    # would reach the music builder only.
+    ".builder-sidebar",
 )
 
 
@@ -88,7 +93,9 @@ def test_every_styled_class_exists_in_the_markup():
     """A selector styling a class nothing renders is a silent no-op — a typo."""
     # Classes composed at runtime (class="history-log-" + log.type) never
     # appear as literals in source; the composing prefix proves the family.
-    _DYNAMIC_PREFIXES = ("history-log-",)
+    # `sched-` joins it for the tile's schedule state, composed the same way
+    # (`sched-${schedule.state}`) from automationSchedule's union.
+    _DYNAMIC_PREFIXES = ("history-log-", "sched-")
     missing = []
     for sel in _selectors():
         for cls in re.findall(r"\.([a-zA-Z][\w-]*)", sel):

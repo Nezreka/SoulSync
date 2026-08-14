@@ -32,6 +32,15 @@ export const automationsSearchSchema = z.object({
     .preprocess((v) => searchString(v) ?? '', z.string())
     .default('')
     .catch(''),
+  /**
+   * A health lens from the verdict strip: 'failing' | 'never' | 'off'.
+   * In the URL so a chip is linkable and survives a reload — the whole point
+   * of the strip is that a number leads somewhere.
+   */
+  health: z
+    .preprocess((v) => searchString(v) ?? '', z.string())
+    .default('')
+    .catch(''),
 });
 
 export type AutomationsSearch = z.infer<typeof automationsSearchSchema>;

@@ -90,9 +90,8 @@ class TestPriorityOrder:
 
         assert next_pending(conn, "lastfm", retry_after_days=30)["type"] == "artist"
 
-    def test_an_error_is_not_retried_automatically(self, conn):
-        """Legacy retried only 'not_found'; errors need a user-triggered refresh,
-        or a provider that is down turns into an infinite retry loop."""
+    def test_an_error_is_retried_after_the_window(self, conn):
+        """Transient per-item errors must not remain a permanent black hole."""
         for entity in ("artist", "album", "track"):
             record_attempt(conn, entity_type=entity, entity_id=1,
                            service="lastfm", status="error")
@@ -100,7 +99,7 @@ class TestPriorityOrder:
                      "SET last_attempted_at = datetime('now','-400 days')")
         conn.commit()
 
-        assert next_pending(conn, "lastfm", retry_after_days=30) is None
+        assert next_pending(conn, "lastfm", retry_after_days=30)["type"] == "artist"
 
 
 class TestTheShapeWorkersConsume:

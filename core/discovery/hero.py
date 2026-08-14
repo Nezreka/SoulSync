@@ -59,14 +59,30 @@ def init(get_metadata_fallback_client_fn):
     _get_metadata_fallback_client = get_metadata_fallback_client_fn
 
 
+# The hero is the FIRST thing the discover page shows, and computing it is the
+# single slowest request on the page (6-14s live: the 200-row consensus query,
+# up to ten metadata fetches for missing art, a rotation write). Cache the
+# payload per (profile, source) so only the first load after a restart pays;
+# the featured-rotation still advances on every fresh compute, just not on
+# every reload inside the window.
+_HERO_CACHE = {}  # (profile_id, source) -> (expiry_ts, payload)
+_HERO_TTL_S = 1800
+
+
 def get_discover_hero():
     """Get featured similar artists for hero slideshow"""
     try:
+        import time as _time
         database = get_database()
 
         # Determine active source
         active_source = _get_active_discovery_source()
         logger.info(f"Discover hero using source: {active_source}")
+
+        _cache_key = (get_current_profile_id(), active_source)
+        _cached = _HERO_CACHE.get(_cache_key)
+        if _cached and _time.time() < _cached[0]:
+            return jsonify(_cached[1])
 
         # Import fallback client for non-Spotify lookups
         itunes_client = _get_metadata_fallback_client()
@@ -118,10 +134,19 @@ def get_discover_hero():
                 if hasattr(artist, 'image_url') and artist.image_url:
                     artist_data['image_url'] = artist.image_url
 
+                try:
+                    artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.artist_name)
+                except Exception as count_err:
+                    # The meter is garnish — never break the hero for it.
+                    logger.debug(f"owned-album count failed for {artist.artist_name}: {count_err}")
+
                 hero_artists.append(artist_data)
 
             logger.warning(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
-            return jsonify({"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"})
+            _payload = {"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"}
+            if hero_artists:
+                _HERO_CACHE[_cache_key] = (_time.time() + _HERO_TTL_S, _payload)
+            return jsonify(_payload)
 
         # Artists are already filtered by source in SQL — no post-filter needed
         valid_artists = list(similar_artists)
@@ -245,13 +270,24 @@ def get_discover_hero():
                 except Exception as img_err:
                     logger.error(f"Could not fetch artist image: {img_err}")
 
+            try:
+                artist_data['owned_album_count'] = database.get_owned_album_count_by_artist_name(artist.similar_artist_name)
+            except Exception as count_err:
+                # The meter is garnish — never break the hero for it.
+                logger.debug(f"owned-album count failed for {artist.similar_artist_name}: {count_err}")
+
             hero_artists.append(artist_data)
 
         # Mark these artists as featured so they cycle to the back of the queue
         featured_names = [a["artist_name"] for a in hero_artists]
         database.mark_artists_featured(featured_names)
 
-        return jsonify({"success": True, "artists": hero_artists, "source": active_source})
+        _payload = {"success": True, "artists": hero_artists, "source": active_source}
+        if hero_artists:
+            # An empty answer stays uncached so data appearing (first scan
+            # finishing, say) shows up on the next load, not in ten minutes.
+            _HERO_CACHE[_cache_key] = (_time.time() + _HERO_TTL_S, _payload)
+        return jsonify(_payload)
 
     except Exception as e:
         logger.error(f"Error getting discover hero: {e}")

@@ -215,6 +215,112 @@ def build_reset_query(
             "WHERE pa.status='not_found'", [entity_type, service])
 
 
+# ── Verify matches — targeted repair of the pre-fix corruption classes ──────
+#
+# The Aug 2026 matching fixes STOP new corruption but can't repair rows the
+# old bugs already froze as 'matched'. Two bug classes left fingerprints
+# findable WITHOUT any API calls:
+#
+#   1. The artist id-smear (Tidal/Qobuz/AudioDB fail-open verify): one
+#      artist's source id written onto OTHER artists' rows. Fingerprint:
+#      multiple artist rows sharing one source id. Every such cluster is
+#      corruption (artists are unique rows; only ONE can own an id), so all
+#      its rows reset for the fixed workers to rematch. Albums/tracks are
+#      deliberately NOT collision-checked — owning the same recording twice
+#      (original album + compilation) legitimately maps two library rows to
+#      one source id.
+#
+#   2. The empty-normalization false match: titles that normalize to nothing
+#      ('!!!', '...', '(Intro)') compared at SequenceMatcher ratio 1.0
+#      against ANY such title, so their 'matched' ids are untrustworthy.
+#      Fingerprint: a DEGENERATE title (nothing left after stripping
+#      bracketed segments and non-word characters). Those rows reset too.
+
+import re as _re
+
+_BRACKETED = _re.compile(r"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}")
+_NON_WORD = _re.compile(r"[^\w]+", _re.UNICODE)
+
+
+def degenerate_title(text) -> bool:
+    """True when a title carries no matchable content — nothing left after
+    stripping bracketed segments and non-word characters. Conservative
+    approximation of the workers' normalizers; unicode letters (CJK titles)
+    are real content, not degenerate."""
+    s = str(text or "")
+    s = _BRACKETED.sub(" ", s)
+    s = _NON_WORD.sub("", s)
+    return not s
+
+
+def _artist_provider_id_expr(service: str, alias: str = "a") -> Optional[str]:
+    """Library-v2 expression holding an artist's id for ``service``."""
+    if service not in SERVICE_ENTITY_SUPPORT or service in ('similar_artists', 'bandcamp'):
+        return None
+    json_id = f"NULLIF(json_extract({alias}.external_ids, '$.{service}'), '')"
+    promoted = {
+        'spotify': f"NULLIF({alias}.spotify_id, '')",
+        'musicbrainz': f"NULLIF({alias}.musicbrainz_id, '')",
+    }.get(service)
+    return f"COALESCE({promoted}, {json_id})" if promoted else json_id
+
+
+def build_artist_collision_queries(service: str) -> Optional[Tuple[str, str, str]]:
+    """Return SQL to count and select Library-v2 artist id-smear clusters.
+
+    The third query SELECTs affected native artist IDs; the database boundary
+    clears them through :func:`set_library_v2_match`, which keeps promoted
+    columns, ``external_ids``, provenance and the attempt ledger consistent.
+    Same-named duplicate/alias rows are allowed to share an id. A collision is
+    only the corruption signature we care about: one provider id attached to
+    more than one distinct artist name.
+    """
+    if 'artist' not in SERVICE_ENTITY_SUPPORT.get(service, ()):
+        return None
+    provider_id = _artist_provider_id_expr(service)
+    if not provider_id:
+        return None
+    colliding = (
+        f"SELECT {provider_id} AS provider_id FROM lib2_artists a "
+        f"WHERE {provider_id} IS NOT NULL AND a.canonical_artist_id IS NULL "
+        f"GROUP BY {provider_id} "
+        "HAVING COUNT(DISTINCT LOWER(TRIM(a.name))) > 1"
+    )
+    count_clusters = f"SELECT COUNT(*) FROM ({colliding})"
+    count_rows = (
+        f"SELECT COUNT(*) FROM lib2_artists a WHERE {provider_id} IN ({colliding})"
+    )
+    select_rows = (
+        f"SELECT a.id FROM lib2_artists a WHERE {provider_id} IN ({colliding})"
+    )
+    return count_clusters, count_rows, select_rows
+
+
+def build_degenerate_reset_query(service: str, entity_type: str,
+                                 entity_ids: List) -> Optional[Tuple[str, List]]:
+    """Select degenerate native rows this service previously matched.
+
+    The caller clears each selected row through the native match boundary.
+    Selecting rather than issuing a raw UPDATE prevents the attempt ledger and
+    provider-id JSON from disagreeing.
+    """
+    if not entity_ids:
+        return None
+    support = SERVICE_ENTITY_SUPPORT.get(service)
+    if not support or entity_type not in support or entity_type not in _ENTITY_TABLE:
+        return None
+    if service == 'similar_artists':
+        return None
+    table = _ENTITY_TABLE[entity_type]['table']
+    placeholders = ", ".join("?" for _ in entity_ids)
+    sql = (
+        f"SELECT e.id FROM {table} e JOIN lib2_provider_attempts pa "
+        "ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
+        f"WHERE pa.status='matched' AND e.id IN ({placeholders})"
+    )
+    return sql, [entity_type, service, *entity_ids]
+
+
 def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
     """Build the matched / not_found / pending / total tally for one entity type."""
     _validate(service, entity_type)
@@ -256,4 +362,7 @@ __all__ = [
     'build_breakdown_query',
     'build_reset_query',
     'RESET_SCOPES',
+    'degenerate_title',
+    'build_artist_collision_queries',
+    'build_degenerate_reset_query',
 ]

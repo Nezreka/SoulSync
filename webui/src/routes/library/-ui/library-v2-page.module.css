@@ -4487,3 +4487,11 @@ textarea.searchInput {
   width: 15px;
   height: 15px;
 }
+
+/* Artist cards share `cardMonitor` with the legacy release cards below.
+ * Keep this override contextual: the bookmark moves inward symmetrically
+ * with the server badge and their visual centres sit on the same line. */
+.artistCard > .cardMonitor {
+  top: 16px;
+  left: 18px;
+}

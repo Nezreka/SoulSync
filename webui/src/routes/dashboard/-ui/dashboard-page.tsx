@@ -20,14 +20,14 @@
 import { useEffect } from 'react';
 
 import { ActiveDownloadsShell } from './active-downloads-shell';
-import { ActivityFeedCard } from './activity-feed';
+import { AlertsBand } from './alerts-band';
+import { AutomationsCard } from './automations-card';
+import { ContentBand } from './content-rails';
 import { DashboardHeader } from './dashboard-header';
 import { LibraryCard } from './library-card';
-import { QuickActionsCard } from './quick-actions';
-import { RateMonitorCard } from './rate-equalizer';
-import { ServiceStatusCard } from './service-cards';
-import { SyncsCard } from './syncs-card';
-import { SystemStatsCard } from './system-stats';
+import { ListenBand } from './listen-band';
+import { ListeningHistoryBand } from './listening-history-band';
+import { SyncBand } from './sync-band';
 
 export function DashboardPage() {
   useEffect(() => {
@@ -38,14 +38,39 @@ export function DashboardPage() {
     <div className="page-shell dashboard-container" id="dashboard-page">
       <DashboardHeader />
       <div className="dash-grid">
-        <ServiceStatusCard />
-        <SystemStatsCard />
+        {/* The exception surface: renders NOTHING while every core
+            connection is healthy — the one place that shouts when a human
+            is needed, which is what buys the rest of the page its calm. */}
+        <AlertsBand />
+        {/* The Library strip leads — whose collection this is, then what's
+            new in it. The content band (Recently Added | Fresh Releases
+            behind a tab switcher) renders nothing until a feed has rows, so
+            a fresh install sees the ops grid it always saw. */}
         <LibraryCard />
-        <SyncsCard />
-        <QuickActionsCard />
-        <ActivityFeedCard />
+        <ContentBand />
+        {/* What you've been PLAYING — recent listens from the same
+            listening_history spine the stats page reads. Renders nothing
+            until history exists. Click-through goes to the stats page. */}
+        <ListeningHistoryBand />
+        {/* The payoff band: everything above is about OWNING music, this is
+            about playing it — Library Radio's front door + the Mixes
+            doorway. */}
+        <ListenBand />
+        {/* The Sync band — Auto Sync and Recent Syncs merged into one
+            full-width section (they were the same system explained twice):
+            one row per playlist with schedule, latest run, ownership, and
+            live pipeline state. Active Downloads appears below only while
+            transfers exist. Everything else the old ops grid held is
+            rehomed where you act on it: the Services card retired (status
+            dots + Test buttons live on the sidebar's Service Status rows,
+            rate graphs in the Manage Workers modal), System Stats went to
+            the notification tray with 3.2.0, Recent Activity to the tray,
+            Quick Actions back to the sidebar. */}
+        <SyncBand />
+        {/* Beside it: the rest of the engine — every automation that ISN'T a
+            playlist pipeline, plus the quick performance switches. */}
+        <AutomationsCard />
         <ActiveDownloadsShell />
-        <RateMonitorCard />
       </div>
     </div>
   );

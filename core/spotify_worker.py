@@ -999,6 +999,10 @@ class SpotifyWorker:
     def _name_similarity(self, query_name: str, result_name: str) -> float:
         norm_query = self._normalize_name(query_name)
         norm_result = self._normalize_name(result_name)
+        if not norm_query or not norm_result:
+            raw_query = (query_name or '').strip().lower()
+            raw_result = (result_name or '').strip().lower()
+            return 1.0 if raw_query and raw_query == raw_result else 0.0
         return SequenceMatcher(None, norm_query, norm_result).ratio()
 
     def _name_matches(self, query_name: str, result_name: str) -> bool:

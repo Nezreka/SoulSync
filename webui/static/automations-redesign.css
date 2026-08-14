@@ -174,10 +174,49 @@
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb), 0.4));
     box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.55);
 }
+/* A failed last run used to be a grey text fragment at the END of the meta
+   line, weighted the same as "Runs: 41". The rail carries it now, so a broken
+   automation is findable without reading a single card. A run in flight wins
+   (the component only sets .errored when not running) — the error describes
+   the LAST run, and a card mid-run should read busy, not broken. */
+.automation-card.errored::before {
+    background: linear-gradient(180deg, rgba(244, 67, 54, 0.9), rgba(244, 67, 54, 0.3));
+    box-shadow: 0 0 12px rgba(244, 67, 54, 0.4);
+}
+/* Held by the side's master switch — not disabled by the user, so it must not
+   look disabled. Desaturated rather than dimmed: it is intact and waiting. */
+.automation-card.paused::before {
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.7), rgba(245, 158, 11, 0.2));
+}
+
 .automation-card:hover {
     transform: translateY(-2px);
     border-color: rgba(255,255,255,0.13);
     box-shadow: 0 10px 30px -12px rgba(0,0,0,0.6);
+}
+
+.automation-card.errored {
+    border-color: rgba(244, 67, 54, 0.22);
+    background: rgba(244, 67, 54, 0.035);
+}
+.automation-card.paused { filter: saturate(0.75); }
+
+/* The failure chip. It leads the meta line, so it reads as a state rather than
+   as another fact among five. (Paused used to have a sibling chip here; it is
+   a schedule-line state now — see .auto-tile-next.paused.)
+
+   Scoped to .automation-card because this sheet loads after style.css for the
+   whole app — a bare class here is a global rule, which is exactly what
+   test_every_rule_is_scoped_to_automations_surfaces exists to stop. */
+.automation-card .auto-meta-fail {
+    color: #ff8a80;
+    font-weight: 600;
+    max-width: 34ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: bottom;
 }
 .automation-card.disabled { opacity: .62; }
 .automation-card.disabled:hover { opacity: .85; }
@@ -271,6 +310,9 @@
 /* Plain inline text — truncation is done in JS at a fixed length, so no
    layout-dependent trimming can misfire. Full facts in the hover tooltip. */
 .automation-card .auto-last-result { color: rgba(255,255,255,0.30); cursor: default; }
+/* A skip is neither success nor failure — the run did not happen, so it reads
+   as an aside rather than as a result. */
+.automation-card .auto-last-result.skipped { color: rgba(255,255,255,0.22); font-style: italic; }
 
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {
@@ -317,6 +359,142 @@
 }
 .automation-card .automation-toggle input:checked + .toggle-slider::before {
     transform: translateX(16px);
+}
+
+/* ── The tile chassis ───────────────────────────────────────────────────────
+   The React cards only. The vanilla renderer in stats-automations.js still
+   paints the flat row for the video page, so every rule here hangs off the
+   .automation-tile modifier and the base card above is left exactly as it was.
+
+   Same chassis as the maintenance job tiles on the tools page: an edge that
+   doubles as the progress bar, a head, the flow, one schedule line, and a foot
+   pairing the leftover facts with the controls. */
+.automation-card.automation-tile {
+    display: block;
+    padding: 13px 15px 12px 18px;
+}
+
+/* the progress bar. Idles as a family-tinted hairline across the full width
+   (--tile-glow comes from the enclosing section; the fallback keeps a card
+   rendered outside one from losing its edge), fills left-to-right while the
+   automation runs. */
+.automation-card.automation-tile .auto-tile-edge {
+    position: absolute; left: 0; top: 0; height: 2px; width: 100%;
+    background: linear-gradient(90deg,
+        rgba(var(--tile-glow, var(--accent-rgb)), 0.30), rgba(var(--tile-glow, var(--accent-rgb)), 0));
+    transition: width .5s ease, background .3s ease, box-shadow .3s ease;
+    pointer-events: none;
+}
+.automation-card.automation-tile .auto-tile-edge.running {
+    height: 3px;
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), rgb(var(--accent-light-rgb)));
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.6);
+}
+.automation-card.automation-tile.errored .auto-tile-edge {
+    background: linear-gradient(90deg, rgba(244, 67, 54, 0.55), rgba(244, 67, 54, 0));
+}
+/* Its time has come round and the scheduler has not reached it yet — worth a
+   glance, not an alarm. */
+.automation-card.automation-tile.sched-due .auto-tile-edge {
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.5), rgba(34, 197, 94, 0));
+}
+
+/* head — dot, name, and the run count as a link to the history */
+.automation-card.automation-tile .auto-tile-head {
+    display: flex; align-items: center; gap: 9px; min-width: 0;
+}
+.automation-card.automation-tile .automation-status { margin-top: 0; }
+.automation-card.automation-tile .automation-name {
+    flex: 1; min-width: 0; margin-bottom: 0; font-size: 14px;
+}
+.automation-card.automation-tile .auto-tile-badge {
+    flex-shrink: 0; border: none; cursor: pointer; font-family: inherit;
+    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+    background: rgba(255,255,255,0.055); color: rgba(255,255,255,0.5);
+    font-variant-numeric: tabular-nums;
+    transition: background .15s ease, color .15s ease;
+}
+.automation-card.automation-tile .auto-tile-badge:hover {
+    background: rgba(var(--accent-rgb), 0.18); color: rgb(var(--accent-light-rgb));
+}
+
+.automation-card.automation-tile .automation-flow { margin: 10px 0 0; }
+
+/* the trigger chip, made editable in place — a chip that can be changed says
+   so, without turning into a button that shouts */
+.automation-card.automation-tile .auto-flow-editable {
+    font-family: inherit; cursor: pointer;
+    border: 1px dashed rgba(var(--accent-rgb), 0.35);
+    padding: 2px 8px;
+    transition: background .15s ease, border-color .15s ease;
+}
+.automation-card.automation-tile .auto-flow-editable:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+.automation-card.automation-tile .auto-cadence-edit {
+    display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+.automation-card.automation-tile .auto-cadence-edit input,
+.automation-card.automation-tile .auto-cadence-edit select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 7px; color: #fff;
+    font-family: inherit; font-size: 11px; padding: 3px 6px;
+}
+.automation-card.automation-tile .auto-cadence-edit input[type="number"] { width: 52px; }
+.automation-card.automation-tile .auto-cadence-edit select option { background: #1a1a1a; }
+.automation-card.automation-tile .auto-cadence-save,
+.automation-card.automation-tile .auto-cadence-cancel {
+    border: none; border-radius: 7px; cursor: pointer;
+    font-family: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px;
+    transition: background .15s ease, color .15s ease;
+}
+.automation-card.automation-tile .auto-cadence-save {
+    background: rgba(var(--accent-rgb), 0.28); color: rgb(var(--accent-light-rgb));
+}
+.automation-card.automation-tile .auto-cadence-save:hover { background: rgba(var(--accent-rgb), 0.42); }
+.automation-card.automation-tile .auto-cadence-save:disabled { opacity: .5; cursor: default; }
+.automation-card.automation-tile .auto-cadence-cancel {
+    background: transparent; color: rgba(255,255,255,0.4);
+}
+.automation-card.automation-tile .auto-cadence-cancel:hover { color: #fff; }
+
+/* the schedule line — one state, one colour. This is the question the card is
+   asked most, so it gets its own row instead of being the third of six
+   fragments in a grey list. */
+.automation-card.automation-tile .auto-tile-schedule {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-top: 9px;
+}
+.automation-card.automation-tile .auto-tile-next {
+    font-size: 11.5px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.4);
+}
+.automation-card.automation-tile .auto-tile-next.waiting { color: rgba(var(--accent-light-rgb), 0.9); }
+.automation-card.automation-tile .auto-tile-next.due { color: rgb(134, 239, 172); }
+.automation-card.automation-tile .auto-tile-next.running { color: rgb(var(--accent-light-rgb)); }
+.automation-card.automation-tile .auto-tile-next.paused { color: #f59e0b; }
+.automation-card.automation-tile .auto-tile-next.listening { color: rgba(134, 239, 172, 0.7); }
+.automation-card.automation-tile .auto-tile-next.off { color: rgba(255,255,255,0.25); }
+.automation-card.automation-tile .auto-tile-next.unscheduled {
+    color: rgba(255,255,255,0.3); font-style: italic; font-weight: 500;
+}
+
+/* foot — what happened last time, and the controls */
+.automation-card.automation-tile .auto-tile-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-top: 10px; padding-top: 9px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+}
+.automation-card.automation-tile .automation-meta { flex: 1; min-width: 0; line-height: 1.55; }
+/* The foot is a designated control strip, not a hover surface — the toggle in
+   it is a state readout as much as a control, so it must not be half-faded. */
+.automation-card.automation-tile .automation-actions { opacity: 1; }
+.automation-card.automation-tile .auto-tile-sep {
+    width: 1px; height: 16px; margin: 0 2px;
+    background: rgba(255,255,255,0.10); flex-shrink: 0;
 }
 
 /* ── Live progress panel (appended by JS as the card's last child) ──────── */
@@ -862,4 +1040,135 @@
     background: rgba(var(--accent-rgb), 0.18);
     border-color: rgba(var(--accent-rgb), 0.45);
     color: #fff; transform: translateY(-1px);
+}
+
+/* ── The verdict strip ──
+   Active/System/Custom counted rows in a table. These answer "is automation
+   working", and each is a lens: clicking one filters the page to exactly the
+   rows it counted. */
+.automations-stats .auto-stat-lens {
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+.automations-stats .auto-stat-lens:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.16); }
+.automations-stats .auto-stat-lens.active {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: #fff;
+}
+.automations-stats .auto-stat-lens.failing {
+    border-color: rgba(244, 67, 54, 0.3);
+    background: rgba(244, 67, 54, 0.07);
+    color: #ff8a80;
+}
+.automations-stats .auto-stat-lens.failing strong {
+    background: none; -webkit-text-fill-color: #ff8a80; color: #ff8a80;
+}
+.automations-stats .auto-stat-lens.failing.active {
+    border-color: rgba(244, 67, 54, 0.55);
+    background: rgba(244, 67, 54, 0.14);
+}
+.automations-stats .auto-stat-lens.waiting {
+    border-color: rgba(245, 158, 11, 0.28);
+    color: #f59e0b;
+}
+.automations-stats .auto-stat-lens.waiting strong {
+    background: none; -webkit-text-fill-color: #f59e0b; color: #f59e0b;
+}
+.automations-stats .auto-stat-allgood {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; letter-spacing: .03em;
+    color: rgb(134, 239, 172);
+}
+.automations-stats .auto-stat-allgood::before { content: '✓'; }
+
+/* ── Families ──
+   Sections were bare headers over a grid: no order, no organisation, and a
+   collapsed one told you nothing. Same container chassis as the tools page's
+   job families — a glow per family, and a header that summarises itself. */
+.automations-section {
+    --tile-glow: 148, 163, 184;
+    position: relative;
+    padding: 12px 14px 14px;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 14px;
+    background:
+        radial-gradient(90% 130% at 0% 0%, rgba(var(--tile-glow), 0.05), transparent 55%),
+        rgba(255,255,255,0.012);
+    overflow: hidden;
+}
+.automations-section::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--tile-glow), 0.5),
+        rgba(var(--tile-glow), 0.75),
+        rgba(var(--tile-glow), 0.5),
+        transparent);
+}
+.automations-section .section-count {
+    background: rgba(var(--tile-glow), 0.16);
+    color: #fff;
+    border-color: rgba(var(--tile-glow), 0.28);
+}
+.automations-section-header .section-summary {
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── Builder palette: search + drawers ──
+   Was three flat, unsearchable lists — 45 triggers and 52 actions, each a
+   full-width row. `.builder-sidebar` is the scope on purpose: both builders
+   carry it, so the video side gets this without a second rule. */
+.builder-sidebar .block-search-wrap {
+    position: sticky; top: 0; z-index: 2;
+    padding: 2px 0 10px;
+    background: inherit;
+}
+.builder-sidebar .block-search {
+    width: 100%; box-sizing: border-box;
+    padding: 8px 11px;
+    border-radius: 9px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.05);
+    color: #fff; font-size: 12.5px; font-family: inherit;
+}
+.builder-sidebar .block-search:focus {
+    outline: none;
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+.builder-sidebar .block-search::placeholder { color: rgba(255,255,255,0.3); }
+
+.builder-sidebar .block-drawer { margin-bottom: 4px; }
+.builder-sidebar .block-drawer-head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 5px 6px; margin-bottom: 2px;
+    border: none; border-radius: 7px;
+    background: transparent; color: inherit;
+    cursor: pointer; text-align: left; font-family: inherit;
+}
+.builder-sidebar .block-drawer-head:hover { background: rgba(255,255,255,0.04); }
+.builder-sidebar .block-drawer-chevron {
+    font-size: 8px; color: rgba(255,255,255,0.3);
+    transition: transform .2s ease;
+}
+.builder-sidebar .block-drawer.collapsed .block-drawer-chevron { transform: rotate(-90deg); }
+.builder-sidebar .block-drawer-name {
+    flex: 1; font-size: 11px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+}
+.builder-sidebar .block-drawer-count {
+    font-size: 10px; font-weight: 700;
+    padding: 1px 7px; border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.4);
+}
+.builder-sidebar .block-drawer.collapsed .block-drawer-body { display: none; }
+.builder-sidebar .block-search-empty {
+    padding: 14px 6px; font-size: 12px; font-style: italic;
+    color: rgba(255,255,255,0.3);
 }

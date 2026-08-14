@@ -961,6 +961,22 @@
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
         _vqSizeLabel('vq-movie-label', p.max_movie_gb || 0);
         _vqSizeLabel('vq-episode-label', p.max_episode_gb || 0);
+
+        // Swarm health floor. Absent from a profile stored before the gate existed
+        // means "use the default", not "no floor" — same rule the normalizer applies,
+        // so the slider never shows 0 for an install that will actually enforce 1.
+        var sd = document.getElementById('vq-min-seeders');
+        var seeders = (p.min_seeders === undefined || p.min_seeders === null) ? 1 : p.min_seeders;
+        if (sd) sd.value = seeders;
+        _vqSeedersLabel(seeders);
+    }
+
+    function _vqSeedersLabel(n) {
+        var el = document.getElementById('vq-seeders-label');
+        if (!el) return;
+        n = parseInt(n, 10) || 0;
+        el.textContent = n <= 0 ? 'No minimum — grab dead swarms too'
+            : ('At least ' + n + ' seeder' + (n === 1 ? '' : 's'));
     }
 
     function moveTier(k, dir) {
@@ -1041,10 +1057,12 @@
             if (e.target.id === 'vq-prefer-repack') { _videoQuality.prefer_repack = e.target.checked; saveQuality(true); return; }
             if (e.target.id === 'vq-movie-size') { _videoQuality.max_movie_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-episode-size') { _videoQuality.max_episode_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-min-seeders') { _videoQuality.min_seeders = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
         });
         card.addEventListener('input', function (e) {
             if (e.target.id === 'vq-movie-size') { _vqSizeLabel('vq-movie-label', parseInt(e.target.value, 10) || 0); return; }
             if (e.target.id === 'vq-episode-size') { _vqSizeLabel('vq-episode-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-min-seeders') { _vqSeedersLabel(e.target.value); return; }
         });
     }
 

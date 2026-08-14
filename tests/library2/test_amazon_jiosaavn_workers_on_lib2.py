@@ -258,9 +258,8 @@ class TestAmazon:
         assert row['expected_track_count'] == 12
         assert row['label'] == 'Sony'
 
-    def test_an_error_is_not_retried(self, amazon):
-        """A provider outage must not become an infinite retry loop — unlike
-        JioSaavn, whose errors mark a transient detail-fetch miss (#964)."""
+    def test_a_stale_error_is_retried(self, amazon):
+        """Per-item failures recover after the shared retry window."""
         amazon._mark_status('artist', 1, 'error')
         conn = amazon.db._get_connection()
         conn.execute("UPDATE lib2_provider_attempts "
@@ -268,7 +267,7 @@ class TestAmazon:
         conn.commit()
         conn.close()
 
-        assert amazon._get_next_item()['type'] == 'album', "the artist stays settled"
+        assert amazon._get_next_item()['type'] == 'artist'
 
     def test_pending_and_progress_cover_all_three(self, amazon):
         assert amazon._count_pending_items() == 3

@@ -696,10 +696,181 @@ class TidalClient:
                 next_params = None      # the cursor URL carries all query params
 
             logger.info(f"Successfully retrieved {len(playlists)} playlists (metadata only) with the V2 filter method.")
+
+            # The V2 owners.id filter above returns only playlists the user
+            # CREATED — playlists they merely FOLLOW (Tidal editorial "My
+            # Daily Discovery", other users' lists) never appear, which is
+            # why curated playlists were invisible unless the user re-added
+            # them as personal copies (Specialmed's report). Merge the v1
+            # favorites listing, deduped by id.
+            try:
+                seen_ids = {str(p.id) for p in playlists}
+                favorites = self._get_favorite_playlists(user_id)
+                added = 0
+                for fav in favorites:
+                    if str(fav.id) in seen_ids:
+                        continue
+                    seen_ids.add(str(fav.id))
+                    playlists.append(fav)
+                    added += 1
+                if added:
+                    logger.info(f"Merged {added} followed/favorited Tidal playlists into the listing.")
+            except Exception as e:
+                # Favorites are additive — never let them break the personal listing.
+                logger.warning(f"Could not fetch favorited Tidal playlists: {e}")
+
             return playlists
 
         except Exception as e:
             logger.error(f"A critical error occurred while fetching Tidal V2 playlists: {e}")
+            return []
+
+    @staticmethod
+    def _favorite_playlist_from_item(item):
+        """Build a Playlist from one v1 favorites row. The v1 endpoint wraps
+        each playlist as {'created': ts, 'item': {...}}; tolerate a flat row
+        too. Returns None for rows without a uuid."""
+        pl = item.get('item') if isinstance(item.get('item'), dict) else item
+        uuid = pl.get('uuid') or pl.get('id')
+        if not uuid:
+            return None
+        image_guid = pl.get('squareImage') or pl.get('image') or ''
+        image_url = (
+            f"https://resources.tidal.com/images/{image_guid.replace('-', '/')}/640x640.jpg"
+            if image_guid else None
+        )
+        creator = pl.get('creator') or {}
+        # Editorial playlists carry creator id 0 / no name — label them Tidal.
+        owner = creator.get('name') or ('Tidal' if not creator.get('id') else 'Tidal user')
+        playlist = Playlist(
+            id=str(uuid),
+            name=pl.get('title') or 'Unknown Playlist',
+            description=pl.get('description') or '',
+            external_urls={'tidal': f"https://listen.tidal.com/playlist/{uuid}"},
+            public=bool(pl.get('publicPlaylist', True)),
+            tracks=[],  # fetched on-demand, like the owned rows
+        )
+        playlist.track_count = pl.get('numberOfTracks') or 0
+        playlist.owner = owner
+        if image_url:
+            playlist.image_url = image_url
+        return playlist
+
+    def _get_favorite_playlists(self, user_id):
+        """The user's FOLLOWED playlists — V2 user-collection first, v1 second.
+
+        The v1 favorites endpoint below was the ONLY path here originally, and
+        it is why Specialmed still saw personal playlists only after the "fix":
+        as `get_favorite_albums` documents, **v1 returns 403 for modern OAuth
+        tokens** lacking the `r_usr` scope. It failed, logged at INFO, and
+        degraded silently to the personal listing — indistinguishable, from the
+        user's side, from no fix at all.
+
+        V2 `userCollectionPlaylists` is the same family of endpoint that already
+        works for favorited albums, artists and tracks in this client, so it is
+        tried first. v1 is kept as a fallback because a token old enough to
+        carry `r_usr` will still be served by it.
+        """
+        collected = self._get_collection_playlists()
+        if collected:
+            return collected
+
+        favorites = []
+        headers = {
+            'Accept': 'application/json',
+            'Authorization': f'Bearer {self.access_token}',
+            'User-Agent': 'TIDAL_ANDROID/2.47.1 okhttp/4.9.0',
+        }
+        limit, offset = 50, 0
+        for _page in range(20):  # 1000 followed playlists — generous ceiling
+            response = requests.get(
+                f"{self.alt_base_url}/users/{user_id}/favorites/playlists",
+                headers=headers,
+                params={'limit': limit, 'offset': offset, 'countryCode': 'US'},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                logger.info(f"v1 favorites/playlists returned {response.status_code}; skipping followed playlists.")
+                break
+            data = response.json() or {}
+            items = data.get('items') or []
+            for item in items:
+                try:
+                    playlist = self._favorite_playlist_from_item(item)
+                    if playlist:
+                        favorites.append(playlist)
+                except Exception as e:
+                    logger.debug(f"Skipping unparseable favorite playlist row: {e}")
+            if len(items) < limit:
+                break
+            offset += limit
+        return favorites
+
+    def _get_collection_playlists(self):
+        """Followed playlists via the V2 user-collection endpoint.
+
+        Two steps, mirroring `get_favorite_albums`: walk the collection for the
+        ids, then batch-hydrate their metadata through the same `/v2/playlists`
+        reader the owned listing already uses, so followed and owned rows are
+        parsed by ONE parser and cannot drift apart."""
+        try:
+            ids = self._iter_collection_resource_ids(
+                self._COLLECTION_PLAYLISTS_PATH, 'playlists',
+            )
+            if not ids:
+                # Distinguish the two silences: a token without collection scope
+                # is a fixable user problem, an empty collection is not.
+                if self.collection_needs_reconnect():
+                    logger.warning(
+                        "Tidal followed playlists unavailable: the saved token lacks "
+                        "collection scope. Reconnect Tidal in Settings -> Connections "
+                        "to see followed/editorial playlists."
+                    )
+                else:
+                    logger.info("Tidal user collection reports no followed playlists.")
+                return []
+
+            playlists = []
+            for i in range(0, len(ids), self._COLLECTION_BATCH_SIZE):
+                playlists.extend(self._get_playlists_batch(ids[i:i + self._COLLECTION_BATCH_SIZE]))
+            logger.info(
+                f"Retrieved {len(playlists)}/{len(ids)} followed Tidal playlists "
+                f"from the V2 user collection."
+            )
+            return playlists
+        except Exception as e:
+            logger.warning(f"Tidal V2 followed-playlist collection failed: {e}")
+            return []
+
+    def _get_playlists_batch(self, playlist_ids):
+        """Batch-hydrate playlist metadata via `/v2/playlists?filter[id]=...`.
+
+        Reuses `_collect_v2_playlist_page` — the response shape is identical to
+        the owned listing's, so there is one parser for both."""
+        if not playlist_ids:
+            return []
+        try:
+            params = {'countryCode': 'US', 'filter[id]': ','.join(playlist_ids)}
+            headers = self.session.headers.copy()
+            headers['accept'] = 'application/vnd.api+json'
+            resp = requests.get(
+                f"{self.base_url}/playlists", params=params, headers=headers, timeout=15,
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    f"Tidal playlists batch returned {resp.status_code}: {resp.text[:200]}"
+                )
+                return []
+            playlists = []
+            self._collect_v2_playlist_page(resp.json(), playlists)
+            # These are FOLLOWED, not owned. The owned listing leaves owner unset;
+            # labelling these keeps the card honest about where the list came from.
+            for playlist in playlists:
+                if not getattr(playlist, 'owner', None):
+                    playlist.owner = 'Tidal'
+            return playlists
+        except Exception as e:
+            logger.warning(f"Tidal _get_playlists_batch error: {e}")
             return []
 
     def _collect_v2_playlist_page(self, data, playlists):
@@ -1659,6 +1830,15 @@ class TidalClient:
     _COLLECTION_TRACKS_PATH = "userCollectionTracks/me/relationships/items"
     _COLLECTION_ALBUMS_PATH = "userCollectionAlbums/me/relationships/items"
     _COLLECTION_ARTISTS_PATH = "userCollectionArtists/me/relationships/items"
+    # Checked against Tidal's published OpenAPI (tidal-usercollectionplaylists-
+    # api-openapi.yml): the resource exists and its path shape is
+    # `/userCollectionPlaylists/{id}/relationships/items` — byte-identical to the
+    # `/userCollectionAlbums/{id}/...` one above, which this client already calls
+    # with `me` in the {id} slot and which works. The spec's item-identifier
+    # `example: tracks` is boilerplate — the ALBUMS spec says `tracks` too, while
+    # the real responses type as `albums`, which is why the walker filters on the
+    # resource name rather than trusting the example.
+    _COLLECTION_PLAYLISTS_PATH = "userCollectionPlaylists/me/relationships/items"
     _COLLECTION_BATCH_SIZE = 20  # Tidal `filter[id]` page cap
 
     @rate_limited

@@ -130,6 +130,10 @@ class WatchlistArtist:
     # releases for this artist but does NOT auto-add them to the wishlist (so they
     # don't auto-download). Default True = current behaviour.
     auto_download: bool = True
+    # Three-state preference behind auto_download: None = follow the global
+    # default, 0 = never, 1 = always. The scanner resolves the pair into
+    # `auto_download` (core.watchlist_auto_download).
+    auto_download_pref: Optional[int] = None
     # App-wide quality_profiles row used for every release queued by this
     # artist.  Stored on the Watchlist itself so consumers do not need to know
     # about Library v2 (or any other UI that created the watch).
@@ -532,6 +536,17 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN file TEXT")
             except sqlite3.OperationalError:
                 pass    # already there
+            # Channel / thread / avatar envelope tags. Without these the
+            # archive flattened every message into #general on reload: the
+            # push loop archived DECODED dicts, and decoding is exactly the
+            # step that strips the envelope, so the tags existed nowhere
+            # the frontend could reach. Same tolerant-ALTER pattern.
+            for _chat_col in ('chan TEXT', 'thread TEXT', 'thread_name TEXT', 'av INTEGER',
+                              'edit_target TEXT'):
+                try:
+                    cursor.execute("ALTER TABLE chat_room_messages ADD COLUMN " + _chat_col)
+                except sqlite3.OperationalError:
+                    pass    # already there
 
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
@@ -700,6 +715,8 @@ class MusicDatabase:
             # from an explicit column list, so any column added before them gets
             # dropped. Adding it here (after the last recreate) makes it stick.
             self._add_watchlist_auto_download_column(cursor)
+            # Same ordering rule: must land AFTER the recreates, or it is dropped.
+            self._add_watchlist_auto_download_pref_column(cursor)
             self._add_watchlist_quality_profile_column(cursor)
 
             # Spotify library cache
@@ -1661,6 +1678,130 @@ class MusicDatabase:
         finally:
             conn.close()
 
+    # Names/titles per entity table for the degenerate-title scan — computed
+    # once per verify call, shared across all services.
+    _VERIFY_ENTITY_NAME_COLS = {
+        'artist': ('lib2_artists', 'name'),
+        'album': ('lib2_albums', 'title'),
+        'track': ('lib2_tracks', 'title'),
+    }
+
+    def get_owned_album_count_by_artist_name(self, artist_name: str) -> int:
+        """How many of this artist's albums are IN the library — the discover
+        hero's ownership meter. Case-insensitive exact name match, riding
+        idx_artists_name + idx_albums_artist_id."""
+        if not (artist_name or '').strip():
+            return 0
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT COUNT(DISTINCT al.id)
+                     FROM lib2_albums al
+                     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE ar.name = ? COLLATE NOCASE
+                      AND al.origin = 'library'
+                      AND EXISTS (
+                          SELECT 1 FROM lib2_tracks t
+                          JOIN lib2_track_files f ON f.track_id = t.id
+                          WHERE t.album_id = al.id
+                            AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                            AND COALESCE(f.file_state, 'active') = 'active'
+                      )""",
+                (artist_name.strip(),),
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+
+    def degenerate_entity_ids(self) -> dict:
+        """{entity_type: [ids]} of rows whose display title is DEGENERATE
+        (normalizes to nothing) — the empty-normalization false-match class.
+        Service-independent, so callers compute it once and reset per service."""
+        from core.enrichment.unmatched import degenerate_title
+        out = {}
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            for entity, (table, col) in self._VERIFY_ENTITY_NAME_COLS.items():
+                try:
+                    cursor.execute(f"SELECT id, {col} FROM {table}")
+                    out[entity] = [r[0] for r in cursor.fetchall() if degenerate_title(r[1])]
+                except Exception as e:
+                    logger.debug(f"degenerate scan skipped for {table}: {e}")
+                    out[entity] = []
+            return out
+        finally:
+            conn.close()
+
+    def verify_enrichment_matches(self, service: str, degenerates: dict = None) -> dict:
+        """Targeted repair of the pre-fix corruption classes for ONE service
+        (see core/enrichment/unmatched.py's Verify-matches block): reset every
+        artist id-collision cluster (the smear fingerprint) and every MATCHED
+        row with a degenerate title (the empty-normalization class). Returns
+        {'collision_clusters', 'collision_rows', 'degenerate_reset'}. Pure
+        SQL + a local title scan — no API calls; the fixed workers rematch
+        the reset rows on their next pass."""
+        from core.enrichment.unmatched import (
+            build_artist_collision_queries,
+            build_degenerate_reset_query,
+        )
+        from core.library2.match_status import set_library_v2_match
+        result = {'collision_clusters': 0, 'collision_rows': 0, 'degenerate_reset': 0}
+        if degenerates is None:
+            degenerates = self.degenerate_entity_ids()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            queries = build_artist_collision_queries(service)
+            if queries:
+                count_clusters, count_rows, select_rows = queries
+                try:
+                    cursor.execute(count_clusters)
+                    result['collision_clusters'] = cursor.fetchone()[0] or 0
+                    cursor.execute(count_rows)
+                    result['collision_rows'] = cursor.fetchone()[0] or 0
+                    if result['collision_rows']:
+                        affected = [row[0] for row in cursor.execute(select_rows)]
+                        for artist_id in affected:
+                            set_library_v2_match(
+                                conn, 'artist', artist_id, service, None,
+                                actor='verify_matches',
+                            )
+                            cursor.execute(
+                                "DELETE FROM lib2_provider_attempts "
+                                "WHERE entity_type='artist' AND entity_id=? "
+                                "AND service=?",
+                                (artist_id, service),
+                            )
+                except Exception as e:
+                    logger.warning(f"collision repair skipped for {service}: {e}")
+            for entity, ids in (degenerates or {}).items():
+                built = build_degenerate_reset_query(service, entity, ids)
+                if not built:
+                    continue
+                sql, params = built
+                try:
+                    affected = [row[0] for row in cursor.execute(sql, params)]
+                    for entity_id in affected:
+                        set_library_v2_match(
+                            conn, entity, entity_id, service, None,
+                            actor='verify_matches',
+                        )
+                        cursor.execute(
+                            "DELETE FROM lib2_provider_attempts "
+                            "WHERE entity_type=? AND entity_id=? AND service=?",
+                            (entity, entity_id, service),
+                        )
+                    result['degenerate_reset'] += len(affected)
+                except Exception as e:
+                    logger.debug(f"degenerate repair skipped for {service}/{entity}: {e}")
+            conn.commit()
+            return result
+        finally:
+            conn.close()
+
     def _add_mirrored_playlist_explored_column(self, cursor):
         """Add explored_at column to mirrored_playlists to persist explore badge."""
         try:
@@ -2592,6 +2733,40 @@ class MusicDatabase:
                 logger.info("Added auto_download column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
+
+    def _add_watchlist_auto_download_pref_column(self, cursor):
+        """Add the three-state auto-download preference (swiftpawpaw's request).
+
+        ``auto_download`` is ``NOT NULL DEFAULT 1``, so every untouched artist
+        already reads 1 and nothing can tell "the user chose this" from "nobody
+        ever set it". A global default would be powerless against those rows —
+        which is exactly the problem: 225 artists, all reading 1, no way to turn
+        them off but one at a time.
+
+        ``auto_download_pref`` is NULLABLE and carries the third state:
+            NULL -> follow the global default
+            0    -> never, whatever the global says
+            1    -> always, whatever the global says
+
+        The backfill is lossless: rows already at ``auto_download=0`` are
+        deliberate follow-only choices and become an explicit 0; everything else
+        stays NULL and inherits. Nothing is discarded, because today "explicitly
+        on" and "on by default" behave identically — the difference was never
+        expressible."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'auto_download_pref' in columns:
+                return
+            cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN auto_download_pref INTEGER")
+            if 'auto_download' in columns:
+                # Preserve every deliberate follow-only; leave the rest inheriting.
+                cursor.execute("UPDATE watchlist_artists SET auto_download_pref = 0 "
+                               "WHERE auto_download = 0")
+            logger.info("Added auto_download_pref column to watchlist_artists "
+                        "(explicit follow-only rows preserved)")
+        except Exception as e:
+            logger.error(f"Error adding auto_download_pref to watchlist_artists: {e}")
 
     def _add_watchlist_quality_profile_column(self, cursor):
         """Add the native per-artist Quality Profile assignment.
@@ -5774,7 +5949,12 @@ class MusicDatabase:
         try:
             cursor.execute("SELECT value FROM metadata WHERE key = 'repair_worker_v2' LIMIT 1")
             if cursor.fetchone():
-                return  # Already migrated
+                # Tables exist — but LATER columns/indexes still have to reach
+                # this database. The marker only guards the CREATE below; the
+                # migrations run on every boot (they self-check) so a DB made
+                # before this release is not stranded on the old shape.
+                self._migrate_repair_worker_columns(cursor)
+                return
 
             logger.info("Creating repair worker v2 tables...")
 
@@ -5822,10 +6002,55 @@ class MusicDatabase:
 
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('repair_worker_v2', '1')")
 
+            # Fresh DBs take the same migration path, so the column set is
+            # defined in exactly one place.
+            self._migrate_repair_worker_columns(cursor)
+
             logger.info("Repair worker v2 tables created successfully")
 
         except Exception as e:
             logger.error(f"Error creating repair worker v2 tables: {e}")
+
+    def _migrate_repair_worker_columns(self, cursor):
+        """Columns + indexes added to the repair tables after v2 shipped.
+
+        Idempotent and cheap (PRAGMA + CREATE INDEX IF NOT EXISTS), and it runs
+        on EVERY boot rather than behind the repair_worker_v2 marker — that
+        marker is set once, so anything gated by it never reaches an existing
+        install.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(repair_findings)")
+            finding_cols = {c[1] for c in cursor.fetchall()}
+            if 'last_error' not in finding_cols:
+                # Why a fix failed, kept ON the finding. Bulk runs used to hold
+                # errors only in memory (capped at 20), so a finding that
+                # refused to fix just sat there pending with no reason anywhere.
+                cursor.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
+                logger.info("Added last_error column to repair_findings")
+
+            cursor.execute("PRAGMA table_info(repair_job_runs)")
+            run_cols = {c[1] for c in cursor.fetchall()}
+            if 'error_text' not in run_cols:
+                # Why a RUN failed. Runs were hardcoded 'completed', so the
+                # history tab could not distinguish a clean scan from a crash.
+                cursor.execute("ALTER TABLE repair_job_runs ADD COLUMN error_text TEXT")
+                logger.info("Added error_text column to repair_job_runs")
+
+            # The dedup lookup filters on (entity_type, entity_id) and on
+            # file_path once per candidate item of every scan; both were full
+            # scans of an unbounded, never-GC'd table.
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_entity "
+                "ON repair_findings (entity_type, entity_id)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_path ON repair_findings (file_path)")
+            # The findings inbox groups by type and filters by status.
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_type_status "
+                "ON repair_findings (finding_type, status)")
+        except Exception as e:
+            logger.error(f"Error migrating repair worker columns: {e}")
 
     def _init_manual_library_match_table(self):
         """Create manual_library_track_matches table and indexes."""
@@ -6022,13 +6247,20 @@ class MusicDatabase:
             return None
 
     def delete_manual_library_match(self, match_id: int, profile_id: int) -> bool:
-        """Delete match by PK id, scoped to profile_id."""
+        """Delete match by PK id, scoped to profile_id.
+
+        Returns whether a row was ACTUALLY removed (#1138). This used to return
+        True whenever the statement didn't raise, so a delete that matched
+        nothing — wrong id, or a match saved under a different profile — was
+        reported to the UI as a success. The row then reappeared on the next
+        load with no explanation, which is what "I tried to remove it but I
+        couldn't" looks like from the outside."""
         try:
             with self._get_connection() as conn:
-                conn.execute("""
+                cursor = conn.execute("""
                     DELETE FROM manual_library_track_matches WHERE id = ? AND profile_id = ?
                 """, (match_id, profile_id))
-                return True
+                return bool(cursor.rowcount)
         except Exception as e:
             logger.error(f"delete_manual_library_match error: {e}")
             return False
@@ -11073,7 +11305,20 @@ class MusicDatabase:
                 fil_json = json.dumps({'n': str(fil.get('n'))[:200],
                                        's': fil.get('s') if isinstance(fil.get('s'), int) else None,
                                        'm': str(fil.get('m') or '')[:80]})
-            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json))
+            _chan = m.get('chan')
+            _th = m.get('th')
+            _tn = m.get('tn')
+            try:
+                _av = int(m.get('av')) if m.get('av') is not None else None
+            except (TypeError, ValueError):
+                _av = None
+            _ed = m.get('ed')
+            rows.append((str(room), user, msg, 1 if m.get('rich') else 0, ts, rep_json, fil_json,
+                         str(_chan)[:24] if _chan else None,
+                         str(_th)[:160] if _th else None,
+                         str(_tn)[:80] if _tn else None,
+                         _av,
+                         str(_ed)[:160] if _ed else None))
         if not rows:
             return 0
         try:
@@ -11081,8 +11326,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 before = conn.total_changes
                 cursor.executemany(
-                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+                    "INSERT INTO chat_room_messages (room, username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
                 inserted = conn.total_changes - before
                 if inserted:
                     cursor.execute(
@@ -11249,7 +11494,7 @@ class MusicDatabase:
         (ready to render). ``before`` pages backwards: only messages strictly
         older than that timestamp."""
         try:
-            q = ("SELECT username, message, rich, timestamp, reply, file FROM chat_room_messages "
+            q = ("SELECT username, message, rich, timestamp, reply, file, chan, thread, thread_name, av, edit_target FROM chat_room_messages "
                  "WHERE room = ?")
             args: list = [str(room)]
             if before:
@@ -11270,6 +11515,26 @@ class MusicDatabase:
                             r[k] = None
                     if not r.get(k):
                         r.pop(k, None)
+                # Envelope tags back under their WIRE names — the frontend
+                # reads m.chan / m.th / m.tn / m.av, matching the live push.
+                if r.get('chan'):
+                    pass  # already the right key
+                else:
+                    r.pop('chan', None)
+                if r.get('thread'):
+                    r['th'] = r.pop('thread')
+                else:
+                    r.pop('thread', None)
+                if r.get('thread_name'):
+                    r['tn'] = r.pop('thread_name')
+                else:
+                    r.pop('thread_name', None)
+                if not r.get('av'):
+                    r.pop('av', None)
+                if r.get('edit_target'):
+                    r['ed'] = r.pop('edit_target')
+                else:
+                    r.pop('edit_target', None)
             return rows
         except Exception as e:
             logger.error("Error reading chat archive: %s", e)
@@ -11992,7 +12257,7 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'quality_profile_id']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -12031,6 +12296,8 @@ class MusicDatabase:
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
+                    auto_download_pref = (row['auto_download_pref']
+                                          if 'auto_download_pref' in existing_columns else None)
                     quality_profile_id = (
                         int(row['quality_profile_id'])
                         if 'quality_profile_id' in existing_columns
@@ -12062,6 +12329,7 @@ class MusicDatabase:
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
+                        auto_download_pref=auto_download_pref,
                         quality_profile_id=quality_profile_id,
                         profile_id=profile_id
                     ))
@@ -12252,6 +12520,70 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
+
+    def get_watchlist_recent_releases(self, limit: int = 20, profile_id: int = 1) -> list:
+        """Newest releases discovered across the WHOLE watchlist, flat.
+
+        ``recent_releases`` is populated by the watchlist scan and until now was
+        only ever read per-artist (the watchlist artist detail's six-release
+        strip). The dashboard's "Fresh from your artists" rail needs the same
+        rows newest-first across every watched artist, with the artist's name
+        and provider ids joined on so a card can say who it's from and link to
+        their page.
+
+        Ordered by release_date (what the user cares about), tie-broken by
+        added_date so two same-day releases keep a stable order.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT rr.album_name, rr.release_date, rr.album_cover_url,
+                           rr.track_count, rr.source,
+                           rr.album_spotify_id, rr.album_itunes_id,
+                           rr.album_deezer_id,
+                           wa.artist_name, wa.spotify_artist_id,
+                           wa.itunes_artist_id, wa.deezer_artist_id
+                    FROM recent_releases rr
+                    JOIN watchlist_artists wa ON rr.watchlist_artist_id = wa.id
+                    WHERE wa.profile_id = ?
+                    ORDER BY rr.release_date DESC, rr.added_date DESC
+                    LIMIT ?
+                """, (profile_id, limit))
+                releases = [dict(row) for row in cursor.fetchall()]
+
+                # Owned = the library already has this (artist, album) —
+                # the dashboard rail badges those, and a click plays them
+                # instead of opening the download modal. Name-match, same
+                # comparison the recently-added art backfill uses; track
+                # completeness stays the click-time check's job.
+                for release in releases:
+                    try:
+                        cursor.execute(
+                            """
+                            SELECT 1 FROM lib2_albums al
+                            JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                              AND al.origin = 'library'
+                              AND EXISTS (
+                                  SELECT 1 FROM lib2_tracks t
+                                  JOIN lib2_track_files f ON f.track_id=t.id
+                                  WHERE t.album_id=al.id
+                                    AND COALESCE(f.file_state,'active')='active'
+                                    AND f.path IS NOT NULL AND TRIM(f.path)<>''
+                              )
+                            LIMIT 1
+                            """,
+                            (release.get('artist_name') or '',
+                             release.get('album_name') or ''))
+                        release['owned'] = cursor.fetchone() is not None
+                    except Exception:
+                        release['owned'] = False
+                return releases
+        except Exception as e:
+            logger.error(f"Error getting watchlist recent releases: {e}")
+            return []
 
     def update_watchlist_artist_image(self, artist_id: str, image_url: str) -> bool:
         """Update the image URL for a watchlist artist (checks linked provider IDs)"""
@@ -16276,6 +16608,120 @@ class MusicDatabase:
             logger.error(f"Error querying library history: {e}")
             return [], 0
 
+    def get_recently_added_albums(self, limit: int = 20) -> list[dict]:
+        """The dashboard's Recently Added rail: newest N ALBUMS to land, folded
+        out of the per-track ``library_history`` rows.
+
+        Fold key is (artist, album) case-insensitively; a row with no album
+        falls back to its track title, so a landed single is its own card
+        rather than invisible. The newest row per key supplies the timestamp,
+        quality, source and the play target (title + file_path); every later
+        row only bumps the track count.
+
+        Art: most history rows carry no thumb_url (the importer records the
+        landing before art exists), so empty covers are backfilled from the
+        Library-v2 catalogue — the album DID land in the library, which is where its
+        art eventually lives — then from the artist's thumb as a last resort.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM library_history ORDER BY created_at DESC LIMIT 200")
+                rows = [dict(r) for r in cursor.fetchall()]
+
+                cards: list[dict] = []
+                by_key: dict[str, dict] = {}
+                for row in rows:
+                    artist = (row.get('artist_name') or '').strip()
+                    album = (row.get('album_name') or '').strip() or (row.get('title') or '').strip()
+                    if not artist and not album:
+                        continue
+                    key = f"{artist.lower()}::{album.lower()}"
+                    existing = by_key.get(key)
+                    if existing is not None:
+                        existing['track_count'] += 1
+                        if not existing['thumb_url'] and row.get('thumb_url'):
+                            existing['thumb_url'] = row['thumb_url']
+                        continue
+                    if len(cards) >= limit:
+                        continue  # keep counting tracks for cards already kept
+                    card = {
+                        'artist_name': artist,
+                        'album_name': album,
+                        'thumb_url': row.get('thumb_url') or '',
+                        'added_at': row.get('created_at') or '',
+                        'track_count': 1,
+                        'quality': (row.get('quality') or '').upper(),
+                        'download_source': row.get('download_source') or '',
+                        'event_type': row.get('event_type') or '',
+                        'play_title': row.get('title') or '',
+                        'play_file_path': row.get('file_path') or '',
+                    }
+                    by_key[key] = card
+                    cards.append(card)
+
+                for card in cards:
+                    if card['thumb_url']:
+                        continue
+                    try:
+                        cursor.execute(
+                            """
+                            SELECT al.image_url, ar.image_url
+                            FROM lib2_albums al
+                            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
+                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                              AND al.origin = 'library'
+                            LIMIT 1
+                            """,
+                            (card['artist_name'], card['album_name']))
+                        hit = cursor.fetchone()
+                        if hit:
+                            card['thumb_url'] = hit[0] or hit[1] or ''
+                    except Exception as e:
+                        logger.debug("recently-added art backfill failed: %s", e)
+
+                # Every card also carries the ARTIST's art: history thumb URLs
+                # can be stale or server-authed and die in the browser, so the
+                # frontend needs a second image to fall to before the
+                # placeholder — not just a second choice server-side.
+                def _artist_art(name):
+                    """Exact name first, then the primary artist: history rows"""
+                    # often carry 'A feat. B' / 'A, B' while the library row is
+                    # just 'A' — without the retry those cards stay artless.
+                    candidates = [name]
+                    lowered = name.lower()
+                    for sep in (' feat.', ' feat ', ' ft.', ' ft ', ' featuring ', ',', ';', ' & ', ' x '):
+                        idx = lowered.find(sep)
+                        if idx > 0:
+                            candidates.append(name[:idx])
+                    for candidate in candidates:
+                        cursor.execute(
+                            "SELECT image_url FROM lib2_artists"
+                            " WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))"
+                            " AND canonical_artist_id IS NULL"
+                            " AND image_url IS NOT NULL AND image_url != '' LIMIT 1",
+                            (candidate,))
+                        hit = cursor.fetchone()
+                        if hit and hit[0]:
+                            return hit[0]
+                    return ''
+
+                for card in cards:
+                    try:
+                        card['artist_thumb_url'] = _artist_art(card['artist_name'])
+                        if not card['thumb_url']:
+                            card['thumb_url'] = card['artist_thumb_url']
+                    except Exception as e:
+                        card['artist_thumb_url'] = ''
+                        logger.debug("recently-added artist art lookup failed: %s", e)
+
+                return cards
+        except Exception as e:
+            logger.error(f"Error getting recently added albums: {e}")
+            return []
+
     def get_library_history_unverified(self) -> list[dict]:
         """Return every library_history row that still needs human confirmation.
 
@@ -17322,6 +17768,33 @@ class MusicDatabase:
             logger.error(f"Error updating mirrored playlist source reference: {e}")
             return False
 
+    def adopt_discovered_artist(self, track_id: int, artist_name: str) -> bool:
+        """Promote a discovery match's artist onto the mirrored row itself —
+        ONLY when the stored artist is missing or the 'Unknown Artist'
+        placeholder. Discovery used to write matched_data alone, so an
+        explored playlist still displayed (and searched as) 'Unknown Artist'
+        forever, even with a confident match sitting in extra_data (found by
+        the PR #1136 author: their explored playlist stayed 75% unknown).
+        A real stored artist is never overwritten — a 0.7-confidence guess
+        must not replace source-provided truth."""
+        name = str(artist_name or '').strip()
+        if not name or name.lower() == 'unknown artist':
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE mirrored_playlist_tracks SET artist_name = ? "
+                    "WHERE id = ? AND (artist_name IS NULL OR TRIM(artist_name) = '' "
+                    "OR LOWER(TRIM(artist_name)) = 'unknown artist')",
+                    (name, track_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"adopt_discovered_artist failed for {track_id}: {e}")
+            return False
+
     def update_mirrored_track_extra_data(self, track_id: int, extra_data_dict: dict) -> bool:
         """Merge new data into a mirrored track's extra_data JSON field."""
         try:
@@ -17467,21 +17940,44 @@ class MusicDatabase:
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
 
-                # In-library counts in one shot. Case-sensitive join so
-                # the name and title indexes kick in.
+                # In-library counts in one shot. ID-FIRST: a mirrored track's
+                # source id against Library-v2's promoted/JSON Spotify id, OR
+                # the case-sensitive artist/title relation. Every hit must own
+                # an active file; provider-only discography rows are not owned.
                 try:
                     cursor.execute("""
                         SELECT mpt.playlist_id, COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                        JOIN lib2_artists a ON a.name = mpt.artist_name
-                        JOIN lib2_albums al ON al.primary_artist_id = a.id
-                        JOIN lib2_tracks t ON t.album_id = al.id
-                                          AND t.title = mpt.track_name
-                        WHERE mp.profile_id = ? AND EXISTS (
-                            SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
-                              AND f.path IS NOT NULL AND TRIM(f.path)<>''
-                              AND COALESCE(f.file_state,'active')='active')
+                        WHERE mp.profile_id = ?
+                          AND EXISTS (
+                            SELECT 1 FROM lib2_tracks t
+                            WHERE (
+                              (mpt.source_track_id IS NOT NULL
+                               AND mpt.source_track_id != ''
+                               AND COALESCE(
+                                     NULLIF(t.spotify_id, ''),
+                                     NULLIF(json_extract(t.external_ids, '$.spotify'), '')
+                                   ) = mpt.source_track_id)
+                              OR (t.title = mpt.track_name AND (
+                                EXISTS (
+                                  SELECT 1 FROM lib2_track_artists ta
+                                  JOIN lib2_artists a ON a.id = ta.artist_id
+                                  WHERE ta.track_id = t.id
+                                    AND a.name = mpt.artist_name)
+                                OR EXISTS (
+                                  SELECT 1 FROM lib2_albums al
+                                  JOIN lib2_artists a ON a.id = al.primary_artist_id
+                                  WHERE al.id = t.album_id
+                                    AND a.name = mpt.artist_name)
+                              ))
+                            )
+                            AND EXISTS (
+                              SELECT 1 FROM lib2_track_files f
+                              WHERE f.track_id = t.id
+                                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                                AND COALESCE(f.file_state, 'active') = 'active')
+                          )
                         GROUP BY mpt.playlist_id
                     """, (profile_id,))
                     for row in cursor.fetchall():
@@ -17530,24 +18026,43 @@ class MusicDatabase:
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
-                # In-library: case-sensitive equality so SQLite can use the
-                # artist-name and track-title indexes. COLLATE NOCASE on the
-                # join columns prevents index usage and takes ~18s per
-                # playlist on a 300k-track library; the case-sensitive variant
-                # is ~6ms. Misses purely-case-different matches (rare — Spotify
-                # canonicalizes artist/track names that match library imports).
+                # In-library, id-first like the batched variant: source id
+                # against Library-v2's Spotify id, OR the case-sensitive name
+                # relation. Case-sensitive equality keeps the name/title
+                # indexes usable on very large catalogues.
                 try:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
                         FROM mirrored_playlist_tracks mpt
-                        JOIN lib2_artists a ON a.name = mpt.artist_name
-                        JOIN lib2_albums al ON al.primary_artist_id = a.id
-                        JOIN lib2_tracks t ON t.album_id = al.id
-                                          AND t.title = mpt.track_name
-                        WHERE mpt.playlist_id = ? AND EXISTS (
-                            SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
-                              AND f.path IS NOT NULL AND TRIM(f.path)<>''
-                              AND COALESCE(f.file_state,'active')='active')
+                        WHERE mpt.playlist_id = ?
+                          AND EXISTS (
+                            SELECT 1 FROM lib2_tracks t
+                            WHERE (
+                              (mpt.source_track_id IS NOT NULL
+                               AND mpt.source_track_id != ''
+                               AND COALESCE(
+                                     NULLIF(t.spotify_id, ''),
+                                     NULLIF(json_extract(t.external_ids, '$.spotify'), '')
+                                   ) = mpt.source_track_id)
+                              OR (t.title = mpt.track_name AND (
+                                EXISTS (
+                                  SELECT 1 FROM lib2_track_artists ta
+                                  JOIN lib2_artists a ON a.id = ta.artist_id
+                                  WHERE ta.track_id = t.id
+                                    AND a.name = mpt.artist_name)
+                                OR EXISTS (
+                                  SELECT 1 FROM lib2_albums al
+                                  JOIN lib2_artists a ON a.id = al.primary_artist_id
+                                  WHERE al.id = t.album_id
+                                    AND a.name = mpt.artist_name)
+                              ))
+                            )
+                            AND EXISTS (
+                              SELECT 1 FROM lib2_track_files f
+                              WHERE f.track_id = t.id
+                                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                                AND COALESCE(f.file_state, 'active') = 'active')
+                          )
                     """, (playlist_id,))
                     result['in_library'] = cursor.fetchone()['in_library'] or 0
                 except Exception as extra_err:
@@ -18059,6 +18574,116 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error getting radio tracks for track {track_id}: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def resolve_library_tracks(self, pairs) -> Dict[tuple, Dict[str, Any]]:
+        """Batch (title, artist) -> library track resolution in ONE pass.
+
+        The per-track resolver runs LOWER(title) = ? per call — an unindexed
+        full scan of the tracks table EACH time, which turned a 50-track
+        playlist into minutes on a 300k-track library. This collects every
+        wanted title into one IN() query (one scan total) and matches the
+        artist in Python. Returns {(title_lower, artist_lower): row}; pairs
+        whose track isn't on disk are simply absent."""
+        wants = set()
+        for t, a in pairs or []:
+            t2 = str(t or '').strip().lower()
+            a2 = str(a or '').strip().lower()
+            if t2:
+                wants.add((t2, a2))
+        if not wants:
+            return {}
+        titles = sorted({k[0] for k in wants})
+        out: Dict[tuple, Dict[str, Any]] = {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                _CHUNK = 400   # stay far under SQLite's placeholder limit
+                for i in range(0, len(titles), _CHUNK):
+                    chunk = titles[i:i + _CHUNK]
+                    ph = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT t.id, t.title, f.path AS file_path, f.bitrate, t.duration,
+                               ar.name AS artist_name, al.title AS album_title,
+                               al.image_url AS thumb_url, ar.id AS artist_id, t.album_id
+                        FROM lib2_tracks t
+                        JOIN lib2_albums al ON al.id = t.album_id
+                        JOIN lib2_track_files f ON f.track_id=t.id
+                          AND f.is_primary=1
+                          AND COALESCE(f.file_state,'active')='active'
+                        JOIN lib2_artists ar ON ar.id=COALESCE(
+                            (SELECT ta.artist_id FROM lib2_track_artists ta
+                             WHERE ta.track_id=t.id
+                             ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                      ta.position, ta.artist_id
+                             LIMIT 1),
+                            al.primary_artist_id
+                        )
+                        WHERE LOWER(t.title) IN ({ph})
+                          AND f.path IS NOT NULL AND f.path != ''
+                        ORDER BY f.id
+                    """, chunk)
+                    for row in cursor.fetchall():
+                        r = dict(row)
+                        key = (str(r['title'] or '').lower(),
+                               str(r['artist_name'] or '').lower())
+                        if key in wants and key not in out:
+                            out[key] = r
+            return out
+        except Exception as e:
+            logger.error("Error batch-resolving library tracks: %s", e)
+            return {}
+
+    def get_library_radio_tracks(self, limit=50, exclude_ids=None) -> Dict[str, Any]:
+        """Seedless radio across the WHOLE library (Library Radio).
+
+        Same machinery as get_radio_tracks' last tier: pull a generous random
+        pool of playable tracks, then let core.radio.selection rank it
+        (play_count + lastfm popularity, recency penalty, stable jitter) so the
+        mix leans familiar-but-fresh instead of pure noise. Once tracks are
+        playing, refills go through the normal seeded get_radio_tracks path —
+        this only starts the station.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                from core.radio.selection import RadioCollector
+
+                collector = RadioCollector(limit, exclude_ids=exclude_ids)
+
+                # No seed track means the exclude set can be EMPTY — and
+                # "NOT IN ()" is a syntax error — so the clause is conditional.
+                _exclude_sql = ""
+                if collector.exclude_values():
+                    _exclude_sql = f"AND t.id NOT IN ({collector.exclude_placeholders()})"
+
+                cursor.execute(f"""
+                    SELECT t.id, t.title, t.track_number, t.duration,
+                           f.path AS file_path, f.bitrate,
+                           t.album_id, al.primary_artist_id AS artist_id,
+                           t.play_count,
+                           json_extract(t.enrichment, '$.lastfm.playcount')
+                               AS lastfm_playcount,
+                           al.title   AS album,
+                           COALESCE(al.image_url, ar.image_url) AS image_url,
+                           ar.name    AS artist
+                    FROM lib2_tracks t
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    JOIN lib2_track_files f
+                      ON f.track_id=t.id AND f.is_primary=1 AND {_LIVE_FILE}
+                    WHERE f.path IS NOT NULL AND f.path != ''
+                      {_exclude_sql}
+                    ORDER BY RANDOM()
+                    LIMIT ?
+                """, collector.exclude_values() + [max(limit * 4, limit + 10)])
+                collector.collect(cursor.fetchall(), rank=True)
+
+                return {'success': True, 'tracks': collector.tracks}
+
+        except Exception as e:
+            logger.error(f"Error getting library radio tracks: {e}")
             return {'success': False, 'error': str(e)}
 
     # ── Library Issues CRUD ──

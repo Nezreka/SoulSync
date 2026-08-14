@@ -385,6 +385,10 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
     completed_path = tmp_dl / "track.mp3"
     completed_path.write_bytes(b"x" * (200 * 1024))  # > MIN_AUDIO_SIZE
 
+    # download() only dispatches the worker. Keep the replacement alive until
+    # that worker reaches its terminal state; otherwise a busy full-suite run
+    # can leave this block before the thread calls _download_sync and the
+    # supposedly offline test contacts real SoundCloud.
     with patch.object(client, '_download_sync', return_value=str(completed_path)):
         download_id = _run(client.download(
             'soundcloud',
@@ -392,13 +396,13 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
             file_size=0,
         ))
 
-    assert download_id is not None
-    deadline = time.time() + 2
-    while time.time() < deadline:
-        record = engine.get_record('soundcloud', download_id)
-        if record and record['state'] == 'Completed, Succeeded':
-            break
-        time.sleep(0.05)
+        assert download_id is not None
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            record = engine.get_record('soundcloud', download_id)
+            if record and record['state'] == 'Completed, Succeeded':
+                break
+            time.sleep(0.05)
 
     info = engine.get_record('soundcloud', download_id)
     assert info['state'] == 'Completed, Succeeded'
@@ -438,16 +442,20 @@ def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
         engine.update_record('soundcloud', download_id, {'state': 'Cancelled'})
         return None
 
+    # The patch must span the whole wait: download() only SCHEDULES the worker
+    # thread, so exiting the with-block after it returns reverts the patch in a
+    # race with the thread's first call — on a slow box the worker then runs
+    # the real yt-dlp path and legitimately marks Errored (the CI flake).
     with patch.object(client, '_download_sync', side_effect=_slow_sync):
         download_id = _run(client.download('soundcloud', '1||u||n'))
 
-    deadline = time.time() + 2
-    while time.time() < deadline:
-        record = engine.get_record('soundcloud', download_id)
-        if record and record['state'] in ('Cancelled', 'Errored'):
-            break
-        time.sleep(0.05)
-    assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            record = engine.get_record('soundcloud', download_id)
+            if record and record['state'] in ('Cancelled', 'Errored'):
+                break
+            time.sleep(0.05)
+        assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
 
 
 # ---------------------------------------------------------------------------

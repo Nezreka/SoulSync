@@ -95,11 +95,16 @@ export function useSystemStats(): StatsState {
 }
 
 function StatCard({ id, title, tile }: { id: string; title: string; tile: StatTile }) {
+  // The subtitle moves into the tooltip: a strip earns its quiet by showing
+  // number + label only. The .stat-card-value/-subtitle classes stay because
+  // the helper tour and the behaviour tests both target them.
   return (
-    <div className="stat-card-dashboard" id={id}>
-      <p className="stat-card-title">{title}</p>
+    <div className="stat-tile" id={id} title={tile.subtitle}>
       <p className="stat-card-value">{tile.value}</p>
-      <p className="stat-card-subtitle">{tile.subtitle}</p>
+      <p className="stat-card-title">{title}</p>
+      <p className="stat-card-subtitle" style={{ display: 'none' }}>
+        {tile.subtitle}
+      </p>
     </div>
   );
 }
@@ -107,20 +112,17 @@ function StatCard({ id, title, tile }: { id: string; title: string; tile: StatTi
 export function SystemStatsCard() {
   const stats = useSystemStats();
   return (
-    <article className="dash-card" data-card="stats">
-      <header className="dash-card__head">
-        <h3 className="dash-card__title">System Stats</h3>
-        <p className="dash-card__sub">Live performance metrics.</p>
-      </header>
-      <div className="dash-card__body">
-        <div className="stats-grid-dashboard">
-          <StatCard id="active-downloads-card" title="Active Downloads" tile={stats.active} />
-          <StatCard id="finished-downloads-card" title="Finished Downloads" tile={stats.finished} />
-          <StatCard id="download-speed-card" title="Download Speed" tile={stats.speed} />
-          <StatCard id="active-syncs-card" title="Active Syncs" tile={stats.syncs} />
-          <StatCard id="uptime-card" title="System Uptime" tile={stats.uptime} />
-          <StatCard id="memory-card" title="Memory Usage" tile={stats.memory} />
-        </div>
+    // A full-width STRIP, not a box of boxes: six numbers with small labels,
+    // subtitles demoted to tooltips. The header went with the box — the
+    // numbers are their own title.
+    <article className="dash-card dash-card--tiles" data-card="stats">
+      <div className="stats-strip">
+        <StatCard id="active-downloads-card" title="Active Downloads" tile={stats.active} />
+        <StatCard id="finished-downloads-card" title="Finished Downloads" tile={stats.finished} />
+        <StatCard id="download-speed-card" title="Download Speed" tile={stats.speed} />
+        <StatCard id="active-syncs-card" title="Active Syncs" tile={stats.syncs} />
+        <StatCard id="uptime-card" title="System Uptime" tile={stats.uptime} />
+        <StatCard id="memory-card" title="Memory Usage" tile={stats.memory} />
       </div>
     </article>
   );

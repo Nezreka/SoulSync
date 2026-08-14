@@ -240,6 +240,9 @@ export interface WatchlistHero {
    *  markup. The vanilla only overwrites the title when the countdown text is
    *  non-empty, so a later payload without one KEEPS the previous title. */
   title?: string;
+  /** The bare countdown text ("2h 13m") for the hello strip — same
+   *  keep-on-empty semantics as title. */
+  countdown?: string;
 }
 
 export interface DashboardHeaderState {
@@ -464,6 +467,7 @@ export function useDashboardHeader(): DashboardHeaderState {
         return {
           count: data.count || 0,
           title: countdownText ? `Next auto-scan in ${countdownText}` : prev.title,
+          countdown: countdownText || prev.countdown,
         };
       });
     },

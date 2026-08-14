@@ -65,8 +65,8 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
   {
     id: 'cache-undiscovered',
     key: 'undiscovered',
-    title: 'Undiscovered Albums',
-    subtitle: 'From artists you love',
+    title: "Albums You're Missing",
+    subtitle: 'From artists you already love — one click to own them',
     endpoint: '/api/discover/undiscovered-albums',
     field: 'albums',
     itemType: 'album',
@@ -75,7 +75,7 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
     id: 'cache-genre-releases',
     key: 'genre_releases',
     title: 'New In Your Genres',
-    subtitle: 'Released in the last 90 days',
+    subtitle: 'Fresh releases from the sounds you collect',
     endpoint: '/api/discover/genre-new-releases',
     field: 'albums',
     itemType: 'album',
@@ -83,8 +83,8 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
   {
     id: 'cache-label-explorer',
     key: 'label_explorer',
-    title: 'From Your Labels',
-    subtitle: 'Popular on labels in your library',
+    title: 'More From Your Labels',
+    subtitle: 'Because you collect these labels',
     endpoint: '/api/discover/label-explorer',
     field: 'albums',
     itemType: 'album',
@@ -93,7 +93,7 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
     id: 'cache-deep-cuts',
     key: 'deep_cuts',
     title: 'Deep Cuts',
-    subtitle: 'Hidden tracks from artists you know',
+    subtitle: 'B-sides and buried tracks from artists you know',
     endpoint: '/api/discover/deep-cuts',
     field: 'tracks',
     itemType: 'track',
@@ -103,8 +103,8 @@ export const CACHE_SECTIONS: CacheSectionDef[] = [
 /** The Genre Explorer is the odd one out: pills, not cards, and inserted TOP. */
 export const GENRE_EXPLORER_SECTION = {
   id: 'cache-genre-explorer',
-  title: 'Genre Explorer',
-  subtitle: 'Tap a genre to explore',
+  title: 'Browse Your Sound',
+  subtitle: 'Every genre in your collection, one tap deep',
   endpoint: '/api/discover/genre-explorer',
   /** `_insertCacheSection(..., 'top', false)` — no `.discover-grid` wrapper. */
   position: 'top' as const,

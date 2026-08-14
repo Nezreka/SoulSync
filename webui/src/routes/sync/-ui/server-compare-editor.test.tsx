@@ -774,3 +774,45 @@ describe('ServerCompareEditor', () => {
     );
   });
 });
+
+// ── #1128: a saved manual match that can't pair here must SAY so ────────────
+//
+// The durable match points at a library track that isn't in this server
+// playlist yet, so pass-0 can't apply it and the row renders as plain
+// "missing" — identical to a track never matched. diegocade1 therefore
+// re-matched the same track on every sync with nothing telling him it had
+// already taken. The real sync DOES honour the match; only this preview was
+// silent about it.
+
+describe('#1128 manual-match note on missing rows', () => {
+  const row = (extra = {}) => ({
+    match_status: 'missing',
+    source_track: {
+      position: 1,
+      name: "Wavin' Flag (Coca-Cola Spanish Celebration Mix)",
+      artist: "K'naan",
+      source_track_id: 'deezer-wavin',
+    },
+    server_track: null,
+    ...extra,
+  });
+
+  it('shows the note when a manual match exists', async () => {
+    payload = { success: true, tracks: [row({ has_manual_match: true })] };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText(/Already matched/i)).toBeInTheDocument());
+  });
+
+  it('stays silent on a genuinely unmatched row', async () => {
+    payload = { success: true, tracks: [row()] };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+    expect(screen.queryByText(/Already matched/i)).toBeNull();
+  });
+
+  it('still offers Find & add — the note explains, it does not disable', async () => {
+    payload = { success: true, tracks: [row({ has_manual_match: true })] };
+    renderEditor();
+    await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+  });
+});

@@ -104,8 +104,10 @@ describe('libraryCardView — the five states', () => {
     const view = libraryCardView({ ...stats, last_update: lastUpdate }, connected, false, NOW);
     expect(view.cardClass).toBe('library-status-card has-data');
     expect(view.title).toBe('Plex Library');
-    expect(view.subtitle).toBe('Last refreshed 5m ago');
-    expect(view.scanLabel).toBe('Refresh');
+    expect(view.subtitle).toBe(
+      `Last refreshed 5m ago · ${(3400).toLocaleString()} albums · 42.5 MB db`,
+    );
+    expect(view.scanLabel).toBe('Quick Scan');
     expect(view.deepVisible).toBe(true);
     expect(view.stats).toEqual({
       artists: (1200).toLocaleString(),
@@ -117,10 +119,12 @@ describe('libraryCardView — the five states', () => {
   });
 
   it('healthy without last_update reads Never; invalid dates too', () => {
-    expect(libraryCardView(stats, connected, false, NOW).subtitle).toBe('Last refreshed Never');
+    expect(libraryCardView(stats, connected, false, NOW).subtitle).toContain(
+      'Last refreshed Never',
+    );
     expect(
       libraryCardView({ ...stats, last_update: 'garbage' }, connected, false, NOW).subtitle,
-    ).toBe('Last refreshed Never');
+    ).toContain('Last refreshed Never');
   });
 });
 

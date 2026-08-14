@@ -122,6 +122,12 @@ declare global {
     /** stats-automations.js — the parameterized radio core the Artist Web's
      *  "Play radio" hands off to (survives the discover.js deletion). */
     startArtistRadioById?: (artistId: string | number, artistName: string) => void | Promise<void>;
+    /** media-player.js — seedless Library Radio: queues a ranked-random batch
+     *  from the whole library and arms radio mode for refills. */
+    startLibraryRadio?: () => void | Promise<void>;
+    /** media-player.js — play a resolved library track list (radio-row shape)
+     *  as the queue, labeled with a "Playing from" context. */
+    playTrackList?: (tracks: unknown[], contextName?: string) => void | Promise<void>;
     /** sync-services.js — the WHOLE ListenBrainz playlist sync: fetch, virtual
      *  playlist, status polling into the discover-lb-playlist-<id>-sync-*
      *  spans. Shared (survives discover.js's deletion), so the React page
@@ -442,6 +448,14 @@ declare global {
     startAudioPlayback?: () => void | Promise<void>;
     /** media-player.js — starts streaming a search result in the player. */
     startStream?: (searchResult: unknown) => void | Promise<void>;
+    /** Repaints the search download bubbles from the vanilla bubble store into
+     *  #enhanced-main-results-area (shared-helpers.js). The React search page
+     *  calls it on mount because it recreates that container each visit. */
+    showSearchDownloadBubbles?: () => void;
+    /** Active profile's display name, mirrored by init.js setCurrentProfile
+     *  (the script-scoped `currentProfile` is unreachable from modules).
+     *  Updated on profile switch alongside ss:webui-profile-context-changed. */
+    _currentProfileName?: string;
     /** media-player.js — 'flac' from 'a/b/c.flac'; '' when there is no extension. */
     getFileExtension?: (filename: string) => string;
     /** media-player.js — can this browser play that file at all? */
@@ -535,6 +549,28 @@ declare global {
       openAddToWishlistAlbum: (input: WishlistAlbumWorkflowInput) => void | Promise<void>;
       notify?: (message: string, type?: string) => void;
     };
+    /** init.js — the performance switches' appliers, the exact functions the
+     *  Settings checkboxes call (body classes + canvas loops + localStorage).
+     *  The dashboard's quick-settings strip reuses them so both surfaces stay
+     *  in perfect agreement. Max performance overrides Reduce effects. */
+    applyReduceEffects?: (enabled: boolean) => void;
+    applyMaxPerformance?: (enabled: boolean) => void;
+    /** init.js:43 — recomputes the --accent[-light|-neon]-rgb custom
+     *  properties app-wide and persists the per-device localStorage copy. */
+    applyAccentColor?: (hex: string) => void;
+    /** init.js:104/126 — the other two per-device appearance switches
+     *  (canvas particles / header worker orbs), same applier contract. */
+    applyParticlesSetting?: (enabled: boolean) => void;
+    applyWorkerOrbsSetting?: (enabled: boolean) => void;
+    /** init.js:3256 — THE cross-page navigation entry: permission guard,
+     *  sidebar chrome (setActivePageChrome), currentPage bookkeeping, then
+     *  the router. React components navigating BETWEEN pages must call
+     *  this, not the raw SoulSyncWebRouter bridge below — the bridge moves
+     *  the URL but leaves the sidebar marking the old page. */
+    navigateToPage?: (
+      pageId: string,
+      options?: Record<string, unknown>,
+    ) => boolean | Promise<boolean> | void;
     SoulSyncWebRouter?: {
       routeManifest: ShellRouteDefinition[];
       getCurrentPath: () => string;
@@ -707,6 +743,13 @@ declare global {
       onStatus: (id: string, data: unknown) => void;
     };
     openAutoSyncScheduleModal?: () => void | Promise<void>;
+    /** auto-sync.js:471 — the schedule board's state builder; the dashboard's
+     *  Auto Sync card reuses it so schedule semantics live in one place. */
+    buildAutoSyncScheduleState?: (
+      playlists: unknown[],
+      automations: unknown[],
+      historyData?: Record<string, unknown>,
+    ) => Record<string, unknown>;
     openSyncDetailModal?: (entryId: number) => void | Promise<void>;
     showLoginScreen?: () => void;
     showLaunchPinScreen?: () => void;

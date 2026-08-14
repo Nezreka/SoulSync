@@ -27,12 +27,21 @@ async def _run(
     *args: Any,
     **kwargs: Any,
 ) -> _T:
-    # wrap_future, not a poll loop: the loop is woken by the worker's own
-    # completion callback instead of 20 times a second per in-flight call,
-    # and there is no 50 ms latency floor on a fast worker. Not
-    # loop.run_in_executor(None, ...) — that installs a loop-OWNED default
-    # executor, which is exactly what these shared pools exist to avoid.
-    return await asyncio.wrap_future(executor.submit(func, *args, **kwargs))
+    # Python 3.14.6 can lose the cross-thread selector wake-up used by
+    # asyncio.wrap_future(), most visibly when the worker future completes with
+    # an exception: the concurrent future is done but the awaiting task sleeps
+    # forever. Keep completion observation on the owner loop instead. A 1 ms
+    # interval is bounded and remains far below the old 50 ms polling floor.
+    # We still use our process-wide pools rather than a loop-owned default
+    # executor, and cancellation attempts to remove work that has not started.
+    future = executor.submit(func, *args, **kwargs)
+    try:
+        while not future.done():
+            await asyncio.sleep(0.001)
+        return future.result()
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
 
 
 async def run_blocking(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:

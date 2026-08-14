@@ -75,6 +75,7 @@ export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
   include_compilations: false,
   include_instrumentals: false,
   exclude_terms: '',
+  global_auto_download: true,
 };
 
 /**
@@ -266,8 +267,48 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
               </div>
             </div>
 
-            {/* Outside the dimmed block on purpose: exclusion terms apply to
-                every scan whether or not the override is on. */}
+            {/* Outside the dimmed block on purpose, and it is NOT a checkbox in
+                the list above: this is a DEFAULT, not an override. It decides
+                what artists who never chose do, and any artist that did choose
+                still wins. Folding it into the override switch would force
+                auto-download on for everyone already using that switch for
+                release formats. */}
+            <div className="config-section">
+              <h3 className="config-section-title">Auto-Download</h3>
+              <p className="config-section-subtitle">
+                The default for every artist you have not set individually. Artists you have
+                explicitly switched on or off keep their own setting either way.
+              </p>
+              <label
+                className={`config-option global-override-toggle${
+                  config.global_auto_download ? ' enabled' : ''
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={config.global_auto_download}
+                  onChange={(event) =>
+                    setConfig((previous) => ({
+                      ...previous,
+                      global_auto_download: event.target.checked,
+                    }))
+                  }
+                />
+                <div className="config-option-content">
+                  <div className="config-option-icon">⬇️</div>
+                  <div className="config-option-text">
+                    <span className="config-option-title">
+                      Auto-download new releases by default
+                    </span>
+                    <span className="config-option-description">
+                      Off = follow only: scans still find new releases, but nothing is downloaded
+                      unless you turn it on for that artist
+                    </span>
+                  </div>
+                </div>
+              </label>
+            </div>
+
             <div className="config-section">
               <h3 className="config-section-title">Custom Exclusion Terms</h3>
               <p className="config-section-subtitle">

@@ -44,21 +44,22 @@ describe('the section definitions', () => {
 
   it('keeps each title and subtitle verbatim', () => {
     const byKey = Object.fromEntries(CACHE_SECTIONS.map((s) => [s.key, s]));
+    // The streaming-voice pass: personal titles, ownership up front.
     expect([byKey.undiscovered.title, byKey.undiscovered.subtitle]).toEqual([
-      'Undiscovered Albums',
-      'From artists you love',
+      "Albums You're Missing",
+      'From artists you already love — one click to own them',
     ]);
     expect([byKey.genre_releases.title, byKey.genre_releases.subtitle]).toEqual([
       'New In Your Genres',
-      'Released in the last 90 days',
+      'Fresh releases from the sounds you collect',
     ]);
     expect([byKey.label_explorer.title, byKey.label_explorer.subtitle]).toEqual([
-      'From Your Labels',
-      'Popular on labels in your library',
+      'More From Your Labels',
+      'Because you collect these labels',
     ]);
     expect([byKey.deep_cuts.title, byKey.deep_cuts.subtitle]).toEqual([
       'Deep Cuts',
-      'Hidden tracks from artists you know',
+      'B-sides and buried tracks from artists you know',
     ]);
   });
 

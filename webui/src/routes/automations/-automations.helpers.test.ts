@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAutomationsView,
+  automationHealth,
+  sectionGlow,
+  sectionSummary,
+  filterByHealth,
   filterAutomations,
   filterOptions,
   forMusicSide,
@@ -163,5 +167,123 @@ describe('filterOptions', () => {
     ]);
     expect(out.triggers).toEqual(['app_started', 'schedule']);
     expect(out.actions).toEqual(['scan_library']);
+  });
+});
+
+describe('automationHealth — the verdict, not an inventory', () => {
+  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
+
+  it('counts what is currently broken, not what ever broke', () => {
+    // last_error is rewritten on every run, so a row that failed and then
+    // succeeded has already cleared it. This is "broken now".
+    const health = automationHealth(
+      [a({ enabled: 1, last_error: 'boom' }), a({ enabled: 1, last_run: 'x' })],
+      false,
+    );
+    expect(health.failing).toBe(1);
+    expect(health.ok).toBe(false);
+  });
+
+  it('does not call a switched-off automation "never run"', () => {
+    // It has not run because you did not want it to. Flagging that trains
+    // people to ignore the number.
+    const health = automationHealth([a({ enabled: 0 }), a({ enabled: 1 })], false);
+    expect(health.neverRun).toBe(1);
+    expect(health.armed).toBe(1);
+  });
+
+  it('is not ok while the side is paused, however healthy the rows are', () => {
+    const rows = [a({ enabled: 1, last_run: 'x' })];
+    expect(automationHealth(rows, false).ok).toBe(true);
+    expect(automationHealth(rows, true).ok).toBe(false);
+  });
+
+  it('an empty page is ok rather than alarming', () => {
+    expect(automationHealth([], false).ok).toBe(true);
+  });
+});
+
+describe('filterByHealth', () => {
+  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
+  const rows = [
+    a({ id: 1, enabled: 1, last_error: 'boom', last_run: 'x' }),
+    a({ id: 2, enabled: 1 }),
+    a({ id: 3, enabled: 0 }),
+    a({ id: 4, enabled: 1, last_run: 'x' }),
+  ];
+
+  it('opens onto exactly the rows the counter counted', () => {
+    // The chip and the lens share this helper on purpose — a strip that says
+    // "1 failing" and filters to a different set is worse than no strip.
+    const health = automationHealth(rows, false);
+    expect(filterByHealth(rows, 'failing')).toHaveLength(health.failing);
+    expect(filterByHealth(rows, 'never')).toHaveLength(health.neverRun);
+  });
+
+  it('never excludes a disabled row from the off lens', () => {
+    expect(filterByHealth(rows, 'off').map((r) => (r as { id: number }).id)).toEqual([3]);
+  });
+
+  it('an unknown lens filters nothing rather than everything', () => {
+    expect(filterByHealth(rows, 'nonsense')).toHaveLength(4);
+  });
+});
+
+describe('filterAutomations with a health lens', () => {
+  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
+  const labels = () => ({ trigger: '', action: '' });
+
+  it('combines the lens with the text box', () => {
+    const rows = [
+      a({ id: 1, name: 'nightly', enabled: 1, last_error: 'boom' }),
+      a({ id: 2, name: 'weekly', enabled: 1, last_error: 'boom' }),
+      a({ id: 3, name: 'nightly', enabled: 1, last_run: 'x' }),
+    ];
+    const out = filterAutomations(rows, { q: 'night', health: 'failing' }, labels);
+    expect(out.map((r) => (r as { id: number }).id)).toEqual([1]);
+  });
+});
+
+describe('sectionSummary — a collapsed family still says something', () => {
+  const a = (over: Record<string, unknown>) => ({ id: 1, name: 'a', ...over }) as never;
+
+  it('leads with what is broken', () => {
+    expect(
+      sectionSummary([
+        a({ enabled: 1, last_error: 'boom', last_run: 'x' }),
+        a({ enabled: 1, last_run: 'x' }),
+        a({ enabled: 0 }),
+      ]),
+    ).toBe('1 failing · 1 off');
+  });
+
+  it('says all healthy rather than printing three zeros', () => {
+    expect(sectionSummary([a({ enabled: 1, last_run: 'x' })])).toBe('all healthy');
+  });
+
+  it('counts never-run only among enabled rows', () => {
+    expect(sectionSummary([a({ enabled: 1 }), a({ enabled: 0 })])).toBe('1 never run · 1 off');
+  });
+
+  it('has a word for an empty family', () => {
+    expect(sectionSummary([])).toBe('empty');
+  });
+});
+
+describe('sectionGlow', () => {
+  it('pins the two families that exist on every install', () => {
+    expect(sectionGlow('system')).toBe('148,163,184');
+    // The user's own automations carry the accent they chose.
+    expect(sectionGlow('ungrouped')).toBe('var(--accent-rgb)');
+  });
+
+  it('gives a group the same colour every time, without storing anything', () => {
+    expect(sectionGlow('group', 'Nightly')).toBe(sectionGlow('group', 'Nightly'));
+    expect(sectionGlow('group', 'Nightly')).toMatch(/^\d+,\d+,\d+$/);
+  });
+
+  it('does not collapse every group onto one colour', () => {
+    const names = ['Nightly', 'Weekend', 'Imports', 'Cleanup', 'Radio'];
+    expect(new Set(names.map((n) => sectionGlow('group', n))).size).toBeGreaterThan(1);
   });
 });

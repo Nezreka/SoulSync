@@ -82,7 +82,9 @@ const DELETED_MARKUP_IDS = [
   'bp-info-panel',
   'build-playlist-sync-btn',
   'discover-hero-view-all',
-  'your-albums-section',
+  // 'your-albums-section' left this ledger when the rails redesign gave it
+  // real CSS (the wrapping-grid exemption) — the parity test caught the
+  // stale claim, exactly as designed.
   'your-artists-carousel',
   'your-artists-section',
 ];

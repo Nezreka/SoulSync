@@ -54,18 +54,27 @@ const pair = (a: DiscoverSectionId, b: DiscoverSectionId): DiscoverLayoutEntry =
  * comments. The dial sits directly above the two sections it affects so the
  * user sees both react to a drag — that adjacency is deliberate, not incidental.
  */
+/**
+ * The streaming-home order (Boulder: 'the data displayed the way spotify /
+ * itunes / deezer would'): the most PERSONAL rows lead — made-for-you mixes,
+ * the dial and its two recommendation targets, because-you-listen — then
+ * what's NEW, then collection-completion rows (the thing no streaming
+ * service can offer), then eras/browse, with stations and power tools last.
+ * The old order led with genre browse tiles and buried
+ * because-you-listen eleventh.
+ */
 export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
-  single('cache-genre-explorer'), //                                  quick browse
   single('your-mixes-section'), //                                    made for you
-  single('year-mixes-section'),
   single('adv-wave'), //                                              the dial
   pair('listening-recs-section', 'recommended-artists-section'), //   its two targets
+  single('discover-bylt-sections'), //                                because you listen
   pair('recent-releases', 'cache-genre-releases'), //                 new
-  pair('seasonal-albums-section', 'cache-undiscovered'),
+  pair('seasonal-albums-section', 'cache-undiscovered'), //           own the gaps
   pair('cache-label-explorer', 'your-albums-section'),
   single('your-artists-section'), //                                  your library
-  single('discover-bylt-sections'), //                                because you listen
+  single('year-mixes-section'), //                                    eras
   single('cache-deep-cuts'),
+  single('cache-genre-explorer'), //                                  browse
   single('lastfm-radio'), //                                          stations & tools
   single('listenbrainz'),
   single('build-a-playlist'),

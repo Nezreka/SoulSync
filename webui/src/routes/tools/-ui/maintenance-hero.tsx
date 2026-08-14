@@ -1,10 +1,17 @@
 /**
- * The Library Maintenance hero — master toggle, three tabs, the job list, the run
- * history and (via FindingsTab) the findings pane.
+ * The Library Maintenance hero — master toggle, the four sections (health,
+ * findings, operations, history) and the job list they share.
  *
- * The hero owns the job list because two tabs need it: the Jobs tab renders it,
- * and the Findings tab's filter dropdown is populated from it — which is exactly
- * why the vanilla filled that `<select>` from inside `loadRepairJobs`.
+ * The three tabs are gone. Tabs made the page a set of rooms you had to know
+ * to walk into: the findings you needed to act on were behind a tab that
+ * looked identical to the two you didn't want, and nothing on screen told you
+ * whether your library was actually alright. It is one scroll surface now,
+ * ordered by what you came here to learn: how healthy am I → what is wrong →
+ * what is running → what happened. The nav jumps; it doesn't hide.
+ *
+ * The hero owns the job list because two sections need it: operations renders
+ * it, and the findings filter is populated from it — which is exactly why the
+ * vanilla filled that `<select>` from inside `loadRepairJobs`.
  *
  * Two contracts from the P0 that outlive this file:
  *
@@ -22,37 +29,30 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { RepairJob, RepairJobProgress, RepairJobRun, RepairTab } from '../-tools.types';
+import type { RepairJob, RepairJobProgress, RepairJobRun, RepairSection } from '../-tools.types';
 
 import {
+  fetchDatabaseStats,
   fetchRepairHistory,
   fetchRepairJobs,
   fetchRepairProgress,
   fetchRepairStatus,
-  runRepairJob,
-  saveRepairJobSettings,
-  setRepairJobEnabled,
-  stopRepairJob,
   toggleRepairMaster,
 } from '../-tools.api';
-import {
-  coerceRepairSettingValue,
-  formatCacheAge,
-  isRepairJobDryRun,
-  prettifyRepairSettingKey,
-  repairHistoryStats,
-  repairHistoryStatusClass,
-  repairJobBadge,
-  repairJobCardClass,
-  repairJobDot,
-  repairJobMeta,
-  repairSettingInput,
-} from '../-tools.core';
+import { isRepairJobDryRun, prettifyRepairSettingKey } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
-import { FindingsTab } from './findings-tab';
+import { FindingsSurface } from './findings-surface';
+import { Operations } from './operations';
+import { RunHistory } from './run-history';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
 const PROGRESS_HIDE_MS = 30000;
+
+/** Optional-called: jsdom has no scrollIntoView, and a nav button is not
+ *  worth failing a render over. */
+function jumpToSection(anchor: string) {
+  document.getElementById(anchor)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+}
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -70,339 +70,6 @@ function settingText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return '';
-}
-
-// ── Job settings editor ──────────────────────────────────────────────────────
-
-interface JobSettingsProps {
-  job: RepairJob;
-  onSaved: () => void;
-}
-
-function JobSettings({ job, onSaved }: JobSettingsProps) {
-  const [intervalHours, setIntervalHours] = useState(String(job.interval_hours));
-  const [values, setValues] = useState<Record<string, unknown>>(() => ({ ...job.settings }));
-  const [open, setOpen] = useState(false);
-
-  const save = useCallback(async () => {
-    const settings: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(values)) {
-      // Section sentinels are display-only; they are not settings and the
-      // vanilla never collects them off the DOM because they render as a div.
-      if (key.startsWith('_section_')) continue;
-      settings[key] = typeof value === 'string' ? coerceRepairSettingValue(value) : value;
-    }
-    try {
-      await saveRepairJobSettings(job.job_id, Number.parseInt(intervalHours, 10) || 24, settings);
-      toast('Settings saved', 'success');
-      onSaved();
-    } catch {
-      toast('Error saving settings', 'error');
-    }
-  }, [intervalHours, job.job_id, onSaved, values]);
-
-  return (
-    <>
-      <button
-        className="repair-settings-btn"
-        type="button"
-        title="Settings"
-        onClick={() => setOpen((previous) => !previous)}
-      >
-        &#9881;
-      </button>
-      <div
-        className="repair-job-settings"
-        id={`repair-settings-${job.job_id}`}
-        style={{ display: open ? '' : 'none' }}
-      >
-        <div className="repair-setting-row">
-          <label>Interval (hours)</label>
-          <input
-            type="number"
-            className="repair-setting-input"
-            data-job={job.job_id}
-            data-key="_interval_hours"
-            value={intervalHours}
-            min="1"
-            step="1"
-            onChange={(event) => setIntervalHours(event.target.value)}
-          />
-        </div>
-        {Object.entries(job.settings || {}).map(([key, value]) => {
-          const field = repairSettingInput(key, value, job.setting_options?.[key]);
-          if (field.kind === 'section') {
-            return (
-              <div className="repair-setting-section" key={key}>
-                {field.title}
-              </div>
-            );
-          }
-          const current = values[key];
-          return (
-            <div className="repair-setting-row" key={key}>
-              <label>{prettifyRepairSettingKey(key)}</label>
-              {field.kind === 'select' ? (
-                <select
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                >
-                  {field.options.map((option) => (
-                    <option value={option} key={option}>
-                      {prettifyRepairSettingKey(option)}
-                    </option>
-                  ))}
-                </select>
-              ) : field.kind === 'checkbox' ? (
-                <input
-                  type="checkbox"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  checked={Boolean(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.checked }))
-                  }
-                />
-              ) : field.kind === 'number' ? (
-                <input
-                  type="number"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  step="0.01"
-                  // A setting that is CURRENTLY negative gets no floor — some
-                  // thresholds are legitimately below zero and a min of 0 would
-                  // make them un-editable.
-                  {...(field.allowNegative ? {} : { min: '0' })}
-                  onChange={(event) =>
-                    setValues((previous) => ({
-                      ...previous,
-                      [key]: Number.parseFloat(event.target.value),
-                    }))
-                  }
-                />
-              ) : (
-                <input
-                  type="text"
-                  className="repair-setting-input"
-                  data-job={job.job_id}
-                  data-key={key}
-                  value={settingText(current)}
-                  onChange={(event) =>
-                    setValues((previous) => ({ ...previous, [key]: event.target.value }))
-                  }
-                />
-              )}
-            </div>
-          );
-        })}
-        <button className="repair-save-settings-btn" type="button" onClick={() => void save()}>
-          Save Settings
-        </button>
-      </div>
-    </>
-  );
-}
-
-// ── Job card ─────────────────────────────────────────────────────────────────
-
-interface JobCardProps {
-  job: RepairJob;
-  progress?: RepairJobProgress;
-  onChanged: () => void;
-  onHelp: (job: RepairJob) => void;
-}
-
-function JobCard({ job, progress, onChanged, onHelp }: JobCardProps) {
-  const [enabled, setEnabled] = useState(job.enabled);
-  const [stopping, setStopping] = useState(false);
-  useEffect(() => setEnabled(job.enabled), [job.enabled]);
-
-  const badge = repairJobBadge(job);
-  const meta = repairJobMeta(job);
-  const hasSettings = Object.keys(job.settings || {}).length > 0;
-  const dryRun = isRepairJobDryRun(job);
-
-  const onToggle = useCallback(
-    async (next: boolean) => {
-      setEnabled(next); // optimistic, exactly as the vanilla flips the card
-      try {
-        await setRepairJobEnabled(job.job_id, next);
-      } catch {
-        toast('Error toggling job', 'error');
-      }
-    },
-    [job.job_id],
-  );
-
-  const onRun = useCallback(async () => {
-    try {
-      await runRepairJob(job.job_id);
-      toast('Job started', 'success');
-      setTimeout(onChanged, 1000);
-    } catch {
-      toast('Error starting job', 'error');
-    }
-  }, [job.job_id, onChanged]);
-
-  const onStop = useCallback(async () => {
-    // The scan can't unwind until its current item returns, so the stop is not
-    // instant — the button says so rather than looking unresponsive.
-    setStopping(true);
-    try {
-      const result = await stopRepairJob(job.job_id);
-      toast(
-        result.stopped ? 'Stopping job…' : 'Job is not running',
-        result.stopped ? 'success' : 'info',
-      );
-      if (!result.stopped) setTimeout(onChanged, 600);
-    } catch {
-      toast('Error stopping job', 'error');
-      setStopping(false);
-    }
-  }, [job.job_id, onChanged]);
-
-  return (
-    <div className={`repair-job-card ${repairJobCardClass(job)}`.trim()} data-job-id={job.job_id}>
-      <div className="repair-job-main">
-        <div className={`repair-job-status ${repairJobDot(job)}`} />
-        <div className="repair-job-info">
-          <div className="repair-job-name">{job.display_name}</div>
-          <div className="repair-job-desc">{job.description || ''}</div>
-          <div className="repair-job-flow">
-            <span className="repair-flow-badge scan">
-              {job.is_running ? <>&#9654; Running</> : 'Scan'}
-            </span>
-            {job.auto_fix ? (
-              <>
-                <span className="repair-flow-arrow">&rarr;</span>
-                <span className={`repair-flow-badge ${dryRun ? 'dryrun' : 'autofix'}`}>
-                  {dryRun ? 'Dry Run' : 'Auto-fix'}
-                </span>
-              </>
-            ) : null}
-            {badge.kind !== 'none' ? (
-              <>
-                <span className="repair-flow-arrow">&rarr;</span>
-                <span
-                  className={
-                    badge.kind === 'pending'
-                      ? 'repair-flow-badge findings'
-                      : 'repair-flow-badge findings findings-historical'
-                  }
-                >
-                  {badge.kind === 'pending'
-                    ? `${badge.count.toLocaleString()} pending`
-                    : `${badge.count} found in last scan`}
-                </span>
-              </>
-            ) : null}
-          </div>
-          <div className="repair-job-meta">{meta.join(' · ')}</div>
-        </div>
-        <div className="repair-job-actions">
-          <label className="repair-job-toggle">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(event) => void onToggle(event.target.checked)}
-            />
-            <span className="repair-toggle-slider small" />
-          </label>
-          {job.is_running ? (
-            <button
-              className={`repair-stop-btn${stopping ? ' stopping' : ''}`}
-              type="button"
-              disabled={stopping}
-              title={stopping ? 'Stopping…' : 'Stop this run'}
-              onClick={() => void onStop()}
-            >
-              &#9209;
-            </button>
-          ) : (
-            <button
-              className="repair-run-btn"
-              type="button"
-              title="Run now"
-              onClick={() => void onRun()}
-            >
-              &#9654;
-            </button>
-          )}
-          {hasSettings ? <JobSettings job={job} onSaved={onChanged} /> : null}
-          <button
-            className="repair-help-btn"
-            type="button"
-            title="About this job"
-            onClick={(event) => {
-              event.stopPropagation();
-              onHelp(job);
-            }}
-          >
-            ?
-          </button>
-        </div>
-      </div>
-      {progress ? (
-        <div
-          className={`repair-job-progress visible${progress.status === 'finished' ? ' finished' : ''}${
-            progress.status === 'error' ? ' error' : ''
-          }`}
-        >
-          <div className="repair-progress-bar-wrap">
-            <div className="repair-progress-bar" style={{ width: `${progress.progress || 0}%` }} />
-          </div>
-          <div className="repair-progress-phase">{progress.phase || ''}</div>
-          <div className="repair-progress-log">
-            {(progress.log || []).map((line, index) => (
-              <div
-                className={`repair-log-line ${line.type || 'info'}`}
-                key={`${index}-${line.text}`}
-              >
-                {line.text}
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── History ──────────────────────────────────────────────────────────────────
-
-function HistoryEntry({ run }: { run: RepairJobRun }) {
-  const statusClass = repairHistoryStatusClass(run.status);
-  const duration = run.duration_seconds ? `${run.duration_seconds.toFixed(1)}s` : '-';
-  return (
-    <div className="repair-history-entry">
-      <div className="repair-history-header">
-        <div className={`repair-history-dot ${statusClass}`} />
-        <span className="repair-history-name">{run.display_name || run.job_id}</span>
-        <span className={`repair-history-status ${statusClass}`}>{run.status}</span>
-        <span className="repair-history-duration">{duration}</span>
-      </div>
-      <div className="repair-history-stats">
-        {repairHistoryStats(run).map((stat) => (
-          <span className={`repair-history-stat ${stat.kind}`.trim()} key={stat.label}>
-            <strong>{stat.count.toLocaleString()}</strong> {stat.label}
-          </span>
-        ))}
-      </div>
-      <div className="repair-history-meta">
-        {formatCacheAge(run.started_at)} &middot;{' '}
-        {run.started_at ? new Date(run.started_at).toLocaleString() : '-'} &rarr;{' '}
-        {run.finished_at ? new Date(run.finished_at).toLocaleString() : 'In progress'}
-      </div>
-    </div>
-  );
 }
 
 function EmptyState({ icon, title, text }: { icon: string; title: string; text: string }) {
@@ -518,8 +185,15 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
 
 // ── The hero ─────────────────────────────────────────────────────────────────
 
+/** The nav. Jumping, not hiding — every section is on the page already. */
+const SECTIONS: Array<{ id: RepairSection; label: string; anchor: string }> = [
+  { id: 'health', label: 'Health', anchor: 'repair-section-health' },
+  { id: 'findings', label: 'Findings', anchor: 'repair-section-findings' },
+  { id: 'operations', label: 'Operations', anchor: 'repair-section-operations' },
+  { id: 'history', label: 'History', anchor: 'repair-section-history' },
+];
+
 export function MaintenanceHero() {
-  const [tab, setTab] = useState<RepairTab>('jobs');
   const [enabled, setEnabled] = useState(false);
   // Driven by the same /api/repair/status payload as the master toggle. Hidden
   // at zero rather than showing a "0" pill, matching updateRepairStatusFromData.
@@ -528,6 +202,9 @@ export function MaintenanceHero() {
   const [jobsError, setJobsError] = useState(false);
   const [history, setHistory] = useState<RepairJobRun[] | null>(null);
   const [historyError, setHistoryError] = useState(false);
+  /** Library size — the health score is per 1,000 tracks, so 200 orphans in a
+   *  2,000-track library and in a 200,000-track one don't score the same. */
+  const [trackCount, setTrackCount] = useState<number | null>(null);
   const [progress, setProgress] = useState<Record<string, RepairJobProgress>>({});
   const hideTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -588,14 +265,14 @@ export function MaintenanceHero() {
       setFindingsPending(status.findings_pending || 0);
     });
     void loadJobs();
+    void loadHistory();
+    void fetchDatabaseStats().then((stats) => {
+      if (stats) setTrackCount(stats.tracks || 0);
+    });
     void fetchRepairProgress().then((frames) => {
       if (Object.keys(frames).length) setProgress(frames);
     });
-  }, [loadJobs]);
-
-  useEffect(() => {
-    if (tab === 'history') void loadHistory();
-  }, [loadHistory, tab]);
+  }, [loadHistory, loadJobs]);
 
   // A finished panel hides itself after 30s and the list reloads for fresh
   // stats — same contract as the vanilla's _repairProgressHideTimers.
@@ -638,6 +315,17 @@ export function MaintenanceHero() {
 
   const [helpJob, setHelpJob] = useState<RepairJob | null>(null);
 
+  /**
+   * A run row's "see this job's findings" jump. The token makes a second
+   * click on the same job re-fire — without it, clicking the same row twice
+   * after wandering off would change nothing.
+   */
+  const [jobFocus, setJobFocus] = useState<{ jobId: string; token: number } | null>(null);
+  const showJobFindings = useCallback((jobId: string) => {
+    setJobFocus((previous) => ({ jobId, token: (previous?.token || 0) + 1 }));
+    jumpToSection('repair-section-findings');
+  }, []);
+
   return (
     <div className="tools-maintenance-hero">
       <div className="tools-maintenance-header">
@@ -664,17 +352,17 @@ export function MaintenanceHero() {
         </label>
       </div>
 
-      <div className="repair-tabs">
-        {(['jobs', 'findings', 'history'] as const).map((name) => (
+      <nav className="repair-section-nav" aria-label="Maintenance sections">
+        {SECTIONS.map((section) => (
           <button
-            className={`repair-tab${tab === name ? ' active' : ''}`}
+            className="repair-section-link"
             type="button"
-            data-tab={name}
-            key={name}
-            onClick={() => setTab(name)}
+            data-section={section.id}
+            key={section.id}
+            onClick={() => jumpToSection(section.anchor)}
           >
-            {name === 'jobs' ? 'Jobs' : name === 'findings' ? 'Findings' : 'History'}
-            {name === 'findings' ? (
+            {section.label}
+            {section.id === 'findings' ? (
               <span
                 className="repair-tab-badge"
                 id="repair-findings-tab-badge"
@@ -685,71 +373,42 @@ export function MaintenanceHero() {
             ) : null}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <div
-        className="repair-tab-content"
-        id="repair-tab-jobs"
-        style={{ display: tab === 'jobs' ? '' : 'none' }}
-      >
-        <div className="repair-jobs-list" id="repair-jobs-list">
-          {jobsError ? (
-            <div className="repair-empty">Error loading jobs</div>
-          ) : jobs === null ? (
-            <div className="repair-loading">Loading jobs...</div>
-          ) : jobs.length === 0 ? (
-            <EmptyState
-              icon="🔧"
-              title="No Maintenance Jobs"
-              text="Library maintenance jobs will appear here once available."
-            />
-          ) : (
-            jobs.map((job) => (
-              <JobCard
-                job={job}
-                progress={progress[job.job_id]}
-                onChanged={loadJobs}
-                onHelp={setHelpJob}
-                key={job.job_id}
-              />
-            ))
-          )}
+      <FindingsSurface
+        jobs={jobs || []}
+        runs={history || []}
+        trackCount={trackCount}
+        focusJob={jobFocus}
+        onStatusChanged={refreshStatus}
+      />
+
+      <section className="repair-section" id="repair-section-operations">
+        <h4 className="repair-section-title">Maintenance jobs</h4>
+        <div id="repair-jobs-list">
+          <Operations
+            jobs={jobs}
+            error={jobsError}
+            progress={progress}
+            runs={history || []}
+            onChanged={loadJobs}
+            onHelp={setHelpJob}
+            onShowFindings={showJobFindings}
+          />
         </div>
-      </div>
+      </section>
 
-      <div
-        className="repair-tab-content"
-        id="repair-tab-findings"
-        style={{ display: tab === 'findings' ? '' : 'none' }}
-      >
-        <FindingsTab
-          jobs={jobs || []}
-          active={tab === 'findings'}
-          onStatusChanged={refreshStatus}
-        />
-      </div>
-
-      <div
-        className="repair-tab-content"
-        id="repair-tab-history"
-        style={{ display: tab === 'history' ? '' : 'none' }}
-      >
-        <div className="repair-history-list" id="repair-history-list">
-          {historyError ? (
-            <div className="repair-empty">Error loading history</div>
-          ) : history === null ? (
-            <div className="repair-loading">Loading history...</div>
-          ) : history.length === 0 ? (
-            <EmptyState
-              icon="&#128337;"
-              title="No History Yet"
-              text="Job run history will appear here after maintenance jobs complete their first scan."
-            />
-          ) : (
-            history.map((run, index) => <HistoryEntry run={run} key={`${run.job_id}-${index}`} />)
-          )}
+      <section className="repair-section" id="repair-section-history">
+        <h4 className="repair-section-title">Recent runs</h4>
+        <div className="repair-runs-card" id="repair-history-list">
+          <RunHistory
+            runs={history}
+            error={historyError}
+            onShowFindings={showJobFindings}
+            onRefresh={() => void loadHistory()}
+          />
         </div>
-      </div>
+      </section>
 
       {helpJob ? <JobHelpOverlay job={helpJob} onClose={() => setHelpJob(null)} /> : null}
     </div>

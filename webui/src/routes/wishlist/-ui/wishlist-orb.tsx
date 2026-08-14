@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { ParsedWishlistTrack, WishlistArtistGroup } from '../-wishlist.types';
 
@@ -40,6 +40,15 @@ export function WishlistOrb({
   // Which album tile is open. Local to this orb: the vanilla handler collapsed
   // tiles within `.wl-album-fan`, i.e. per artist, not globally.
   const [openAlbum, setOpenAlbum] = useState<string | null>(null);
+
+  // Mount the heavy expanded subtree only once this orb has actually been
+  // opened. `expanded` was only a CSS class, so EVERY orb mounted its whole
+  // album fan and every track row up front — a 400-track wishlist rendered
+  // the entire tracklist on first paint and re-reconciled it on each poll
+  // settle (perf sweep, Aug 2026). Latched (a ref survives re-renders), so
+  // closing keeps the DOM: the collapse animation and re-opens stay instant.
+  const everExpandedRef = useRef(expanded);
+  if (expanded) everExpandedRef.current = true;
 
   const image = orbImage(group, artistImages);
   const ringCovers = orbRingCovers(group);
@@ -119,7 +128,7 @@ export function WishlistOrb({
       </div>
 
       <div className="wl-orb-expanded">
-        {hasAlbums ? (
+        {everExpandedRef.current && hasAlbums ? (
           <div className="wl-album-fan">
             {group.albums.map((album) => (
               <div
@@ -170,7 +179,7 @@ export function WishlistOrb({
           </div>
         ) : null}
 
-        {group.singles.length > 0 ? (
+        {everExpandedRef.current && group.singles.length > 0 ? (
           <div className="wl-singles-orbit">
             {group.singles.map((single) => (
               <div

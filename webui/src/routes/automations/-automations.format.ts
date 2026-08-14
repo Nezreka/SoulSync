@@ -88,6 +88,117 @@ export function lastResultFacts(lastResult: unknown): { shown: string; full: str
   return { shown, full };
 }
 
+/**
+ * What the last run actually accomplished, in a sentence.
+ *
+ * `lastResultFacts` prints the handler's own dict keys — "tracks added: 4 ·
+ * playlists: 2". Honest, but it is the internals leaking: those keys were
+ * named for the code that sets them, not for the person reading the card.
+ *
+ * Only these action types get a sentence, and each one is built ONLY from
+ * keys its handler verifiably returns (see the key list beside each entry;
+ * `tests/test_automation_result_keys.py` fails if a handler stops returning
+ * one). Everything else falls through to the generic facts — inventing a
+ * sentence for a handler whose shape I had not read would be worse than the
+ * raw keys, because it would read as authoritative.
+ */
+const num = (v: unknown): number => {
+  // Several handlers stringify their counters ('refreshed': str(n)).
+  const n = typeof v === 'number' ? v : Number.parseFloat(String(v ?? ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+type Sentence = (r: Record<string, unknown>) => string | null;
+
+const ACTION_SENTENCES: Record<string, Sentence> = {
+  // artists_scanned / new_tracks_found / tracks_added_to_wishlist
+  scan_watchlist: (r) => {
+    const artists = num(r.artists_scanned);
+    const wishlisted = num(r.tracks_added_to_wishlist);
+    const found = num(r.new_tracks_found);
+    if (!artists && !wishlisted && !found) return null;
+    const parts = [`Checked ${plural(artists, 'artist')}`];
+    if (wishlisted) parts.push(`wishlisted ${plural(wishlisted, 'track')}`);
+    else if (found) parts.push(`found ${plural(found, 'new track')}`);
+    else parts.push('nothing new');
+    return parts.join(', ');
+  },
+  // files_scanned / duplicates_found / files_deleted / space_freed_mb
+  run_duplicate_cleaner: (r) => {
+    const scanned = num(r.files_scanned);
+    const removed = num(r.files_deleted);
+    const found = num(r.duplicates_found);
+    if (!scanned && !found) return null;
+    if (!found) return `Checked ${plural(scanned, 'file')}, no duplicates`;
+    const freed = num(r.space_freed_mb);
+    const tail = removed ? `removed ${plural(removed, 'file')}` : `${found} to review`;
+    return freed
+      ? `Found ${found} duplicates, ${tail} (${freed} MB)`
+      : `Found ${found} duplicates, ${tail}`;
+  },
+  // refreshed / errors
+  refresh_mirrored: (r) => {
+    const refreshed = num(r.refreshed);
+    const errors = num(r.errors);
+    if (!refreshed && !errors) return null;
+    const base = `Refreshed ${plural(refreshed, 'playlist')}`;
+    return errors ? `${base}, ${plural(errors, 'error')}` : base;
+  },
+  // artists / albums / tracks
+  start_database_update: (r) => {
+    const tracks = num(r.tracks);
+    const artists = num(r.artists);
+    if (!tracks && !artists) return null;
+    return `Library now ${plural(artists, 'artist')}, ${plural(tracks, 'track')}`;
+  },
+};
+
+export interface AutomationOutcome {
+  text: string;
+  /** Drives the tone: a skip is neither success nor failure. */
+  kind: 'ok' | 'skipped';
+}
+
+/**
+ * The last-run line for a card.
+ *
+ * A non-completed status is handled first and explicitly. It used to fall into
+ * the generic facts, where a skip rendered as "reason: Duplicate cleaner is
+ * already running" — the word "reason" is a dict key, not something a person
+ * would say.
+ */
+export function automationOutcome(
+  actionType: string | null | undefined,
+  lastResult: unknown,
+): AutomationOutcome | null {
+  if (!lastResult || typeof lastResult !== 'object' || Array.isArray(lastResult)) return null;
+  const result = lastResult as Record<string, unknown>;
+  const status = String(result.status ?? '');
+
+  if (status === 'skipped') {
+    const why = String(result.reason ?? '').trim();
+    return { text: why ? `Skipped — ${why}` : 'Skipped', kind: 'skipped' };
+  }
+  // 'started'/'running' mean the handler handed off to a worker and the real
+  // outcome lands later; claiming a result would be a guess.
+  if (status === 'started' || status === 'running') {
+    return { text: 'Handed off — still working', kind: 'skipped' };
+  }
+
+  const sentence = ACTION_SENTENCES[actionType ?? '']?.(result);
+  if (sentence) return { text: sentence, kind: 'ok' };
+
+  const facts = lastResultFacts(lastResult);
+  return facts ? { text: facts.shown, kind: 'ok' } : null;
+}
+
+/** The action types that get a hand-written sentence. Exported for the
+ *  cross-language test that checks their handlers still return those keys. */
+export const SENTENCE_ACTION_TYPES = Object.keys(ACTION_SENTENCES);
+
 /** Triggers driven by a timer — these are the only ones that show "Next:". */
 export const TIMER_TRIGGERS = ['schedule', 'daily_time', 'weekly_time', 'monthly_time'] as const;
 
@@ -160,6 +271,7 @@ const ACTION_LABELS: Record<string, string> = {
   discover_playlist: 'Discover Playlist',
   notify_only: 'Notify Only',
   start_database_update: 'Update Database',
+  start_database_update_hourly: 'Update Database (Hourly)',
   run_duplicate_cleaner: 'Run Duplicate Cleaner',
   clear_quarantine: 'Clear Quarantine',
   cleanup_wishlist: 'Clean Up Wishlist',
@@ -197,33 +309,109 @@ export function formatAction(
   return ACTION_LABELS[type ?? ''] ?? blockLabel?.(type ?? '') ?? humanizeType(type);
 }
 
-/** The meta line under a card name, already ordered the way the card renders it. */
+/**
+ * The facts under a card name.
+ *
+ * `paused` is the side's master switch. Without it this function computed
+ * "Next: in 3h" and "Listening" from `enabled` and the trigger type alone —
+ * so with automations paused every card advertised a countdown that would
+ * never fire and claimed to be listening for events it would ignore. The
+ * engine skips the slot (`run_automation`, the master check) but keeps the
+ * schedule alive, so the stored `next_run` is real; what is false is the
+ * implication that it will run. A paused card says paused, and says nothing
+ * about a next run.
+ *
+ * Manual Run still works while paused (it passes `skip_delay`, which bypasses
+ * the master check), so the Run button is NOT part of this lie and stays.
+ */
 export function automationMeta(
   a: Automation,
   now: number = Date.now(),
+  paused = false,
 ): {
   lastRun?: string;
   nextRun?: string;
   listening: boolean;
+  paused: boolean;
   runs?: number;
   error?: string;
-  result?: { shown: string; full: string };
+  result?: AutomationOutcome;
 } {
   const enabled = a.enabled === true || a.enabled === 1;
   const timer = isTimerTrigger(a.trigger_type);
+  // A disabled automation is already off on its own account; "paused" is only
+  // worth saying about one that WOULD otherwise be doing something.
+  const heldByMaster = paused && enabled;
   return {
     lastRun: a.last_run ? timeAgo(a.last_run, now) : undefined,
-    nextRun: a.next_run && enabled && timer ? timeUntil(a.next_run, now) : undefined,
+    nextRun: a.next_run && enabled && timer && !paused ? timeUntil(a.next_run, now) : undefined,
     // Event-driven automations advertise that they are armed; timer ones show
     // a countdown instead, so the two are mutually exclusive.
-    listening: !timer && enabled,
+    listening: !timer && enabled && !paused,
+    paused: heldByMaster,
     runs: a.run_count || undefined,
     error: a.last_error || undefined,
     // An error replaces the result summary rather than joining it.
     // `?? undefined` because lastResultFacts returns null for "nothing worth
     // showing", while every other field here uses undefined for absent.
-    result: a.last_error ? undefined : (lastResultFacts(a.last_result) ?? undefined),
+    // Prefer a sentence over the handler's raw dict keys; falls back to them.
+    result: a.last_error
+      ? undefined
+      : (automationOutcome(a.action_type, a.last_result) ?? undefined),
   };
+}
+
+/**
+ * The schedule line on a card's face.
+ *
+ * `automationMeta` answers "what should the meta line say"; this answers the
+ * one question the card is asked most — *when does this next happen* — as a
+ * single state word plus a label, so the same fact can be coloured, filtered
+ * and read at a glance instead of being inferred from which of three optional
+ * meta fragments happens to be present.
+ *
+ * The order is a precedence, not a list: a run in flight outranks everything
+ * (it IS happening), then the two ways an automation can be held — its own
+ * switch, then the side's — and only after that does a stored `next_run` mean
+ * anything. That is the same order the engine itself applies.
+ *
+ * `due` rather than `overdue`: the scheduler arms `next_run` and picks the row
+ * up on its next pass, so a timestamp a moment in the past is normal operation,
+ * not a fault. Nothing here claims to know how late is late.
+ */
+export type AutomationScheduleState =
+  | 'running'
+  | 'off'
+  | 'paused'
+  | 'due'
+  | 'waiting'
+  | 'unscheduled'
+  | 'listening';
+
+export interface AutomationSchedule {
+  state: AutomationScheduleState;
+  label: string;
+  /** The label is a live countdown, so the card must re-render each second. */
+  ticking: boolean;
+}
+
+export function automationSchedule(
+  a: Automation,
+  now: number = Date.now(),
+  paused = false,
+  running = false,
+): AutomationSchedule {
+  if (running) return { state: 'running', label: 'Running now', ticking: false };
+  const enabled = a.enabled === true || a.enabled === 1;
+  if (!enabled) return { state: 'off', label: 'Switched off', ticking: false };
+  if (paused) return { state: 'paused', label: 'Paused', ticking: false };
+  if (!isTimerTrigger(a.trigger_type))
+    return { state: 'listening', label: 'Listening', ticking: false };
+  // A timer automation with no armed next_run has not been picked up by the
+  // scheduler yet — usually the seconds after it was created or re-triggered.
+  if (!a.next_run) return { state: 'unscheduled', label: 'Not scheduled yet', ticking: false };
+  if (parseServerTime(a.next_run) <= now) return { state: 'due', label: 'Due now', ticking: false };
+  return { state: 'waiting', label: `Next ${timeUntil(a.next_run, now)}`, ticking: true };
 }
 
 /**
