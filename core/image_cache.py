@@ -38,14 +38,35 @@ DEFAULT_MAX_CACHE_BYTES = 2 * 1024 * 1024 * 1024
 # than paying it on every single one.
 _PRUNE_EVERY_N_STORES = 250
 
+# Seconds to wait on an upstream image before giving up and letting the page
+# render with a placeholder.
+DEFAULT_FETCH_TIMEOUT = 10.0
+
 # Thumbnail sizes, by the job the image is doing. Max WIDTH, aspect preserved —
 # covers are square but artist photos and backdrops are not, so forcing a box
 # would letterbox or crop them.
-VARIANT_MAX_WIDTH = {
+DEFAULT_VARIANT_MAX_WIDTH = {
     "grid": 240,     # library/discover tiles
     "card": 480,     # shelf cards, search results
     "hero": 1200,    # detail-page headers
 }
+
+# Resolved from config at import so a caller can size these to their own
+# layout, which is what "configurable thumbnail variants" asked for. A bad or
+# missing value falls back to the default for that name rather than dropping
+# the variant, so a typo in config cannot make artwork disappear.
+def _resolved_variant_widths() -> dict:
+    widths = {}
+    for name, default in DEFAULT_VARIANT_MAX_WIDTH.items():
+        try:
+            value = int(config_manager.get(f"image_cache.variant_{name}_px", default))
+            widths[name] = value if 32 <= value <= 4000 else default
+        except (TypeError, ValueError):
+            widths[name] = default
+    return widths
+
+
+VARIANT_MAX_WIDTH = _resolved_variant_widths()
 
 
 def _row_get(row, column: str, default=""):
@@ -78,6 +99,7 @@ class ImageCache:
         failed_ttl_seconds: int = DEFAULT_FAILED_TTL_SECONDS,
         max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
         max_cache_bytes: int = DEFAULT_MAX_CACHE_BYTES,
+        fetch_timeout: float = DEFAULT_FETCH_TIMEOUT,
         fetcher: Optional[Callable[..., requests.Response]] = None,
     ):
         self.cache_dir = Path(cache_dir)
@@ -85,6 +107,10 @@ class ImageCache:
         self.failed_ttl_seconds = int(failed_ttl_seconds)
         self.max_download_bytes = int(max_download_bytes)
         self.max_cache_bytes = int(max_cache_bytes)
+        # A slow CDN must never hold a page open. Short by default, and
+        # configurable — "short fetch timeouts ... so a slow image CDN never
+        # blocks page rendering" (#1141).
+        self.fetch_timeout = float(fetch_timeout)
         self._stores_since_prune = 0
         self.fetcher = fetcher or requests.get
         self.db_path = self.cache_dir / "image_cache.sqlite3"
@@ -401,7 +427,7 @@ class ImageCache:
 
         response = self.fetcher(
             url,
-            timeout=10,
+            timeout=self.fetch_timeout,
             stream=True,
             headers={
                 "User-Agent": (
@@ -615,6 +641,7 @@ def get_image_cache() -> ImageCache:
                 max_download_bytes=int(config_manager.get("image_cache.max_download_mb", 15)) * 1024 * 1024,
                 max_cache_bytes=int(config_manager.get(
                     "image_cache.max_cache_mb", DEFAULT_MAX_CACHE_BYTES // (1024 * 1024))) * 1024 * 1024,
+                fetch_timeout=float(config_manager.get("image_cache.fetch_timeout", DEFAULT_FETCH_TIMEOUT)),
             )
             # Reclaim on startup too: a cache that only prunes while it is being
             # written never shrinks for someone who has stopped browsing.
@@ -631,9 +658,10 @@ def reset_image_cache() -> None:
     Settings are applied by rebuilding, not by mutating a live object: the
     cache is constructed from config once, so without this a size limit saved
     in Settings would sit there doing nothing until the next restart."""
-    global _image_cache
+    global _image_cache, VARIANT_MAX_WIDTH
     with _image_cache_lock:
         _image_cache = None
+    VARIANT_MAX_WIDTH = _resolved_variant_widths()
 
 
 def thumbnails_enabled() -> bool:

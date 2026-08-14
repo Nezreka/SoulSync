@@ -178,3 +178,55 @@ def test_serving_a_variant_cannot_deadlock(tmp_path):
 
     assert cache.get(key).path.exists()
 
+
+# ── configurability (#1141: "configurable thumbnail variants") ───────────────
+
+def test_variant_widths_come_from_config(monkeypatch):
+    """His ask was configurable variants, not three sizes I picked. A caller
+    whose grid is denser or wider than mine can size them to their layout."""
+    from core import image_cache as mod
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return {"image_cache.variant_grid_px": 160}.get(key, default)
+
+    monkeypatch.setattr(mod, "config_manager", _Cfg())
+    widths = mod._resolved_variant_widths()
+
+    assert widths["grid"] == 160
+    assert widths["card"] == mod.DEFAULT_VARIANT_MAX_WIDTH["card"], "untouched sizes keep their default"
+
+
+@pytest.mark.parametrize("bad", [0, -5, 99999, "wide", None])
+def test_a_nonsense_width_falls_back_instead_of_losing_the_variant(monkeypatch, bad):
+    """A typo in config must not make artwork vanish or blow memory on a
+    resize — the variant survives at its default size."""
+    from core import image_cache as mod
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return bad if key == "image_cache.variant_grid_px" else default
+
+    monkeypatch.setattr(mod, "config_manager", _Cfg())
+
+    assert mod._resolved_variant_widths()["grid"] == mod.DEFAULT_VARIANT_MAX_WIDTH["grid"]
+
+
+def test_the_fetch_timeout_is_configurable_and_short_by_default(tmp_path):
+    """"Short fetch timeouts ... so a slow image CDN never blocks page
+    rendering" — it was hardcoded at 10s with no way to lower it."""
+    from core.image_cache import DEFAULT_FETCH_TIMEOUT
+
+    assert DEFAULT_FETCH_TIMEOUT <= 10, "the default is meant to be short"
+
+    seen = {}
+
+    def fetcher(url, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return FakeResponse(BIG)
+
+    cache = ImageCache(tmp_path, fetcher=fetcher, fetch_timeout=2.5)
+    cache.get_url(URL)
+
+    assert seen["timeout"] == 2.5, "the configured timeout never reached the request"
+

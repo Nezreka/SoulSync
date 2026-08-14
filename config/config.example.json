@@ -78,6 +78,10 @@
     "thumbnails": false,
     "max_cache_mb": 2048,
     "ttl_seconds": 2592000,
-    "max_download_mb": 15
+    "max_download_mb": 15,
+    "fetch_timeout": 10,
+    "variant_grid_px": 240,
+    "variant_card_px": 480,
+    "variant_hero_px": 1200
   }
 }

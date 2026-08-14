@@ -1,3 +1,4 @@
+import { thumb } from '@/platform/artwork-thumb';
 import { useState } from 'react';
 
 import type { RecentAlbum } from '../-discover.recent-releases';
@@ -44,7 +45,7 @@ export function DiscoverAlbumCard({
   return (
     <div className="ya-card discover-album-card" title={titleAttr} onClick={onOpen}>
       <div className="ya-card-img">
-        {!failed && <img src={cover} alt="" loading="lazy" onError={() => setFailed(true)} />}
+        {!failed && <img src={thumb(cover, 'grid')} alt="" loading="lazy" onError={() => setFailed(true)} />}
         <div className="ya-card-placeholder" style={failed ? undefined : { display: 'none' }}>
           ♫
         </div>
