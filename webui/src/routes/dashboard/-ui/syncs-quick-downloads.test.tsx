@@ -97,7 +97,10 @@ describe('the Sync band', () => {
     const row = view.container.querySelector('.syncband-row')!;
     expect(row.querySelector('.syncband-name')!.textContent).toBe('Bangers');
     expect(row.querySelector('.syncband-sub')!.textContent).toBe('Spotify · playlist');
-    expect(row.querySelector('.syncband-chip--dl')!.textContent).toBe('⬇ 3');
+    // No download chip: the successful downloads are what filled the coverage
+    // bar, so "⬇ 3" beside "8/10 in library" was the same fact twice. The bar
+    // wins because it carries the total too.
+    expect(row.querySelector('.syncband-chip--dl')).toBeNull();
     // ONE completeness number: the bar carries the run's matched count —
     // no separate "matched" chip to contradict it.
     expect(row.querySelector('.syncband-owned-text')!.textContent).toBe('8/10 in library');
@@ -106,6 +109,29 @@ describe('the Sync band', () => {
     expect(row.querySelector('.syncband-art img')!.getAttribute('src')).toBe('/thumb.jpg');
     // The rows container keeps the tour/helper anchor id.
     expect(view.container.querySelector('#sync-history-cards')).not.toBeNull();
+  });
+
+  /**
+   * The failure chip is the ONLY number on the row you would act on, and the
+   * only one the coverage bar cannot express — a run that failed 4 tracks and
+   * a run that skipped them both leave the bar unmoved. It survived the
+   * download-chip removal on purpose, so it needs its own guard.
+   */
+  it('still shows the failure chip — the bar cannot express a failure', async () => {
+    syncRoutes({ entries: [{ ...ENTRY, tracks_failed: 4 }] });
+    const view = await mount(<SyncBand />);
+    const row = view.container.querySelector('.syncband-row')!;
+    expect(row.querySelector('.syncband-chip--fail')!.textContent).toBe('\u2717 4');
+    expect(row.querySelector('.syncband-chip--dl')).toBeNull();
+  });
+
+  it('a clean run shows no chips at all', async () => {
+    syncRoutes({ entries: [ENTRY] });
+    const view = await mount(<SyncBand />);
+    const row = view.container.querySelector('.syncband-row')!;
+    expect(row.querySelector('.syncband-chip')).toBeNull();
+    // ...but the coverage bar still reports the run.
+    expect(row.querySelector('.syncband-owned-text')!.textContent).toBe('8/10 in library');
   });
 
   it('an empty history shows the empty state; wishlist runs are filtered out', async () => {
