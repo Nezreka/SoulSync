@@ -139,6 +139,15 @@ def test_failed_processor_stamps_every_attempt():
     assert body.index("if success:") > 0
 
 
+def test_wing_it_batch_no_longer_blanket_skips_wishlist():
+    src = (_ROOT / "core" / "downloads" / "wishlist_failed.py").read_text(encoding="utf-8")
+    # Used to return before ever reaching is_stub_id()/should_wishlist_stub(),
+    # so wishlist.wing_it_guesses had no effect for Wing It download batches.
+    # Only the per-track gate should govern now.
+    assert "batch.get('wing_it')" not in src
+    assert "is_stub_id(sp_id) and not should_wishlist_stub(_artist" in src
+
+
 def test_backoff_applies_to_scheduled_cycles_only():
     src = (_ROOT / "core" / "wishlist" / "processing.py").read_text(encoding="utf-8")
     assert "split_due_for_retry" in src

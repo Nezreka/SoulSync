@@ -61,11 +61,10 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
 
         batch = download_batches[batch_id]
 
-        # Wing It mode — skip wishlist entirely for failed tracks
-        if batch.get('wing_it'):
-            failed_count = len(batch.get('permanently_failed_tracks', []))
-            logger.error(f"[Wing It] Skipping wishlist for {failed_count} failed tracks (wing it mode)")
-            return {'tracks_added': 0, 'errors': 0}
+        # Wing It mode used to skip wishlist entirely here. Now the per-track
+        # is_stub_id()/should_wishlist_stub() gate below decides: a searchable
+        # stub is wishlisted when wishlist.wing_it_guesses is on, everything
+        # else (non-stub failures, non-searchable stubs) behaves as before.
         permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
         cancelled_tracks = batch.get('cancelled_tracks', set())
         
