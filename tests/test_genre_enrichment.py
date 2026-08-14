@@ -6,7 +6,7 @@ from core.metadata.genre_enrichment import (
     propose_genres,
     translate_genre,
 )
-from core.repair_worker import RepairWorker
+from core.repair_worker import RepairWorker, job_category
 from database.music_database import MusicDatabase
 
 
@@ -110,3 +110,7 @@ def test_ambiguous_only_fix_does_not_report_success(tmp_path):
         assert json.loads(conn.execute(
             "SELECT genres FROM artists WHERE id = ?", ('artist-1',)
         ).fetchone()['genres']) == ['Rock']
+
+
+def test_genre_enrichment_belongs_to_tags_and_metadata_category():
+    assert job_category('genre_enrichment') == 'Tags & metadata'

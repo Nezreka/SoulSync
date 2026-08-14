@@ -147,6 +147,7 @@ JOB_CATEGORIES = {
     'album_tag_consistency': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
     'genre_cleanup': 'Tags & metadata',
+    'genre_enrichment': 'Tags & metadata',
     'comma_artist_splitter': 'Tags & metadata',
     'unknown_artist_fixer': 'Tags & metadata',
     'metadata_gap_filler': 'Tags & metadata',
