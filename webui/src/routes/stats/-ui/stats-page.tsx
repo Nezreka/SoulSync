@@ -21,11 +21,16 @@ import { useReactPageShell, useShellStatus } from '@/platform/shell/route-contro
 import type {
   StatsAlbumRow,
   StatsArtistRow,
+  StatsClock,
   StatsDbStoragePayload,
   StatsHealth,
   StatsLibraryDiskUsagePayload,
+  StatsNeglectedAlbum,
+  StatsOwnVsPlay,
   StatsRange,
   StatsRecentTrack,
+  StatsRhythm,
+  StatsTab,
   StatsTrackRow,
 } from '../-stats.types';
 
@@ -44,19 +49,27 @@ import {
   formatBytes,
   formatCompactNumber,
   formatDbStorageValue,
+  formatHourLabel,
   formatListeningTime,
+  formatPeakSlot,
   formatRelativePlayedAt,
   formatTotalDuration,
   getStatsRangeLabel,
   getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
+  heatIntensity,
+  isNewSincePrevious,
   STATS_DB_STORAGE_COLORS,
   STATS_GENRE_COLORS,
+  statDelta,
+  WEEKDAY_LABELS,
   visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
+import { STATS_TAB_VALUES } from '../-stats.types';
 import { Route } from '../route';
 import styles from './stats-page.module.css';
+import { YearStory } from './year-story';
 
 const STATS_TOOLTIP_STYLE = {
   background: 'rgba(12, 12, 12, 0.96)',
@@ -80,7 +93,7 @@ export function StatsPage() {
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const { range } = Route.useSearch();
+  const { range, tab, story } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -134,7 +147,32 @@ export function StatsPage() {
   const onRangeChange = (nextRange: StatsRange) => {
     void navigate({
       to: Route.fullPath,
-      search: { range: nextRange },
+      search: { range: nextRange, tab, story },
+      replace: true,
+    });
+  };
+
+  const onTabChange = (nextTab: StatsTab) => {
+    // Range travels with the tab so switching to Library and back does not
+    // silently reset a range the user chose.
+    void navigate({
+      to: Route.fullPath,
+      search: { range, tab: nextTab, story },
+      replace: true,
+    });
+  };
+
+  // Opening the story is a real history entry (no `replace`) so Back closes it
+  // — the gesture people already reach for on a full-screen takeover. Closing
+  // replaces, so Back from the closed page does not drop them straight back in.
+  const openStory = () => {
+    void navigate({ to: Route.fullPath, search: { range, tab, story: 'year' } });
+  };
+
+  const closeStory = () => {
+    void navigate({
+      to: Route.fullPath,
+      search: { range, tab, story: undefined },
       replace: true,
     });
   };
@@ -146,11 +184,40 @@ export function StatsPage() {
         title="Listening Stats"
         actions={
           <>
+            {/* The story is a listening fact, so it does not belong on the
+                Library tab where nothing else is about the person. */}
+            {tab === 'listening' ? (
+              <button
+                type="button"
+                className={styles.statsYearButton}
+                onClick={openStory}
+                data-testid="stats-year-button"
+              >
+                Your Year
+              </button>
+            ) : null}
+            <div className={styles.statsTabs} role="tablist" aria-label="Stats section">
+              {STATS_TAB_VALUES.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === option}
+                  className={`${styles.statsTab} ${tab === option ? styles.statsTabActive : ''}`}
+                  onClick={() => onTabChange(option)}
+                >
+                  {option === 'listening' ? 'Listening' : 'Library'}
+                </button>
+              ))}
+            </div>
+            {/* Library stats are not range-scoped — disk usage is what it is
+                today — so the picker is hidden rather than left inert. */}
             <div
               id="stats-time-range"
               className={styles.statsTimeRange}
               role="tablist"
               aria-label="Listening stats range"
+              hidden={tab !== 'listening'}
             >
               {(['7d', '30d', '12m', 'all'] as const).map((option) => (
                 <button
@@ -197,19 +264,51 @@ export function StatsPage() {
         }
       />
 
+      {story === 'year' ? <YearStory onClose={closeStory} /> : null}
+
       {cachedStatsQuery.isPending ? (
         <SectionLoadingState />
       ) : cachedStatsQuery.error ? (
         <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
+      ) : tab === 'library' ? (
+        /* Operational facts. Deliberately NOT range-scoped — disk usage and
+           database size are what they are right now, so the range picker is
+           hidden on this tab rather than sitting there doing nothing. */
+        <>
+          <StatsSectionCard title="Library Health" fullWidth>
+            <StatsLibraryHealth health={cachedStats?.health ?? {}} />
+          </StatsSectionCard>
+
+          <StatsSectionCard title="Library Disk Usage" fullWidth>
+            <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
+          </StatsSectionCard>
+
+          <StatsSectionCard title="Database Storage" fullWidth>
+            <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
+          </StatsSectionCard>
+        </>
       ) : hasData ? (
         <>
-          <OverviewCards overview={overview} />
+          <OverviewCards
+            overview={overview}
+            previous={cachedStats?.previous ?? null}
+            periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
+          />
           <div className={styles.statsMainGrid}>
             <div className={styles.statsLeftCol}>
+              <StatsSectionCard title="When You Listen">
+                <StatsListeningClock clock={cachedStats?.clock} rhythm={cachedStats?.rhythm} />
+              </StatsSectionCard>
               <StatsSectionCard title="Listening Activity">
                 <div id="stats-timeline-chart" className={styles.chartContainer}>
                   <StatsActivityChart timeline={cachedStats?.timeline ?? []} />
                 </div>
+              </StatsSectionCard>
+              <StatsSectionCard title="Own vs Play">
+                <StatsOwnVsPlayCard
+                  rows={cachedStats?.own_vs_play ?? []}
+                  neglected={cachedStats?.neglected ?? []}
+                />
               </StatsSectionCard>
               <StatsSectionCard title="Genre Breakdown">
                 <div className={styles.statsGenreChartContainer}>
@@ -242,18 +341,6 @@ export function StatsPage() {
               </StatsSectionCard>
             </div>
           </div>
-
-          <StatsSectionCard title="Library Health" fullWidth>
-            <StatsLibraryHealth health={cachedStats?.health ?? {}} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Library Disk Usage" fullWidth>
-            <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Database Storage" fullWidth>
-            <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
-          </StatsSectionCard>
         </>
       ) : (
         <StatsEmptyState />
@@ -262,24 +349,48 @@ export function StatsPage() {
   );
 }
 
+type OverviewShape = Partial<{
+  total_plays: number;
+  total_time_ms: number;
+  unique_artists: number;
+  unique_albums: number;
+  unique_tracks: number;
+}>;
+
+/**
+ * What the delta is measured against, per range. 'all' is absent on purpose —
+ * there is no period before everything, so its tiles carry no comparison.
+ */
+const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
+  '7d': 'vs previous 7 days',
+  '30d': 'vs previous 30 days',
+  '12m': 'vs previous 12 months',
+};
+
 function OverviewCards({
   overview,
+  periodLabel,
+  previous,
 }: {
-  overview: Partial<{
-    total_plays: number;
-    total_time_ms: number;
-    unique_artists: number;
-    unique_albums: number;
-    unique_tracks: number;
-  }>;
+  overview: OverviewShape;
+  periodLabel: string | null;
+  previous: OverviewShape | null;
 }) {
   const cards = [
-    { label: 'Total Plays', value: formatCompactNumber(overview.total_plays) },
-    { label: 'Listening Time', value: formatListeningTime(overview.total_time_ms) },
-    { label: 'Artists', value: formatCompactNumber(overview.unique_artists) },
-    { label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
-    { label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
-  ];
+    { key: 'total_plays', label: 'Total Plays', value: formatCompactNumber(overview.total_plays) },
+    {
+      key: 'total_time_ms',
+      label: 'Listening Time',
+      value: formatListeningTime(overview.total_time_ms),
+    },
+    {
+      key: 'unique_artists',
+      label: 'Artists',
+      value: formatCompactNumber(overview.unique_artists),
+    },
+    { key: 'unique_albums', label: 'Albums', value: formatCompactNumber(overview.unique_albums) },
+    { key: 'unique_tracks', label: 'Tracks', value: formatCompactNumber(overview.unique_tracks) },
+  ] as const;
 
   return (
     <div id="stats-overview" className={styles.statsOverview}>
@@ -287,8 +398,212 @@ function OverviewCards({
         <div key={card.label} className={styles.statsCard}>
           <div className={styles.statsCardValue}>{card.value}</div>
           <div className={styles.statsCardLabel}>{card.label}</div>
+          <StatsCardDelta
+            current={overview[card.key]}
+            previous={previous?.[card.key]}
+            periodLabel={periodLabel}
+          />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The change against the equivalent previous period.
+ *
+ * Renders NOTHING rather than something misleading, in three cases: no
+ * previous period at all (range 'all'), a previous period of zero (there is no
+ * honest percentage for growth from nothing — that shows "new" instead), and a
+ * partial payload. A stats page that invents "+∞%" is worse than one that says
+ * less.
+ */
+function StatsCardDelta({
+  current,
+  periodLabel,
+  previous,
+}: {
+  current: number | undefined;
+  periodLabel: string | null;
+  previous: number | undefined;
+}) {
+  if (!periodLabel) return null;
+  if (isNewSincePrevious(current, previous)) {
+    return (
+      <div className={`${styles.statsCardDelta} ${styles.statsCardDeltaNew}`}>
+        new {periodLabel}
+      </div>
+    );
+  }
+  const delta = statDelta(current, previous);
+  if (!delta) return null;
+  const arrow = delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : '·';
+  return (
+    <div className={`${styles.statsCardDelta} ${styles[`statsCardDelta_${delta.direction}`]}`}>
+      {arrow} {delta.pct}% {periodLabel}
+    </div>
+  );
+}
+
+/**
+ * The shape of a listening week — plays by weekday x hour — plus the habit
+ * numbers beside it.
+ *
+ * The page could say how MUCH you listened and never WHEN. This is the most
+ * personal thing the data can show, and it is one GROUP BY.
+ *
+ * The grid arrives dense (7x24, zeros included) from the backend, so this
+ * renders it directly: a UI that has to fill gaps is a UI where an empty hour
+ * and a missing hour look the same.
+ */
+function StatsListeningClock({
+  clock,
+  rhythm,
+}: {
+  clock: StatsClock | undefined;
+  rhythm: StatsRhythm | undefined;
+}) {
+  const grid = clock?.grid;
+  const peak = clock?.peak;
+  const peakPlays = peak?.plays ?? 0;
+
+  if (!grid || !clock?.total) {
+    return <div className={styles.statsClockEmpty}>No plays in this range yet.</div>;
+  }
+
+  const peakSlot = formatPeakSlot(peak?.weekday, peak?.hour);
+
+  return (
+    <div className={styles.statsClock}>
+      <div className={styles.statsClockGrid}>
+        {grid.map((row, weekday) => (
+          <div key={weekday} className={styles.statsClockRow}>
+            <span className={styles.statsClockDay}>{WEEKDAY_LABELS[weekday]}</span>
+            {row.map((plays, hour) => (
+              <span
+                key={hour}
+                className={styles.statsClockCell}
+                style={{ opacity: heatIntensity(plays, peakPlays) }}
+                title={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)} — ${plays} ${
+                  plays === 1 ? 'play' : 'plays'
+                }`}
+              />
+            ))}
+          </div>
+        ))}
+        <div className={styles.statsClockAxis}>
+          <span className={styles.statsClockDay} />
+          {[0, 6, 12, 18].map((h) => (
+            <span key={h} className={styles.statsClockAxisLabel}>
+              {formatHourLabel(h)}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className={styles.statsRhythm}>
+        {peakSlot ? (
+          <div className={styles.statsRhythmItem}>
+            <span className={styles.statsRhythmValue}>{peakSlot}</span>
+            <span className={styles.statsRhythmLabel}>peak slot</span>
+          </div>
+        ) : null}
+        {rhythm ? (
+          <>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.current_streak}</span>
+              <span className={styles.statsRhythmLabel}>
+                day{rhythm.current_streak === 1 ? '' : 's'} in a row
+              </span>
+            </div>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.longest_streak}</span>
+              <span className={styles.statsRhythmLabel}>longest streak</span>
+            </div>
+            <div className={styles.statsRhythmItem}>
+              <span className={styles.statsRhythmValue}>{rhythm.busiest_day.plays}</span>
+              <span className={styles.statsRhythmLabel}>busiest day</span>
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What share of the library a genre is, against what share of the listening.
+ *
+ * The page's strongest claim to being worth visiting: Spotify has no library
+ * and Plex has no acquisition history, so nobody else can tell you that you
+ * own 40% metal and play 12% of it.
+ *
+ * Sorted by the size of the DISAGREEMENT, not by size — the biggest genre is
+ * something the user already knows.
+ */
+function StatsOwnVsPlayCard({
+  neglected,
+  rows,
+}: {
+  neglected: StatsNeglectedAlbum[];
+  rows: StatsOwnVsPlay[];
+}) {
+  if (!rows.length) {
+    return <div className={styles.statsClockEmpty}>Not enough tagged artists to compare yet.</div>;
+  }
+
+  return (
+    <div className={styles.statsOwnPlay}>
+      {rows.map((row) => (
+        <div key={row.genre} className={styles.statsOwnPlayRow}>
+          <span className={styles.statsOwnPlayGenre} title={row.genre}>
+            {row.genre}
+          </span>
+          <span className={styles.statsOwnPlayBars}>
+            <span
+              className={styles.statsOwnPlayOwned}
+              style={{ width: `${Math.min(row.owned_pct, 100)}%` }}
+              title={`${row.owned_pct}% of your library (${row.owned_tracks} tracks)`}
+            />
+            <span
+              className={styles.statsOwnPlayPlayed}
+              style={{ width: `${Math.min(row.played_pct, 100)}%` }}
+              title={`${row.played_pct}% of your plays (${row.plays})`}
+            />
+          </span>
+          <span
+            className={`${styles.statsOwnPlayGap} ${
+              row.gap >= 0 ? styles.statsOwnPlayGapUp : styles.statsOwnPlayGapDown
+            }`}
+            title={
+              row.gap >= 0
+                ? 'You play this more than you own it'
+                : 'You own this more than you play it'
+            }
+          >
+            {row.gap > 0 ? '+' : ''}
+            {row.gap}
+          </span>
+        </div>
+      ))}
+
+      <div className={styles.statsOwnPlayLegend}>
+        <span className={styles.statsOwnPlayKeyOwned} /> owned
+        <span className={styles.statsOwnPlayKeyPlayed} /> played
+      </div>
+
+      {neglected.length ? (
+        <div className={styles.statsNeglected}>
+          <div className={styles.statsNeglectedTitle}>Never played ({neglected.length})</div>
+          {neglected.slice(0, 5).map((album) => (
+            <div key={album.id} className={styles.statsNeglectedRow}>
+              <span className={styles.statsNeglectedName}>{album.name}</span>
+              <span className={styles.statsNeglectedArtist}>{album.artist}</span>
+              <span className={styles.statsNeglectedCount}>{album.tracks}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

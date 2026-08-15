@@ -33,6 +33,31 @@ describe('stats route', () => {
             unique_albums: 4,
             unique_tracks: 12,
           },
+          previous: {
+            total_plays: 12,
+            total_time_ms: 3_300_000,
+            unique_artists: 3,
+            unique_albums: 2,
+            unique_tracks: 6,
+          },
+          clock: {
+            grid: Array.from({ length: 7 }, (_, d) =>
+              Array.from({ length: 24 }, (_, h) => (d === 3 && h === 21 ? 9 : 0)),
+            ),
+            peak: { weekday: 3, hour: 21, plays: 9 },
+            total: 9,
+          },
+          rhythm: {
+            current_streak: 4,
+            longest_streak: 11,
+            busiest_day: { date: '2026-08-12', plays: 9 },
+            active_days: 20,
+          },
+          own_vs_play: [
+            { genre: 'Metal', owned_pct: 80, played_pct: 0, gap: -80, owned_tracks: 8, plays: 0 },
+            { genre: 'Pop', owned_pct: 20, played_pct: 100, gap: 80, owned_tracks: 2, plays: 4 },
+          ],
+          neglected: [{ id: 1, name: 'Dusty Record', artist: 'Someone', tracks: 11 }],
           top_artists: [{ id: 7, name: 'Artist A', play_count: 10 }],
           top_albums: [],
           top_tracks: [],
@@ -173,6 +198,230 @@ describe('stats route', () => {
     const { history } = renderStatsRoute(['/stats']);
 
     await waitFor(() => expect(history.location.pathname).toBe('/discover'));
+  });
+  /**
+   * The tiles printed totals with nothing to measure them against. The delta is
+   * the whole point of stats P1 — a render guard so it cannot quietly stop
+   * appearing (the download-chip lesson: half a feature can ship inert).
+   */
+  it('shows each tile its change against the previous period', async () => {
+    renderStatsRoute();
+    // plays 24/12, time 6.6M/3.3M, albums 4/2, tracks 12/6 all doubled.
+    const doubled = await screen.findAllByText(/↑ 100% vs previous 7 days/);
+    expect(doubled).toHaveLength(4);
+    // Artists were 3 both periods — flat, and deliberately not an arrow.
+    expect(screen.getByText(/· 0% vs previous 7 days/)).toBeTruthy();
+  });
+
+  /**
+   * Defence against a STALE cache. The worker writes previous: null for 'all',
+   * but a cache written before that existed — or a future backend slip — could
+   * hand the page a previous it has no label for, and the tile would read
+   * "↑ 5% undefined". The label is the gate, not just the data.
+   */
+  it('renders no delta for a range it has no label for, even with data', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: {
+            total_plays: 24,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          // A previous window that should not exist for 'all'.
+          previous: {
+            total_plays: 12,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
+          health: { total_tracks: 12 },
+        }),
+      ),
+    );
+    renderStatsRoute(['/stats?range=all']);
+    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    // The symptom is NOT the string "undefined" — React renders a null label
+    // as empty. It is a naked "↑ 100%" with nothing saying what it is against.
+    expect(screen.queryByText(/↑\s*100%/)).toBeNull();
+    expect(screen.queryByText(/vs previous/)).toBeNull();
+  });
+
+  /**
+   * P2: the page carried two kinds of fact in one visual language — your top
+   * artists sitting beside database table sizes. They are read by different
+   * people at different frequencies. Split, with the tab in the URL so it is
+   * linkable and survives a reload.
+   */
+  it('shows listening facts by default and hides the operational ones', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Top Artists')).toBeTruthy();
+    expect(screen.queryByText('Library Disk Usage')).toBeNull();
+    expect(screen.queryByText('Database Storage')).toBeNull();
+  });
+
+  it('the library tab shows the operational facts and none of the personal ones', async () => {
+    renderStatsRoute(['/stats?tab=library']);
+    expect(await screen.findByText('Library Disk Usage')).toBeTruthy();
+    expect(screen.getByText('Database Storage')).toBeTruthy();
+    expect(screen.getByText('Library Health')).toBeTruthy();
+    expect(screen.queryByText('Top Artists')).toBeNull();
+  });
+
+  it('hides the range picker on the library tab', async () => {
+    // Disk usage is what it is today — a range picker there is a control that
+    // does nothing, which is worse than no control.
+    const { container } = renderStatsRoute(['/stats?tab=library']);
+    await screen.findByText('Library Disk Usage');
+    expect(container.querySelector('#stats-time-range')?.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('keeps the chosen range when switching tabs', async () => {
+    // Switching to Library and back must not silently reset a chosen range.
+    const { history } = renderStatsRoute(['/stats?range=30d']);
+    await screen.findByText('Top Artists');
+    fireEvent.click(screen.getByRole('tab', { name: 'Library' }));
+    await screen.findByText('Library Disk Usage');
+    expect(history.location.search).toContain('range=30d');
+    expect(history.location.search).toContain('tab=library');
+  });
+
+  /**
+   * P3: the page could say how MUCH you listened and never WHEN. The heatmap
+   * is the most personal thing the data supports, and it is one GROUP BY.
+   */
+  it('names the slot you listen most', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Wed 9pm')).toBeTruthy();
+    expect(screen.getByText('peak slot')).toBeTruthy();
+  });
+
+  it('shows listening as a habit, not just a total', async () => {
+    renderStatsRoute();
+    // Pair the value to ITS label — a bare getByText('11') collides with any
+    // other 11 on the page (it did, once the neglected shelf arrived).
+    const longest = await screen.findByText('longest streak');
+    expect(longest.previousSibling?.textContent).toBe('11');
+    const inARow = screen.getByText('days in a row');
+    expect(inARow.previousSibling?.textContent).toBe('4');
+  });
+
+  it('says so plainly when there are no plays to shape', async () => {
+    // An empty heatmap is a grid of blank squares, which reads as broken.
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: {
+            total_plays: 3,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          clock: {
+            grid: Array.from({ length: 7 }, () => Array(24).fill(0)),
+            peak: { weekday: null, hour: null, plays: 0 },
+            total: 0,
+          },
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
+          health: { total_tracks: 1 },
+        }),
+      ),
+    );
+    renderStatsRoute();
+    expect(await screen.findByText(/No plays in this range yet/)).toBeTruthy();
+  });
+
+  /**
+   * P4: the page's strongest claim to being worth visiting. Spotify has no
+   * library, Plex has no acquisition history — only SoulSync holds both halves.
+   */
+  it('shows what you own against what you actually play', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Own vs Play')).toBeTruthy();
+    expect(screen.getByText('Metal')).toBeTruthy();
+    // Owning far more than you play reads as a negative gap.
+    expect(screen.getByText('-80')).toBeTruthy();
+    expect(screen.getByText('+80')).toBeTruthy();
+  });
+
+  it('lists albums you own and have never played', async () => {
+    renderStatsRoute();
+    expect(await screen.findByText('Dusty Record')).toBeTruthy();
+    expect(screen.getByText(/Never played \(1\)/)).toBeTruthy();
+  });
+
+  it('says so plainly when there is not enough tagged metadata to compare', async () => {
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: {
+            total_plays: 3,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          own_vs_play: [],
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
+          health: { total_tracks: 1 },
+        }),
+      ),
+    );
+    renderStatsRoute();
+    expect(await screen.findByText(/Not enough tagged artists/)).toBeTruthy();
+  });
+
+  it('omits the comparison entirely on the all-time range', async () => {
+    // 'all' has no period before it — the backend sends previous: null and the
+    // page must render nothing rather than a delta against zero.
+    server.use(
+      http.get('/api/stats/cached', () =>
+        HttpResponse.json({
+          success: true,
+          overview: {
+            total_plays: 24,
+            total_time_ms: 1,
+            unique_artists: 1,
+            unique_albums: 1,
+            unique_tracks: 1,
+          },
+          previous: null,
+          top_artists: [],
+          top_albums: [],
+          top_tracks: [],
+          timeline: [],
+          genres: [],
+          recent: [],
+          health: { total_tracks: 12 },
+        }),
+      ),
+    );
+    renderStatsRoute(['/stats?range=all']);
+    expect(await screen.findByText('Total Plays')).toBeTruthy();
+    expect(screen.queryByText(/vs previous/)).toBeNull();
   });
 });
 
