@@ -64,6 +64,7 @@ from core.download_plugins.album_bundle import (
     get_poll_interval,
     get_poll_timeout,
     pick_best_album_release,
+    profile_allowed_formats,
     poll_album_download,
     resolve_reported_save_path,
 )
@@ -87,6 +88,8 @@ from core.prowlarr_client import (
 from core.torrent_clients import get_active_adapter as get_active_torrent_adapter
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
+
+from core.quality.release_format import evaluate_release
 
 logger = get_logger("download_plugins.torrent")
 
@@ -295,6 +298,23 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return None
         download_url, fallback_magnet = _decode_candidate(candidate)
 
+        # #1149 stage 1: refuse on the TITLE before spawning anything.
+        # Returning None is the engine's "declined, try the next source"
+        # contract (core/download_engine/engine.py), so a strict-lossless user
+        # falls through to a source that can satisfy them instead of queueing
+        # a release the import guard will throw away.
+        #
+        # Only ever fires for a profile that names formats AND disables
+        # fallback. A user who allows lossy has allowed_formats=None here and
+        # sees no change whatsoever.
+        allowed_formats = profile_allowed_formats()
+        if allowed_formats:
+            ok, why = evaluate_release(allowed_formats, display_name)
+            if not ok:
+                logger.info("Torrent declined %r on the quality profile: %s",
+                            display_name, why)
+                return None
+
         download_id = str(uuid.uuid4())
         with self._lock:
             self.active_downloads[download_id] = {
@@ -315,7 +335,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         thread = threading.Thread(
             target=self._download_thread,
-            args=(download_id, download_url, display_name, fallback_magnet),
+            args=(download_id, download_url, display_name, fallback_magnet,
+                  allowed_formats),
             daemon=True,
             name=f'torrent-dl-{download_id[:8]}',
         )
@@ -323,7 +344,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         return download_id
 
     def _download_thread(self, download_id: str, download_url: str, display_name: str,
-                         fallback_magnet: Optional[str] = None) -> None:
+                         fallback_magnet: Optional[str] = None,
+                         allowed_formats=None) -> None:
         """Background worker: hand the URL to the active adapter,
         poll until done, then walk the resulting directory."""
         adapter = get_active_torrent_adapter()
@@ -332,9 +354,26 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return
 
         try:
-            from core.torrent_clients.base import add_torrent_smart
+            from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
+
+            # #1149 stage 2: the title cleared, now check what is actually in
+            # the release. A title saying FLAC over a folder of MP3s is the
+            # case a title-only check cannot catch.
+            def _verify(names):
+                if not allowed_formats:
+                    return True, ''
+                return evaluate_release(allowed_formats, display_name, file_names=names)
+
             torrent_hash = run_async(add_torrent_smart(
-                adapter, download_url, fallback_magnet=fallback_magnet))
+                adapter, download_url, fallback_magnet=fallback_magnet,
+                verify_files=_verify))
+        except ReleaseRejected as rejected:
+            logger.info("Torrent refused %r after reading its file list: %s",
+                        display_name, rejected.reason)
+            self._mark_error(
+                download_id,
+                f"Does not match the quality profile: {rejected.reason}")
+            return
         except Exception as e:
             self._mark_error(download_id, f"add_torrent failed: {e}")
             return
@@ -614,6 +653,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         artist_name: str,
         staging_dir: str,
         progress_callback=None,
+        quality_profile_id=None,
     ) -> Dict[str, Any]:
         """One-shot album download: search Prowlarr for the whole
         release, pick the best torrent, fetch it, extract if needed,
@@ -672,16 +712,32 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # min_seeders keeps a provably-dead swarm out of the queue entirely
         # (#1139) — picking the "most seeded" of a field where everything is on
         # zero still queues something nobody is serving.
+        # #1149: the profile's formats are a VETO here, not a ranking nudge.
+        # Quality was the second sort key after seeders, so a well-seeded MP3
+        # rip beat a FLAC rip with fewer seeders however the profile was set.
+        # No new setting: a ladder of FLAC targets with fallback disabled
+        # already means "FLAC only" to the import guard; this side just never
+        # asked.
+        allowed_formats = profile_allowed_formats(quality_profile_id)
         picked = pick_best_album_release(
             candidates, _guess_quality_from_title, album_name=album_name,
             min_seeders=get_min_seeders(),
+            allowed_formats=allowed_formats,
         )
         if picked is None:
             # No candidate matched the requested album, or none had a live
             # swarm. Fall back to the per-track flow rather than downloading a
             # wrong album (#730) or queueing a dead one (#1139) — per-track
             # searches each track individually.
-            result['error'] = 'No torrent candidate matched the requested album'
+            # Say WHICH gate refused, so the user can act on it rather than
+            # re-running the same search and getting the same silence.
+            if allowed_formats:
+                result['error'] = (
+                    'No torrent candidate matched the requested album in '
+                    f"{'/'.join(sorted(allowed_formats)).upper()} "
+                    '(quality profile allows no other format)')
+            else:
+                result['error'] = 'No torrent candidate matched the requested album'
             result['fallback'] = True
             return result
 
@@ -698,9 +754,29 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         # Phase 2: hand to adapter. Fetch the .torrent server-side first —
         # the client often can't reach Prowlarr itself (split containers).
         try:
-            from core.torrent_clients.base import add_torrent_smart
+            from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
+
+            # #1149: the title got us this far; the FILE LIST is the evidence.
+            # This runs inside add_torrent_smart because that is where the
+            # fetched payload already lives, so verification costs no extra
+            # request and happens strictly before the client is handed
+            # anything.
+            def _verify(names):
+                if not allowed_formats:
+                    return True, ''
+                return evaluate_release(
+                    allowed_formats, picked.title, file_names=names)
+
             torrent_id = run_async(add_torrent_smart(
-                adapter, download_url, fallback_magnet=picked.magnet_uri))
+                adapter, download_url, fallback_magnet=picked.magnet_uri,
+                verify_files=_verify))
+        except ReleaseRejected as rejected:
+            logger.info("[Torrent album] Refused '%s' after reading its file list: %s",
+                        picked.title, rejected.reason)
+            result['error'] = f'Release does not match the quality profile: {rejected.reason}'
+            # Fallback-eligible: the next source may have a release that does.
+            result['fallback'] = True
+            return result
         except Exception as e:
             result['error'] = f'Torrent client refused the release: {e}'
             return result
