@@ -16,9 +16,20 @@ export type StatsRange = (typeof STATS_RANGE_VALUES)[number];
 export const STATS_TAB_VALUES = ['listening', 'library'] as const;
 export type StatsTab = (typeof STATS_TAB_VALUES)[number];
 
+/**
+ * The Year in Listening takeover, opened as `?story=year`.
+ *
+ * In the URL rather than component state for the same reason `tab` is: the
+ * story is worth linking to, and closing it should be a back-button away
+ * rather than a state reset that leaves the page behind it looking untouched.
+ */
+export const STATS_STORY_VALUES = ['year'] as const;
+export type StatsStory = (typeof STATS_STORY_VALUES)[number];
+
 export const statsSearchSchema = z.object({
   range: z.enum(STATS_RANGE_VALUES).default('7d').catch('7d'),
   tab: z.enum(STATS_TAB_VALUES).default('listening').catch('listening'),
+  story: z.enum(STATS_STORY_VALUES).optional().catch(undefined),
 });
 
 export type StatsSearch = z.infer<typeof statsSearchSchema>;

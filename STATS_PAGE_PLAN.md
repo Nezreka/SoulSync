@@ -90,21 +90,135 @@ Decade and format gaps NOT built: `tracks.year` is sparse and format lives only
 in `file_path`, so both would be gaps in the metadata dressed up as gaps in
 taste. **Rediscovered** still to do.
 
-## P5 — Year in Listening (the big one)
+## P5 — Year in Listening ✅ SHIPPED
 
-A separate surface — `/stats/year` or a modal takeover — NOT another section.
+A separate surface, opened as `?story=year` from a single accented button on
+the Listening tab. Takeover rather than a route: the open state still lives in
+the URL (linkable, survives reload, Back closes it), without a second page
+shell or router surgery for one screen.
 
-What makes Wrapped work is three things, in order of importance:
-1. a **fixed period**, not a filter
-2. a **sequence of single-idea moments**, not a grid
-3. a **shareable card** at the end
+All three things that make the format work are in:
 
-Spine: top artist per month for twelve months, month-over-month shifts, your #1
-of the year, minutes as "that's N days", new artists discovered, the one track
-you played most and when.
+1. **A fixed period, not a filter** — `get_year_in_listening()` decides the
+   window and the endpoint takes no `range` argument at all. Letting a caller
+   narrow it would turn the story back into the picker the page already has.
+2. **A sequence of single-idea moments** — nine slide kinds, keyboard and
+   button driven, with progress pips.
+3. **Something you keep** — a client-side canvas card with Save as image.
 
-All of it is SQL over `listening_history`. The work is sequencing and design,
-not data.
+**Decided: rolling twelve calendar months, not Jan–Dec.** A self-hosted app
+gets opened in August, and a fixed calendar year would hand a five-month-old
+install an empty story for seven of its twelve slots. The period label prints
+the real range so nothing is implied that the data does not cover.
+
+**Decided: client-side canvas, not server-side Pillow.** The browser already
+holds every number on the card; the server alternative meant re-querying the
+year and adding an image endpoint to redraw what was on screen.
+
+The slide list is DERIVED, not fixed (`buildYearSlides`). An empty slide is
+worse than a shorter story — it breaks the promise that each screen was worth
+advancing to. So a year with one artist gets no top-five countdown, a year
+where nothing was discovered gets no discoveries slide, and a year with no
+plays is a single honest screen that says so.
+
+Two things worth knowing about the data:
+
+- **Discoveries compare first-play against ALL of history, not the window.**
+  Scoping that subquery to the window would call every returning artist a
+  discovery — the most obviously wrong number this surface could print. There
+  is a test that fails if anyone narrows it.
+- **This surface is FREE OF THE UTC SKEW** the range filters carry. The window
+  is built from the local clock and compared with `date(played_at)`, which
+  matches the local wall-clock the column stores — and parses both stored
+  shapes (the web player writes an ISO 'T' separator, plex_client a space,
+  and a lexicographic compare orders those differently at a boundary).
+
+Cached once as `stats_cache_year`, not per range — it is a period, not a
+filter, and four copies under four keys would be four chances to disagree.
+The endpoint computes it live on a cache miss, which is the path that matters:
+a fresh or just-restarted install would otherwise show an empty year that
+looks identical to "you have never listened to anything".
+
+### P5b — artwork pass (second round)
+
+First version shipped name-only, because the year cache never went through
+the enrichment the per-range caches get. That was a wiring gap, not a data
+gap: the images were sitting in `artists.thumb_url` / `albums.thumb_url` the
+whole time.
+
+- `_enrich_stats_items` LIFTED out of `ListeningStatsWorker` into
+  `core/stats/enrich.py` so the cached path and the live-compute path share
+  one enricher. A version that only existed on the worker is exactly how the
+  live path ended up returning bare names.
+- `discoveries` now enriches as an artist list (`ARTIST_LIST_KEYS`), so the
+  slide has both artwork and the `id` it needs to link through.
+- Every artist row in the story links to artist detail. Rows we could not
+  resolve an id for render as plain text rather than a link to
+  `/artist-detail/library/undefined`.
+- A new **album wall** slide, and artwork on the opening, countdown and
+  on-repeat slides. Missing art renders as an initial-letter tile, never a
+  hole — a patchy library must not produce a ragged grid.
+- The share card was rebuilt: `-year.card.ts` holds a pure
+  `buildYearCardModel` (content + palette + which art) and a `drawYearCard`
+  geometry pass, so what the card SAYS is testable without a canvas. A live
+  preview is drawn by the same call that exports — the preview cannot drift
+  from the file.
+- **The canvas taint trap:** artwork proxied from the media server is
+  same-origin, but anything from an external metadata provider is not.
+  Drawing one of those without CORS taints the canvas and `toBlob` throws.
+  Images load with `crossOrigin='anonymous'`, and a failed export retries
+  text-only rather than handing back nothing.
+
+`shareCardLines` / `shareCardFilename` were DELETED from `-year.helpers.ts`
+when the card model landed — two sources of truth for the same card content
+is the drift that bites six months later.
+
+### P5c — motion, playback, and the card STUDIO
+
+**Motion** (`-year.animation.ts`): headline numbers count up, month bars grow
+from zero in sequence, list items reveal behind one another. The easing,
+duration scaling and stagger cap are pure and tested, because animation bugs
+otherwise only ever surface as "it looked wrong for a second".
+
+Duration scales with magnitude — 12 and 40,000 ticking over the same span
+looks broken, because the eye reads the individual digits. Stagger is capped
+so the twelfth month does not arrive after the reader has moved on. All of it
+degrades to the final state under `prefers-reduced-motion`.
+
+**A real bug the motion tests caught:** the count-up seeded its clock from
+`performance.now()` but measured elapsed against the rAF callback timestamp.
+Those are not guaranteed to share a time origin; where they do not, `elapsed`
+goes negative and the number sits at zero forever. The clock now comes from
+the first rAF timestamp.
+
+**Playback:** album cards on the wall play the album — `/api/stats/album-tracks/<id>`
+returns rows shaped exactly like `/api/library/radio`, because that is what
+`npMapRadioTrack` (media-player.js) reads and anything else silently drops out
+of the queue. Tracks with no `file_path` are excluded server-side: a row the
+player would skip is not a track you own, and counting it makes "play album"
+look like it lost songs.
+
+**The card is now a STUDIO, not a template** — 4 layouts × 3 aspects ×
+4 themes, plus which numbers appear.
+
+This is the deliberate divergence from Spotify. They ship one fixed
+composition because they render it for half a billion people; we render it for
+one person who owns their music, so the card can offer real choices AND use
+the actual covers off their disk. A single fixed template throws that away.
+
+- Layouts are different COMPOSITIONS, not restyles: `poster` (one cover, full
+  bleed, bottom-anchored type), `mosaic` (a 3-wide wall of covers with a text
+  panel), `stack` (the balanced default), `minimal` (type only). A layout
+  picker whose options all look alike is worse than no picker.
+- Aspects are Post 4:5 / Square 1:1 / Story 9:16, and the type SCALES with the
+  card — a story card is not a post card with more empty space.
+- `paper` was added as a light theme because every dark card looks the same in
+  a feed.
+- Stats are user-selected, capped at 5, and always render in DEFINITION order
+  — a card whose rows reshuffle as you tick boxes feels broken rather than
+  configurable. `toggleCardStat` refuses to leave the card with none.
+- **Copy to clipboard** alongside save: on desktop the real share gesture is
+  paste, not "find the downloaded file and drag it somewhere".
 
 ## P6 — three.js, if it earns it
 
@@ -124,7 +238,13 @@ on the stats page. Revisit only after P5 ships and is worth landing on.
 
 ## Open questions
 
-- Is Wrapped year-bound (Jan–Dec) or rolling twelve months? Rolling is more
-  useful year-round; fixed is more shareable in December.
-- Does the shareable card render server-side (Pillow, like the overlay
-  compositor already does) or client-side canvas?
+Both P5 questions are now answered above (rolling twelve months; client-side
+canvas). What is left:
+
+- The pre-existing UTC skew on the RANGE filters. P5 sidesteps it; the older
+  range-scoped stats still carry it. Fixing it moves every existing number on
+  the page, so it wants its own change with its own before/after — not a
+  drive-by.
+- **Rediscovered** tracks (P4 leftover): something you played heavily, stopped,
+  and came back to. Needs a "gap" definition, which is a judgement call.
+- Sessions / gap detection (P3 leftover), for the same reason.

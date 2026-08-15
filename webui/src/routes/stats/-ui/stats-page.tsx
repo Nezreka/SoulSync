@@ -68,6 +68,8 @@ import {
 } from '../-stats.helpers';
 import { STATS_TAB_VALUES } from '../-stats.types';
 import { Route } from '../route';
+import { YearStory } from './year-story';
+
 import styles from './stats-page.module.css';
 
 const STATS_TOOLTIP_STYLE = {
@@ -92,7 +94,7 @@ export function StatsPage() {
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const { range, tab } = Route.useSearch();
+  const { range, tab, story } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -146,7 +148,7 @@ export function StatsPage() {
   const onRangeChange = (nextRange: StatsRange) => {
     void navigate({
       to: Route.fullPath,
-      search: { range: nextRange, tab },
+      search: { range: nextRange, tab, story },
       replace: true,
     });
   };
@@ -156,7 +158,22 @@ export function StatsPage() {
     // silently reset a range the user chose.
     void navigate({
       to: Route.fullPath,
-      search: { range, tab: nextTab },
+      search: { range, tab: nextTab, story },
+      replace: true,
+    });
+  };
+
+  // Opening the story is a real history entry (no `replace`) so Back closes it
+  // — the gesture people already reach for on a full-screen takeover. Closing
+  // replaces, so Back from the closed page does not drop them straight back in.
+  const openStory = () => {
+    void navigate({ to: Route.fullPath, search: { range, tab, story: 'year' } });
+  };
+
+  const closeStory = () => {
+    void navigate({
+      to: Route.fullPath,
+      search: { range, tab, story: undefined },
       replace: true,
     });
   };
@@ -168,6 +185,18 @@ export function StatsPage() {
         title="Listening Stats"
         actions={
           <>
+            {/* The story is a listening fact, so it does not belong on the
+                Library tab where nothing else is about the person. */}
+            {tab === 'listening' ? (
+              <button
+                type="button"
+                className={styles.statsYearButton}
+                onClick={openStory}
+                data-testid="stats-year-button"
+              >
+                Your Year
+              </button>
+            ) : null}
             <div className={styles.statsTabs} role="tablist" aria-label="Stats section">
               {STATS_TAB_VALUES.map((option) => (
                 <button
@@ -235,6 +264,8 @@ export function StatsPage() {
           </>
         }
       />
+
+      {story === 'year' ? <YearStory onClose={closeStory} /> : null}
 
       {cachedStatsQuery.isPending ? (
         <SectionLoadingState />

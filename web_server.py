@@ -40226,6 +40226,35 @@ def stats_cached():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/stats/year', methods=['GET'])
+def stats_year_in_listening():
+    """Your Year in Listening — one fixed twelve-month period, not a range.
+
+    No `range` argument on purpose: the period is the feature. Letting a
+    caller narrow it would turn the story back into the filter the rest of
+    the page already provides."""
+    try:
+        data = _stats_queries.get_year_in_listening(get_database(), fix_artist_image_url)
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/stats/album-tracks/<album_id>', methods=['GET'])
+def stats_album_tracks(album_id):
+    """An owned album's tracks, ready for the media player's queue.
+
+    Exists so a card on a stats surface can start playback without the page
+    having to know the player's row shape."""
+    try:
+        tracks = _stats_queries.get_album_play_tracks(
+            get_database(), album_id, fix_artist_image_url,
+        )
+        return jsonify({'success': True, 'tracks': tracks})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/stats/overview', methods=['GET'])
 def stats_overview():
     """Get aggregate listening stats for a time range."""

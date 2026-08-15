@@ -5717,6 +5717,272 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # ── Year in Listening (stats P5) ─────────────────────────────────────
+    #
+    # A FIXED PERIOD, not another filter. That is the whole difference between
+    # this and the rest of the page: the range picker asks the user to choose,
+    # and a Wrapped tells them what happened. Everything below is one window,
+    # decided here, with the boundary printed on the page.
+    #
+    # ROLLING twelve calendar months ending with the current (partial) one —
+    # not Jan-Dec. A self-hosted app gets opened in August, and a fixed
+    # calendar year would hand a five-month-old install an empty story for
+    # seven of its twelve slots. The period label states the real range so
+    # nothing is implied that the data does not cover.
+    #
+    # TIMEZONE: unlike the range filters (which compare local `played_at`
+    # against SQLite's UTC `datetime('now')` and are skewed by the server's
+    # offset — see STATS_PAGE_PLAN.md), this window is computed from the
+    # LOCAL clock and compared with `date(played_at)`. That matches the local
+    # wall-clock the column actually stores, so the year is skew-free. Using
+    # date() rather than a raw string compare also means both stored shapes
+    # parse — the web player writes an ISO 'T' separator and plex_client
+    # writes a space, and a lexicographic compare orders those differently at
+    # the boundary.
+
+    _MONTH_LABELS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+    @staticmethod
+    def _year_month_keys(now, months=12):
+        """The ``months`` calendar-month keys ending with ``now``'s month.
+
+        Returned oldest-first as ('YYYY-MM', 'Mon YYYY') pairs. Generated in
+        Python rather than read off the data so the strip is DENSE — a month
+        you listened to nothing in is a fact about the year, and letting it
+        fall out of a GROUP BY would silently close the gap."""
+        base = now.year * 12 + (now.month - 1)
+        keys = []
+        for offset in range(months - 1, -1, -1):
+            total = base - offset
+            year, month0 = divmod(total, 12)
+            keys.append((f'{year:04d}-{month0 + 1:02d}',
+                         f'{MusicDatabase._MONTH_LABELS[month0]} {year}'))
+        return keys
+
+    _EMPTY_YEAR_TOTALS = {'plays': 0, 'minutes': 0, 'artists': 0,
+                          'albums': 0, 'tracks': 0, 'active_days': 0}
+
+    @staticmethod
+    def _pick_month_leaders(rows):
+        """``{month: winning artist}`` from ``(month, artist, plays)`` rows.
+
+        A fold rather than a ROW_NUMBER() window: window functions need SQLite
+        3.25+, and this would have been the only query in the codebase to
+        require it.
+
+        Split out from the query so the TIE-BREAK is testable. A tie resolves
+        to the lower-cased-alphabetically-first name, and it has to resolve the
+        same way every rebuild — SQLite makes no promise about the order it
+        hands back grouped rows, so a fold that just kept the first one it saw
+        would let the month strip change its mind between two renders of
+        identical data. Given rows in any order, this returns one answer."""
+        leaders = {}
+        for month, artist, plays in rows:
+            if not month:
+                continue
+            best = leaders.get(month)
+            if (best is None
+                    or plays > best[1]
+                    or (plays == best[1]
+                        and str(artist).lower() < str(best[0]).lower())):
+                leaders[month] = (artist, plays)
+        return {month: name for month, (name, _) in leaders.items()}
+
+    def get_year_in_listening(self, now=None, months=12):
+        """The whole Year in Listening story in one payload.
+
+        ``now`` is injectable so the story is reproducible in tests — every
+        boundary in here derives from it rather than from a scattered
+        datetime.now(), which is also what lets the worker cache it."""
+        from datetime import datetime as _dt
+
+        now = now or _dt.now()
+        month_keys = self._year_month_keys(now, months)
+        start_key = month_keys[0][0]
+        start_date = f'{start_key}-01'
+        # Inclusive end: today. A row dated in the future is a clock artefact,
+        # not listening, and must not inflate the current month.
+        end_date = now.strftime('%Y-%m-%d')
+        period = {
+            'start': start_date,
+            'end': end_date,
+            'label': f'{month_keys[0][1]} — {month_keys[-1][1]}',
+            'months': months,
+        }
+        empty = {
+            'period': period,
+            'has_data': False,
+            'totals': dict(self._EMPTY_YEAR_TOTALS),
+            'months': [{'month': k, 'label': lbl, 'plays': 0, 'minutes': 0,
+                        'top_artist': None} for k, lbl in month_keys],
+            'top_artists': [], 'top_albums': [], 'top_tracks': [],
+            'discoveries': [],
+            'peak_day': {'date': None, 'plays': 0},
+            'top_hour': {'hour': None, 'plays': 0},
+        }
+
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            window = "WHERE date(played_at) >= ? AND date(played_at) <= ?"
+            span = (start_date, end_date)
+
+            cursor.execute(f"""
+                SELECT COUNT(*),
+                       COALESCE(SUM(duration_ms), 0),
+                       COUNT(DISTINCT LOWER(artist)),
+                       COUNT(DISTINCT LOWER(album)),
+                       COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
+                       COUNT(DISTINCT date(played_at))
+                FROM listening_history {window}
+            """, span)
+            row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
+            plays = row[0] or 0
+            if not plays:
+                return empty
+
+            totals = {
+                'plays': plays,
+                # Whole minutes. The page turns this into "that's N days", and
+                # a fractional minute would only ever be noise there.
+                'minutes': int((row[1] or 0) // 60000),
+                'artists': row[2] or 0,
+                'albums': row[3] or 0,
+                'tracks': row[4] or 0,
+                'active_days': row[5] or 0,
+            }
+
+            # Per-month plays + minutes, folded onto the dense strip.
+            cursor.execute(f"""
+                SELECT strftime('%Y-%m', played_at) AS ym,
+                       COUNT(*), COALESCE(SUM(duration_ms), 0)
+                FROM listening_history {window}
+                GROUP BY ym
+            """, span)
+            by_month = {r[0]: (r[1], r[2]) for r in cursor.fetchall() if r[0]}
+
+            # The #1 artist of each month — the month strip's actual story.
+            # Folded in Python rather than ranked with ROW_NUMBER(): window
+            # functions need SQLite 3.25+, and this is the only query in the
+            # codebase that would have required it. Twelve months of grouped
+            # rows is nothing to walk, and a tie breaks on the lower-cased
+            # name so the same month never renders two different leaders.
+            cursor.execute(f"""
+                SELECT strftime('%Y-%m', played_at) AS ym, artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY ym, LOWER(artist)
+            """, span)
+            month_leader = self._pick_month_leaders(cursor.fetchall())
+
+            month_rows = []
+            for key, label in month_keys:
+                plays_m, ms_m = by_month.get(key, (0, 0))
+                month_rows.append({
+                    'month': key,
+                    'label': label,
+                    'plays': plays_m,
+                    'minutes': int((ms_m or 0) // 60000),
+                    'top_artist': month_leader.get(key),
+                })
+
+            def _top(sql, mapper, limit=5):
+                cursor.execute(sql, (*span, limit))
+                return [mapper(r) for r in cursor.fetchall()]
+
+            top_artists = _top(f"""
+                SELECT artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'plays': r[1]})
+
+            # How many of the twelve months each finalist actually led. This is
+            # the fact that separates "played a lot once" from "your year".
+            crowns = {}
+            for leader in month_leader.values():
+                crowns[str(leader).lower()] = crowns.get(str(leader).lower(), 0) + 1
+            for entry in top_artists:
+                entry['months_on_top'] = crowns.get(str(entry['name']).lower(), 0)
+
+            top_albums = _top(f"""
+                SELECT album, artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND album IS NOT NULL AND album != ''
+                GROUP BY LOWER(album), LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'artist': r[1], 'plays': r[2]})
+
+            top_tracks = _top(f"""
+                SELECT title, artist, album, COUNT(*) AS plays,
+                       MIN(played_at), MAX(played_at)
+                FROM listening_history {window}
+                  AND title IS NOT NULL AND title != ''
+                GROUP BY LOWER(title), LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'artist': r[1], 'album': r[2],
+                            'plays': r[3], 'first_played': r[4], 'last_played': r[5]})
+
+            # Discoveries: artists whose FIRST EVER play falls inside the
+            # window. The comparison is against ALL of history, not against the
+            # window — an artist you first played in 2019 and came back to this
+            # year is a rediscovery, not a discovery, and calling it one would
+            # be the single most obviously wrong number on the page.
+            cursor.execute("""
+                SELECT artist, first_play, plays FROM (
+                    SELECT artist,
+                           MIN(date(played_at)) AS first_play,
+                           COUNT(*) AS plays
+                    FROM listening_history
+                    WHERE artist IS NOT NULL AND artist != ''
+                    GROUP BY LOWER(artist)
+                )
+                WHERE first_play >= ? AND first_play <= ?
+                ORDER BY plays DESC
+                LIMIT 12
+            """, span)
+            discoveries = [{'name': r[0], 'first_played': r[1], 'plays': r[2]}
+                           for r in cursor.fetchall()]
+
+            cursor.execute(f"""
+                SELECT date(played_at) AS d, COUNT(*) AS plays
+                FROM listening_history {window}
+                GROUP BY d ORDER BY plays DESC, d DESC LIMIT 1
+            """, span)
+            peak = cursor.fetchone()
+
+            cursor.execute(f"""
+                SELECT CAST(strftime('%H', played_at) AS INTEGER) AS h, COUNT(*) AS plays
+                FROM listening_history {window}
+                GROUP BY h HAVING h IS NOT NULL
+                ORDER BY plays DESC, h ASC LIMIT 1
+            """, span)
+            hour = cursor.fetchone()
+
+            return {
+                'period': period,
+                'has_data': True,
+                'totals': totals,
+                'months': month_rows,
+                'top_artists': top_artists,
+                'top_albums': top_albums,
+                'top_tracks': top_tracks,
+                'discoveries': discoveries,
+                'peak_day': {'date': peak[0], 'plays': peak[1]} if peak and peak[0]
+                            else {'date': None, 'plays': 0},
+                'top_hour': {'hour': hour[0], 'plays': hour[1]} if hour
+                            else {'hour': None, 'plays': 0},
+            }
+        except Exception as e:
+            logger.error(f"Error building year in listening: {e}")
+            return empty
+        finally:
+            if conn:
+                conn.close()
+
     def get_library_health(self):
         """Get library health metrics."""
         conn = None
