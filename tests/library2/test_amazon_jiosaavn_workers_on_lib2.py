@@ -29,6 +29,8 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 
+from .conftest import own_every_track
+
 
 class _Db:
     def __init__(self, path):
@@ -44,6 +46,7 @@ def _seed(path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
+    own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())
     artist = conn.execute(
         "INSERT INTO lib2_artists(name, sort_name) VALUES('Arijit Singh',"
@@ -165,6 +168,8 @@ class TestJioSaavn:
         """Issue #964: a detail fetch that failed after a search match is marked
         rather than left unattempted, so the queue stops re-picking it every tick —
         but it has to become due again."""
+        for entity_type in ('album', 'track'):
+            jiosaavn._mark_status(entity_type, 1, 'matched')
         jiosaavn._mark_status('artist', 1, 'error')
         conn = jiosaavn.db._get_connection()
         conn.execute("UPDATE lib2_provider_attempts "
@@ -260,6 +265,8 @@ class TestAmazon:
 
     def test_a_stale_error_is_retried(self, amazon):
         """Per-item failures recover after the shared retry window."""
+        for entity_type in ('album', 'track'):
+            amazon._mark_status(entity_type, 1, 'matched')
         amazon._mark_status('artist', 1, 'error')
         conn = amazon.db._get_connection()
         conn.execute("UPDATE lib2_provider_attempts "

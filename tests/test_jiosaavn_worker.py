@@ -104,8 +104,14 @@ def _insert_track(db, album_id, title="Test Track"):
         cur = conn.execute(
             "INSERT INTO lib2_tracks (album_id, title) VALUES (?, ?)",
             (album_id, title))
+        track_id = cur.lastrowid
+        # The enrichment queue offers only what the user owns, and ownership is
+        # a live file row — this track is what makes its album and artist owned.
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?,?,1,'active')", (track_id, f"/music/{track_id}.flac"))
         conn.commit()
-        return cur.lastrowid
+        return track_id
 
 
 def _status(db, entity_type, entity_id):

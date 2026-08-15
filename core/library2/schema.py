@@ -943,6 +943,24 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_artists_canonical create skipped: %s", e)
+    # The provider-id conflict gate every enrichment worker passes through looks
+    # an id up across both places v2 keeps one: a promoted column for Spotify and
+    # MusicBrainz, `external_ids` for the other eleven. The column half was
+    # already indexed; without a matching expression index on the JSON half the
+    # OR collapsed the whole query to a scan of `lib2_artists` — on every artist
+    # match of twelve workers. With both halves indexed SQLite takes the
+    # MULTI-INDEX OR path. The expression must match `worker_support`'s
+    # predicate exactly, so both derive it from `provider_ids.external_id_sql`.
+    try:
+        from core.library2.match_status import SERVICES
+        from core.library2.provider_ids import external_id_sql
+
+        for service, _label, _ids in SERVICES:
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_lib2_artists_ext_{service} "
+                f"ON lib2_artists({external_id_sql('external_ids', service)})")
+    except Exception as e:  # noqa: BLE001
+        logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER
     # the additive column migration, so installs that predate the column get
     # both in the same startup and never need a re-import to benefit.

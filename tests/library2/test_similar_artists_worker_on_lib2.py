@@ -27,6 +27,8 @@ from core.library2.provider_attempts import (
     attempt_state, ensure_provider_attempt_schema, record_attempt,
 )
 from core.library2.schema import ensure_library_v2_schema
+
+from .conftest import own_every_track
 from core.similar_artists_worker import SimilarArtistsWorker, pick_source_artist_id
 
 
@@ -46,6 +48,7 @@ def worker(tmp_path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
+    own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())
     conn.commit()
     conn.close()
@@ -68,6 +71,12 @@ def _artist(worker, name, *, spotify_id=None, musicbrainz_id=None,
             "external_ids) VALUES(?,?,?,?,?)",
             (name, name, spotify_id, musicbrainz_id,
              json.dumps(external_ids or {}))).lastrowid
+        # The queue offers owned artists only; `own_every_track` files the track.
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+            "VALUES(?,'Tohu Bohu','album')", (artist_id,)).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')", (album,))
         conn.commit()
         return artist_id
     finally:

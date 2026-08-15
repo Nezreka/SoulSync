@@ -41,11 +41,36 @@ def conn(tmp_path):
 
 
 def _artist(conn, name, *, spotify_id=None, external_ids=None):
-    return conn.execute(
+    """An artist the user owns — the only kind the queue offers.
+
+    Ownership is a live file row, so every artist here gets the album/track/file
+    chain a real library artist has. `_child` hands the tests that album and
+    track back rather than having them insert a second, unowned one.
+    """
+    artist = conn.execute(
         "INSERT INTO lib2_artists(name, sort_name, spotify_id, external_ids) "
         "VALUES(?,?,?,?)",
         (name, name, spotify_id, json.dumps(external_ids or {})),
     ).lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+        "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')", (album,)).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+        "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
+    return artist
+
+
+def _child(conn, artist_id):
+    """The owned album and track `_artist` created for this artist."""
+    row = conn.execute(
+        "SELECT al.id AS album_id, t.id AS track_id FROM lib2_albums al "
+        "JOIN lib2_tracks t ON t.album_id = al.id "
+        "WHERE al.primary_artist_id = ? ORDER BY al.id LIMIT 1", (artist_id,)
+    ).fetchone()
+    return int(row["album_id"]), int(row["track_id"])
 
 
 def _stale(conn, entity_id, status, service="similar_artists"):
@@ -138,9 +163,7 @@ class TestTheParentsProviderIdOnAChildItem:
 
     def test_an_album_carries_its_artists_id(self, conn):
         artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
-        album = conn.execute(
-            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-            "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
+        album, _track = _child(conn, artist)
 
         item = next_pending(conn, "qobuz", entity_types=("album",),
                             include_parent_id=True)
@@ -152,12 +175,7 @@ class TestTheParentsProviderIdOnAChildItem:
         """A track's artist is two joins away in lib2 — track → album → primary
         artist — where legacy carried tracks.artist_id on the row itself."""
         artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
-        album = conn.execute(
-            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-            "VALUES(?,'Tohu Bohu','album')", (artist,)).lastrowid
-        track = conn.execute(
-            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Bora')",
-            (album,)).lastrowid
+        _album, track = _child(conn, artist)
 
         item = next_pending(conn, "qobuz", entity_types=("track",),
                             include_parent_id=True)
@@ -168,10 +186,7 @@ class TestTheParentsProviderIdOnAChildItem:
     def test_an_unmatched_parent_yields_none_for_the_key(self, conn):
         """Present but empty, so the caller's `if not parent_id: return True` guard
         reads the same as it did on legacy."""
-        artist = _artist(conn, "Rone")
-        conn.execute(
-            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-            "VALUES(?,'Tohu Bohu','album')", (artist,))
+        _artist(conn, "Rone")
 
         item = next_pending(conn, "qobuz", entity_types=("album",),
                             include_parent_id=True)
@@ -179,10 +194,7 @@ class TestTheParentsProviderIdOnAChildItem:
         assert item["artist_qobuz_id"] is None
 
     def test_a_promoted_column_counts(self, conn):
-        artist = _artist(conn, "Rone", spotify_id="sp-artist")
-        conn.execute(
-            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-            "VALUES(?,'Tohu Bohu','album')", (artist,))
+        _artist(conn, "Rone", spotify_id="sp-artist")
 
         item = next_pending(conn, "spotify", entity_types=("album",),
                             include_parent_id=True)
@@ -198,10 +210,7 @@ class TestTheParentsProviderIdOnAChildItem:
         assert "artist_qobuz_id" not in item
 
     def test_it_is_off_by_default(self, conn):
-        artist = _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
-        conn.execute(
-            "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
-            "VALUES(?,'Tohu Bohu','album')", (artist,))
+        _artist(conn, "Rone", external_ids={"qobuz": "qb-artist"})
 
         item = next_pending(conn, "qobuz", entity_types=("album",))
 

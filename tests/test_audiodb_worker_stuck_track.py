@@ -36,12 +36,15 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 
+from lib2_ownership import own_every_track
+
 
 def _make_lib2_db(tmp_path):
     db_path = tmp_path / "audiodb_test.db"
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
+    own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())
     conn.commit()
     conn.close()

@@ -30,6 +30,8 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 
+from lib2_ownership import own_every_track
+
 
 class _Db:
     def __init__(self, path):
@@ -67,6 +69,7 @@ def worker(tmp_path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
+    own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())
     artist = conn.execute(
         "INSERT INTO lib2_artists(name, sort_name) VALUES('Some Artist','Some Artist')"

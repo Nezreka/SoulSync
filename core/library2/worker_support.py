@@ -25,7 +25,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional
 
-from core.library2.provider_ids import normalize_provider_name, parse_external_ids
+from core.library2.provider_ids import (
+    external_id_sql, normalize_provider_name, parse_external_ids,
+)
 from core.worker_utils import (
     ARTIST_NAME_MATCH_THRESHOLD, artist_name_matches, normalize_artist_name,
 )
@@ -69,11 +71,12 @@ def provider_id_conflict(conn, service: str, provider_id: Any, artist_id: Any,
     ordinary re-matching. Only a different artist holding it is the corruption
     this guards against.
 
-    Narrowed in SQL first. Twelve workers call this on every artist match, and
-    reading the whole table to filter in Python made each match cost a scan plus
-    a materialized ``external_ids`` per artist. The predicate is a superset of
-    what ``_ids`` accepts — a promoted column and the JSON both count as a hit —
-    so ``_ids`` still decides, now over a handful of rows instead of all of them.
+    Narrowed in SQL, and indexed. Twelve workers call this on every artist
+    match; reading the whole table to filter in Python made each match cost a
+    scan plus a materialized ``external_ids`` per artist. The predicate is a
+    superset of what ``_ids`` accepts — a promoted column and the JSON both
+    count as a hit — so ``_ids`` still decides, over the handful of rows the
+    two indexes return.
     """
     service = normalize_provider_name(service)
     if not service:
@@ -81,13 +84,17 @@ def provider_id_conflict(conn, service: str, provider_id: Any, artist_id: Any,
     wanted = str(provider_id or "").strip()
     if not wanted:
         return None
+    try:
+        json_id = external_id_sql("external_ids", service)
+    except ValueError:
+        return None
     column = _PROMOTED.get(service)
-    # The JSON path is bound, not interpolated — the service name arrives from a
-    # caller. CAST/TRIM mirrors `_ids`' own `str(...).strip()`, without which a
-    # JSON *number* would never compare equal to the text id passed in.
-    holds = "TRIM(CAST(json_extract(external_ids, ?) AS TEXT)) = ?"
-    params: List[Any] = [artist_id, f"$.{service}", wanted]
+    holds = f"{json_id} = ?"
+    params: List[Any] = [artist_id, wanted]
     if column:
+        # Both halves are indexed (`idx_lib2_artists_<service>` and the matching
+        # `idx_lib2_artists_ext_<service>`), so SQLite resolves this as a
+        # MULTI-INDEX OR rather than scanning.
         holds = f"{column} = ? OR {holds}"
         params.insert(1, wanted)
     try:

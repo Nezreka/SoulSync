@@ -17,6 +17,21 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 _NON_PROVIDER_KEYS = frozenset({"barcode", "isrc", "upc"})
 
 
+def external_id_sql(column: str, service: str) -> str:
+    """One service's id out of an ``external_ids`` column, as SQL.
+
+    Both the lookup predicate and the expression index that serves it are built
+    from here — SQLite only uses an expression index when the text matches, so
+    two hand-written copies would silently degrade to a table scan. The path is
+    a literal for the same reason (a bound path cannot match an index), which is
+    why ``service`` must already be a normalized provider name; TRIM/CAST mirror
+    the Python side's ``str(...).strip()`` so a JSON *number* still compares.
+    """
+    if normalize_provider_name(service) != service or not service.isalnum():
+        raise ValueError(f"Unsafe provider name for SQL: {service!r}")
+    return f"TRIM(CAST(json_extract({column},'$.{service}') AS TEXT))"
+
+
 def normalize_provider_name(value: Any) -> Optional[str]:
     """Return a safe lower-case provider namespace, or ``None``.
 

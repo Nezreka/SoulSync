@@ -33,6 +33,17 @@ def _artist(db, server_id: str, name: str, **provider_ids: str) -> int:
             set_library_v2_match(
                 conn, "artist", artist_id, service, provider_id, actor="test"
             )
+        # Owned, or the enrichment queue will not offer it: ownership in lib2 is
+        # a live file row, which legacy's `artists` table implied by existing.
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,?)",
+            (artist_id, f"{name} LP")).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)",
+            (album, name)).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+            "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
         conn.commit()
     return artist_id
 
@@ -185,6 +196,20 @@ def test_error_rows_requeue_after_retry_window(db):
             status="error",
             attempted_at=stale,
         )
+        # The artist's owned album and track are unattempted work, and
+        # unattempted work legitimately comes before an expired retry. Settle
+        # them so this test is about the retry window and nothing else.
+        for row in conn.execute(
+                "SELECT id FROM lib2_albums WHERE primary_artist_id=?",
+                (artist_id,)).fetchall():
+            record_attempt(conn, entity_type="album", entity_id=int(row[0]),
+                           service="tidal", status="matched")
+        for row in conn.execute(
+                "SELECT t.id FROM lib2_tracks t "
+                "JOIN lib2_albums al ON al.id = t.album_id "
+                "WHERE al.primary_artist_id=?", (artist_id,)).fetchall():
+            record_attempt(conn, entity_type="track", entity_id=int(row[0]),
+                           service="tidal", status="matched")
         conn.commit()
 
     worker = TidalWorker(database=db)

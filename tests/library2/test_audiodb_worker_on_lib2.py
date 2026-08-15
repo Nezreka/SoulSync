@@ -26,6 +26,8 @@ from core.library2.provider_attempts import (
 )
 from core.library2.schema import ensure_library_v2_schema
 
+from .conftest import own_every_track
+
 
 class _Db:
     def __init__(self, path):
@@ -43,6 +45,7 @@ def worker(tmp_path):
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     ensure_library_v2_schema(conn)
+    own_every_track(conn)
     ensure_provider_attempt_schema(conn.cursor())
     artist = conn.execute(
         "INSERT INTO lib2_artists(name, sort_name) VALUES('Massive Attack',"
@@ -99,6 +102,8 @@ class TestTheQueue:
     def test_a_stale_error_comes_back(self, worker):
         """Issue #553: transient outages are marked rather than left NULL, and
         without this retry path those rows would stay errored forever."""
+        for entity_type in ('album', 'track'):
+            worker._mark_status(entity_type, 1, 'matched')
         worker._mark_status('artist', 1, 'error')
         conn = worker.db._get_connection()
         conn.execute("UPDATE lib2_provider_attempts "

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
 
+from core.library2.sql_util import owned_sql as _owned_sql
+
 logger = get_logger("music_database")
 
 # A file row confirmed at a configured path. Missing/deleted rows remain as
@@ -21,21 +23,11 @@ _LIVE_FILE = ("COALESCE(f.file_state, 'active') = 'active' "
               "AND f.path IS NOT NULL AND TRIM(f.path) <> ''")
 
 # Catalogue presence and ownership are separate: only live file evidence makes
-# a track owned. Missing/wanted/provider-only tracks intentionally remain lib2 rows.
-_OWNED_TRACK = ("EXISTS (SELECT 1 FROM lib2_track_files owned_f "
-                "WHERE owned_f.track_id=t.id AND owned_f.path IS NOT NULL "
-                "AND TRIM(owned_f.path)<>'' "
-                "AND COALESCE(owned_f.file_state,'active')='active')")
-
-# An artist the user owns is one behind an owned track — the same evidence, one
-# join further out. Either credit counts: the album's primary artist, and a
-# featured credit on the track, are both in the library.
-_OWNED_ARTIST = (
-    "(EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id"
-    f"         WHERE al.primary_artist_id = a.id AND {_OWNED_TRACK})"
-    " OR EXISTS (SELECT 1 FROM lib2_tracks t"
-    "             JOIN lib2_track_artists ta ON ta.track_id = t.id"
-    f"            WHERE ta.artist_id = a.id AND {_OWNED_TRACK}))")
+# a track owned. Missing/wanted/provider-only tracks intentionally remain lib2
+# rows. One definition, shared with the enrichment queue — it had been
+# re-derived in four places, and the queue's copy was simply missing.
+_OWNED_TRACK = _owned_sql("track", "t")
+_OWNED_ARTIST = _owned_sql("artist", "a")
 
 def _as_datetime(value):
     """A timestamp column as a datetime, or None. v2 stores ISO strings."""
@@ -7432,7 +7424,10 @@ class MusicDatabase:
     def _detach_server_contribution(cursor, server_source: str, scope="all", ids=()):
         """Detach one server without deleting shared catalogue/provider state."""
         source = str(server_source)
-        ids = [str(value) for value in ids]
+        # Second line of defence for the same trap: a blank id in an explicit
+        # detach list is not a selector for one row, it matches every row that
+        # never got a server id.
+        ids = [str(value) for value in ids if str(value).strip()]
 
         def chunks(values, size=500):
             values = list(values)
@@ -7848,14 +7843,24 @@ class MusicDatabase:
             return set()
 
     def get_all_track_ids_for_server(self, server_source: str) -> set:
-        """Get all track IDs stored in the database for a specific server."""
+        """Get all server-side track IDs stored in the database for one server.
+
+        Blank ids are excluded, and that is load-bearing. This used to return
+        primary keys, where one stale entry meant one row; it now returns server
+        ids, which the deep scan diffs against what the server reported. A server
+        never reports an empty id, so a single row stamped with `server_id=''`
+        would always land in the stale set — and detaching by server id expands
+        that one entry into every blank-id row of the source.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT server_id FROM lib2_media_server_mappings "
-                               "WHERE entity_type='track' AND server_source=? UNION "
+                               "WHERE entity_type='track' AND server_source=? "
+                               "AND TRIM(server_id) <> '' UNION "
                                "SELECT server_id FROM lib2_tracks WHERE server_source=? "
-                               "AND server_id IS NOT NULL", (server_source, server_source))
+                               "AND server_id IS NOT NULL AND TRIM(server_id) <> ''",
+                               (server_source, server_source))
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Error getting track IDs for {server_source}: {e}")
@@ -8380,16 +8385,29 @@ class MusicDatabase:
         return self._get_track_with_metadata("t.id = ?", (track_id,), "t.id")
 
     def get_track_by_server_id(self, track_id, server_source: str) -> Optional[DatabaseTrackWithMetadata]:
-        """Get a track by a server-scoped media-server ID."""
-        return self._get_track_with_metadata(
-            "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-            "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
-            "AND m.server_id=?) OR (t.server_source=? AND t.server_id=?))",
-            (server_source, str(track_id), server_source, str(track_id)),
+        """Get a track by a server-scoped media-server ID.
+
+        Asked in two steps, not as one OR. The mapping table is authoritative;
+        the entity's `server_source`/`server_id` pair is the compatibility
+        snapshot, and a re-match clears the mapping without clearing that pair —
+        so both can answer for the same id and an OR returns whichever row the
+        engine happens to reach first.
+        """
+        id_column = (
             "COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m WHERE "
             "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
-            "LIMIT 1),t.server_id)",
-            (server_source,))
+            "LIMIT 1),t.server_id)")
+        for where, params in (
+            ("EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
+             "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
+             "AND m.server_id=?)", (server_source, str(track_id))),
+            ("(t.server_source=? AND t.server_id=?)", (server_source, str(track_id))),
+        ):
+            found = self._get_track_with_metadata(
+                where, params, id_column, (server_source,))
+            if found is not None:
+                return found
+        return None
 
     def _get_track_with_metadata(self, where, params, id_column, id_params=()):
         try:

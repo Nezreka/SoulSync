@@ -1,6 +1,7 @@
 """Findings-based, additive genre enrichment."""
 import json
 from core.repair_jobs import register_job
+from core.library2.sql_util import owned_sql
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from core.metadata.genre_enrichment import (collect_cached_candidates, collect_local_candidates,
     extract_provider_genres, parse_values, propose_genres, provider_ids_from_row,
@@ -48,28 +49,34 @@ class GenreEnrichmentJob(RepairJob):
             return result
         conn = context.db._get_connection()
         conn.row_factory = None
+        # Owned rows only, like every sibling job. v2 keeps a watched artist's
+        # discography and the wishlist in the same tables, and findings raised
+        # against those are not about the user's library — with allow_live_calls
+        # on they also spend real provider requests.
         entity_specs = []
         if settings['include_artists']:
-            entity_specs.append(('artist', 'lib2_artists'))
+            entity_specs.append(('artist', 'lib2_artists a', owned_sql('artist', 'a')))
         if settings['include_albums']:
-            entity_specs.append(('album', 'lib2_albums'))
+            entity_specs.append(('album', 'lib2_albums al', owned_sql('album', 'al')))
         total = 0
-        for _, table in entity_specs:
-            count_row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+        for _, source, owned in entity_specs:
+            count_row = conn.execute(
+                f"SELECT COUNT(*) FROM {source} WHERE {owned}").fetchone()
             total += int(count_row[0] or 0)
         if context.update_progress: context.update_progress(0, total)
 
         def iter_entities():
-            for kind, _table in entity_specs:
+            for kind, _source, owned in entity_specs:
                 cur = conn.cursor()
                 if kind == 'album':
                     cur.execute(
                         "SELECT al.*, ar.name AS artist_name "
                         "FROM lib2_albums al "
-                        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id"
+                        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id "
+                        f"WHERE {owned}"
                     )
                 else:
-                    cur.execute("SELECT * FROM lib2_artists")
+                    cur.execute(f"SELECT * FROM lib2_artists a WHERE {owned}")
                 columns = [x[0] for x in cur.description]
                 for raw_row in cur:
                     yield kind, dict(zip(columns, raw_row, strict=True))

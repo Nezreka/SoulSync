@@ -45,6 +45,20 @@ def _artist(conn, name="Muse", **columns):
     return artist_id
 
 
+def _owned_artist(conn, name):
+    """An artist the enrichment queue will offer: one with a live file behind it."""
+    artist = _artist(conn, name)
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,?)",
+        (artist, f"{name} LP")).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)", (album, name)).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+        "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
+    return artist
+
+
 # ── LV2-MIG-01 ─────────────────────────────────────────────────────────────
 
 def test_the_mapping_backfill_terminates_on_a_blank_server_id(conn):
@@ -197,20 +211,22 @@ def test_the_queue_still_serves_unattempted_before_expired_retries(conn):
     """The split must not reorder the work."""
     from core.library2.worker_queue import next_pending, pending_count
 
-    stale = _artist(conn, "Stale")
-    fresh = _artist(conn, "Fresh")
+    stale = _owned_artist(conn, "Stale")
+    fresh = _owned_artist(conn, "Fresh")
     record_attempt(conn, entity_type="artist", entity_id=stale,
                    service="spotify", status="not_found",
                    attempted_at="2020-01-01 00:00:00")
 
-    assert next_pending(conn, "spotify")["id"] == fresh
-    assert pending_count(conn, "spotify") == 2
+    # Unattempted before an expired retry, across every entity type — the
+    # legacy priority 1-3 then 4-6, which per-type phasing had inverted.
+    assert next_pending(conn, "spotify", entity_types=("artist",))["id"] == fresh
+    assert pending_count(conn, "spotify", entity_types=("artist",)) == 2
 
     record_attempt(conn, entity_type="artist", entity_id=fresh,
                    service="spotify", status="matched")
 
-    assert next_pending(conn, "spotify")["id"] == stale
-    assert pending_count(conn, "spotify") == 1
+    assert next_pending(conn, "spotify", entity_types=("artist",))["id"] == stale
+    assert pending_count(conn, "spotify", entity_types=("artist",)) == 1
 
 
 # ── LV2-MIG-10 ─────────────────────────────────────────────────────────────
@@ -284,3 +300,138 @@ def test_the_orphan_purge_waits_for_the_migration_to_finish(tmp_path):
             "SELECT COUNT(*) FROM lib2_provider_attempts").fetchone()[0] == 0
     finally:
         c.close()
+
+
+# ── Second round (issues.md §39) ───────────────────────────────────────────
+
+@pytest.fixture
+def music_db(tmp_path):
+    from database.music_database import MusicDatabase
+
+    return MusicDatabase(database_path=str(tmp_path / "music.db"))
+
+
+def _server_track(db, *, server_id, title="Song", source="plex"):
+    conn = db._get_connection()
+    try:
+        artist = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key) VALUES('Muse','muse')").lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Absolution')",
+            (artist,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title,server_source,server_id)"
+            " VALUES(?,?,?,?)", (album, title, source, server_id)).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state)"
+            " VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
+        conn.commit()
+        return track
+    finally:
+        conn.close()
+
+
+def test_a_blank_server_id_never_enters_the_stale_set(music_db):
+    """One blank id would detach every blank-id row of the source.
+
+    This used to return primary keys, where a stale entry meant one row. It now
+    returns server ids and the deep scan diffs them against what the server
+    reported — and a server never reports an empty id, so `''` was always stale.
+    The 50% safety net cannot catch it: it counts distinct ids while the detach
+    removes catalogue rows.
+    """
+    blank = _server_track(music_db, server_id="", title="Blank")
+    real = _server_track(music_db, server_id="p-7", title="Real")
+
+    assert music_db.get_all_track_ids_for_server("plex") == {"p-7"}
+
+    # Even handed one explicitly, it must not become a wildcard.
+    music_db.delete_stale_tracks({""}, "plex")
+    conn = music_db._get_connection()
+    try:
+        alive = {int(r[0]) for r in conn.execute("SELECT id FROM lib2_tracks")}
+    finally:
+        conn.close()
+    assert alive == {blank, real}
+
+
+def test_the_mapping_beats_a_stale_snapshot_for_the_same_server_id(music_db):
+    """`server_source`/`server_id` on the entity is the compatibility snapshot.
+
+    A re-match moves the mapping row but leaves that pair behind, so both can
+    answer for one id — and an OR returned whichever row the engine reached
+    first, which for a UNION is the lower id: the stale one.
+    """
+    stale = _server_track(music_db, server_id="p-1", title="Old")
+    current = _server_track(music_db, server_id="p-1", title="New")
+    conn = music_db._get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO lib2_media_server_mappings"
+            "(entity_type,entity_id,server_source,server_id,match_status)"
+            " VALUES('track',?,'plex','p-1','recognized')", (current,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    found = music_db.get_track_by_server_id("p-1", "plex")
+
+    assert found is not None and found.title == "New", f"stale row {stale} won"
+
+
+class TestTheQueueOffersOnlyTheOwnedLibrary:
+    """Legacy's tables *were* the owned library; v2's are not."""
+
+    def test_an_artist_without_a_file_is_not_offered(self, conn):
+        from core.library2.worker_queue import next_pending, pending_count
+
+        _artist(conn, "Merely Listed")
+
+        assert next_pending(conn, "spotify") is None
+        assert pending_count(conn, "spotify") == 0
+
+    def test_a_discography_album_is_not_offered(self, conn):
+        from core.library2.worker_queue import next_pending
+
+        artist = _owned_artist(conn, "Watched")
+        conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,origin)"
+            " VALUES(?,'Not Owned Yet','discography')", (artist,))
+
+        offered = []
+        while True:
+            item = next_pending(conn, "spotify")
+            if item is None:
+                break
+            offered.append((item["type"], item["name"]))
+            record_attempt(conn, entity_type=item["type"], entity_id=item["id"],
+                           service="spotify", status="matched")
+        assert ("album", "Not Owned Yet") not in offered
+        assert ("album", "Watched LP") in offered
+
+    def test_an_unattempted_track_precedes_an_expired_artist_retry(self, conn):
+        from core.library2.worker_queue import next_pending
+
+        artist = _owned_artist(conn, "Rone")
+        record_attempt(conn, entity_type="artist", entity_id=artist,
+                       service="spotify", status="not_found",
+                       attempted_at="2020-01-01 00:00:00")
+
+        assert next_pending(conn, "spotify")["type"] == "album"
+
+
+def test_the_provider_id_conflict_check_is_indexed(conn):
+    """Both halves of the OR, or SQLite scans the whole artist table for it."""
+    from core.library2.provider_ids import external_id_sql
+
+    for service, column in (("spotify", "spotify_id"), ("deezer", None)):
+        holds = f"{external_id_sql('external_ids', service)} = ?"
+        params = [1, "x"]
+        if column:
+            holds = f"{column} = ? OR {holds}"
+            params.insert(1, "x")
+        plan = " ".join(str(row[3]) for row in conn.execute(
+            "EXPLAIN QUERY PLAN SELECT id, name, spotify_id, musicbrainz_id, "
+            f"external_ids FROM lib2_artists WHERE id <> ? AND ({holds})",
+            params).fetchall())
+        assert "SCAN lib2_artists" not in plan, f"{service}: {plan}"

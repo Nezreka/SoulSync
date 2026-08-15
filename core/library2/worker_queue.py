@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional
 
 from core.library2.provider_attempts import DEFAULT_RETRY_AFTER_DAYS
+from core.library2.sql_util import owned_sql
 
 ENTITY_ORDER = ("artist", "album", "track")
 
@@ -106,6 +107,11 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
     them stays the caller's, which asks for ``new`` first.
     """
     universe = f"AND ({_HAS_PROVIDER_ID})" if require_provider_id else ""
+    # The library the user owns, which is all legacy's tables could ever hold.
+    # v2 keeps a watched artist's discography and the wishlist in the same
+    # tables, and without this every worker enriched those too — work legacy
+    # never did, re-asked every retry window, and counted into the denominator.
+    owned = f"AND {owned_sql(entity_type, 'e')}"
     if phase == "new":
         return f"""
             {_sources(service)[entity_type]}
@@ -113,6 +119,7 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
                                 WHERE a.entity_type = :entity
                                   AND a.entity_id = e.id
                                   AND a.service = :service)
+               {owned}
                {universe}
              ORDER BY e.id
         """
@@ -123,6 +130,7 @@ def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
                 AND a.service = :service
          WHERE a.status IN ({_retryable_sql(retry_statuses)})
            AND a.last_attempted_at <= datetime('now', :window)
+           {owned}
            {universe}
          ORDER BY a.last_attempted_at, e.id
     """
@@ -135,16 +143,13 @@ def _params(entity_type: str, service: str, retry_after_days: int) -> Dict[str, 
 
 def _fetch(conn, entity_type: str, service: str, retry_after_days: int,
            retry_statuses: tuple = _RETRYABLE,
-           require_provider_id: bool = False) -> Optional[Any]:
+           require_provider_id: bool = False,
+           phase: str = "new") -> Optional[Any]:
     key = str(service).strip().lower()
-    params = _params(entity_type, key, retry_after_days)
-    for phase in _PHASES:
-        row = conn.execute(
-            _pending_sql(entity_type, retry_statuses, require_provider_id, key,
-                         phase) + " LIMIT 1", params).fetchone()
-        if row is not None:
-            return row
-    return None
+    return conn.execute(
+        _pending_sql(entity_type, retry_statuses, require_provider_id, key,
+                     phase) + " LIMIT 1",
+        _params(entity_type, key, retry_after_days)).fetchone()
 
 
 def next_pending(
@@ -183,22 +188,27 @@ def next_pending(
     if pinned in order:
         order.remove(pinned)
         order.insert(0, pinned)
-    for entity_type in order:
-        row = _fetch(conn, entity_type, service, retry_after_days,
-                     retry_statuses, require_provider_id)
-        if row is None:
-            continue
-        item: Dict[str, Any] = {
-            "type": overrides.get(entity_type, entity_type),
-            "id": int(row["id"]),
-            "name": row["name"],
-        }
-        if row["artist_name"] is not None:
-            item["artist"] = row["artist_name"]
-        if include_parent_id and entity_type != "artist":
-            item[f"artist_{str(service).strip().lower()}_id"] = (
-                row["parent_provider_id"])
-        return item
+    # Phase outside, entity type inside. Legacy ran priorities 1-3 (unattempted
+    # artists, albums, tracks) before 4-6 (their expired retries), so a freshly
+    # imported album was never queued behind a backlog of artist retries. Asking
+    # per entity type instead inverted that; only the loop nesting says so.
+    for phase in _PHASES:
+        for entity_type in order:
+            row = _fetch(conn, entity_type, service, retry_after_days,
+                         retry_statuses, require_provider_id, phase)
+            if row is None:
+                continue
+            item: Dict[str, Any] = {
+                "type": overrides.get(entity_type, entity_type),
+                "id": int(row["id"]),
+                "name": row["name"],
+            }
+            if row["artist_name"] is not None:
+                item["artist"] = row["artist_name"]
+            if include_parent_id and entity_type != "artist":
+                item[f"artist_{str(service).strip().lower()}_id"] = (
+                    row["parent_provider_id"])
+            return item
     return None
 
 

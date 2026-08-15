@@ -36,7 +36,11 @@ def conn(tmp_path):
     album = c.execute(
         "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
         "VALUES(?,'Mezzanine','album')", (artist,)).lastrowid
-    c.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Angel')", (album,))
+    track = c.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Angel')", (album,)).lastrowid
+    # The queue only offers what the user owns, and ownership is a live file row.
+    c.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+              "VALUES(?,'/music/angel.flac',1,'active')", (track,))
     c.commit()
     yield c
     c.close()

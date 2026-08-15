@@ -527,13 +527,23 @@ class ListeningStatsWorker:
             for i in range(0, len(ids), chunk_size):
                 chunk = ids[i:i + chunk_size]
                 placeholders = ','.join(['?'] * len(chunk))
+                # Mapping first, snapshot only for what it does not answer. A
+                # UNION has no defined row order — SQLite sorts it, so the lower
+                # entity id won, not the authoritative row — and after a
+                # re-match the stale snapshot is usually the older, lower id.
+                # Play counts landed on the wrong track.
                 cursor.execute(
                     f"SELECT m.server_id, m.entity_id FROM lib2_media_server_mappings m "
                     f"WHERE m.entity_type='track' AND m.server_source=? "
-                    f"AND m.server_id IN ({placeholders}) UNION "
+                    f"AND m.server_id IN ({placeholders})",
+                    [server_source, *chunk],
+                )
+                for server_id, track_id in cursor.fetchall():
+                    by_server_id[str(server_id)] = track_id
+                cursor.execute(
                     f"SELECT t.server_id, t.id FROM lib2_tracks t "
                     f"WHERE t.server_source=? AND t.server_id IN ({placeholders})",
-                    [server_source, *chunk, server_source, *chunk],
+                    [server_source, *chunk],
                 )
                 for server_id, track_id in cursor.fetchall():
                     by_server_id.setdefault(str(server_id), track_id)

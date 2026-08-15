@@ -223,7 +223,10 @@ class TestMapPlayCountsToDb:
             restore()
 
         assert len(updates) == 30
-        assert counter["n"] == 1
+        # Two statements per chunk: the authoritative mapping, then the
+        # compatibility snapshot for whatever it did not answer. What matters is
+        # that it does not scale with the number of tracks.
+        assert counter["n"] == 2
 
 
 # ---------------------------------------------------------------------------

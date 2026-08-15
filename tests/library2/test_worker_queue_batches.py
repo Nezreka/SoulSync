@@ -47,18 +47,40 @@ def _artist(conn, name="Rone", *, provider_id=None, service="spotify"):
 
 
 def _album(conn, artist_id, title="Tohu Bohu", *, provider_id=None,
-           service="spotify"):
-    return conn.execute(
+           service="spotify", owned=True):
+    album = conn.execute(
         "INSERT INTO lib2_albums(primary_artist_id,title,album_type,external_ids) "
         "VALUES(?,?,'album',?)",
         (artist_id, title, json.dumps({service: provider_id} if provider_id else {})),
     ).lastrowid
+    if owned:
+        # The queue offers only what the user owns, and ownership is a live file
+        # row — an album and its artist reach it through a track that has one.
+        _track(conn, album, title=f"{title} (owned)", number=99)
+    return album
 
 
 def _track(conn, album_id, title="Bora", number=1):
-    return conn.execute(
+    track = conn.execute(
         "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,?,?)",
         (album_id, title, number)).lastrowid
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+        "VALUES(?,?,1,'active')", (track, f"/music/{track}.flac"))
+    return track
+
+
+def _settle(conn, album_id, service="spotify"):
+    """Mark an album and its tracks done, so only the artist is still due.
+
+    `_album` gives the album a live file — the queue offers nothing else — which
+    also makes that album and track legitimately pending work. Tests about the
+    artist settle them first.
+    """
+    _matched(conn, "album", album_id, service)
+    for row in conn.execute(
+            "SELECT id FROM lib2_tracks WHERE album_id=?", (album_id,)).fetchall():
+        _matched(conn, "track", int(row["id"]), service)
 
 
 def _matched(conn, entity_type, entity_id, service="spotify"):
@@ -113,7 +135,7 @@ class TestTheBatchIsPreferred:
 
     def test_a_matched_album_with_pending_tracks_yields_a_track_batch(self, conn):
         artist = _artist(conn, provider_id="sp-a")
-        album = _album(conn, artist, provider_id="sp-al")
+        album = _album(conn, artist, provider_id="sp-al", owned=False)
         _track(conn, album)
         _matched(conn, "artist", artist)
         _matched(conn, "album", album)
@@ -129,7 +151,7 @@ class TestTheBatchIsPreferred:
 
     def test_albums_are_batched_before_tracks(self, conn):
         artist = _artist(conn, provider_id="sp-a")
-        album = _album(conn, artist, provider_id="sp-al")
+        album = _album(conn, artist, provider_id="sp-al", owned=False)
         second = _album(conn, artist, "Creatures")
         _track(conn, album)
         _matched(conn, "artist", artist)
@@ -156,7 +178,7 @@ class TestTheIndividualFallback:
 
     def test_a_track_whose_album_is_unmatched_goes_individual(self, conn):
         artist = _artist(conn)
-        album = _album(conn, artist)
+        album = _album(conn, artist, owned=False)
         track = _track(conn, album)
         for entity_type, entity_id in (("artist", artist), ("album", album)):
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
@@ -169,10 +191,12 @@ class TestTheIndividualFallback:
 
     def test_a_stale_not_found_comes_back_as_individual(self, conn):
         artist = _artist(conn, provider_id="sp-a")
+        _settle(conn, _album(conn, artist))
         record_attempt(conn, entity_type="artist", entity_id=artist,
                        service="spotify", status="not_found")
         conn.execute("UPDATE lib2_provider_attempts "
-                     "SET last_attempted_at=datetime('now','-90 days')")
+                     "SET last_attempted_at=datetime('now','-90 days') "
+                     "WHERE entity_type='artist'")
 
         item = next_batch_pending(conn, "spotify")
 
@@ -181,7 +205,7 @@ class TestTheIndividualFallback:
 
     def test_nothing_due_yields_nothing(self, conn):
         artist = _artist(conn, provider_id="sp-a")
-        album = _album(conn, artist, provider_id="sp-al")
+        album = _album(conn, artist, provider_id="sp-al", owned=False)
         track = _track(conn, album)
         for entity_type, entity_id in (("artist", artist), ("album", album),
                                        ("track", track)):
@@ -195,7 +219,7 @@ class TestThePinnedOverride:
         """The pin means "work on tracks now", and the batch path is keyed off a
         matched parent, so the override serves the individual shape."""
         artist = _artist(conn, provider_id="sp-a")
-        album = _album(conn, artist)
+        album = _album(conn, artist, owned=False)
         track = _track(conn, album)
 
         item = next_batch_pending(conn, "spotify", pinned="track")
@@ -206,7 +230,7 @@ class TestThePinnedOverride:
 
     def test_an_exhausted_pin_falls_through(self, conn):
         artist = _artist(conn, provider_id="sp-a")
-        _album(conn, artist)
+        _settle(conn, _album(conn, artist))
 
         item = next_batch_pending(conn, "spotify", pinned="track")
 
@@ -230,7 +254,7 @@ class TestTheChildrenOfABatch:
         """The batch matcher uses the track number as a tiebreak when two tracks
         on a release share a title."""
         artist = _artist(conn, provider_id="sp-a")
-        album = _album(conn, artist, provider_id="sp-al")
+        album = _album(conn, artist, provider_id="sp-al", owned=False)
         track = _track(conn, album, "Bora", number=3)
 
         children = pending_children(conn, "spotify", "album", album, child="track")

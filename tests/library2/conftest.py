@@ -228,3 +228,6 @@ def imported_conn(legacy_db):
     conn.execute("PRAGMA foreign_keys = ON")
     yield conn
     conn.close()
+
+
+from lib2_ownership import own_every_track  # noqa: E402,F401
