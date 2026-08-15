@@ -19,11 +19,17 @@ from core.library2.provider_attempts import (
 from core.library2.schema import ensure_library_v2_schema
 
 
+def _settled(conn):
+    """The ledger's delete trigger is only installed once the migration is done."""
+    conn.execute("UPDATE lib2_bootstrap_state SET status='done' WHERE id=1")
+
+
 @pytest.fixture
 def conn(tmp_path):
     c = sqlite3.connect(str(tmp_path / "lib2.db"), isolation_level=None)
     c.row_factory = sqlite3.Row
     ensure_library_v2_schema(c)
+    _settled(c)
     ensure_provider_attempt_schema(c.cursor())
     yield c
     c.close()
@@ -229,6 +235,7 @@ def test_the_existing_orphan_backlog_is_cleared_once(tmp_path):
     c.row_factory = sqlite3.Row
     try:
         ensure_library_v2_schema(c)
+        _settled(c)
         ensure_provider_attempt_schema(c.cursor())
         _artist(c, "Alive")
         c.execute("DROP TRIGGER trg_lib2_artists_delete_provider_attempts")
@@ -243,5 +250,37 @@ def test_the_existing_orphan_backlog_is_cleared_once(tmp_path):
         assert c.execute(
             "SELECT COUNT(*) FROM lib2_provider_attempts").fetchone()[0] == 0
         assert progress_breakdown(c, "spotify", entity_types=("artist",))["artists"]["percent"] == 0
+    finally:
+        c.close()
+
+
+def test_the_orphan_purge_waits_for_the_migration_to_finish(tmp_path):
+    """Mid-migration, "no entity row" does not yet mean "no entity".
+
+    The bootstrap import seeds the ledger from the legacy columns precisely so a
+    fresh v2 install does not re-ask every provider about the whole library.
+    Purging against a half-imported catalogue would throw that away.
+    """
+    c = sqlite3.connect(str(tmp_path / "lib2.db"), isolation_level=None)
+    c.row_factory = sqlite3.Row
+    try:
+        ensure_library_v2_schema(c)
+        c.execute("UPDATE lib2_bootstrap_state SET status='running' WHERE id=1")
+        ensure_provider_attempt_schema(c.cursor())
+        # Seeded history for an artist this run has not imported yet.
+        record_attempt(c, entity_type="artist", entity_id=900,
+                       service="spotify", status="matched")
+
+        ensure_provider_attempt_schema(c.cursor())
+        assert c.execute(
+            "SELECT COUNT(*) FROM lib2_provider_attempts").fetchone()[0] == 1
+        assert c.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'"
+            " AND name LIKE '%delete_provider_attempts'").fetchone()[0] == 0
+
+        _settled(c)
+        ensure_provider_attempt_schema(c.cursor())
+        assert c.execute(
+            "SELECT COUNT(*) FROM lib2_provider_attempts").fetchone()[0] == 0
     finally:
         c.close()

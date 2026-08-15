@@ -106,6 +106,24 @@ def _table_exists(conn, table: str) -> bool:
     ).fetchone() is not None
 
 
+def _migration_settled(cursor: Any) -> bool:
+    """Whether the legacy → v2 import has finished (or had nothing to do).
+
+    Read directly rather than through :mod:`core.library2.bootstrap`, which
+    imports this module. ``ensure_bootstrap_schema`` runs immediately before this
+    in ``ensure_library_v2_schema``, so the row is there on any real install; a
+    missing table or row means "not settled", which only ever defers work.
+    """
+    try:
+        if not _table_exists(cursor, "lib2_bootstrap_state"):
+            return False
+        row = cursor.execute(
+            "SELECT status FROM lib2_bootstrap_state WHERE id = 1").fetchone()
+    except Exception:  # noqa: BLE001 — a deferred purge is always safe
+        return False
+    return bool(row) and str(row[0] or "") in {"done", "waiting_for_source"}
+
+
 def ensure_provider_attempt_schema(cursor: Any) -> None:
     cursor.execute(PROVIDER_ATTEMPTS_DDL)
     for statement in _INDEXES:
@@ -115,6 +133,15 @@ def ensure_provider_attempt_schema(cursor: Any) -> None:
     # pin the bar at a clamped 100% while work is still outstanding. The mapping
     # table has had this trigger since it was added; this one never did, so the
     # backlog it already accumulated is cleared once, when the trigger appears.
+    #
+    # Not during a migration, though: half the catalogue is imported, so "no
+    # entity row" does not yet mean "no entity", and the purge would throw away
+    # exactly the history `backfill_from_legacy` seeded to stop every worker
+    # re-asking every provider about the whole library. Deferring costs nothing —
+    # an import creates entities, it does not delete them, so no orphan can
+    # appear in the window where the trigger is still missing.
+    if not _migration_settled(cursor):
+        return
     for entity_type, table in _TABLES.items():
         trigger = f"trg_{table}_delete_provider_attempts"
         if not _table_exists(cursor, table) or cursor.execute(
