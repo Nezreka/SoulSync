@@ -17,9 +17,10 @@
  * modal when not (openFreshRelease). One fetch per feed, on mount.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
+import { useLiveRefresh } from '../-dash.live-refresh';
 
 import { getShellBridge } from '@/platform/shell/bridge';
 import { thumb } from '@/platform/artwork-thumb';
@@ -99,6 +100,10 @@ function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titl
   );
 }
 
+// Slower than Recently Played: a library gains albums far less often than
+// it gains plays, and this rail costs two queries.
+const CONTENT_REFRESH_MS = 120_000;
+
 type BandTab = 'recent' | 'fresh';
 
 export function ContentBand() {
@@ -106,18 +111,21 @@ export function ContentBand() {
   const [releases, setReleases] = useState<FreshRelease[]>([]);
   const [tab, setTab] = useState<BandTab>('recent');
 
-  useEffect(() => {
-    let alive = true;
-    void fetchRecentlyAdded().then((rows) => {
-      if (alive) setAlbums(rows);
-    });
-    void fetchFreshReleases().then((rows) => {
-      if (alive) setReleases(rows);
-    });
-    return () => {
-      alive = false;
-    };
+  // Was a one-shot mount load, so a finished download did not show up here
+  // until the page was reloaded. Both rails refresh on a timer now and catch
+  // up whenever the tab comes back to the front.
+  const load = useCallback(async () => {
+    const [added, fresh] = await Promise.all([
+      fetchRecentlyAdded().catch(() => null),
+      fetchFreshReleases().catch(() => null),
+    ]);
+    // null means that rail's fetch failed; keep what is on screen rather than
+    // blanking a populated rail because of one bad poll.
+    if (added) setAlbums(added);
+    if (fresh) setReleases(fresh);
   }, []);
+
+  useLiveRefresh(load, { intervalMs: CONTENT_REFRESH_MS });
 
   const hasRecent = albums.length > 0;
   const hasFresh = releases.length > 0;
