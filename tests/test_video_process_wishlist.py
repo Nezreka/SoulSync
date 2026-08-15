@@ -66,7 +66,11 @@ def test_build_record_movie_shape():
     assert rec["kind"] == "movie" and rec["title"] == "The Matrix" and rec["media_id"] == "5"
     assert rec["source"] == "soulseek" and rec["status"] == "downloading"
     assert rec["target_dir"] == "/movies" and rec["filename"] == "Matrix.1999.1080p.mkv"
-    assert json.loads(rec["search_ctx"]) == {"scope": "movie", "title": "The Matrix", "year": "1999"}
+    # search_ctx now also carries the external ids the indexer search needs — the
+    # drain used to run every Prowlarr query as free text because nothing filled
+    # them. They ride here so a RETRY searches as well-informed as the first try.
+    assert json.loads(rec["search_ctx"]) == {"scope": "movie", "title": "The Matrix",
+                                             "year": "1999", "tmdb_id": 5}
     assert [c["filename"] for c in json.loads(rec["candidates"])] == ["other.mkv"]   # best excluded
 
 
@@ -87,7 +91,19 @@ def test_build_record_episode_shape():
     assert rec["kind"] == "episode" and rec["media_id"] == "9" and rec["year"] == "2008"
     assert json.loads(rec["search_ctx"]) == {"scope": "episode", "title": "Breaking Bad",
                                              "season": 1, "episode": 3, "year": "2008",
-                                             "air_date": "2008-02-10"}
+                                             "air_date": "2008-02-10", "tmdb_id": 9}
+
+
+def test_build_record_carries_the_series_ids_when_the_library_knows_them():
+    """A show that IS in the library contributes tvdb/imdb ids, and they must
+    reach the download row so the monitor's requery keeps the id-aware routing
+    the first search had."""
+    item = {"show_tmdb_id": 9, "show_title": "Breaking Bad", "season_number": 1,
+            "episode_number": 3, "tvdb_id": 81189, "imdb_id": "tt0903747"}
+    rec = build_download_record(item, _cand("BrBa.S01E03.mkv"), [], media_type="episode",
+                                target_dir="/tv", query="q")
+    ctx = json.loads(rec["search_ctx"])
+    assert ctx["tvdb_id"] == 81189 and ctx["imdb_id"] == "tt0903747" and ctx["tmdb_id"] == 9
 
 
 # ── handler ───────────────────────────────────────────────────────────────────

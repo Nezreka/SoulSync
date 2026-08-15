@@ -13,7 +13,7 @@ def test_resolve_album_bundle_threshold_uses_default_when_config_missing():
     """Default 2 matches the bumped ``min_tracks_per_album`` floor in
     ``group_wishlist_tracks_by_album`` — single-track wishlist items
     take the per-track path, multi-track items take the bundle path."""
-    with patch('config.settings.config_manager') as cm:
+    with patch('core.settings.config_manager') as cm:
         cm.get.return_value = processing._DEFAULT_ALBUM_BUNDLE_MIN_TRACKS
         assert processing._resolve_album_bundle_threshold() == 2
 
@@ -22,7 +22,7 @@ def test_resolve_album_bundle_threshold_honors_config_override():
     """Power users who want bundle for every wishlist track (old
     behaviour) can set the key to 1. Users who want bundle only on
     bigger gaps can set higher."""
-    with patch('config.settings.config_manager') as cm:
+    with patch('core.settings.config_manager') as cm:
         cm.get.return_value = 1
         assert processing._resolve_album_bundle_threshold() == 1
         cm.get.return_value = 5
@@ -33,7 +33,7 @@ def test_resolve_album_bundle_threshold_falls_back_on_garbage():
     """Non-numeric / non-positive / config-manager-raise all fall back
     to the safe default. Same defensive shape as get_poll_interval /
     get_transient_miss_threshold."""
-    with patch('config.settings.config_manager') as cm:
+    with patch('core.settings.config_manager') as cm:
         cm.get.return_value = 'oops'
         assert processing._resolve_album_bundle_threshold() == 2
         cm.get.return_value = 0

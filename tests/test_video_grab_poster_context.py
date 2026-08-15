@@ -23,8 +23,14 @@ _GRAB = (_ROOT / "webui" / "static" / "video" / "video-grab.js").read_text(encod
 
 
 def _fn(src, name):
-    start = src.index("function " + name)
-    return src[start:start + 900]
+    """The body of exactly this function.
+
+    Name-exact on purpose: a plain ``index("function season")`` also matches
+    ``function seasonPack``, which is a real function in the same file and reads
+    close enough to pass the wrong assertion."""
+    match = re.search(r"function\s+" + re.escape(name) + r"\s*\(", src)
+    assert match, name
+    return src[match.start():match.start() + 900]
 
 
 def test_single_episode_grab_params_carry_the_poster():
@@ -39,10 +45,12 @@ def test_season_grab_carries_the_poster():
 
 def test_grab_module_forwards_poster_to_the_backend():
     # episode(): the grab payload must send poster_url from opts.poster …
-    assert re.search(r"poster_url:\s*opts\.poster", _GRAB)
-    # … and season() must forward opts.poster into each episode() call.
-    body = _fn(_GRAB, "season")
-    assert "poster: opts.poster" in body
+    assert re.search(r"poster_url:\s*opts\.poster", _fn(_GRAB, "episode"))
+    # … the season-PACK grab is its own payload and needs it too …
+    assert re.search(r"poster_url:\s*opts\.poster", _fn(_GRAB, "seasonPack"))
+    # … and the per-episode fan-out (where season() lands when no pack exists)
+    # must forward opts.poster into each episode() call.
+    assert "poster: opts.poster" in _fn(_GRAB, "perEpisode")
 
 
 def test_show_poster_resolver_exists_and_prefers_library_art():

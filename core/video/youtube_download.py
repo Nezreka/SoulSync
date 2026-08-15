@@ -620,10 +620,18 @@ def process_youtube_download(
                    cookie_opts=cookie_opts, extra_opts=media_embed_opts(settings))
 
     if not res.get("ok"):
-        err = res.get("error") or "Download failed"
+        raw = res.get("error") or "Download failed"
+        # Say what actually went wrong. A raw yt-dlp line ("ERROR: unable to download
+        # video data: HTTP Error 403: Forbidden", five times, five channels) tells you
+        # nothing you can act on; the classified reason names the cause — and for 403
+        # names the fix, because that one is almost always a stale yt-dlp. The RAW text
+        # is kept in the archived row: the strike weighting reads it, so replacing it
+        # here would break the "not released yet doesn't count" rule.
+        from core.video.youtube_errors import human_reason
+        err = human_reason(raw) or raw
         completed = now()
         update_row(dl.get("id"), status="failed", error=err, completed_at=completed)
-        archive(dl, {"status": "failed", "error": err, "completed_at": completed})
+        archive(dl, {"status": "failed", "error": raw, "completed_at": completed})
         _publish_event("video_download_failed", dl, error=err)
         return {"status": "failed", "error": err}
 
@@ -842,7 +850,7 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         # Stage into the shared download folder (a 'youtube' subfolder), then transfer to the
         # library — same pipeline as movies/TV. Falls back to straight-to-library if no
         # download folder is configured.
-        from config.settings import config_manager
+        from core.settings import config_manager
         dl_root = str(config_manager.get("soulseek.download_path", "") or "").strip()
         stage_dir = os.path.join(dl_root, "youtube") if dl_root else None
 

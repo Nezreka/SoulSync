@@ -634,7 +634,7 @@ def test_tmdb_extras_parse(monkeypatch):
 def _no_server_config(monkeypatch):
     """Stub the shared config_manager so no media-server watch link is added
     (keeps these tests independent of the dev machine's Plex/Jellyfin config)."""
-    import config.settings as cs
+    import core.settings as cs
     class CM:
         def get_plex_config(self): return {}
         def get_jellyfin_config(self): return {}
@@ -758,7 +758,7 @@ def test_tvdb_episode_gap_fill(db):
 
 def test_item_extras_caches_tmdb_call(db, monkeypatch):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 603})
-    import config.settings as cs
+    import core.settings as cs
     class CM:
         def get_plex_config(self): return {}
         def get_jellyfin_config(self): return {}
@@ -799,7 +799,7 @@ def test_item_extras_needs_tmdb_and_id(db, monkeypatch):
 
 def test_item_extras_adds_jellyfin_watch_link(db, monkeypatch):
     mid = db.upsert_movie("jellyfin", {"server_id": "abc123", "title": "Owned"})
-    import config.settings as cs
+    import core.settings as cs
     class CM:
         def get_jellyfin_config(self): return {"base_url": "http://jelly:8096/"}
         def get_plex_config(self): return {}
@@ -811,7 +811,7 @@ def test_item_extras_adds_jellyfin_watch_link(db, monkeypatch):
 
 def test_item_extras_adds_plex_watch_link(db, monkeypatch):
     mid = db.upsert_movie("plex", {"server_id": "555", "title": "Owned"})
-    import config.settings as cs
+    import core.settings as cs
     class CM:
         def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "T"}
         def get_jellyfin_config(self): return {}
@@ -828,7 +828,7 @@ def test_item_extras_adds_plex_watch_link(db, monkeypatch):
 
 def test_item_extras_no_server_link_when_unowned(db, monkeypatch):
     # A wishlist-style row with no server id → no watch link.
-    import config.settings as cs
+    import core.settings as cs
     class CM:
         def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "T"}
         def get_jellyfin_config(self): return {}

@@ -16,7 +16,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { DiscoveryResultRow } from './-sync.types';
 
@@ -29,6 +29,7 @@ import {
   discoveryRowAction,
   downloadTaskStatusText,
   finalDownloadProgress,
+  mapWithConcurrency,
   formatDuration,
   heroSourceLabel,
   isFoundRowLenient,
@@ -536,5 +537,69 @@ describe('discoveryCompleteToast (differential vs sync-services.js 9218-9231)', 
       message: 'ListenBrainz discovery complete!',
       type: 'success',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapWithConcurrency — the background track crawl's throttle
+// ---------------------------------------------------------------------------
+
+describe('mapWithConcurrency', () => {
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  it('never exceeds the limit, and still visits every item', async () => {
+    const gates = Array.from({ length: 7 }, deferred);
+    let inFlight = 0;
+    let peak = 0;
+    const visited: number[] = [];
+
+    const walk = mapWithConcurrency([0, 1, 2, 3, 4, 5, 6], 3, async (i) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      visited.push(i);
+      await gates[i].promise;
+      inFlight -= 1;
+    });
+
+    // Only the first `limit` may have started before anything resolves — this
+    // is the property that keeps a 200-playlist account from opening 200
+    // simultaneous requests at Tidal.
+    await Promise.resolve();
+    expect(visited).toEqual([0, 1, 2]);
+
+    gates.forEach((g) => g.resolve());
+    await walk;
+
+    expect(peak).toBe(3);
+    expect(visited.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it('one rejecting item does not strand the rest', async () => {
+    const done: number[] = [];
+    await mapWithConcurrency([1, 2, 3], 2, async (i) => {
+      if (i === 2) throw new Error('dead playlist');
+      done.push(i);
+    });
+    expect(done.sort()).toEqual([1, 3]);
+  });
+
+  it('a nonsense limit still makes progress instead of deadlocking', async () => {
+    const done: number[] = [];
+    await mapWithConcurrency([1, 2], 0, async (i) => {
+      done.push(i);
+    });
+    expect(done).toEqual([1, 2]);
+  });
+
+  it('an empty list resolves without spawning workers', async () => {
+    const fn = vi.fn();
+    await mapWithConcurrency([], 3, fn);
+    expect(fn).not.toHaveBeenCalled();
   });
 });

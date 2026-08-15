@@ -86,12 +86,44 @@
     var R_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
     var OPEN_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
-    // Downloads of the same show + season collapse into one parent card (≥2 members).
+    // Downloads of the same show + season collapse into one parent card.
+    //
+    // A season PACK belongs to the same group as the episodes it produces: it is
+    // the batch. It carries a season and no episode, so the old rule excluded it
+    // and it rendered as a lonely card beside its own children — live, pack #3911
+    // sat outside the group holding #3912–3919. `is_pack` comes from the server
+    // (core.video.season_pack.is_pack_download); the search_ctx fallback only
+    // covers a payload from an older build.
+    function isPackRow(d) {
+        if (d && typeof d.is_pack === 'boolean') return d.is_pack;
+        var c = parseCtx(d);
+        var scope = String(c.scope || '').toLowerCase();
+        if (scope === 'season' || scope === 'series') return true;
+        return (d.kind || '').toLowerCase() === 'show' && c.season != null && c.episode == null;
+    }
     function groupKey(d) {
         if ((d.kind || '').toLowerCase() !== 'show') return null;
         var c = parseCtx(d);
-        if (c.season == null || c.episode == null) return null;
+        if (c.season == null) return null;
+        if (c.episode == null && !isPackRow(d)) return null;
         return 'g:' + (d.media_id || d.title || '?') + ':s' + c.season;
+    }
+
+    // Split a group's rows into its batch head (the pack, if any) and the episode
+    // cards. Pure — no DOM — so the decision can be exercised directly.
+    function splitGroup(members) {
+        var pack = null, eps = [];
+        (members || []).forEach(function (d) {
+            if (!pack && isPackRow(d)) pack = d; else eps.push(d);
+        });
+        return { pack: pack, episodes: eps };
+    }
+
+    // A group is worth drawing when it has ≥2 rows, OR when a pack is present —
+    // a pack that has downloaded but imported nothing yet is still a batch, and
+    // showing it as a bare card is the bug this fixes.
+    function groupWorthy(members) {
+        return members.length >= 2 || !!splitGroup(members).pack;
     }
 
     function makeGroup(key) {
@@ -115,29 +147,58 @@
     }
 
     function patchGroup(el, members, key) {
-        var first = members[0], c0 = parseCtx(first);
-        var total = members.length, done = 0, act = 0, fail = 0, pctSum = 0;
-        members.forEach(function (d) {
+        // The pack is the batch, not one of its own episodes — counting it as a
+        // member would report "8/9 done" for a fully-imported season of eight.
+        var parts = splitGroup(members);
+        var pack = parts.pack, eps = parts.episodes;
+        var first = pack || members[0], c0 = parseCtx(first);
+        var total = eps.length, done = 0, act = 0, fail = 0, pctSum = 0;
+        eps.forEach(function (d) {
             if (d.status === 'completed') { done++; pctSum += 100; }
             else if (isActive(d.status)) { act++; pctSum += Math.max(0, Math.min(100, d.progress || 0)); }
             else { fail++; }
         });
+        var packActive = !!(pack && isActive(pack.status));
         var t = el.querySelector('[data-f="title"]'); if (t) t.textContent = first.title || 'Show';
         var seasonTxt = (c0.season != null) ? ('Season ' + c0.season) : 'Episodes';
         var sub = el.querySelector('[data-f="sub"]');
-        if (sub) sub.textContent = seasonTxt + '  ·  ' + done + '/' + total + ' done' + (fail ? '  ·  ' + fail + ' failed' : '');
+        if (sub) {
+            // Before any episode exists there is nothing to tally; say what the row
+            // actually is instead of a bare "0/0 done".
+            var tally = total
+                ? (done + '/' + total + ' imported' + (fail ? '  ·  ' + fail + ' failed' : ''))
+                : (packActive ? 'season pack downloading…' : 'season pack');
+            sub.textContent = seasonTxt + '  ·  ' + tally;
+        }
         var bar = el.querySelector('[data-f="bar"]'), fill = el.querySelector('[data-f="fill"]');
-        if (bar) { if (act) { bar.style.display = ''; if (fill) fill.style.width = Math.round(pctSum / total) + '%'; } else { bar.style.display = 'none'; } }
+        if (bar) {
+            // While the pack itself is downloading, ITS percentage is the honest one
+            // — the episodes don't exist yet, so an episode average would read 0%.
+            var pct = packActive ? Math.max(0, Math.min(100, pack.progress || 0))
+                : (total ? Math.round(pctSum / total) : 0);
+            if (packActive || act) { bar.style.display = ''; if (fill) fill.style.width = pct + '%'; }
+            else { bar.style.display = 'none'; }
+        }
         var status = el.querySelector('[data-f="status"]');
-        if (status) status.textContent = act ? (act + ' active') : (done === total ? '✓ done' : (fail + ' failed'));
+        if (status) {
+            status.textContent = packActive ? (pack.status === 'importing' ? 'importing' : 'downloading')
+                : act ? (act + ' active')
+                : total && done === total ? '✓ done'
+                : total ? (fail + ' failed')
+                : (pack ? (pack.status || '') : '');
+        }
         var art = el.querySelector('[data-f="art"]');
         if (art && first.poster_url && art._p !== first.poster_url) {
             art._p = first.poster_url; art.style.backgroundImage = "url('" + first.poster_url + "')";
             art.classList.add('vdpg-has-poster'); art.textContent = '';
         }
+        // The cancel handler reads ids out of the group BODY, which no longer holds
+        // the pack — hand it the pack's id directly so cancelling a batch whose
+        // episodes don't exist yet still cancels the download that is running.
+        el._packActiveId = packActive ? pack.id : null;
         var act2 = el.querySelector('[data-f="act"]');
         if (act2) {
-            var wantAct = act ? '<button class="adl-row-cancel" type="button" data-vdpg-group-cancel="' + esc(key) + '" title="Cancel all in this batch">' + X_SVG + '</button>' : '';
+            var wantAct = (act || packActive) ? '<button class="adl-row-cancel" type="button" data-vdpg-group-cancel="' + esc(key) + '" title="Cancel all in this batch">' + X_SVG + '</button>' : '';
             if (act2.innerHTML !== wantAct) act2.innerHTML = wantAct;
         }
         var collapsed = !!_gcollapse[key];
@@ -513,12 +574,18 @@
         // Group same-show+season episode batches (≥2) into one parent card; keep
         // everything else standalone. Server order preserved — a group sits where its
         // first member appears.
-        var gcount = {};
-        list.forEach(function (d) { var k = groupKey(d); if (k) gcount[k] = (gcount[k] || 0) + 1; });
+        var gcount = {}, _packKeys = {};
+        list.forEach(function (d) {
+            var k = groupKey(d); if (!k) return;
+            gcount[k] = (gcount[k] || 0) + 1;
+            // A pack alone still deserves its batch card: right after the grab it is
+            // the ONLY row for that season, and rendering it bare is the bug.
+            if (isPackRow(d)) _packKeys[k] = true;
+        });
         var order = [], gidx = {};
         list.forEach(function (d) {
             var k = groupKey(d);
-            if (k && gcount[k] >= 2) {
+            if (k && (gcount[k] >= 2 || _packKeys[k])) {
                 if (gidx[k] == null) { gidx[k] = order.length; order.push({ group: k, members: [d] }); }
                 else { order[gidx[k]].members.push(d); }
             } else { order.push({ single: d }); }
@@ -539,7 +606,12 @@
             host.appendChild(g);
             var body = g.querySelector('[data-vdpg-group-body]');
             var visN = 0;
-            u.members.forEach(function (d) {
+            // The pack IS the head — its download progress and status belong on the
+            // group bar. Drawing it as a card too would put a ninth "episode" that
+            // is really the batch alongside the eight it produced.
+            var parts = splitGroup(u.members);
+            if (parts.pack) seen[parts.pack.id] = true;
+            parts.episodes.forEach(function (d) {
                 seen[d.id] = true;
                 var el = _cards[d.id] || (_cards[d.id] = makeCard(d));
                 patchCard(el, d);
@@ -547,7 +619,11 @@
                 body.appendChild(el);
             });
             patchGroup(g, u.members, u.group);
-            g.style.display = visN ? '' : 'none';
+            // A pack that has produced no episode rows yet still has to be visible,
+            // or a just-started season grab shows nothing at all.
+            var headVis = parts.pack ? matches(parts.pack.status) : false;
+            if (headVis && !visN) shown++;
+            g.style.display = (visN || headVis) ? '' : 'none';
         });
         Object.keys(_cards).forEach(function (id) {
             if (!seen[id]) { var e = _cards[id]; if (e && e.parentNode) e.parentNode.removeChild(e); delete _cards[id]; }
@@ -645,11 +721,16 @@
             // Group header: cancel the whole batch, or collapse/expand it.
             var gcan = e.target.closest('[data-vdpg-group-cancel]');
             if (gcan) {
-                var gbody = gcan.closest('.vdpg-group').querySelector('[data-vdpg-group-body]');
+                var gel = gcan.closest('.vdpg-group');
+                var gbody = gel.querySelector('[data-vdpg-group-body]');
                 var ids = [];
                 Array.prototype.forEach.call(gbody.querySelectorAll('.adl-row[data-dl-id]'), function (c) {
                     if (c.classList.contains('adl-row-active') || c.classList.contains('adl-row-queued')) ids.push(+c.getAttribute('data-dl-id'));
                 });
+                // The pack is the head, not a card in the body — without this,
+                // cancelling a batch whose episodes don't exist yet (the pack is
+                // still downloading) would cancel nothing at all.
+                if (gel._packActiveId != null && ids.indexOf(gel._packActiveId) === -1) ids.push(gel._packActiveId);
                 gcan.disabled = true;
                 Promise.all(ids.map(function (id) { return postJSON(URL_CANCEL, { id: id }); }))
                     .then(function () { toast('Cancelled ' + ids.length + ' download' + (ids.length === 1 ? '' : 's'), 'info'); poll(); });

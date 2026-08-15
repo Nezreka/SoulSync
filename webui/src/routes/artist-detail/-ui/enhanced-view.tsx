@@ -1,3 +1,4 @@
+import { thumb } from '@/platform/artwork-thumb';
 import { useEffect, useState } from 'react';
 
 import type { EnhancedAlbum, EnhancedData } from '../-artist-detail.enhanced';
@@ -285,7 +286,7 @@ function EnhancedAlbumWrapper({
           {album.thumb_url && !thumbBroken ? (
             <img
               className="enhanced-album-thumb"
-              src={String(album.thumb_url)}
+              src={thumb(String(album.thumb_url), 'card')}
               alt=""
               loading="lazy"
               onError={() => setThumbBroken(true)}

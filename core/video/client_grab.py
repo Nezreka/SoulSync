@@ -23,12 +23,12 @@ def _run(coro):
 
 
 def _torrent_category() -> str:
-    from config.settings import config_manager
+    from core.settings import config_manager
     return str(config_manager.get("torrent_client.category", "") or "soulsync")
 
 
 def _usenet_category() -> str:
-    from config.settings import config_manager
+    from core.settings import config_manager
     return str(config_manager.get("usenet_client.category", "") or "soulsync")
 
 

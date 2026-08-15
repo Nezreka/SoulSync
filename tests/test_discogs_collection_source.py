@@ -74,7 +74,7 @@ def test_get_user_collection_returns_empty_without_token(monkeypatch):
     Stub the config lookup so this test stays deterministic regardless
     of the developer's local config (which may have a real token set
     after using the Your Albums Discogs source feature)."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     monkeypatch.setattr(config_manager, 'get',
                         lambda key, default=None: '' if key == 'discogs.token' else default)
     client = DiscogsClient(token='')

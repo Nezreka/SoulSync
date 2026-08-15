@@ -24,7 +24,7 @@ import logging
 import logging.handlers
 
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 # fpcalc binary location (downloaded automatically if needed)
 FPCALC_BIN_DIR = Path(__file__).parent.parent / "bin"

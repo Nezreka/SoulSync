@@ -10,7 +10,7 @@ import os
 
 import requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.jellyfin_client import JellyfinClient
 from core.metadata.registry import get_primary_source
 from core.plex_client import PlexClient
@@ -227,6 +227,21 @@ def run_service_test(service, test_config):
                     'hybrid': "Could not connect to download sources. Check configuration."
                 }
                 error = mode_errors.get(download_mode, "Download source connection failed.")
+                # Prefer what the source actually said. "YouTube download source
+                # not available." told fabian42069 (#1126) nothing he could act
+                # on, while yt-dlp had already reported a bot-block. Sources that
+                # can explain themselves expose last_failure_reason().
+                # `client()` is the public accessor (it also resolves aliases like
+                # deezer_dl -> deezer); the `_client` alias is for callers inside
+                # the orchestrator.
+                try:
+                    source = download_orchestrator.client(download_mode)
+                    explain = getattr(source, 'last_failure_reason', None)
+                    reason = explain() if callable(explain) else None
+                    if reason:
+                        error = f"{error} {reason}"
+                except Exception as e:      # noqa: BLE001 - a status probe must not raise
+                    logger.debug("No detailed reason from %s: %s", download_mode, e)
                 return False, error
         elif service == "listenbrainz":
             token = test_config.get('token', '')

@@ -44,7 +44,7 @@ def get_logger():
 
 def get_config_manager():
     try:
-        from config.settings import config_manager as settings_config_manager
+        from core.settings import config_manager as settings_config_manager
 
         return settings_config_manager
     except Exception:

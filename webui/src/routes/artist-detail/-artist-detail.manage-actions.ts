@@ -189,19 +189,35 @@ export interface ArtApplyResult {
   disk_written?: boolean;
 }
 
+function artEndpoint(target: ArtPickerTarget): string {
+  return target.kind === 'album'
+    ? `/api/album/${encodeURIComponent(String(target.id))}/art`
+    : `/api/artist/${encodeURIComponent(String(target.id))}/art`;
+}
+
 export async function applyArtRequest(
   target: ArtPickerTarget,
   url: string,
 ): Promise<ArtApplyResult> {
-  const endpoint =
-    target.kind === 'album'
-      ? `/api/album/${encodeURIComponent(String(target.id))}/art`
-      : `/api/artist/${encodeURIComponent(String(target.id))}/art`;
-  const res = await fetch(endpoint, {
+  const res = await fetch(artEndpoint(target), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
+  return res.json();
+}
+
+/**
+ * Give the art back to the media server (DELETE on the same endpoint).
+ *
+ * Applying a pick LOCKS it, which is the whole point — a library sync used to
+ * overwrite hand-picked covers. But the picker only offers art it can find on
+ * external sources and may find none at all, so without this a user who locked
+ * art they no longer want would have nothing to switch to. The image stays put
+ * until the next sync replaces it.
+ */
+export async function releaseArtRequest(target: ArtPickerTarget): Promise<ArtApplyResult> {
+  const res = await fetch(artEndpoint(target), { method: 'DELETE' });
   return res.json();
 }
 

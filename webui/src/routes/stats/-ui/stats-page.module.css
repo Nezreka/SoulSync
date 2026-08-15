@@ -856,3 +856,245 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Tile delta — the comparison that turns a total into a signal (stats P1).
+   Absent entirely when there is nothing honest to compare against. */
+.statsCardDelta {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  opacity: 0.85;
+}
+
+.statsCardDelta_up {
+  color: #4ade80;
+}
+
+.statsCardDelta_down {
+  color: #f87171;
+}
+
+/* Flat is deliberately NOT red or green — no change is not bad news. */
+.statsCardDelta_flat {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.statsCardDeltaNew {
+  color: rgb(var(--accent-rgb));
+}
+
+/* Listening | Library — two kinds of fact that used to share one surface. */
+.statsTabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.statsTab {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.statsTab:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.statsTabActive {
+  background: rgb(var(--accent-rgb));
+  color: #0c0c0c;
+}
+
+/* When You Listen — the weekday x hour heatmap and the habit numbers. */
+.statsClock {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statsClockGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.statsClockRow {
+  display: grid;
+  grid-template-columns: 34px repeat(24, 1fr);
+  gap: 3px;
+  align-items: center;
+}
+
+.statsClockDay {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: right;
+  padding-right: 4px;
+}
+
+.statsClockCell {
+  aspect-ratio: 1;
+  min-height: 10px;
+  border-radius: 2px;
+  background: rgb(var(--accent-rgb));
+  transition: transform 90ms ease;
+}
+
+.statsClockCell:hover {
+  transform: scale(1.35);
+}
+
+.statsClockAxis {
+  display: grid;
+  grid-template-columns: 34px repeat(4, 1fr);
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.statsClockAxisLabel {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.statsClockEmpty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsRhythm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsRhythmItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statsRhythmValue {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.statsRhythmLabel {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* Own vs Play — library share against listening share. */
+.statsOwnPlay { display: flex; flex-direction: column; gap: 8px; }
+
+.statsOwnPlayRow {
+  display: grid;
+  grid-template-columns: 92px 1fr 46px;
+  gap: 10px;
+  align-items: center;
+}
+
+.statsOwnPlayGenre {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statsOwnPlayBars { display: flex; flex-direction: column; gap: 3px; }
+
+.statsOwnPlayOwned,
+.statsOwnPlayPlayed {
+  height: 6px;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.statsOwnPlayOwned { background: rgba(255, 255, 255, 0.28); }
+.statsOwnPlayPlayed { background: rgb(var(--accent-rgb)); }
+
+.statsOwnPlayGap { font-size: 12px; font-weight: 700; text-align: right; }
+.statsOwnPlayGapUp { color: #4ade80; }
+.statsOwnPlayGapDown { color: #f87171; }
+
+.statsOwnPlayLegend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.statsOwnPlayKeyOwned,
+.statsOwnPlayKeyPlayed {
+  width: 12px;
+  height: 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+}
+
+.statsOwnPlayKeyOwned { background: rgba(255, 255, 255, 0.28); margin-left: 0; }
+.statsOwnPlayKeyPlayed { background: rgb(var(--accent-rgb)); }
+
+.statsNeglected {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.statsNeglectedTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 6px;
+}
+
+.statsNeglectedRow {
+  display: grid;
+  grid-template-columns: 1fr auto 28px;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.statsNeglectedName { color: rgba(255, 255, 255, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statsNeglectedArtist { color: rgba(255, 255, 255, 0.4); }
+.statsNeglectedCount { color: rgba(255, 255, 255, 0.35); text-align: right; }
+
+/* Entry point to the Year in Listening takeover. Styled as the page's one
+   accented action — everything else in this header is a neutral control, and
+   this is the only thing here that opens something new. */
+.statsYearButton {
+  padding: 7px 18px;
+  border: 1px solid rgba(29, 185, 84, 0.35);
+  border-radius: 999px;
+  background: rgba(29, 185, 84, 0.12);
+  color: #1ed760;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.statsYearButton:hover {
+  background: rgba(29, 185, 84, 0.22);
+  color: #fff;
+}

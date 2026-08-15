@@ -19,6 +19,22 @@ _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
+
+def _row_value(row, column: str, default=None):
+    """Read a column off a sqlite3.Row that may not have it.
+
+    Upgraded databases can lag the code by a migration, and indexing a Row for a
+    missing column raises IndexError rather than returning None. The upsert paths
+    read columns that only newer schemas carry, and a raised IndexError there
+    would fail the whole scan, so absent means default."""
+    if row is None:
+        return default
+    try:
+        value = row[column]
+    except (IndexError, KeyError):
+        return default
+    return default if value is None else value
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -106,6 +122,10 @@ class WatchlistArtist:
     # releases for this artist but does NOT auto-add them to the wishlist (so they
     # don't auto-download). Default True = current behaviour.
     auto_download: bool = True
+    # Three-state preference behind auto_download: None = follow the global
+    # default, 0 = never, 1 = always. The scanner resolves the pair into
+    # `auto_download` (core.watchlist_auto_download).
+    auto_download_pref: Optional[int] = None
     # App-wide quality_profiles row used for every release queued by this
     # artist.  Stored on the Watchlist itself so consumers do not need to know
     # about Library v2 (or any other UI that created the watch).
@@ -661,6 +681,8 @@ class MusicDatabase:
             # from an explicit column list, so any column added before them gets
             # dropped. Adding it here (after the last recreate) makes it stick.
             self._add_watchlist_auto_download_column(cursor)
+            # Same ordering rule: must land AFTER the recreates, or it is dropped.
+            self._add_watchlist_auto_download_pref_column(cursor)
             self._add_watchlist_quality_profile_column(cursor)
 
             # Spotify library cache
@@ -671,6 +693,26 @@ class MusicDatabase:
 
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS genre_translation_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    whitelist_hash TEXT NOT NULL,
+                    source_genre TEXT NOT NULL,
+                    normalized_source_genre TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    matched_genre TEXT,
+                    score REAL,
+                    margin REAL,
+                    candidates_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_count INTEGER DEFAULT 1,
+                    UNIQUE(whitelist_hash, normalized_source_genre)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gtc_hash ON genre_translation_cache (whitelist_hash)")
 
             # Mirrored playlists — persistent backup of parsed playlists from any service
             cursor.execute("""
@@ -1204,6 +1246,7 @@ class MusicDatabase:
             self._backfill_native_quality_profile_assignments(cursor)
 
             self._ensure_core_media_schema_columns(cursor)
+            self._ensure_art_lock_columns(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -1456,8 +1499,67 @@ class MusicDatabase:
                 if album_cols and _col not in album_cols:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
+
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
+
+    def _art_lock_supported(self, cursor, table: str) -> bool:
+        """Does this database have ``<table>.art_locked`` yet?
+
+        The sync upserts REFERENCE the column, and SQLite raises "no such
+        column" for the whole statement if it is absent — which the upsert's
+        broad ``except`` swallows into a False return, losing the row silently.
+        A scan that quietly stops saving albums is far worse than art that
+        forgets it was pinned, so the lock degrades instead of exploding:
+        no column ⇒ exactly the pre-lock behaviour.
+
+        Reachable whenever the schema is older than the code: a database whose
+        migration failed, and any caller that builds a bare albums table and
+        drives the upsert directly (which several tests legitimately do).
+
+        Memoized per instance — a PRAGMA per upsert would be a real cost on a
+        full library scan. `getattr` because callers may bypass ``__init__``."""
+        cache = getattr(self, '_art_lock_cols', None)
+        if cache is None:
+            cache = {}
+            self._art_lock_cols = cache
+        if table not in cache:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cache[table] = any(row[1] == 'art_locked' for row in cursor.fetchall())
+            except Exception:
+                cache[table] = False
+        return cache[table]
+
+    def _ensure_art_lock_columns(self, cursor):
+        """Art chosen by hand (TheHomeGuy). Same shape as ``canonical_locked``:
+        a manual pick must survive every automatic writer.
+
+        The art picker used to be "pinned" only by accident — enrichment workers
+        fill art solely ``WHERE thumb_url IS NULL OR ''``, so a non-empty value
+        happened to survive them. A library sync is a different writer with
+        different rules, and it overwrote the pick with whatever the media server
+        returned. Nothing in the row said a human chose this, so nothing could
+        protect it. Additive, defaults to 0 = "follow the server", i.e. exactly
+        today's behaviour for every existing row.
+
+        Deliberately its OWN method with its OWN try, not part of
+        ``_ensure_core_media_schema_columns``: that one wraps every repair in a
+        single try, so one unrelated failure would skip everything after it. The
+        sync upserts now REFERENCE ``art_locked``, and a missing column there
+        raises "no such column" for every album and artist — swallowed by the
+        upsert's broad except, which would silently lose the whole scan. This
+        column has to be the one thing that cannot be skipped by someone else's
+        error."""
+        for table in ('albums', 'artists'):
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {c[1] for c in cursor.fetchall()}
+                if cols and 'art_locked' not in cols:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN art_locked INTEGER DEFAULT 0")
+                    logger.info("Added art_locked column to %s table (custom artwork)", table)
+            except Exception as e:
+                logger.error("Could not ensure %s.art_locked: %s", table, e)
 
     def _ensure_wishlist_quality_columns(self, cursor):
         """Give every wishlist row a pointer to its own quality profile.
@@ -2796,6 +2898,40 @@ class MusicDatabase:
                 logger.info("Added auto_download column to watchlist_artists table")
         except Exception as e:
             logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
+
+    def _add_watchlist_auto_download_pref_column(self, cursor):
+        """Add the three-state auto-download preference (swiftpawpaw's request).
+
+        ``auto_download`` is ``NOT NULL DEFAULT 1``, so every untouched artist
+        already reads 1 and nothing can tell "the user chose this" from "nobody
+        ever set it". A global default would be powerless against those rows —
+        which is exactly the problem: 225 artists, all reading 1, no way to turn
+        them off but one at a time.
+
+        ``auto_download_pref`` is NULLABLE and carries the third state:
+            NULL -> follow the global default
+            0    -> never, whatever the global says
+            1    -> always, whatever the global says
+
+        The backfill is lossless: rows already at ``auto_download=0`` are
+        deliberate follow-only choices and become an explicit 0; everything else
+        stays NULL and inherits. Nothing is discarded, because today "explicitly
+        on" and "on by default" behave identically — the difference was never
+        expressible."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'auto_download_pref' in columns:
+                return
+            cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN auto_download_pref INTEGER")
+            if 'auto_download' in columns:
+                # Preserve every deliberate follow-only; leave the rest inheriting.
+                cursor.execute("UPDATE watchlist_artists SET auto_download_pref = 0 "
+                               "WHERE auto_download = 0")
+            logger.info("Added auto_download_pref column to watchlist_artists "
+                        "(explicit follow-only rows preserved)")
+        except Exception as e:
+            logger.error(f"Error adding auto_download_pref to watchlist_artists: {e}")
 
     def _add_watchlist_quality_profile_column(self, cursor):
         """Add the native per-artist Quality Profile assignment.
@@ -4566,7 +4702,7 @@ class MusicDatabase:
     def set_profile_listenbrainz(self, profile_id: int, token: str, base_url: str = '', username: str = '') -> bool:
         """Save encrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             encrypted_token = config_manager._encrypt_value(token) if token else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4585,7 +4721,7 @@ class MusicDatabase:
     def get_profile_listenbrainz(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted ListenBrainz credentials for a profile"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4626,7 +4762,7 @@ class MusicDatabase:
     def get_profiles_with_listenbrainz(self) -> List[Dict[str, Any]]:
         """Get all profiles that have ListenBrainz tokens configured"""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -4751,7 +4887,7 @@ class MusicDatabase:
         """Create a named credential set for a service. Returns the new id, or
         None on failure / duplicate (service, label). Payload is encrypted."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc = config_manager._encrypt_value(payload) if payload else None
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -4773,7 +4909,7 @@ class MusicDatabase:
         """Update a credential set's label and/or payload. Only provided fields
         change. Returns True if a row was updated."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             sets, params = [], []
             if label is not None:
                 sets.append("label = ?")
@@ -4848,7 +4984,7 @@ class MusicDatabase:
         """Get a credential set WITH its decrypted payload, or None. For the
         resolver / client wiring — not for shipping to the browser."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -5116,12 +5252,23 @@ class MusicDatabase:
         Returns:
             Dict with total_plays, total_time_ms, unique_artists, unique_albums, unique_tracks
         """
+        return self._listening_overview(self._listening_time_filter(time_range))
+
+    _EMPTY_OVERVIEW = {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0,
+                       'unique_albums': 0, 'unique_tracks': 0}
+
+    def _listening_overview(self, where):
+        """The overview aggregate for an arbitrary WHERE clause.
+
+        One query body shared by the current window and the previous one, so the
+        two can never drift into measuring subtly different things — which is
+        exactly what would make a "vs last month" delta lie."""
+        if not where:
+            return dict(self._EMPTY_OVERVIEW)
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            where = self._listening_time_filter(time_range)
-
             cursor.execute(f"""
                 SELECT
                     COUNT(*) as total_plays,
@@ -5142,10 +5289,147 @@ class MusicDatabase:
             }
         except Exception as e:
             logger.error(f"Error getting listening stats: {e}")
-            return {'total_plays': 0, 'total_time_ms': 0, 'unique_artists': 0, 'unique_albums': 0, 'unique_tracks': 0}
+            return dict(self._EMPTY_OVERVIEW)
         finally:
             if conn:
                 conn.close()
+
+    # ── When you listen (stats P3) ───────────────────────────────────────
+    #
+    # TIMEZONE NOTE: played_at is stored as LOCAL naive wall-clock — the web
+    # player writes datetime.now().isoformat() and plex_client writes
+    # item.viewedAt.isoformat(), both local. So strftime('%H', played_at)
+    # already yields the hour the user actually listened, which is precisely
+    # what this chart means. Do NOT "fix" it to UTC.
+    #
+    # (The same fact means the range filters, which compare local timestamps
+    # against SQLite's UTC datetime('now'), are skewed by the server's UTC
+    # offset. Pre-existing, affects every range-scoped stat, and deliberately
+    # not changed here — see STATS_PAGE_PLAN.md.)
+
+    def get_listening_clock(self, time_range='all'):
+        """Plays by weekday x hour — the shape of a listening week.
+
+        Returns a dict with a dense 7x24 ``grid`` (weekday 0=Sunday, matching
+        strftime %w) plus the peak cell. Dense on purpose: a heatmap needs a
+        value for every cell, and making the UI fill gaps is how an empty hour
+        becomes an undefined square."""
+        where = self._listening_time_filter(time_range)
+        grid = [[0] * 24 for _ in range(7)]
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT CAST(strftime('%w', played_at) AS INTEGER) AS weekday,
+                       CAST(strftime('%H', played_at) AS INTEGER) AS hour,
+                       COUNT(*) AS plays
+                FROM listening_history
+                {where}
+                GROUP BY weekday, hour
+            """)
+            peak = {'weekday': None, 'hour': None, 'plays': 0}
+            total = 0
+            for weekday, hour, plays in cursor.fetchall():
+                # strftime returns NULL for an unparseable timestamp; skip
+                # rather than letting None index the grid.
+                if weekday is None or hour is None:
+                    continue
+                if not (0 <= weekday <= 6 and 0 <= hour <= 23):
+                    continue
+                grid[weekday][hour] = plays
+                total += plays
+                if plays > peak['plays']:
+                    peak = {'weekday': weekday, 'hour': hour, 'plays': plays}
+            return {'grid': grid, 'peak': peak, 'total': total}
+        except Exception as e:
+            logger.error(f"Error building listening clock: {e}")
+            return {'grid': grid, 'peak': {'weekday': None, 'hour': None, 'plays': 0}, 'total': 0}
+        finally:
+            if conn:
+                conn.close()
+
+    def get_listening_rhythm(self, time_range='all'):
+        """Streaks and the biggest day — listening as a habit, not a total.
+
+        ``current_streak`` counts back from today, and tolerates today having
+        no plays yet: a streak should not read as broken at 9am just because
+        you have not put anything on."""
+        where = self._listening_time_filter(time_range)
+        empty = {'current_streak': 0, 'longest_streak': 0,
+                 'busiest_day': {'date': None, 'plays': 0}, 'active_days': 0}
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT DATE(played_at) AS day, COUNT(*) AS plays
+                FROM listening_history
+                {where}
+                GROUP BY day
+                ORDER BY day
+            """)
+            rows = [(day, plays) for day, plays in cursor.fetchall() if day]
+            if not rows:
+                return dict(empty)
+
+            from datetime import date as _date, timedelta as _timedelta
+
+            days = []
+            for day, plays in rows:
+                try:
+                    days.append((_date.fromisoformat(day), plays))
+                except (TypeError, ValueError):
+                    continue
+            if not days:
+                return dict(empty)
+
+            busiest = max(days, key=lambda d: d[1])
+
+            longest = run = 1
+            for i in range(1, len(days)):
+                if days[i][0] - days[i - 1][0] == _timedelta(days=1):
+                    run += 1
+                    longest = max(longest, run)
+                else:
+                    run = 1
+
+            # Count back from the most recent day, but only call it CURRENT if
+            # that day is today or yesterday — an unbroken run that ended last
+            # month is history, not a streak you are on.
+            today = _date.today()
+            last_day = days[-1][0]
+            current = 0
+            if (today - last_day).days <= 1:
+                current = 1
+                for i in range(len(days) - 1, 0, -1):
+                    if days[i][0] - days[i - 1][0] == _timedelta(days=1):
+                        current += 1
+                    else:
+                        break
+
+            return {
+                'current_streak': current,
+                'longest_streak': longest,
+                'busiest_day': {'date': busiest[0].isoformat(), 'plays': busiest[1]},
+                'active_days': len(days),
+            }
+        except Exception as e:
+            logger.error(f"Error building listening rhythm: {e}")
+            return dict(empty)
+        finally:
+            if conn:
+                conn.close()
+
+    def get_listening_stats_previous(self, time_range='all'):
+        """The overview for the period immediately BEFORE ``time_range``.
+
+        Returns None when there is no previous window ('all'), so the UI omits
+        the comparison instead of rendering a delta against nothing."""
+        where = self._listening_previous_filter(time_range)
+        if not where:
+            return None
+        return self._listening_overview(where)
 
     def get_top_artists(self, time_range='all', limit=10):
         """Get top artists by play count."""
@@ -5299,6 +5583,402 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting genre breakdown: {e}")
             return []
+        finally:
+            if conn:
+                conn.close()
+
+    # ── Own vs play (stats P4) ───────────────────────────────────────────
+    #
+    # The one thing only SoulSync can say. Spotify has no library; Plex has no
+    # acquisition history. We have both halves, so we can answer "you own 40%
+    # metal and play 12% of it" — which is a fact about the user, not a number
+    # about the software.
+
+    @staticmethod
+    def _accumulate_genres(genre_counts, genres_str, weight):
+        """Fold one artist's genre payload into a running tally.
+
+        Shared by the owned and played sides so a genre can never be spelled
+        one way in one half and another way in the other — the percentages sit
+        beside each other and a parsing difference would read as a real gap."""
+        if not genres_str:
+            return
+        try:
+            import json
+            genres = json.loads(genres_str)
+            if isinstance(genres, list):
+                names = [str(g).strip() for g in genres]
+            else:
+                names = [str(genres).strip()]
+        except (ValueError, TypeError):
+            names = [g.strip() for g in str(genres_str).split(',')]
+        for name in names:
+            if name:
+                genre_counts[name] = genre_counts.get(name, 0) + weight
+
+    def get_genre_own_vs_play(self, time_range='all', limit=12):
+        """What share of the library each genre is, against what share of plays.
+
+        Both sides are percentages of the GENRE-KNOWN population (tracks whose
+        artist carries genres), so they are directly comparable — an untagged
+        artist is absent from both, not counted as zero on one side.
+
+        Returns rows sorted by the size of the gap, because the interesting
+        rows are the ones where owning and listening disagree — not the
+        biggest genre, which you already know."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            owned = {}
+            cursor.execute("""
+                SELECT a.genres, COUNT(*) AS owned_tracks
+                FROM tracks t
+                JOIN artists a ON a.id = t.artist_id
+                WHERE a.genres IS NOT NULL AND a.genres != ''
+                GROUP BY a.genres
+            """)
+            for genres_str, count in cursor.fetchall():
+                self._accumulate_genres(owned, genres_str, count)
+
+            played = {}
+            where = self._listening_time_filter(time_range, alias='lh')
+            cursor.execute(f"""
+                SELECT a.genres, COUNT(*) AS plays
+                FROM listening_history lh
+                JOIN tracks t ON t.id = lh.db_track_id
+                JOIN artists a ON a.id = t.artist_id
+                {where}
+                AND a.genres IS NOT NULL AND a.genres != ''
+                GROUP BY a.genres
+            """)
+            for genres_str, count in cursor.fetchall():
+                self._accumulate_genres(played, genres_str, count)
+
+            owned_total = sum(owned.values())
+            played_total = sum(played.values())
+            if not owned_total:
+                return []
+
+            rows = []
+            for genre in set(owned) | set(played):
+                owned_pct = owned.get(genre, 0) / owned_total * 100
+                # No plays at all in range: every genre is 0% played, which is
+                # honest — "you have not listened to anything" — rather than a
+                # division by zero.
+                played_pct = (played.get(genre, 0) / played_total * 100) if played_total else 0.0
+                rows.append({
+                    'genre': genre,
+                    'owned_pct': round(owned_pct, 1),
+                    'played_pct': round(played_pct, 1),
+                    'gap': round(played_pct - owned_pct, 1),
+                    'owned_tracks': owned.get(genre, 0),
+                    'plays': played.get(genre, 0),
+                })
+
+            rows.sort(key=lambda r: abs(r['gap']), reverse=True)
+            return rows[:limit]
+        except Exception as e:
+            logger.error(f"Error building own-vs-play: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_neglected_albums(self, limit=12):
+        """Albums you own where nothing has ever been played.
+
+        ``unplayed_count`` was already on the page as a dead number. An album
+        you can act on is worth more than a total you cannot."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT al.id, al.title, ar.name AS artist, COUNT(t.id) AS tracks,
+                       MAX(COALESCE(t.play_count, 0)) AS best_play_count
+                FROM albums al
+                JOIN tracks t ON t.album_id = al.id
+                JOIN artists ar ON ar.id = al.artist_id
+                GROUP BY al.id
+                HAVING best_play_count = 0 AND tracks > 0
+                ORDER BY tracks DESC
+                LIMIT ?
+            """, (limit,))
+            return [
+                {'id': row[0], 'name': row[1], 'artist': row[2], 'tracks': row[3]}
+                for row in cursor.fetchall()
+            ]
+        except Exception as e:
+            logger.error(f"Error finding neglected albums: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    # ── Year in Listening (stats P5) ─────────────────────────────────────
+    #
+    # A FIXED PERIOD, not another filter. That is the whole difference between
+    # this and the rest of the page: the range picker asks the user to choose,
+    # and a Wrapped tells them what happened. Everything below is one window,
+    # decided here, with the boundary printed on the page.
+    #
+    # ROLLING twelve calendar months ending with the current (partial) one —
+    # not Jan-Dec. A self-hosted app gets opened in August, and a fixed
+    # calendar year would hand a five-month-old install an empty story for
+    # seven of its twelve slots. The period label states the real range so
+    # nothing is implied that the data does not cover.
+    #
+    # TIMEZONE: unlike the range filters (which compare local `played_at`
+    # against SQLite's UTC `datetime('now')` and are skewed by the server's
+    # offset — see STATS_PAGE_PLAN.md), this window is computed from the
+    # LOCAL clock and compared with `date(played_at)`. That matches the local
+    # wall-clock the column actually stores, so the year is skew-free. Using
+    # date() rather than a raw string compare also means both stored shapes
+    # parse — the web player writes an ISO 'T' separator and plex_client
+    # writes a space, and a lexicographic compare orders those differently at
+    # the boundary.
+
+    _MONTH_LABELS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+    @staticmethod
+    def _year_month_keys(now, months=12):
+        """The ``months`` calendar-month keys ending with ``now``'s month.
+
+        Returned oldest-first as ('YYYY-MM', 'Mon YYYY') pairs. Generated in
+        Python rather than read off the data so the strip is DENSE — a month
+        you listened to nothing in is a fact about the year, and letting it
+        fall out of a GROUP BY would silently close the gap."""
+        base = now.year * 12 + (now.month - 1)
+        keys = []
+        for offset in range(months - 1, -1, -1):
+            total = base - offset
+            year, month0 = divmod(total, 12)
+            keys.append((f'{year:04d}-{month0 + 1:02d}',
+                         f'{MusicDatabase._MONTH_LABELS[month0]} {year}'))
+        return keys
+
+    _EMPTY_YEAR_TOTALS = {'plays': 0, 'minutes': 0, 'artists': 0,
+                          'albums': 0, 'tracks': 0, 'active_days': 0}
+
+    @staticmethod
+    def _pick_month_leaders(rows):
+        """``{month: winning artist}`` from ``(month, artist, plays)`` rows.
+
+        A fold rather than a ROW_NUMBER() window: window functions need SQLite
+        3.25+, and this would have been the only query in the codebase to
+        require it.
+
+        Split out from the query so the TIE-BREAK is testable. A tie resolves
+        to the lower-cased-alphabetically-first name, and it has to resolve the
+        same way every rebuild — SQLite makes no promise about the order it
+        hands back grouped rows, so a fold that just kept the first one it saw
+        would let the month strip change its mind between two renders of
+        identical data. Given rows in any order, this returns one answer."""
+        leaders = {}
+        for month, artist, plays in rows:
+            if not month:
+                continue
+            best = leaders.get(month)
+            if (best is None
+                    or plays > best[1]
+                    or (plays == best[1]
+                        and str(artist).lower() < str(best[0]).lower())):
+                leaders[month] = (artist, plays)
+        return {month: name for month, (name, _) in leaders.items()}
+
+    def get_year_in_listening(self, now=None, months=12):
+        """The whole Year in Listening story in one payload.
+
+        ``now`` is injectable so the story is reproducible in tests — every
+        boundary in here derives from it rather than from a scattered
+        datetime.now(), which is also what lets the worker cache it."""
+        from datetime import datetime as _dt
+
+        now = now or _dt.now()
+        month_keys = self._year_month_keys(now, months)
+        start_key = month_keys[0][0]
+        start_date = f'{start_key}-01'
+        # Inclusive end: today. A row dated in the future is a clock artefact,
+        # not listening, and must not inflate the current month.
+        end_date = now.strftime('%Y-%m-%d')
+        period = {
+            'start': start_date,
+            'end': end_date,
+            'label': f'{month_keys[0][1]} — {month_keys[-1][1]}',
+            'months': months,
+        }
+        empty = {
+            'period': period,
+            'has_data': False,
+            'totals': dict(self._EMPTY_YEAR_TOTALS),
+            'months': [{'month': k, 'label': lbl, 'plays': 0, 'minutes': 0,
+                        'top_artist': None} for k, lbl in month_keys],
+            'top_artists': [], 'top_albums': [], 'top_tracks': [],
+            'discoveries': [],
+            'peak_day': {'date': None, 'plays': 0},
+            'top_hour': {'hour': None, 'plays': 0},
+        }
+
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            window = "WHERE date(played_at) >= ? AND date(played_at) <= ?"
+            span = (start_date, end_date)
+
+            cursor.execute(f"""
+                SELECT COUNT(*),
+                       COALESCE(SUM(duration_ms), 0),
+                       COUNT(DISTINCT LOWER(artist)),
+                       COUNT(DISTINCT LOWER(album)),
+                       COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
+                       COUNT(DISTINCT date(played_at))
+                FROM listening_history {window}
+            """, span)
+            row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
+            plays = row[0] or 0
+            if not plays:
+                return empty
+
+            totals = {
+                'plays': plays,
+                # Whole minutes. The page turns this into "that's N days", and
+                # a fractional minute would only ever be noise there.
+                'minutes': int((row[1] or 0) // 60000),
+                'artists': row[2] or 0,
+                'albums': row[3] or 0,
+                'tracks': row[4] or 0,
+                'active_days': row[5] or 0,
+            }
+
+            # Per-month plays + minutes, folded onto the dense strip.
+            cursor.execute(f"""
+                SELECT strftime('%Y-%m', played_at) AS ym,
+                       COUNT(*), COALESCE(SUM(duration_ms), 0)
+                FROM listening_history {window}
+                GROUP BY ym
+            """, span)
+            by_month = {r[0]: (r[1], r[2]) for r in cursor.fetchall() if r[0]}
+
+            # The #1 artist of each month — the month strip's actual story.
+            # Folded in Python rather than ranked with ROW_NUMBER(): window
+            # functions need SQLite 3.25+, and this is the only query in the
+            # codebase that would have required it. Twelve months of grouped
+            # rows is nothing to walk, and a tie breaks on the lower-cased
+            # name so the same month never renders two different leaders.
+            cursor.execute(f"""
+                SELECT strftime('%Y-%m', played_at) AS ym, artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY ym, LOWER(artist)
+            """, span)
+            month_leader = self._pick_month_leaders(cursor.fetchall())
+
+            month_rows = []
+            for key, label in month_keys:
+                plays_m, ms_m = by_month.get(key, (0, 0))
+                month_rows.append({
+                    'month': key,
+                    'label': label,
+                    'plays': plays_m,
+                    'minutes': int((ms_m or 0) // 60000),
+                    'top_artist': month_leader.get(key),
+                })
+
+            def _top(sql, mapper, limit=5):
+                cursor.execute(sql, (*span, limit))
+                return [mapper(r) for r in cursor.fetchall()]
+
+            top_artists = _top(f"""
+                SELECT artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'plays': r[1]})
+
+            # How many of the twelve months each finalist actually led. This is
+            # the fact that separates "played a lot once" from "your year".
+            crowns = {}
+            for leader in month_leader.values():
+                crowns[str(leader).lower()] = crowns.get(str(leader).lower(), 0) + 1
+            for entry in top_artists:
+                entry['months_on_top'] = crowns.get(str(entry['name']).lower(), 0)
+
+            top_albums = _top(f"""
+                SELECT album, artist, COUNT(*) AS plays
+                FROM listening_history {window}
+                  AND album IS NOT NULL AND album != ''
+                GROUP BY LOWER(album), LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'artist': r[1], 'plays': r[2]})
+
+            top_tracks = _top(f"""
+                SELECT title, artist, album, COUNT(*) AS plays,
+                       MIN(played_at), MAX(played_at)
+                FROM listening_history {window}
+                  AND title IS NOT NULL AND title != ''
+                GROUP BY LOWER(title), LOWER(artist)
+                ORDER BY plays DESC LIMIT ?
+            """, lambda r: {'name': r[0], 'artist': r[1], 'album': r[2],
+                            'plays': r[3], 'first_played': r[4], 'last_played': r[5]})
+
+            # Discoveries: artists whose FIRST EVER play falls inside the
+            # window. The comparison is against ALL of history, not against the
+            # window — an artist you first played in 2019 and came back to this
+            # year is a rediscovery, not a discovery, and calling it one would
+            # be the single most obviously wrong number on the page.
+            cursor.execute("""
+                SELECT artist, first_play, plays FROM (
+                    SELECT artist,
+                           MIN(date(played_at)) AS first_play,
+                           COUNT(*) AS plays
+                    FROM listening_history
+                    WHERE artist IS NOT NULL AND artist != ''
+                    GROUP BY LOWER(artist)
+                )
+                WHERE first_play >= ? AND first_play <= ?
+                ORDER BY plays DESC
+                LIMIT 12
+            """, span)
+            discoveries = [{'name': r[0], 'first_played': r[1], 'plays': r[2]}
+                           for r in cursor.fetchall()]
+
+            cursor.execute(f"""
+                SELECT date(played_at) AS d, COUNT(*) AS plays
+                FROM listening_history {window}
+                GROUP BY d ORDER BY plays DESC, d DESC LIMIT 1
+            """, span)
+            peak = cursor.fetchone()
+
+            cursor.execute(f"""
+                SELECT CAST(strftime('%H', played_at) AS INTEGER) AS h, COUNT(*) AS plays
+                FROM listening_history {window}
+                GROUP BY h HAVING h IS NOT NULL
+                ORDER BY plays DESC, h ASC LIMIT 1
+            """, span)
+            hour = cursor.fetchone()
+
+            return {
+                'period': period,
+                'has_data': True,
+                'totals': totals,
+                'months': month_rows,
+                'top_artists': top_artists,
+                'top_albums': top_albums,
+                'top_tracks': top_tracks,
+                'discoveries': discoveries,
+                'peak_day': {'date': peak[0], 'plays': peak[1]} if peak and peak[0]
+                            else {'date': None, 'plays': 0},
+                'top_hour': {'hour': hour[0], 'plays': hour[1]} if hour
+                            else {'hour': None, 'plays': 0},
+            }
+        except Exception as e:
+            logger.error(f"Error building year in listening: {e}")
+            return empty
         finally:
             if conn:
                 conn.close()
@@ -5517,11 +6197,38 @@ class MusicDatabase:
         else:
             return "WHERE 1=1"
 
+    # The window of the SAME length immediately before the current one, so a
+    # stat can say "vs last month" instead of standing alone. A total with no
+    # reference point is trivia; the comparison is what makes it a signal.
+    #
+    # 'all' has no previous window by definition — the caller must not render a
+    # delta for it rather than us inventing a zero to compare against.
+    _PREVIOUS_WINDOW = {
+        '7d': ('-14 days', '-7 days'),
+        '30d': ('-60 days', '-30 days'),
+        '12m': ('-24 months', '-12 months'),
+    }
+
+    @staticmethod
+    def _listening_previous_filter(time_range, alias=''):
+        """WHERE clause for the period immediately BEFORE ``time_range``.
+
+        Returns None for 'all' (and anything unrecognised) — there is no
+        "before everything", and a caller that gets None must omit the
+        comparison rather than compare against nothing."""
+        window = MusicDatabase._PREVIOUS_WINDOW.get(time_range)
+        if not window:
+            return None
+        start, end = window
+        prefix = f"{alias}." if alias else ""
+        return (f"WHERE {prefix}played_at >= datetime('now', '{start}') "
+                f"AND {prefix}played_at < datetime('now', '{end}')")
+
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:
         """Save Spotify API credentials for a profile (encrypted)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_id = config_manager._encrypt_value(client_id) if client_id else None
             enc_secret = config_manager._encrypt_value(client_secret) if client_secret else None
             with self._get_connection() as conn:
@@ -5541,7 +6248,7 @@ class MusicDatabase:
     def get_profile_spotify(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Spotify credentials for a profile."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -5566,7 +6273,7 @@ class MusicDatabase:
     def set_profile_spotify_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
         """Save Spotify OAuth tokens for a profile (from auth callback)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5588,7 +6295,7 @@ class MusicDatabase:
         per-profile Tidal client's token refresh — keeps a profile's refresh from
         ever touching the global tidal_tokens slot."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             enc_access = config_manager._encrypt_value(access_token) if access_token else None
             enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
             with self._get_connection() as conn:
@@ -5608,7 +6315,7 @@ class MusicDatabase:
     def get_profile_tidal(self, profile_id: int) -> Dict[str, Any]:
         """Get decrypted Tidal tokens for a profile ({} if none)."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -6985,9 +7692,20 @@ class MusicDatabase:
 
                 if exists:
                     # Update existing artist
-                    cursor.execute("""
+                    # art_locked = the user picked this photo by hand; the server
+                    # does not get to replace it. Everything else still tracks
+                    # the server, and an unlocked row behaves exactly as before.
+                    # Both spellings take the same parameters, so only the
+                    # thumb_url expression changes when the column is absent.
+                    thumb_expr = (
+                        "CASE WHEN COALESCE(art_locked, 0) = 1 THEN thumb_url ELSE ? END"
+                        if self._art_lock_supported(cursor, 'artists') else "?"
+                    )
+                    cursor.execute(f"""
                         UPDATE artists
-                        SET name = ?, thumb_url = ?, genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+                        SET name = ?,
+                            thumb_url = {thumb_expr},
+                            genres = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ? AND server_source = ?
                     """, (name, thumb_url, genres_json, summary, artist_id, server_source))
                     logger.debug(f"Updated existing {server_source} artist: {name} (ID: {artist_id})")
@@ -7011,18 +7729,27 @@ class MusicDatabase:
                             'style', 'mood', 'label', 'banner_url',
                             'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                             'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
+                            # See the album rekey path: without this, rebuilding the
+                            # row under a new id silently unlocks a hand-picked photo.
+                            'art_locked',
                         ]
 
                         # Read enrichment data from old artist
                         cursor.execute("SELECT * FROM artists WHERE id = ? AND server_source = ?", (old_id, server_source))
                         old_row = cursor.fetchone()
 
+                        # A locked photo survives the rekey; otherwise the server wins,
+                        # exactly as before.
+                        preserved_thumb_url = thumb_url
+                        if _row_value(old_row, 'art_locked'):
+                            preserved_thumb_url = _row_value(old_row, 'thumb_url') or thumb_url
+
                         # Insert new artist with fresh server metadata + preserved created_at
                         old_created = old_row['created_at'] if old_row else None
                         cursor.execute("""
                             INSERT INTO artists (id, name, thumb_url, genres, summary, server_source, created_at, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        """, (artist_id, name, thumb_url, genres_json, summary, server_source, old_created))
+                        """, (artist_id, name, preserved_thumb_url, genres_json, summary, server_source, old_created))
 
                         # Copy enrichment data from old record to new record
                         if old_row:
@@ -7155,9 +7882,25 @@ class MusicDatabase:
 
             if existing:
                 # Album exists - update it (update server_source if different)
-                cursor.execute("""
+                # THE bug TheHomeGuy hit. COALESCE(NULLIF(?, '')) alone only
+                # protects the row when the SERVER sends nothing — and Navidrome
+                # always sends a cover URL, including for its own blue-vinyl
+                # placeholder. So a hand-picked cover lost to a manual sync every
+                # time. art_locked says a person chose it; leave it alone.
+                # Same parameters either way — only the expression differs, so a
+                # database that predates the column keeps the old behaviour
+                # instead of failing every album (see _art_lock_supported).
+                thumb_expr = (
+                    "CASE WHEN COALESCE(art_locked, 0) = 1 "
+                    "THEN thumb_url ELSE COALESCE(NULLIF(?, ''), thumb_url) END"
+                    if self._art_lock_supported(cursor, 'albums')
+                    else "COALESCE(NULLIF(?, ''), thumb_url)"
+                )
+                cursor.execute(f"""
                     UPDATE albums
-                    SET artist_id = ?, title = ?, year = ?, thumb_url = COALESCE(NULLIF(?, ''), thumb_url), genres = ?,
+                    SET artist_id = ?, title = ?, year = ?,
+                        thumb_url = {thumb_expr},
+                        genres = ?,
                         track_count = ?, duration = ?, server_source = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (artist_id, title, year, thumb_url, genres_json, track_count, duration, server_source, album_id))
@@ -7188,12 +7931,22 @@ class MusicDatabase:
                         # losing it on a ratingKey rekey would force the next
                         # completeness scan back to live API lookups (kettui PR #374).
                         'api_track_count',
+                        # Without this the rekey path quietly UNLOCKS custom art:
+                        # the row is rebuilt under a new id, art_locked defaults
+                        # back to 0, and the next sync overwrites the pick.
+                        'art_locked',
                     ]
 
                     # Read enrichment data from old album
                     cursor.execute("SELECT * FROM albums WHERE id = ?", (old_id,))
                     old_row = cursor.fetchone()
-                    preserved_thumb_url = thumb_url or (old_row['thumb_url'] if old_row and 'thumb_url' in old_row.keys() else None)
+                    old_thumb_url = _row_value(old_row, 'thumb_url')
+                    if _row_value(old_row, 'art_locked'):
+                        # Hand-picked art outranks the server even here, where the
+                        # server has just handed us a brand-new id for this album.
+                        preserved_thumb_url = old_thumb_url or thumb_url
+                    else:
+                        preserved_thumb_url = thumb_url or old_thumb_url
 
                     # Insert new album with fresh server metadata + preserved created_at
                     old_created = old_row['created_at'] if old_row else None
@@ -9840,7 +10593,7 @@ class MusicDatabase:
         self.set_quality_profile(profile)
 
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             config_manager.set("acoustid.require_verified", profile["acoustid_required"])
             config_manager.set("lossy_copy.downsample_hires", profile["downsample_enabled"])
             config_manager.set("post_processing.audio_completeness_check", profile["deep_audio_verify"])
@@ -9869,7 +10622,7 @@ class MusicDatabase:
         the active profile" true in both directions.
         """
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             values = {
                 "acoustid_required": 1 if config_manager.get("acoustid.require_verified", False) else 0,
                 "downsample_enabled": 1 if config_manager.get("lossy_copy.downsample_hires", False) else 0,
@@ -10113,7 +10866,7 @@ class MusicDatabase:
         .quality = 'hires'|'hires_max'), which #896 removed in favour of the
         global profile. Used to preserve their intent on migration."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
         except Exception:
             return False
         hires = {'hires', 'hires_max'}
@@ -10624,7 +11377,7 @@ class MusicDatabase:
 
                 # Check for duplicates by track name + artist (not just Spotify ID)
                 # When allow_duplicates is True (default), same song from different albums can coexist
-                from config.settings import config_manager
+                from core.settings import config_manager
                 allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
                 # Convert data once; existing rows and inserts use the same
@@ -11533,7 +12286,7 @@ class MusicDatabase:
         Keeps the oldest entry (by date_added) for each duplicate set.
         Returns the number of duplicates removed."""
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
             with self._get_connection() as conn:
@@ -11946,7 +12699,7 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'quality_profile_id']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -11985,6 +12738,8 @@ class MusicDatabase:
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
+                    auto_download_pref = (row['auto_download_pref']
+                                          if 'auto_download_pref' in existing_columns else None)
                     quality_profile_id = (
                         int(row['quality_profile_id'])
                         if 'quality_profile_id' in existing_columns
@@ -12016,6 +12771,7 @@ class MusicDatabase:
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
+                        auto_download_pref=auto_download_pref,
                         quality_profile_id=quality_profile_id,
                         profile_id=profile_id
                     ))
@@ -13643,7 +14399,7 @@ class MusicDatabase:
         """Get comprehensive database information filtered by server source"""
         try:
             # Import here to avoid circular imports
-            from config.settings import config_manager
+            from core.settings import config_manager
             
             # If no server specified, use active server
             if server_source is None:
@@ -13758,7 +14514,7 @@ class MusicDatabase:
                             where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
 
                 # Get active server for filtering
-                from config.settings import config_manager
+                from core.settings import config_manager
                 active_server = config_manager.get_active_media_server()
 
                 # Add active server filter to where conditions
@@ -14312,15 +15068,27 @@ class MusicDatabase:
             return {'success': False, 'error': str(e)}
 
     def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
-        """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
-        every enrichment worker fills art only ``WHERE thumb_url IS NULL OR = ''``, so none will
-        overwrite a user pick. Returns True when a row was updated."""
+        """Set an album's cover-art URL (the user's art-picker choice) and LOCK it.
+
+        Two different protections, because there are two kinds of writer:
+
+        * enrichment workers fill art only ``WHERE thumb_url IS NULL OR = ''``,
+          so a non-empty value is enough to survive them;
+        * a library sync writes whatever the media server returned, and does not
+          care whether the value it is replacing was chosen by a human. That is
+          what wiped TheHomeGuy's covers — Navidrome always returns a cover URL
+          (its own placeholder counts), so the "non-empty" protection above
+          never applied. ``art_locked`` is the flag that says a person picked
+          this, and the sync upserts leave locked art alone.
+
+        Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE albums SET thumb_url = ?, art_locked = 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
                 (thumb_url, album_id))
             conn.commit()
             return cursor.rowcount > 0
@@ -14332,20 +15100,55 @@ class MusicDatabase:
                 conn.close()
 
     def set_artist_thumb_url(self, artist_id, thumb_url: str) -> bool:
-        """Set an artist's photo URL (the user's image-picker choice). A non-empty value also PINS
-        it: every enrichment worker fills artist thumbs only ``WHERE thumb_url IS NULL OR = ''``,
-        so none will overwrite a user pick. Returns True when a row was updated."""
+        """Set an artist's photo URL (the user's image-picker choice) and LOCK it.
+
+        See :meth:`set_album_thumb_url` for why the non-empty value alone was not
+        enough. The artist upsert was the worse of the two: it wrote the server's
+        photo with a plain ``SET thumb_url = ?``, with not even the empty-value
+        guard the album path had. Returns True when a row was updated."""
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE artists SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE artists SET thumb_url = ?, art_locked = 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
                 (thumb_url, artist_id))
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"set_artist_thumb_url failed for artist {artist_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def clear_art_lock(self, kind: str, entity_id) -> bool:
+        """Release a hand-picked image so the media server owns the art again.
+
+        Without this the lock is a one-way door. The picker offers covers from
+        external sources only (Cover Art Archive, Deezer, iTunes, …) and can
+        legitimately return NOTHING — TheHomeGuy's own screenshot reads "No
+        alternative covers found for this album" — so a user who locked art they
+        no longer want would have no candidate to switch to and no way back.
+
+        The current image is deliberately left in place: it stays until the next
+        library sync refreshes it, so "unlock" never blanks the page. Returns
+        True when a row was updated."""
+        table = {'album': 'albums', 'artist': 'artists'}.get(kind)
+        if table is None:
+            raise ValueError(f"clear_art_lock: kind must be 'album' or 'artist', got {kind!r}")
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE {table} SET art_locked = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (entity_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"clear_art_lock failed for {kind} {entity_id}: {e}")
             return False
         finally:
             if conn:

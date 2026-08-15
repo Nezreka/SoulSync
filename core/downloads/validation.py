@@ -8,7 +8,7 @@ the body.
 import logging
 import re
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.file_integrity import resolve_duration_tolerance
 
 logger = logging.getLogger(__name__)

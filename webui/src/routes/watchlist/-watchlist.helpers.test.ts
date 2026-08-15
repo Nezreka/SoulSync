@@ -5,6 +5,10 @@ import type { WatchlistArtist } from './-watchlist.types';
 import {
   artistPills,
   artistSourceKeys,
+  autoDownloadPrefFromSelect,
+  autoDownloadSelectValue,
+  describeAutoDownload,
+  effectiveAutoDownload,
   batchSelectionState,
   filterArtists,
   formatArtistCount,
@@ -318,5 +322,48 @@ describe('artistPills', () => {
 
   it('is empty when nothing is enabled', () => {
     expect(artistPills(artist())).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-download (swiftpawpaw: 225 artists, no way to turn it off in one place)
+// ---------------------------------------------------------------------------
+
+describe('auto-download preference', () => {
+  it('maps the three states to and from the select', () => {
+    expect(autoDownloadSelectValue(null)).toBe('inherit');
+    expect(autoDownloadSelectValue(1)).toBe('always');
+    expect(autoDownloadSelectValue(0)).toBe('never');
+    expect(autoDownloadPrefFromSelect('inherit')).toBe(null);
+    expect(autoDownloadPrefFromSelect('always')).toBe(1);
+    expect(autoDownloadPrefFromSelect('never')).toBe(0);
+  });
+
+  it('inherits rather than guessing a side for anything unrecognised', () => {
+    // A row we cannot read must follow the global, not silently pin itself on —
+    // one bad value would otherwise ignore the user's global off forever.
+    expect(autoDownloadSelectValue(undefined)).toBe('inherit');
+    expect(autoDownloadSelectValue(7)).toBe('inherit');
+    expect(autoDownloadPrefFromSelect('wat')).toBe(null);
+  });
+
+  it('lets the global decide only when the artist has no opinion', () => {
+    expect(effectiveAutoDownload(null, true)).toBe(true);
+    expect(effectiveAutoDownload(null, false)).toBe(false);
+    // THE requirement: "the user configuration trumps the global".
+    expect(effectiveAutoDownload(1, false)).toBe(true);
+    expect(effectiveAutoDownload(0, true)).toBe(false);
+  });
+
+  it('turns off all 225 untouched artists when the global goes off', () => {
+    const untouched = Array.from({ length: 225 }, () => null);
+    expect(untouched.some((pref) => effectiveAutoDownload(pref, false))).toBe(false);
+    expect(untouched.every((pref) => effectiveAutoDownload(pref, true))).toBe(true);
+  });
+
+  it('says WHY it is off, because "off" alone is ambiguous', () => {
+    expect(describeAutoDownload(0, true)).toContain('this artist');
+    expect(describeAutoDownload(null, false)).toContain('OFF');
+    expect(describeAutoDownload(null, true)).toContain('ON');
   });
 });

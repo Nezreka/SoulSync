@@ -194,12 +194,26 @@ async def _fetch_torrent_payload_async(url: str):
     return await run_blocking(fetch_torrent_payload, url)
 
 
+class ReleaseRejected(Exception):
+    """The fetched .torrent describes something the caller will not accept.
+
+    Raised instead of returning None so the caller can tell "the client
+    refused it" apart from "we refused it, and here is why" — the second
+    needs to reach the user and let the hybrid chain try the next source.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 async def add_torrent_smart(
     adapter: "TorrentClientAdapter",
     url_or_magnet: str,
     category: str = "soulsync",
     save_path: Optional[str] = None,
     fallback_magnet: Optional[str] = None,
+    verify_files=None,
 ) -> Optional[str]:
     """Add a release the way Sonarr/Radarr do: magnets go straight to the
     client; HTTP download links are fetched server-side and handed over as
@@ -214,6 +228,14 @@ async def add_torrent_smart(
     preference from being a downgrade — if the server-side fetch fails we use
     the magnet we already had instead of handing over a URL this process just
     proved it cannot reach.
+
+    ``verify_files`` (#1149) is called with the .torrent's file-name list
+    before the release is handed over, and raises ``ReleaseRejected`` when it
+    says no. It runs HERE because this is where the payload already exists —
+    checking in the caller would mean fetching the same .torrent twice. It is
+    skipped when the payload never materialises (a magnet, or a fetch that
+    failed): no file list is no evidence, and the caller's title-level check
+    has already had its say.
     """
     from utils.logging_config import get_logger
     logger = get_logger('torrent.add')
@@ -225,6 +247,16 @@ async def add_torrent_smart(
     if magnet:
         return await adapter.add_torrent(magnet, category=category, save_path=save_path)
     if file_bytes is not None:
+        if verify_files is not None:
+            from core.quality.torrent_contents import torrent_file_names
+            names = torrent_file_names(file_bytes)
+            # None means the payload could not be parsed, which is not
+            # evidence of anything — do not turn a decoder failure into a
+            # blocked download.
+            if names is not None:
+                ok, reason = verify_files(names)
+                if not ok:
+                    raise ReleaseRejected(reason)
         return await adapter.add_torrent_file(file_bytes, category=category, save_path=save_path)
 
     if fallback_magnet:

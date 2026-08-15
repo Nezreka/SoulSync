@@ -34,7 +34,7 @@ from urllib.parse import urljoin
 import requests as http_requests
 
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_blocking
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
@@ -300,7 +300,7 @@ class HiFiClient(DownloadSourcePlugin):
         if _pushed_new_defaults:
             return
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             offered = config_manager.get('hifi.offered_defaults', None)
             existing = db.get_all_hifi_instances()
             to_add, new_offered = compute_new_default_pushes(

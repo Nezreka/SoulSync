@@ -7,7 +7,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 import json
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 
 # Shared dataclasses live in the neutral media_server package — every
 # server client used to define a near-identical XTrackInfo /
@@ -495,6 +495,54 @@ class NavidromeClient(MediaServerClient):
                 self.username is not None and
                 self.password is not None)
 
+    def _empty_answer_is_verified(self, call: str) -> bool:
+        """Whether a falsy Navidrome answer means "the library really is empty".
+
+        Navidrome answers an EMPTY library with a hard Subsonic API error
+        ('Library not found or empty') rather than an empty envelope
+        (5BILLION's report). 'not found' and 'empty' share one message, so
+        confirm the selected folder actually EXISTS before believing 'empty' —
+        a wrong folder id must stay a FAILURE, because "empty" is the answer
+        that authorises deleting the user's library rows.
+
+        Shared by every fetch that can be asked about an empty library
+        (``get_all_artists``, ``get_all_artist_ids``, ``get_all_album_ids``).
+        It lives in ONE place deliberately: three rounds of this bug were fixed
+        in `get_all_artists` alone while the removal-detection fetchers kept the
+        original behaviour, which is why it kept bouncing back.
+        """
+        err = str(getattr(self, 'last_api_error', '') or '').lower()
+        if 'empty' not in err:
+            logger.error(
+                "Navidrome: %s failed with non-empty error %r — treating as a "
+                "failure (no stale removal)", call, err)
+            return False
+
+        folders = self._fetch_music_folders()
+        known = {str(f.get('id')) for f in folders if isinstance(f, dict)}
+        if self.music_folder_id and str(self.music_folder_id) in known:
+            logger.info(
+                "Navidrome: selected library %s exists but is empty (%s said %r) "
+                "— verified empty, not a failure", self.music_folder_id, call, err)
+            return True
+        if not self.music_folder_id and isinstance(folders, list):
+            # With NO folder selected there is no misconfigured id to protect
+            # against: a server-wide 'empty' answer plus a live getMusicFolders
+            # response IS a verified empty server.
+            logger.info(
+                "Navidrome: no folder selected, %s answered 'empty' and "
+                "getMusicFolders responded (%d folder(s)) — verified empty, not "
+                "a failure", call, len(folders))
+            return True
+        # Diagnose loudly: the NEXT report must say which leg failed instead of
+        # a bare 'No artists found' toast.
+        logger.error(
+            "Navidrome: 'empty' answer to %s NOT verified — selected folder id "
+            "%r, server's folder ids %s — treating as a failure (no stale "
+            "removal). If the selected id is stale, re-pick the music folder in "
+            "Settings.", call, self.music_folder_id, sorted(known))
+        return False
+
     def get_all_artists(self) -> List[NavidromeArtist]:
         """Get all artists from the music library"""
         # last_fetch_failed lets callers tell "library is genuinely empty"
@@ -513,49 +561,9 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtists', params if params else None)
             if not response:
-                # Navidrome answers getArtists on an EMPTY library with a hard
-                # API error ('Library not found or empty') instead of an empty
-                # envelope (5BILLION's report). 'not found' and 'empty' share
-                # one message, so confirm the selected folder actually EXISTS
-                # before believing 'empty' — a wrong folder id must stay a
-                # failure (never wipe a library on a misconfig).
-                err = str(getattr(self, 'last_api_error', '') or '').lower()
-                if 'empty' in err:
-                    folders = self._fetch_music_folders()
-                    known = {str(f.get('id')) for f in folders if isinstance(f, dict)}
-                    if self.music_folder_id and str(self.music_folder_id) in known:
-                        logger.info(
-                            "Navidrome: selected library %s exists but is empty "
-                            "(API said %r) — verified empty, not a failure",
-                            self.music_folder_id, err)
-                        self.last_fetch_failed = False
-                        return []
-                    if not self.music_folder_id and isinstance(folders, list):
-                        # 5BILLION round 3: with NO folder selected, the old
-                        # guard could never verify-empty at all — the branch
-                        # required a selected id. A server-wide 'empty' answer
-                        # plus a live getMusicFolders response IS a verified
-                        # empty server (there's no misconfigured id to protect
-                        # against when none is selected).
-                        logger.info(
-                            "Navidrome: no folder selected, server answered 'empty' "
-                            "and getMusicFolders responded (%d folder(s)) — verified "
-                            "empty, not a failure", len(folders))
-                        self.last_fetch_failed = False
-                        return []
-                    # Diagnose loudly: the NEXT report must tell us exactly which
-                    # leg failed instead of a bare 'No artists found' toast.
-                    logger.error(
-                        "Navidrome: 'empty' API answer NOT verified — selected "
-                        "folder id %r, server's folder ids %s — treating as a "
-                        "failure (no stale removal). If the selected id is stale, "
-                        "re-pick the music folder in Settings.",
-                        self.music_folder_id, sorted(known))
-                else:
-                    logger.error(
-                        "Navidrome: getArtists failed with non-empty error %r — "
-                        "treating as a failure (no stale removal)", err)
-                # anything else is a FAILURE, not an empty library
+                if self._empty_answer_is_verified('getArtists'):
+                    self.last_fetch_failed = False
+                # otherwise a FAILURE, not an empty library
                 return []
 
             if self._progress_callback:
@@ -588,7 +596,13 @@ class NavidromeClient(MediaServerClient):
             return []
 
     def get_all_artist_ids(self) -> set:
-        """Get all artist IDs from Navidrome (lightweight, for removal detection)."""
+        """Get all artist IDs from Navidrome (lightweight, for removal detection).
+
+        Sets ``last_fetch_failed`` on the same contract as ``get_all_artists``:
+        an empty set means "failed" unless this flag says otherwise. Removal
+        detection reads it to tell a genuinely empty server from an API failure —
+        without it, an empty library could never have its stale rows removed."""
+        self.last_fetch_failed = True
         if not self.ensure_connection():
             return set()
         try:
@@ -597,6 +611,8 @@ class NavidromeClient(MediaServerClient):
                 params['musicFolderId'] = self.music_folder_id
             response = self._make_request('getArtists', params if params else None)
             if not response:
+                if self._empty_answer_is_verified('getArtists (ids)'):
+                    self.last_fetch_failed = False
                 return set()
             ids = set()
             for index in response.get('artists', {}).get('index', []):
@@ -604,6 +620,7 @@ class NavidromeClient(MediaServerClient):
                     aid = artist_data.get('id')
                     if aid:
                         ids.add(str(aid))
+            self.last_fetch_failed = False
             logger.info(f"Retrieved {len(ids)} artist IDs from Navidrome (lightweight)")
             return ids
         except Exception as e:
@@ -611,7 +628,14 @@ class NavidromeClient(MediaServerClient):
             return set()
 
     def get_all_album_ids(self) -> set:
-        """Get all album IDs from Navidrome (lightweight, paginated, for removal detection)."""
+        """Get all album IDs from Navidrome (lightweight, paginated, for removal detection).
+
+        Same ``last_fetch_failed`` contract as the artist fetchers. Note the
+        pagination distinction: a falsy answer on the FIRST page can be a
+        verified empty library, but a falsy answer part-way through is a partial
+        read and must stay a failure — removing "stale" rows from a truncated
+        catalogue would delete albums the server still has."""
+        self.last_fetch_failed = True
         if not self.ensure_connection():
             return set()
         try:
@@ -628,9 +652,25 @@ class NavidromeClient(MediaServerClient):
                     params['musicFolderId'] = self.music_folder_id
                 response = self._make_request('getAlbumList2', params)
                 if not response:
-                    break
+                    if offset == 0:
+                        # Nothing read yet: this can be a verified empty library.
+                        if self._empty_answer_is_verified('getAlbumList2'):
+                            self.last_fetch_failed = False
+                        return set()
+                    # A LATER page failed, so what we hold is a truncated
+                    # catalogue. Returning it would let removal detection treat
+                    # the unread albums as deleted. Discard it and stay flagged
+                    # as failed — the caller then skips removal entirely.
+                    logger.error(
+                        "Navidrome: getAlbumList2 failed at offset %d after %d "
+                        "albums — partial read, discarding (no stale removal)",
+                        offset, len(all_ids))
+                    return set()
                 album_list = response.get('albumList2', {}).get('album', [])
                 if not album_list:
+                    # An empty page IS an answer (Navidrome can return an empty
+                    # list rather than erroring), so the catalogue is complete.
+                    self.last_fetch_failed = False
                     break
                 for album_data in album_list:
                     aid = album_data.get('id')
@@ -639,6 +679,7 @@ class NavidromeClient(MediaServerClient):
                 if len(album_list) < page_size:
                     break
                 offset += page_size
+            self.last_fetch_failed = False
             logger.info(f"Retrieved {len(all_ids)} album IDs from Navidrome (lightweight)")
             return all_ids
         except Exception as e:
@@ -1386,7 +1427,7 @@ class NavidromeClient(MediaServerClient):
             existing_playlists = self.get_playlists_by_name(playlist_name)
             
             # Check if backup is enabled in config
-            from config.settings import config_manager
+            from core.settings import config_manager
             create_backup = config_manager.get('playlist_sync.create_backup', True)
 
             # If we have existing playlists and want to backup, use the first one found

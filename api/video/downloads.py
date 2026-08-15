@@ -69,6 +69,19 @@ def _parse_text(hit) -> str:
     return title
 
 
+def _external_ids(body) -> dict:
+    """The tvdb/imdb/tmdb ids a manual search may carry, as prowlarr_search kwargs.
+
+    Prowlarr routes each id to the indexers that can resolve it, which is how the
+    *arr apps stop depending on a title matching scene spelling. Absent keys are
+    dropped rather than passed as None so the strategy builder sees exactly what
+    the caller actually knew."""
+    body = body if isinstance(body, dict) else {}
+    ids = {"imdb_id": body.get("imdb_id"), "tmdb_id": body.get("tmdb_id"),
+           "tvdb_id": body.get("tvdb_id")}
+    return {k: v for k, v in ids.items() if v}
+
+
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
@@ -104,10 +117,16 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     for hit in raw:
         parsed = parse_release(_parse_text(hit))
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
+        # Swarm health is a TORRENT concept. Usenet and Soulseek hits have no
+        # seeders (Prowlarr leaves the field None for usenet), and a defensive 0
+        # from an indexer must not be read as a dead swarm for them — so the
+        # count only reaches the judge when the hit is actually a torrent.
+        proto = str(hit.get("protocol") or "").lower()
+        seeders = hit.get("seeders") if proto == "torrent" else None
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title, want_date=want_date,
-                                   want_absolute=want_absolute)
+                                   want_absolute=want_absolute, seeders=seeders)
         # Custom formats: matched formats ADD their (per-profile) score; a
         # summed score under the profile's floor hard-rejects (Radarr's
         # min custom format score).
@@ -216,7 +235,7 @@ def register_routes(bp):
     def video_downloads_config():
         from . import get_video_db
         from core.video.download_config import load as load_source
-        from config.settings import config_manager
+        from core.settings import config_manager
         db = get_video_db()
         out = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
         if not out["movies_path"]:        # migrate the legacy single transfer folder → Movies
@@ -235,7 +254,7 @@ def register_routes(bp):
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
         if "download_path" in body:   # SHARED with music — write the same config key
-            from config.settings import config_manager
+            from core.settings import config_manager
             config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
@@ -647,7 +666,8 @@ def register_routes(bp):
         elif source in ("torrent", "usenet"):
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"scope": scope, "results": [],
                                 "error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
@@ -692,7 +712,8 @@ def register_routes(bp):
             # (no polling id), so the client renders immediately.
             from core.video.prowlarr_search import prowlarr_search
             pres = prowlarr_search(scope, title, year=body.get("year"),
-                                   season=want_season, episode=want_episode, source=source)
+                                   season=want_season, episode=want_episode, source=source,
+                                   **_external_ids(body))
             if not pres.get("configured"):
                 return jsonify({"error": "Prowlarr isn't configured — set its URL + key on Settings → Downloads."})
             if pres.get("error"):
@@ -727,7 +748,7 @@ def register_routes(bp):
         Body: {kind, title, release_title, source, username, filename, size_bytes,
         quality_label}."""
         from . import get_video_db
-        from config.settings import config_manager
+        from core.settings import config_manager
         from core.video.download_monitor import ensure_started
         from core.video.download_pipeline import target_dir_for
         from core.video.slskd_download import start_download
@@ -895,6 +916,30 @@ def register_routes(bp):
             ensure_started(get_video_db)
         return jsonify({"ok": started > 0, "started": started, "skipped": skipped, "ids": ids})
 
+    def _annotate_packs(rows) -> None:
+        """Mark the season-pack BATCH rows for the Downloads page.
+
+        The page groups a show's episodes into one card, keyed on show + season,
+        and it did that by reading ``search_ctx`` itself — which meant a pack row
+        (a season, no episode) matched nothing and rendered as a lonely card
+        beside the very episodes it produced. Live: pack #3911 sat outside the
+        group holding its own #3912–3919.
+
+        The verdict comes from ``core.video.season_pack.is_pack_download`` — the
+        same function the monitor uses to decide whether to map a finished folder.
+        Re-deriving it in JavaScript would be a second answer to one question, and
+        the two would drift the first time the shape changed."""
+        try:
+            from core.video.season_pack import is_pack_download
+        except Exception:   # noqa: BLE001 - the page must render even if this import breaks
+            logger.exception("pack annotation unavailable")
+            return
+        for r in rows or []:
+            try:
+                r["is_pack"] = bool(is_pack_download(r))
+            except Exception:   # noqa: BLE001 - one odd row must not blank the page
+                r["is_pack"] = False
+
     def _annotate_upgrade_watches(db, rows) -> None:
         """Mark COMPLETED movie/episode rows that still hold a wishlist row —
         the upgrade-until-cutoff watches. Without this, a below-cutoff grab
@@ -934,6 +979,7 @@ def register_routes(bp):
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         rows = db.list_video_downloads()
         _annotate_upgrade_watches(db, rows)
+        _annotate_packs(rows)
         return jsonify({"downloads": rows})
 
     @bp.route("/downloads/status", methods=["GET"])
@@ -1042,13 +1088,13 @@ def register_routes(bp):
     @bp.route("/downloads/slskd", methods=["GET"])
     def video_slskd_config():
         # SHARED with music — same slskd instance. Reads the app-wide config_manager.
-        from config.settings import config_manager
+        from core.settings import config_manager
         return jsonify({k: config_manager.get(cfg, default)
                         for k, (cfg, default) in _SLSKD_KEYS.items()})
 
     @bp.route("/downloads/slskd", methods=["POST"])
     def video_slskd_config_save():
-        from config.settings import config_manager
+        from core.settings import config_manager
         body = request.get_json(silent=True) or {}
         for k, (cfg, _default) in _SLSKD_KEYS.items():
             if k in body:

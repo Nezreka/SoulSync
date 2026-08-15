@@ -61,7 +61,7 @@ def _coerce_hours(v: Any) -> int:
 def _load_cfg() -> Dict[str, Any]:
     """Read + normalize the seeding goals. A malformed stored value defaults to
     OFF (0) rather than crashing the sweep — the goals are opt-in either way."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     return {
         "seed_ratio_goal": _coerce_ratio(config_manager.get("torrent_client.seed_ratio_goal", 0)),
         "seed_time_goal_hours": _coerce_hours(config_manager.get("torrent_client.seed_time_goal_hours", 0)),

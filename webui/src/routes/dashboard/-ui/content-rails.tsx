@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { thumb } from '@/platform/artwork-thumb';
 
 import {
   fetchFreshReleases,
@@ -61,7 +62,7 @@ function RailCard({ owned, cover, fallbackCover, name, sub, caption, badge, titl
   return (
     <div className="ya-card dash-rail-card" title={titleAttr ?? `${name} — ${sub}`} onClick={onOpen}>
       <div className="ya-card-img">
-        {src && <img key={src} src={src} alt="" loading="lazy" onError={() => setRung(rung + 1)} />}
+        {src && <img key={src} src={thumb(src, 'grid')} alt="" loading="lazy" onError={() => setRung(rung + 1)} />}
         <div className="ya-card-placeholder" style={src ? { display: 'none' } : undefined}>
           ♫
         </div>

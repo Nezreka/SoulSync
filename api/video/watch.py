@@ -96,6 +96,12 @@ def register_routes(bp):
             return jsonify({"error": "items must be a list"}), 400
         db = get_video_db()
         owned = {}
+        # Art is personal for the same reason ownership is. The bus only carries
+        # a poster when it is a TMDB CDN URL — a library row's artwork path can
+        # be a tokened Plex/Jellyfin URL and must never be broadcast into a
+        # public Soulseek room — so an OWNED title almost never has one and the
+        # card fell back to a 🎬 placeholder. Each client resolves its own.
+        art = {}
         for it in items[:_MAX_ITEMS]:
             if not isinstance(it, dict):
                 continue
@@ -123,7 +129,148 @@ def register_routes(bp):
             else:
                 continue
             owned[key] = bool(hit)
-        return jsonify({"owned": owned})
+            # The local poster proxy for whichever library row backs this key.
+            # Movies key off the movie row; an episode shows its SHOW's poster,
+            # which is what the ballot wants anyway.
+            try:
+                lib_id = db.owned_library_id("movie" if kd == "m" else "show", tmdb_id)
+                if lib_id:
+                    art[key] = "/api/video/poster/%s/%s?w=185" % (
+                        "movie" if kd == "m" else "show", lib_id)
+            except Exception:   # noqa: BLE001 - art is decoration, never a 500
+                logger.debug("watch art lookup failed for %s", key, exc_info=True)
+        return jsonify({"owned": owned, "art": art})
+
+    def _party_file(args):
+        """Resolve a party item to a real local file, or (None, error, status).
+
+        The client names a TITLE (kind + tmdb id + SxE), never a path — the path
+        comes from the library row and is then re-rooted through the video path
+        resolver. That is what keeps this endpoint from being an arbitrary file
+        reader: there is no request shape that can point it at something the
+        scanner didn't record."""
+        from . import get_video_db
+        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
+        kd = args.get("kd")
+        try:
+            tmdb_id = int(args.get("id"))
+        except (TypeError, ValueError):
+            return None, "id required", 400
+        if tmdb_id <= 0 or kd not in ("m", "t"):
+            return None, "kd must be m|t with a tmdb id", 400
+        db = get_video_db()
+        if kd == "m":
+            hit = db.video_stored_file_path("movie", tmdb_id=tmdb_id)
+        else:
+            try:
+                season, episode = int(args.get("s")), int(args.get("e"))
+            except (TypeError, ValueError):
+                return None, "season and episode required for a show", 400
+            hit = db.video_stored_file_path("episode", tmdb_id=tmdb_id,
+                                            season=season, episode=episode)
+        if not hit:
+            return None, "You don't have a file for this", 404
+        local = resolve_video_file_path(hit.get("path"), video_base_dirs(db),
+                                        size_bytes=hit.get("size_bytes"))
+        if local:
+            return {"path": local, "row": hit}, None, 200
+        # No local file — but SoulSync doesn't need one. The media server knows
+        # exactly where every file lives (it reported the path in the first
+        # place) and we already hold its URL, token and this item's server_id.
+        # Asking IT for the bytes sidesteps the mount question entirely, which
+        # matters a lot: a library spread across a dozen mount roots is mostly
+        # invisible to a SoulSync that only knows one share.
+        from core.video.media_stream import server_stream_target
+        # Hand over the file we actually JUDGED — an item with several versions
+        # must not be judged on one and streamed from another.
+        remote = server_stream_target(db, "movie" if kd == "m" else "episode",
+                                      tmdb_id=tmdb_id,
+                                      season=args.get("s"), episode=args.get("e"),
+                                      want_size=hit.get("size_bytes"),
+                                      want_path=hit.get("path"))
+        if remote and remote.get("url"):
+            return {"remote": remote["url"], "server": remote["server"], "row": hit}, None, 200
+        # Say WHICH failure. Collapsing "not configured", "stale id" and "wrong
+        # server kind" into one sentence sent Boulder hunting the wrong thing.
+        why = (remote or {}).get("error") or "your media server had no file for it"
+        return None, "This server can't reach the file, and %s" % why, 404
+
+    @bp.route("/watch/playable", methods=["GET"])
+    def video_watch_playable():
+        """Whether THIS box can stream the party's pick to a browser, and if not
+        why — asked before playback so the room gets an honest answer instead of
+        a video element that fails silently or plays a silent picture."""
+        from . import get_video_db
+        from core.video.direct_play import direct_play_verdict
+        found, err, status = _party_file(request.args)
+        if err:
+            return jsonify({"playable": False, "verdict": "no", "reasons": [err]}), status
+        db = get_video_db()
+        # Judge the STORED path, not the resolved one: it is the row the codecs
+        # are keyed by, it carries the same extension, and it is the only one
+        # that exists when the bytes are coming from the media server rather
+        # than a local file.
+        stored = (found.get("row") or {}).get("path")
+        codecs = {}
+        try:
+            codecs = db.video_file_codecs(stored) or {}
+        except Exception:   # noqa: BLE001 - a codec lookup must never block playback
+            logger.debug("codec lookup failed for the watch party", exc_info=True)
+        v = direct_play_verdict(stored, codecs.get("video_codec"), codecs.get("audio_codec"))
+        return jsonify({"playable": v["verdict"] != "no", "via": found.get("server") or "local", **v})
+
+    @bp.route("/watch/stream", methods=["GET"])
+    def video_watch_stream():
+        """Byte-serve the party's file to a ``<video>`` element.
+
+        ``conditional=True`` is what makes this a video source rather than a
+        download: Werkzeug answers Range requests with 206 partial content, so
+        the browser can seek — and seeking is not a nicety here, it is how a
+        latecomer joins a showing already in progress."""
+        from flask import Response, send_file, stream_with_context
+        from core.video.direct_play import mime_for
+        found, err, status = _party_file(request.args)
+        if err:
+            return jsonify({"error": err}), status
+
+        if found.get("path"):
+            try:
+                return send_file(found["path"], mimetype=mime_for(found["path"]),
+                                 conditional=True, as_attachment=False)
+            except OSError:
+                logger.exception("watch stream failed to open %s", found["path"])
+                return jsonify({"error": "That file could not be opened for playback"}), 404
+
+        # Proxied from the media server. The browser must NEVER see the upstream
+        # URL — it carries the server's token — so SoulSync relays the bytes and
+        # passes the Range header both ways, keeping the stream seekable.
+        import requests
+        head = {}
+        if request.headers.get("Range"):
+            head["Range"] = request.headers["Range"]
+        try:
+            up = requests.get(found["remote"], headers=head, stream=True, timeout=(10, 60))
+        except requests.RequestException:
+            logger.exception("watch stream: %s did not answer", found.get("server"))
+            return jsonify({"error": "Your %s server didn't answer" % (found.get("server") or "media")}), 502
+        if up.status_code >= 400:
+            up.close()
+            return jsonify({"error": "Your %s server refused the stream (HTTP %d)"
+                            % (found.get("server") or "media", up.status_code)}), 502
+        passthru = {k: v for k, v in up.headers.items()
+                    if k.lower() in ("content-type", "content-length", "content-range",
+                                     "accept-ranges", "last-modified")}
+        passthru.setdefault("Accept-Ranges", "bytes")
+
+        def _relay():
+            try:
+                for chunk in up.iter_content(chunk_size=256 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                up.close()
+
+        return Response(stream_with_context(_relay()), status=up.status_code, headers=passthru)
 
     @bp.route("/watch/grab", methods=["POST"])
     def video_watch_grab():

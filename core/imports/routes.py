@@ -52,7 +52,7 @@ def _is_active_media_server_ready() -> tuple[bool, str]:
 
 
 def _get_allowed_import_roots() -> list[str]:
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.imports.paths import docker_resolve_path
 
     return [

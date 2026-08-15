@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   applyArtRequest,
+  releaseArtRequest,
   artistArtAppliedMessage,
   blacklistSourceRequest,
   deleteLibraryAlbumRequest,
@@ -159,6 +160,22 @@ describe('art pickers', () => {
     expect(JSON.parse(String(spy.mock.calls[0][1]?.body))).toEqual({
       url: 'https://img',
     });
+  });
+
+  it('release DELETEs the same endpoint, with no body', async () => {
+    // Applying LOCKS the pick so a library sync cannot overwrite it
+    // (TheHomeGuy). The picker can offer zero alternatives to switch to, so
+    // DELETE is the only way back to the media server's own art.
+    const spy = stubFetch({ success: true, art_locked: false });
+
+    await releaseArtRequest({ kind: 'album', id: 5 });
+    expect(String(spy.mock.calls[0][0])).toBe('/api/album/5/art');
+    expect(spy.mock.calls[0][1]?.method).toBe('DELETE');
+    expect(spy.mock.calls[0][1]?.body).toBeUndefined();
+
+    await releaseArtRequest({ kind: 'artist', id: 9 });
+    expect(String(spy.mock.calls[1][0])).toBe('/api/artist/9/art');
+    expect(spy.mock.calls[1][1]?.method).toBe('DELETE');
   });
 
   it('the artist apply toast lists exactly what else was updated', () => {

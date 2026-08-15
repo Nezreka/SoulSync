@@ -246,3 +246,52 @@ def test_claim_ignores_non_youtube_and_terminal(db):
                            "title": "Movie", "status": "queued"})
     assert db.claim_next_youtube_queued() is None             # soulseek queue isn't ours
     assert db.count_active_youtube_downloads() == 0
+
+
+# ── the stale-yt-dlp warning ──────────────────────────────────────────────────
+# Five HTTP 403s across five different channels in two days is not five unrelated
+# problems — it is YouTube's bot-detection having moved on while yt-dlp stayed
+# still, and the fix is a package update only the user can run. Said once here,
+# because otherwise each of those videos quietly spends its three attempts and is
+# skipped forever for an entirely fixable reason.
+
+_403 = ("\x1b[0;31mERROR:\x1b[0m unable to download video data: "
+        "HTTP Error 403: Forbidden")
+
+
+def _drain(recent, deps=None):
+    deps = deps or _Deps()
+    auto_video_process_youtube_wishlist(
+        {"_automation_id": "x", "max_concurrent": 1}, deps,
+        youtube_root=lambda: "/yt", fetch_wanted=lambda: [], active_ids=lambda: [],
+        running_count=lambda: 0, enqueue=lambda v, r: 1, start_next=lambda: None,
+        reap=lambda: 0, failed_counts=lambda: {}, recent_errors=lambda: recent)
+    return deps
+
+
+def test_a_cluster_of_refusals_names_yt_dlp_and_the_command():
+    deps = _drain([_403, _403, _403, _403])
+    warns = [p for p in deps.progress if p.get("log_type") == "warning"]
+    assert warns, "a cluster of 403s must be surfaced, not left as four mystery rows"
+    assert "pip install -U yt-dlp" in warns[0]["log_line"]
+    assert "4" in warns[0]["log_line"], "say how many, so it reads as a pattern"
+
+
+def test_unrelated_failures_do_not_trigger_it():
+    """Members-only and premieres are not yt-dlp's fault. Crying wolf here would
+    train the warning to be ignored when it is real."""
+    deps = _drain(["This video is available to this channel's members on level: X",
+                   "Premieres in 3 days", "Connection reset by peer"])
+    assert not [p for p in deps.progress if p.get("log_type") == "warning"]
+
+
+def test_the_drain_still_runs_when_the_diagnostic_explodes():
+    def boom():
+        raise RuntimeError("history table is having a moment")
+    deps = _Deps()
+    res = auto_video_process_youtube_wishlist(
+        {"_automation_id": "x", "max_concurrent": 1}, deps,
+        youtube_root=lambda: "/yt", fetch_wanted=lambda: [_v("a")], active_ids=lambda: [],
+        running_count=lambda: 0, enqueue=lambda v, r: 1, start_next=lambda: None,
+        reap=lambda: 0, failed_counts=lambda: {}, recent_errors=boom)
+    assert res["status"] == "completed" and res["queued"] == 1

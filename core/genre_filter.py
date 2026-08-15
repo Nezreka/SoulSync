@@ -4,6 +4,8 @@ When strict mode is enabled, only genres on the whitelist pass through
 during enrichment. When disabled (default), all genres pass unchanged.
 """
 
+import re
+import unicodedata
 from utils.logging_config import get_logger
 
 logger = get_logger("genre_filter")
@@ -95,8 +97,10 @@ DEFAULT_GENRES = [
     "Lounge", "Psychedelic", "Progressive",
 ]
 
-# Normalized lookup set — built once, used for O(1) matching
-_DEFAULT_LOOKUP = {g.lower() for g in DEFAULT_GENRES}
+_GENRE_ALIASES = {
+    'hiphop': 'hip hop', 'hip hop': 'hip hop', 'rnb': 'r and b',
+    'r b': 'r and b', 'r and b': 'r and b', 'rhythm and blues': 'r and b',
+}
 
 
 def _normalize_for_match(genre: str) -> str:
@@ -104,10 +108,20 @@ def _normalize_for_match(genre: str) -> str:
 
     Handles common variations: 'R&B' vs 'RnB', 'Hip-Hop' vs 'Hip Hop'.
     """
-    g = genre.lower().strip()
-    g = g.replace('-', ' ').replace('&', ' and ')
-    # Collapse multiple spaces
-    return ' '.join(g.split())
+    if genre is None:
+        return ''
+    g = unicodedata.normalize('NFKC', str(genre)).lower().strip()
+    g = g.replace('\u2010', '-').replace('\u2011', '-').replace('\u2012', '-')
+    g = g.replace('\u2013', '-').replace('\u2014', '-').replace('\u2212', '-')
+    g = g.replace('&', ' and ')
+    g = re.sub(r'[-_/.,;:|]+', ' ', g)
+    g = re.sub(r"[’'\"`()\[\]{}!?]+", '', g)
+    g = ' '.join(g.split())
+    return _GENRE_ALIASES.get(g, g)
+
+
+# Normalized lookup set — built once, used for O(1) matching
+_DEFAULT_LOOKUP = {_normalize_for_match(g) for g in DEFAULT_GENRES}
 
 
 def _build_lookup(genre_list):

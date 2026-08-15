@@ -182,22 +182,30 @@ This ensures:
 
 ## 🛠️ Troubleshooting
 
-### ❌ ModuleNotFoundError: No module named 'config.settings' or 'database'
+### ❌ ModuleNotFoundError: No module named 'database'
 
-**Problem**: Most common error - mounting over Python modules
+**Problem**: Mounting a host folder over a Python package inside the image.
+
+`/app/database` is a Python package (`music_database.py` and friends), so mounting
+your storage there hides the code. Persistence lives at `/app/data` instead.
 
 **Wrong**:
 ```yaml
-- "/mnt/cache/appdata/soulsync:/app/config"         # ❌ Overwrites Python config module
-- "/mnt/cache/appdata/soulsync/config:/app/config"  # ❌ Still overwrites Python config module
 - "/mnt/cache/appdata/soulsync/database:/app/database"  # ❌ Overwrites Python database module
 ```
 
 **Correct**:
 ```yaml
-- "/mnt/cache/appdata/soulsync/config.json:/app/config/config.json"  # ✅ Mount only the config file
-- "/mnt/cache/appdata/soulsync/database:/app/data"  # ✅ Mount database to different path
+- "/mnt/cache/appdata/soulsync/config:/app/config"  # ✅ Settings — no Python code lives here
+- "/mnt/cache/appdata/soulsync/database:/app/data"  # ✅ Mount database to /app/data
 ```
+
+> **Note:** mounting `/app/config` used to break the app too, because
+> `config/settings.py` lived there and a user's stale copy would mask the image's.
+> That module now lives in `core/settings.py`, outside every mount, so mounting the
+> whole config directory is the supported setup (it is what `docker-compose.yml`
+> does). If you are upgrading, an old `settings.py` left in your config folder is
+> removed automatically at startup.
 
 **Why this happens**: Both `/app/config` and `/app/database` directories contain Python module files needed for the app to run. Mounting anything to these paths overwrites the modules. Mount config file specifically and database to `/app/data`.
 

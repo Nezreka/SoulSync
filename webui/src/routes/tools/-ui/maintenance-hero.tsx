@@ -281,6 +281,13 @@ export function MaintenanceHero() {
     for (const [jobId, frame] of Object.entries(progress)) {
       const done = frame.status === 'finished' || frame.status === 'error';
       if (done && !timers[jobId]) {
+        // Recent Runs used to sit stale until you reloaded the page or hit its
+        // refresh button — you ran a job, watched it finish, and the history
+        // below still showed the run before it (#1144). The worker writes the
+        // run row (_record_job_finish) BEFORE it announces completion, so the
+        // row is already there to fetch. This branch is the single-shot edge:
+        // the timer is set in the same tick, so a completion refreshes once.
+        void loadHistory();
         timers[jobId] = setTimeout(() => {
           delete timers[jobId];
           setProgress((previous) => {
@@ -295,7 +302,7 @@ export function MaintenanceHero() {
         delete timers[jobId];
       }
     }
-  }, [loadJobs, progress]);
+  }, [loadHistory, loadJobs, progress]);
 
   useEffect(() => {
     const timers = hideTimers.current;

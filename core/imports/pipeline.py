@@ -9,7 +9,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.file_ops import (
     cleanup_empty_directories,
     cleanup_slskd_dedup_siblings,

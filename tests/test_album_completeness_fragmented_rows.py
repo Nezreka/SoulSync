@@ -32,14 +32,14 @@ if "spotipy" not in sys.modules:
     sys.modules["spotipy"] = spotipy
     sys.modules["spotipy.oauth2"] = oauth2
 
-if "config.settings" not in sys.modules:
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
+    sys.modules["core.settings"] = settings_mod
 
 from core.repair_jobs.album_completeness import AlbumCompletenessJob
 import core.repair_jobs.album_completeness as album_completeness_module

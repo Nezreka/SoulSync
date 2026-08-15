@@ -26,10 +26,10 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# Stub config.settings so importing core.reorganize_runner -> core.library_reorganize doesn't blow up
-if "config.settings" not in sys.modules:
+# Stub core.settings so importing core.reorganize_runner -> core.library_reorganize doesn't blow up
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     class _DummyConfigManager:
         def get(self, key, default=None):
@@ -41,7 +41,7 @@ if "config.settings" not in sys.modules:
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
+    sys.modules["core.settings"] = settings_mod
 
 if "spotipy" not in sys.modules:
     spotipy = types.ModuleType("spotipy")
@@ -290,3 +290,169 @@ def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
     item = _make_item()
     item.rename_only = True
     assert runner(item)['status'] == 'setup_failed'
+
+
+# ── findings follow the file (#1143) ─────────────────────────────────────────
+#
+# A maintenance finding stores its OWN snapshot of the path. Reorganize updated
+# `tracks.file_path` and left the findings naming the old location, so their
+# fixes could never succeed — and because a failed fix keeps a finding pending,
+# they were retried on every later run until cleared by hand.
+
+import json as _json          # noqa: E402
+import sqlite3                # noqa: E402
+
+
+class _RepointDb:
+    """A real SQLite DB behind the same `_get_connection()` the runner uses."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def _get_connection(self):
+        return self._conn
+
+
+class _KeepOpen(sqlite3.Connection):
+    def close(self):  # noqa: A003 - tests inspect the DB afterwards
+        pass
+
+
+@pytest.fixture()
+def repoint(monkeypatch, tmp_path):
+    """Returns (update_track_path_fn, conn) — the REAL production closure."""
+    conn = sqlite3.connect(":memory:", factory=_KeepOpen)
+    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT, "
+                 "updated_at TIMESTAMP)")
+    conn.execute("CREATE TABLE repair_findings (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "file_path TEXT, status TEXT DEFAULT 'pending', "
+                 "details_json TEXT DEFAULT '{}', updated_at TIMESTAMP)")
+    conn.commit()
+
+    captured = {}
+
+    def fake_reorganize_album(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': 's', 'total': 0,
+                'moved': 0, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    runner = _build(
+        monkeypatch,
+        download_path_fn=lambda: str(tmp_path),
+        transfer_path_fn=lambda: str(tmp_path / 'transfer'),
+        reorganize_album_fn=fake_reorganize_album,
+        get_database=lambda: _RepointDb(conn),
+    )
+    runner(_make_item())
+    return captured['update_track_path_fn'], conn
+
+
+OLD = '/music/Old Artist/Album/01.flac'
+NEW = '/music/New Artist/Album/01 - Track.flac'
+
+
+def _add_track(conn, path=OLD, track_id='t1'):
+    conn.execute("INSERT INTO tracks (id, file_path) VALUES (?, ?)", (track_id, path))
+    conn.commit()
+
+
+def _add_finding(conn, *, path=OLD, status='pending', details=None):
+    cur = conn.execute(
+        "INSERT INTO repair_findings (file_path, status, details_json) VALUES (?, ?, ?)",
+        (path, status, _json.dumps(details) if details is not None else '{}'))
+    conn.commit()
+    return cur.lastrowid
+
+
+def _finding(conn, fid):
+    return conn.execute(
+        "SELECT file_path, details_json FROM repair_findings WHERE id = ?",
+        (fid,)).fetchone()
+
+
+def test_a_pending_finding_follows_the_file(repoint):
+    update_path, conn = repoint
+    _add_track(conn)
+    fid = _add_finding(conn)
+
+    update_path('t1', NEW)
+
+    assert _finding(conn, fid)[0] == NEW, 'the finding still names the old path'
+
+
+def test_the_details_path_moves_too(repoint):
+    """Several fix handlers read details['file_path'] in PREFERENCE to the
+    column, so updating only the column would leave the fix using the stale
+    path while the UI displayed the new one."""
+    update_path, conn = repoint
+    _add_track(conn)
+    fid = _add_finding(conn, details={'file_path': OLD, 'track_title': 'Song'})
+
+    update_path('t1', NEW)
+
+    path, details_json = _finding(conn, fid)
+    details = _json.loads(details_json)
+    assert path == NEW
+    assert details['file_path'] == NEW, 'the fix would still use the old path'
+    assert details['track_title'] == 'Song', 'unrelated detail keys were lost'
+
+
+def test_the_track_row_is_still_updated(repoint):
+    update_path, conn = repoint
+    _add_track(conn)
+
+    update_path('t1', NEW)
+
+    assert conn.execute(
+        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+
+
+def test_findings_on_other_files_are_untouched(repoint):
+    update_path, conn = repoint
+    _add_track(conn)
+    other = _add_finding(conn, path='/music/Someone Else/x.flac')
+
+    update_path('t1', NEW)
+
+    assert _finding(conn, other)[0] == '/music/Someone Else/x.flac'
+
+
+def test_a_resolved_finding_keeps_its_historical_path(repoint):
+    """Resolved rows are a record of work that happened at a location. Only
+    pending rows will be acted on again, so only those need re-pointing."""
+    update_path, conn = repoint
+    _add_track(conn)
+    done = _add_finding(conn, status='resolved')
+
+    update_path('t1', NEW)
+
+    assert _finding(conn, done)[0] == OLD
+
+
+def test_unparseable_details_still_get_the_column_fixed(repoint):
+    """A finding with corrupt details_json must not lose its re-point — the
+    column is what the list view and the missing-file check read."""
+    update_path, conn = repoint
+    _add_track(conn)
+    conn.execute("INSERT INTO repair_findings (file_path, details_json) VALUES (?, ?)",
+                 (OLD, 'not json at all'))
+    conn.commit()
+    fid = conn.execute("SELECT MAX(id) FROM repair_findings").fetchone()[0]
+
+    update_path('t1', NEW)
+
+    assert _finding(conn, fid)[0] == NEW
+
+
+def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
+    """Best-effort by design: the track path update is the important write and
+    must survive a database without the maintenance tables."""
+    update_path, conn = repoint
+    _add_track(conn)
+    conn.execute("DROP TABLE repair_findings")
+    conn.commit()
+
+    update_path('t1', NEW)   # must not raise
+
+    assert conn.execute(
+        "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW

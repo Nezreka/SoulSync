@@ -229,7 +229,11 @@ export interface WatchlistArtistConfigUpdate {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
-  auto_download: boolean;
+  /** The three-state preference: null = follow the global. Sent INSTEAD of the
+   *  legacy `auto_download` boolean — the server reads that one as a deliberate
+   *  choice, so posting it on every save would pin every artist the user ever
+   *  opened out of the global default. */
+  auto_download_pref: number | null;
   quality_profile_id: number | null;
   lookback_days: number | null;
   preferred_metadata_source: string | null;

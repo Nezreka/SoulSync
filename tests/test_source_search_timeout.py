@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from config.settings import ConfigManager
+from core.settings import ConfigManager
 
 _ROOT = Path(__file__).resolve().parent.parent
 

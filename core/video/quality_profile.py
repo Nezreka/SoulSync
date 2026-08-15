@@ -31,18 +31,29 @@ from typing import Any
 
 # The quality ladder, ordered best→worst. ``key`` = ``<source>-<resolution>`` (plus
 # the two resolution-less SD tiers). This is the default ranking the UI renders.
+#
+# The ladder MUST cover everything ``quality_eval.tier_key`` can name, or those
+# releases are unreachable — no toggle can accept them. That was a real hole:
+# WEBRip existed only at 1080p, so every 720p WEBRip (one of the commonest TV
+# release shapes) was rejected as "isn't in your enabled tiers" no matter how the
+# profile was configured. ``test_quality_tier_keyspace`` now pins the two sets
+# together, so adding a source or a resolution to the parser fails loudly here.
 TIERS = (
-    "remux-2160p", "bluray-2160p", "web-2160p",
+    "remux-2160p", "bluray-2160p", "web-2160p", "webrip-2160p", "hdtv-2160p",
     "remux-1080p", "bluray-1080p", "web-1080p", "webrip-1080p", "hdtv-1080p",
-    "bluray-720p", "web-720p", "hdtv-720p",
+    "bluray-720p", "web-720p", "webrip-720p", "hdtv-720p",
     "dvd", "sdtv",
 )
 
 # Default-enabled tiers: solid 1080p + 720p coverage. 4K tiers off (size) and the
 # SD tiers (dvd/sdtv) off — users opt into those deliberately.
+#
+# ``webrip-720p`` is ON by default like its 1080p sibling: it is a mainstream TV
+# quality, and it only became togglable when the ladder gained it, so leaving it
+# off would silently preserve the bug it was added to fix.
 _DEFAULT_ON = frozenset({
     "remux-1080p", "bluray-1080p", "web-1080p", "webrip-1080p", "hdtv-1080p",
-    "bluray-720p", "web-720p", "hdtv-720p",
+    "bluray-720p", "web-720p", "webrip-720p", "hdtv-720p",
 })
 
 # Hard rejects (never grabbed). x264 is offered but OFF by default (rejecting it
@@ -53,6 +64,7 @@ CODECS = ("any", "hevc", "av1")              # SOFT codec preference (tie-breake
 HDR_MODES = ("off", "prefer", "require")     # require = HDR-only (a real filter)
 AUDIO_MODES = ("any", "surround", "lossless", "atmos")
 MAX_SIZE_CAP_GB = 200                        # slider ceiling; 0 means "no limit"
+MAX_MIN_SEEDERS = 100                        # slider ceiling; 0 means "no floor"
 
 # The cutoff is a LOOSE resolution target (Radarr-style "upgrade until"): once the
 # library holds an item at this resolution or better, stop chasing upgrades. ""
@@ -79,6 +91,13 @@ def default_profile() -> dict:
         "max_episode_gb": 0,
         "format_scores": {},    # custom-format score overrides (P3): {format_id: score}
         "min_format_score": 0,  # hard floor on the summed format score (0 = off)
+        # Torrent health floor, the *arr apps' "minimum seeders". A swarm with no
+        # seeders cannot finish: the client parks on 'downloading metadata' or
+        # stalls at 0% forever. Grabbing them anyway is how a client fills up with
+        # dead torrents while the wishlist row reports a fruitless search. Applies
+        # ONLY where a seeder count exists (torrents) — usenet and Soulseek have no
+        # such thing and are never gated. 0 = no floor.
+        "min_seeders": 1,
     }
 
 
@@ -157,6 +176,10 @@ def normalize(raw: Any) -> dict:
                 continue
         d["format_scores"] = clean
     d["min_format_score"] = max(-1000, min(1000, _coerce_int(raw.get("min_format_score"), 0)))
+    # Absent from a stored profile → the default floor of 1, so installs written
+    # before the gate existed gain it on the next read rather than keeping the
+    # old grab-anything behaviour. An explicit 0 is honoured as "no floor".
+    d["min_seeders"] = min(MAX_MIN_SEEDERS, max(0, _coerce_int(raw.get("min_seeders"), d["min_seeders"])))
     return d
 
 
@@ -260,7 +283,7 @@ def load_for_item(db, item: Any) -> dict:
 
 __all__ = [
     "TIERS", "REJECTS", "CODECS", "HDR_MODES", "AUDIO_MODES", "RESOLUTIONS",
-    "MAX_SIZE_CAP_GB", "DEFAULT_PROFILE_ID", "default_profile", "normalize",
+    "MAX_SIZE_CAP_GB", "MAX_MIN_SEEDERS", "DEFAULT_PROFILE_ID", "default_profile", "normalize",
     "normalize_tiers", "load", "save", "list_profiles", "profile_by_id",
     "save_named", "delete_named", "load_for_item",
 ]

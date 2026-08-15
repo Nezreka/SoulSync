@@ -87,7 +87,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
     def __init__(self, download_path: str = None):
-        from config.settings import config_manager
+        from core.settings import config_manager
         self._config = config_manager
 
         if download_path is None:

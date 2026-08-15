@@ -55,7 +55,7 @@ def is_configured() -> bool:
 
 def _indexer_ids() -> List[int]:
     """The optional Prowlarr indexer allowlist (shared ``prowlarr.indexer_ids``)."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     raw = str(config_manager.get("prowlarr.indexer_ids", "") or "").strip()
     return [int(p) for p in (x.strip() for x in raw.split(",")) if p.isdigit()]
 

@@ -250,11 +250,43 @@ describe('findings', () => {
 
   it('omits absent scope from a clear', async () => {
     jsonOnce({ success: true, deleted: 5 });
-    await clearFindings();
+    await clearFindings({});
     expect(lastCall().body).toEqual({});
     jsonOnce({ success: true, deleted: 5 });
-    await clearFindings('discography_backfill', 'pending');
+    await clearFindings({ jobId: 'discography_backfill', status: 'pending' });
     expect(lastCall().body).toEqual({ job_id: 'discography_backfill', status: 'pending' });
+  });
+
+  /**
+   * Clear DELETES rows, and it used to send only job_id and status while the
+   * list filtered on five things — so a narrowed view cleared far more than it
+   * showed (#1142). Every filter the list understands has to reach the wire.
+   */
+  it('sends every filter the list can apply', async () => {
+    jsonOnce({ success: true, deleted: 2 });
+    await clearFindings({
+      jobId: 'lyrics_filler',
+      status: 'pending',
+      severity: 'error',
+      findingType: 'missing_lyrics',
+      q: 'Kid A',
+    });
+    expect(lastCall().body).toEqual({
+      job_id: 'lyrics_filler',
+      status: 'pending',
+      severity: 'error',
+      finding_type: 'missing_lyrics',
+      q: 'Kid A',
+    });
+  });
+
+  it('trims the search term and drops it when it is only whitespace', async () => {
+    jsonOnce({ success: true, deleted: 1 });
+    await clearFindings({ q: '  Kid A  ' });
+    expect(lastCall().body).toEqual({ q: 'Kid A' });
+    jsonOnce({ success: true, deleted: 1 });
+    await clearFindings({ q: '   ' });
+    expect(lastCall().body).toEqual({});
   });
 });
 

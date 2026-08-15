@@ -128,7 +128,7 @@ def test_migration_gives_auto_import_its_own_relaxed_profile_when_filter_was_off
         def set(self, key, value):
             set_calls[key] = value
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     conn = db._get_connection()
     try:
@@ -177,7 +177,7 @@ def test_migration_does_not_overwrite_existing_auto_import_override(db, monkeypa
         def set(self, key, value):
             set_calls[key] = value
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     conn = db._get_connection()
     try:
@@ -215,7 +215,7 @@ def test_migration_not_marked_done_when_relaxed_profile_creation_fails(db, monke
         def set(self, key, value):
             raise AssertionError("config_manager.set must not be called when migration fails")
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated insert failure")
@@ -395,7 +395,7 @@ def test_migration_resolves_acoustid_required_from_config(db, monkeypatch):
         def get(self, key, default=None):
             return {"acoustid.enabled": True, "acoustid.require_verified": True}.get(key, default)
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     conn = db._get_connection()
     try:
@@ -431,7 +431,7 @@ def test_migration_captures_full_settings_bundle(db, monkeypatch):
                 "lossy_copy.delete_original": True,
             }.get(key, default)
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     conn = db._get_connection()
     try:
@@ -494,7 +494,7 @@ def test_migration_output_is_actually_consumed_end_to_end(db, monkeypatch, tmp_p
                 "post_processing.audio_completeness_check": True,
             }.get(key, default)
 
-    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+    monkeypatch.setattr("core.settings.config_manager", _FakeCfg(), raising=False)
 
     conn = db._get_connection()
     try:

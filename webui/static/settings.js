@@ -598,6 +598,12 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
+    if (tab === 'advanced' && typeof loadYtdlpStatus === 'function') {
+        try { loadYtdlpStatus(); } catch (e) { }
+    }
+    if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
+        try { loadImageCacheStatus(); } catch (e) { }
+    }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
@@ -4469,6 +4475,12 @@ async function saveSettings(quiet = false) {
             jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
             bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
         },
+        image_cache: {
+            // Server-side resizing is opt-in; the cache itself keeps whatever
+            // it was already set to (on, for every install since it shipped).
+            thumbnails: document.getElementById('imgcache-thumbnails')?.checked === true,
+            max_cache_mb: parseInt(document.getElementById('imgcache-max-mb')?.value, 10) || 0,
+        },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
             api_key: document.getElementById('hydrabase-api-key').value,
@@ -6590,5 +6602,193 @@ async function selectNavidromeMusicFolder() {
     } catch (error) {
         console.error('Error selecting Navidrome music folder:', error);
         showToast('Error selecting music folder. Please try again.', 'error', 'set-media');
+    }
+}
+
+
+// ============================================================
+// == YT-DLP UPDATER (Advanced tab, both sides)              ==
+// ============================================================
+// YouTube changes how it serves video far faster than yt-dlp cuts a stable
+// release, so a copy a few weeks old starts answering "403 Forbidden" on videos
+// that worked yesterday. Without an in-app update, those downloads quietly burn
+// their retry budget and get abandoned for an entirely fixable reason.
+
+async function loadYtdlpStatus() {
+    const chanEl = document.getElementById('ytdlp-channel');
+    const instEl = document.getElementById('ytdlp-installed');
+    const latEl = document.getElementById('ytdlp-latest');
+    const badge = document.getElementById('ytdlp-hint-badge');
+    if (!instEl || !latEl) return;
+    const channel = (chanEl && chanEl.value) || 'nightly';
+    instEl.textContent = 'Loading...';
+    latEl.textContent = 'Loading...';
+    try {
+        const resp = await fetch('/api/ytdlp/status?channel=' + encodeURIComponent(channel));
+        const d = await resp.json();
+        instEl.textContent = d.installed || 'Not installed';
+        // A PyPI outage must not read as "you are up to date" — say we could not
+        // look, which is a different fact from "nothing newer exists".
+        latEl.textContent = d.latest || (d.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown');
+        latEl.style.color = d.behind ? '#ffb300' : '';
+        if (badge) {
+            badge.hidden = !d.behind;
+            badge.style.color = '#ffb300';
+            badge.title = d.behind ? 'A newer yt-dlp is available' : '';
+        }
+    } catch (e) {
+        instEl.textContent = 'Unknown';
+        latEl.textContent = 'Unknown';
+        console.error('yt-dlp status failed:', e);
+    }
+}
+
+async function runYtdlpUpdate() {
+    const btn = document.getElementById('ytdlp-update-btn');
+    const status = document.getElementById('ytdlp-status');
+    const detail = document.getElementById('ytdlp-detail');
+    const chanEl = document.getElementById('ytdlp-channel');
+    const channel = (chanEl && chanEl.value) || 'nightly';
+    if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
+    if (detail) { detail.style.display = 'none'; detail.textContent = ''; }
+    if (status) {
+        status.style.display = 'block';
+        status.style.background = 'rgba(255,255,255,0.04)';
+        status.style.color = 'rgba(255,255,255,0.6)';
+        status.textContent = 'Installing the newest ' + channel + ' build — this can take a minute...';
+    }
+    try {
+        const resp = await fetch('/api/ytdlp/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: channel })
+        });
+        const d = await resp.json();
+        if (status) {
+            status.style.color = d.success ? (d.restart_required ? '#ffb300' : '#4caf50') : '#ff5252';
+            status.textContent = d.message || (d.success ? 'Done.' : 'Update failed.');
+        }
+        // pip's own words, kept available but out of the way — every failure mode
+        // here (read-only container, distro-managed Python, wrong user, dead
+        // network) needs a different action, and the output is what says which.
+        if (detail && d.detail) { detail.style.display = 'block'; detail.textContent = d.detail; }
+        // Guarded the way chat.js guards it: showToast is a global owned by
+        // downloads.js, and this tile renders on the video side too.
+        if (typeof showToast === 'function') {
+            if (d.success) {
+                showToast(d.restart_required
+                    ? 'yt-dlp updated — restart SoulSync to use it'
+                    : (d.message || 'Already up to date'),
+                    d.restart_required ? 'info' : 'success');
+            } else {
+                showToast('yt-dlp update failed — see Settings for details', 'error');
+            }
+        }
+        loadYtdlpStatus();
+    } catch (e) {
+        if (status) { status.style.color = '#ff5252'; status.textContent = 'Update request failed: ' + e; }
+        if (typeof showToast === 'function') showToast('yt-dlp update failed', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Update yt-dlp'; }
+    }
+}
+
+
+// == ARTWORK CACHE (Advanced tab, both sides)               ==
+// One cache serves album covers on the music side and posters on the video
+// side, so this panel is deliberately not marked video-only.
+
+function _imgCacheBytes(n) {
+    if (!n) return '0 MB';
+    const mb = n / (1024 * 1024);
+    return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
+}
+
+function _imgCacheStatus(message, tone) {
+    const el = document.getElementById('imgcache-status');
+    if (!el) return;
+    el.textContent = message;
+    el.style.display = 'block';
+    el.style.background = tone === 'error' ? 'rgba(255,80,80,.12)' : 'rgba(80,255,150,.10)';
+    el.style.color = tone === 'error' ? '#ff9a9a' : '#8ee7b0';
+}
+
+function onImageCacheSettingChanged() {
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+async function loadImageCacheStatus() {
+    try {
+        const resp = await fetch('/api/image-cache/status');
+        const data = await resp.json();
+        if (!data.success) return;
+        const entries = document.getElementById('imgcache-entries');
+        const size = document.getElementById('imgcache-size');
+        if (entries) entries.textContent = (data.entries || 0).toLocaleString();
+        if (size) {
+            size.textContent = data.max_bytes
+                ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`
+                : `${_imgCacheBytes(data.bytes)} (no limit)`;
+        }
+        // Reflect saved config without clobbering something the user is editing.
+        const maxEl = document.getElementById('imgcache-max-mb');
+        if (maxEl && document.activeElement !== maxEl) {
+            maxEl.value = Math.round((data.max_bytes || 0) / (1024 * 1024));
+        }
+        const thumbEl = document.getElementById('imgcache-thumbnails');
+        if (thumbEl) thumbEl.checked = data.thumbnails === true;
+    } catch (e) {
+        console.error('image cache status failed', e);
+    }
+}
+
+async function runImageCachePrune() {
+    const btn = document.getElementById('imgcache-prune-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Reclaiming...'; }
+    try {
+        const resp = await fetch('/api/image-cache/prune', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            const freed = (data.expired || 0) + (data.evicted || 0);
+            _imgCacheStatus(freed
+                ? `Removed ${freed} cached image${freed === 1 ? '' : 's'}.`
+                : 'Nothing to reclaim — the cache is already within its limits.', 'ok');
+            loadImageCacheStatus();
+        } else {
+            _imgCacheStatus(data.error || 'Could not reclaim space.', 'error');
+        }
+    } catch (e) {
+        _imgCacheStatus('Could not reclaim space: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Reclaim space now'; }
+    }
+}
+
+async function runImageCacheClear() {
+    const ok = await showConfirmDialog({
+        title: 'Clear the artwork cache?',
+        message: 'Every cached cover and poster is removed. Nothing is lost permanently — '
+               + 'images are downloaded again as pages need them, so the only cost is a '
+               + 'slower first load.',
+        confirmText: 'Clear cache',
+        cancelText: 'Cancel'
+    });
+    if (!ok) return;
+
+    const btn = document.getElementById('imgcache-clear-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Clearing...'; }
+    try {
+        const resp = await fetch('/api/image-cache/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            _imgCacheStatus(`Cleared ${data.removed || 0} cached image${data.removed === 1 ? '' : 's'}.`, 'ok');
+            loadImageCacheStatus();
+        } else {
+            _imgCacheStatus(data.error || 'Could not clear the cache.', 'error');
+        }
+    } catch (e) {
+        _imgCacheStatus('Could not clear the cache: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Clear cache'; }
     }
 }

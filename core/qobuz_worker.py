@@ -716,7 +716,7 @@ class QobuzWorker:
                 genre_name = genre.get('name', '') if isinstance(genre, dict) else str(genre) if genre else ''
                 if genre_name:
                     from core.genre_filter import filter_genres
-                    from config.settings import config_manager as _cfg
+                    from core.settings import config_manager as _cfg
                     _filtered = filter_genres([genre_name], _cfg)
                     if _filtered:
                         cursor.execute("""

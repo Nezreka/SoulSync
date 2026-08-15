@@ -52,6 +52,103 @@ def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str) 
     }
 
 
+def get_year_in_listening(database, image_url_fixer: ImageUrlFixer) -> dict:
+    """The Year in Listening story — cached by the worker, computed on miss.
+
+    The miss path is the one that matters: the worker rebuilds every 30
+    minutes, so a fresh install (or one restarted five minutes ago) has no
+    cache yet. Serving an empty year there would look exactly like "you have
+    not listened to anything", which is the wrong answer and unrecoverable
+    from the user's side. Computing it costs one pass over listening_history.
+    """
+    data = None
+    conn = database._get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_year'")
+        row = cursor.fetchone()
+        if row and row[0]:
+            data = json.loads(row[0])
+    except Exception as e:
+        logger.debug("year cache read failed, computing live: %s", e)
+    finally:
+        conn.close()
+
+    if not data:
+        data = database.get_year_in_listening()
+        # The cached copy was enriched by the worker; a live one has to earn
+        # its artwork here or the story renders name-only on exactly the
+        # installs that hit this path.
+        try:
+            from core.stats.enrich import enrich_stats_items
+            enrich_stats_items(database, data)
+        except Exception as e:
+            logger.debug("year enrichment failed, serving unenriched: %s", e)
+        data['cached'] = False
+    else:
+        data['cached'] = True
+
+    for item in ((data.get('top_artists') or []) + (data.get('top_albums') or [])
+                 + (data.get('top_tracks') or []) + (data.get('discoveries') or [])):
+        if item.get('image_url'):
+            item['image_url'] = image_url_fixer(item['image_url'])
+
+    return data
+
+
+def get_album_play_tracks(database, album_id, image_url_fixer: ImageUrlFixer) -> list[dict]:
+    """An owned album's tracks, shaped for ``window.playTrackList``.
+
+    Rows match what ``/api/library/radio`` returns because that is the shape
+    ``npMapRadioTrack`` (media-player.js) maps — anything else silently drops
+    out of the queue.
+
+    Tracks with no ``file_path`` are EXCLUDED here rather than filtered in the
+    player: a row the player would skip is not a track you own, and counting
+    it would make "play album" look like it lost songs. Ordered by track
+    number so the album plays as an album.
+    """
+    conn = None
+    try:
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT t.id, t.title, ar.name, al.title, t.file_path, t.bitrate,
+                   t.artist_id, t.album_id, al.thumb_url
+            FROM tracks t
+            JOIN albums al ON al.id = t.album_id
+            JOIN artists ar ON ar.id = t.artist_id
+            WHERE t.album_id = ?
+              AND t.file_path IS NOT NULL AND t.file_path != ''
+            ORDER BY COALESCE(t.track_number, 999999), t.title
+            """,
+            (album_id,),
+        )
+        rows = cursor.fetchall()
+    except Exception as e:
+        logger.error("Error loading album tracks for %s: %s", album_id, e)
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+    return [
+        {
+            'id': r[0],
+            'title': r[1],
+            'artist': r[2],
+            'album': r[3],
+            'file_path': r[4],
+            'bitrate': r[5],
+            'artist_id': r[6],
+            'album_id': r[7],
+            'image_url': image_url_fixer(r[8]) if r[8] else None,
+        }
+        for r in rows
+    ]
+
+
 def get_overview(database, time_range: str) -> dict:
     """Aggregate listening stats for a time range."""
     return database.get_listening_stats(time_range)

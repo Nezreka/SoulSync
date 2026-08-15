@@ -7,7 +7,7 @@ their original names without any modification.
 import logging
 import time
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.metadata.registry import (
     get_deezer_client,
     get_discogs_client,
@@ -105,7 +105,7 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
     try:
         dc = _get_discogs_client()
         # Only use Discogs if token is configured
-        from config.settings import config_manager as _cm
+        from core.settings import config_manager as _cm
         if _cm.get('discogs.token', ''):
             search_clients['discogs'] = dc
     except Exception as e:

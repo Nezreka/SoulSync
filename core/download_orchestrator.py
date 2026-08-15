@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple
 from pathlib import Path
 
 from utils.logging_config import get_logger
-from config.settings import config_manager
+from core.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus

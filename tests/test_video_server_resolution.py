@@ -4,7 +4,7 @@ mixed setup (Navidrome music + Plex video) works."""
 
 from __future__ import annotations
 
-import config.settings as cs
+import core.settings as cs
 import pytest
 
 from core.video.sources import (resolve_video_server, video_plex_config,

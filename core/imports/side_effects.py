@@ -7,7 +7,7 @@ import json
 import os
 from typing import Any, Dict
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,

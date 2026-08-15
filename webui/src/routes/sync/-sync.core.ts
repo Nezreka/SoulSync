@@ -360,3 +360,37 @@ export function formatDuration(durationMs: number | null | undefined): string {
   const seconds = Math.floor((durationMs % 60000) / 1000);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
+
+/**
+ * Run `fn` over `items`, at most `limit` in flight at once.
+ *
+ * Exists because the account tabs' per-playlist track crawl was sequential —
+ * one `await` per playlist, which is what made Tidal's refresh take 3-5 minutes
+ * for a large account (Specialmed, Discord Aug 11). Unbounded parallelism is
+ * not the answer either: it would fire one request per playlist at Tidal at
+ * once and earn a rate limit.
+ *
+ * Rejections are swallowed per item, deliberately: this drives a best-effort
+ * background crawl, and one dead playlist must not strand the rest. `limit` is
+ * clamped to at least 1 so a bad caller cannot deadlock the walk.
+ */
+export async function mapWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  const safeLimit = Math.max(1, Math.floor(limit) || 1);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(safeLimit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      try {
+        await fn(items[index], index);
+      } catch {
+        // Per-item failure is not the walk's problem.
+      }
+    }
+  });
+  await Promise.all(workers);
+}

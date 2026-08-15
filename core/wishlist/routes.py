@@ -620,7 +620,7 @@ def add_album_track_to_wishlist(
         # scan + cleanup use: OFF → skip owned, ON → add anyway. (The quality
         # re-download flow uses a different endpoint, so it's unaffected.)
         try:
-            from config.settings import config_manager as _cfg
+            from core.settings import config_manager as _cfg
             if not _cfg.get('wishlist.allow_duplicate_tracks', True):
                 _db = runtime.get_music_database()
                 _existing, _conf = _db.check_track_exists(

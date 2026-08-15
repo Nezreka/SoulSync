@@ -15,14 +15,14 @@ if 'spotipy' not in sys.modules:
     sp = types.ModuleType('spotipy'); oa = types.ModuleType('spotipy.oauth2')
     sp.Spotify = type('S', (), {}); oa.SpotifyOAuth = oa.SpotifyClientCredentials = type('O', (), {})
     sp.oauth2 = oa; sys.modules['spotipy'] = sp; sys.modules['spotipy.oauth2'] = oa
-if 'config.settings' not in sys.modules:
-    cm = types.ModuleType('config'); sm = types.ModuleType('config.settings')
+if 'core.settings' not in sys.modules:
+    cm = types.ModuleType('config'); sm = types.ModuleType('core.settings')
 
     class _Cfg:
         def get(self, k, d=None): return d
         def get_active_media_server(self): return 'plex'
     sm.config_manager = _Cfg(); cm.settings = sm
-    sys.modules['config'] = cm; sys.modules['config.settings'] = sm
+    sys.modules['config'] = cm; sys.modules['core.settings'] = sm
 
 from core.repair_jobs import library_retag as lr
 

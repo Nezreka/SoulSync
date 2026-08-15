@@ -467,7 +467,7 @@ class AutomationEngine:
         # let users override without touching env vars; falls back to
         # the system-detected local tz.
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             self._default_tz = (config_manager.get('automation.default_timezone', '') or _SYSTEM_DEFAULT_TZ)
         except Exception:
             self._default_tz = _SYSTEM_DEFAULT_TZ
@@ -1013,6 +1013,23 @@ class AutomationEngine:
             for remaining in range(delay_seconds, 0, -1):
                 if not self._running:
                     return
+                # Re-check the pause DURING the wait. The gate at the top of
+                # this method ran before the sleep, so a delayed event
+                # automation would otherwise clear the check and still fire
+                # minutes later, after the user paused the side.
+                if not self.master_enabled(side):
+                    logger.info(
+                        f"Event automation '{auto.get('name')}' abandoned mid-delay — "
+                        f"{side} automations were paused")
+                    if _delay_already_inited and self._progress_finish_fn:
+                        try:
+                            self._progress_finish_fn(
+                                automation_id,
+                                {'status': 'skipped',
+                                 'reason': f'{side} automations are paused'})
+                        except Exception as e:
+                            logger.debug("event progress finish (paused mid-delay): %s", e)
+                    return
                 if self._progress_update_fn and remaining % 5 == 0:
                     mins, secs = divmod(remaining, 60)
                     self._progress_update_fn(automation_id,
@@ -1104,8 +1121,8 @@ class AutomationEngine:
         # stays alive (_finish_run computes the next natural slot), so flipping
         # the master back on resumes at the normal cadence — no restart, no
         # burst of catch-up runs. Manual run_now (skip_delay=True) bypasses.
+        side = self.automation_side(auto)
         if not skip_delay:
-            side = self.automation_side(auto)
             if not self.master_enabled(side):
                 logger.info(f"Automation '{auto.get('name')}' skipped — {side} automations are paused")
                 self._finish_run(auto, automation_id,
@@ -1163,6 +1180,24 @@ class AutomationEngine:
             logger.info(f"Automation '{auto['name']}' delaying {delay_minutes}m before action")
             for remaining in range(delay_seconds, 0, -1):
                 if not self._running:
+                    return
+                # Re-check the pause DURING the wait, not only before it. The
+                # gate above runs before this sleep, so an automation with a
+                # configured delay would otherwise clear the check at 00:30,
+                # sleep, and still fire at 01:00 despite being paused at 00:35
+                # — the user watches it start while the page says "Paused".
+                if not self.master_enabled(side):
+                    result = {'status': 'skipped',
+                              'reason': f'{side} automations are paused'}
+                    logger.info(
+                        f"Automation '{auto.get('name')}' abandoned mid-delay — "
+                        f"{side} automations were paused")
+                    if _delay_already_inited and self._progress_finish_fn:
+                        try:
+                            self._progress_finish_fn(automation_id, result)
+                        except Exception as e:
+                            logger.debug("scheduled progress finish (paused mid-delay): %s", e)
+                    self._finish_run(auto, automation_id, result, error=None)
                     return
                 if self._progress_update_fn and remaining % 5 == 0:
                     mins, secs = divmod(remaining, 60)

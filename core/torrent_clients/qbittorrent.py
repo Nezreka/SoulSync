@@ -11,17 +11,30 @@ Reference: https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorren
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import List, Optional
 
 import requests as http_requests
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.async_utils import run_control
 from core.torrent_clients.base import TorrentStatus, normalize_client_url
 from utils.logging_config import get_logger
 
 logger = get_logger("torrent.qbittorrent")
+
+# v1 info-hashes are 40 hex chars; qBittorrent reports them lowercase.
+_BTIH = re.compile(r"\bxt=urn:btih:([0-9a-fA-F]{40})\b")
+
+
+def _magnet_hash(url_or_magnet) -> Optional[str]:
+    """The v1 info-hash a magnet names, lowercased — or None for a .torrent URL
+    or a base32 magnet. Used to recognise "you already have this" so a duplicate
+    add resolves to the torrent already in the client instead of reading as a
+    refusal."""
+    m = _BTIH.search(str(url_or_magnet or ""))
+    return m.group(1).lower() if m else None
 
 
 # qBittorrent's native state strings. Mapped onto the adapter-uniform
@@ -195,10 +208,28 @@ class QBittorrentAdapter:
                            (resp.text[:200] if resp else ''))
             return None
         if resp.text and resp.text.strip() and resp.text.strip() != 'Ok.':
+            # "Fails." is also what qBittorrent answers when it ALREADY HOLDS the
+            # torrent. Reporting that as a refusal made the video wishlist drain
+            # re-pick the same release every hour forever (one live row reached 133
+            # fruitless "searches" against a torrent sitting in the client the whole
+            # time). If the magnet names a hash we already have, the caller's intent
+            # — "this release is in the client, track it" — is already satisfied, so
+            # hand back the existing hash instead of a failure.
+            existing = _magnet_hash(url_or_magnet)
+            if existing and existing in {h.lower() for h in before}:
+                logger.info("qBittorrent already holds %s — adopting the existing "
+                            "torrent instead of reporting a failed add", existing[:12])
+                return existing
             logger.warning("qBittorrent /torrents/add unexpected body: %r", resp.text[:200])
             return None
         new_hash = self._poll_for_new_hash(before)
         if not new_hash:
+            # Same adoption rule on the silent-duplicate path: some builds answer
+            # 'Ok.' to a duplicate and simply never add a row.
+            existing = _magnet_hash(url_or_magnet)
+            if existing and existing in {h.lower() for h in before}:
+                logger.info("qBittorrent already holds %s — adopting it", existing[:12])
+                return existing
             logger.error("qBittorrent accepted the request but no new torrent appeared — "
                          "URL may have been rejected (bad magnet, unreachable HTTPS, "
                          "duplicate hash, etc.)")

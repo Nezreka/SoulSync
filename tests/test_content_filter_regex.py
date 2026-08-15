@@ -11,9 +11,9 @@ import types
 
 
 # Minimal stubs so the watchlist_scanner module imports without the full app.
-if "config.settings" not in sys.modules:
+if "core.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
+    settings_mod = types.ModuleType("core.settings")
 
     class _DummyConfigManager:
         def get(self, key, default=None):
@@ -25,7 +25,7 @@ if "config.settings" not in sys.modules:
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules.setdefault("config", config_pkg)
-    sys.modules.setdefault("config.settings", settings_mod)
+    sys.modules.setdefault("core.settings", settings_mod)
 
 
 from core.watchlist_scanner import is_live_version  # noqa: E402

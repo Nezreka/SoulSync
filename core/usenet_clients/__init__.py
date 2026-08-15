@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from config.settings import config_manager
+from core.settings import config_manager
 
 from core.usenet_clients.base import UsenetClientAdapter, UsenetStatus
 from core.usenet_clients.nzbget import NZBGetAdapter

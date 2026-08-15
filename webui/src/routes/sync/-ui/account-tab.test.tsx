@@ -198,6 +198,50 @@ describe('TidalTab', () => {
     expect(screen.getByText('Racer')).toBeInTheDocument();
   });
 
+  it('Specialmed: Refresh releases when the CARDS paint, not when the track crawl ends', async () => {
+    // Discord, Aug 11: Tidal's Refresh sat on "Loading" for 3-5 minutes after
+    // the playlists had visibly rendered. The per-playlist track crawl that
+    // feeds auto-mirroring was awaited INSIDE the load, so the button reported
+    // the crawl rather than the list. (Fixed once in the vanilla page — three
+    // days after /sync flipped to React, so it landed in a dead file.)
+    calls = [];
+    let releaseTracks: (value: unknown) => void = () => undefined;
+    const tracksGate = new Promise((resolve) => {
+      releaseTracks = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push({ url, method: 'GET', body: undefined });
+        if (url === '/api/tidal/playlists') {
+          return new Response(
+            JSON.stringify([
+              { id: 't1', name: 'Racer', track_count: 1 },
+              { id: 't2', name: 'Chaser', track_count: 1 },
+            ]),
+          );
+        }
+        if (url === '/api/tidal/playlists/states') {
+          return new Response(JSON.stringify({ states: [] }));
+        }
+        // The crawl — still in flight while we assert below.
+        await tracksGate;
+        return new Response(JSON.stringify({ tracks: [{ id: 'x', name: 'Song' }] }));
+      }),
+    );
+
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+
+    // The cards are up and the button is BACK, with the crawl still hanging.
+    await waitFor(() => expect(screen.getByText('Racer')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('🔄 Refresh')).toBeEnabled());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t1')).toBe(true));
+
+    releaseTracks(undefined);
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t2')).toBe(true));
+  });
+
   it('a failed list paints the ❌ placeholder and toasts (64-66)', async () => {
     calls = [];
     vi.stubGlobal(

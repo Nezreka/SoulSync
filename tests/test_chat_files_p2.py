@@ -233,7 +233,7 @@ def test_media_server_path_resolves_via_music_paths(files_app, tmp_path, monkeyp
     resolver + Settings → Library → Music Paths, not a naive as-stored check.
     """
     http, state, client, uploads = files_app
-    from config.settings import config_manager
+    from core.settings import config_manager
     from database.music_database import MusicDatabase
 
     # the real file lives where SoulSync mounts the library

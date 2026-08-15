@@ -174,6 +174,82 @@ describe('the history section', () => {
     await flush();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/history'))).toBe(true);
   });
+
+  const historyCalls = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).includes('/repair/history')).length;
+
+  async function finishFrame(status = 'finished') {
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:repair-progress', {
+          detail: { orphan_file_detector: { status, progress: 100, phase: 'Done' } },
+        }),
+      );
+    });
+  }
+
+  /**
+   * #1144 — you ran a job, watched it finish, and Recent Runs below it still
+   * showed the PREVIOUS run until you reloaded or hit refresh. The history was
+   * only fetched on mount; the completion path refreshed the job cards
+   * (loadJobs) and nothing else.
+   */
+  it('refreshes as soon as a job finishes', async () => {
+    routes({ '/api/repair/history': { runs: [run] } });
+    render(<MaintenanceHero />);
+    await flush();
+    const afterMount = historyCalls();
+
+    await finishFrame();
+
+    expect(historyCalls()).toBe(afterMount + 1);
+  });
+
+  it('refreshes on a job that ERRORED too — a failed run is still a run', async () => {
+    routes({ '/api/repair/history': { runs: [run] } });
+    render(<MaintenanceHero />);
+    await flush();
+    const afterMount = historyCalls();
+
+    await finishFrame('error');
+
+    expect(historyCalls()).toBe(afterMount + 1);
+  });
+
+  /**
+   * Frames keep arriving after a job is done, and each one is a new object, so
+   * the effect re-runs. Without the `!timers[jobId]` guard this would refetch
+   * the whole history on every frame for as long as the panel stayed up.
+   */
+  it('refreshes ONCE per completion, not on every frame that follows', async () => {
+    routes({ '/api/repair/history': { runs: [run] } });
+    render(<MaintenanceHero />);
+    await flush();
+    const afterMount = historyCalls();
+
+    await finishFrame();
+    await finishFrame();
+    await finishFrame();
+
+    expect(historyCalls()).toBe(afterMount + 1);
+  });
+
+  it('does not refresh while a job is still running', async () => {
+    routes({ '/api/repair/history': { runs: [run] } });
+    render(<MaintenanceHero />);
+    await flush();
+    const afterMount = historyCalls();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ss:repair-progress', {
+          detail: { orphan_file_detector: { status: 'running', progress: 40, phase: 'Scanning' } },
+        }),
+      );
+    });
+
+    expect(historyCalls()).toBe(afterMount);
+  });
 });
 
 describe('job help overlay', () => {

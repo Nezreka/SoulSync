@@ -117,8 +117,7 @@ RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/S
 # These will be used by entrypoint.sh to initialize empty volumes
 RUN mkdir -p /defaults && \
     cp /app/config/config.example.json /defaults/config.json && \
-    cp /app/config/settings.py /defaults/settings.py && \
-    chmod 644 /defaults/config.json /defaults/settings.py
+    chmod 644 /defaults/config.json
 
 # Create volume mount points
 # NOTE: Changed /app/database to /app/data to avoid overwriting Python package

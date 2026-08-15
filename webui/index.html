@@ -3725,6 +3725,14 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Minimum seeders <span class="vq-hint" id="vq-seeders-label">At least 1 seeder</span></div>
+                                    <input type="range" id="vq-min-seeders" class="vq-slider" min="0" max="100" step="1" value="1">
+                                    <div class="setting-help-text">
+                                        A torrent nobody is seeding never finishes — it parks on "downloading metadata" or stalls at 0% and quietly fills your client with dead entries.
+                                        Set 0 to grab regardless. Usenet and Soulseek have no seeders and are never affected.
+                                    </div>
+                                </div>
                             </div>
                             <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
                             <div class="settings-group" data-stg="quality" data-video-only>
@@ -5945,6 +5953,47 @@
                             </div>
                             </div><!-- end Database Maintenance body -->
 
+                            <!-- yt-dlp updater. Deliberately NOT marked video-only: it is one
+                                 package, used by YouTube downloads on the video side and by
+                                 YouTube-sourced audio on the music side, so both sides get it. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>yt-dlp</h3>
+                                <span class="settings-section-hint">Version &amp; one-click update <span id="ytdlp-hint-badge" hidden>&#9679;</span></span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group" data-stg="advanced">
+
+                                <div class="form-group">
+                                    <label>Installed:</label>
+                                    <span id="ytdlp-installed" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Newest available:</label>
+                                    <span id="ytdlp-latest" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Release channel:</label>
+                                    <select id="ytdlp-channel" onchange="loadYtdlpStatus()">
+                                        <option value="nightly" selected>Nightly (recommended)</option>
+                                        <option value="stable">Stable</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly.</div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="ytdlp-update-btn" onclick="runYtdlpUpdate()">Update yt-dlp</button>
+                                </div>
+                                <div class="help-text">
+                                    When YouTube downloads start failing with <strong>403 Forbidden</strong>, an out-of-date yt-dlp is nearly always the cause.
+                                    <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the running process keeps using the version it loaded at startup.
+                                </div>
+                                <div id="ytdlp-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                                <pre id="ytdlp-detail" style="display: none; margin-top: 8px; max-height: 220px; overflow: auto; font-size: 0.75em; white-space: pre-wrap;"></pre>
+                            </div>
+                            </div><!-- end yt-dlp body -->
+
                             <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
@@ -6228,6 +6277,59 @@
                                 </div>
                             </div>
                             </div><!-- end Developer Mode body -->
+
+                            <!-- Artwork cache. Deliberately NOT marked video-only: one cache
+                                 serves covers on the music side and posters on the video side,
+                                 same as the yt-dlp tile above. -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Artwork Cache</h3>
+                                <span class="settings-section-hint">Local copies of cover &amp; poster art</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group" data-stg="advanced">
+
+                                <div class="form-group">
+                                    <label>Cached images:</label>
+                                    <span id="imgcache-entries" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Disk used:</label>
+                                    <span id="imgcache-size" class="readonly-field">Loading...</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="imgcache-max-mb">Size limit (MB):</label>
+                                    <input type="number" id="imgcache-max-mb" min="0" step="128" style="max-width:160px;" onchange="onImageCacheSettingChanged()">
+                                </div>
+                                <div class="help-text">
+                                    Oldest-unused art is removed once the cache passes this size. <strong>0</strong> means no limit.
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="imgcache-thumbnails" style="display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" id="imgcache-thumbnails" style="width:auto;margin:0;" onchange="onImageCacheSettingChanged()">
+                                        Serve resized thumbnails
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    Off by default. When on, SoulSync resizes art server-side so a grid of tiles
+                                    doesn't pull full-size originals — the big win on large libraries, at the cost
+                                    of some CPU the first time each image is seen. Everything else about the cache
+                                    is unchanged.
+                                </div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="imgcache-prune-btn" onclick="runImageCachePrune()">Reclaim space now</button>
+                                    <button class="test-button" id="imgcache-clear-btn" onclick="runImageCacheClear()">Clear cache</button>
+                                </div>
+                                <div class="help-text">
+                                    Nothing here is irreplaceable — every image is re-downloaded on demand, so
+                                    clearing only costs a slower first load.
+                                </div>
+                                <div id="imgcache-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                            </div>
+                            </div><!-- end Artwork Cache body -->
 
                             <div class="settings-experimental-break" data-stg="advanced" role="separator" aria-label="Experimental features">
                                 <span class="settings-experimental-break__line" aria-hidden="true"></span>
@@ -6722,6 +6824,12 @@
                                  Fully repainted by renderWatch; the video panel itself
                                  is phase 2. -->
                             <div class="chat-watch" data-chat-watch hidden></div>
+                            <!-- The party's screen lives OUTSIDE the card on purpose: the card's
+                                 innerHTML is rebuilt on every room event, and a <video> inside it
+                                 would be destroyed and re-created several times a minute — the film
+                                 restarting each time. This host is only touched when the showing
+                                 itself changes. -->
+                            <div class="chat-watch-stagehost" data-chat-watch-stage hidden></div>
                             <aside class="chat-users" data-chat-users></aside>
                         </div>
                     </div>

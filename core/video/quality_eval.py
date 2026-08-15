@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.video.quality_profile import TIERS as _QP_TIERS
+
 # Resolution ranking (higher = better). The loose cutoff and the owned-vs-target
 # check both compare on this rank, so "1920x1080", "1080p" and "1080" all agree.
 _RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("1080", 3),
@@ -111,10 +113,42 @@ _SRC_TIER = {"remux": "remux", "bluray": "bluray", "web-dl": "web",
 _RES_SCORE = {"2160p": 400, "1080p": 300, "720p": 200, "480p": 100}
 _SRC_SCORE = {"remux": 90, "bluray": 70, "web-dl": 55, "webrip": 40, "hdtv": 25, "dvd": 10}
 
+# Everything the release parser folds into "SD". ``release_parse`` normalises both
+# 480p and 576p to "480p", but the set is spelled out so a parser that later keeps
+# 576p distinct still lands on the SD tiers instead of falling off the ladder.
+_SD_RESOLUTIONS = frozenset({"480p", "576p"})
+
+# When a (source, resolution) pair has no tier of its own, snap to the nearest
+# source the ladder DOES define at that resolution. Ordered nearest-first; a
+# remux with no remux tier is disc-sourced, so bluray describes it best.
+_SRC_FALLBACK = {
+    "remux": ("bluray", "web"),
+    "bluray": ("web",),
+    "web": ("webrip", "hdtv"),
+    "webrip": ("web", "hdtv"),
+    "hdtv": ("webrip", "web"),
+}
+
+
+# The ladder itself, as the set tier_key validates against. The dependency is
+# one-way (quality_profile imports nothing from here), so a plain import is safe
+# and keeps the invariant checkable without a function call per hit.
+_LADDER = frozenset(_QP_TIERS)
+
 
 def tier_key(source, resolution) -> str:
     """The quality-ladder key for a parsed (source, resolution), or '' if it isn't a
-    ladder tier (junk sources like cam/screener have no tier)."""
+    ladder tier (junk sources like cam/screener have no tier).
+
+    **Invariant: the result is always '' or a member of ``quality_profile.TIERS``.**
+    It used to be a plain ``source + '-' + resolution`` concatenation, which could
+    name tiers the ladder never defined — ``webrip-720p``, ``hdtv-2160p``,
+    ``web-480p``. Those releases were then rejected as "isn't in your enabled
+    tiers" with no toggle anywhere that could accept them, and the ``sdtv`` tier
+    in the UI was a dead switch because nothing could ever produce that key. Two
+    rules close it: SD collapses onto the ladder's deliberately source-less SD
+    tiers, and any remaining gap snaps to the nearest defined source at the same
+    resolution. ``test_quality_tier_keyspace`` walks the whole product space."""
     pre = _SRC_TIER.get(source)
     if not pre:
         # A loosely-named release with a known resolution but NO recognised source
@@ -127,7 +161,20 @@ def tier_key(source, resolution) -> str:
             return ""
     if pre == "dvd":
         return "dvd"
-    return (pre + "-" + resolution) if resolution else ""
+    if not resolution:
+        return ""
+    if resolution in _SD_RESOLUTIONS:
+        # The ladder collapses SD deliberately: below 720p the source barely
+        # matters and the two source-less tiers (dvd / sdtv) are what the UI
+        # offers. Anything SD that isn't disc-sourced is broadcast-grade.
+        return "sdtv"
+    key = pre + "-" + resolution
+    if key in _LADDER:
+        return key
+    for alt in _SRC_FALLBACK.get(pre, ()):        # snap to the nearest defined source
+        if (alt + "-" + resolution) in _LADDER:
+            return alt + "-" + resolution
+    return ""
 
 
 def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
@@ -196,11 +243,14 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
                      want_episode=None, size_gb=None, want_year=None, want_title=None,
-                     want_date=None, want_absolute=None) -> dict:
+                     want_date=None, want_absolute=None, seeders=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
-    means it's filtered out (``rejected`` says why); ``score`` ranks the keepers."""
+    means it's filtered out (``rejected`` says why); ``score`` ranks the keepers.
+
+    ``seeders`` is the swarm health for TORRENT hits, and ``None`` for anything
+    without the concept (usenet, Soulseek) — those are never gated on it."""
     parsed = parsed if isinstance(parsed, dict) else {}
     profile = profile if isinstance(profile, dict) else {}
     res, source = parsed.get("resolution"), parsed.get("source")
@@ -248,6 +298,22 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
                                     want_date, want_absolute)
         if scope_reason:
             rejected = scope_reason
+
+    # 4b) swarm health — a torrent nobody is seeding cannot finish. The client
+    # parks it on 'downloading metadata' or stalls it at 0% indefinitely, and
+    # the wishlist row then reports a fruitless search forever while the dead
+    # torrent accumulates in the client. Radarr/Sonarr call this minimum
+    # seeders; only torrents carry the number, so None is never judged.
+    if not rejected and seeders is not None:
+        floor = (profile or {}).get("min_seeders")
+        floor = 0 if floor is None else floor
+        try:
+            have = int(seeders)
+        except (TypeError, ValueError):
+            have = 0
+        if floor and have < floor:
+            rejected = ("No seeders — nobody is sharing this" if have <= 0 else
+                        "Only %d seeder(s) — your floor is %d" % (have, floor))
 
     # 5) size guard (movie/episode only — packs are legitimately large)
     if not rejected and size_gb:

@@ -522,7 +522,7 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         # the POST save path resolves the server directly (not via list_video_libraries),
         # and correctly 400s when none is configured — give it one so the save is exercised.
         monkeypatch.setattr(vs, "resolve_video_server", lambda: "plex")
-        import config.settings as cs
+        import core.settings as cs
         monkeypatch.setattr(cs.config_manager, "get_active_media_server", lambda: "plex")
 
         data = client.get("/api/video/libraries").get_json()
@@ -631,7 +631,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
 
 def test_downloads_config_save_load(tmp_path, monkeypatch):
     import api.video as videoapi
-    import config.settings as cfg
+    import core.settings as cfg
     from database.video_database import VideoDatabase
 
     class _Cfg:   # fake shared app config so the test never touches real music config
@@ -906,7 +906,7 @@ def test_downloads_status_lookup_by_id_and_media(tmp_path, monkeypatch):
 
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
-    import config.settings as cfg
+    import core.settings as cfg
     from database.video_database import VideoDatabase
 
     class _Cfg:

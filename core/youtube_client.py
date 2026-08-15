@@ -44,7 +44,7 @@ def _resolve_cookie_opts() -> dict:
     'custom' — which must become a yt-dlp ``cookiefile`` pointing at the saved file,
     NOT be passed through as a browser name (yt-dlp rejects: 'unsupported browser:
     custom'). Delegates to the shared, tested precedence in core.youtube_cookies."""
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.youtube_cookies import build_youtube_cookie_opts
     mode = config_manager.get('youtube.cookies_browser', '')
     cookiefile = config_manager.get('youtube.cookies_file', '')
@@ -139,7 +139,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
     def __init__(self, download_path: str = None):
         # Use Soulseek download path for consistency (post-processing expects files here)
-        from config.settings import config_manager
+        from core.settings import config_manager
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
@@ -319,7 +319,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
     def reload_settings(self):
         """Reload YouTube settings from config (called when settings are saved)."""
-        from config.settings import config_manager
+        from core.settings import config_manager
         self._download_delay = config_manager.get('youtube.download_delay', 3)
         # Clear both cookie sources, then re-apply from current settings (browser
         # store or pasted cookies.txt) so a mode switch doesn't leave a stale arg.
@@ -354,6 +354,14 @@ class YouTubeClient(DownloadSourcePlugin):
                     'extract_flat': True,  # Don't download, just extract info
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                 }
+                # The probe must run with the SAME credentials as the real work.
+                # Without this it was the only yt-dlp call in the file that went
+                # out unauthenticated (search does it at ~821, downloads at ~237),
+                # so a user whose cookies were configured and working still got
+                # "YouTube download source not available" from the Settings test
+                # (#1126). An unauthenticated probe from a server IP is exactly
+                # the request YouTube bot-gates first.
+                ydl_opts.update(_resolve_cookie_opts())
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # Try to extract info from a known video (YouTube's own channel trailer)
@@ -361,11 +369,39 @@ class YouTubeClient(DownloadSourcePlugin):
                     info = ydl.extract_info("https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=False)
                     return info is not None
 
-            return await run_blocking(_check)
+            ok = await run_blocking(_check)
+            if ok:
+                self.last_error_reason = None
+            return ok
 
         except Exception as e:
-            logger.error(f"YouTube connection check failed: {e}")
+            self._record_failure(e, "connection check")
             return False
+
+    def _record_failure(self, error, what: str) -> None:
+        """Classify a yt-dlp failure, log something a user can act on, and keep
+        the reason for whoever reports status next.
+
+        #1126: a YouTube block surfaced to the user as "No results found for
+        'the living'" and "YouTube download source not available" — two messages
+        that describe SoulSync failing to find something, when what actually
+        happened is YouTube refusing us. The classifier is the same one the video
+        side uses, so both halves of the app name the same failure the same way."""
+        from core.youtube_errors import classify, human_reason
+        reason = human_reason(error)
+        kind = classify(error)
+        self.last_error_reason = reason
+        self.last_error_kind = kind
+        if reason:
+            logger.warning("YouTube %s failed (%s): %s", what, kind, reason)
+        else:
+            logger.error("YouTube %s failed: %s", what, error)
+
+    def last_failure_reason(self) -> Optional[str]:
+        """The last classified failure, for status/UI copy. None when the last
+        attempt succeeded or failed in a way we cannot explain better than the
+        raw error."""
+        return getattr(self, 'last_error_reason', None)
 
     def is_configured(self) -> bool:
         """
@@ -857,9 +893,10 @@ class YouTubeClient(DownloadSourcePlugin):
             return (track_results, [])
 
         except Exception as e:
-            logger.error(f"YouTube search failed: {e}")
-            import traceback
-            traceback.print_exc()
+            # Was: log + print_exc + return empty, which the UI rendered as
+            # "No results found for '<query>'". A bot-block, an expired cookie
+            # and a genuinely empty search all looked identical (#1126).
+            self._record_failure(e, f"search for {query!r}")
             return ([], [])
 
     def _get_best_audio_format(self, formats: List[Dict]) -> Optional[Dict]:

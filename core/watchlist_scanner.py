@@ -1054,10 +1054,36 @@ class WatchlistScanner:
         logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
         return None
 
+    def _apply_auto_download_default(self, watchlist_artists: List[WatchlistArtist]):
+        """Resolve each artist's effective auto-download: its own choice, else the
+        global default.
+
+        Deliberately NOT gated behind ``global_override_enabled``. That switch
+        governs the FORMAT overrides, which overwrite an artist wholesale; this is
+        a default an artist's own setting beats, so it applies on its own terms.
+        Folding it into the format switch would force auto-download on everyone
+        already using that override for formats — silently undoing any deliberate
+        follow-only they had set."""
+        from core.watchlist_auto_download import effective_with_legacy
+        try:
+            from core.settings import config_manager
+            g_auto = config_manager.get('watchlist.global_auto_download', True)
+        except Exception:   # noqa: BLE001 - a config hiccup keeps today's behaviour
+            g_auto = True
+        for artist in watchlist_artists or []:
+            pref = getattr(artist, 'auto_download_pref', None)
+            # The stored boolean is passed too: a row the backfill never reached
+            # can still hold a deliberate follow-only, and the global must not
+            # switch downloads back on for it.
+            legacy = getattr(artist, 'auto_download', True)
+            artist.auto_download = effective_with_legacy(pref, legacy, g_auto)
+
     def _apply_global_watchlist_overrides(self, watchlist_artists: List[WatchlistArtist]):
         """Apply global watchlist release-type overrides to a batch of artists."""
+        # Runs first and unconditionally — see _apply_auto_download_default.
+        self._apply_auto_download_default(watchlist_artists)
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
         except Exception:
             return
 
@@ -2149,7 +2175,7 @@ class WatchlistScanner:
 
             # Check custom exclusion terms
             try:
-                from config.settings import config_manager as _cfg
+                from core.settings import config_manager as _cfg
                 exclude_terms_str = _cfg.get('watchlist.exclude_terms', '')
                 if exclude_terms_str:
                     exclude_terms = [t.strip() for t in exclude_terms_str.split(',') if t.strip()]
@@ -2198,7 +2224,7 @@ class WatchlistScanner:
             unique_title_variations = list(dict.fromkeys(title_variations))
 
             # Search for each artist with each title variation
-            from config.settings import config_manager
+            from core.settings import config_manager
             active_server = config_manager.get_active_media_server()
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
@@ -4421,7 +4447,7 @@ class WatchlistScanner:
         """
         try:
             from datetime import datetime, timedelta
-            from config.settings import config_manager
+            from core.settings import config_manager
             from database.music_database import get_database
 
             # Weekly throttle

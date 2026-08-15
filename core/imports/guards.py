@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from config.settings import config_manager
+from core.settings import config_manager
 from core.imports.context import (
     get_import_clean_artist,
     get_import_clean_title,

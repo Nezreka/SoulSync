@@ -26,7 +26,7 @@ def _run(svc, db):
     cm = MagicMock(); cm.get_active_media_server.return_value = "jellyfin"
     track = SimpleNamespace(name="Valió la Pena - Salsa Version", artists=["Marc Anthony"], id="sp16")
     with patch("database.music_database.MusicDatabase", return_value=db), \
-         patch("config.settings.config_manager", cm), \
+         patch("core.settings.config_manager", cm), \
          patch("core.artists.map.get_current_profile_id", return_value=1):
         return asyncio.run(svc._find_track_in_media_server(track, candidate_pool={}))
 

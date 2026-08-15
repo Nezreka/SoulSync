@@ -363,9 +363,13 @@ function Row({
           </span>
         ) : row.last ? (
           <>
-            {row.last.downloaded > 0 ? (
-              <span className="syncband-chip syncband-chip--dl">⬇ {row.last.downloaded}</span>
-            ) : null}
+            {/* No download chip. A successful download is ALREADY on this row —
+                it is what made the coverage bar fill, so "⬇ 8" sitting beside
+                "8/10 in library" read as the same fact stated twice. The bar is
+                the better of the two: it carries the total as well as the win.
+                The failure chip stays because nothing else on the row conveys
+                it, and it is the only number here you would act on. (Same
+                reasoning retired the "matched" chip earlier.) */}
             {row.last.failed > 0 ? (
               <span className="syncband-chip syncband-chip--fail">✗ {row.last.failed}</span>
             ) : null}
