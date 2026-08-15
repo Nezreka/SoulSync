@@ -220,3 +220,39 @@ def test_auth_from_real_file_round_trips(tmp_path):
     headers = ytmusic_auth_from_cookiefile(str(path))
     assert headers is not None
     assert "SAPISIDHASH" in headers["Authorization"]
+
+
+def test_auth_from_config_anonymous_when_not_paste_mode(monkeypatch):
+    monkeypatch.setattr(
+        "config.settings.config_manager.get",
+        lambda key, default="": "firefox" if key == "youtube.cookies_browser" else default,
+    )
+    from core.youtube_cookies import ytmusic_auth_from_config
+    assert ytmusic_auth_from_config() is None
+
+
+def test_auth_from_config_paste_mode_reads_cookiefile(monkeypatch, tmp_path):
+    path = tmp_path / "cookies.txt"
+    path.write_text(_JAR, encoding="utf-8")
+
+    def _get(key, default=""):
+        if key == "youtube.cookies_browser":
+            return PASTE_MODE
+        if key == "youtube.cookies_file":
+            return str(path)
+        return default
+
+    monkeypatch.setattr("config.settings.config_manager.get", _get)
+    from core.youtube_cookies import ytmusic_auth_from_config
+    headers = ytmusic_auth_from_config()
+    assert headers is not None
+    assert "SAPISIDHASH" in headers["Authorization"]
+
+
+def test_auth_from_config_exception_is_anonymous(monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("config down")
+
+    monkeypatch.setattr("config.settings.config_manager.get", _boom)
+    from core.youtube_cookies import ytmusic_auth_from_config
+    assert ytmusic_auth_from_config() is None

@@ -12,9 +12,14 @@ Fixtures are trimmed copies of real ytmusicapi `get_playlist` responses.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+import sys
+
 from core.youtube_music_meta import (
     playlist_id_from_url,
+    search_ytmusic_songs,
     ytmusic_playlist_to_payload,
+    ytmusic_search_hit_to_track,
 )
 
 URL = "https://music.youtube.com/playlist?list=PLExamplePlaylistId00000000000000"
@@ -183,3 +188,111 @@ def test_missing_video_type_is_empty_not_none():
     payload = ytmusic_playlist_to_payload(
         _raw({**ATV_TRACK, "videoType": None}), URL)
     assert payload["tracks"][0]["video_type"] == ""
+
+
+# ── song search projection ────────────────────────────────────────────────
+
+SONG_HIT = {
+    "videoId": "exampleVid1",
+    "title": "Example Track",
+    "artists": [{"name": "Example Artist", "id": "UCExampleChannelId000000"}],
+    "album": {"name": "Example Album", "id": "MPREb_ExampleAlbumId"},
+    "duration": "3:45",
+    "duration_seconds": 225,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "thumbnails": [{"url": "https://i.ytimg.com/vi/exampleVid1/low.jpg"},
+                   {"url": "https://i.ytimg.com/vi/exampleVid1/high.jpg"}],
+}
+
+
+def test_search_hit_projects_artist_album_duration_and_watch_url():
+    track = ytmusic_search_hit_to_track(SONG_HIT)
+    assert track["id"] == "exampleVid1"
+    assert track["name"] == "Example Track"
+    assert track["artists"] == ["Example Artist"]
+    assert track["album"] == "Example Album"
+    assert track["duration_ms"] == 225_000
+    assert track["video_type"] == "MUSIC_VIDEO_TYPE_ATV"
+    assert track["url"] == "https://www.youtube.com/watch?v=exampleVid1"
+    assert track["thumbnail"] == "https://i.ytimg.com/vi/exampleVid1/high.jpg"
+
+
+def test_search_hit_without_video_id_is_dropped():
+    assert ytmusic_search_hit_to_track({**SONG_HIT, "videoId": ""}) is None
+    assert ytmusic_search_hit_to_track({**SONG_HIT, "videoId": None}) is None
+    assert ytmusic_search_hit_to_track("junk") is None
+
+
+def test_search_hit_without_title_is_dropped():
+    assert ytmusic_search_hit_to_track({**SONG_HIT, "title": ""}) is None
+    assert ytmusic_search_hit_to_track({**SONG_HIT, "title": None}) is None
+
+
+def test_search_hit_topic_suffix_stripped():
+    track = ytmusic_search_hit_to_track(
+        {**SONG_HIT, "artists": [{"name": "Example Band - Topic"}]})
+    assert track["artists"] == ["Example Band"]
+
+
+def test_search_hit_parses_duration_string_when_seconds_missing():
+    track = ytmusic_search_hit_to_track(
+        {**SONG_HIT, "duration_seconds": None, "duration": "3:45"})
+    assert track["duration_ms"] == 225_000
+
+
+def test_search_hit_parses_hour_duration_string():
+    track = ytmusic_search_hit_to_track(
+        {**SONG_HIT, "duration_seconds": None, "duration": "1:02:03"})
+    assert track["duration_ms"] == 3_723_000
+
+
+def test_search_ytmusic_songs_empty_query_returns_none():
+    assert search_ytmusic_songs("") is None
+    assert search_ytmusic_songs("   ") is None
+    assert search_ytmusic_songs(None) is None  # type: ignore[arg-type]
+
+
+def _install_fake_ytmusic(monkeypatch, search_impl):
+    class _FakeYTMusic:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def search(self, query, filter="songs", limit=50):
+            return search_impl(query, filter, limit)
+
+    monkeypatch.setitem(sys.modules, "ytmusicapi", SimpleNamespace(YTMusic=_FakeYTMusic))
+
+
+def test_search_ytmusic_songs_missing_library_returns_none(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ytmusicapi", None)
+    assert search_ytmusic_songs("Artist - Title") is None
+
+
+def test_search_ytmusic_songs_exception_returns_none(monkeypatch):
+    class _Boom:
+        def __init__(self, *_a, **_k):
+            raise RuntimeError("inner-tube down")
+
+    monkeypatch.setitem(sys.modules, "ytmusicapi", SimpleNamespace(YTMusic=_Boom))
+    assert search_ytmusic_songs("Artist - Title") is None
+
+
+def test_search_ytmusic_songs_empty_or_unusable_returns_none(monkeypatch):
+    _install_fake_ytmusic(monkeypatch, lambda *_a: [])
+    assert search_ytmusic_songs("Artist - Title") is None
+
+    _install_fake_ytmusic(monkeypatch, lambda *_a: [{"title": "No Id"}])
+    assert search_ytmusic_songs("Artist - Title") is None
+
+
+def test_search_ytmusic_songs_sorts_atv_first(monkeypatch):
+    _install_fake_ytmusic(monkeypatch, lambda *_a: [
+        {**SONG_HIT, "videoId": "omv", "title": "Official Video",
+         "videoType": "MUSIC_VIDEO_TYPE_OMV"},
+        {**SONG_HIT, "videoId": "atv", "title": "Official Audio",
+         "videoType": "MUSIC_VIDEO_TYPE_ATV"},
+        {**SONG_HIT, "videoId": "ugc", "title": "Cover",
+         "videoType": "MUSIC_VIDEO_TYPE_UGC"},
+    ])
+    hits = search_ytmusic_songs("Example Artist - Example Track")
+    assert [h["id"] for h in hits] == ["atv", "omv", "ugc"]
