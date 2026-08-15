@@ -55736,12 +55736,26 @@ tr.tag-diff-same {
     background: rgba(0, 0, 0, 0.2);
 }
 
+/* The settings panel lives inside a job tile, and `.repair-tile` is
+   `overflow: hidden` (for its rounded corners and glow edge). So anything
+   wider than the tile is CLIPPED, not scrolled — the field just vanishes off
+   the right and cannot be filled in.
+
+   The row has to be able to shrink to whatever the tile gives it. Two things
+   stop that by default and both are handled below: a form control's
+   `min-width: auto` resolves to its INTRINSIC width (~170px for a number
+   input, regardless of any `width` we set), and a long label like
+   "Fingerprint Threshold" will not break. Together they put the row's minimum
+   at roughly the tile's inner width, so it clipped on some setups and not
+   others depending on scrollbars, zoom and column count. */
 .repair-setting-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Last resort: drop the input onto its own line rather than clip it. */
+    flex-wrap: wrap;
     padding: 7px 0;
-    gap: 12px;
+    gap: 6px 12px;
     border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
 }
 
@@ -55752,6 +55766,10 @@ tr.tag-diff-same {
 .repair-setting-row label {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
+    /* Let the label give way before the input does — it is the part that can
+       afford to wrap. */
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* Section header inside a repair job settings panel — used to group related
@@ -55781,6 +55799,13 @@ tr.tag-diff-same {
     padding: 5px 10px;
     font-size: 12px;
     width: 100px;
+    /* `min-width: 0` is the one that matters. Without it a form control's
+       min-width is `auto` = its intrinsic size, so it ignores the 100px above
+       and refuses to shrink — which is what pushed the row past the tile. */
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 100px;
+    box-sizing: border-box;
     text-align: right;
 }
 
@@ -55798,6 +55823,8 @@ tr.tag-diff-same {
 
 .repair-save-settings-btn {
     margin-top: 10px;
+    /* Same story: the button must not be the thing that widens the panel. */
+    max-width: 100%;
     background: var(--accent-color, #6366f1);
     color: #fff;
     border: none;
