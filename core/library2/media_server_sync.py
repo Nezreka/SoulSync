@@ -233,7 +233,7 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
 
 
 def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
-                 artist_id: int, title: str, track_number=None, disc_number=1,
+                 artist_id: int, title: str, track_number=None, disc_number=None,
                  duration=None, track_artist: Optional[str] = None,
                  musicbrainz_id: Optional[str] = None,
                  file_path: Optional[str] = None, file_size=None,
@@ -274,7 +274,7 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
             "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,"
             "                        duration, track_artist, musicbrainz_id,"
             "                        server_source, server_id)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            " VALUES(?,?,COALESCE(?,1),COALESCE(?,1),?,?,?,?,?)",
             (album_id, title, track_number, disc_number, duration, track_artist,
              musicbrainz_id, server_source, str(server_id)),
         ).lastrowid)
@@ -297,9 +297,14 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                     " AND file_state='active'",
                     (file_size, bitrate, server_source, track_id, file_path))
             return track_id
+        # Ownership may correct an existing row, never blank it: a caller that
+        # does not know the disc (the importer never passes one) must not stamp
+        # its default over the disc the catalogue already holds.
         cursor.execute(
             "UPDATE lib2_tracks"
-            "   SET album_id=?, title=?, track_number=?, disc_number=?,"
+            "   SET album_id=?, title=?,"
+            "       track_number=COALESCE(?, track_number),"
+            "       disc_number=COALESCE(?, disc_number),"
             "       duration=COALESCE(?, duration),"
             "       track_artist=COALESCE(?, track_artist),"
             "       musicbrainz_id=COALESCE(?, musicbrainz_id),"

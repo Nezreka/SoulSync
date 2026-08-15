@@ -814,3 +814,54 @@ def test_is_active_media_server_ready_does_not_block_local_import_when_server_of
 
     assert ready is True
     assert reason == ""
+
+
+def test_the_registration_gate_accepts_a_row_the_autolink_did_not_write(tmp_path, monkeypatch):
+    """The gate asks the catalogue, not one writer's return value (issues §38).
+
+    ``link_download_into_library_v2`` returns None — without raising — for a file
+    whose identity it cannot derive. ``record_soulsync_library_entry`` derives the
+    same identity from ``artist_context`` and writes the same rows, so failing on
+    the autolink's None reported a correctly imported file as failed and skipped
+    the completion callbacks behind it.
+    """
+    import sqlite3
+
+    from core.library2.schema import ensure_library_v2_schema
+
+    path = str(tmp_path / "lib2.db")
+    seed = sqlite3.connect(path)
+    ensure_library_v2_schema(seed)
+    seed.execute("INSERT INTO lib2_artists(name,sort_name) VALUES('Muse','Muse')")
+    seed.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(1,'Absolution')")
+    seed.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(1,'Time')")
+    seed.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary,file_state)"
+        " VALUES(1,'/library/song.flac',1,'active')")
+    seed.commit()
+    seed.close()
+
+    class _DBStub:
+        def record_track_download(self, **_kwargs):
+            return None
+
+        def _get_connection(self):
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            return conn
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: _DBStub())
+    import core.library2.autolink as autolink
+
+    monkeypatch.setattr(
+        autolink, "link_download_into_library_v2", lambda *_a, **_kw: None)
+
+    # Registered by the other writer: no raise.
+    side_effects.record_download_provenance(
+        {"_final_processed_path": "/library/song.flac"}, require_library=True)
+
+    # Nothing in the catalogue for this path: still a hard failure.
+    with pytest.raises(RuntimeError, match="did not create a file row"):
+        side_effects.record_download_provenance(
+            {"_final_processed_path": "/library/never-imported.flac"},
+            require_library=True)

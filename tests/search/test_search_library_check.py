@@ -364,3 +364,31 @@ def test_track_artist_csv_uses_first_only(db):
         tracks=[{'name': 'HUMBLE.', 'artist': 'Kendrick Lamar, J. Cole'}],
     )
     assert result['tracks'][0]['in_library'] is True
+
+
+def test_a_natively_imported_track_still_carries_an_identity(db):
+    """After the legacy cutover all three id arms can be NULL at once.
+
+    A track imported by SoulSync has no media-server mapping, carries
+    ``server_source='soulsync'`` (so the active server's CASE yields NULL) and
+    has no ``legacy_track_id`` — the player was handed ``''`` as the track id and
+    recorded the play against nothing. The lib2 id is always there.
+    """
+    aid = _seed_artist(db, 'Native Artist')
+    alb = _seed_album(db, aid, 'Native Album')
+    legacy_track_id = _seed_track(db, alb, aid, 'Native Song')
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE lib2_tracks SET server_source='soulsync',server_id='ss-1',"
+            "                       legacy_track_id=NULL "
+            "WHERE legacy_track_id=?", (legacy_track_id,))
+        lib2_id = conn.execute(
+            "SELECT id FROM lib2_tracks WHERE server_id='ss-1'").fetchone()['id']
+
+    result = library_check.check_library_presence(
+        db, _FakePlexClient(), _FakeConfigManager({}), profile_id=1,
+        albums=[], tracks=[{'name': 'Native Song', 'artist': 'Native Artist'}],
+    )
+
+    assert result['tracks'][0]['in_library'] is True
+    assert result['tracks'][0]['track_id'] == lib2_id

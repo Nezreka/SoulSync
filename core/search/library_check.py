@@ -51,7 +51,12 @@ _OWNED_TRACKS_SQL = """
                       WHERE m.entity_type='track' AND m.entity_id=t.id
                         AND m.server_source=? LIMIT 1),
                     CASE WHEN t.server_source=? THEN t.server_id END,
-                    t.legacy_track_id),
+                    t.legacy_track_id,
+                    -- Always populated, so the projection cannot come back
+                    -- identity-less. After the legacy cutover a natively
+                    -- imported track has no mapping, no matching server_source
+                    -- and no legacy id, and the player was handed ''.
+                    t.id),
            t.id,
            al.title, al.image_url,
            (SELECT f.path FROM lib2_track_files f

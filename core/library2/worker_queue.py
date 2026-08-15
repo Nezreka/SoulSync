@@ -89,34 +89,62 @@ def _retryable_sql(retry_statuses: tuple) -> str:
     return ", ".join(f"'{status}'" for status in wanted) or "''"
 
 
+_PHASES = ("new", "retry")
+
+
 def _pending_sql(entity_type: str, retry_statuses: tuple = _RETRYABLE,
                  require_provider_id: bool = False,
-                 service: str = "spotify") -> str:
-    """Unattempted first, then expired retryable failures, oldest attempt first."""
+                 service: str = "spotify", phase: str = "new") -> str:
+    """One of the queue's two disjoint halves: never attempted, or due again.
+
+    Deliberately two queries. Ordering both together needs
+    ``ORDER BY last_attempted_at IS NOT NULL, ...`` over a LEFT JOIN, which no
+    index can serve — so SQLite built a temp b-tree over every artist/album/track
+    row before taking the one row a worker asked for, three times per tick.
+    Apart, each half stops early like legacy did: ``new`` walks entity ids,
+    ``retry`` is driven by ``idx_lib2_provider_attempts_due``. Priority between
+    them stays the caller's, which asks for ``new`` first.
+    """
     universe = f"AND ({_HAS_PROVIDER_ID})" if require_provider_id else ""
+    if phase == "new":
+        return f"""
+            {_sources(service)[entity_type]}
+             WHERE NOT EXISTS (SELECT 1 FROM lib2_provider_attempts a
+                                WHERE a.entity_type = :entity
+                                  AND a.entity_id = e.id
+                                  AND a.service = :service)
+               {universe}
+             ORDER BY e.id
+        """
     return f"""
         {_sources(service)[entity_type]}
-          LEFT JOIN lib2_provider_attempts a
+          JOIN lib2_provider_attempts a
                  ON a.entity_type = :entity AND a.entity_id = e.id
                 AND a.service = :service
-         WHERE (a.entity_id IS NULL
-                OR (a.status IN ({_retryable_sql(retry_statuses)})
-                    AND a.last_attempted_at <= datetime('now', :window)))
+         WHERE a.status IN ({_retryable_sql(retry_statuses)})
+           AND a.last_attempted_at <= datetime('now', :window)
            {universe}
-         ORDER BY a.last_attempted_at IS NOT NULL, a.last_attempted_at, e.id
+         ORDER BY a.last_attempted_at, e.id
     """
+
+
+def _params(entity_type: str, service: str, retry_after_days: int) -> Dict[str, Any]:
+    return {"entity": entity_type, "service": str(service).strip().lower(),
+            "window": f"-{max(0, int(retry_after_days))} days"}
 
 
 def _fetch(conn, entity_type: str, service: str, retry_after_days: int,
            retry_statuses: tuple = _RETRYABLE,
            require_provider_id: bool = False) -> Optional[Any]:
     key = str(service).strip().lower()
-    return conn.execute(
-        _pending_sql(entity_type, retry_statuses, require_provider_id, key)
-        + " LIMIT 1",
-        {"entity": entity_type, "service": str(service).strip().lower(),
-         "window": f"-{max(0, int(retry_after_days))} days"},
-    ).fetchone()
+    params = _params(entity_type, key, retry_after_days)
+    for phase in _PHASES:
+        row = conn.execute(
+            _pending_sql(entity_type, retry_statuses, require_provider_id, key,
+                         phase) + " LIMIT 1", params).fetchone()
+        if row is not None:
+            return row
+    return None
 
 
 def next_pending(
@@ -181,14 +209,14 @@ def pending_count(conn, service: str, *,
                   require_provider_id: bool = False) -> int:
     """How many items still need this provider looked at."""
     total = 0
+    key = str(service).strip().lower()
     for entity_type in entity_types:
-        total += int(conn.execute(
-            "SELECT COUNT(*) FROM ("
-            + _pending_sql(entity_type, retry_statuses, require_provider_id,
-                           str(service).strip().lower()) + ")",
-            {"entity": entity_type, "service": str(service).strip().lower(),
-             "window": f"-{max(0, int(retry_after_days))} days"},
-        ).fetchone()[0])
+        params = _params(entity_type, key, retry_after_days)
+        for phase in _PHASES:
+            total += int(conn.execute(
+                "SELECT COUNT(*) FROM ("
+                + _pending_sql(entity_type, retry_statuses, require_provider_id,
+                               key, phase) + ")", params).fetchone()[0])
     return total
 
 

@@ -288,6 +288,46 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         logger.debug("library history record failed: %s", e)
 
 
+def registered_lib2_file_id(context: Dict[str, Any]) -> Optional[int]:
+    """The live Library-v2 file row for this import's final path, if any."""
+    path = context.get("_final_processed_path") or context.get("_final_path")
+    if not path:
+        return None
+    conn = None
+    try:
+        conn = get_database()._get_connection()
+        row = conn.execute(
+            "SELECT id FROM lib2_track_files WHERE path=?"
+            " AND COALESCE(file_state,'active')='active' LIMIT 1", (str(path),),
+        ).fetchone()
+        return int(row[0]) if row else None
+    except Exception as e:
+        logger.debug("library v2 file lookup failed: %s", e)
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def require_library_v2_registration(context: Dict[str, Any]) -> None:
+    """An import may only complete once its file exists in the catalogue.
+
+    §37/LV2-PAUD-03 made registration part of success. The gate belongs after
+    *every* writer that can satisfy it, not after only the first one: the
+    autolink returns None for a file whose identity it cannot derive, while
+    ``record_soulsync_library_entry`` derives the same identity from
+    ``artist_context`` and writes the same rows. So the question this asks is
+    what the catalogue holds, not what one writer returned.
+    """
+    if registered_lib2_file_id(context) is None:
+        raise RuntimeError(
+            "The file was written, but Library v2 did not create a file row"
+        )
+
+
 def record_download_provenance(context: Dict[str, Any],
                                require_library: bool = False) -> Optional[int]:
     """Record provenance and register the imported file in Library v2.
@@ -421,9 +461,7 @@ def record_download_provenance(context: Dict[str, Any],
             ) from e
         logger.debug("library v2 autolink skipped: %s", e)
     if require_library and linked_lib2_file_id is None:
-        raise RuntimeError(
-            "The file was written, but Library v2 did not create a file row"
-        )
+        require_library_v2_registration(context)
 
     # The canonical tracklist deliberately comes from one provider, but a
     # confirmed album can carry several provider release IDs. Reconcile those
@@ -521,7 +559,10 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             album_info=album_info,
             default=track_info.get("name", "") or original_search.get("title", ""),
         )
-        track_number = (track_info.get("track_number") or (album_info.get("track_number") if isinstance(album_info, dict) else None)) or 1
+        # No `or 1` fallback: the writer defaults a *new* row to 1 itself, and a
+        # guessed 1 handed to an existing row would overwrite its real number.
+        track_number = track_info.get("track_number") or (
+            album_info.get("track_number") if isinstance(album_info, dict) else None)
         duration_ms = track_info.get("duration_ms", 0) or 0
 
         year = None

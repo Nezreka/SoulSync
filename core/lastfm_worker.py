@@ -519,8 +519,9 @@ class LastFMWorker:
         """Record the outcome of an attempt in the provider ledger.
 
         Replaces the legacy `<service>_match_status`/`_last_attempted` column
-        pair. `not_found` becomes due again after the retry window; `error` does
-        not, so a provider outage cannot turn into an infinite retry loop.
+        pair. Both `not_found` and `error` become due again after the retry
+        window; a source-wide outage is handled by the worker's own backoff
+        before an attempt is ever recorded, so it cannot become a tight loop.
         """
         conn = None
         try:

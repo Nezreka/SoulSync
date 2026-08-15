@@ -27,6 +27,16 @@ _OWNED_TRACK = ("EXISTS (SELECT 1 FROM lib2_track_files owned_f "
                 "AND TRIM(owned_f.path)<>'' "
                 "AND COALESCE(owned_f.file_state,'active')='active')")
 
+# An artist the user owns is one behind an owned track — the same evidence, one
+# join further out. Either credit counts: the album's primary artist, and a
+# featured credit on the track, are both in the library.
+_OWNED_ARTIST = (
+    "(EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id"
+    f"         WHERE al.primary_artist_id = a.id AND {_OWNED_TRACK})"
+    " OR EXISTS (SELECT 1 FROM lib2_tracks t"
+    "             JOIN lib2_track_artists ta ON ta.track_id = t.id"
+    f"            WHERE ta.artist_id = a.id AND {_OWNED_TRACK}))")
+
 def _as_datetime(value):
     """A timestamp column as a datetime, or None. v2 stores ISO strings."""
     if not value:
@@ -6129,15 +6139,25 @@ class MusicDatabase:
             for service in ('deezer', 'itunes', 'audiodb', 'genius', 'tidal', 'qobuz'):
                 matched_expr[service] = (
                     f"json_extract(external_ids, '$.{service}') IS NOT NULL")
-            cursor.execute("SELECT COUNT(*) FROM lib2_artists")
-            total_artists = (cursor.fetchone() or [0])[0]
-            for service, expr in matched_expr.items():
-                try:
-                    cursor.execute(f"SELECT COUNT(*) FROM lib2_artists WHERE {expr}")
-                    matched = (cursor.fetchone() or [0])[0]
-                    enrichment[service] = round(matched / total_artists * 100, 1) if total_artists else 0
-                except Exception:
-                    enrichment[service] = 0
+            # Owned artists only, like every other metric here. v2 also holds
+            # provider-only, discography and watchlist artists that legacy's
+            # `artists` never did; counting those diluted all nine percentages,
+            # so the same library reported worse coverage after the migration.
+            services = list(matched_expr.items())
+            try:
+                cursor.execute(
+                    "SELECT COUNT(*), "
+                    + ", ".join(f"SUM(CASE WHEN {expr} THEN 1 ELSE 0 END)"
+                                for _service, expr in services)
+                    + f" FROM lib2_artists a WHERE {_OWNED_ARTIST}")
+                counts = cursor.fetchone() or []
+            except Exception:
+                counts = []
+            total_artists = int(counts[0] or 0) if counts else 0
+            for index, (service, _expr) in enumerate(services, start=1):
+                matched = int(counts[index] or 0) if counts else 0
+                enrichment[service] = (round(matched / total_artists * 100, 1)
+                                       if total_artists else 0)
 
             return {
                 'total_tracks': total_tracks,

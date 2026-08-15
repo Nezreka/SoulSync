@@ -68,6 +68,12 @@ def provider_id_conflict(conn, service: str, provider_id: Any, artist_id: Any,
     provider identities legitimately shares an id, and rejecting that would block
     ordinary re-matching. Only a different artist holding it is the corruption
     this guards against.
+
+    Narrowed in SQL first. Twelve workers call this on every artist match, and
+    reading the whole table to filter in Python made each match cost a scan plus
+    a materialized ``external_ids`` per artist. The predicate is a superset of
+    what ``_ids`` accepts — a promoted column and the JSON both count as a hit —
+    so ``_ids`` still decides, now over a handful of rows instead of all of them.
     """
     service = normalize_provider_name(service)
     if not service:
@@ -75,10 +81,19 @@ def provider_id_conflict(conn, service: str, provider_id: Any, artist_id: Any,
     wanted = str(provider_id or "").strip()
     if not wanted:
         return None
+    column = _PROMOTED.get(service)
+    # The JSON path is bound, not interpolated — the service name arrives from a
+    # caller. CAST/TRIM mirrors `_ids`' own `str(...).strip()`, without which a
+    # JSON *number* would never compare equal to the text id passed in.
+    holds = "TRIM(CAST(json_extract(external_ids, ?) AS TEXT)) = ?"
+    params: List[Any] = [artist_id, f"$.{service}", wanted]
+    if column:
+        holds = f"{column} = ? OR {holds}"
+        params.insert(1, wanted)
     try:
         rows = conn.execute(
             "SELECT id, name, spotify_id, musicbrainz_id, external_ids "
-            "FROM lib2_artists WHERE id <> ?", (artist_id,)).fetchall()
+            f"FROM lib2_artists WHERE id <> ? AND ({holds})", params).fetchall()
     except Exception as exc:
         logger.debug("provider_id_conflict(%s=%s) failed: %s", service, wanted, exc)
         return None

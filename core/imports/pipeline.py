@@ -54,6 +54,7 @@ from core.imports.side_effects import (
     record_download_provenance,
     record_library_history_download,
     record_soulsync_library_entry,
+    require_library_v2_registration,
 )
 from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
@@ -2093,10 +2094,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
-        record_download_provenance(context, True)
+        # Both catalogue writers run before the gate. The autolink cannot derive
+        # an identity for every file; the standalone writer derives it from
+        # `artist_context` instead, so failing on the first one's None reported a
+        # correctly imported file as failed and skipped the callbacks below.
+        record_download_provenance(context)
+        record_soulsync_library_entry(context, artist_context, album_info)
+        require_library_v2_registration(context)
         emit_track_downloaded(context, automation_engine)
         record_library_history_download(context)
-        record_soulsync_library_entry(context, artist_context, album_info)
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
@@ -2514,14 +2520,21 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                             _record_replaced_file_path(context, old_path)
                             _retire_lib2_path_after_redownload(old_path, expected_final_path)
                             logger.info(f"[Redownload] Deleted old file: {old_path}")
-                    if lib_track_id and expected_final_path:
+                    # Guarded on `old_path`, because that is what the repoint
+                    # matches on — the row is keyed by the path we stored, not
+                    # by the track id the old legacy UPDATE used. Report the
+                    # rows actually moved: zero is normal once the delete branch
+                    # above has retired the row, but it is not "updated".
+                    if old_path and expected_final_path:
                         _rd_db = get_database()
                         _rd_conn = _rd_db._get_connection()
                         from core.library2.track_files import repoint_file_path
-                        repoint_file_path(_rd_conn, old_path, expected_final_path)
+                        _rd_moved = repoint_file_path(_rd_conn, old_path, expected_final_path)
                         _rd_conn.commit()
                         _rd_conn.close()
-                        logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
+                        logger.info(
+                            f"[Redownload] Repointed {_rd_moved} lib2 file row(s) "
+                            f"for track {lib_track_id}")
                 except Exception as e:
                     logger.error(f"[Redownload] Post-processing hook error: {e}")
 

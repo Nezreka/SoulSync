@@ -110,6 +110,26 @@ def ensure_provider_attempt_schema(cursor: Any) -> None:
     cursor.execute(PROVIDER_ATTEMPTS_DDL)
     for statement in _INDEXES:
         cursor.execute(statement)
+    # A deleted entity must not keep its ledger rows. `progress_breakdown` counts
+    # them as processed against a live COUNT(*) of the entity table, so orphans
+    # pin the bar at a clamped 100% while work is still outstanding. The mapping
+    # table has had this trigger since it was added; this one never did, so the
+    # backlog it already accumulated is cleared once, when the trigger appears.
+    for entity_type, table in _TABLES.items():
+        trigger = f"trg_{table}_delete_provider_attempts"
+        if not _table_exists(cursor, table) or cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",
+                (trigger,)).fetchone():
+            continue
+        cursor.execute(
+            f"""CREATE TRIGGER {trigger} AFTER DELETE ON {table}
+                BEGIN
+                    DELETE FROM lib2_provider_attempts
+                     WHERE entity_type='{entity_type}' AND entity_id=OLD.id;
+                END""")
+        cursor.execute(
+            "DELETE FROM lib2_provider_attempts WHERE entity_type=? AND "
+            f"entity_id NOT IN (SELECT id FROM {table})", (entity_type,))
 
 
 def record_attempt(conn, *, entity_type: str, entity_id: int, service: str,

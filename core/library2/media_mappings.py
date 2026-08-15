@@ -126,7 +126,12 @@ def mapping_sources(cursor: Any, entity_type: str, entity_ids: Iterable[int]
 def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                              batch_size: int = 500, on_batch=None,
                              should_stop=None) -> int:
-    """Converge real media-server stamps from the old one-slot columns."""
+    """Converge real media-server stamps from the old one-slot columns.
+
+    The batch predicate has to select exactly what ``upsert_mapping`` will write.
+    It is the loop's only exit condition, so a row the SELECT keeps returning and
+    the write keeps skipping — a blank ``server_id`` was one — spins here forever.
+    """
     changed = 0
     for entity_type, table in ENTITY_TABLES.items():
         while not (should_stop and should_stop()):
@@ -134,6 +139,7 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                 f"""SELECT id,server_source,server_id FROM {table} old
                      WHERE old.server_source IN ('plex','jellyfin','navidrome')
                        AND old.server_id IS NOT NULL
+                       AND TRIM(old.server_id) <> ''
                        AND NOT EXISTS (
                            SELECT 1 FROM lib2_media_server_mappings m
                             WHERE m.entity_type=? AND m.entity_id=old.id

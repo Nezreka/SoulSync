@@ -105,10 +105,12 @@ def test_enrichment_coverage_reads_columns_and_external_ids(db):
     """Only Spotify and MusicBrainz are promoted to columns in v2; the rest of
     the services this page reports on live in ``external_ids``, and Last.fm in
     the enrichment payload."""
-    _artist(db, 'Fully Matched', spotify_id='SP1', musicbrainz_id='MB1',
-            external_ids={'deezer': 'DZ1', 'itunes': 'IT1'},
-            enrichment={'lastfm': {'url': 'https://last.fm/x'}})
-    _artist(db, 'Unmatched')
+    matched = _artist(db, 'Fully Matched', spotify_id='SP1', musicbrainz_id='MB1',
+                      external_ids={'deezer': 'DZ1', 'itunes': 'IT1'},
+                      enrichment={'lastfm': {'url': 'https://last.fm/x'}})
+    unmatched = _artist(db, 'Unmatched')
+    _track(db, matched, title='Owned A', path='/m/a.flac')
+    _track(db, unmatched, title='Owned B', path='/m/b.flac')
 
     coverage = db.get_library_health()['enrichment_coverage']
 
@@ -154,3 +156,21 @@ def test_statistics_count_an_artist_name_once(db):
     _track(db, second, path='/m/b.flac')
 
     assert db.get_statistics()['artists'] == 1
+
+
+def test_enrichment_coverage_denominator_is_the_owned_library(db):
+    """A tracked artist's discography must not dilute the percentages.
+
+    v2 keeps provider-only, discography and watchlist artists in the same table
+    legacy's `artists` never held. Counting them made the same library report
+    worse coverage after the migration than before it.
+    """
+    owned = _artist(db, 'Owned', spotify_id='SP1')
+    _track(db, owned, title='Owned', path='/m/owned.flac')
+    for index in range(3):
+        listed = _artist(db, f'Merely Listed {index}')
+        _track(db, listed, title='Listed', origin='discography')
+
+    health = db.get_library_health()
+
+    assert health['enrichment_coverage']['spotify'] == 100.0
