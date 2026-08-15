@@ -13,6 +13,7 @@ This client provides:
 import sys
 import os
 import re
+import copy
 import time
 import platform
 import uuid
@@ -34,6 +35,9 @@ from core.spotify_client import Track as SpotifyTrack
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import SearchResult, TrackResult, AlbumResult, DownloadStatus
+from core.quality.model import AudioQuality, rank_candidate
+from core.quality.source_map import quality_from_youtube, quality_tier_for_source
+from core.quality.selection import quality_meets_profile
 
 logger = get_logger("youtube_client")
 
@@ -50,6 +54,353 @@ def _resolve_cookie_opts() -> dict:
     cookiefile = config_manager.get('youtube.cookies_file', '')
     exists = bool(cookiefile) and os.path.exists(cookiefile)
     return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
+
+
+_TRANSCODE_CODECS = frozenset({'mp3', 'opus', 'aac', 'm4a', 'ogg'})
+_EXTRACTED_AUDIO_EXTS = ('.opus', '.m4a', '.mp3', '.ogg', '.aac', '.wav', '.flac')
+_DOWNLOADED_AUDIO_EXTS = _EXTRACTED_AUDIO_EXTS + ('.webm',)
+
+# Walk-down chain — keys must match ``_SOURCE_TIER_LADDERS['youtube']``.
+_YOUTUBE_QUALITY_MAP = {
+    'opus_256': AudioQuality('opus', bitrate=256),
+    'aac_256': AudioQuality('aac', bitrate=256),
+    'opus_160': AudioQuality('opus', bitrate=160),
+    'aac_128': AudioQuality('aac', bitrate=128),
+}
+_YOUTUBE_QUALITY_CHAIN = list(_YOUTUBE_QUALITY_MAP)
+# Player-response fetches per track search. Soulseek/Qobuz already have
+# per-hit quality; YouTube does not. 3 is enough to find a better encode
+# of the same recording without walking a 10–20 result search.
+_YOUTUBE_PROBE_BUDGET = 3
+# Quality may beat the top match only when confidence is this close.
+# 0.92 vs 0.88 can take a better encode; 0.92 vs 0.62 cannot.
+_YOUTUBE_QUALITY_CONFIDENCE_MARGIN = 0.05
+
+
+def _youtube_match_confidence(candidate) -> float:
+    return float(
+        getattr(candidate, 'confidence', None)
+        or getattr(candidate, '_match_confidence', None)
+        or 0
+    )
+
+
+def youtube_quality_rank_band(
+    candidates,
+    *,
+    margin: float = _YOUTUBE_QUALITY_CONFIDENCE_MARGIN,
+):
+    """Keep match-passing hits close enough to the top score for quality ranking.
+
+    Distant survivors (covers, similar titles) stay out of the itag pick so a
+    256 kbps wrong recording cannot beat a 0.92 match at 160.
+    """
+    rows = list(candidates or [])
+    if not rows:
+        return []
+    top = max(_youtube_match_confidence(c) for c in rows)
+    floor = top - margin
+    return [c for c in rows if _youtube_match_confidence(c) >= floor]
+
+# yt-dlp format strings: requested rung first, then the rest of the ladder
+# (same walk-down as Qobuz/Deezer), then any audio / muxed.
+_YOUTUBE_TIER_SELECTORS = {
+    'opus_256': (
+        'bestaudio[acodec^=opus][abr>=192]/'
+        'bestaudio[ext=m4a][abr>=192]/'
+        'bestaudio[acodec^=opus]/'
+        'bestaudio[ext=m4a]/'
+        'bestaudio/best'
+    ),
+    'aac_256': (
+        'bestaudio[ext=m4a][abr>=192]/'
+        'bestaudio[acodec^=opus][abr>=192]/'
+        'bestaudio[ext=m4a]/'
+        'bestaudio[acodec^=opus]/'
+        'bestaudio/best'
+    ),
+    'opus_160': (
+        'bestaudio[acodec^=opus][abr<=180]/'
+        'bestaudio[ext=m4a][abr<=160]/'
+        'bestaudio[acodec^=opus]/'
+        'bestaudio/best'
+    ),
+    'aac_128': (
+        'bestaudio[ext=m4a][abr<=160]/'
+        'bestaudio[acodec^=opus][abr<=180]/'
+        'bestaudio[ext=m4a]/'
+        'bestaudio/best'
+    ),
+}
+
+
+def _youtube_transcode_settings() -> tuple:
+    """Live YouTube re-encode settings. Never raises — missing config is MP3 320."""
+    try:
+        from config.settings import config_manager
+        transcode = bool(config_manager.get('youtube.transcode', True))
+        codec = str(config_manager.get('youtube.transcode_codec', 'mp3') or 'mp3')
+        bitrate = str(config_manager.get('youtube.transcode_bitrate', '320') or '320')
+        return transcode, codec, bitrate
+    except Exception:  # noqa: BLE001 - download must not depend on settings I/O
+        return True, 'mp3', '320'
+
+
+def youtube_transcode_output_quality() -> Optional[AudioQuality]:
+    """AudioQuality of the file after re-encode, or ``None`` when remuxing.
+
+    Search/import rank against this when re-encode is on, so an MP3-only
+    profile can accept YouTube. The original stream is still fetched at
+    best effort (see ``youtube_requested_tier``); this is the converted
+    output, not a claim that YouTube served MP3.
+    """
+    transcode, codec, bitrate = _youtube_transcode_settings()
+    if not transcode:
+        return None
+    pref = (codec or 'mp3').lower()
+    if pref == 'm4a':
+        pref = 'aac'
+    if pref not in _TRANSCODE_CODECS:
+        pref = 'mp3'
+    try:
+        kbps = int(bitrate)
+    except (TypeError, ValueError):
+        kbps = 320
+    if kbps <= 0:
+        kbps = 320
+    fmt = 'aac' if pref == 'm4a' else pref
+    if fmt not in ('mp3', 'opus', 'aac', 'ogg'):
+        fmt = 'mp3'
+    return AudioQuality(format=fmt, bitrate=kbps)
+
+
+def youtube_claimed_quality(audio_format: Optional[dict] = None) -> AudioQuality:
+    """Quality used for ranking a YouTube hit.
+
+    Re-encode on → converted output (so the profile sees MP3/AAC/Opus as
+    configured). Re-encode off → the original stream claim.
+    """
+    output = youtube_transcode_output_quality()
+    if output is not None:
+        return output
+    return quality_from_youtube(audio_format)
+
+
+def youtube_requested_tier() -> str:
+    """YouTube rung to fetch. Re-encode always takes the best original stream
+    (``opus_256``, walking down if missing). Otherwise the quality profile
+    picks the lowest satisfying rung, same as Tidal/Deezer."""
+    try:
+        if youtube_transcode_output_quality() is not None:
+            return 'opus_256'
+        return quality_tier_for_source('youtube', default='opus_256') or 'opus_256'
+    except Exception:  # noqa: BLE001 - missing DB / profile must not break download
+        return 'opus_256'
+
+
+def youtube_audio_format_selector(tier: Optional[str] = None) -> str:
+    """yt-dlp format string for a YouTube ladder tier (walk-down, then muxed)."""
+    if tier is None:
+        key = youtube_requested_tier()
+    else:
+        key = str(tier).strip().lower()
+    return _YOUTUBE_TIER_SELECTORS.get(key, 'bestaudio/best')
+
+
+def _youtube_format_matches_tier(audio_format: dict, want: AudioQuality) -> bool:
+    """True when *audio_format* is this ladder rung, not a higher one."""
+    got = quality_from_youtube(audio_format)
+    if got.format != want.format:
+        return False
+    bitrate = got.bitrate or 0
+    want_br = want.bitrate or 0
+    if want_br >= 224:
+        return bitrate >= 192
+    return 96 <= bitrate < 192
+
+
+def pick_youtube_audio_format(
+    formats: Optional[List[Dict]],
+    tier: Optional[str] = None,
+) -> Optional[Dict]:
+    """Audio-only itag for *tier*, walking down the YouTube ladder if missing."""
+    if not formats:
+        return None
+    audio_formats = [
+        f for f in formats
+        if f.get('vcodec') == 'none' and f.get('acodec') != 'none'
+    ]
+    if not audio_formats:
+        return None
+
+    key = (tier or youtube_requested_tier() or '').strip().lower()
+    try:
+        start = _YOUTUBE_QUALITY_CHAIN.index(key)
+    except ValueError:
+        start = 0
+
+    def _abr(fmt):
+        return fmt.get('abr') or fmt.get('tbr') or 0
+
+    for name in _YOUTUBE_QUALITY_CHAIN[start:]:
+        want = _YOUTUBE_QUALITY_MAP[name]
+        matching = [f for f in audio_formats if _youtube_format_matches_tier(f, want)]
+        if matching:
+            matching.sort(key=_abr, reverse=True)
+            return matching[0]
+
+    audio_formats.sort(key=_abr, reverse=True)
+    return audio_formats[0]
+
+
+def _claimed_is_youtube_ceiling(claimed: Optional[AudioQuality]) -> bool:
+    """True when this claim is the top YouTube ladder rung (Premium ~256)."""
+    if claimed is None:
+        return False
+    fmt = (claimed.format or '').lower()
+    return fmt in ('opus', 'aac') and (claimed.bitrate or 0) >= 192
+
+
+def _youtube_can_satisfy_targets(targets) -> bool:
+    """False when no YouTube rung can meet the profile (e.g. FLAC-only)."""
+    if not targets:
+        return True
+    return any(quality_meets_profile(aq, targets) for aq in _YOUTUBE_QUALITY_MAP.values())
+
+
+def _should_stop_youtube_probes(claimed, targets, *, seen_passing: bool) -> Tuple[bool, bool]:
+    """Whether further player fetches can change ranking.
+
+    Returns ``(stop, seen_passing)``. Re-encode is the same file for every
+    hit. A 256 claim is the YouTube ceiling. FLAC-only profiles cannot be
+    satisfied by more itags. Otherwise: hunt until something meets the
+    profile, then one look-ahead for a better encode of the same recording.
+    """
+    if youtube_transcode_output_quality() is not None:
+        return True, seen_passing
+    if _claimed_is_youtube_ceiling(claimed):
+        return True, True
+    if targets is None:
+        if seen_passing:
+            return True, True
+        return False, True
+    if not _youtube_can_satisfy_targets(targets):
+        return True, seen_passing
+    if quality_meets_profile(claimed, targets):
+        best = _YOUTUBE_QUALITY_MAP['opus_256']
+        claimed_idx, _ = rank_candidate(claimed, targets)
+        best_idx, _ = rank_candidate(best, targets)
+        if best_idx < claimed_idx:
+            return False, True
+        if seen_passing:
+            return True, True
+        return False, True
+    return False, seen_passing
+
+
+def youtube_audio_postprocessor(
+    transcode: bool = False,
+    codec: str = 'mp3',
+    bitrate: str = '320',
+) -> dict:
+    """yt-dlp FFmpegExtractAudio postprocessor.
+
+    Default is a remux (``preferredcodec='best'``) so Opus/AAC stay in their
+    original codec — YouTube audio is already lossy, and re-encoding to
+    MP3 320 does not add quality. When *transcode* is on, encode to the
+    requested codec/bitrate for player compatibility.
+    """
+    if transcode:
+        pref = (codec or 'mp3').lower()
+        if pref == 'm4a':
+            pref = 'aac'
+        if pref not in _TRANSCODE_CODECS:
+            pref = 'mp3'
+        try:
+            kbps = int(bitrate)
+        except (TypeError, ValueError):
+            kbps = 320
+        if kbps <= 0:
+            kbps = 320
+        return {
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': pref,
+            'preferredquality': str(kbps),
+        }
+    return {
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'best',
+    }
+
+
+def youtube_audio_postprocessor_from_config() -> dict:
+    """Build the audio extract postprocessor from live YouTube settings."""
+    transcode, codec, bitrate = _youtube_transcode_settings()
+    return youtube_audio_postprocessor(transcode=transcode, codec=codec, bitrate=bitrate)
+
+
+def resolve_downloaded_audio_path(ydl, info) -> Optional[str]:
+    """Final on-disk audio path after yt-dlp + FFmpegExtractAudio.
+
+    ``prepare_filename`` uses the container extension from the downloaded
+    stream (often ``.webm``/``.m4a``). After extract the real file is
+    ``.opus``/``.m4a``/``.mp3``. Prefer filepath from the info dict, then
+    the prepared name, then a sibling with an audio suffix.
+    """
+    candidates = []
+    if isinstance(info, dict):
+        for key in ('filepath', '_filename'):
+            val = info.get(key)
+            if val:
+                candidates.append(Path(val))
+        requested = info.get('requested_downloads') or []
+        if isinstance(requested, list) and requested:
+            first = requested[0]
+            fp = first.get('filepath') if isinstance(first, dict) else None
+            if fp:
+                candidates.append(Path(fp))
+    try:
+        prepared = Path(ydl.prepare_filename(info))
+        candidates.append(prepared)
+        for ext in _DOWNLOADED_AUDIO_EXTS:
+            candidates.append(prepared.with_suffix(ext))
+    except Exception:
+        pass
+    seen = set()
+    existing = []
+    for path in candidates:
+        resolved = str(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if path.exists() and path.is_file():
+            existing.append(path)
+    extracted = [p for p in existing if p.suffix.lower() in _EXTRACTED_AUDIO_EXTS]
+    if extracted:
+        return str(extracted[0])
+    if existing:
+        return str(existing[0])
+    return None
+
+
+def discard_leftover_youtube_containers(audio_path: Optional[str]) -> None:
+    """Unlink DASH/muxed leftovers beside extracted audio (``.webm``/``.mp4``/``.mkv``).
+
+    ``FFmpegExtractAudio`` usually deletes the source container; when it does
+    not, the converted file is what we import. Never delete the chosen audio.
+    """
+    if not audio_path:
+        return
+    chosen = Path(audio_path)
+    if not chosen.is_file() or chosen.suffix.lower() not in _EXTRACTED_AUDIO_EXTS:
+        return
+    for ext in ('.webm', '.mp4', '.mkv'):
+        leftover = chosen.with_suffix(ext)
+        try:
+            if leftover.is_file() and leftover.resolve() != chosen.resolve():
+                leftover.unlink()
+        except OSError:
+            pass
 
 
 @dataclass
@@ -224,11 +575,7 @@ class YouTubeClient(DownloadSourcePlugin):
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '320',
-            }],
+            'postprocessors': [youtube_audio_postprocessor_from_config()],
             'progress_hooks': [self._progress_hook],  # Track download progress
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'age_limit': None,  # Don't skip age-restricted
@@ -337,6 +684,8 @@ class YouTubeClient(DownloadSourcePlugin):
             logger.info(f"YouTube download path updated to: {self.download_path}")
 
         logger.info(f"YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if _cookie_opts else 'disabled'})")
+        self._yt_probe_quality = {}
+        self._yt_probe_info = {}
 
     async def check_connection(self) -> bool:
         """
@@ -473,11 +822,11 @@ class YouTubeClient(DownloadSourcePlugin):
                     self.progress_callback(self.current_download_progress)
 
             elif status == 'finished':
-                # Download finished — ffmpeg now converts to MP3. The
-                # engine.worker thread flips to 'Completed, Succeeded'
-                # once _download_sync returns; this just bumps progress
-                # to 95% so the UI doesn't sit at 99.9% during the
-                # ffmpeg post-process.
+                # Download finished — ffmpeg now remuxes (or optionally
+                # transcodes). The engine.worker thread flips to
+                # 'Completed, Succeeded' once _download_sync returns;
+                # this just bumps progress to 95% so the UI doesn't sit
+                # at 99.9% during the ffmpeg post-process.
                 self._engine.update_record('youtube', self.current_download_id, {
                     'progress': 95.0,
                 })
@@ -719,28 +1068,22 @@ class YouTubeClient(DownloadSourcePlugin):
         if best_audio and 'filesize' in best_audio:
             file_size = best_audio.get('filesize', 0) or best_audio.get('filesize_approx', 0) or 0
 
-        # Extract bitrate
-        bitrate = None
-        if best_audio:
-            bitrate = int(best_audio.get('abr', best_audio.get('tbr', 0)))
-
         # Duration in milliseconds (Soulseek uses ms)
         duration_ms = int(entry.get('duration', 0) * 1000) if entry.get('duration') else None
-
-        # Quality string
-        quality_str = self._format_quality_string(best_audio) if best_audio else "unknown"
 
         # Video URL as filename (we'll use this to identify the track later)
         video_id = entry.get('id', '')
         filename = f"{video_id}||{title}"  # Store video_id and title for later download
 
+        claimed = youtube_claimed_quality(best_audio)
+
         track_result = TrackResult(
             username="youtube",  # YouTube doesn't have users - use constant
             filename=filename,
             size=file_size,
-            bitrate=bitrate,
+            bitrate=claimed.bitrate,
             duration=duration_ms,
-            quality="mp3",  # We always convert to MP3
+            quality=claimed.format,
             free_upload_slots=999,  # YouTube always available
             upload_speed=999999,  # High speed indicator
             queue_length=0,  # No queue for YouTube
@@ -749,7 +1092,8 @@ class YouTubeClient(DownloadSourcePlugin):
             album=None,  # YouTube videos don't have album info (will be added from Spotify)
             track_number=None
         )
-        
+        track_result.set_quality(claimed)
+
         # Add thumbnail for frontend (surgical addition)
         # In fast mode (extract_flat), 'thumbnail' might be missing, but 'thumbnails' list exists
         thumbnail = entry.get('thumbnail')
@@ -758,9 +1102,45 @@ class YouTubeClient(DownloadSourcePlugin):
             thumbs = entry.get('thumbnails')
             if isinstance(thumbs, list) and thumbs:
                 thumbnail = thumbs[-1].get('url')
-        
+
         track_result.thumbnail = thumbnail
 
+        return track_result
+
+    def _ytmusic_hit_to_track_result(self, hit: dict) -> TrackResult:
+        """Map a catalog song hit onto TrackResult. Structured artist/title/album.
+
+        ``filename`` stays ``videoId||title`` so ``download()`` is unchanged.
+        Missing format metadata claims typical Opus 160 (itag 251), or the
+        re-encode output when that setting is on.
+        """
+        claimed = youtube_claimed_quality(None)
+        video_id = str(hit.get("id") or "")
+        title = str(hit.get("name") or "")
+        artists = hit.get("artists") or []
+        artist = artists[0] if artists else "Unknown Artist"
+        album = str(hit.get("album") or "").strip() or None
+        duration_ms = hit.get("duration_ms") or None
+
+        track_result = TrackResult(
+            username="youtube",
+            filename=f"{video_id}||{title}",
+            size=0,
+            bitrate=claimed.bitrate,
+            duration=duration_ms,
+            quality=claimed.format,
+            free_upload_slots=999,
+            upload_speed=999999,
+            queue_length=0,
+            artist=artist,
+            title=title,
+            album=album,
+            track_number=None,
+        )
+        track_result.set_quality(claimed)
+        thumbnail = str(hit.get("thumbnail") or "").strip() or None
+        if thumbnail:
+            track_result.thumbnail = thumbnail
         return track_result
 
     async def search_videos(self, query: str, max_results: int = 20) -> List[YouTubeSearchResult]:
@@ -844,6 +1224,17 @@ class YouTubeClient(DownloadSourcePlugin):
         logger.info(f"Searching YouTube for: {query}")
 
         try:
+            def _catalog_search():
+                from core.youtube_cookies import ytmusic_auth_from_config
+                from core.youtube_music_meta import search_ytmusic_songs
+                return search_ytmusic_songs(query, auth=ytmusic_auth_from_config())
+
+            hits = await run_blocking(_catalog_search)
+            if hits:
+                track_results = [self._ytmusic_hit_to_track_result(hit) for hit in hits]
+                logger.info("Found %d YouTube Music catalog tracks", len(track_results))
+                return (track_results, [])
+
             # Run yt-dlp in executor to avoid blocking event loop
             def _search():
                 ydl_opts = {
@@ -899,20 +1290,182 @@ class YouTubeClient(DownloadSourcePlugin):
             self._record_failure(e, f"search for {query!r}")
             return ([], [])
 
-    def _get_best_audio_format(self, formats: List[Dict]) -> Optional[Dict]:
-        """Extract best audio format from available formats"""
-        if not formats:
+    def _get_best_audio_format(
+        self, formats: List[Dict], tier: Optional[str] = None
+    ) -> Optional[Dict]:
+        """Audio-only itag for the profile's YouTube ladder tier.
+
+        Walks down the same rungs as Qobuz/Deezer when the requested itag is
+        missing (Premium 256 → typical 160/128). Last resort is highest-bitrate
+        audio so ranking can still stamp an honest claim.
+        """
+        return pick_youtube_audio_format(formats, tier)
+
+    _PROBE_INFO_TTL_S = 90.0
+
+    @staticmethod
+    def _video_id_from_candidate(candidate) -> str:
+        filename = getattr(candidate, 'filename', None) or ''
+        if '||' not in filename:
+            return ''
+        return filename.split('||', 1)[0].strip()
+
+    @staticmethod
+    def _video_id_from_url(url: str) -> str:
+        if not url:
+            return ''
+        match = re.search(r'(?:v=|/shorts/|youtu\.be/)([\w-]{11})', url)
+        return match.group(1) if match else ''
+
+    def _probe_quality_cache(self) -> dict:
+        cache = getattr(self, '_yt_probe_quality', None)
+        if cache is None:
+            self._yt_probe_quality = cache = {}
+        return cache
+
+    def _probe_info_cache(self) -> dict:
+        cache = getattr(self, '_yt_probe_info', None)
+        if cache is None:
+            self._yt_probe_info = cache = {}
+        return cache
+
+    def _store_probe(self, video_id: str, claimed, info: Optional[dict]) -> None:
+        if not video_id or claimed is None:
+            return
+        self._probe_quality_cache()[video_id] = (time.monotonic(), claimed)
+        if info:
+            self._probe_info_cache()[video_id] = (time.monotonic(), info)
+
+    def _cached_quality(self, video_id: str):
+        packed = self._probe_quality_cache().get(video_id)
+        if packed is None:
             return None
-
-        # Filter for audio-only formats
-        audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
-
-        if not audio_formats:
+        if not isinstance(packed, tuple) or len(packed) != 2:
+            self._probe_quality_cache().pop(video_id, None)
             return None
+        stored_at, claimed = packed
+        if (time.monotonic() - stored_at) > self._PROBE_INFO_TTL_S:
+            self._probe_quality_cache().pop(video_id, None)
+            return None
+        return claimed
 
-        # Sort by audio bitrate (tbr = total bitrate, abr = audio bitrate)
-        audio_formats.sort(key=lambda f: f.get('abr', f.get('tbr', 0)), reverse=True)
-        return audio_formats[0]
+    def _take_fresh_probe_info(self, video_id: str) -> Optional[dict]:
+        """Pop a recent player response so download can skip a second extract."""
+        if not video_id:
+            return None
+        cache = getattr(self, '_yt_probe_info', None) or {}
+        packed = cache.pop(video_id, None)
+        if not packed:
+            return None
+        stored_at, info = packed
+        if (time.monotonic() - stored_at) > self._PROBE_INFO_TTL_S:
+            return None
+        return info
+
+    def _stamp_probed_quality(self, candidate, claimed) -> None:
+        candidate.set_quality(claimed)
+        candidate._youtube_quality_probed = True
+
+    def refresh_claimed_quality(self, candidates, *, limit: int = _YOUTUBE_PROBE_BUDGET, targets=None) -> None:
+        """Stamp ranking quality on YouTube matches before profile ranking.
+
+        Search uses extract_flat / catalog metadata, so hits start as typical
+        Opus 160 (or the re-encode output when that setting is on). Player
+        fetches are capped (default 3) and stop early when more itags cannot
+        change the pick — same idea as Soulseek ranking every match, without
+        walking a full search. Premium itags are per-video: remux never copies
+        one video's formats onto another. Re-encode on may share the converted
+        claim. Probe failure leaves the existing claim. Download reuses a
+        fresh player response so ranking and fetch share one extract.
+        """
+        youtube = [
+            c for c in (candidates or [])
+            if getattr(c, 'username', None) == 'youtube'
+        ]
+        if not youtube:
+            return
+
+        def _confidence(c):
+            return getattr(c, 'confidence', None) or getattr(c, '_match_confidence', None) or 0
+
+        youtube.sort(key=_confidence, reverse=True)
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'noplaylist': True,
+        }
+        ydl_opts.update(_resolve_cookie_opts())
+
+        max_network = max(0, int(limit))
+        network = 0
+        batch_claim = None
+        seen_passing = False
+
+        for candidate in youtube:
+            if getattr(candidate, '_youtube_quality_probed', False):
+                continue
+            video_id = self._video_id_from_candidate(candidate)
+            if not video_id:
+                continue
+
+            cached = self._cached_quality(video_id)
+            if cached is not None:
+                self._stamp_probed_quality(candidate, cached)
+                if batch_claim is None:
+                    batch_claim = cached
+                stop, seen_passing = _should_stop_youtube_probes(
+                    cached, targets, seen_passing=seen_passing,
+                )
+                if stop:
+                    break
+                continue
+
+            if network >= max_network:
+                continue
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+            except Exception as e:  # noqa: BLE001 - probe is best-effort
+                logger.info(
+                    "YouTube format probe failed for %s (%s: %s) — keeping claimed quality",
+                    video_id, type(e).__name__, e,
+                )
+                network += 1
+                continue
+            network += 1
+            if not info:
+                continue
+            best = self._get_best_audio_format(info.get('formats') or [])
+            if not best:
+                continue
+            claimed = youtube_claimed_quality(best)
+            self._store_probe(video_id, claimed, info)
+            self._stamp_probed_quality(candidate, claimed)
+            if batch_claim is None:
+                batch_claim = claimed
+            logger.info(
+                "YouTube format probe %s: %s",
+                video_id, claimed.label(),
+            )
+            stop, seen_passing = _should_stop_youtube_probes(
+                claimed, targets, seen_passing=seen_passing,
+            )
+            if stop:
+                break
+
+        if batch_claim is None:
+            return
+        if youtube_transcode_output_quality() is None:
+            return
+        for candidate in youtube:
+            if getattr(candidate, '_youtube_quality_probed', False):
+                continue
+            self._stamp_probed_quality(candidate, batch_claim)
+            video_id = self._video_id_from_candidate(candidate)
+            if video_id:
+                self._store_probe(video_id, batch_claim, None)
 
     def _format_quality_string(self, audio_format: Optional[Dict]) -> str:
         """Format quality info string"""
@@ -1116,11 +1669,17 @@ class YouTubeClient(DownloadSourcePlugin):
                     return None
 
                 try:
-                    # Use default download options
+                    # Use default download options, but rebuild the audio
+                    # postprocessor from live settings so a Settings save
+                    # applies without restarting.
                     download_opts = self.download_opts.copy()
+                    download_opts['postprocessors'] = [youtube_audio_postprocessor_from_config()]
                     
-                    # Force best audio format to prevent 'Requested format not available' errors
-                    download_opts['format'] = 'bestaudio/best'
+                    # Profile-driven original stream (same ladder as Tidal/Deezer).
+                    # Retry 3 still falls back to muxed ``best``.
+                    download_opts['format'] = youtube_audio_format_selector(
+                        youtube_requested_tier()
+                    )
                     download_opts['noplaylist'] = True
 
                     # On retry, try different strategies
@@ -1144,17 +1703,35 @@ class YouTubeClient(DownloadSourcePlugin):
                         download_opts.pop('extractor_args', None)
 
 
-                    # Perform download
+                    # Perform download. Reuse a fresh ranking probe when we
+                    # have one so we don't hit the player API twice for the
+                    # same video; retries always extract from scratch.
                     with yt_dlp.YoutubeDL(download_opts) as ydl:
-                        info = ydl.extract_info(youtube_url, download=True)
+                        info = None
+                        if attempt == 0:
+                            cached = self._take_fresh_probe_info(
+                                self._video_id_from_url(youtube_url)
+                            )
+                            process = getattr(ydl, 'process_ie_result', None)
+                            if cached is not None and callable(process):
+                                try:
+                                    info = process(copy.deepcopy(cached), download=True)
+                                except Exception as e:  # noqa: BLE001 - fall back to extract
+                                    logger.info(
+                                        "YouTube download from cached probe failed (%s: %s) — extracting fresh",
+                                        type(e).__name__, e,
+                                    )
+                                    info = None
+                        if info is None:
+                            info = ydl.extract_info(youtube_url, download=True)
 
-                        # Get final filename (will be MP3 after ffmpeg conversion)
-                        filename = Path(ydl.prepare_filename(info)).with_suffix('.mp3')
+                        filename = resolve_downloaded_audio_path(ydl, info)
 
-                        if filename.exists():
-                            return str(filename)
+                        if filename:
+                            discard_leftover_youtube_containers(filename)
+                            return filename
                         else:
-                            logger.error(f"Download completed but file not found: {filename}")
+                            logger.error("Download completed but audio file not found after extract")
                             if attempt < max_retries - 1:
                                 continue  # Retry
                             return None

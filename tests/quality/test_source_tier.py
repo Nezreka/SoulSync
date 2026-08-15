@@ -43,6 +43,7 @@ def test_no_targets_requests_max(monkeypatch):
     _patch_targets(monkeypatch, [])
     assert sm.quality_tier_for_source('tidal') == 'hires'
     assert sm.quality_tier_for_source('deezer') == 'flac'
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'
 
 
 def test_deezer_flac_and_mp3(monkeypatch):
@@ -57,6 +58,56 @@ def test_qobuz_hires_max(monkeypatch):
     assert sm.quality_tier_for_source('qobuz') == 'hires_max'
 
 
+T_OPUS = [QualityTarget(label='', format='opus')]
+T_OPUS_192 = [QualityTarget(label='', format='opus', min_bitrate=192)]
+T_AAC_128 = [QualityTarget(label='', format='aac', min_bitrate=128)]
+T_AAC_192 = [QualityTarget(label='', format='aac', min_bitrate=192)]
+
+
+def test_youtube_opus_without_floor_requests_160(monkeypatch):
+    _patch_targets(monkeypatch, T_OPUS)
+    assert sm.quality_tier_for_source('youtube') == 'opus_160'
+
+
+def test_youtube_opus_192_requests_256(monkeypatch):
+    _patch_targets(monkeypatch, T_OPUS_192)
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'
+
+
+def test_youtube_aac_128_does_not_fetch_256(monkeypatch):
+    _patch_targets(monkeypatch, T_AAC_128)
+    assert sm.quality_tier_for_source('youtube') == 'aac_128'
+
+
+def test_youtube_aac_192_requests_256(monkeypatch):
+    _patch_targets(monkeypatch, T_AAC_192)
+    assert sm.quality_tier_for_source('youtube') == 'aac_256'
+
+
+def test_youtube_flac_or_mp3_is_best_effort_max(monkeypatch):
+    _patch_targets(monkeypatch, T_FLAC16)
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'
+    _patch_targets(monkeypatch, T_MP3_320)
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'
+
+
 def test_unknown_source_returns_default(monkeypatch):
     _patch_targets(monkeypatch, T_FLAC16)
     assert sm.quality_tier_for_source('nope', default='x') == 'x'
+
+
+def test_youtube_aac_without_floor_requests_128(monkeypatch):
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='aac')])
+    assert sm.quality_tier_for_source('youtube') == 'aac_128'
+
+
+def test_youtube_opus_160_floor_stays_160_but_161_jumps(monkeypatch):
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='opus', min_bitrate=160)])
+    assert sm.quality_tier_for_source('youtube') == 'opus_160'
+    _patch_targets(monkeypatch, [QualityTarget(label='', format='opus', min_bitrate=161)])
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'
+
+
+def test_youtube_ignores_second_target_when_top_is_unsatisfiable(monkeypatch):
+    _patch_targets(monkeypatch, T_FLAC16 + T_OPUS)
+    assert sm.quality_tier_for_source('youtube') == 'opus_256'

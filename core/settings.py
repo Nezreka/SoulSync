@@ -833,6 +833,12 @@ class ConfigManager:
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"
                 "download_delay": 3,        # seconds between sequential downloads
+                # Default: convert to MP3 320 after download. YouTube audio is
+                # Opus/AAC; re-encode does not add quality but matches common
+                # players. The quality profile ranks the file on disk.
+                "transcode": True,
+                "transcode_codec": "mp3",
+                "transcode_bitrate": "320",
             },
             "hydrabase": {
                 "url": "",
