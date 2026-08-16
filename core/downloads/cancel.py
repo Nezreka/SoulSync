@@ -25,7 +25,7 @@ Out of scope for this PR (deferred to the batch-lifecycle lift):
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 from typing import Callable
 
 from core.runtime_state import (
@@ -35,7 +35,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.cancel")
 
 _TERMINAL_STATUSES = {
     'completed', 'failed', 'not_found', 'cancelled', 'skipped', 'already_owned',

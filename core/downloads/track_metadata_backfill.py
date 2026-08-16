@@ -22,10 +22,10 @@ isn't paid twice.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 from typing import Any, Dict, NamedTuple, Optional
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.track_metadata_backfill")
 
 
 class ResolvedTrackMetadata(NamedTuple):

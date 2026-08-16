@@ -31,7 +31,7 @@ status updater, DB) all injected via `CandidatesDeps`.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -44,7 +44,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.candidates")
 
 
 def preferred_version_stamp(candidate, preferred_version):

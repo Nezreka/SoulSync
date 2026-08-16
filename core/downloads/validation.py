@@ -5,13 +5,13 @@ Body is byte-identical to the original. ``matching_engine`` and
 constructed in web_server.py and referenced by name throughout
 the body.
 """
-import logging
+from utils.logging_config import get_logger
 import re
 
 from core.settings import config_manager
 from core.imports.file_integrity import resolve_duration_tolerance
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.validation")
 
 # Injected at runtime via init().
 matching_engine = None
