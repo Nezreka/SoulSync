@@ -1230,7 +1230,32 @@ duplicate_cleaner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefi
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
 # Shared task/batch state now lives in core.runtime_state.
-missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
+def _download_pool_size():
+    """Worker threads for the search/download flow.
+
+    Sized from the user's "Concurrent Downloads" setting, which is a PER BATCH
+    limit. With the pool hardwired to 3 the setting silently stopped meaning
+    anything above 3: a batch would start 10 workers and 7 of them just sat in
+    the executor queue, while the help text promised "higher values speed up
+    large playlists and wishlists".
+
+    A search holds its thread for the whole search (``run_async`` blocks the
+    caller), so threads are the real currency here.
+
+    Floor of 3 so a setting of 1 or 2 doesn't shrink the pool and serialize
+    every OTHER batch too — the per-batch limit already handles that. Ceiling
+    because the pool is a process-wide resource and a hand-edited config
+    shouldn't be able to spawn hundreds. Built at import, so a change needs a
+    restart.
+    """
+    try:
+        wanted = int(config_manager.get('download_source.max_concurrent', 3) or 3)
+    except (TypeError, ValueError):
+        wanted = 3
+    return max(3, min(wanted, 16))
+
+
+missing_download_executor = ThreadPoolExecutor(max_workers=_download_pool_size(), thread_name_prefix="MissingTrackWorker")
 
 # Dedicated pool for per-album bundle downloads (#740). An album-bundle batch
 # blocks its worker thread for the entire search+download; if these run on the
@@ -1820,6 +1845,9 @@ from core.downloads.monitor import (
     init as _init_download_monitor,
 )
 import core.downloads.monitor as _download_monitor_module
+# the post_processing stuck window, defined once in lifecycle where the rescue
+# itself lives. healing only decides WHEN to ask; lifecycle decides what to do.
+from core.downloads.lifecycle import _POST_PROCESSING_STUCK_TIMEOUT
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
@@ -1868,6 +1896,7 @@ def validate_and_heal_batch_states():
                 # Count actually active tasks
                 actually_active = 0
                 orphaned_tasks = []
+                stuck_post_processing = []
                 # Respect _on_download_completed dedup set — don't re-inflate active_count
                 completed_task_ids = batch_data.get('_completed_task_ids', set())
 
@@ -1877,6 +1906,20 @@ def validate_and_heal_batch_states():
                         if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
                             if task_id not in completed_task_ids:
                                 actually_active += 1
+                            # post_processing is the one active state nothing else
+                            # rescues: the Safety Valve only covers searching /
+                            # queued / downloading, and the 30-minute timeout lives
+                            # inside the completion check, which only ran when the
+                            # batch had ORPHANS. A batch whose remaining tasks are
+                            # all post_processing produces none, so it held its
+                            # slots forever. Flag it here and let the existing
+                            # rescue below do the work — the timeout itself stays
+                            # defined once, in lifecycle.
+                            if task_status == 'post_processing':
+                                _pp_age = current_time - download_tasks[task_id].get(
+                                    'status_change_time', current_time)
+                                if _pp_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                                    stuck_post_processing.append(task_id)
                         elif task_status in ['failed', 'completed', 'cancelled', 'not_found']:
                             orphaned_tasks.append(task_id)
                     else:
@@ -1895,10 +1938,31 @@ def validate_and_heal_batch_states():
                         if queue_index < len(queue):
                             batches_needing_workers.append(batch_id)
 
-                # Clean up orphaned tasks that are blocking progress
-                if orphaned_tasks and phase == 'downloading':
-                    logger.warning(f"[Batch Healing] Found {len(orphaned_tasks)} orphaned tasks in active batch {batch_id}")
-                    batches_needing_completion_check.append(batch_id)
+                # Finished tasks left sitting in the queue, plus anything wedged
+                # in post_processing past the timeout. Both want the completion
+                # check; neither is removed from the queue, because queue_index
+                # is a POSITION into it and shrinking the list underneath would
+                # make the batch skip or repeat tasks.
+                #
+                # Only NEW orphans are worth reporting. This used to fire on the
+                # same finished tasks on every 30s pass forever — one user's log
+                # has the identical 13 re-reported all the way through — which
+                # buried the real events and re-ran the check for nothing.
+                if phase == 'downloading':
+                    _seen_orphans = batch_data.setdefault('_reported_orphans', set())
+                    _new_orphans = [t for t in orphaned_tasks if t not in _seen_orphans]
+                    if _new_orphans:
+                        _seen_orphans.update(_new_orphans)
+                        logger.warning(
+                            f"[Batch Healing] Found {len(_new_orphans)} newly orphaned tasks "
+                            f"in active batch {batch_id} ({len(orphaned_tasks)} total)")
+                    if stuck_post_processing:
+                        logger.warning(
+                            f"[Batch Healing] {len(stuck_post_processing)} task(s) wedged in "
+                            f"post_processing past {_POST_PROCESSING_STUCK_TIMEOUT}s in batch "
+                            f"{batch_id} — forcing a completion check")
+                    if _new_orphans or stuck_post_processing:
+                        batches_needing_completion_check.append(batch_id)
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
