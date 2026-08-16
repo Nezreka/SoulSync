@@ -34,6 +34,13 @@ _run_post_processing_worker = None
 _start_next_batch_of_downloads = None
 _orphaned_download_keys = None
 missing_download_executor = None
+# Post-processing gets its own pool. On the shared one a finished download
+# queued behind Soulseek searches that take 25-60s each and usually find
+# nothing, and since the task is marked 'post_processing' the moment the
+# transfer ends, it sat there reading "Processing" the whole time — holding its
+# batch slot, so the batch started nothing new. Same starvation #740 fixed for
+# album bundles, same fix. Falls back to the shared pool when unwired.
+post_processing_executor = None
 download_orchestrator = None
 _RELEASE_SOURCE_NAMES = frozenset(('torrent', 'usenet'))
 
@@ -271,6 +278,18 @@ def _is_release_task(task):
     return username in _RELEASE_SOURCE_NAMES
 
 
+def _post_processing_pool():
+    """Where a finished download's post-processing runs.
+
+    Falls back to the shared download pool when only that one is wired — an
+    older ``init()`` caller, or a test that patches the module global directly.
+    The fallback is about never handing ``None`` to ``.submit()`` where the old
+    code had a working executor; it is NOT a substitute for wiring, which
+    web_server does and a test pins.
+    """
+    return post_processing_executor or missing_download_executor
+
+
 def _lookup_live_info(task, live_transfers_lookup):
     ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
     download_id = task.get('download_id')
@@ -295,11 +314,13 @@ def init(
     orphaned_download_keys,
     missing_download_executor_obj,
     download_orchestrator_obj,
+    post_processing_executor_obj=None,
 ):
     """Bind web_server-side helpers/globals so the class body can resolve them."""
     global _make_context_key, _on_download_completed, _download_track_worker
     global _run_post_processing_worker, _start_next_batch_of_downloads
     global _orphaned_download_keys, missing_download_executor, download_orchestrator
+    global post_processing_executor
     _make_context_key = make_context_key
     _on_download_completed = on_download_completed
     _download_track_worker = download_track_worker
@@ -307,6 +328,9 @@ def init(
     _start_next_batch_of_downloads = start_next_batch_of_downloads
     _orphaned_download_keys = orphaned_download_keys
     missing_download_executor = missing_download_executor_obj
+    # None here is fine — _post_processing_pool() falls back to the shared pool,
+    # so the fallback lives in exactly one place.
+    post_processing_executor = post_processing_executor_obj
     download_orchestrator = download_orchestrator_obj
 
 
@@ -495,7 +519,7 @@ class WebUIDownloadMonitor:
                 # Submit post-processing worker (file move, tagging, AcoustID verification)
                 # This makes batch downloads fully independent of browser polling.
                 logger.info(f"[Monitor] Submitting post-processing worker for task {task_id}")
-                missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
+                _post_processing_pool().submit(_run_post_processing_worker, task_id, batch_id)
             except Exception as e:
                 logger.error(f"[Monitor] Error handling completed task {task_id}: {e}")
                 with tasks_lock:

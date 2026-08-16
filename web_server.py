@@ -1242,6 +1242,19 @@ missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 # other album downloads, never the user-facing path.
 album_bundle_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlbumBundleWorker")
 
+# Dedicated pool for post-processing a finished download, for the same reason
+# #740 gave album bundles their own. A search worker holds its thread for the
+# whole search — 25-60s per query, several queries, and usually nothing found
+# for anything obscure. Post-processing shared those 3 workers, so a completed
+# download queued behind the searches: one user's log has a track submitted at
+# 13:28:32 whose worker only started at 13:29:24. 52s in line, 3s of work.
+# The task is marked 'post_processing' the moment the transfer ends, so it read
+# "Processing" for all 52s AND counted as active, which stops its batch
+# starting the next song — "stuck on processing, blocks other downloads".
+# Still 3 workers: that is what post-processing could already reach on the
+# shared pool, so this decouples the queue without raising concurrency.
+post_processing_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="PostProcessWorker")
+
 # Parallelizes the per-file metadata-lookup + post-processing in
 # /api/import/singles/process. Single-file work is dominated by
 # Spotify/iTunes/Deezer search round-trips so 3 workers give a near-
@@ -2103,6 +2116,7 @@ def _shutdown_runtime_components():
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
+        (post_processing_executor, "post processing executor"),
         (album_bundle_executor, "album bundle executor"),
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
@@ -21121,7 +21135,7 @@ def _build_status_deps():
         docker_resolve_path=docker_resolve_path,
         find_completed_file=_find_completed_file_robust,
         make_context_key=_make_context_key,
-        submit_post_processing=lambda task_id, batch_id: missing_download_executor.submit(
+        submit_post_processing=lambda task_id, batch_id: post_processing_executor.submit(
             _run_post_processing_worker, task_id, batch_id
         ),
         get_cached_transfer_data=get_cached_transfer_data,
@@ -40098,6 +40112,7 @@ _init_download_monitor(
     start_next_batch_of_downloads=_start_next_batch_of_downloads,
     orphaned_download_keys=_orphaned_download_keys,
     missing_download_executor_obj=missing_download_executor,
+    post_processing_executor_obj=post_processing_executor,
     download_orchestrator_obj=download_orchestrator,
 )
 
