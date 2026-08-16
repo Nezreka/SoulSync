@@ -146,11 +146,17 @@ def _title_words_are_expected(candidate_title, expected_title, expected_artists)
     return all(word in allowed for word in cand.split())
 
 
-def get_valid_candidates(results, spotify_track, query):
+def get_valid_candidates(results, spotify_track, query, profile_id=None):
     """
     This function is a direct port from sync.py. It scores and filters
     Soulseek search results against a Spotify track to find the best, most
     accurate download candidates.
+
+    ``profile_id`` is the item's own quality profile, taken from the wishlist
+    row's ``quality_profile_id``. It reaches the Soulseek quality filter so a
+    per-item profile decides what is CONSIDERED, not just what survives the
+    import guard (#1150). None means the app-wide default, which is what manual
+    downloads and staging imports want.
     """
     if not results:
         return []
@@ -373,7 +379,8 @@ def get_valid_candidates(results, spotify_track, query):
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
-        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(initial_candidates)
+        quality_filtered_candidates = download_orchestrator.client('soulseek').filter_results_by_quality_preference(
+            initial_candidates, profile_id=profile_id)
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
