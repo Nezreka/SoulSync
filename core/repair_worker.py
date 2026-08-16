@@ -2379,9 +2379,87 @@ class RepairWorker:
             'message': f'Expired download — {verb}',
         }
 
+    @staticmethod
+    def _legacy_quality_track_data(entity_id, details) -> Optional[dict]:
+        """Rebuild a wishlist-ready payload from a migrated finding's details.
+
+        Most preserved pre-V2 quality findings carry ``matched_track_data``,
+        but the flag-only Quality Check scanner never pre-searched a match —
+        those findings only ever knew the title and artist read off the file,
+        and applying one failed with "No matched track in finding" every
+        single time (reported twice upstream). The legacy row the finding
+        names is no help either: a full refresh renumbered every legacy track
+        id, and Library v2 is the catalogue now — so the details are the only
+        source left.
+
+        Both detail vocabularies are read, because the two producers
+        disagreed: the scanner wrote ``expected_*``, the upgrade job wrote
+        ``track_title``/``artist``. Reading only one set left the other's
+        findings unresolvable.
+        """
+        details = details or {}
+
+        def _pick(*keys, default=None):
+            for key in keys:
+                value = details.get(key)
+                if value not in (None, ''):
+                    return value
+            return default
+
+        track_name = _pick('track_title', 'expected_title', 'title')
+        artist_name = _pick('artist', 'expected_artist', 'artist_name')
+        if not track_name or not artist_name:
+            # A wishlist entry built from "Unknown - Unknown" would search for
+            # nothing and sit there forever, so refuse rather than queue
+            # garbage.
+            logger.warning(
+                "Legacy quality finding %s has no usable track identity", entity_id)
+            return None
+
+        album_title = _pick('album_title', 'album', default='')
+        source_id = _pick('spotify_track_id', 'itunes_track_id', 'deezer_id')
+        if source_id:
+            wishlist_id = str(source_id)
+        elif entity_id:
+            wishlist_id = f"redownload_{entity_id}"
+        else:
+            # entity_id is None for a file the old scanner could not match to a
+            # track row. A literal "redownload_None" would make every such
+            # finding share one wishlist row — the second would be deduped away
+            # and silently never downloaded.
+            seed = f"{artist_name}|{track_name}|{_pick('file_path', default='')}"
+            wishlist_id = f"redownload_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
+
+        album_thumb = _pick('album_thumb_url', 'album_thumb')
+        spotify_track_id = details.get('spotify_track_id')
+        return {
+            'id': wishlist_id,
+            'name': track_name,
+            'artists': [{'name': artist_name}],
+            'album': {
+                'name': album_title or track_name,
+                'id': _pick('spotify_album_id', default='') or '',
+                'release_date': str(_pick('year', 'release_date', default='') or ''),
+                'images': [{'url': album_thumb}] if album_thumb else [],
+                'album_type': _pick('record_type', default='album'),
+                'total_tracks': _pick('track_count', default=0),
+                'artists': [{'name': artist_name}],
+            },
+            'duration_ms': _pick('duration_ms', 'duration', default=0),
+            'track_number': _pick('track_number', default=1),
+            'disc_number': _pick('disc_number', default=1),
+            'explicit': False,
+            'external_urls': {},
+            'popularity': 0,
+            'preview_url': None,
+            'uri': f"spotify:track:{spotify_track_id}" if spotify_track_id else '',
+            'is_local': False,
+        }
+
     def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
         """Approve a preserved pre-V2 quality finding without deleting its file."""
-        track_data = details.get('matched_track_data') or details.get('track_data')
+        track_data = (details.get('matched_track_data') or details.get('track_data')
+                      or self._legacy_quality_track_data(entity_id, details))
         if not track_data:
             return {
                 'success': False,

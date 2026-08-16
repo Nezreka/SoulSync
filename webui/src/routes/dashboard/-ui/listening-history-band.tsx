@@ -24,43 +24,40 @@
  * as siblings and it costs zero new card CSS.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
 import { openArtistFromRail } from '../-dash.content';
 import { toRecentPlays } from '../-dash.listening';
+import { useLiveRefresh } from '../-dash.live-refresh';
 import { playTrackByMetadata } from '../../../features/playback/play-track';
 import { getShellBridge } from '../../../platform/shell/bridge';
 
-const LIMIT = 12;
+// 25, not 12: this is the dashboard's whole view of what you have been
+// listening to, and a dozen rows runs out inside one album.
+const LIMIT = 25;
 const REFRESH_MS = 60_000;
 
 export function ListeningHistoryBand() {
   const [plays, setPlays] = useState<RecentPlay[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      // Hidden tabs do no work — the steady-state poller rule.
-      if (document.hidden) return;
-      try {
-        const response = await fetch(`/api/stats/recent?limit=${LIMIT}`);
-        const data = (await response.json()) as { success?: boolean; tracks?: RecentPlayRow[] };
-        if (!cancelled && data.success && Array.isArray(data.tracks)) {
-          setPlays(toRecentPlays(data.tracks, new Date(), LIMIT));
-        }
-      } catch {
-        // Band stays as-is on failure; an empty band renders nothing at all.
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/stats/recent?limit=${LIMIT}`);
+      const data = (await response.json()) as { success?: boolean; tracks?: RecentPlayRow[] };
+      if (data.success && Array.isArray(data.tracks)) {
+        setPlays(toRecentPlays(data.tracks, new Date(), LIMIT));
       }
-    };
-    void load();
-    const timer = setInterval(() => void load(), REFRESH_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    } catch {
+      // Band stays as-is on failure; an empty band renders nothing at all.
+    }
   }, []);
+
+  // Polls while visible, pauses while hidden, and catches up the moment the
+  // tab comes back — the missing half is why this read as "only updates if I
+  // refresh the page".
+  useLiveRefresh(load, { intervalMs: REFRESH_MS });
 
   if (!plays.length) return null;
 

@@ -25,8 +25,9 @@ Security → API Key.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import requests as http_requests
 
@@ -55,6 +56,11 @@ MUSIC_CATEGORY_FOREIGN = 3060
 # category filter at all — kept finding them, so the gap read as "Usenet is
 # broken for this artist".  Audiobook (3030) and Video (3020) stay out: those
 # are genuinely different media, not a script/region distinction.
+# Ceiling on a per-indexer fan-out (#1151). Deliberately well under the
+# shared slow-I/O pool's 16 workers: this must never be the thing that
+# starves every other provider call in the app.
+MAX_CONCURRENT_INDEXER_SEARCHES = 6
+
 DEFAULT_MUSIC_CATEGORIES: tuple = (
     MUSIC_CATEGORY_ALL,
     MUSIC_CATEGORY_MP3,
@@ -269,6 +275,127 @@ class ProwlarrClient:
             limit, search_type, list(extra_params or []),
             self.resolve_search_timeout(timeout),
         )
+
+    async def resolve_search_indexers(
+        self, indexer_ids: Sequence[int], protocol: str,
+    ) -> List[int]:
+        """The CONCRETE indexer ids a search should be fanned out across.
+
+        An empty ``indexer_ids`` means "every enabled indexer" — fine for one
+        aggregated request, useless for a per-indexer fan-out, so it is
+        expanded here against Prowlarr's own indexer list and narrowed to the
+        protocol. Querying the torrent plugin's search against a usenet
+        indexer would be a guaranteed zero.
+
+        Returns ``[]`` when the list cannot be resolved. The caller must read
+        that as "fall back to the single aggregated request", never as "search
+        nothing" — a Prowlarr that cannot list its indexers can still search.
+        """
+        wanted = [int(i) for i in indexer_ids or []]
+        if wanted:
+            return wanted
+        protocol = canonical_protocol(protocol)
+        try:
+            known = await self.get_indexers()
+        except Exception as exc:                        # noqa: BLE001
+            logger.debug("Prowlarr indexer enumeration failed, using one request: %s", exc)
+            return []
+        return [i.id for i in known
+                if i.enable and (not protocol or canonical_protocol(i.protocol) == protocol)]
+
+    async def search_each_indexer(
+        self,
+        query: str,
+        indexer_ids: Sequence[int],
+        categories: Sequence[int] = DEFAULT_MUSIC_CATEGORIES,
+        limit: int = 100,
+        search_type: str = "search",
+        extra_params: Optional[Sequence[tuple]] = None,
+        timeout: Optional[int] = None,
+    ) -> Tuple[List[ProwlarrSearchResult], List[str]]:
+        """Search each indexer SEPARATELY and concurrently (#1151).
+
+        Prowlarr's search endpoint takes every indexer id in one request and
+        answers once, so a single slow or unreachable indexer holds the whole
+        response past the read timeout — and a timed-out request yields
+        NOTHING, discarding results the responsive indexers had already
+        produced (Zombiehamser). One request per indexer means a failure costs
+        only its own slot.
+
+        Wall time is still the slowest indexer, deliberately: waiting is the
+        price of never dropping a result that was going to arrive.
+
+        Returns ``(results, failures)``. ``failures`` are human-readable and
+        name the indexer, which the aggregated request structurally could not
+        do — the report asks for exactly that.
+        """
+        # Deduped, order preserved. The allowlist is free text
+        # (`prowlarr.indexer_ids`) and is not deduped upstream — harmless when
+        # every id went into ONE request, but here a repeat means a second
+        # request to the same indexer and its results merged in twice.
+        ids: List[int] = []
+        for raw in indexer_ids or []:
+            value = int(raw)
+            if value not in ids:
+                ids.append(value)
+        if not ids:
+            return [], []
+
+        # Bounded, because `search` runs on the SHARED slow-I/O thread pool
+        # (16 workers, used by every provider in the app). An unbounded fan-out
+        # would hold one worker per indexer for the whole timeout — starving
+        # Spotify/Deezer/enrichment — and, once the pool is full, the requests
+        # would QUEUE rather than run together, making this slower than the
+        # single aggregated request it replaces. A responsive indexer frees its
+        # slot in seconds, so the realistic cost of the cap is nil.
+        gate = asyncio.Semaphore(MAX_CONCURRENT_INDEXER_SEARCHES)
+
+        async def _one(indexer_id: int):
+            async with gate:
+                return await self.search(
+                    query, categories=categories, indexer_ids=[indexer_id],
+                    limit=limit, search_type=search_type, extra_params=extra_params,
+                    timeout=timeout,
+                )
+
+        budget = self.resolve_search_timeout(timeout)
+        tasks = {asyncio.ensure_future(_one(i)): i for i in ids}
+
+        # ONE overall deadline, the same budget the single aggregated request
+        # had. Without it the fan-out is slower than what it replaces whenever
+        # there are more indexers than the concurrency cap: batches run back to
+        # back, so N dead indexers cost ceil(N/cap) x timeout instead of one.
+        # `asyncio.wait` returns rather than raising, so whatever finished in
+        # the budget is kept — which is the entire point of the change.
+        done, pending = await asyncio.wait(set(tasks), timeout=budget)
+
+        for task in pending:
+            task.cancel()
+            # Reap quietly. The task is abandoned, not awaited — awaiting would
+            # wait out the very timeout the deadline exists to avoid — so a
+            # late result or error would otherwise surface as an "exception was
+            # never retrieved" warning. (The executor thread itself cannot be
+            # cancelled; it ends at its own request timeout, which is this same
+            # budget.)
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+        results: List[ProwlarrSearchResult] = []
+        failures: List[str] = []
+        for task, indexer_id in tasks.items():
+            if task in pending:
+                failures.append(f"indexer {indexer_id}: no answer within {budget}s")
+                continue
+            if task.cancelled():
+                # Cancelled from OUTSIDE (shutdown), not by our deadline —
+                # those are in `pending`. Propagate rather than reporting a
+                # phantom indexer failure.
+                raise asyncio.CancelledError()
+            error = task.exception()
+            if error is not None:
+                failures.append(f"indexer {indexer_id}: {error}")
+                continue
+            results.extend(task.result())
+        return results, failures
 
     def _search_sync(
         self,

@@ -28,6 +28,7 @@ from core.download_plugins.album_bundle import (
     get_completed_no_path_window_seconds,
     incomplete_path_stability_check,
     pick_best_album_release,
+    profile_allowed_formats,
     poll_album_download,
     resolve_reported_save_path,
     snapshot_incomplete_path,
@@ -864,6 +865,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         artist_name: str,
         staging_dir: str,
         progress_callback=None,
+        quality_profile_id=None,
     ) -> Dict[str, Any]:
         """Usenet sibling of ``TorrentDownloadPlugin.download_album_to_staging``.
         See that method's docstring for the contract."""
@@ -905,13 +907,24 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             result['fallback'] = True
             return result
 
+        # #1149 applies to the hybrid chain too, not just torrents: the same
+        # profile veto, so a lossy NZB is not the thing that satisfies a
+        # lossless-only profile after the torrent path correctly refused.
+        allowed_formats = profile_allowed_formats(quality_profile_id)
         picked = pick_best_album_release(
             candidates, _guess_quality_from_title, album_name=album_name,
+            allowed_formats=allowed_formats,
         )
         if picked is None:
             # No candidate matched the requested album (or none passed filtering).
             # Fall back to per-track rather than grabbing a wrong album (#730).
-            result['error'] = 'No NZB candidate matched the requested album'
+            if allowed_formats:
+                result['error'] = (
+                    'No NZB candidate matched the requested album in '
+                    f"{'/'.join(sorted(allowed_formats)).upper()} "
+                    '(quality profile allows no other format)')
+            else:
+                result['error'] = 'No NZB candidate matched the requested album'
             result['fallback'] = True
             return result
 

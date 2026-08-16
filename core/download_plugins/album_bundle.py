@@ -180,9 +180,32 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
     return coverage
 
 
+def profile_allowed_formats(quality_profile_id=None):
+    """The formats the caller's quality profile will accept, or None for any.
+
+    Lives here because the torrent and usenet plugins both need it and both
+    already share this module's picker (#1149 applies to the hybrid chain, not
+    just torrents).
+
+    Resolved LIVE (not snapshotted) through the same primitive every other
+    pipeline stage uses, so editing a profile takes effect on the next search
+    rather than the next restart. Any failure returns None: a profile we
+    cannot read must never become a filter that blocks every download.
+    """
+    try:
+        from core.quality.release_format import allowed_formats_from_profile
+        from core.quality.selection import load_profile_by_id
+        return allowed_formats_from_profile(load_profile_by_id(quality_profile_id))
+    except Exception as e:                        # pragma: no cover - defensive
+        logger.debug("Could not resolve profile formats, allowing any: %s", e)
+        return None
+
+
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
-                            min_seeders: int = 0) -> Optional[object]:
+                            min_seeders: int = 0,
+                            allowed_formats=None,
+                            allow_mixed: bool = False) -> Optional[object]:
     """Pick the single best torrent / NZB for an album-bundle download.
 
     Heuristic, in priority order:
@@ -192,6 +215,14 @@ def pick_best_album_release(candidates, quality_guess,
        different album. When ``album_name`` is given and NOTHING clears the
        relevance floor, return None — the caller then falls back to per-track
        rather than downloading a confident mismatch.
+    0a. FORMAT gate (#1149): drop candidates whose format cannot satisfy the
+       caller's quality profile. ``allowed_formats=None`` disables it, which
+       is what a profile with fallback enabled (or no ranked targets) means
+       everywhere else in the pipeline. Quality used to be the SECOND sort key
+       after seeders, so a well-seeded MP3 rip beat a FLAC rip with fewer
+       seeders no matter what the profile said — sorting cannot express "never
+       this", only "prefer that". A release whose format cannot be determined
+       is dropped too rather than assumed lossy and ranked.
     0b. Availability gate (#1139): drop candidates whose indexer-reported
        seeder count is BELOW ``min_seeders``. Sorting by seeders was never
        enough — with every candidate on zero, the sort still handed back a
@@ -227,6 +258,37 @@ def pick_best_album_release(candidates, quality_guess,
             )
             return None
         candidates = relevant
+
+    # 0a. Format gate. Runs before the seeder and size gates so the log says
+    # "nothing in the right format" rather than "nothing with enough seeders"
+    # when both are true — the first is the actionable one.
+    if allowed_formats:
+        from core.quality.release_format import evaluate_release
+
+        keeping = []
+        for c in candidates:
+            ok, why = evaluate_release(
+                allowed_formats, c.title or '',
+                file_names=getattr(c, 'file_names', None),
+                allow_mixed=allow_mixed,
+            )
+            if ok:
+                keeping.append(c)
+            else:
+                logger.debug("[Album Bundle] Rejected '%s': %s", c.title, why)
+        if not keeping:
+            logger.warning(
+                "[Album Bundle] No candidate for '%s' matches the profile's "
+                "formats (%s); %d rejected — refusing the bundle so the caller "
+                "falls back rather than queueing something the import will "
+                "throw away.",
+                album_name or '?', '/'.join(sorted(allowed_formats)), len(candidates),
+            )
+            return None
+        if len(keeping) != len(candidates):
+            logger.info("[Album Bundle] Dropped %d candidate(s) failing the format profile",
+                        len(candidates) - len(keeping))
+        candidates = keeping
 
     if min_seeders > 0:
         available = [c for c in candidates
@@ -983,6 +1045,7 @@ __all__ = [
     "resolve_reported_save_path",
     "pick_best_album_release",
     "poll_album_download",
+    "profile_allowed_formats",
     "quality_score",
     "time",
     "unique_staging_path",

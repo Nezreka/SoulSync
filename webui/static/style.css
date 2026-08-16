@@ -52586,6 +52586,8 @@ textarea.enhanced-meta-field-input {
     color: rgba(100, 149, 237, 0.6);
     transition: all 0.15s ease;
 }
+
+
 .enhanced-reorganize-album-btn:hover {
     background: rgba(100, 149, 237, 0.12);
     color: rgba(100, 149, 237, 0.9);
@@ -52618,6 +52620,27 @@ textarea.enhanced-meta-field-input {
     vertical-align: -1px;
 }
 
+/* Reassign — the album action row's pattern is identical geometry with a
+   DISTINCT accent per action, so the buttons are scannable by colour. Teal:
+   the two blues and two greens are taken by Reorganize, Redownload and Write
+   Tags, and reusing Reorganize's blue put two same-coloured buttons next to
+   each other. */
+.enhanced-reassign-album-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(45, 212, 191, 0.06);
+    border: 1px solid rgba(45, 212, 191, 0.15);
+    color: rgba(45, 212, 191, 0.6);
+    transition: all 0.15s ease;
+}
+.enhanced-reassign-album-btn:hover {
+    background: rgba(45, 212, 191, 0.12);
+    color: rgba(45, 212, 191, 0.9);
+    border-color: rgba(45, 212, 191, 0.35);
+}
 .enhanced-redownload-album-btn {
     padding: 6px 14px;
     border-radius: 8px;
@@ -76885,4 +76908,146 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .artmap-explore-result {
     background: transparent; border: none; width: 100%;
     font: inherit; color: inherit; text-align: left;
+}
+
+/* ── Album reassign modal ──────────────────────────────────────────────────
+   Rides the .reid-* chassis (hero / tabs / search / results / footer). Only
+   the two things re-identify has no equivalent for live here: the step rail,
+   and the track mapping rows. */
+
+.reassign-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 28px 2px;
+}
+
+.reassign-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7390;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    transition: all 0.18s ease;
+}
+
+.reassign-step-num {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.reassign-step.active {
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.reassign-step.active .reassign-step-num {
+    background: rgb(var(--accent-rgb));
+    color: #0b0d12;
+}
+
+.reassign-step.done {
+    color: rgba(45, 212, 191, 0.85);
+}
+
+.reassign-step.done .reassign-step-num {
+    background: rgba(45, 212, 191, 0.18);
+    color: rgba(45, 212, 191, 0.95);
+}
+
+/* The verdict line above the mapping. Amber when tracks would be left behind:
+   proceeding then SPLITS the album, which is the problem the feature fixes. */
+.reassign-summary {
+    padding: 10px 14px;
+    margin: 4px 0 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(45, 212, 191, 0.9);
+    background: rgba(45, 212, 191, 0.08);
+    border: 1px solid rgba(45, 212, 191, 0.2);
+}
+
+.reassign-summary.warn {
+    color: rgba(245, 158, 11, 0.95);
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
+.reassign-row {
+    display: grid;
+    /* minmax(0,…) on the text columns — without it a long title refuses to
+       shrink and pushes the reason column out of the modal. */
+    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    margin: 4px 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid transparent;
+    font-size: 13px;
+    color: #cfd3e2;
+}
+
+.reassign-row.unmapped {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.18);
+    color: #8b8fa3;
+}
+
+.reassign-row-local,
+.reassign-row-target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reassign-row-target {
+    color: #fff;
+}
+
+.reassign-row.unmapped .reassign-row-target {
+    color: rgba(245, 158, 11, 0.8);
+    font-style: italic;
+}
+
+.reassign-row-arrow {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.reassign-row-why {
+    font: 600 10px/1 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+    .reassign-row {
+        grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+    }
+
+    .reassign-row-why {
+        display: none;
+    }
+
+    .reassign-steps {
+        padding: 12px 16px 0;
+    }
 }

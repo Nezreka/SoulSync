@@ -138,6 +138,7 @@ import {
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfileModal, QualityProfilePicker } from './quality-profile-modal';
+import { ReassignModal } from './reassign-modal';
 import { AlbumReorganizeModal, ArtistReorganizeAllModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
 
@@ -2456,6 +2457,10 @@ interface AlbumDetailTarget extends EditableAlbumMetadata {
   quality_profile_id: number;
   quality_profile_source?: LibraryV2QualityProfileSource;
   quality_profile_explicit?: boolean;
+  /** Context for the reassign modal — who this album is filed under today,
+   *  and its cover for the modal hero. Optional: the menu works without them. */
+  artist_name?: string | null;
+  image_url?: string | null;
 }
 
 type AlbumDetailTab = 'quality' | 'metadata';
@@ -2713,6 +2718,7 @@ export function AlbumOverflowMenu({
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
   const [showReorganize, setShowReorganize] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -2796,6 +2802,19 @@ export function AlbumOverflowMenu({
             }}
           >
             Reorganize
+          </button>
+          <button
+            type="button"
+            className={styles.overflowMenuItem}
+            data-requires-write=""
+            disabled={!canWrite}
+            onClick={() => {
+              if (!canWrite) return;
+              setShowReassign(true);
+              setOpen(false);
+            }}
+          >
+            Reassign to another artist…
           </button>
           <button
             type="button"
@@ -2902,6 +2921,22 @@ export function AlbumOverflowMenu({
           albumId={album.id}
           albumTitle={album.title}
           onClose={() => setShowReorganize(false)}
+        />
+      ) : null}
+      {showReassign ? (
+        <ReassignModal
+          albumId={album.id}
+          albumTitle={album.title}
+          currentArtist={album.artist_name || 'its current artist'}
+          imageUrl={album.image_url ?? undefined}
+          onClose={() => setShowReassign(false)}
+          // Nothing has moved yet — the files are staged with a hint and the
+          // import pipeline does the rest. Refresh anyway: the album's own
+          // rows change the moment that import lands, and a stale view here
+          // is what makes a user click Reassign a second time.
+          onApplied={() => {
+            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+          }}
         />
       ) : null}
       {showArtPicker ? (
@@ -4805,6 +4840,8 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     quality_profile_id: album.quality_profile?.id ?? 1,
                     quality_profile_source: album.quality_profile_source,
                     quality_profile_explicit: album.quality_profile_explicit,
+                    artist_name: album.primary_artist?.name,
+                    image_url: album.image_url,
                   }}
                   onDeleted={goBack}
                 />
@@ -6570,6 +6607,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Albums"
                 albums={releasesOf(artist.albums, 'albums')}
                 artistId={artistId}
+                artistName={artist.name}
                 scope="albums"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
                 queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
@@ -6579,6 +6617,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="EPs"
                 albums={releasesOf(artist.eps ?? [], 'eps')}
                 artistId={artistId}
+                artistName={artist.name}
                 scope="eps"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
                 queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
@@ -6588,6 +6627,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 title="Singles"
                 albums={releasesOf(artist.singles, 'singles')}
                 artistId={artistId}
+                artistName={artist.name}
                 scope="singles"
                 queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
                 queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
@@ -6888,6 +6928,7 @@ function AlbumGroup({
   title,
   albums,
   artistId,
+  artistName,
   scope,
   queueStatusByAlbum,
   queueStatusTracks,
@@ -6896,6 +6937,7 @@ function AlbumGroup({
   title: string;
   albums: LibraryV2AlbumSummary[];
   artistId: number;
+  artistName: string;
   scope: 'albums' | 'eps' | 'singles';
   queueStatusByAlbum: Record<number, number>;
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
@@ -6921,6 +6963,7 @@ function AlbumGroup({
           <AlbumBlock
             key={album.id}
             album={album}
+            artistName={artistName}
             activeDownloads={queueStatusByAlbum[album.id] ?? 0}
             queueStatusTracks={queueStatusTracks}
             onAction={onAction}
@@ -6933,11 +6976,15 @@ function AlbumGroup({
 
 function AlbumBlock({
   album,
+  artistName,
   activeDownloads,
   onAction,
   queueStatusTracks,
 }: {
   album: LibraryV2AlbumSummary;
+  /** Who the album is filed under today — the reassign modal says so, and the
+   *  summary row itself has no artist on it. */
+  artistName: string;
   activeDownloads: number;
   onAction: ActionHandler;
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
@@ -7062,6 +7109,8 @@ function AlbumBlock({
               quality_profile_id: album.quality_profile_id,
               quality_profile_source: album.quality_profile_source,
               quality_profile_explicit: album.quality_profile_explicit,
+              artist_name: artistName,
+              image_url: album.image_url,
             }}
           />
         </span>
