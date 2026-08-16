@@ -1751,30 +1751,44 @@ class YouTubeClient(DownloadSourcePlugin):
                     )
                     download_opts['noplaylist'] = True
 
-                    # On retry, try different strategies
+                    # Skip itags whose CDN URL 403s (Premium 774 is listed
+                    # often, then refused) so the selector can walk down
+                    # without failing the whole download.
+                    download_opts['check_formats'] = 'selected'
+
+                    # Keep cookies on every attempt. Stripping them made
+                    # itag 774/141 disappear, so a probe that ranked Opus 256
+                    # then downloaded anonymous Opus 160 (or failed) and
+                    # Soulseek won the walk.
+                    extra = youtube_authenticated_extractor_args(download_opts)
                     if attempt == 0:
-                        extra = youtube_authenticated_extractor_args(download_opts)
                         if extra:
                             download_opts['extractor_args'] = extra
                     elif attempt == 1:
-                        # Drop cookies — authenticated sessions (browser store OR a
-                        # pasted cookies.txt) sometimes get restricted formats.
-                        if 'cookiesfrombrowser' in download_opts or 'cookiefile' in download_opts:
-                            logger.info(f"Retry {attempt + 1}/{max_retries} without cookies")
-                            download_opts.pop('cookiesfrombrowser', None)
-                            download_opts.pop('cookiefile', None)
-                            download_opts.pop('extractor_args', None)
-                        else:
-                            logger.info(f"Retry {attempt + 1}/{max_retries} with web_creator client")
+                        if extra:
+                            logger.info(
+                                "Retry %s/%s with web_music only (keeping cookies)",
+                                attempt + 1, max_retries,
+                            )
                             download_opts['extractor_args'] = {
-                                'youtube': { 'player_client': ['web_creator'] }
+                                'youtube': {'player_client': ['web_music']},
+                            }
+                        else:
+                            logger.info(
+                                "Retry %s/%s with web_creator client",
+                                attempt + 1, max_retries,
+                            )
+                            download_opts['extractor_args'] = {
+                                'youtube': {'player_client': ['web_creator']},
                             }
                     elif attempt >= 2:
-                        logger.info(f"Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
+                        logger.info(
+                            "Retry %s/%s with 'best' format (keeping cookies)",
+                            attempt + 1, max_retries,
+                        )
                         download_opts['format'] = 'best'
-                        download_opts.pop('cookiesfrombrowser', None)
-                        download_opts.pop('cookiefile', None)
-                        download_opts.pop('extractor_args', None)
+                        if extra:
+                            download_opts['extractor_args'] = extra
 
 
                     # Perform download. Ranking already probed itags; fetch

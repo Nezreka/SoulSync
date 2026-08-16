@@ -1215,6 +1215,75 @@ def test_get_valid_candidates_probes_youtube_when_soulseek_is_first(monkeypatch)
     assert slsk_batches == [['alice']]
 
 
+def test_mixed_pool_walk_picks_youtube_774_over_soulseek_flac(monkeypatch):
+    """Worker path: probed itag 774 must be tried before a Soulseek FLAC when
+    Opus ≥192 is the top target — even if the walk is not flagged quality_first.
+    """
+    from core.downloads.candidates import order_candidates
+
+    _patch_profile(monkeypatch, [
+        _OPUS_192,
+        QualityTarget(label='FLAC 16-bit', format='flac', bit_depth=16),
+    ], False)
+
+    class _YT:
+        def refresh_claimed_quality(self, candidates, **kwargs):
+            for c in candidates:
+                c.set_quality(AudioQuality('opus', bitrate=256))
+
+    class _Slsk:
+        def filter_results_by_quality_preference(self, cands):
+            return list(cands)
+
+    class _Orch:
+        def client(self, name):
+            if name == 'youtube':
+                return _YT()
+            if name == 'soulseek':
+                return _Slsk()
+            return None
+
+    class _Engine:
+        def score_track_match(self, **kwargs):
+            return 0.85, 'ok'
+
+        def normalize_string(self, text):
+            return (text or '').lower()
+
+        def find_best_slskd_matches_enhanced(self, track, results, **_kw):
+            for r in results:
+                r.confidence = 0.99
+            return list(results)
+
+    monkeypatch.setattr(validation, 'download_orchestrator', _Orch())
+    monkeypatch.setattr(validation, 'matching_engine', _Engine())
+
+    peer = TrackResult(
+        username='alice',
+        filename='Artist/Album/01 - Song.flac',
+        size=20_000_000,
+        bitrate=1411,
+        duration=180_000,
+        quality='flac',
+        free_upload_slots=1,
+        upload_speed=1,
+        queue_length=0,
+        artist='Artist',
+        title='Song',
+        sample_rate=44100,
+        bit_depth=16,
+    )
+    yt = _yt_track(filename='aaaaaaaaaaa||Song', bitrate=160)
+    result = get_valid_candidates([peer, yt], _Expected(), 'Artist Song')
+    ordered = order_candidates(
+        result, quality_first=False,
+        targets=[_OPUS_192, QualityTarget(label='FLAC 16-bit', format='flac', bit_depth=16)],
+        source_order=['youtube', 'soulseek'],
+    )
+    assert ordered[0] is yt
+    assert yt.bitrate == 256
+
+
 def test_stubs_without_audio_quality_are_not_rejected():
     """Match-only test doubles omit audio_quality — filter must pass through."""
     from core.downloads.validation import _filter_youtube_by_quality
@@ -2062,15 +2131,16 @@ def test_download_sync_third_retry_uses_muxed_best(tmp_path, monkeypatch):
     assert result == str(audio)
     assert len(seen) == 3
     assert 'opus' in seen[0]
-    assert 'opus' in seen[1]  # retry 2 still prefers opus; only drops cookies
+    assert 'opus' in seen[1]  # retry 2 still prefers opus; keeps cookies
     assert seen[2] == 'best'
 
 
-def test_download_sync_retry_drops_cookies_on_second_attempt(tmp_path, monkeypatch):
+def test_download_sync_retry_keeps_cookies_and_tries_web_music_only(tmp_path, monkeypatch):
     audio = tmp_path / 'Song.m4a'
     audio.write_bytes(b'x')
     cookie_keys = []
     extractor_clients = []
+    check_formats = []
 
     class _FakeYDL:
         def __init__(self, opts):
@@ -2078,6 +2148,7 @@ def test_download_sync_retry_drops_cookies_on_second_attempt(tmp_path, monkeypat
             extractor_clients.append(
                 (opts.get('extractor_args') or {}).get('youtube', {}).get('player_client')
             )
+            check_formats.append(opts.get('check_formats'))
 
         def __enter__(self):
             return self
@@ -2103,9 +2174,10 @@ def test_download_sync_retry_drops_cookies_on_second_attempt(tmp_path, monkeypat
     client.shutdown_check = None
     assert client._download_sync('https://youtu.be/abc', 'Song') == str(audio)
     assert cookie_keys[0] == (True, False)
-    assert cookie_keys[1] == (False, False)
+    assert cookie_keys[1] == (True, False)
     assert extractor_clients[0] == ['web_music', 'default']
-    assert extractor_clients[1] != ['web_music', 'default']
+    assert extractor_clients[1] == ['web_music']
+    assert check_formats == ['selected', 'selected']
 
 
 # ── quality filter + download selector extra edges ─────────────────────────
