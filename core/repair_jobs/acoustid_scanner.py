@@ -346,12 +346,18 @@ class AcoustIDScannerJob(RepairJob):
             new_status = 'verified'
         elif outcome.decision == Decision.SKIP and not file_verif_status:
             new_status = 'unverified'
-        if new_status:
-            self._persist_status(
-                context, track_id, fpath,
-                (expected.get('file_path') or '').strip() or None,
-                new_status, write_tag=(new_status != file_verif_status),
-                expected=expected)
+        # The fingerprint's own verdict is recorded even when the overall
+        # verification standing does not move. Those are different questions —
+        # "does this file stand verified" vs "what did the fingerprint check
+        # conclude" — and the library's Check column renders the second one.
+        # Writing only the first is why a fully scanned library still read
+        # "Not scanned": the scan agreed with an already-'verified' file, so
+        # nothing at all was written about the check it had just performed.
+        self._persist_status(
+            context, track_id, fpath,
+            (expected.get('file_path') or '').strip() or None,
+            new_status, write_tag=(bool(new_status) and new_status != file_verif_status),
+            expected=expected, acoustid_status=outcome.decision.value)
 
         if outcome.decision != Decision.FAIL:
             if context.report_progress:
@@ -471,10 +477,21 @@ class AcoustIDScannerJob(RepairJob):
 
     def _persist_status(
         self, context, track_id, fpath, db_path, status, write_tag, expected=None,
+        acoustid_status=None,
     ):
-        if not status:
+        """Record what the scan concluded, in both places it belongs.
+
+        ``status`` is the file's overall verification standing and may be
+        unchanged (or absent — a FAIL on an untagged file moves nothing).
+        ``acoustid_status`` is the fingerprint verdict itself
+        (``pass``/``skip``/``fail``), which the library's Check column reads
+        and which a scan always produces. Either one alone is enough reason to
+        write; only ``status`` reaches the tag and the history projection,
+        because those have no notion of a separate fingerprint verdict.
+        """
+        if not status and not acoustid_status:
             return
-        if write_tag:
+        if status and write_tag:
             try:
                 from core.tag_writer import write_verification_status
 
@@ -485,13 +502,21 @@ class AcoustIDScannerJob(RepairJob):
         conn = context.db._get_connection()
         try:
             if file_id:
+                assignments, params = [], []
+                if status:
+                    assignments.append("verification_status=?")
+                    params.append(status)
+                if acoustid_status:
+                    assignments.append("acoustid_status=?")
+                    params.append(acoustid_status)
                 conn.execute(
-                    "UPDATE lib2_track_files SET verification_status=?, "
+                    f"UPDATE lib2_track_files SET {', '.join(assignments)}, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (status, file_id),
+                    (*params, file_id),
                 )
-            self._project_status_to_history(
-                conn, fpath, db_path, status, expected or {})
+            if status:
+                self._project_status_to_history(
+                    conn, fpath, db_path, status, expected or {})
             conn.commit()
         finally:
             conn.close()
@@ -507,6 +532,7 @@ class AcoustIDScannerJob(RepairJob):
                 details={
                     **subject_details((expected or {}).get("lib2_subject") or {}),
                     "verification_status": status,
+                    "acoustid_status": acoustid_status,
                 },
             )
 

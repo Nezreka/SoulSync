@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
+import { REPAIR_PROGRESS_EVENT } from '../tools/-tools.events';
 import { LIBRARY_V2_QUERY_KEY } from './-library-v2.api';
 
 /**
@@ -27,5 +28,47 @@ export function useLibraryChanged(): void {
 
     window.addEventListener(LIBRARY_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(LIBRARY_CHANGED_EVENT, onChanged);
+  }, [queryClient]);
+}
+
+/**
+ * Catch the library up when a maintenance job finishes.
+ *
+ * Reported after the AcoustID checker ran: the Check column still read "Not
+ * scanned", "und eigentlich sollte es ja automatisch updaten". The stale value
+ * had its own cause in the scanner, but the refresh gap is real on its own —
+ * a job that rewrites verification state, deletes a file or retags a track
+ * changes exactly what this page is showing, and nothing told the page.
+ *
+ * The signal is already app-wide: core.js re-broadcasts the worker's
+ * `repair:progress` socket frames as `ss:repair-progress` on every page. This
+ * only has to notice a job LEAVING the running state — invalidating on every
+ * frame would refetch the artist view once a second for the whole scan.
+ */
+export function useMaintenanceChanged(): void {
+  const queryClient = useQueryClient();
+  const running = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const onFrame = (event: Event) => {
+      const frames = (event as CustomEvent<Record<string, { status?: string }>>).detail;
+      if (!frames || typeof frames !== 'object') return;
+      let finished = false;
+      for (const [jobId, frame] of Object.entries(frames)) {
+        if (String(frame?.status ?? '') === 'running') {
+          running.current.add(jobId);
+        } else if (running.current.delete(jobId)) {
+          // Only for a job this page actually watched start: a trailing frame
+          // about a run that ended before you arrived is not news.
+          finished = true;
+        }
+      }
+      if (finished) {
+        void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      }
+    };
+
+    window.addEventListener(REPAIR_PROGRESS_EVENT, onFrame);
+    return () => window.removeEventListener(REPAIR_PROGRESS_EVENT, onFrame);
   }, [queryClient]);
 }

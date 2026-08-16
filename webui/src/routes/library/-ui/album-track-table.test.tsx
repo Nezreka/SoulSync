@@ -379,6 +379,38 @@ describe('library v2 album track table', () => {
     );
   });
 
+  it('does not call a verified file unscanned just because no fingerprint verdict was stored', () => {
+    // The reported bug: the AcoustID tool had processed the whole library and
+    // Michael Jackson still read "Not scanned". The scan wrote its verdict to
+    // verification_status only, so every file it agreed with fell through to
+    // the unscanned branch. The scanner records `acoustid_status` now — but
+    // the files it verified BEFORE that fix still carry none, and calling them
+    // unchecked would be just as wrong today.
+    render(<TrackCheckBadge file={trackFile({ verification_status: 'verified' })} />);
+
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.queryByText('Not scanned')).not.toBeInTheDocument();
+  });
+
+  it('says a fingerprint mismatch out loud instead of calling it unscanned', () => {
+    // A file the fingerprint contradicts is the most-checked file there is.
+    // It used to render identically to one nothing had ever looked at.
+    render(
+      <TrackCheckBadge
+        file={trackFile({
+          verification_status: 'verified',
+          acoustid_status: 'fail',
+          pipeline_result: { acoustid_message: 'matches "Smooth Criminal"' },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Mismatch')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Smooth Criminal'),
+    );
+  });
+
   it('opens one-track table settings in a viewport portal without clipping sections', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

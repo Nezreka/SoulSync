@@ -101,7 +101,7 @@ import {
   type LibraryV2MatchRelease,
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
-import { useLibraryChanged } from '../-library-v2.live';
+import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
 import {
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2AlbumDetail,
@@ -1142,6 +1142,20 @@ export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
       </span>
     );
   }
+  if (file.acoustid_status === 'fail') {
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationMismatch}`}
+        title={
+          detail
+            ? `AcoustID says this is a different recording: ${detail}`
+            : 'The audio fingerprint matches a different recording'
+        }
+      >
+        Mismatch
+      </span>
+    );
+  }
   if (file.acoustid_status === 'pass') {
     return (
       <span
@@ -1165,6 +1179,24 @@ export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
         }
       >
         Skipped
+      </span>
+    );
+  }
+  if (file.verification_status === 'verified') {
+    // No fingerprint verdict of its own, but the verification pipeline did
+    // accept this file. Every file the AcoustID scanner verified before it
+    // started recording `acoustid_status` looks like this, and calling those
+    // "Not scanned" is what made a fully scanned library read as untouched.
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationVerified}`}
+        title={
+          detail
+            ? `Verified at import; AcoustID detail: ${detail}`
+            : 'Verified — no separate fingerprint verdict is recorded for this file'
+        }
+      >
+        Verified
       </span>
     );
   }
@@ -3966,6 +3998,7 @@ export function UnifiedFileRemovalDialog({
 export function LibraryV2Page() {
   useReactPageShell('library');
   useLibraryChanged();
+  useMaintenanceChanged();
   const search = Route.useSearch();
   const enabledQuery = useQuery(libraryV2EnabledQueryOptions());
 

@@ -2953,6 +2953,14 @@ button.statusWarn:disabled {
   border: 1px solid rgba(241, 196, 15, 0.25);
 }
 
+/* A fingerprint that contradicts the file — the one Check outcome that is a
+   problem rather than a state, so it reads as one. */
+.verificationMismatch {
+  background: rgba(231, 76, 60, 0.12);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.28);
+}
+
 .albumMatchRow {
   display: flex;
   align-items: center;
