@@ -927,7 +927,15 @@ class MusicMatchingEngine:
         filename_lower = filename.lower()
         
         # Define version patterns and their penalties (higher penalty = lower priority)
+        # radio sits first on purpose. 'edit' is one of the remix patterns below
+        # and this loop stops at the first hit, so "radio edit" and "clean edit"
+        # used to come back as remixes. remix is reject-on-sight, so a radio edit
+        # got thrown away even when that's exactly what was asked for.
         version_patterns = {
+            'radio': {
+                'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
+                'penalty': 0.08  # -8% penalty for radio edits (minor difference)
+            },
             'remix': {
                 'patterns': [r'\bremix\b', r'\brmx\b', r'\brework\b', r'\bedit\b(?!ion)'],
                 'penalty': 0.15  # -15% penalty for remixes
@@ -943,10 +951,6 @@ class MusicMatchingEngine:
             'instrumental': {
                 'patterns': [r'\binstrumental\b', r'\bkaraoke\b', r'\bminus one\b'],
                 'penalty': 0.25  # -25% penalty for instrumentals (most different from original)
-            },
-            'radio': {
-                'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
-                'penalty': 0.08  # -8% penalty for radio edits (minor difference)
             },
             'clean': {
                 # #923: bare clean/censored markers used to be invisible (only
