@@ -388,7 +388,7 @@ def _enable_lossy(monkeypatch, codec="mp3", bitrate="320"):
     cfg = {"lossy_copy.enabled": True, "lossy_copy.codec": codec,
            "lossy_copy.bitrate": bitrate, "lossy_copy.delete_original": False}
     monkeypatch.setattr(_fo.config_manager, "get", lambda k, d=None: cfg.get(k, d))
-    monkeypatch.setattr(_fo, "get_audio_quality_string", lambda _p: None)
+    monkeypatch.setattr(_fo, "get_audio_quality_string", lambda _p, **_k: None)
 
 
 def test_create_lossy_copy_rejects_non_lossless(monkeypatch, tmp_path):
@@ -435,3 +435,90 @@ def test_create_lossy_copy_skips_when_output_would_overwrite_source(monkeypatch,
     out = _fo.create_lossy_copy(str(src))
     assert out is None                 # skipped — output would overwrite source
     assert ran["called"] is False      # the original was never touched
+
+
+def test_opus_quality_chip_estimates_bitrate_when_header_has_none(tmp_path, monkeypatch):
+    """mutagen.oggopus exposes length, not bitrate. YouTube remux files were
+    importing with a blank quality chip because `info.bitrate // 1000` threw."""
+    path = tmp_path / "song.opus"
+    path.write_bytes(b"x" * 40_000)  # 40 KB over 2s ≈ 160 kbps
+
+    class _Info:
+        length = 2.0
+        channels = 2
+
+    class _Opus:
+        def __init__(self, _p):
+            self.info = _Info()
+
+    monkeypatch.setattr("mutagen.oggopus.OggOpus", _Opus)
+    assert _fo.get_audio_quality_string(str(path)) == "OPUS-160"
+    assert _fo.get_audio_quality_string(
+        str(path), claimed_format="opus", claimed_bitrate=256,
+    ) == "OPUS-256"
+    aq = _fo.probe_audio_quality(str(path))
+    assert aq is not None
+    assert aq.format == "opus"
+    assert aq.bitrate == 160
+
+
+def test_opus_256_estimate_meets_opus_192_target(tmp_path, monkeypatch):
+    path = tmp_path / "premium.opus"
+    path.write_bytes(b"x" * 64_000)  # 64 KB over 2s ≈ 256 kbps
+
+    class _Info:
+        length = 2.0
+        channels = 2
+
+    class _Opus:
+        def __init__(self, _p):
+            self.info = _Info()
+
+    monkeypatch.setattr("mutagen.oggopus.OggOpus", _Opus)
+    from core.quality.model import QualityTarget
+    from core.quality.selection import quality_meets_profile
+
+    aq = _fo.probe_audio_quality(str(path))
+    assert quality_meets_profile(
+        aq, [QualityTarget(label="OPUS ≥ 192", format="opus", min_bitrate=192)],
+    )
+
+
+def test_opus_chip_without_duration_is_still_opus(tmp_path, monkeypatch):
+    path = tmp_path / "nodur.opus"
+    path.write_bytes(b"x" * 100)
+
+    class _Info:
+        length = 0
+        channels = 2
+
+    class _Opus:
+        def __init__(self, _p):
+            self.info = _Info()
+
+    monkeypatch.setattr("mutagen.oggopus.OggOpus", _Opus)
+    assert _fo.get_audio_quality_string(str(path)) == "OPUS"
+    assert _fo.get_audio_quality_string(
+        str(path), claimed_format="opus", claimed_bitrate=256,
+    ) == "OPUS-256"
+
+
+def test_opus_chip_ignores_youtube_claim_when_file_is_mp3(tmp_path, monkeypatch):
+    """Re-encode to MP3 must not inherit the Opus itag bitrate."""
+    path = tmp_path / "song.mp3"
+    path.write_bytes(b"x" * 1000)
+
+    class _Info:
+        bitrate = 320_000
+        bitrate_mode = None
+        length = 2.0
+
+    class _MP3:
+        def __init__(self, _p):
+            self.info = _Info()
+
+    monkeypatch.setattr("mutagen.mp3.MP3", _MP3)
+    monkeypatch.setattr("mutagen.mp3.BitrateMode", type("BM", (), {"VBR": object()}))
+    assert _fo.get_audio_quality_string(
+        str(path), claimed_format="opus", claimed_bitrate=256,
+    ) == "MP3-320"

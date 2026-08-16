@@ -1743,6 +1743,14 @@ class YouTubeClient(DownloadSourcePlugin):
                     # applies without restarting.
                     download_opts = self.download_opts.copy()
                     download_opts['postprocessors'] = [youtube_audio_postprocessor_from_config()]
+                    pp = download_opts['postprocessors'][0]
+                    if pp.get('preferredcodec') == 'best':
+                        logger.info("YouTube extract: remux original Opus/AAC (re-encode off)")
+                    else:
+                        logger.info(
+                            "YouTube extract: transcode to %s %s",
+                            pp.get('preferredcodec'), pp.get('preferredquality'),
+                        )
                     
                     # Profile-driven original stream (same ladder as Tidal/Deezer).
                     # Retry 3 still falls back to muxed ``best``.

@@ -627,7 +627,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # audio quality is recorded on the context (→ quarantine sidecar) for
         # EVERY trigger, so it's known when reviewing/approving any quarantined
         # file. force_import still never fires on a quality mismatch.
-        context['_audio_quality'] = get_audio_quality_string(file_path)
+        context['_audio_quality'] = get_audio_quality_string(
+            file_path,
+            claimed_format=(get_import_original_search(context) or {}).get('quality'),
+            claimed_bitrate=(get_import_original_search(context) or {}).get('bitrate'),
+        )
         if context['_audio_quality']:
             logger.info(f"Audio quality detected: {context['_audio_quality']}")
 

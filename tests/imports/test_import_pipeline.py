@@ -233,7 +233,7 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     )
     monkeypatch.setattr(import_pipeline, "resolve_album_group", lambda artist_context, album_info, original_album: album_info["album_name"])
     monkeypatch.setattr(import_pipeline, "get_import_clean_title", lambda *args, **kwargs: "Track")
-    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path: "")
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path, **_k: "")
     monkeypatch.setattr(import_pipeline, "check_flac_bit_depth", lambda *args, **kwargs: None)
     # Bypass integrity check — the 5-byte fixture would fail it; this test
     # exercises the metadata-runtime forwarding path, not file integrity.
@@ -321,7 +321,7 @@ def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_numbe
     )
     monkeypatch.setattr(import_pipeline, "resolve_album_group", lambda artist_context, album_info, original_album: album_info["album_name"])
     monkeypatch.setattr(import_pipeline, "get_import_clean_title", lambda *args, **kwargs: "Track")
-    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path: "")
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path, **_k: "")
     monkeypatch.setattr(import_pipeline, "check_flac_bit_depth", lambda *args, **kwargs: None)
     from core.imports.file_integrity import IntegrityResult
     monkeypatch.setattr(import_pipeline, "check_audio_integrity",
@@ -422,7 +422,7 @@ def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "detect_broken_audio", lambda *_a, **_kw: None)
 
     # Wrong quality → rejection.
-    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda fp: "FLAC 16bit/44.1kHz")
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda fp, **_k: "FLAC 16bit/44.1kHz")
     monkeypatch.setattr(import_pipeline, "check_quality_target", lambda fp, ctx: "Quality mismatch: FLAC 16bit")
 
     triggers = []
