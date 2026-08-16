@@ -522,3 +522,42 @@ def test_opus_chip_ignores_youtube_claim_when_file_is_mp3(tmp_path, monkeypatch)
     assert _fo.get_audio_quality_string(
         str(path), claimed_format="opus", claimed_bitrate=256,
     ) == "MP3-320"
+
+
+def test_estimate_bitrate_kbps_from_size_and_duration():
+    """40 KB over 2s is 160 kbps — the YouTube Opus 160 effective rate."""
+    assert _fo.estimate_bitrate_kbps(size_bytes=40_000, duration_seconds=2.0) == 160
+    assert _fo.estimate_bitrate_kbps(size_bytes=40_000, duration_ms=2000) == 160
+    assert _fo.estimate_bitrate_kbps(size_bytes=0, duration_ms=2000) is None
+    assert _fo.estimate_bitrate_kbps(size_bytes=40_000, duration_ms=0) is None
+
+
+def test_fill_missing_track_bitrate_estimates_when_db_is_zero():
+    """Library enhanced view reads tracks.bitrate; Opus import left it at 0."""
+    track = {
+        "bitrate": 0,
+        "file_size": 40_000,
+        "duration": 2000,
+        "file_path": "Autumnal Embrace.opus",
+    }
+    assert _fo.fill_missing_track_bitrate(track)["bitrate"] == 160
+
+
+def test_fill_missing_track_bitrate_keeps_a_header_value():
+    track = {"bitrate": 320, "file_size": 40_000, "duration": 2000, "file_path": "a.mp3"}
+    filled = _fo.fill_missing_track_bitrate(track)
+    assert filled["bitrate"] == 320
+    assert not filled.get("bitrate_vbr")
+
+
+def test_fill_missing_track_bitrate_flags_aac_as_vbr():
+    track = {"bitrate": 256, "file_path": "song.m4a"}
+    assert _fo.fill_missing_track_bitrate(track).get("bitrate_vbr") == 1
+
+
+def test_stream_uses_vbr_display_for_lossy_averages():
+    assert _fo.stream_uses_vbr_display("a.opus") is True
+    assert _fo.stream_uses_vbr_display("a.m4a") is True
+    assert _fo.stream_uses_vbr_display("a.wma") is True
+    assert _fo.stream_uses_vbr_display("a.mp3") is False
+    assert _fo.stream_uses_vbr_display("a.flac") is False

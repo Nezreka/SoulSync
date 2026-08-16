@@ -15017,7 +15017,8 @@ class MusicDatabase:
                         ORDER BY track_number, title
                     """, (album_data['id'],))
                     track_rows = cursor.fetchall()
-                    album_data['tracks'] = [dict(tr) for tr in track_rows]
+                    from core.imports.file_ops import fill_missing_track_bitrate
+                    album_data['tracks'] = [fill_missing_track_bitrate(dict(tr)) for tr in track_rows]
 
                     # Determine record type from data if not set
                     if not album_data.get('record_type'):

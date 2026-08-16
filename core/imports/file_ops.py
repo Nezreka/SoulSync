@@ -314,6 +314,78 @@ def cleanup_empty_directories(download_path, moved_file_path):
         logger.error(f"An error occurred during directory cleanup: {e}")
 
 
+def estimate_bitrate_kbps(*, size_bytes=None, duration_seconds=None, duration_ms=None, file_path=None):
+    """Effective kbps from file size and duration.
+
+    Used when the container has no bitrate header (Ogg Opus) and for
+    already-imported library rows stored as 0.
+    """
+    size = size_bytes
+    if not size and file_path:
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            size = 0
+    try:
+        size = int(size or 0)
+    except (TypeError, ValueError):
+        size = 0
+    length = duration_seconds
+    if not length and duration_ms:
+        try:
+            length = float(duration_ms) / 1000.0
+        except (TypeError, ValueError):
+            length = 0
+    try:
+        length = float(length or 0)
+    except (TypeError, ValueError):
+        length = 0
+    if length > 0.05 and size > 0:
+        return max(1, int(size * 8 / length / 1000))
+    return None
+
+
+def stream_uses_vbr_display(file_path, info=None) -> bool:
+    """True when the library bitrate cell should show an average (``~N kbps``).
+
+    Opus/Vorbis are always VBR. AAC/WMA store mutagen's average (MP4 esds
+    ``avgBitrate``), not a CBR constant. MP3 is VBR only when mutagen says so.
+    """
+    ext = os.path.splitext(file_path or "")[1].lower()
+    if ext in {".opus", ".ogg", ".m4a", ".aac", ".wma"}:
+        return True
+    if ext == ".mp3" and info is not None:
+        try:
+            from mutagen.mp3 import BitrateMode
+            return getattr(info, "bitrate_mode", None) == BitrateMode.VBR
+        except Exception:
+            return False
+    return False
+
+
+def fill_missing_track_bitrate(track: dict) -> dict:
+    """If the DB row has no bitrate, fill an average from size and duration.
+
+    The enhanced library table reads ``tracks.bitrate``. Opus import used
+    to store 0 because mutagen.oggopus has no bitrate attribute.
+    """
+    try:
+        existing = int(track.get("bitrate") or 0)
+    except (TypeError, ValueError):
+        existing = 0
+    if existing <= 0:
+        kbps = estimate_bitrate_kbps(
+            size_bytes=track.get("file_size"),
+            duration_ms=track.get("duration"),
+            file_path=track.get("file_path"),
+        )
+        if kbps:
+            track["bitrate"] = kbps
+    if stream_uses_vbr_display(track.get("file_path")):
+        track["bitrate_vbr"] = 1
+    return track
+
+
 def _kbps_from_stream_info(info, file_path: str, *, estimate: bool = True):
     """Bitrate in kbps from mutagen, optionally a size/duration estimate.
 
@@ -329,18 +401,10 @@ def _kbps_from_stream_info(info, file_path: str, *, estimate: bool = True):
             pass
     if not estimate:
         return None
-    length = getattr(info, "length", None) or getattr(info, "duration", None) or 0 if info is not None else 0
-    try:
-        length = float(length)
-    except (TypeError, ValueError):
-        length = 0
-    try:
-        size = os.path.getsize(file_path)
-    except OSError:
-        size = 0
-    if length > 0.05 and size > 0:
-        return max(1, int(size * 8 / length / 1000))
-    return None
+    length = None
+    if info is not None:
+        length = getattr(info, "length", None) or getattr(info, "duration", None)
+    return estimate_bitrate_kbps(file_path=file_path, duration_seconds=length)
 
 
 def _claim_kbps(on_disk_format: str, claimed_format, claimed_bitrate):

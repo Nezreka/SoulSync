@@ -49731,7 +49731,7 @@ textarea.enhanced-meta-field-input {
 .enhanced-track-table .col-title { width: auto; }
 .enhanced-track-table .col-duration { width: 70px; text-align: right; }
 .enhanced-track-table .col-format { width: 80px; }
-.enhanced-track-table .col-bitrate { width: 75px; text-align: right; }
+.enhanced-track-table .col-bitrate { width: 100px; text-align: right; }
 .enhanced-track-table .col-path { width: 25%; }
 .enhanced-track-table .col-bpm { width: 60px; text-align: right; }
 .enhanced-track-table .col-actions { width: 50px; text-align: center; }
