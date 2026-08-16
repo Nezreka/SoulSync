@@ -4215,10 +4215,12 @@
                                         <textarea id="youtube-cookies-paste" class="form-input" rows="6"
                                                   placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
                                         <div class="setting-help-text">
-                                            For server/Docker installs with no local browser. Export your YouTube cookies
-                                            with a "Get cookies.txt LOCALLY" browser extension and paste the whole file.
-                                            Required for private playlists like your <strong>Liked Music</strong>.
-                                            Stored on the server and they expire periodically &mdash; re-paste if YouTube stops working.
+                                            For server/Docker installs with no local browser. Paste a Netscape/Mozilla
+                                            <code>cookies.txt</code>. Export with a
+                                            "Get cookies.txt LOCALLY" extension and paste the whole file &mdash; the
+                                            <code># Netscape HTTP Cookie File</code> header alone is not enough.
+                                            Required for private playlists like your <strong>Liked Music</strong>, and for
+                                            Premium audio itags. Cookies expire periodically &mdash; re-paste if YouTube stops working.
                                         </div>
                                     </div>
                                     <div class="form-group">

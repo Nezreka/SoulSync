@@ -13,7 +13,6 @@ This client provides:
 import sys
 import os
 import re
-import copy
 import time
 import platform
 import uuid
@@ -54,6 +53,74 @@ def _resolve_cookie_opts() -> dict:
     cookiefile = config_manager.get('youtube.cookies_file', '')
     exists = bool(cookiefile) and os.path.exists(cookiefile)
     return build_youtube_cookie_opts(mode, cookiefile, cookiefile_exists=exists)
+
+
+def youtube_authenticated_extractor_args(opts: Optional[dict] = None) -> dict:
+    """yt-dlp extractor_args that can surface Music Premium itags.
+
+    itag 774 (Opus ~256) and 141 (AAC ~256) are on the ``web_music`` player,
+    not yt-dlp's default youtube.com clients. Cookies are not Premium: this
+    only adds the client that *can* return those itags. Ranking still stamps
+    whatever the player actually sent (251 stays Opus 160).
+
+    Anonymous extracts skip ``web_music`` — yt-dlp maintainers keep it off
+    the default list because it is an extra request and only useful when
+    authenticated.
+    """
+    opts = opts or {}
+    if not opts.get('cookiefile') and not opts.get('cookiesfrombrowser'):
+        return {}
+    return {
+        'youtube': {
+            'player_client': ['web_music', 'default'],
+        }
+    }
+
+
+def youtube_probe_auth_label(opts: Optional[dict] = None) -> str:
+    """Short probe-log token. Never includes cookie values or paths."""
+    opts = opts or {}
+    if opts.get('cookiefile'):
+        return 'cookiefile'
+    browser = opts.get('cookiesfrombrowser')
+    if browser:
+        name = browser[0] if isinstance(browser, (tuple, list)) else browser
+        return f'browser:{name}'
+    return 'none'
+
+
+class _YtdlpProbeLog:
+    """Forward yt-dlp auth / PO-token warnings without dumping cookies."""
+
+    _KEEP = ('PO Token', 'Skipping client', 'YouTube account', 'Premium')
+
+    def debug(self, msg):
+        text = str(msg)
+        if 'Cookie:' in text or 'SAPISID=' in text:
+            return
+        if any(token in text for token in self._KEEP):
+            logger.info("yt-dlp %s", text)
+
+    info = debug
+
+    def warning(self, msg):
+        text = str(msg)
+        if 'Cookie:' in text or 'SAPISID=' in text:
+            return
+        logger.info("yt-dlp %s", text)
+
+    def error(self, msg):
+        self.warning(msg)
+
+
+def _audio_itag_summary(formats: Optional[List[Dict]]) -> str:
+    ids = []
+    for fmt in formats or []:
+        if fmt.get('vcodec') == 'none' and fmt.get('acodec') not in (None, 'none'):
+            fid = fmt.get('format_id')
+            if fid:
+                ids.append(str(fid))
+    return ','.join(ids) if ids else 'none'
 
 
 _TRANSCODE_CODECS = frozenset({'mp3', 'opus', 'aac', 'm4a', 'ogg'})
@@ -1333,8 +1400,8 @@ class YouTubeClient(DownloadSourcePlugin):
         if not video_id or claimed is None:
             return
         self._probe_quality_cache()[video_id] = (time.monotonic(), claimed)
-        if info:
-            self._probe_info_cache()[video_id] = (time.monotonic(), info)
+        # Player JSON is ranking-only. skip_download URLs (especially itag
+        # 774) 403 when a later YoutubeDL calls process_ie_result.
 
     def _cached_quality(self, video_id: str):
         packed = self._probe_quality_cache().get(video_id)
@@ -1349,19 +1416,6 @@ class YouTubeClient(DownloadSourcePlugin):
             return None
         return claimed
 
-    def _take_fresh_probe_info(self, video_id: str) -> Optional[dict]:
-        """Pop a recent player response so download can skip a second extract."""
-        if not video_id:
-            return None
-        cache = getattr(self, '_yt_probe_info', None) or {}
-        packed = cache.pop(video_id, None)
-        if not packed:
-            return None
-        stored_at, info = packed
-        if (time.monotonic() - stored_at) > self._PROBE_INFO_TTL_S:
-            return None
-        return info
-
     def _stamp_probed_quality(self, candidate, claimed) -> None:
         candidate.set_quality(claimed)
         candidate._youtube_quality_probed = True
@@ -1375,8 +1429,9 @@ class YouTubeClient(DownloadSourcePlugin):
         change the pick — same idea as Soulseek ranking every match, without
         walking a full search. Premium itags are per-video: remux never copies
         one video's formats onto another. Re-encode on may share the converted
-        claim. Probe failure leaves the existing claim. Download reuses a
-        fresh player response so ranking and fetch share one extract.
+        claim. Probe failure leaves the existing claim. Download always
+        extracts fresh — skip_download probe URLs (especially itag 774)
+        403 if a later YoutubeDL tries to fetch them.
         """
         youtube = [
             c for c in (candidates or [])
@@ -1396,6 +1451,18 @@ class YouTubeClient(DownloadSourcePlugin):
             'noplaylist': True,
         }
         ydl_opts.update(_resolve_cookie_opts())
+        extractor_args = youtube_authenticated_extractor_args(ydl_opts)
+        if extractor_args:
+            ydl_opts['extractor_args'] = extractor_args
+        auth_label = youtube_probe_auth_label(ydl_opts)
+        if auth_label == 'none':
+            logger.info(
+                "YouTube format probe auth=none — Premium itags 774/141 need "
+                "Settings → YouTube → Paste cookies.txt (a browser dropdown "
+                "does nothing in Docker)"
+            )
+        ydl_opts['logger'] = _YtdlpProbeLog()
+        ydl_opts['no_warnings'] = False
 
         max_network = max(0, int(limit))
         network = 0
@@ -1446,8 +1513,10 @@ class YouTubeClient(DownloadSourcePlugin):
             if batch_claim is None:
                 batch_claim = claimed
             logger.info(
-                "YouTube format probe %s: %s",
+                "YouTube format probe %s: %s (itags %s, auth=%s)",
                 video_id, claimed.label(),
+                _audio_itag_summary(info.get('formats')),
+                auth_label,
             )
             stop, seen_passing = _should_stop_youtube_probes(
                 claimed, targets, seen_passing=seen_passing,
@@ -1683,13 +1752,18 @@ class YouTubeClient(DownloadSourcePlugin):
                     download_opts['noplaylist'] = True
 
                     # On retry, try different strategies
-                    if attempt == 1:
+                    if attempt == 0:
+                        extra = youtube_authenticated_extractor_args(download_opts)
+                        if extra:
+                            download_opts['extractor_args'] = extra
+                    elif attempt == 1:
                         # Drop cookies — authenticated sessions (browser store OR a
                         # pasted cookies.txt) sometimes get restricted formats.
                         if 'cookiesfrombrowser' in download_opts or 'cookiefile' in download_opts:
                             logger.info(f"Retry {attempt + 1}/{max_retries} without cookies")
                             download_opts.pop('cookiesfrombrowser', None)
                             download_opts.pop('cookiefile', None)
+                            download_opts.pop('extractor_args', None)
                         else:
                             logger.info(f"Retry {attempt + 1}/{max_retries} with web_creator client")
                             download_opts['extractor_args'] = {
@@ -1703,27 +1777,10 @@ class YouTubeClient(DownloadSourcePlugin):
                         download_opts.pop('extractor_args', None)
 
 
-                    # Perform download. Reuse a fresh ranking probe when we
-                    # have one so we don't hit the player API twice for the
-                    # same video; retries always extract from scratch.
+                    # Perform download. Ranking already probed itags; fetch
+                    # always extracts fresh. Probe URLs 403 if reused here.
                     with yt_dlp.YoutubeDL(download_opts) as ydl:
-                        info = None
-                        if attempt == 0:
-                            cached = self._take_fresh_probe_info(
-                                self._video_id_from_url(youtube_url)
-                            )
-                            process = getattr(ydl, 'process_ie_result', None)
-                            if cached is not None and callable(process):
-                                try:
-                                    info = process(copy.deepcopy(cached), download=True)
-                                except Exception as e:  # noqa: BLE001 - fall back to extract
-                                    logger.info(
-                                        "YouTube download from cached probe failed (%s: %s) — extracting fresh",
-                                        type(e).__name__, e,
-                                    )
-                                    info = None
-                        if info is None:
-                            info = ydl.extract_info(youtube_url, download=True)
+                        info = ydl.extract_info(youtube_url, download=True)
 
                         filename = resolve_downloaded_audio_path(ydl, info)
 

@@ -1804,7 +1804,7 @@ const HELPER_CONTENT = {
     },
     '#youtube-settings-container': {
         title: 'YouTube Settings',
-        description: 'Browser cookies selection for bot detection bypass and Premium audio qualities, plus download delay between requests. Re-encode to MP3 320 is on by default.',
+        description: 'Cookies for bot detection bypass and Premium audio: a local browser, or on Docker a pasted Netscape cookies.txt. Download delay and Re-encode to MP3 320 (on by default).',
     },
 
     // Quality Profile

@@ -26,6 +26,8 @@ from core.youtube_client import (
     youtube_audio_format_selector,
     youtube_audio_postprocessor,
     youtube_audio_postprocessor_from_config,
+    youtube_authenticated_extractor_args,
+    youtube_probe_auth_label,
     youtube_quality_rank_band,
 )
 
@@ -739,6 +741,64 @@ def test_refresh_probe_forwards_cookie_opts(monkeypatch):
     }, calls=calls)
     _bare_client().refresh_claimed_quality([_yt_track()])
     assert calls[0].get('cookiefile') == '/tmp/youtube_cookies.txt'
+
+
+def test_authenticated_extractor_args_asks_web_music_only_with_cookies():
+    """itag 774/141 live on the Music player. Cookies are not Premium —
+    this only adds the client that *can* return those itags."""
+    assert youtube_authenticated_extractor_args({}) == {}
+    assert youtube_authenticated_extractor_args({'quiet': True}) == {}
+    music = youtube_authenticated_extractor_args(
+        {'cookiefile': '/tmp/youtube_cookies.txt'},
+    )
+    assert music['youtube']['player_client'] == ['web_music', 'default']
+    browser = youtube_authenticated_extractor_args(
+        {'cookiesfrombrowser': ('firefox',)},
+    )
+    assert browser['youtube']['player_client'] == ['web_music', 'default']
+
+
+def test_probe_auth_label_never_includes_paths_or_secrets():
+    assert youtube_probe_auth_label({}) == 'none'
+    assert youtube_probe_auth_label({'quiet': True}) == 'none'
+    assert youtube_probe_auth_label(
+        {'cookiefile': '/secret/youtube_cookies.txt'},
+    ) == 'cookiefile'
+    assert youtube_probe_auth_label(
+        {'cookiesfrombrowser': ('firefox',)},
+    ) == 'browser:firefox'
+    assert 'secret' not in youtube_probe_auth_label(
+        {'cookiefile': '/secret/youtube_cookies.txt'},
+    )
+
+
+def test_refresh_probe_requests_web_music_when_cookies(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        youtube_client, '_resolve_cookie_opts',
+        lambda: {'cookiefile': '/tmp/youtube_cookies.txt'},
+    )
+    _patch_ydl(monkeypatch, {
+        'formats': [
+            {'vcodec': 'none', 'acodec': 'opus', 'abr': 160, 'ext': 'webm', 'format_id': '251'},
+        ],
+    }, calls=calls)
+    _bare_client().refresh_claimed_quality([_yt_track()])
+    clients = (calls[0].get('extractor_args') or {}).get('youtube', {}).get('player_client')
+    assert clients == ['web_music', 'default']
+
+
+def test_refresh_probe_skips_web_music_when_anonymous(monkeypatch):
+    calls = []
+    monkeypatch.setattr(youtube_client, '_resolve_cookie_opts', lambda: {})
+    _patch_ydl(monkeypatch, {
+        'formats': [
+            {'vcodec': 'none', 'acodec': 'opus', 'abr': 160, 'ext': 'webm', 'format_id': '251'},
+        ],
+    }, calls=calls)
+    _bare_client().refresh_claimed_quality([_yt_track()])
+    clients = (calls[0].get('extractor_args') or {}).get('youtube', {}).get('player_client', [])
+    assert 'web_music' not in clients
 
 
 def _patch_profile(monkeypatch, targets, fallback):
@@ -1479,7 +1539,8 @@ def test_download_sync_reencode_writes_mp3_320_postprocessor(tmp_path, monkeypat
     }]
 
 
-def test_download_sync_reuses_fresh_probe_info(tmp_path, monkeypatch):
+def test_download_sync_extracts_fresh_after_probe(tmp_path, monkeypatch):
+    """Probe URLs (itag 774 especially) 403 if downloaded later. Fetch extracts again."""
     audio = tmp_path / 'Song.opus'
     audio.write_bytes(b'x')
     seen = {'extract': 0, 'process': 0}
@@ -1496,17 +1557,18 @@ def test_download_sync_reuses_fresh_probe_info(tmp_path, monkeypatch):
 
         def extract_info(self, url, download=True):
             seen['extract'] += 1
+            if download:
+                return {'filepath': str(audio)}
             return {
                 'id': 'jNQXAC9IVRw',
                 'formats': [
-                    {'vcodec': 'none', 'acodec': 'opus', 'abr': 160, 'ext': 'webm'},
+                    {'vcodec': 'none', 'acodec': 'opus', 'abr': 256, 'ext': 'webm', 'format_id': '774'},
                 ],
             }
 
         def process_ie_result(self, info, download=True):
             seen['process'] += 1
-            assert download is True
-            return {'filepath': str(audio)}
+            raise RuntimeError('should not download from cached probe')
 
         def prepare_filename(self, info):
             return str(tmp_path / 'Song.webm')
@@ -1525,8 +1587,8 @@ def test_download_sync_reuses_fresh_probe_info(tmp_path, monkeypatch):
     assert seen['extract'] == 1
     path = client._download_sync('https://www.youtube.com/watch?v=jNQXAC9IVRw', 'Me at the zoo')
     assert path == str(audio)
-    assert seen['extract'] == 1
-    assert seen['process'] == 1
+    assert seen['extract'] == 2
+    assert seen['process'] == 0
 
 
 def test_download_sync_extracts_fresh_when_probe_cache_expired(tmp_path, monkeypatch):
@@ -1667,9 +1729,11 @@ def test_docs_mention_youtube_reencode_default():
     transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
     assert 'Re-encode YouTube audio' in youtube_docs
     assert 'MP3 320' in youtube_docs
-    assert 'Re-encode to MP3 320 is on by default' in youtube_help
-    assert 'Premium audio qualities' in youtube_help
-    assert 'Premium audio qualities' in youtube_docs
+    assert 'Re-encode to MP3 320 (on by default)' in youtube_help
+    assert 'Netscape cookies.txt' in youtube_help
+    assert 'Premium audio' in youtube_help
+    assert 'Paste cookies.txt' in youtube_docs
+    assert 'Netscape' in youtube_docs
     assert 'Premium audio qualities' in index
     assert 'Opus or AAC' in transcode_help
     assert 'quality list' in transcode_help
@@ -2006,10 +2070,14 @@ def test_download_sync_retry_drops_cookies_on_second_attempt(tmp_path, monkeypat
     audio = tmp_path / 'Song.m4a'
     audio.write_bytes(b'x')
     cookie_keys = []
+    extractor_clients = []
 
     class _FakeYDL:
         def __init__(self, opts):
             cookie_keys.append(('cookiefile' in opts, 'cookiesfrombrowser' in opts))
+            extractor_clients.append(
+                (opts.get('extractor_args') or {}).get('youtube', {}).get('player_client')
+            )
 
         def __enter__(self):
             return self
@@ -2036,6 +2104,8 @@ def test_download_sync_retry_drops_cookies_on_second_attempt(tmp_path, monkeypat
     assert client._download_sync('https://youtu.be/abc', 'Song') == str(audio)
     assert cookie_keys[0] == (True, False)
     assert cookie_keys[1] == (False, False)
+    assert extractor_clients[0] == ['web_music', 'default']
+    assert extractor_clients[1] != ['web_music', 'default']
 
 
 # ── quality filter + download selector extra edges ─────────────────────────

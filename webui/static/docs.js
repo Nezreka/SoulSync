@@ -77,7 +77,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Spotify</strong></td><td>Primary metadata source (artists, albums, tracks, cover art, genres)</td><td>OAuth &mdash; Client ID + Secret</td></tr>
                         <tr><td><strong>iTunes / Apple Music</strong></td><td>Fallback metadata source, always free, no auth needed</td><td>None</td></tr>
                         <tr><td><strong>Soulseek (slskd)</strong></td><td>Download source &mdash; P2P network, best for lossless and rare music</td><td>URL + API key</td></tr>
-                        <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>None (optional cookies browser)</td></tr>
+                        <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>Optional: local cookies browser, or Netscape cookies.txt paste (Docker)</td></tr>
                         <tr><td><strong>Tidal</strong></td><td>Download source + playlist import + enrichment</td><td>OAuth &mdash; Client ID + Secret</td></tr>
                         <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password, or Auth Token (from browser DevTools)</td></tr>
                         <tr><td><strong>HiFi</strong></td><td>Download source &mdash; free lossless via community API</td><td>None</td></tr>
@@ -814,7 +814,7 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Hybrid mode</strong> is recommended for most users. It tries your primary source first, then falls back through your configured priority order. All six sources (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer) can be ordered via drag-and-drop in Settings.</div></div>
-                <p class="docs-text"><strong>YouTube settings</strong> include cookies (bot detection bypass, and Premium audio if your account has it), download delay (seconds between requests), and <em>Re-encode YouTube audio</em> (MP3 320 by default).</p>
+                <p class="docs-text"><strong>YouTube settings</strong> include cookies (bot detection bypass, and Premium audio if your account has it), download delay (seconds between requests), and <em>Re-encode YouTube audio</em> (MP3 320 by default). On Docker, use <strong>Paste cookies.txt</strong>: Netscape/Mozilla format only (tab-separated rows). Paste the whole file from a "Get cookies.txt LOCALLY" extension &mdash; the header line alone is not enough.</p>
             </div>
             <div class="docs-subsection" id="search-downloading">
                 <h3 class="docs-subsection-title">Downloading Music</h3>
@@ -1455,7 +1455,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="set-other">
                 <h3 class="docs-subsection-title">Other Settings</h3>
                 <ul class="docs-list">
-                    <li><strong>YouTube Configuration</strong> &mdash; Select cookies browser (Chrome, Firefox, Edge) for bot detection bypass and Premium audio qualities if your account has them, set download delay (seconds between requests). <em>Re-encode YouTube audio</em> is on by default (MP3 320).</li>
+                    <li><strong>YouTube Configuration</strong> &mdash; Cookies for bot detection bypass and Premium audio if your account has it: pick a local browser, or on Docker/server use <strong>Paste cookies.txt</strong> (Netscape/Mozilla tab-separated file only &mdash; not JSON, not a <code>Cookie:</code> header). Set download delay (seconds between requests). <em>Re-encode YouTube audio</em> is on by default (MP3 320).</li>
                     <li><strong>UI Appearance</strong> &mdash; Custom accent colors with persistent preference. Changes apply immediately across the entire interface. Choose from different <strong>sidebar visualizer types</strong> for the media player audio visualization.</li>
                     <li><strong>API Keys</strong> &mdash; Generate and manage API keys for the REST API. Keys use a <code>sk_</code> prefix and are shown once at creation &mdash; only a SHA-256 hash is stored for security.</li>
                     <li><strong>Path Templates</strong> &mdash; Configure how files are organized in your library. The default template is <code>Artist/Album/TrackNum - Title.ext</code></li>
