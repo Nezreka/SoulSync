@@ -13918,6 +13918,21 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
+    # --- Last resort: wrong INTERIOR segment (#1127) ---
+    # Everything above can only repair a wrong PREFIX. Navidrome synthesizes the
+    # Subsonic path from tags, so the album folder AND the filename can both be
+    # wrong. Shared with core/library/path_resolver so the repair jobs and this
+    # resolver can't drift — this copy never had the sibling-album step at all,
+    # which is why the same library resolved from a repair job and failed here.
+    try:
+        from core.library.path_resolver import resolve_via_last_resort_fallbacks
+        interior = resolve_via_last_resort_fallbacks(clean_rel, abs_bases)
+        if interior:
+            logger.debug("[PathResolve] interior-segment fallback: %r → %r", file_path, interior)
+            return interior
+    except Exception as e:
+        logger.debug("[PathResolve] interior-segment fallback failed: %s", e)
+
     # Couldn't resolve — log the bases we searched, throttled to once per 10
     # minutes. The old once-per-PROCESS guard self-silenced forever, which hid
     # intermittent failures completely (TheHomeGuy: an NFS mount that drops and
