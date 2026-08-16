@@ -234,12 +234,23 @@ def test_unknown_ids_are_kept_rather_than_widening_the_allowlist(monkeypatch):
 
 
 class _FakeProwlarr:
+    """Stands in for ProwlarrClient on the AGGREGATED path.
+
+    `resolve_search_indexers` answers [] — "the ids could not be resolved" —
+    which is the client's own signal to fall back to a single request for
+    every indexer. These tests were written for that path and keep exercising
+    it unchanged; the per-indexer fan-out (#1151) has its own double below.
+    """
+
     def __init__(self, answers):
         self.answers = answers
         self.calls: list = []
 
     def indexer_ids_for_protocol(self, ids, protocol):
         return list(ids)
+
+    async def resolve_search_indexers(self, ids, protocol):
+        return []
 
     async def search(self, query, categories=None, indexer_ids=None, timeout=None):
         self.calls.append({"query": query, "timeout": timeout})
