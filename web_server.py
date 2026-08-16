@@ -41074,6 +41074,97 @@ def import_staging_scan_status():
     return jsonify(payload), status
 
 
+def _reassign_missing_fields(data):
+    """Which required identifiers a reassign request left out.
+
+    Named explicitly rather than left to degrade: without them the service
+    would answer "Nothing to reassign", which reads like the album is empty
+    instead of like the request was malformed.
+    """
+    return [field for field in ('source', 'local_album_id', 'album_id')
+            if not str(data.get(field) or '').strip()]
+
+
+@app.route('/api/reassign/artists', methods=['GET'])
+@admin_only
+def reassign_search_artists():
+    """Step 1 of an album reassign: find the artist it SHOULD belong to.
+
+    Admin-only, like re-identify: it restages library files."""
+    try:
+        from core.imports.reassign_service import search_artists
+        return jsonify({'success': True, 'artists': search_artists(
+            request.args.get('source', ''), request.args.get('q', ''))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/albums', methods=['GET'])
+@admin_only
+def reassign_artist_albums():
+    """Step 2: that artist's releases. Picking from THIS list is what
+    guarantees the target is one the source can answer for."""
+    try:
+        from core.imports.reassign_service import artist_albums
+        return jsonify({'success': True, 'albums': artist_albums(
+            request.args.get('source', ''), request.args.get('artist_id', ''))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/preview', methods=['POST'])
+@admin_only
+def reassign_preview():
+    """Step 3: how the local files line up, BEFORE anything is staged."""
+    try:
+        from core.imports.reassign_service import preview_reassign
+        data = request.get_json() or {}
+        missing = _reassign_missing_fields(data)
+        if missing:
+            return jsonify({'success': False,
+                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
+        payload = preview_reassign(
+            get_database(), data.get('source', ''),
+            data.get('local_album_id'), data.get('album_id', ''))
+        return jsonify(payload), (200 if payload.get('success') else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/apply', methods=['POST'])
+@admin_only
+def reassign_apply():
+    """Step 4: stage each file with its hint. The import pipeline re-files
+    them — tags, folder and database rows all come from the same code that
+    handles a fresh download."""
+    try:
+        from core.imports.reassign_service import apply_reassign
+        from core.imports.staging import get_staging_path
+        data = request.get_json() or {}
+        missing = _reassign_missing_fields(data)
+        if missing:
+            return jsonify({'success': False,
+                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
+        payload = apply_reassign(
+            get_database(),
+            source=data.get('source', ''),
+            local_album_id=data.get('local_album_id'),
+            album_id=data.get('album_id', ''),
+            album_name=data.get('album_name', ''),
+            artist_id=data.get('artist_id'),
+            artist_name=data.get('artist_name', ''),
+            album_type=data.get('album_type'),
+            staging_dir=get_staging_path(),
+            replace=bool(data.get('replace', True)),
+            # Only ever true when the client has shown the user the preview and
+            # they accepted an incomplete mapping.
+            allow_partial=bool(data.get('allow_partial', False)),
+        )
+        return jsonify(payload), (200 if payload.get('success') else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/import/staging/hints', methods=['GET'])
 def import_staging_hints():
     payload, status = _import_staging_hints(_build_import_route_runtime())
