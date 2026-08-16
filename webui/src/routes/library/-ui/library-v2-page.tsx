@@ -2461,6 +2461,10 @@ interface AlbumDetailTarget extends EditableAlbumMetadata {
    *  and its cover for the modal hero. Optional: the menu works without them. */
   artist_name?: string | null;
   image_url?: string | null;
+  /** Whether the album owns any files. A discography row owns none, and
+   *  reassign has nothing to move — offering it there only ever ends in
+   *  "That album has no files on disk to reassign". */
+  owns_files?: boolean;
 }
 
 type AlbumDetailTab = 'quality' | 'metadata';
@@ -2807,9 +2811,14 @@ export function AlbumOverflowMenu({
             type="button"
             className={styles.overflowMenuItem}
             data-requires-write=""
-            disabled={!canWrite}
+            disabled={!canWrite || album.owns_files === false}
+            title={
+              album.owns_files === false
+                ? 'Nothing to reassign — this release has no files in your library'
+                : 'Move this album\u2019s files to a different artist'
+            }
             onClick={() => {
-              if (!canWrite) return;
+              if (!canWrite || album.owns_files === false) return;
               setShowReassign(true);
               setOpen(false);
             }}
@@ -4842,6 +4851,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     quality_profile_explicit: album.quality_profile_explicit,
                     artist_name: album.primary_artist?.name,
                     image_url: album.image_url,
+                    owns_files: album.tracks_present > 0,
                   }}
                   onDeleted={goBack}
                 />
@@ -7111,6 +7121,7 @@ function AlbumBlock({
               quality_profile_explicit: album.quality_profile_explicit,
               artist_name: artistName,
               image_url: album.image_url,
+              owns_files: album.tracks_present > 0,
             }}
           />
         </span>

@@ -76,12 +76,54 @@ describe('library v2 remaining mutation boundaries', () => {
       'Preview retag',
       'Analyze ReplayGain',
       'Reorganize',
+      /Reassign to another artist/,
       'Change cover',
       /Enrich/,
       'Delete',
     ]) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
+  });
+
+  it('offers reassign only for a release that actually owns files', () => {
+    // A discography row owns nothing to move, so the preview can only answer
+    // "That album has no files on disk to reassign" — a dead end the menu
+    // should not walk the user into.
+    const base = {
+      id: 12,
+      title: 'Album',
+      year: 2026,
+      album_type: 'album',
+      release_date: '2026-01-01',
+      explicit: false,
+      label: null,
+      style: null,
+      mood: null,
+      user_overrides: {},
+      quality_profile_id: 1,
+    };
+    const reassign = /Reassign to another artist/;
+
+    const { unmount } = renderWithQueryClient(
+      <AlbumOverflowMenu
+        album={
+          { ...base, owns_files: false } as React.ComponentProps<typeof AlbumOverflowMenu>['album']
+        }
+      />,
+    );
+    fireEvent.click(screen.getByTitle('More actions'));
+    expect(screen.getByRole('button', { name: reassign })).toBeDisabled();
+    unmount();
+
+    renderWithQueryClient(
+      <AlbumOverflowMenu
+        album={
+          { ...base, owns_files: true } as React.ComponentProps<typeof AlbumOverflowMenu>['album']
+        }
+      />,
+    );
+    fireEvent.click(screen.getByTitle('More actions'));
+    expect(screen.getByRole('button', { name: reassign })).toBeEnabled();
   });
 
   it('does not unlink or open alias linking for read-only profiles', async () => {
