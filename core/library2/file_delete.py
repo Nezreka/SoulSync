@@ -523,6 +523,291 @@ def reconcile_incomplete_deletes(database) -> int:
         conn.close()
 
 
+def _execute_delete_items(
+    database,
+    operation_id: str,
+    items: List[Dict[str, Any]],
+    *,
+    config_manager: Any = None,
+    unlink: Callable[[str], None] = os.unlink,
+) -> Dict[str, List[Any]]:
+    """Unlink the planned items of one operation, one journal write per step.
+
+    The ``deleting`` state is persisted BEFORE the unlink on purpose: a process
+    that dies mid-run leaves the item in a state
+    :func:`reconcile_incomplete_deletes` can settle, instead of a file that is
+    gone with nothing saying so. Only ``Exception`` is caught — a
+    ``KeyboardInterrupt`` must keep propagating and leave the row as evidence.
+    """
+    deleted: List[str] = []
+    failed: List[Dict[str, str]] = []
+
+    for item in items:
+        try:
+            stat = os.stat(item["path"])
+            root = _containing_root(item["path"], _library_roots(config_manager))
+            unchanged = (
+                root == item["root"]
+                and os.path.isfile(item["path"])
+                and int(stat.st_size) == item["size"]
+                and int(stat.st_mtime_ns) == item["mtime_ns"]
+            )
+        except OSError as exc:
+            unchanged = False
+            validation_error = str(exc) or exc.__class__.__name__
+        else:
+            validation_error = "file_changed_after_preview"
+
+        conn = database._get_connection()
+        try:
+            if not unchanged:
+                conn.execute(
+                    """UPDATE lib2_file_delete_items SET status='failed', error=?
+                         WHERE operation_id=? AND resolved_path=?""",
+                    (validation_error, operation_id, item["path"]),
+                )
+                conn.commit()
+                failed.append({"path": item["path"], "error": validation_error})
+                continue
+            conn.execute(
+                "UPDATE lib2_file_delete_operations SET status='executing' WHERE id=?",
+                (operation_id,),
+            )
+            conn.execute(
+                """UPDATE lib2_file_delete_items SET status='deleting', error=NULL
+                     WHERE operation_id=? AND resolved_path=?""",
+                (operation_id, item["path"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            unlink(item["path"])
+        except Exception as exc:  # noqa: BLE001
+            error = str(exc) or exc.__class__.__name__
+            conn = database._get_connection()
+            try:
+                conn.execute(
+                    """UPDATE lib2_file_delete_items SET status='failed', error=?
+                         WHERE operation_id=? AND resolved_path=?""",
+                    (error, operation_id, item["path"]),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            failed.append({"path": item["path"], "error": error})
+            continue
+
+        conn = database._get_connection()
+        try:
+            _mark_file_rows_deleted(conn, item["file_ids"])
+            conn.execute(
+                """UPDATE lib2_file_delete_items
+                      SET status='deleted', deleted_at=CURRENT_TIMESTAMP, error=NULL
+                    WHERE operation_id=? AND resolved_path=?""",
+                (operation_id, item["path"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        deleted.append(item["path"])
+
+    return {"deleted": deleted, "failed": failed}
+
+
+def _plan_target(
+    conn, target: Any, roots: List[str], config_manager: Any = None,
+    *, require_library_root: bool = True,
+) -> Dict[str, Any]:
+    """Turn one caller-supplied target into a journal item, safe or not.
+
+    A target is a path, or a dict carrying the resolved ``path`` plus whatever
+    the caller already knows (``stored_path``, ``file_ids``, ``track_ids``).
+    Whatever it does not know is looked up here, so a worker that only ever had
+    a path still produces a journal row that names the catalogue rows it
+    retired.
+    """
+    if isinstance(target, dict):
+        raw_path = str(target.get("path") or "")
+        stored_path = target.get("stored_path")
+        file_ids = [int(v) for v in (target.get("file_ids") or [])]
+        track_ids = [int(v) for v in (target.get("track_ids") or [])]
+    else:
+        raw_path = str(target or "")
+        stored_path, file_ids, track_ids = None, [], []
+
+    from core.library2.paths import resolve_lib2_path
+
+    resolved = raw_path
+    if resolved and not os.path.exists(resolved):
+        resolved = resolve_lib2_path(resolved, config_manager=config_manager) or resolved
+    real_path = os.path.realpath(resolved) if resolved else ""
+
+    lookup_paths = [p for p in {raw_path, stored_path, resolved, real_path} if p]
+    if not file_ids and lookup_paths:
+        marks = ",".join("?" for _ in lookup_paths)
+        rows = conn.execute(
+            f"SELECT id, track_id FROM lib2_track_files WHERE path IN ({marks})",
+            lookup_paths,
+        ).fetchall()
+        file_ids = [int(row[0]) for row in rows]
+        track_ids = track_ids or [int(row[1]) for row in rows]
+
+    item: Dict[str, Any] = {
+        "path": real_path or raw_path,
+        "stored_paths": [p for p in {stored_path or raw_path} if p],
+        "file_ids": file_ids,
+        "track_ids": track_ids,
+        "root": None,
+        "size": 0,
+        "mtime_ns": None,
+        "error": None,
+    }
+    if not real_path or not os.path.isfile(real_path):
+        item["error"] = "file_not_found"
+        return item
+    root = _containing_root(real_path, roots)
+    if not root and require_library_root:
+        # Fail closed, per file: with no configured root containing it there is
+        # nothing that says this path belongs to the library at all.
+        item["error"] = "outside_configured_library_roots"
+        return item
+    try:
+        stat = os.stat(real_path)
+    except OSError as exc:
+        item["error"] = str(exc) or "stat_failed"
+        return item
+    item.update(root=root, size=int(stat.st_size), mtime_ns=int(stat.st_mtime_ns))
+    return item
+
+
+def delete_files_journaled(
+    database,
+    *,
+    targets: List[Any],
+    entity_type: str,
+    entity_id: int,
+    actor: str,
+    actor_profile_id: Optional[int] = None,
+    config_manager: Any = None,
+    unlink: Callable[[str], None] = os.unlink,
+    require_library_root: bool = True,
+) -> Dict[str, Any]:
+    """Delete files by path, through the ADR-05 journal.
+
+    The entity-scoped :func:`delete_entity_files` is the user-facing command:
+    it previews, hands the user a token and revalidates it. A maintenance job
+    has no preview to revalidate — it has a finding, a path and a decision the
+    user already approved (or, later, a policy that approved it). This is that
+    command: same containment rule, same journal, same statuses, same crash
+    recovery, without the token dance.
+
+    ``entity_type``/``entity_id`` are what the History feed filters on
+    (``albums``/``artists``), so a deletion made by a job shows up on the
+    album's own timeline rather than nowhere. ``actor`` says who did it —
+    ``repair:<job_id>`` for the worker, ``user`` for a person.
+
+    ``require_library_root`` is what the ADR-05 dialog enforces and what the
+    maintenance worker does NOT: it already applies
+    :func:`fuzzy_resolved_path_is_deletable`, which is stricter for a path the
+    resolver guessed and deliberately laxer for a path the catalogue names
+    exactly — a library whose folders were never listed in
+    ``library.music_paths`` still has deletable files. Journalling must not
+    quietly change WHICH files a job may delete; that decision belongs to
+    turning unattended deletion on, not to writing it down.
+    """
+    # Before recovery, not after: a worker can reach this on a database whose
+    # journal tables were never created, and "no such table" must not be how a
+    # delete fails.
+    conn = database._get_connection()
+    try:
+        ensure_file_delete_schema(conn.cursor())
+        conn.commit()
+    finally:
+        conn.close()
+
+    reconcile_incomplete_deletes(database)
+    roots = _library_roots(config_manager)
+
+    conn = database._get_connection()
+    try:
+        planned = [
+            _plan_target(conn, target, roots, config_manager,
+                         require_library_root=require_library_root)
+            for target in targets
+        ]
+    finally:
+        conn.close()
+
+    ok = [item for item in planned if not item["error"]]
+    rejected = [item for item in planned if item["error"]]
+
+    operation_id = uuid.uuid4().hex
+    conn = database._get_connection()
+    try:
+        ensure_file_delete_schema(conn.cursor())
+        conn.execute(
+            """INSERT INTO lib2_file_delete_operations(
+                   id, entity_type, entity_id, preview_token, status,
+                   file_count, total_size, mode, actor, actor_profile_id)
+               VALUES(?,?,?,'', 'planned', ?,?, 'permanent', ?,?)""",
+            (
+                operation_id,
+                str(entity_type),
+                int(entity_id),
+                len(planned),
+                sum(int(item["size"] or 0) for item in ok),
+                str(actor or "user"),
+                actor_profile_id,
+            ),
+        )
+        for item in planned:
+            conn.execute(
+                """INSERT INTO lib2_file_delete_items(
+                       operation_id, file_ids_json, stored_paths_json,
+                       resolved_path, root_path, size, mtime_ns, status, error)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    operation_id,
+                    json.dumps(item["file_ids"]),
+                    json.dumps(item["stored_paths"]),
+                    item["path"],
+                    item["root"] or "",
+                    item["size"],
+                    item["mtime_ns"],
+                    "failed" if item["error"] else "planned",
+                    item["error"],
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    outcome = _execute_delete_items(
+        database, operation_id, ok, config_manager=config_manager, unlink=unlink,
+    )
+
+    conn = database._get_connection()
+    try:
+        _finish_operation(conn, operation_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "operation_id": operation_id,
+        "deleted": outcome["deleted"],
+        "failed": [
+            *({"path": item["path"], "error": item["error"]} for item in rejected),
+            *outcome["failed"],
+        ],
+        "track_ids": sorted({
+            track_id for item in ok for track_id in item["track_ids"]
+        }),
+    }
+
+
 def delete_entity_files(
     database,
     *,
@@ -601,72 +886,10 @@ def delete_entity_files(
     finally:
         conn.close()
 
-    for item in preview["files"]:
-        try:
-            stat = os.stat(item["path"])
-            root = _containing_root(item["path"], _library_roots(config_manager))
-            unchanged = (
-                root == item["root"]
-                and os.path.isfile(item["path"])
-                and int(stat.st_size) == item["size"]
-                and int(stat.st_mtime_ns) == item["mtime_ns"]
-            )
-        except OSError as exc:
-            unchanged = False
-            validation_error = str(exc) or exc.__class__.__name__
-        else:
-            validation_error = "file_changed_after_preview"
-
-        conn = database._get_connection()
-        try:
-            if not unchanged:
-                conn.execute(
-                    """UPDATE lib2_file_delete_items SET status='failed', error=?
-                         WHERE operation_id=? AND resolved_path=?""",
-                    (validation_error, operation_id, item["path"]),
-                )
-                conn.commit()
-                continue
-            conn.execute(
-                "UPDATE lib2_file_delete_operations SET status='executing' WHERE id=?",
-                (operation_id,),
-            )
-            conn.execute(
-                """UPDATE lib2_file_delete_items SET status='deleting', error=NULL
-                     WHERE operation_id=? AND resolved_path=?""",
-                (operation_id, item["path"]),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        try:
-            unlink(item["path"])
-        except Exception as exc:  # noqa: BLE001
-            conn = database._get_connection()
-            try:
-                conn.execute(
-                    """UPDATE lib2_file_delete_items SET status='failed', error=?
-                         WHERE operation_id=? AND resolved_path=?""",
-                    (str(exc) or exc.__class__.__name__, operation_id, item["path"]),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-            continue
-
-        conn = database._get_connection()
-        try:
-            _mark_file_rows_deleted(conn, item["file_ids"])
-            conn.execute(
-                """UPDATE lib2_file_delete_items
-                      SET status='deleted', deleted_at=CURRENT_TIMESTAMP, error=NULL
-                    WHERE operation_id=? AND resolved_path=?""",
-                (operation_id, item["path"]),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    _execute_delete_items(
+        database, operation_id, preview["files"],
+        config_manager=config_manager, unlink=unlink,
+    )
 
     conn = database._get_connection()
     try:
@@ -686,6 +909,7 @@ def delete_entity_files(
 __all__ = [
     "FileDeleteError",
     "delete_entity_files",
+    "delete_files_journaled",
     "ensure_file_delete_schema",
     "get_delete_operation",
     "preview_entity_files",

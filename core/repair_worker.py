@@ -2685,9 +2685,51 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def _remove_native_repair_file(self, file_path: str, details: dict) -> dict:
+    def _delete_journal_subject(self, paths: List[str]) -> Tuple[str, int]:
+        """Which entity a maintenance delete is filed against in the journal.
+
+        The History feed queries ``lib2_file_delete_operations`` by
+        artist/album id, so an operation filed against nothing would be a
+        journal entry the user can never find. The album that owns the file is
+        the natural home; a file the catalogue does not know (an orphan) has
+        none, and is filed against ``files``/0 rather than dropped.
+        """
+        candidates = [p for p in paths if p]
+        if candidates:
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                marks = ','.join('?' for _ in candidates)
+                row = conn.execute(
+                    f"""SELECT t.album_id
+                          FROM lib2_track_files tf
+                          JOIN lib2_tracks t ON t.id = tf.track_id
+                         WHERE tf.path IN ({marks})
+                         LIMIT 1""",
+                    candidates,
+                ).fetchone()
+                if row and row[0]:
+                    return 'albums', int(row[0])
+            except Exception as exc:  # noqa: BLE001 - journalling must not block the fix
+                logger.debug("could not resolve delete subject for %s: %s", candidates, exc)
+            finally:
+                if conn:
+                    conn.close()
+        return 'files', 0
+
+    def _remove_native_repair_file(self, file_path: str, details: dict,
+                                   *, reason: str = 'maintenance') -> dict:
         """Physically remove one reviewed native file; DB lifecycle follows
-        through ``sync_repair_change`` after this handler succeeds."""
+        through ``sync_repair_change`` after this handler succeeds.
+
+        The unlink goes through the ADR-05 journal
+        (:func:`core.library2.file_delete.delete_files_journaled`), the same
+        one the Library-v2 delete dialog writes to. Before that, a maintenance
+        delete was a bare ``os.remove``: nothing in the album's History said it
+        happened, and a crash mid-run left no record to recover from. ``reason``
+        becomes the journal's actor (``repair:<reason>``), which is how the
+        History tells an unattended delete from one a person clicked.
+        """
         target = file_path or details.get('original_path') or details.get('file_path')
         if not target:
             return {'success': True, 'deleted_file': False}
@@ -2737,11 +2779,35 @@ class RepairWorker:
                     'the real file.'
                 ),
             }
+        from core.library2.file_delete import delete_files_journaled
+
+        entity_type, entity_id = self._delete_journal_subject([target, resolved])
         try:
-            os.remove(resolved)
-            return {'success': True, 'deleted_file': True, 'resolved_path': resolved}
-        except OSError as exc:
+            outcome = delete_files_journaled(
+                self.db,
+                targets=[{'path': resolved, 'stored_path': target}],
+                entity_type=entity_type,
+                entity_id=entity_id,
+                actor=f'repair:{reason}',
+                config_manager=self._config_manager,
+                # Containment for this path was already decided, one line
+                # above, by the rule that knows whether the resolver guessed.
+                # Re-applying the dialog's stricter rule here would silently
+                # stop deleting for every library whose folders are not listed
+                # in `library.music_paths` — a behaviour change hiding inside
+                # a bookkeeping change.
+                require_library_root=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface as a fix failure
             return {'success': False, 'error': f'Could not delete file: {exc}'}
+        if not outcome.get('deleted'):
+            failure = (outcome.get('failed') or [{}])[0]
+            return {
+                'success': False,
+                'error': f"Could not delete file: {failure.get('error') or 'unknown error'}",
+            }
+        return {'success': True, 'deleted_file': True, 'resolved_path': resolved,
+                'delete_operation_id': outcome.get('operation_id')}
 
     def _fix_short_preview_track(self, entity_type, entity_id, file_path, details):
         """Approve a preview-clip finding: delete the ~30s preview file, drop its DB row, and
@@ -2757,7 +2823,7 @@ class RepairWorker:
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
             return {'success': False, 'error': 'Track not found in Library v2'}
-        removed = self._remove_native_repair_file(file_path, details)
+        removed = self._remove_native_repair_file(file_path, details, reason='short_preview_track')
         if not removed.get('success'):
             return removed
         title = row.get('title') or details.get('title') or 'Unknown'
@@ -2788,7 +2854,7 @@ class RepairWorker:
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
             return {'success': False, 'error': 'Track not found in Library v2'}
-        removed = self._remove_native_repair_file(file_path, details)
+        removed = self._remove_native_repair_file(file_path, details, reason='corrupt_audio')
         if not removed.get('success'):
             return removed
         title = row.get('title') or details.get('title') or 'Unknown'
@@ -2858,10 +2924,32 @@ class RepairWorker:
                         'message': 'Moved to staging folder for import'}
 
             elif fix_action == 'delete':
-                os.remove(resolved)
+                # Journalled like every other physical delete. An orphan has no
+                # catalogue row, so `_delete_journal_subject` files it under
+                # `files`/0 — a record with no owner still beats no record.
+                from core.library2.file_delete import delete_files_journaled
+
+                entity_type_, entity_id_ = self._delete_journal_subject([file_path, resolved])
+                outcome = delete_files_journaled(
+                    self.db,
+                    targets=[{'path': resolved, 'stored_path': file_path}],
+                    entity_type=entity_type_,
+                    entity_id=entity_id_,
+                    actor='repair:orphan_file',
+                    config_manager=self._config_manager,
+                    # An orphan legitimately lives outside the music roots —
+                    # the transfer folder is where most of them are found.
+                    require_library_root=False,
+                )
+                if not outcome.get('deleted'):
+                    failure = (outcome.get('failed') or [{}])[0]
+                    return {'success': False,
+                            'error': f"Failed to handle orphan file: "
+                                     f"{failure.get('error') or 'unknown error'}"}
                 self._cleanup_empty_parents(resolved)
                 return {'success': True, 'action': 'deleted_file',
-                        'message': 'Deleted orphan file from disk'}
+                        'message': 'Deleted orphan file from disk',
+                        'delete_operation_id': outcome.get('operation_id')}
 
         except OSError as e:
             return {'success': False, 'error': f'Failed to handle orphan file: {e}'}
@@ -3589,7 +3677,7 @@ class RepairWorker:
         stale = _stale_legacy_subject(track_id)
         if stale:
             return stale
-        removed = self._remove_native_repair_file(track_path, details)
+        removed = self._remove_native_repair_file(track_path, details, reason='unwanted_content')
         if not removed.get('success'):
             return removed
         return {
@@ -3636,7 +3724,7 @@ class RepairWorker:
 
         native_track_id = _lib2_id(track_id)
         if fix_action in {'delete', 'redownload'}:
-            removed = self._remove_native_repair_file(file_path, details)
+            removed = self._remove_native_repair_file(file_path, details, reason='acoustid_mismatch')
             if not removed.get('success'):
                 return removed
             expected = details.get('expected_title') or 'track'
@@ -4288,7 +4376,14 @@ class RepairWorker:
                     from mutagen import File as MutagenFile
                     test = MutagenFile(out_path)
                     if test is not None:
-                        os.remove(resolved)
+                        # The lossless original leaving the disk is the most
+                        # consequential delete this worker performs; it goes
+                        # through the same journal as every other one.
+                        removed = self._remove_native_repair_file(
+                            file_path, details, reason='lossy_converter',
+                        )
+                        if not removed.get('success'):
+                            return removed
                         # Keep the DB's own path format — the row may hold a
                         # container path this process resolved to something else.
                         new_db_path = os.path.splitext(file_path)[0] + out_ext

@@ -153,44 +153,79 @@ def test_an_ambiguous_edition_yields_no_tracklist(two_edition_conn):
 
 
 class _Worker:
-    """Just the two methods under test, with no worker bootstrap."""
+    """Just the methods under test, with no worker bootstrap."""
 
     from core.repair_worker import RepairWorker
 
     _remove_native_repair_file = RepairWorker._remove_native_repair_file
     _other_usable_lib2_files = RepairWorker._other_usable_lib2_files
+    _delete_journal_subject = RepairWorker._delete_journal_subject
 
     def __init__(self, config_manager=None, db=None):
         self._config_manager = config_manager
         self.db = db
 
 
-def test_a_deleted_file_reports_a_real_delete(tmp_path):
+@pytest.fixture
+def journal_db(tmp_path):
+    """A database the ADR-05 delete journal can be written to.
+
+    Every physical delete is journalled now, including the maintenance ones,
+    so a worker without a database can no longer delete — deliberately: a
+    delete nobody recorded is the thing this work exists to remove.
+    """
+    path = str(tmp_path / "journal.db")
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE lib2_track_files(
+               id INTEGER PRIMARY KEY, track_id INT, path TEXT,
+               file_state TEXT DEFAULT 'active')"""
+    )
+    conn.execute("CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id INT)")
+    conn.commit()
+    conn.close()
+
+    class _DB:
+        def _get_connection(self):
+            c = sqlite3.connect(path)
+            c.row_factory = sqlite3.Row
+            return c
+
+    return _DB()
+
+
+def test_a_deleted_file_reports_a_real_delete(tmp_path, journal_db):
     target = tmp_path / "song.flac"
     target.write_bytes(b"x")
-    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []))
+    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []),
+                     db=journal_db)
 
     result = worker._remove_native_repair_file(str(target), {})
 
-    assert result == {
-        'success': True, 'deleted_file': True, 'resolved_path': str(target),
-    }
+    assert result['success'] is True
+    assert result['deleted_file'] is True
+    assert result['resolved_path'] == str(target)
+    assert result['delete_operation_id'], 'the delete must be on the record'
     assert not target.exists()
 
 
-def test_an_already_absent_file_under_a_healthy_root_is_not_an_error(tmp_path):
-    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []))
+def test_an_already_absent_file_under_a_healthy_root_is_not_an_error(
+        tmp_path, journal_db):
+    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []),
+                     db=journal_db)
 
     result = worker._remove_native_repair_file(str(tmp_path / "gone.flac"), {})
 
     assert result == {'success': True, 'deleted_file': False}
 
 
-def test_unreachable_storage_is_reported_as_a_failure(tmp_path):
+def test_unreachable_storage_is_reported_as_a_failure(tmp_path, journal_db):
     """dd28-19: this used to return success, so sync_repair_change set
     file_state='deleted' and flipped monitoring — deleting a file from the
     catalog that still exists on an unmounted NAS, and queueing a redownload."""
-    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []))
+    worker = _Worker(config_manager=SimpleNamespace(get=lambda *a, **k: []),
+                     db=journal_db)
     unreachable = str(tmp_path / "not-mounted" / "song.flac")
 
     result = worker._remove_native_repair_file(unreachable, {})
