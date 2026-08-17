@@ -25571,6 +25571,23 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
 from core.discovery import playlist as _discovery_playlist
 
 
+def _lookup_artist_aliases(artist_name):
+    """Alternate spellings for an artist name, or [] if none can be resolved.
+
+    Thin wrapper over MusicBrainzService.lookup_artist_aliases, which already
+    does the caching (library row -> musicbrainz_cache -> live MB) and applies
+    the trust gate that keeps a fuzzy near-miss from renaming an artist.
+    Best-effort by contract: any failure returns [] so discovery falls back to
+    exactly its prior behaviour.
+    """
+    try:
+        from core.musicbrainz_service import get_musicbrainz_service
+        return get_musicbrainz_service().lookup_artist_aliases(artist_name) or []
+    except Exception as e:
+        logger.debug("artist alias lookup unavailable for %r: %s", artist_name, e)
+        return []
+
+
 def _build_playlist_discovery_deps():
     """Build the PlaylistDiscoveryDeps bundle from web_server.py globals on each call."""
     return _discovery_playlist.PlaylistDiscoveryDeps(
@@ -25590,6 +25607,7 @@ def _build_playlist_discovery_deps():
         discovery_score_candidates=_discovery_score_candidates,
         get_metadata_cache=get_metadata_cache,
         build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        lookup_artist_aliases=_lookup_artist_aliases,
     )
 
 
