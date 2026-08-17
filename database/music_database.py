@@ -2,6 +2,7 @@
 
 import sqlite3
 import json
+import string
 import logging
 import os
 import re
@@ -8740,17 +8741,44 @@ class MusicDatabase:
         rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
         return self._rows_to_tracks(rows)
 
+    @staticmethod
+    def _fuzzy_terms(text: str) -> List[str]:
+        """Words to fuzzy-match on, with punctuation trimmed off each END.
+
+        Splitting on whitespace alone leaves punctuation glued to the token, so
+        "Would've, Could've, Should've" asked the database for ``%would've,%``
+        — a title only matches if the comma is there too. The LAST word is the
+        only one without trailing punctuation, so it was the only one matching
+        broadly, and the scoring below then couldn't tell the real track from
+        anything else sharing that one word. That is #1159: searching for
+        "Would've, Could've, Should've" returned other "Should've" songs and
+        buried the real one at rank 3, because a library file tagged without
+        the commas matched one term where it should have matched three.
+
+        Trimming ENDS only, so internal punctuation survives — N.W.A, P!nk and
+        "pepper's" have to stay intact. Strictly broader than before: the column
+        side keeps its punctuation (unidecode_lower only lowercases), so a
+        trimmed term matches everything the untrimmed one did and more. It can
+        raise a row's score, never lower it.
+        """
+        terms = []
+        for word in (text or '').split():
+            trimmed = word.strip().strip(string.punctuation)
+            if len(trimmed) >= 3:
+                terms.append(trimmed)
+        return terms
+
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
                                   server_source: Optional[str] = None):
         """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
         # Get broader results by searching for individual words
         search_terms = []
         if title:
-            title_words = [w.strip() for w in self._normalize_for_comparison(title).split() if len(w.strip()) >= 3]
+            title_words = self._fuzzy_terms(self._normalize_for_comparison(title))
             search_terms.extend(title_words)
 
         if artist:
-            artist_words = [w.strip() for w in self._normalize_for_comparison(artist).split() if len(w.strip()) >= 3]
+            artist_words = self._fuzzy_terms(self._normalize_for_comparison(artist))
             search_terms.extend(artist_words)
 
         if not search_terms:
