@@ -8170,8 +8170,13 @@ class MusicDatabase:
                     file_path = track_obj.path
                 if bitrate is None and hasattr(track_obj, 'bitRate') and track_obj.bitRate:
                     bitrate = track_obj.bitRate
-                if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
-                    file_path = f"{track_obj.title}.{track_obj.suffix}"
+                # Do NOT fabricate a bare filename when path is missing —
+                # the Subsonic API can omit 'path' transiently (e.g. during
+                # a Navidrome library rescan).  A bogus relative name like
+                # "My Song.flac" would overwrite the correct value on the
+                # next UPDATE.  Leave file_path as None instead; the
+                # COALESCE guard in the UPDATE statement protects the
+                # existing row.
                 # File size: Jellyfin / Navidrome / SoulSync-standalone
                 # all set track_obj.file_size on their wrapper class.
                 # Plex came in via the media.parts[0].size path above —
@@ -8247,7 +8252,7 @@ class MusicDatabase:
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?,
+                            duration = ?, file_path = COALESCE(?, file_path), bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
                             track_artist = COALESCE(?, track_artist),
