@@ -22,7 +22,10 @@ logger = get_logger("api_call_tracker")
 RATE_LIMITS = {
     'spotify': 171,       # MIN_API_INTERVAL=0.35s → ~171/min
     'itunes': 20,         # MIN_API_INTERVAL=3.0s → ~20/min
-    'deezer': 60,         # MIN_API_INTERVAL=1.0s → ~60/min
+    # core.deezer_throttle: 40 per 5s shared across every Deezer caller. The old
+    # 60 described a decorator that two of the busiest paths bypassed entirely,
+    # so the tracker read ~0/min during a playlist load.
+    'deezer': 480,        # deezer_throttle 40/5s → 8/s → 480/min
     'lastfm': 300,        # MIN_API_INTERVAL=0.2s → ~300/min
     'genius': 30,         # MIN_API_INTERVAL=2.0s → ~30/min
     'musicbrainz': 60,    # MIN_API_INTERVAL=1.0s → ~60/min

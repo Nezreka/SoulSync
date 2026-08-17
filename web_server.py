@@ -25971,16 +25971,38 @@ def get_deezer_arl_playlists():
 
         playlists = deezer_dl.get_user_playlists()
 
-        # Add sync_status field to match Spotify format
+        # Real sync status, same file every other source reads. This was a
+        # hardcoded 'Never Synced' literal — the field was added "to match
+        # Spotify format" but only ever carried the shape, never the value, so a
+        # Deezer playlist read as never synced no matter how many times it had
+        # been (TheHomeGuy: sync ran, tracks downloaded, playlist appeared on the
+        # server, card still said NEVER SYNCED).
+        #
+        # The write side was always fine. These cards are shimmed into
+        # spotifyPlaylists with id = `deezer_arl_<id>` (-sync.accounts.ts), and
+        # startPlaylistSync posts that card id straight to /api/sync/start — so
+        # the status lands under the PREFIXED id. The bare `deezer_<id>` belongs
+        # to the other engine, the per-source discovery flow behind
+        # /api/deezer/sync/start; check it second so a playlist synced that way
+        # still reads as synced.
+        #
+        # No snapshot passed: Deezer has no snapshot/etag equivalent, so there is
+        # nothing to compare a stored one against. That leaves the two states the
+        # Deezer card actually renders — deezerArlStatusClass only distinguishes
+        # 'Synced' from never, with no 'Needs Sync' arm.
+        sync_statuses = _load_sync_status_file()
         playlist_data = []
         for p in playlists:
+            status_info = (sync_statuses.get(f"deezer_arl_{p['id']}")
+                           or sync_statuses.get(f"deezer_{p['id']}")
+                           or {})
             playlist_data.append({
                 'id': p['id'],
                 'name': p['name'],
                 'owner': p.get('owner', ''),
                 'track_count': p.get('track_count', 0),
                 'image_url': p.get('image_url', ''),
-                'sync_status': 'Never Synced',
+                'sync_status': _format_playlist_sync_status(status_info, None),
             })
 
         logger.info(f"Loaded {len(playlist_data)} Deezer user playlists via ARL")
@@ -25997,7 +26019,25 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
-        playlist = deezer_dl.get_playlist_tracks(playlist_id)
+        # Narrate the wait. Resolving a 1200-track playlist means ~1,750
+        # rate-limited requests, so this GET legitimately runs for minutes and a
+        # bare spinner cannot tell working from hung — which is how it was
+        # reported ("seems to hang", "sit here for several minutes doing
+        # nothing"). Emitted on the socket the shell already owns; core.js
+        # re-broadcasts it as an ss: CustomEvent for the React card, the same
+        # seam repair:progress and the scan frames use.
+        def _emit_progress(done, total, phase):
+            try:
+                socketio.emit('deezer:playlist_progress', {
+                    'playlist_id': str(playlist_id),
+                    'done': done,
+                    'total': total,
+                    'phase': phase,
+                })
+            except Exception as emit_err:   # noqa: BLE001 - never let narration break the fetch
+                logger.debug("deezer playlist progress emit failed: %s", emit_err)
+
+        playlist = deezer_dl.get_playlist_tracks(playlist_id, progress_cb=_emit_progress)
         if not playlist:
             return jsonify({'error': 'Playlist not found or unable to access.'}), 404
 
@@ -30636,6 +30676,9 @@ def add_to_watchlist():
                                 logger.info(f"Discogs artist image: {image_url[:60] if image_url else 'None'}")
                         elif source == 'deezer' or fallback_source == 'deezer':
                             # Deezer: fetch artist image directly from API
+                            # shared deezer budget — this call used to bypass it entirely
+                            from core.deezer_throttle import wait_for_slot
+                            wait_for_slot()
                             dz_resp = requests.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
                             if dz_resp.ok:
                                 dz_data = dz_resp.json()

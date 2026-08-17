@@ -1050,7 +1050,12 @@ class MetadataCache:
         144: 'Reggae', 129: 'Jazz', 84: 'Country', 67: 'Salsa', 173: 'Films/Games',
         98: 'Classical', 169: 'Soul & Funk', 2: 'African Music', 16: 'Asian Music',
         153: 'Blues', 75: 'Brazilian Music', 81: 'Indian Music', 95: 'Kids',
-        197: 'Latin Music', 73: 'Metal', 464: 'Rap', 174: 'Musicals',
+        # 464 is METAL. It read 'Rap' here, so every album that fell back to this
+        # map with genre 464 was filed as rap — checked against
+        # api.deezer.com/genre with Accept-Language: en, which is the same list
+        # this map was transcribed from. 73 and 174 are not in that list at all
+        # any more; kept because an older album can still carry them.
+        197: 'Latin Music', 73: 'Metal', 464: 'Metal', 174: 'Musicals',
     }
 
     def _extract_deezer_fields(self, entity_type: str, data: dict) -> dict:

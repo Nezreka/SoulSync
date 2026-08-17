@@ -54,6 +54,22 @@ import {
 import { AccountDetailsModal } from './account-details-modal';
 import { AccountPlaylistCard } from './account-playlist-card';
 
+/**
+ * `deezer:playlist_progress`, re-broadcast by core.js as an `ss:` CustomEvent —
+ * the same seam as ss:discovery-progress and ss:repair-progress, used because
+ * `socket` is a module-scoped `let` in core.js that no route can subscribe to.
+ */
+export const DEEZER_PLAYLIST_PROGRESS_EVENT = 'ss:deezer-playlist-progress';
+
+/** One frame of it: how far through resolving a playlist's albums we are. */
+export interface DeezerPlaylistProgress {
+  playlist_id: string;
+  done: number;
+  total: number;
+  /** 'release dates' or 'track numbers' — the two passes over the albums. */
+  phase: string;
+}
+
 /** The open details modal: which row, and the tracks fetched for it. */
 interface OpenDetail {
   row: AccountPlaylistRow;
@@ -143,6 +159,7 @@ export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: Accoun
       window.hideLoadingOverlay?.();
     }
   }, []);
+
 
   return (
     <div>
@@ -248,9 +265,31 @@ export function DeezerArlTab() {
     void load();
   }, [load]);
 
-  /** openDeezerArlPlaylistDetailsModal (2534-2570). */
+  /**
+   * openDeezerArlPlaylistDetailsModal (2534-2570), plus live progress.
+   *
+   * Deezer's track fetch resolves every unique album for release dates and real
+   * track numbers — around 900 rate-limited requests on a 1200-track playlist,
+   * which is minutes. A bare "Loading playlist: X..." for that long reads as
+   * hung, and was reported as exactly that. The server narrates over the socket
+   * and core.js re-broadcasts it here, `socket` being module-scoped there.
+   *
+   * The listener only ever rewrites the overlay TEXT, so if the frames never
+   * arrive (older server, socket down) the load still completes and the overlay
+   * still clears in the finally — the wait just goes back to being silent.
+   */
   const openDetails = useCallback(async (row: AccountPlaylistRow) => {
-    window.showLoadingOverlay?.(`Loading playlist: ${row.name}...`);
+    const label = `Loading playlist: ${row.name}`;
+    window.showLoadingOverlay?.(`${label}...`);
+    const onProgress = (event: Event) => {
+      const frame = (event as CustomEvent<DeezerPlaylistProgress>).detail;
+      if (!frame || String(frame.playlist_id) !== String(row.id) || !frame.total) return;
+      const pct = Math.min(100, Math.round((frame.done / frame.total) * 100));
+      window.showLoadingOverlay?.(
+        `${label} — ${frame.phase} ${frame.done}/${frame.total} (${pct}%)`,
+      );
+    };
+    window.addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
     try {
       // The PATH takes the raw deezer id; the cache and the engine use the
       // prefixed one (2557 vs 2540).
@@ -263,6 +302,7 @@ export function DeezerArlTab() {
         'error',
       );
     } finally {
+      window.removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
       window.hideLoadingOverlay?.();
     }
   }, []);
