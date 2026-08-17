@@ -13,12 +13,12 @@ free of web_server imports.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 import time
 import traceback
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.cleanup")
 
 # Landed audio a cancelled streaming download leaves behind (yt-dlp can't be
 # interrupted mid-stream; the file arrives after its record is gone). These

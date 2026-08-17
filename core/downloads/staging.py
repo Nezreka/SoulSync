@@ -32,7 +32,7 @@ cache, runtime state) all injected via `StagingDeps`.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 import re
 from dataclasses import dataclass
@@ -48,7 +48,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.staging")
 
 
 def _coerce_positive_int(value: Any, default: int = 0) -> int:

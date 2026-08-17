@@ -35,6 +35,7 @@ from core.imports.context import (
 )
 from core.imports.file_integrity import (
     check_audio_integrity,
+    duration_reference_for_context,
     expected_duration_for_check,
     probe_decoded_duration,
     resolve_duration_tolerance,
@@ -959,6 +960,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # skip the duration-agreement leg (it would false-quarantine a file that
         # drifts from a re-resolved release; #804). Size + parse legs still run.
         _is_local_import = bool(context.get('is_local_import')) if isinstance(context, dict) else False
+        _expected_duration_ms = duration_reference_for_context(_expected_duration_ms, context)
         _expected_duration_ms = expected_duration_for_check(_expected_duration_ms, _is_local_import)
         if _is_local_import and _expected_duration_ms is None:
             logger.debug("[Integrity] Local import — duration-agreement leg skipped for %s", _basename)

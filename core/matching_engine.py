@@ -12,6 +12,9 @@ from core.media_server.types import TrackInfo
 # neutral download_plugins package (download PR's Gap 1 lift). Import
 # from the new location.
 from core.download_plugins.types import TrackResult, AlbumResult
+# Pure text helpers, no cycle back here (core.text imports only core.text).
+from core.text.source_title import strip_artist_prefix
+from core.text.title_match import is_trailing_version_qualifier
 
 
 logger = get_logger("matching_engine")
@@ -927,7 +930,15 @@ class MusicMatchingEngine:
         filename_lower = filename.lower()
         
         # Define version patterns and their penalties (higher penalty = lower priority)
+        # radio sits first on purpose. 'edit' is one of the remix patterns below
+        # and this loop stops at the first hit, so "radio edit" and "clean edit"
+        # used to come back as remixes. remix is reject-on-sight, so a radio edit
+        # got thrown away even when that's exactly what was asked for.
         version_patterns = {
+            'radio': {
+                'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
+                'penalty': 0.08  # -8% penalty for radio edits (minor difference)
+            },
             'remix': {
                 'patterns': [r'\bremix\b', r'\brmx\b', r'\brework\b', r'\bedit\b(?!ion)'],
                 'penalty': 0.15  # -15% penalty for remixes
@@ -943,10 +954,6 @@ class MusicMatchingEngine:
             'instrumental': {
                 'patterns': [r'\binstrumental\b', r'\bkaraoke\b', r'\bminus one\b'],
                 'penalty': 0.25  # -25% penalty for instrumentals (most different from original)
-            },
-            'radio': {
-                'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
-                'penalty': 0.08  # -8% penalty for radio edits (minor difference)
             },
             'clean': {
                 # #923: bare clean/censored markers used to be invisible (only
@@ -1003,8 +1010,15 @@ class MusicMatchingEngine:
         # Check if Spotify track title contains version indicators
         spotify_title_lower = spotify_track.name.lower()
 
+        # The user can ask for one of these versions on purpose. When they have,
+        # don't reject it for going unnamed in the source title — the source is
+        # Spotify saying "radio edit" because that's the only cut it carries,
+        # which is the exact case the setting exists for.
+        _preferred = self._preferred_version()
+        _wanted_on_purpose = bool(_preferred) and version_type == _preferred
+
         # STRICT VERSION MATCHING: Reject mismatched versions
-        if version_type == 'live':
+        if version_type == 'live' and not _wanted_on_purpose:
             # Only accept live versions if Spotify title has live as a VERSION INDICATOR
             # Patterns: (Live), - Live, [Live], Live at, Live from, Live in, Live Version
             # NOT: words ending with 'live' like "Let Me Live" or starting like "Lively"
@@ -1024,7 +1038,7 @@ class MusicMatchingEngine:
                 # Reject: Soulseek has live version but Spotify doesn't want it
                 return 0.0, 'rejected_version_mismatch'
 
-        elif version_type == 'remix':
+        elif version_type == 'remix' and not _wanted_on_purpose:
             # Only accept remixes if Spotify title has remix as a VERSION INDICATOR
             # Patterns: (Remix), - Remix, [Remix], Remix, Mix
             remix_patterns = [
@@ -1039,7 +1053,7 @@ class MusicMatchingEngine:
                 # Reject: Soulseek has remix but Spotify wants original
                 return 0.0, 'rejected_version_mismatch'
 
-        elif version_type == 'acoustic':
+        elif version_type == 'acoustic' and not _wanted_on_purpose:
             # Only accept acoustic if Spotify title has acoustic as a VERSION INDICATOR
             acoustic_patterns = [
                 r'\(.*?acoustic.*?\)',         # (Acoustic)
@@ -1053,7 +1067,7 @@ class MusicMatchingEngine:
                 # Reject: Soulseek has acoustic but Spotify wants original
                 return 0.0, 'rejected_version_mismatch'
 
-        elif version_type == 'instrumental':
+        elif version_type == 'instrumental' and not _wanted_on_purpose:
             # Only accept instrumental if Spotify title has instrumental as a VERSION INDICATOR
             instrumental_patterns = [
                 r'\(.*?instrumental.*?\)',     # (Instrumental)
@@ -1082,6 +1096,11 @@ class MusicMatchingEngine:
                     effective_penalty = -0.05
                 elif version_type in ('clean', 'radio'):
                     effective_penalty += 0.10
+            if _wanted_on_purpose:
+                # they went and asked for this version, so it isn't a demerit.
+                # a floor rather than a flat 0 so the explicit boost above still
+                # stands when explicit is also the preferred one.
+                effective_penalty = min(effective_penalty, 0.0)
             adjusted_confidence = max(0.0, min(1.0, base_confidence - effective_penalty))
             # Store version info on the track object for UI display
             slskd_track.version_type = version_type
@@ -1092,6 +1111,115 @@ class MusicMatchingEngine:
             slskd_track.version_penalty = 0.0
 
         return adjusted_confidence, version_type
+
+    # the versions a user is allowed to ask for. same labels detect_version_type
+    # hands back, so a preference can only ever name something the detector
+    # actually produces — a typo in config turns the feature off instead of
+    # silently matching nothing.
+    PREFERABLE_VERSIONS = ('extended', 'radio', 'remix', 'live', 'acoustic',
+                           'instrumental', 'demo', 'clean', 'explicit')
+
+    # Everything wrapped around a title in a Soulseek filename: a track number
+    # ("01 - ", "01.", "12-01 "), a vinyl side ("A1 "), or nothing at all.
+    _TRACK_NUM_PREFIX = re.compile(
+        r'^(?:[a-d]?\d{1,3}(?:[-_.]\d{1,3})?)\s*[-_.]?\s+|^\d{1,3}[-_.]\s*', re.I)
+    _BRACKET_GROUP = re.compile(r'[\(\[][^\)\]]*[\)\]]')
+
+    @staticmethod
+    def _preferred_version() -> str:
+        """The version the user asked us to favour, or '' for off.
+
+        Off is the default and everything hangs off this being empty: with no
+        preference every candidate gets the same preference term, so the sort
+        tuple compares exactly like it did before and nothing moves. Never
+        raises (config trouble = feature off)."""
+        try:
+            value = config_manager.get('soulseek.preferred_version', '') or ''
+        except Exception:
+            return ''
+        value = str(value).strip().lower()
+        return value if value in MusicMatchingEngine.PREFERABLE_VERSIONS else ''
+
+    def base_title_of(self, text: str, artist: str = '',
+                      *, from_filename: bool = False) -> str:
+        """The bare song title, with everything wrapped around it removed.
+
+        Soulseek filenames carry a lot that isn't the title — a track number, a
+        vinyl side, the artist again, the release year, the format, and the
+        version qualifier itself. Strip all of it and what's left is the song,
+        which is the only thing worth comparing.
+
+        ``from_filename`` gates the strips that ONLY make sense on a filename:
+        the extension and the leading track number. A source title must never
+        get those, because plenty of songs genuinely start with a number —
+        "99 Problems" would reduce to "problems" while the candidate
+        "03 - 99 Problems.flac" reduces to "99 problems", and the two sides
+        would never meet. Same trap as stripping "99 Luftballons" in the
+        library path resolver.
+        """
+        stem = str(text or '')
+        if from_filename:
+            if '/' in stem or '\\' in stem:
+                stem = re.split(r'[\\/]', stem)[-1]
+            stem = re.sub(r'\.[A-Za-z0-9]{2,5}$', '', stem)      # file extension
+        stem = self._BRACKET_GROUP.sub(' ', stem)                # (Extended Mix), [2004], [FLAC]
+        stem = re.sub(r'\s+', ' ', stem).strip(' -_.')
+        if from_filename:
+            stem = self._TRACK_NUM_PREFIX.sub('', stem, count=1).strip()
+        if artist:
+            stem = strip_artist_prefix(stem, artist).strip(' -_.')
+        if ' - ' in stem:
+            head, tail = stem.rsplit(' - ', 1)
+            if is_trailing_version_qualifier(tail):
+                stem = head
+        return re.sub(r'[^a-z0-9 ]', '', stem.lower()).strip()
+
+    def preferred_match_ids(self, spotify_track, results, preferred: str) -> set:
+        """ids of the candidates that really are the asked-for version OF THIS TRACK.
+
+        Carrying the label is not enough. "Song Two (Extended Mix)" is an
+        extended mix, just not of the song we're after, and with the preference
+        ranked above confidence it would beat the correct track outright.
+
+        Confidence cannot tell those apart — it scores the whole file PATH with
+        fuzzy string similarity, and real Soulseek paths are mostly noise
+        ("@@dl/", "[FLAC]", "VA/Compilation Vol 3/"). Measured against 'Song'
+        the right file scored 0.751 and an impostor 0.743, eight thousandths
+        apart, while genuine matches in messy folders scored no better than
+        wrong ones. Every threshold over those numbers either fired on the
+        wrong song or never fired at all.
+
+        So compare the TITLE instead of the path: reduce both sides to the bare
+        song name and require them to be equal. "01 - Song (Extended Mix)",
+        "A1 Song (Extended Mix)" and "VA/.../12 - Artist - Song (Extended Mix)"
+        all reduce to "song"; "Song Two", "The Song" and "Another Song" don't.
+        Exact equality, so there is no threshold to get wrong.
+        """
+        if not preferred or not results:
+            return set()
+        artist = ''
+        try:
+            artists = getattr(spotify_track, 'artists', None) or []
+            artist = str(artists[0]) if artists else ''
+        except Exception:
+            artist = ''
+        try:
+            wanted = self.base_title_of(getattr(spotify_track, 'name', ''), artist)
+        except Exception:
+            return set()
+        if not wanted:
+            return set()
+        matches = set()
+        for r in results:
+            if getattr(r, 'version_type', 'original') != preferred:
+                continue
+            try:
+                if self.base_title_of(getattr(r, 'filename', ''), artist,
+                                      from_filename=True) == wanted:
+                    matches.add(id(r))
+            except Exception:
+                continue
+        return matches
 
     @staticmethod
     def _prefer_explicit_enabled() -> bool:
@@ -1134,15 +1262,32 @@ class MusicMatchingEngine:
             slskd_track.version_type = getattr(slskd_track, 'version_type', 'original')
             scored_results.append(slskd_track)
 
-        # Sort by confidence, version preference, peer quality, then file size
+        # Sort by requested version, confidence, version preference, peer quality, size
+        _preferred = self._preferred_version()
+        # Which candidates are genuinely the asked-for version OF THIS TRACK.
+        # Empty set when the feature is off, so nothing below can fire.
+        _preferred_ids = self.preferred_match_ids(spotify_track, scored_results, _preferred)
+        # Stamped on the file, not kept in a local set. Sorting here is not the
+        # last word: the download walk re-sorts this exact list later
+        # (core.downloads.candidates.order_candidates) and would otherwise drop
+        # the preference on the floor and take the plain version anyway. The
+        # attribute is the one place both sorts read the answer from.
+        for _r in scored_results:
+            _r.preferred_version_hit = id(_r) in _preferred_ids
+
         def sort_key(r):
+            # Zeroth: the version the user actually asked for wins outright.
+            # With no preference set this is 0 for every candidate, so the
+            # tuple compares exactly as it did before and nothing reorders —
+            # that's what makes the setting safe to ship off by default.
+            preferred_hit = 1 if getattr(r, 'preferred_version_hit', False) else 0
             # Primary: confidence score
             # Secondary: prefer originals (original=0, others=penalty value for tie-breaking)
             version_priority = 0.0 if r.version_type == 'original' else getattr(r, 'version_penalty', 0.1)
             # Tertiary: peer quality (upload speed, queue, free slots)
             peer_quality = r.quality_score
             # Quaternary: file size
-            return (r.confidence, -version_priority, peer_quality, r.size)
+            return (preferred_hit, r.confidence, -version_priority, peer_quality, r.size)
 
         sorted_results = sorted(scored_results, key=sort_key, reverse=True)
 

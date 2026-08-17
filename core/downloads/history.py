@@ -13,12 +13,12 @@ a failure here must never break a real download.
 from __future__ import annotations
 
 import json
-import logging
+from utils.logging_config import get_logger
 from typing import Optional
 
 from core.runtime_state import download_tasks
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.history")
 
 
 _SOURCE_PREFIX_MAP = [

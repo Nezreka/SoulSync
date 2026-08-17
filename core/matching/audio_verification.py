@@ -283,12 +283,21 @@ def _recording_identity(title: Optional[str]) -> str:
 
 def evaluate(expected_title: str, expected_artist: str,
              recordings: List[dict], *, fingerprint_score: float,
-             aliases_provider: Optional[Any] = None) -> Outcome:
+             aliases_provider: Optional[Any] = None,
+             accept_version: Optional[str] = None) -> Outcome:
     """Decide PASS / SKIP / FAIL for a fingerprinted file against expected
     title/artist. Pure: no I/O. Shared by import verification and library scan.
 
     ``aliases_provider``: iterable or callable of expected-artist aliases
     (kanji/cyrillic/etc) used to bridge cross-script comparisons.
+
+    ``accept_version``: a version label the caller went and fetched ON PURPOSE
+    (Settings → prefer a version), so the version gate must not call it a wrong
+    song. The source title says "Song" and the file really is "Song (Extended
+    Mix)" — that difference is the point, not a fault. Only the version gate
+    loosens; title and artist still have to agree, so a genuinely wrong song
+    fails exactly as before. None (the default, and the library scan always)
+    leaves the gate strict.
 
     Note: fingerprint-collision duration checks are the caller's responsibility
     (the library scan pre-checks the top recording's length before calling this)
@@ -320,7 +329,10 @@ def evaluate(expected_title: str, expected_artist: str,
     expected_version = _detect_title_version(expected_title)
     matched_version = _detect_title_version(matched_title)
     if expected_version != matched_version:
-        if not is_acceptable_version_mismatch(
+        # the caller asked for this exact version, so the file reporting it is
+        # the setting working, not a mismatch.
+        _asked_for_it = bool(accept_version) and matched_version == accept_version
+        if not _asked_for_it and not is_acceptable_version_mismatch(
             expected_version, matched_version,
             fingerprint_score=fingerprint_score,
             title_similarity=title_sim, artist_similarity=artist_sim,

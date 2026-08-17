@@ -6,7 +6,7 @@ core.runtime_state; automation_engine, download_orchestrator, and the
 sweep helper are injected via init() because they are constructed
 in web_server.py.
 """
-import logging
+from utils.logging_config import get_logger
 import time
 
 from core.runtime_state import (
@@ -27,7 +27,7 @@ from core.wishlist.resolution import (
 )
 from utils.async_helpers import run_async
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.wishlist_failed")
 
 # Injected at runtime via init().
 automation_engine = None

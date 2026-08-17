@@ -25,7 +25,7 @@ Lifted verbatim from web_server.py. Dependencies injected via
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 import shutil
 import time
@@ -42,7 +42,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.lifecycle")
 
 
 # A task that has been in 'post_processing' longer than this is treated as stuck.

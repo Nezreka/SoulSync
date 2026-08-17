@@ -3877,6 +3877,7 @@
                                     <div class="setting-help-text setting-help-body" hidden>
                                         Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker
                                         due to per-user upload limits. Higher values speed up large playlists and wishlists.
+                                        Takes effect after a restart, since the worker threads are created at startup.
                                     </div>
                                 </div>
 
@@ -6082,6 +6083,32 @@
                                     rank higher and Clean/Censored/Radio-Edit files rank lower. Nothing is
                                     ever skipped &mdash; if only a clean version exists, it still downloads.
                                     Requires explicit content to be allowed.
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="preferred-version">Prefer a version when one exists</label>
+                                    <select id="preferred-version" onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
+                                        <option value="">Off &mdash; take what the source asked for</option>
+                                        <option value="extended">Extended mix / long version</option>
+                                        <option value="radio">Radio edit / radio version</option>
+                                        <option value="remix">Remix</option>
+                                        <option value="live">Live</option>
+                                        <option value="acoustic">Acoustic</option>
+                                        <option value="instrumental">Instrumental</option>
+                                        <option value="demo">Demo</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>
+                                    Spotify often only carries one cut of a track. With a version picked here,
+                                    a matching file wins over the plain one when both turn up in the same
+                                    Soulseek search. Nothing is ever skipped &mdash; if that version isn't out
+                                    there, the normal one downloads exactly as it does now. Off by default.
+                                    <br><br>
+                                    Live, remix, acoustic and instrumental files are normally thrown out on
+                                    sight when the source didn't ask for one. Picking any of those four here
+                                    lifts that for the version you picked, so a live take of a similarly
+                                    titled song can be accepted when the real track is nowhere to be found.
                                 </div>
 
                                 <div class="form-group">

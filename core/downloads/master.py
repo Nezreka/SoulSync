@@ -26,7 +26,7 @@ all injected via `MasterDeps`.
 from __future__ import annotations
 
 import json
-import logging
+from utils.logging_config import get_logger
 import re
 import time
 import uuid
@@ -38,7 +38,7 @@ from typing import Any, Callable
 from core.downloads import album_bundle_dispatch as _album_bundle_dispatch
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.master")
 
 
 _ALBUM_PREFLIGHT_MIN_SCORE = 0.62

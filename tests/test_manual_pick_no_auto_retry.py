@@ -113,7 +113,12 @@ def test_monitor_waits_for_post_processing_before_batch_success(monkeypatch):
     def fake_post_processing_worker(task_id, batch_id):
         return None
 
-    monkeypatch.setattr(dm, 'missing_download_executor', FakeExecutor())
+    _pool = FakeExecutor()
+    monkeypatch.setattr(dm, 'missing_download_executor', _pool)
+    # post-processing runs on its own pool now (it used to queue behind
+    # searches on the shared one) — patch both so this stays about WHETHER
+    # the work was submitted, not which pool took it
+    monkeypatch.setattr(dm, 'post_processing_executor', _pool)
     monkeypatch.setattr(dm, '_run_post_processing_worker', fake_post_processing_worker)
     monkeypatch.setattr(
         dm,
@@ -182,7 +187,12 @@ def test_monitor_matches_release_download_by_id_when_filename_changes(monkeypatc
     def fake_post_processing_worker(task_id, batch_id):
         return None
 
-    monkeypatch.setattr(dm, 'missing_download_executor', FakeExecutor())
+    _pool = FakeExecutor()
+    monkeypatch.setattr(dm, 'missing_download_executor', _pool)
+    # post-processing runs on its own pool now (it used to queue behind
+    # searches on the shared one) — patch both so this stays about WHETHER
+    # the work was submitted, not which pool took it
+    monkeypatch.setattr(dm, 'post_processing_executor', _pool)
     monkeypatch.setattr(dm, '_run_post_processing_worker', fake_post_processing_worker)
     monkeypatch.setattr(dm, '_on_download_completed', lambda *args: None)
 
@@ -245,7 +255,12 @@ def test_monitor_recovers_premature_failed_release_download(monkeypatch):
     def fake_post_processing_worker(task_id, batch_id):
         return None
 
-    monkeypatch.setattr(dm, 'missing_download_executor', FakeExecutor())
+    _pool = FakeExecutor()
+    monkeypatch.setattr(dm, 'missing_download_executor', _pool)
+    # post-processing runs on its own pool now (it used to queue behind
+    # searches on the shared one) — patch both so this stays about WHETHER
+    # the work was submitted, not which pool took it
+    monkeypatch.setattr(dm, 'post_processing_executor', _pool)
     monkeypatch.setattr(dm, '_run_post_processing_worker', fake_post_processing_worker)
     monkeypatch.setattr(dm, '_on_download_completed', lambda *args: None)
 

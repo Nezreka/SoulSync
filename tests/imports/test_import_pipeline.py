@@ -710,6 +710,70 @@ def test_scan_order_fallback_not_used_for_plain_download(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# The duration reference a deliberately-preferred version is measured against
+# ---------------------------------------------------------------------------
+
+def _run_with_duration(tmp_path, monkeypatch, context_extra):
+    """Post-process one file and report the expected duration the integrity
+    check was handed."""
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+    _wire_post_process_common(
+        monkeypatch, tmp_path, target_path, track_number=1, is_album_download=False)
+    # the source says 3:20; the extended mix we went and fetched runs 6:20
+    monkeypatch.setattr(import_pipeline, "get_import_track_info",
+                        lambda context: {"duration_ms": 200_000})
+
+    from core.imports.file_integrity import IntegrityResult
+    seen = []
+
+    def _capture(path, expected_ms, **_kw):
+        seen.append(expected_ms)
+        return IntegrityResult(ok=True, checks={})
+
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity", _capture)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {"track_info": {}, "original_search_result": {"title": "Track", "album": "Album"}}
+    context.update(context_extra)
+    import_pipeline.post_process_matched_download("ctx", context, str(source_path), runtime)
+    return seen
+
+
+def test_an_ordinary_download_is_measured_against_the_source(tmp_path, monkeypatch):
+    assert _run_with_duration(tmp_path, monkeypatch, {}) == [200_000]
+
+
+def test_a_preferred_version_is_measured_against_the_peers_length(tmp_path, monkeypatch):
+    """Settings → prefer a version. The file is a different recording on
+    purpose, so the source's 3:20 describes the other cut — measuring against it
+    quarantines every file the setting went and found. The download stamps the
+    length the peer advertised, which still catches a truncated transfer.
+
+    This pins the WIRING. The reference itself is decided by
+    ``duration_reference_for_context`` and unit-tested in
+    tests/test_preferred_version.py; without this the pipeline could stop
+    calling it and every one of those tests would still pass."""
+    seen = _run_with_duration(tmp_path, monkeypatch, {
+        '_preferred_version_taken': 'extended',
+        '_preferred_version_duration_ms': 380_000,
+    })
+    assert seen == [380_000]
+
+
+def test_a_preferred_version_with_no_advertised_length_skips_the_leg(tmp_path, monkeypatch):
+    """The peer advertised nothing, so there is no honest reference. Skip the
+    duration leg rather than guess — size and parse legs still run."""
+    seen = _run_with_duration(tmp_path, monkeypatch, {
+        '_preferred_version_taken': 'extended',
+        '_preferred_version_duration_ms': None,
+    })
+    assert seen == [None]
+
+
+# ---------------------------------------------------------------------------
 # Quarantine entry-id propagation through the verification wrapper
 # (the wrapper pops task_id out of context, so _mark_task_quarantined can't
 # write to the task directly — it stashes on context and the wrapper applies it)
