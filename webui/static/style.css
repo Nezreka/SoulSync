@@ -5,6 +5,18 @@
     --accent-rgb: 29, 185, 84;
     --accent-light-rgb: 30, 215, 96;
     --accent-neon-rgb: 34, 255, 107;
+
+    /* Sidebar width (#1155). One definition, because three other things line
+       themselves up against it and two of them live OUTSIDE the sidebar: the
+       audio visualiser is position:fixed at its right edge (deliberately, to
+       escape the overflow clip) and the page particles canvas offsets from it.
+       Hardcode the width in any of them again and they detach. */
+    --sidebar-w: 240px;
+}
+
+/* Collapsed: icons only. */
+html[data-sidebar="collapsed"] {
+    --sidebar-w: 68px;
 }
 
 .modal-track-play-btn {
@@ -70,7 +82,7 @@ body {
    ====================================== */
 
 .sidebar {
-    width: 240px;
+    width: var(--sidebar-w);
 
     /* Opaque dark foundation (GPU-optimized: no backdrop-filter needed on solid dark body) */
     background: linear-gradient(135deg,
@@ -171,7 +183,7 @@ body.max-performance .sidebar::after {
 /* Sidebar Audio Visualizer — fixed strip on right edge of sidebar */
 .sidebar-visualizer {
     position: fixed;
-    left: 240px;
+    left: var(--sidebar-w);
     top: 0;
     bottom: 0;
     width: 10px;
@@ -3112,10 +3124,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 #page-particles-canvas {
     position: fixed;
     top: 0;
-    left: 240px; /* sidebar width */
+    left: var(--sidebar-w); /* sidebar width */
     right: 0;
     bottom: 0;
-    width: calc(100vw - 240px);
+    width: calc(100vw - var(--sidebar-w));
     height: 100vh;
     pointer-events: none;
     z-index: 0;
@@ -7205,9 +7217,12 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
         min-width: 1200px;
     }
 
+    /* These have to track --sidebar-w, not restate it. min-width pins a flex
+       item regardless of what `width` says, so leaving 240px here made the
+       collapse toggle do visibly nothing on desktop (#1155). */
     .sidebar {
-        min-width: 240px;
-        max-width: 240px;
+        min-width: var(--sidebar-w);
+        max-width: var(--sidebar-w);
     }
 
     .main-content {
@@ -49968,7 +49983,7 @@ textarea.enhanced-meta-field-input {
 .enhanced-bulk-bar {
     position: fixed;
     bottom: -80px;
-    left: 240px;
+    left: var(--sidebar-w);
     right: 0;
     height: 60px;
     background: linear-gradient(135deg, rgba(30,30,30,0.98), rgba(20,20,20,0.98));
@@ -74049,6 +74064,142 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 /* Collapsed: chevron points right (closed). Expanded: points down (default, open). */
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }
+
+/* ══ Collapsible sidebar (#1155, wishx) ═══════════════════════════════════
+   One toggle, two states: full width, or just wide enough for the icons.
+   The state is an attribute on <html> so --sidebar-w resolves before first
+   paint — see the inline script in index.html, which has to run in <head> or
+   the whole page visibly jumps on every navigation.
+
+   Items size themselves off the sidebar rather than repeating its number,
+   which is what let .nav-button and .nav-section-label sit on a hardcoded
+   216px that nobody would have thought to update. */
+html[data-sidebar] .nav-button,
+html[data-sidebar] .nav-section-label {
+    width: calc(var(--sidebar-w) - 24px);
+}
+
+/* ── Collapsed: icons only ── */
+html[data-sidebar="collapsed"] .nav-text,
+html[data-sidebar="collapsed"] .sidebar-brand-text,
+html[data-sidebar="collapsed"] .nav-section-title,
+html[data-sidebar="collapsed"] .nav-section-chevron,
+html[data-sidebar="collapsed"] .side-toggle-btn span,
+html[data-sidebar="collapsed"] .profile-indicator-name {
+    display: none;
+}
+
+/* The footer blocks are all prose — "Support SoulSync", a version string, and
+   three service rows with names and test buttons. None of it survives being
+   68px wide, and there is no icon that would stand in for it. They come back
+   the moment you expand. The status JS keeps updating them regardless; hiding
+   is presentational only, so nothing downstream needs to know. */
+html[data-sidebar="collapsed"] .support-section,
+html[data-sidebar="collapsed"] .version-section,
+html[data-sidebar="collapsed"] .status-section {
+    display: none;
+}
+
+html[data-sidebar="collapsed"] .nav-button {
+    width: 44px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+}
+
+/* A section header with no readable text is a dead control — you would be
+   clicking a nameless chevron and items would vanish with no way to tell what
+   you hid or how to get it back. So the label becomes a plain divider and
+   every item under it is forced visible, whatever the saved per-section state
+   says. That state stays in localStorage untouched and comes back on expand. */
+html[data-sidebar="collapsed"] .nav-section-label {
+    width: 28px;
+    height: 1px;
+    min-height: 1px;
+    margin: 12px auto;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 1px;
+    pointer-events: none;
+    overflow: hidden;
+}
+html[data-sidebar="collapsed"] .nav-item-hidden { display: flex !important; }
+
+/* The header's 24px side padding eats 48px of a 68px sidebar, leaving a 20px
+   content box — everything inside it overflowed right and got clipped by the
+   header's own overflow:hidden, which is why nothing looked centred. */
+html[data-sidebar="collapsed"] .sidebar-header {
+    padding: 16px 6px;
+    align-items: center;
+}
+
+/* Logo and toggle stack rather than share a line: 38px logo + 12px gap + 26px
+   button is 76px, wider than the collapsed sidebar itself, so side by side they
+   just squash each other. */
+html[data-sidebar="collapsed"] .sidebar-brand {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+/* the Music/Video pill's collapsed geometry lives with the rest of it, in
+   video/video-side.css — the sliding thumb has to be reasoned about as one
+   piece or it ends up a stray bar. */
+html[data-sidebar="collapsed"] .profile-indicator { justify-content: center; flex-wrap: wrap; }
+
+/* The toggle itself. Sits in the sidebar header because this is a spatial
+   preference you change while looking at the thing, not configuration. */
+.sidebar-collapse-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.sidebar-collapse-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+.sidebar-collapse-toggle svg { width: 14px; height: 14px; }
+/* Chevrons point the way the click will take you: inward to shrink, outward
+   to grow back. Collapsed is the only state where expanding is the only move. */
+html[data-sidebar="collapsed"] .sidebar-collapse-toggle svg { transform: rotate(180deg); }
+
+/* Mobile owns the sidebar below its breakpoint (mobile.css) — the density
+   modes are a desktop concern and must not fight it. */
+@media (max-width: 768px) {
+    html[data-sidebar="collapsed"] {
+        --sidebar-w: 240px;
+    }
+    .sidebar-collapse-toggle { display: none; }
+    html[data-sidebar="collapsed"] .nav-text,
+    html[data-sidebar="collapsed"] .sidebar-brand-text,
+    html[data-sidebar="collapsed"] .nav-section-title,
+    html[data-sidebar="collapsed"] .nav-section-chevron,
+    html[data-sidebar="collapsed"] .side-toggle-btn span,
+    html[data-sidebar="collapsed"] .profile-indicator-name,
+    html[data-sidebar="collapsed"] .support-section,
+    html[data-sidebar="collapsed"] .version-section,
+    html[data-sidebar="collapsed"] .status-section {
+        display: revert;
+    }
+    html[data-sidebar="collapsed"] .nav-button {
+        width: calc(var(--sidebar-w) - 24px);
+        padding: 0 16px;
+        gap: 14px;
+        justify-content: flex-start;
+    }
+}
 
 /* ══ Live Server Activity (app-wide Tautulli-style view) ══════════════════ */
 .activity-float-btn {

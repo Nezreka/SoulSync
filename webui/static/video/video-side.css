@@ -76,6 +76,44 @@ body[data-side="video"] .side-toggle-thumb {
     opacity: 1;
 }
 
+/* ── Collapsed sidebar (#1155): the same pill, stacked ──────────────────── */
+/* At icon width the two halves cannot sit side by side, so the pill turns
+   vertical — and the thumb has to turn with it. Everything above sizes it as a
+   horizontal half (width: calc(50% - 4px), translateX), which once stacked
+   reads as a stray bar floating over the top button. Hiding it instead just
+   loses the active indicator, so it slides DOWN here rather than across.
+   Kept next to the base rules on purpose: the thumb's geometry only makes
+   sense read together with the track it slides in. */
+html[data-sidebar="collapsed"] .side-toggle {
+    flex-direction: column;
+    width: 46px;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 10px;
+    padding: 3px;
+    border-radius: 13px;
+}
+html[data-sidebar="collapsed"] .side-toggle-thumb {
+    top: 3px;
+    left: 3px;
+    right: 3px;
+    width: auto;
+    height: calc(50% - 3px);
+    border-radius: 10px;
+}
+html[data-sidebar="collapsed"] body[data-side="video"] .side-toggle-thumb {
+    transform: translateY(100%);
+}
+html[data-sidebar="collapsed"] .side-toggle-btn {
+    padding: 7px 0;
+    gap: 0;
+    border-radius: 10px;
+}
+html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
+    width: 16px;
+    height: 16px;
+}
+
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
 /* The video nav reuses .sidebar-nav layout (same class) — only visibility
    differs. Hidden by default (music side); shown when data-side="video". */

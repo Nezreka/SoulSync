@@ -5,6 +5,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
+    <!-- Collapsed sidebar (#1155). Has to run HERE, before the stylesheet
+         resolves --sidebar-w, or the sidebar renders full width and snaps to the
+         icon width after paint — a visible jump of the whole page on every
+         navigation. Same reason the nav-section restore is inlined rather than
+         left to init.js. Kept tiny and dependency-free; nothing is loaded yet. -->
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('sidebarCollapsed') === '1') {
+                    document.documentElement.setAttribute('data-sidebar', 'collapsed');
+                }
+            } catch (e) { /* localStorage blocked — full width, no harm */ }
+        })();
+    </script>
     <!-- On-screen error console for devices with no devtools (phones/tablets).
          OFF unless the URL carries ?debug=1, so users never see it. Must stay the
          FIRST script in <head> — anything loaded before it can fail unseen. -->
@@ -308,6 +322,14 @@
                         <h1 class="app-name">SoulSync</h1>
                         <p class="app-subtitle">Music Sync & Manager</p>
                     </div>
+                    <!-- #1155: collapses the sidebar to icon width. Lives here, not in
+                         Settings, because it's a spatial preference you change while
+                         looking at the thing you're changing. -->
+                    <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle"
+                            onclick="toggleSidebarCollapsed()" title="Collapse sidebar"
+                            aria-label="Collapse sidebar" aria-expanded="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/><line x1="4" y1="4" x2="4" y2="20"/></svg>
+                    </button>
                 </div>
                 <!-- Music ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
                 <div class="side-toggle" role="group" aria-label="Switch between Music and Video">
