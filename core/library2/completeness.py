@@ -248,12 +248,42 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
     return with_file[0]["id"]
 
 
-def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
+def _from_a_known_release_id(
+    source_ids: Any, provider: Any, provider_entity_id: Any,
+) -> bool:
+    """Did this tracklist come from a release id the album already carried?
+
+    Only then may a shorter list shrink ``expected_track_count``. The provider
+    walk falls back to a Deezer NAME search for rows without release ids, and a
+    title search can land on the wrong release — an EP's suite matching a
+    one-track single would otherwise "correct" a 31-track expectation down to
+    1 and hide thirty genuinely missing tracks. A direct id is a statement
+    about THIS release; a search result is a guess about which release it is.
+    """
+    if not provider or not provider_entity_id:
+        return False
+    try:
+        known = (source_ids or {}).get(str(provider))
+    except AttributeError:
+        return False
+    return bool(known) and str(known) == str(provider_entity_id)
+
+
+def _persist_tracklist_tracks(
+    conn, album_id: int, tracks: List[dict], *, complete: bool = False,
+) -> int:
     """Persist provider tracklist entries as fileless lib2 track rows.
 
     Missing rows must have real DB ids so they can be monitored individually,
     just like Lidarr's wanted track rows. Existing local/downloaded tracks are
     matched by disc+track number and left in place.
+
+    ``complete`` says the provider answered for the WHOLE release. Only then may
+    the stored expectation come down: an old, too-high count (a different
+    edition, a deluxe total, a provider that has since corrected itself) would
+    otherwise survive every refresh and leave the album permanently one track
+    short — of a track that exists in no tracklist and no row. A truncated page
+    is not evidence of a shorter album, and neither is an empty answer.
     """
     al = conn.execute(
         "SELECT primary_artist_id, monitored, quality_profile_id, expected_track_count FROM lib2_albums WHERE id=?",
@@ -270,6 +300,18 @@ def _persist_tracklist_tracks(conn, album_id: int, tracks: List[dict]) -> int:
     # A provider-confirmed complete list wins over an old undercount. Never
     # slice real entries to a stale expected_track_count (P1-26).
     if len(entries) > expected:
+        expected = len(entries)
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET expected_track_count=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (expected, album_id),
+        )
+    elif complete and entries and len(entries) < expected:
+        # …and over an old OVERcount, which had no way to be corrected before:
+        # the album kept reporting a missing track that no tracklist entry and
+        # no row could account for. The convergence below still raises it back
+        # if local rows outnumber the provider's list.
         expected = len(entries)
         conn.execute(
             """UPDATE lib2_albums
@@ -485,7 +527,19 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
 
     reusable = durable_tracks or cached
     if reusable:
-        _persist_tracklist_tracks(conn, album_id, reusable)
+        # A durable snapshot carries whether the provider answered for the whole
+        # release; the legacy-cache upgrade above records itself as complete.
+        # Passing it through is what lets an album with a stale, too-high
+        # expectation heal on the next reconcile without a provider call.
+        reusable_complete = (
+            bool(snapshot.is_complete)
+            and _from_a_known_release_id(
+                source_ids, snapshot.provider, snapshot.provider_entity_id)
+            if durable_tracks and snapshot is not None else False
+        )
+        _persist_tracklist_tracks(
+            conn, album_id, reusable, complete=reusable_complete,
+        )
         conn.execute(
             """UPDATE lib2_albums
                   SET tracklist_json=?, tracklist_status='ready',
@@ -536,7 +590,12 @@ def resolve_tracklist(config_manager, conn, album_id: int) -> Optional[List[dict
                     WHERE id=?""",
                 (json.dumps(tracks), album_id),
             )
-            _persist_tracklist_tracks(conn, album_id, tracks)
+            _persist_tracklist_tracks(
+                conn, album_id, tracks,
+                complete=bool(provider_result.is_complete) and _from_a_known_release_id(
+                    source_ids, provider_result.provider,
+                    provider_result.provider_entity_id),
+            )
             conn.commit()
         except Exception as e:  # noqa: BLE001
             logger.debug("tracklist cache write failed (%s): %s", album_id, e)

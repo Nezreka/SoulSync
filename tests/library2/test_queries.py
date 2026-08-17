@@ -491,7 +491,10 @@ def test_get_album_track_status(imported_conn):
     assert album["album_type"] == "album"
     assert album["track_count"] == 2
     assert album["tracks_present"] == 1
-    assert album["tracks_missing"] == 1
+    # "Missing" means monitored-and-absent. 'Hotline Bling' is a legacy row the
+    # import left unmonitored (no file, no wishlist rule) — known, but nobody
+    # is waiting for it. Monitor it and it becomes a gap again, below.
+    assert album["tracks_missing"] == 0
     by_title = {t["title"]: t for t in album["tracks"]}
     one_dance = by_title["One Dance"]
     assert [a["name"] for a in one_dance["artists"]] == ["Drake", "Wizkid"]
@@ -502,6 +505,18 @@ def test_get_album_track_status(imported_conn):
     assert isinstance(one_dance["file"]["file_id"], int)
     # The track with no file_path is reported missing.
     assert by_title["Hotline Bling"]["file_status"] == "missing"
+
+    # Want it again — through the wanted projection, which is what both the
+    # album list and this detail read — and it counts as a gap once more.
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET monitored=1 WHERE id=?",
+        (by_title["Hotline Bling"]["id"],),
+    )
+    imported_conn.execute(
+        "DELETE FROM lib2_wanted_tracks WHERE track_id=?",
+        (by_title["Hotline Bling"]["id"],),
+    )
+    assert Q.get_album(imported_conn, views_id)["tracks_missing"] == 1
 
 
 def test_album_detail_query_count_does_not_scale_with_tracks(imported_conn):
@@ -606,7 +621,9 @@ def test_confirmed_missing_file_is_not_counted_as_present(imported_conn):
     album = Q.get_album(imported_conn, album_id)
 
     assert album["tracks_present"] == 0
-    assert album["tracks_missing"] == 2
+    # One Dance is monitored (it had a file until this scan confirmed it gone),
+    # so it counts; the unmonitored legacy row next to it does not.
+    assert album["tracks_missing"] == 1
     one_dance = next(track for track in album["tracks"] if track["title"] == "One Dance")
     assert one_dance["file_status"] == "missing"
     assert one_dance["file"]["file_state"] == "missing_confirmed"
@@ -623,7 +640,9 @@ def test_get_album_shows_expected_missing_track_rows(imported_conn):
     album = Q.get_album(imported_conn, views_id)
 
     assert album["track_count"] == 4
-    assert album["tracks_missing"] == 3
+    # Two slots the provider promised and no row exists for yet. The third
+    # absent track has a row and is unmonitored, so it is not a gap.
+    assert album["tracks_missing"] == 2
     assert len(album["tracks"]) == 4
     missing_rows = [track for track in album["tracks"] if track["file_status"] == "missing"]
     assert [track["track_number"] for track in missing_rows] == [2, 3, 4]
@@ -672,7 +691,9 @@ def test_get_album_surfaces_first_missing_scan_without_marking_track_missing(imp
     # First miss is diagnostic only: it still counts as present and cannot
     # activate the wanted/redownload projection before confirmation.
     assert album["tracks_present"] == 1
-    assert album["tracks_missing"] == 1
+    # The suspected-missing track still counts as present, and the album's other
+    # row is an unmonitored legacy one — nothing is waiting to be filled.
+    assert album["tracks_missing"] == 0
 
 
 def test_get_album_single_is_duplicate(imported_conn):

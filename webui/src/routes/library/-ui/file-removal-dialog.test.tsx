@@ -7,6 +7,31 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import { UnifiedFileRemovalDialog } from './library-v2-page';
 
+/** A preview whose only row points at a file that is no longer on disk. */
+function previewWithGoneFile() {
+  return {
+    ...preview(0),
+    files: [
+      {
+        file_ids: [101],
+        track_ids: [55],
+        stored_paths: ['/music/Drake/Views/01 - One Dance.flac'],
+        path: '/music/Drake/Views/01 - One Dance.flac',
+        root: '/music',
+        size: 0,
+        deletable: false,
+        reason: 'already_gone',
+        album_title: 'Views',
+        track_titles: ['One Dance'],
+      },
+    ],
+    deletable_count: 0,
+    unsafe_count: 0,
+    missing_count: 1,
+    total_size: 0,
+  };
+}
+
 function preview(unsafeCount = 0) {
   return {
     success: true,
@@ -159,5 +184,35 @@ describe('unified Library v2 file-removal dialog', () => {
     expect(screen.getByRole('radio', { name: /Permanently delete files/ })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Remove from library database' }));
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+  });
+
+  it('says a file that is already gone will be cleaned up, not that it is unsafe', async () => {
+    // Reported: "Permanent deletion is blocked for 1 unsafe or unresolved
+    // file" on an album where one track's file had simply been deleted
+    // outside SoulSync. One already-gone file made the other twelve
+    // undeletable, and the message blamed safety for a bookkeeping leftover.
+    server.use(
+      http.get('/api/library/v2/albums/42/file-delete-preview', () =>
+        HttpResponse.json(previewWithGoneFile()),
+      ),
+    );
+    renderDialog();
+
+    expect(await screen.findByText(/already gone from disk/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Permanent deletion is blocked/i)).not.toBeInTheDocument();
+  });
+
+  it('names the setting to fix when a path really is outside the library', async () => {
+    // The old wording ("unsafe or unresolved file") told the user nothing they
+    // could act on. The blocking case is almost always an unconfigured library
+    // path, so the message says which setting that is.
+    server.use(
+      http.get('/api/library/v2/albums/42/file-delete-preview', () =>
+        HttpResponse.json(preview(1)),
+      ),
+    );
+    renderDialog();
+
+    expect(await screen.findByText(/Music Library Paths/i)).toBeInTheDocument();
   });
 });

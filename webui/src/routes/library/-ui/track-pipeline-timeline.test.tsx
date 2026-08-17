@@ -41,7 +41,7 @@ describe('library v2 track pipeline timeline (§52.9)', () => {
     expect(screen.queryByText(/Pipeline —/)).not.toBeInTheDocument();
   });
 
-  it('shows a failed attempt that never reached a file row, oldest first', async () => {
+  it('shows a failed attempt that never reached a file row, newest first', async () => {
     server.use(
       http.get('/api/library/v2/tracks/9/history', () =>
         HttpResponse.json({
@@ -72,7 +72,7 @@ describe('library v2 track pipeline timeline (§52.9)', () => {
 
     await waitFor(() => expect(screen.getByText('Pipeline — 2 events')).toBeInTheDocument());
     const items = screen.getAllByText(/Grabbed|Quarantined/);
-    expect(items.map((el) => el.textContent)).toEqual(['Grabbed', 'Quarantined']);
+    expect(items.map((el) => el.textContent)).toEqual(['Quarantined', 'Grabbed']);
     expect(screen.getByText('AcoustID mismatch')).toBeInTheDocument();
   });
 

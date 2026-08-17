@@ -800,12 +800,28 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                -- bookmarking a single top track wrote a wishlist row the user
                -- could then not find anywhere in their library.
                COUNT(DISTINCT CASE WHEN t.monitored=1 THEN t.id END) AS monitored_tracks,
+               -- What "missing" is allowed to mean: a track you still want and
+               -- do not have. Unmonitoring the two interludes you never intend
+               -- to own used to leave the album reading "2 missing" forever,
+               -- with no way to reach zero except downloading music you had
+               -- explicitly said no to.
+               -- `wanted` first, `monitored` as the fallback: that is exactly
+               -- what the album detail projects per row, and the two views
+               -- disagreeing about the same number would be its own bug.
+               COUNT(DISTINCT CASE
+                   WHEN COALESCE(w.wanted, t.monitored)=1 AND NOT EXISTS (
+                       SELECT 1 FROM lib2_track_files f
+                        WHERE f.track_id=t.id
+                          AND COALESCE(f.file_state,'active')
+                              NOT IN ('missing_confirmed','deleted'))
+                   THEN t.id END) AS monitored_missing,
                COALESCE(asz.total_size_bytes, 0) AS total_size_bytes
         FROM artist_albums aa
         JOIN lib2_albums al ON al.id = aa.album_id
         JOIN lib2_artists pa ON pa.id=al.primary_artist_id
         LEFT JOIN lib2_tracks t ON t.album_id=al.id
         LEFT JOIN lib2_track_files tf ON tf.track_id=t.id
+        LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id=1
         LEFT JOIN album_size asz ON asz.album_id=al.id
         GROUP BY al.id
         ORDER BY al.year DESC, al.title COLLATE NOCASE
@@ -857,7 +873,14 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "mood": effective["mood"],
             "track_count": total,
             "tracks_present": present,
-            "tracks_missing": max(0, total - present),
+            # Rows the provider promised but that do not exist yet always
+            # count: a slot with no row is not a track anyone said no to, and
+            # `lib2_albums.monitored` cannot stand in for intent here — the
+            # importer clears it precisely BECAUSE a release is incomplete, so
+            # gating on it would hide the gaps on exactly the albums that have
+            # them.
+            "tracks_missing": (r["monitored_missing"] or 0)
+            + max(0, total - (r["db_track_count"] or 0)),
             "monitored_tracks": r["monitored_tracks"] or 0,
             "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
@@ -1593,7 +1616,13 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         "tracks": tracks,
         "track_count": total,
         "tracks_present": present_count,
-        "tracks_missing": max(0, total - present_count),
+        # Same rule as the album list: only a track you still want counts as
+        # missing, plus the slots the provider promised that have no row yet
+        # (those have no monitored flag of their own — the album's answers).
+        "tracks_missing": sum(
+            1 for t in tracks
+            if t["file_status"] == "missing" and t.get("monitored")
+        ) + max(0, total - known_count),
         # I8: disk-space roll-up — sum of each present track's primary file.
         "total_size_bytes": sum(
             t["file"]["size"] or 0 for t in tracks if t.get("file") and t["file"].get("size")

@@ -1201,7 +1201,7 @@ button.featureTag:disabled {
 
 .colNum {
   text-align: center;
-  width: 90px;
+  width: 64px;
   white-space: nowrap;
 }
 
@@ -1213,8 +1213,17 @@ button.featureTag:disabled {
 
 .colDuration,
 .colBpm {
-  text-align: center;
+  text-align: left;
   width: 64px;
+  white-space: nowrap;
+}
+
+/* The track table's optional "Disc #" data column — left-aligned like
+ * duration/BPM/file size. Distinct from .colNum (the leading "#" column,
+ * plus every unrelated numeric column elsewhere in the app that stays
+ * centered) so this one change doesn't ripple anywhere else. */
+.colDisc {
+  text-align: left;
   white-space: nowrap;
 }
 
@@ -1229,28 +1238,41 @@ button.featureTag:disabled {
   white-space: nowrap;
 }
 
+/* These three utility columns (checkbox/monitor-star/actions) used to say
+ * `width: auto` here. Fixed table layout gives an unconstrained column an
+ * EQUAL SHARE of whatever's left over — it never shrinks to content — so
+ * in a table with few other pixel-width columns (Retag/Reorganize preview:
+ * just these plus Title/Changes) the checkbox column grabbed roughly a
+ * third of the table, reading as a vast empty gap before the track number.
+ * Pin them to their real base width instead; only the padding/alignment
+ * still needs overriding here. */
 .trackTable .colActions,
 .trackTable .trackActions {
-  width: auto;
+  width: 170px;
   padding-right: 2px;
   padding-left: 2px;
 }
 
 .trackTable .colCheckbox {
-  width: auto;
+  width: 30px;
   padding-right: 4px;
   padding-left: 4px;
 }
 
 .trackTable .colMonitor {
-  width: auto;
+  width: 44px;
   padding-right: 2px;
   padding-left: 2px;
   text-align: center;
 }
 
 .trackTable .colNum {
-  width: auto;
+  /* Fixed table layout gives an unconstrained column an equal share of the
+   * remaining width instead of shrinking to content — for a 1-2 digit
+   * number that reads as far too much empty space around a tiny glyph. */
+  width: 64px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .trackTable .trackActions .iconAction {
@@ -1932,12 +1954,15 @@ button.statusWarn:disabled {
   padding: 18px;
 }
 
-/* Fixed width+height for tabbed detail modals (track/album) so switching
- * tabs never resizes/jumps the modal — only the tab body scrolls. */
+/* Fixed width+height for tabbed detail modals (track/album) — switching
+ * tabs must NEVER resize or jump the modal, only the tab body scrolls.
+ * The fixed height is picked generous enough for a full History tab; a
+ * short tab like Quality just leaves some room below, which is far less
+ * jarring than the modal changing size under you as you click a tab. */
 .modalDetail {
-  width: min(880px, 94vw);
-  height: 620px;
-  max-height: 88vh;
+  width: min(1120px, 96vw);
+  height: 840px;
+  max-height: 94vh;
   display: flex;
   flex-direction: column;
 }
@@ -2443,6 +2468,14 @@ button.statusWarn:disabled {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* History tab: stacks whole sections (pipeline timeline, download table),
+ * not label/value rows — needs real room between them, unlike sourceInfoBody. */
+.trackHistoryBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .sourceInfoRow {
@@ -2953,6 +2986,17 @@ button.statusWarn:disabled {
   border: 1px solid rgba(241, 196, 15, 0.25);
 }
 
+/* Not a problem, just something the user should know before confirming:
+   rows whose file already left the disk. */
+.mutedNotice {
+  font-size: 12px;
+  color: var(--text-secondary, #9aa3ad);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
 /* A fingerprint that contradicts the file — the one Check outcome that is a
    problem rather than a state, so it reads as one. */
 .verificationMismatch {
@@ -3326,35 +3370,10 @@ button.statusWarn:disabled {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* --- track pipeline timeline (§52.9): chronological search→grab→quality→
-   quarantine→import events for one track, including attempts that never
+/* --- track pipeline history (§52.9/§44): chronological search→grab→
+   quality→quarantine→import→delete events for one track, rendered as a
+   table like the album/artist History — including attempts that never
    reached a file row --- */
-.pipelineTimeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 6px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.pipelineTimelineItem {
-  padding: 6px 0 6px 10px;
-  border-left: 2px solid rgba(255, 255, 255, 0.15);
-}
-
-.pipelineTimelineHead {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.pipelineTimelineDate {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
 .pipelineStatus {
   padding: 1px 6px;
   border: 1px solid rgba(148, 163, 184, 0.3);
@@ -3381,12 +3400,6 @@ button.statusWarn:disabled {
 .pipelineStatus[data-status='not_run'] {
   border-color: rgba(251, 191, 36, 0.35);
   color: rgb(253, 224, 71);
-}
-
-.pipelineTimelineDetail {
-  margin-top: 3px;
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.65);
 }
 
 /* --- inline present/missing (right after the track title) --- */
@@ -3503,6 +3516,7 @@ button.statusWarn:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 14px;
 }
 
 .qpSubtitle {
@@ -3962,7 +3976,7 @@ button.statusWarn:disabled {
 
 .fileSizeCell {
   white-space: nowrap;
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
 
@@ -4015,6 +4029,14 @@ button.statusWarn:disabled {
 .tableOptionsProviderGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(155px, 100%), 1fr));
+}
+
+/* A wrapping multi-column grid makes "move up/down" meaningless — index-1
+ * can land in the previous row's last cell, nowhere near where it looks
+ * like it moved. Reorderable lists get a single column so drag position
+ * and array position always agree. */
+.tableOptionsColumnGridReorder {
+  grid-template-columns: 1fr;
 }
 
 .tableOptionsGroupLabel {
@@ -4127,6 +4149,26 @@ button.statusWarn:disabled {
 .reorderBtn:disabled {
   opacity: 0.15;
   cursor: not-allowed;
+}
+
+.reorderHandle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 13px;
+  line-height: 1;
+  cursor: grab;
+}
+
+.reorderHandle:active {
+  cursor: grabbing;
+}
+
+.tableOptionsRowDragging {
+  opacity: 0.4;
 }
 
 .tableOptionsDivider {

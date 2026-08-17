@@ -983,7 +983,12 @@ export interface LibraryV2FileDeletePreview {
   files: LibraryV2FileDeletePreviewItem[];
   file_count: number;
   deletable_count: number;
+  /** Paths that exist but lie outside the library — these block the delete. */
   unsafe_count: number;
+  /** Rows whose file is already gone: nothing to unlink, only a row to retire.
+   *  Counted apart from `unsafe_count` because one already-deleted file used
+   *  to veto deleting every other file on the album. */
+  missing_count?: number;
   total_size: number;
   preview_token: string;
 }

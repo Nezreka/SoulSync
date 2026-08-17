@@ -279,7 +279,7 @@ describe('library v2 album track table', () => {
     expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
-  it('renders the generic Check column separately from verification provenance', async () => {
+  it('renders one Check column and no separate verification column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>
         HttpResponse.json({
@@ -307,6 +307,8 @@ describe('library v2 album track table', () => {
           success: true,
           preferences: {
             track_table: {
+              // A stale saved preference from before the two columns were
+              // merged must not resurrect the removed one.
               columns: { quality: true, verification: true, acoustid: true },
               column_order: ['quality', 'verification', 'acoustid'],
             },
@@ -325,13 +327,12 @@ describe('library v2 album track table', () => {
     );
 
     expect(await screen.findByRole('columnheader', { name: /^Check/ })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: /^Verification/ })).toBeInTheDocument();
-    expect(screen.getAllByText('Verified')).toHaveLength(2);
-    expect(
-      screen
-        .getAllByText('Verified')
-        .find((element) => element.getAttribute('title')?.includes('fingerprint matched')),
-    ).toBeDefined();
+    expect(screen.queryByRole('columnheader', { name: /^Verification/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Verified')).toHaveLength(1);
+    expect(screen.getByText('Verified')).toHaveAttribute(
+      'title',
+      expect.stringContaining('fingerprint matched'),
+    );
   });
 
   it('summarizes human, skipped and unscanned check outcomes with reasons', () => {
@@ -379,6 +380,40 @@ describe('library v2 album track table', () => {
     );
   });
 
+  it('calls a genuine no-match "Unverified", not "Skipped" — the check DID run', () => {
+    // Reported: collapsing "AcoustID ran and found nothing confident" into
+    // the same "Skipped" word as "the check never ran at all" (force/retry
+    // bypass) lost the exact distinction the old Verification column drew as
+    // "Unverified" vs "Bypassed". "Skipped" implies nothing happened; here
+    // something did, it just couldn't confirm the file.
+    render(
+      <TrackCheckBadge
+        file={trackFile({
+          verification_status: null,
+          acoustid_status: 'skip',
+          pipeline_result: { acoustid_message: 'No match in AcoustID database' },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Unverified')).toHaveAttribute(
+      'title',
+      expect.stringContaining('No match in AcoustID database'),
+    );
+    expect(screen.queryByText('Skipped')).not.toBeInTheDocument();
+  });
+
+  it('explains an unverified file even with no captured message', () => {
+    render(
+      <TrackCheckBadge file={trackFile({ verification_status: null, acoustid_status: 'skip' })} />,
+    );
+
+    expect(screen.getByText('Unverified')).toHaveAttribute(
+      'title',
+      expect.stringContaining('found no confident match'),
+    );
+  });
+
   it('does not call a verified file unscanned just because no fingerprint verdict was stored', () => {
     // The reported bug: the AcoustID tool had processed the whole library and
     // Michael Jackson still read "Not scanned". The scan wrote its verdict to
@@ -389,6 +424,19 @@ describe('library v2 album track table', () => {
     render(<TrackCheckBadge file={trackFile({ verification_status: 'verified' })} />);
 
     expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.queryByText('Not scanned')).not.toBeInTheDocument();
+  });
+
+  it('says the file is gone rather than blaming the scanner for not checking it', () => {
+    // "Not scanned" on a row whose file no longer exists reads like the tool
+    // skipped it. Nothing can fingerprint a file that is not there.
+    render(
+      <TrackCheckBadge
+        file={trackFile({ verification_status: null, file_state: 'missing_confirmed' })}
+      />,
+    );
+
+    expect(screen.getByText('File missing')).toBeInTheDocument();
     expect(screen.queryByText('Not scanned')).not.toBeInTheDocument();
   });
 

@@ -81,22 +81,52 @@ def ensure_file_delete_schema(cursor) -> None:
     )
 
 
-def _library_roots(config_manager: Any = None) -> List[str]:
-    """Return existing, canonical roots explicitly configured by the user."""
-    try:
-        if config_manager is None:
+def _library_roots(config_manager: Any = None, *, include_import_root: bool = True) -> List[str]:
+    """The folders a library file may legitimately live in.
+
+    ``library.music_paths`` is what the user declared — and it is optional,
+    defaults to ``[]``, and plenty of installs never fill it. Taking it as the
+    only answer made permanent deletion impossible on a default setup: every
+    file previewed as ``outside_configured_library_roots`` and the error named
+    no setting to fix. So the organize destination
+    (``soulseek.transfer_path``) counts too: that is the folder SoulSync's own
+    import pipeline files the library into, which makes it a library root by
+    construction rather than by configuration.
+
+    The incoming download folder is deliberately NOT a root. Those files belong
+    to the downloader until the import moves them; the library's delete command
+    has no business there.
+
+    ``include_import_root=False`` is for :func:`fuzzy_resolved_path_is_deletable`,
+    where the transfer folder is precisely the hazard (iss29-E04): a resolver
+    GUESS landing on a freshly imported file must never be deleted.
+    """
+    def _read(key):
+        try:
+            return config_manager.get(key, None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    if config_manager is None:
+        try:
             from core.settings import config_manager as _config_manager
             config_manager = _config_manager
-        configured = config_manager.get("library.music_paths", []) or []
-    except Exception:  # noqa: BLE001
-        configured = []
+        except Exception:  # noqa: BLE001
+            return []
+
+    configured = _read("library.music_paths") or []
     if isinstance(configured, str):
         configured = [configured]
+    candidates = list(configured)
+    if include_import_root:
+        import_root = _read("soulseek.transfer_path")
+        if isinstance(import_root, str) and import_root.strip():
+            candidates.append(import_root)
 
     from core.imports.paths import docker_resolve_path
 
     roots: List[str] = []
-    for raw in configured:
+    for raw in candidates:
         if not isinstance(raw, str) or not raw.strip():
             continue
         resolved = os.path.realpath(
@@ -150,10 +180,31 @@ def fuzzy_resolved_path_is_deletable(
             return True  # not a guess — the catalogue path itself
     except OSError:
         pass
-    roots = _library_roots(config_manager)
+    # Music paths only: the transfer folder is the hazard this guard exists
+    # for, not a safe harbour (see ``_library_roots``).
+    roots = _library_roots(config_manager, include_import_root=False)
     if not roots:
         return False
     return _containing_root(resolved, roots) is not None
+
+
+ALREADY_GONE = "already_gone"
+
+
+def _absent_reason(path: Any, config_manager: Any = None) -> str:
+    """Why a path could not be stat'ed — gone, or merely out of reach.
+
+    dd28-19's lesson, applied to the preview: absence is only credible when
+    the storage that should hold the file is reachable. An unmounted share
+    makes every one of its files look deleted, and retiring those rows would
+    "delete" a library that is alive on a disk we simply cannot see.
+    """
+    from core.library2.paths import missing_path_root_is_healthy
+
+    text = str(path or "")
+    if text and missing_path_root_is_healthy(text, config_manager):
+        return ALREADY_GONE
+    return "path_unresolved"
 
 
 def _scope_snapshot(
@@ -257,7 +308,8 @@ def preview_entity_files(
                 "size": int(row["db_size"] or 0) or None,
                 "mtime_ns": None,
                 "deletable": False,
-                "reason": "path_unresolved",
+                "reason": _absent_reason(
+                    resolved or row["stored_path"], config_manager),
                 "album_id": row["album_id"],
                 "album_title": row["album_title"],
                 "track_titles": [],
@@ -274,6 +326,8 @@ def preview_entity_files(
             item["root"] = root
             if not root:
                 item["reason"] = "outside_configured_library_roots"
+            elif not os.path.exists(real_path):
+                item["reason"] = _absent_reason(real_path, config_manager)
             elif not os.path.isfile(real_path):
                 item["reason"] = "not_a_regular_file"
             else:
@@ -313,7 +367,17 @@ def preview_entity_files(
         "files": files,
         "file_count": len(files),
         "deletable_count": sum(1 for item in files if item["deletable"]),
-        "unsafe_count": sum(1 for item in files if not item["deletable"]),
+        # "Unsafe" means: this path is real and lies outside your library, so
+        # deleting it could destroy something that is not the library's to
+        # delete. A file that is simply GONE is not unsafe — there is nothing
+        # to unlink, only a row to retire — and counting it as unsafe let one
+        # already-deleted file veto the deletion of every other file on the
+        # album, permanently.
+        "unsafe_count": sum(
+            1 for item in files
+            if not item["deletable"] and item["reason"] != ALREADY_GONE
+        ),
+        "missing_count": sum(1 for item in files if item["reason"] == ALREADY_GONE),
         "total_size": sum(int(item["size"] or 0) for item in files),
         "preview_token": preview_token,
     }
@@ -846,6 +910,13 @@ def delete_entity_files(
             409,
         )
 
+    # Rows whose file is already gone have nothing to unlink. They are still
+    # part of what the user asked to remove, so they are journalled and their
+    # catalogue rows retired — they just do not go through the unlink loop, and
+    # they do not block the files that ARE there.
+    gone = [item for item in preview["files"] if item["reason"] == ALREADY_GONE]
+    to_unlink = [item for item in preview["files"] if item["deletable"]]
+
     operation_id = uuid.uuid4().hex
     conn = database._get_connection()
     try:
@@ -867,27 +938,34 @@ def delete_entity_files(
             ),
         )
         for item in preview["files"]:
+            already_gone = item["reason"] == ALREADY_GONE
             conn.execute(
-                """INSERT INTO lib2_file_delete_items(
-                       operation_id, file_ids_json, stored_paths_json,
-                       resolved_path, root_path, size, mtime_ns, status)
-                   VALUES(?,?,?,?,?,?,?, 'planned')""",
+                f"""INSERT INTO lib2_file_delete_items(
+                        operation_id, file_ids_json, stored_paths_json,
+                        resolved_path, root_path, size, mtime_ns, status,
+                        error, deleted_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,
+                           {"CURRENT_TIMESTAMP" if already_gone else "NULL"})""",
                 (
                     operation_id,
                     json.dumps(item["file_ids"]),
                     json.dumps(item["stored_paths"]),
-                    item["path"],
-                    item["root"],
+                    item["path"] or (item["stored_paths"] or [""])[0],
+                    item["root"] or "",
                     item["size"],
                     item["mtime_ns"],
+                    "missing" if already_gone else "planned",
+                    "file was already gone from disk" if already_gone else None,
                 ),
             )
+        for item in gone:
+            _mark_file_rows_deleted(conn, item["file_ids"])
         conn.commit()
     finally:
         conn.close()
 
     _execute_delete_items(
-        database, operation_id, preview["files"],
+        database, operation_id, to_unlink,
         config_manager=config_manager, unlink=unlink,
     )
 

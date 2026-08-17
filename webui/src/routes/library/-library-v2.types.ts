@@ -574,8 +574,6 @@ export interface LibraryV2TrackTableColumns {
   quality: boolean;
   features: boolean;
   metadata: boolean;
-  /** T-10: AcoustID/human verification provenance as its own column. */
-  verification: boolean;
   /** iss28-01: effective Check summary, backed by AcoustID + verification provenance. */
   acoustid: boolean;
   /** UI-03: size of the primary physical file on disk. */

@@ -197,6 +197,87 @@ def test_previous_file_replaced_surfaces_in_the_feed(imported_conn):
     assert replaced["detail"] == "quality_upgrade"
 
 
+def test_manual_grab_says_which_gate_it_overrode(imported_conn):
+    """Reported: "Grabbed (manual)" showed only the source ("youtube") — no
+    sign that this grab happened BECAUSE a human overrode gates the
+    automatic matcher had rejected. That override reason is exactly the
+    "wieso/weshalb" the history is supposed to answer.
+    """
+    from core.acquisition.history import record_history_event
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    record_history_event(
+        imported_conn,
+        "manual_grab_correlated",
+        request_id=request_id,
+        reason_code="gate_rejections_overridden_by_manual_pick",
+        payload={
+            "source": "youtube",
+            "accepted": False,
+            "rejections": ["artist_mismatch", "release_mismatch"],
+            "warnings": ["quality_fallback"],
+        },
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+    manual = next(e for e in history if e["event_type"] == "manual_grab_correlated")
+
+    assert "youtube" in manual["detail"]
+    assert "artist mismatch" in manual["detail"]
+    assert "release mismatch" in manual["detail"]
+    assert "quality fallback" in manual["detail"]
+
+
+def test_the_legacy_download_row_does_not_duplicate_the_acquisition_completion(imported_conn):
+    """Reported: "wieso gibt es Download und Download completed in der
+    History?" — track_downloads (legacy) and acquisition_history (current)
+    both journal the same real-world "the file arrived" moment
+    independently. For a track the acquisition pipeline actually tracked,
+    that must read as ONE event, not two.
+    """
+    from core.acquisition.history import record_history_event
+
+    drake = _drake_ids(imported_conn)
+    request_id = _acquisition_grab(
+        imported_conn, scope="recording", entity_id=drake["recording_id"]
+    )
+    record_history_event(
+        imported_conn, "grab_completed", request_id=request_id,
+        payload={"source": "youtube", "has_output_path": True},
+    )
+    same_moment = imported_conn.execute(
+        "SELECT created_at FROM acquisition_history WHERE request_id=? AND event_type='grab_completed'",
+        (request_id,),
+    ).fetchone()[0]
+    imported_conn.execute(
+        """CREATE TABLE IF NOT EXISTS track_downloads(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, file_path TEXT,
+               source_service TEXT, track_title TEXT, track_album TEXT,
+               status TEXT DEFAULT 'completed', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"""
+    )
+    imported_conn.execute(
+        "INSERT INTO track_downloads(track_id, source_service, track_title, status, created_at) "
+        "VALUES(?, 'youtube', 'One Dance', 'completed', ?)",
+        (str(drake["track_id"]), same_moment),
+    )
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET legacy_track_id=? WHERE id=?",
+        (str(drake["track_id"]), drake["track_id"]),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+
+    assert any(e["event_type"] == "grab_completed" for e in history)
+    assert not any(e["event_type"] == "downloaded" for e in history), (
+        "the legacy row at the same timestamp is the same event, not a second one"
+    )
+
+
 def test_human_verification_decisions_surface_in_the_feed(imported_conn):
     """F-10's two human steps: an approve/reject that happens long after the
     download must land in the same correlated story, not a separate silo."""
@@ -287,6 +368,203 @@ def test_file_delete_operation_surfaces_at_album_and_artist_not_sibling(imported
     assert any(e["event_type"] == "files_deleted" for e in album_history)
     assert any(e["event_type"] == "files_deleted" for e in artist_history)
     assert not any(e["event_type"] == "files_deleted" for e in rihanna_history)
+
+
+def test_a_maintenance_delete_shows_up_on_the_albums_timeline(imported_conn):
+    """Lidarr parity, as reported: "da wird dann auch in der history angezeigt
+    wenn ein song gelöscht wurde und neu heruntergeladen". The download half
+    was already there; the delete half only existed for the dialog, because a
+    job's delete was a bare os.remove with no operation row to render.
+    """
+    from core.library2.file_delete import delete_files_journaled
+
+    drake = _drake_ids(imported_conn)
+
+    class _KeepOpen:
+        """The journal closes what it opens; this test's connection must live."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def close(self):
+            pass
+
+    class _DB:
+        def _get_connection(self):
+            return _KeepOpen(imported_conn)
+
+    # A path that does not exist: the delete fails, but the operation is still
+    # journalled — which is the point being tested here.
+    delete_files_journaled(
+        _DB(), targets=["/music/Drake/Views/01 - Gone.flac"],
+        entity_type="albums", entity_id=drake["album_id"],
+        actor="repair:corrupt_audio", require_library_root=False,
+    )
+
+    album_history = scoped_history(imported_conn, scope="album", entity_id=drake["album_id"])
+    deleted = [e for e in album_history if e["event_type"] == "files_deleted"]
+
+    assert deleted, "a job's delete has to appear on the album's timeline"
+    assert "repair:corrupt_audio" in deleted[0]["detail"], (
+        "the timeline must say WHO deleted it — a user or a job"
+    )
+
+
+def test_an_acoustid_scan_event_says_the_verdict_not_just_the_field_names(imported_conn):
+    """Reported: "wenn in der history steht 'acoustid updated' dann soll da
+    auch stehen ob unverified, verified etc mit begründung". The raw event
+    only ever recorded WHICH columns a job touched, never what they became —
+    so "Acoustic ID status updated" said nothing an unverified/verified
+    reader could act on. The file's current row already carries the verdict
+    the Check column shows; the history event should say the same thing.
+    """
+    from core.library2.maintenance_sync import ensure_maintenance_event_schema
+
+    drake = _drake_ids(imported_conn)
+    file_id = imported_conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (drake["track_id"],),
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET acoustid_status='fail', verification_status='unverified', "
+        "pipeline_result_json=? WHERE id=?",
+        ('{"acoustid_message": "Audio mismatch: file identified as \'Wrong Song\' by \'Someone Else\'"}',
+         file_id),
+    )
+    ensure_maintenance_event_schema(imported_conn.cursor())
+    imported_conn.execute(
+        "INSERT INTO lib2_maintenance_events(job_id, action, lib2_track_id, lib2_file_id, "
+        "changed_fields_json) VALUES('acoustid_scanner', 'verification_status_updated', ?, ?, "
+        "'[\"file_snapshot\"]')",
+        (drake["track_id"], file_id),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+    scan_event = next(e for e in history if e["event_type"] == "verification_status_updated")
+
+    # Status carries the verdict word (matches the Check column's own badge
+    # text exactly, so the UI can render one identical badge in both places);
+    # Detail carries the reasoning — not the same field doing double duty.
+    assert scan_event["status"] == "Mismatch"
+    assert "Wrong Song" in scan_event["detail"]
+
+
+def test_acoustid_scan_event_says_unverified_not_skipped_when_the_check_ran(imported_conn):
+    """Reported: "Skipped" reads as "nothing happened" — wrong for a file
+    AcoustID actually fingerprinted and simply could not confirm. Force/retry
+    bypasses (never ran at all) keep "Skipped"; a genuine no-match gets
+    "Unverified", same split as the Check column badge."""
+    from core.library2.maintenance_sync import ensure_maintenance_event_schema
+
+    drake = _drake_ids(imported_conn)
+    file_id = imported_conn.execute(
+        "SELECT id FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (drake["track_id"],),
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_track_files SET acoustid_status='skip', verification_status=NULL "
+        "WHERE id=?", (file_id,),
+    )
+    ensure_maintenance_event_schema(imported_conn.cursor())
+    imported_conn.execute(
+        "INSERT INTO lib2_maintenance_events(job_id, action, lib2_track_id, lib2_file_id, "
+        "changed_fields_json) VALUES('acoustid_scanner', 'verification_status_updated', ?, ?, "
+        "'[\"file_snapshot\"]')",
+        (drake["track_id"], file_id),
+    )
+    imported_conn.commit()
+
+    history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
+    scan_event = next(e for e in history if e["event_type"] == "verification_status_updated")
+
+    assert scan_event["status"] == "Unverified"
+    assert "no confident match" in scan_event["detail"]
+
+
+def test_a_tracks_own_history_says_its_file_was_deleted(imported_conn):
+    """Reported: "ich hab gelöscht und wenn ich auf den Stift klicke, dann auf
+    Infos gehe, sehe ich nicht dass dieser Track von mir gelöscht wurde."
+
+    The delete journal is keyed by artist/album, so the artist and album
+    timelines showed it and the track's own — the one behind the pencil — did
+    not. The journal's ITEMS name the file ids, and a file belongs to a track.
+    """
+    from core.library2.file_delete import delete_files_journaled
+
+    track_id, album_id = imported_conn.execute(
+        "SELECT t.id, t.album_id FROM lib2_tracks t "
+        " JOIN lib2_track_files f ON f.track_id=t.id LIMIT 1"
+    ).fetchone()
+    path = imported_conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=?", (track_id,)
+    ).fetchone()[0]
+
+    class _KeepOpen:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def close(self):
+            pass
+
+    class _DB:
+        def _get_connection(self):
+            return _KeepOpen(imported_conn)
+
+    delete_files_journaled(
+        _DB(), targets=[{"path": path, "stored_path": path}],
+        entity_type="albums", entity_id=album_id,
+        actor="user", require_library_root=False,
+    )
+
+    history = scoped_history(imported_conn, scope="track", entity_id=track_id)
+    deleted = [e for e in history if e["event_type"] == "files_deleted"]
+
+    assert deleted, "the track the file belonged to must say so"
+    assert "user" in deleted[0]["detail"]
+
+
+def test_a_sibling_tracks_delete_stays_off_this_tracks_history(imported_conn):
+    """Scoping, so the pencil does not turn into the album's timeline."""
+    from core.library2.file_delete import delete_files_journaled
+
+    rows = imported_conn.execute(
+        "SELECT t.id, t.album_id, f.path FROM lib2_tracks t "
+        " JOIN lib2_track_files f ON f.track_id=t.id LIMIT 1"
+    ).fetchone()
+    other_track_id = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE id <> ? LIMIT 1", (rows[0],)
+    ).fetchone()[0]
+
+    class _KeepOpen:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def close(self):
+            pass
+
+    class _DB:
+        def _get_connection(self):
+            return _KeepOpen(imported_conn)
+
+    delete_files_journaled(
+        _DB(), targets=[{"path": rows[2], "stored_path": rows[2]}],
+        entity_type="albums", entity_id=rows[1],
+        actor="user", require_library_root=False,
+    )
+
+    history = scoped_history(imported_conn, scope="track", entity_id=other_track_id)
+
+    assert not [e for e in history if e["event_type"] == "files_deleted"]
 
 
 def test_database_only_file_removal_has_distinct_history_label(imported_conn):

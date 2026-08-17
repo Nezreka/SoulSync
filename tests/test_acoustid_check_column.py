@@ -62,7 +62,8 @@ def _file_row(db, file_id) -> sqlite3.Row:
     conn = db._get_connection()
     try:
         return conn.execute(
-            "SELECT verification_status, acoustid_status FROM lib2_track_files WHERE id=?",
+            "SELECT verification_status, acoustid_status, pipeline_result_json "
+            "FROM lib2_track_files WHERE id=?",
             (file_id,),
         ).fetchone()
     finally:
@@ -90,10 +91,31 @@ class _Result:
 
 
 def _acoustid(title, artist, score=0.99):
+    """A client that answers, in the structured shape the scanner prefers."""
     return types.SimpleNamespace(
-        fingerprint_and_lookup=lambda fpath: {
+        lookup_with_status=lambda fpath: {
+            "status": "ok",
             "best_score": score,
             "recordings": [{"title": title, "artist": artist}],
+        },
+    )
+
+
+def _acoustid_no_match():
+    """The lookup worked; AcoustID simply has no entry for this audio."""
+    return types.SimpleNamespace(
+        lookup_with_status=lambda fpath: {
+            "status": "no_match", "recordings": [], "best_score": 0.0,
+        },
+    )
+
+
+def _acoustid_broken():
+    """Missing API key / no chromaprint — an error, not an answer."""
+    return types.SimpleNamespace(
+        lookup_with_status=lambda fpath: {
+            "status": "unavailable", "recordings": [],
+            "error": "No AcoustID API key configured",
         },
     )
 
@@ -171,11 +193,12 @@ def test_a_mismatch_is_recorded_as_a_failed_check(db, monkeypatch):
 
 
 def test_a_verdict_the_scan_cannot_reach_leaves_the_column_alone(db, monkeypatch):
-    """No AcoustID answer at all (offline, unknown fingerprint) is not a
-    verdict. Writing 'fail' there would accuse a file nothing was learned
-    about."""
+    """A lookup that could not run (no API key, no chromaprint) is not a
+    verdict. Recording one would paint an unchecked library as checked — the
+    exact reason `fingerprint_and_lookup` is not used here: it returns None for
+    "no match" AND for "everything is broken"."""
     file_id = _seed_file(db, verification_status="verified")
-    silent = types.SimpleNamespace(fingerprint_and_lookup=lambda fpath: None)
+    silent = _acoustid_broken()
 
     AcoustIDScannerJob()._scan_file(
         FPATH, "1",
@@ -186,3 +209,68 @@ def test_a_verdict_the_scan_cannot_reach_leaves_the_column_alone(db, monkeypatch
     )
 
     assert _file_row(db, file_id)["acoustid_status"] is None
+
+# ── the inconclusive outcomes ────────────────────────────────────────────────
+#
+# Reported after the first fix: "nach dem acoustid scan gibt es immer noch
+# tracks wo steht das kein scan durchgeführt wurde". A scan that reaches a file
+# and cannot conclude anything about it still LOOKED at it — AcoustID simply
+# has no entry, or the fingerprint scored too low to mean anything. Recording
+# nothing left those files indistinguishable from files the scan never got to,
+# which is the state the user is complaining about.
+
+
+def test_a_file_acoustid_has_never_heard_of_is_recorded_as_skipped(db):
+    file_id = _seed_file(db)
+    silent = _acoustid_no_match()
+
+    AcoustIDScannerJob()._scan_file(
+        FPATH, "1",
+        {"title": "Beat It", "artist": "Michael Jackson",
+         "lib2_file_id": file_id, "file_path": FPATH},
+        silent, _context(db), _Result(),
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    row = _file_row(db, file_id)
+    assert row["acoustid_status"] == "skip"
+    assert "no AcoustID match" in (row["pipeline_result_json"] or "")
+
+
+def test_a_fingerprint_below_the_threshold_is_recorded_as_skipped(db):
+    file_id = _seed_file(db)
+    weak = types.SimpleNamespace(
+        lookup_with_status=lambda fpath: {
+            "status": "ok", "best_score": 0.20,
+            "recordings": [{"title": "Beat It", "artist": "Michael Jackson"}],
+        },
+    )
+
+    AcoustIDScannerJob()._scan_file(
+        FPATH, "1",
+        {"title": "Beat It", "artist": "Michael Jackson",
+         "lib2_file_id": file_id, "file_path": FPATH},
+        weak, _context(db), _Result(),
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    assert _file_row(db, file_id)["acoustid_status"] == "skip"
+
+
+def test_an_inconclusive_scan_does_not_touch_the_verification_standing(db):
+    """'skip' is not a verdict about the file's standing — a file verified at
+    import must not be demoted because AcoustID has no entry for it."""
+    file_id = _seed_file(db, verification_status="verified")
+    silent = _acoustid_no_match()
+
+    AcoustIDScannerJob()._scan_file(
+        FPATH, "1",
+        {"title": "Beat It", "artist": "Michael Jackson",
+         "lib2_file_id": file_id, "file_path": FPATH},
+        silent, _context(db), _Result(),
+        fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6,
+    )
+
+    row = _file_row(db, file_id)
+    assert row["verification_status"] == "verified"
+    assert row["acoustid_status"] == "skip"

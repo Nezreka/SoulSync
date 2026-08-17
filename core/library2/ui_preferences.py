@@ -42,10 +42,6 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "quality": True,
             "features": True,
             "metadata": True,
-            # issues.md T-10: how a file was verified (AcoustID pass / human
-            # approval / bypass) was only a sub-badge inside the quality cell.
-            # Opt-in like file_path — it is a diagnostic, not everyday info.
-            "verification": False,
             # iss28-01: everyday Check summary backed by AcoustID plus the
             # human/force verification provenance.
             "acoustid": True,
@@ -67,7 +63,6 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "quality",
             "features",
             "metadata",
-            "verification",
             "acoustid",
             "file_size",
             "file_path",

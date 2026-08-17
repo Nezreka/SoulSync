@@ -1082,52 +1082,23 @@ export function MatchChips({
   );
 }
 
-function TrackVerificationBadge({ file }: { file: LibraryV2TrackFile | null }) {
-  if (!file || !file.verification_status) return null;
-  const status = file.verification_status;
-  let className = '';
-  let label = '';
-  let tooltip = '';
-  switch (status) {
-    case 'verified':
-      className = styles.verificationVerified;
-      label = 'Verified';
-      tooltip = 'AcoustID fingerprint matched the expected track';
-      break;
-    case 'human_verified':
-      className = styles.verificationHuman;
-      label = 'Human verified';
-      tooltip = 'Human verified: you approved this file, skipping AcoustID';
-      break;
-    case 'force_imported':
-      className = styles.verificationForced;
-      label = 'Bypassed';
-      tooltip = 'Force-imported: AcoustID check bypassed (accepted version-mismatch fallback)';
-      break;
-    case 'unverified':
-      className = styles.verificationUnverified;
-      label = 'Unverified';
-      tooltip = 'Imported but not hard-confirmed: AcoustID could not verify this file';
-      break;
-    default:
-      return null;
-  }
-  // A7/C4: the concrete AcoustID reason, when the pipeline captured one —
-  // otherwise the tooltip only states the outcome, not why.
-  const detail = file.pipeline_result?.acoustid_message;
-  if (detail) tooltip = `${tooltip} (${detail})`;
-  return (
-    <span className={`${styles.verificationBadge} ${className}`} title={tooltip}>
-      {label}
-    </span>
-  );
-}
-
 /** iss28-01: compact effective Check summary. Human approval wins over the
  * raw AcoustID skip because it explains why the technical check was bypassed. */
 export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
   if (!file) return <span className={styles.muted}>—</span>;
   const detail = file.pipeline_result?.acoustid_message;
+  if (file.file_state === 'missing_confirmed' || file.file_state === 'deleted') {
+    // Nothing can fingerprint a file that is not there. "Not scanned" here
+    // reads as a failure of the scanner rather than the state of the file.
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationUnverified}`}
+        title="The file is no longer on disk, so no check can run against it"
+      >
+        File missing
+      </span>
+    );
+  }
   if (file.verification_status === 'human_verified') {
     return (
       <span
@@ -1166,19 +1137,33 @@ export function TrackCheckBadge({ file }: { file: LibraryV2TrackFile | null }) {
       </span>
     );
   }
-  if (file.acoustid_status === 'skip' || file.verification_status === 'force_imported') {
+  // Administrative bypass — the check never ran. Kept distinct from the
+  // branch below (ran, but couldn't confirm): the previous "Verification"
+  // column separated these as "Bypassed" vs "Unverified", and collapsing
+  // both into one "Skipped" word lost exactly the distinction a reader
+  // needs to tell "we didn't check" from "we checked and don't know".
+  if (file.verification_status === 'force_imported') {
     return (
       <span
         className={`${styles.verificationBadge} ${styles.verificationForced}`}
-        title={
-          detail
-            ? `Check skipped: ${detail}`
-            : file.verification_status === 'force_imported'
-              ? 'Check skipped by force/retry import'
-              : 'AcoustID check was skipped'
-        }
+        title={detail ? `Check skipped: ${detail}` : 'Check skipped by force/retry import'}
       >
         Skipped
+      </span>
+    );
+  }
+  if (file.acoustid_status === 'skip') {
+    return (
+      <span
+        className={`${styles.verificationBadge} ${styles.verificationUnverified}`}
+        title={
+          detail
+            ? `AcoustID could not confirm this file: ${detail}`
+            : 'AcoustID ran but found no confident match — a low fingerprint score, ' +
+              'an ambiguous cover/collab, or no match in its database'
+        }
+      >
+        Unverified
       </span>
     );
   }
@@ -3952,8 +3937,17 @@ export function UnifiedFileRemovalDialog({
       </div>
       {physical && physical.unsafe_count > 0 ? (
         <div className={styles.mutationError} role="alert">
-          Permanent deletion is blocked for {physical.unsafe_count} unsafe or unresolved file
-          {physical.unsafe_count === 1 ? '' : 's'}. Database-only removal remains available.
+          Permanent deletion is blocked for {physical.unsafe_count} file
+          {physical.unsafe_count === 1 ? '' : 's'} that {physical.unsafe_count === 1 ? 'is' : 'are'}{' '}
+          outside your library folders, or whose storage is not reachable right now. Check Settings
+          → Music Library Paths, or use database-only removal.
+        </div>
+      ) : null}
+      {physical && (physical.missing_count ?? 0) > 0 ? (
+        <div className={styles.mutedNotice}>
+          {physical.missing_count} file{physical.missing_count === 1 ? ' is' : 's are'} already gone
+          from disk — {physical.missing_count === 1 ? 'its entry' : 'their entries'} will be removed
+          with the rest.
         </div>
       ) : null}
       {mode === 'permanent' ? (
@@ -7039,11 +7033,16 @@ function AlbumBlock({
     (profilesQuery.data ?? []).find((p) => p.id === album.quality_profile_id)?.name ?? null;
   const releaseDate =
     formatReleaseDate(album.release_date) || (album.year ? String(album.year) : null);
-  const complete = album.tracks_missing === 0 && album.track_count > 0;
   const pct = album.track_count
     ? clampPercent((100 * album.tracks_present) / album.track_count)
     : 0;
-  const unowned = album.origin === 'discography' && album.tracks_present === 0;
+  // "Missing" only counts monitored tracks (§44/LV2-CNT-01), so a release
+  // nobody wants anything from now reads 0 missing with 0 present too — that
+  // is not completion, it is nothing having been asked for. Read it the same
+  // way a browsed-but-untouched discography release already reads.
+  const unowned =
+    album.tracks_present === 0 && (album.origin === 'discography' || album.tracks_missing === 0);
+  const complete = !unowned && album.tracks_missing === 0 && album.track_count > 0;
   return (
     <div className={`${styles.albumBlock} ${open ? styles.albumBlockOpen : ''}`}>
       <div className={styles.albumHead} onClick={() => setOpen(!open)}>
@@ -7189,7 +7188,6 @@ const DEFAULT_TRACK_TABLE_COLUMNS: LibraryV2TrackTableColumns = {
   quality: true,
   features: true,
   metadata: true,
-  verification: false,
   acoustid: true,
   file_size: false,
   file_path: false,
@@ -7205,7 +7203,6 @@ const TRACK_TABLE_COLUMN_LABELS: Record<keyof LibraryV2TrackTableColumns, string
   quality: 'Quality',
   features: 'Features',
   metadata: 'Metadata',
-  verification: 'Verification',
   acoustid: 'Check',
   file_size: 'File size',
   file_path: 'File path',
@@ -7263,7 +7260,6 @@ const DEFAULT_COLUMN_WEIGHTS: Record<string, number> = {
   quality: 40,
   features: 9,
   metadata: 10,
-  verification: 9,
   acoustid: 9,
   file_size: 8,
   file_path: 20,
@@ -7287,7 +7283,6 @@ const RESPONSIVE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   quality: 164,
   features: 82,
   metadata: 104,
-  verification: 112,
   acoustid: 112,
   file_size: 84,
   file_path: 120,
@@ -7724,8 +7719,20 @@ function ColumnsOptionsMenu<K extends string>({
   extra?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [dragKey, setDragKey] = useState<K | null>(null);
 
   const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
+  const reorderable = Boolean(onReorder && columnOrder);
+
+  const moveTo = (targetIndex: number) => {
+    if (!onReorder || !columnOrder || dragKey == null) return;
+    const fromIndex = columnOrder.indexOf(dragKey);
+    if (fromIndex === -1 || fromIndex === targetIndex) return;
+    const nextOrder = [...columnOrder];
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    nextOrder.splice(targetIndex, 0, moved);
+    onReorder(nextOrder);
+  };
 
   return (
     <span className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
@@ -7741,21 +7748,46 @@ function ColumnsOptionsMenu<K extends string>({
             <div className={styles.tableOptionsLayout}>
               <section className={styles.tableOptionsSection}>
                 <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
-                <div className={styles.tableOptionsColumnGrid}>
+                <div
+                  className={`${styles.tableOptionsColumnGrid} ${reorderable ? styles.tableOptionsColumnGridReorder : ''}`}
+                >
                   {columnKeys.map((key, index) => (
-                    <div key={key} className={styles.tableOptionsRow}>
-                      {onReorder && columnOrder ? (
+                    <div
+                      key={key}
+                      className={`${styles.tableOptionsRow} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
+                      onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
+                      onDrop={
+                        reorderable
+                          ? (e) => {
+                              e.preventDefault();
+                              moveTo(index);
+                              setDragKey(null);
+                            }
+                          : undefined
+                      }
+                    >
+                      {reorderable ? (
                         <div className={styles.tableOptionsReorder}>
+                          <span
+                            className={styles.reorderHandle}
+                            draggable
+                            title="Drag to reorder"
+                            aria-label={`Drag to reorder ${columnLabels[key]}`}
+                            onDragStart={() => setDragKey(key)}
+                            onDragEnd={() => setDragKey(null)}
+                          >
+                            ⠿
+                          </span>
                           <button
                             type="button"
                             title="Move up"
                             disabled={index === 0}
                             onClick={() => {
-                              const nextOrder = [...columnOrder];
+                              const nextOrder = [...columnOrder!];
                               const temp = nextOrder[index];
                               nextOrder[index] = nextOrder[index - 1];
                               nextOrder[index - 1] = temp;
-                              onReorder(nextOrder);
+                              onReorder!(nextOrder);
                             }}
                             className={styles.reorderBtn}
                           >
@@ -7766,11 +7798,11 @@ function ColumnsOptionsMenu<K extends string>({
                             title="Move down"
                             disabled={index === columnKeys.length - 1}
                             onClick={() => {
-                              const nextOrder = [...columnOrder];
+                              const nextOrder = [...columnOrder!];
                               const temp = nextOrder[index];
                               nextOrder[index] = nextOrder[index + 1];
                               nextOrder[index + 1] = temp;
-                              onReorder(nextOrder);
+                              onReorder!(nextOrder);
                             }}
                             className={styles.reorderBtn}
                           >
@@ -8447,7 +8479,6 @@ export function AlbumTrackTable({
     'quality',
     'features',
     'metadata',
-    'verification',
     'acoustid',
     'file_size',
     'file_path',
@@ -8634,7 +8665,7 @@ export function AlbumTrackTable({
             key="disc"
             columnKey="disc"
             {...headerResizeProps('disc')}
-            className={styles.colNum}
+            className={styles.colDisc}
           >
             Disc
           </ResizableHeaderCell>
@@ -8700,16 +8731,6 @@ export function AlbumTrackTable({
             {...headerResizeProps('metadata')}
           >
             Metadata
-          </ResizableHeaderCell>
-        );
-      case 'verification':
-        return (
-          <ResizableHeaderCell
-            key="verification"
-            columnKey="verification"
-            {...headerResizeProps('verification')}
-          >
-            Verification
           </ResizableHeaderCell>
         );
       case 'acoustid':
@@ -9103,7 +9124,7 @@ function TrackRow({
     switch (key) {
       case 'disc':
         return (
-          <td key="disc" className={styles.colNum} style={widthStyle('disc')}>
+          <td key="disc" className={styles.colDisc} style={widthStyle('disc')}>
             {track.disc_number ?? '—'}
           </td>
         );
@@ -9216,28 +9237,6 @@ function TrackRow({
               <TrackMetadataGapsCell track={track} onOpenTags={() => setDetailTab('tags')} />
             ) : (
               <span className={styles.muted}>—</span>
-            )}
-          </td>
-        );
-      case 'verification':
-        return (
-          <td key="verification" style={widthStyle('verification')}>
-            {!missing && track.file?.verification_status ? (
-              <TrackVerificationBadge file={track.file} />
-            ) : (
-              // A file with no recorded provenance is a real, actionable state
-              // (T-09), not an empty cell: it says "nothing in this library
-              // knows how this file was checked".
-              <span
-                className={styles.muted}
-                title={
-                  missing || !track.file
-                    ? 'No file'
-                    : 'No verification recorded — run Refresh & Scan to adopt the file’s own tag, or the AcoustID Scanner to check it'
-                }
-              >
-                —
-              </span>
             )}
           </td>
         );
@@ -9591,7 +9590,7 @@ function TrackDetailButton({
   );
 }
 
-type TrackDetailTab = 'quality' | 'metadata' | 'tags' | 'lyrics' | 'info';
+type TrackDetailTab = 'quality' | 'metadata' | 'tags' | 'lyrics' | 'info' | 'history';
 
 const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
   quality: 'Quality',
@@ -9599,6 +9598,7 @@ const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
   tags: 'Tags',
   lyrics: 'Lyrics',
   info: 'Info',
+  history: 'History',
 };
 
 function TrackDetailModal({
@@ -9622,7 +9622,7 @@ function TrackDetailModal({
   return (
     <ModalShell title={track.title ?? albumTitle} detail onClose={onClose}>
       <div className={styles.detailTabs}>
-        {(['quality', 'metadata', 'tags', 'lyrics', 'info'] as const).map((t) => (
+        {(['quality', 'history', 'metadata', 'tags', 'lyrics', 'info'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -9655,6 +9655,7 @@ function TrackDetailModal({
             file={track.file}
           />
         ) : null}
+        {tab === 'history' ? <TrackHistoryPanel trackId={trackId} /> : null}
       </div>
     </ModalShell>
   );
@@ -10330,9 +10331,9 @@ const MANUAL_SKIP_CHECK_LABELS: Record<string, string> = {
   quality: 'Quality gate',
 };
 
-/** §18.3: what checks this file went through — the verification badge's own
- *  tooltip already spells out the AcoustID pass/skip/bypass result, so this
- *  panel adds the piece the badge can't show: which checks were explicitly,
+/** §18.3: what checks this file went through — the Check badge's own tooltip
+ *  already spells out the AcoustID pass/skip/bypass result, so this panel
+ *  adds the piece the badge can't show: which checks were explicitly,
  *  manually overridden, when, and why. */
 function TrackLifecycleSection({
   file,
@@ -10342,14 +10343,12 @@ function TrackLifecycleSection({
   manualSkips: LibraryV2ManualSkip[];
 }) {
   const fallbacks = file?.pipeline_result?.quality_fallback ?? [];
-  if (!file?.verification_status && manualSkips.length === 0 && fallbacks.length === 0) {
+  if (!file && manualSkips.length === 0 && fallbacks.length === 0) {
     return null;
   }
   return (
     <div className={styles.sourceInfoBody}>
-      {file?.verification_status ? (
-        <SourceInfoRow label="Verification" value={<TrackVerificationBadge file={file} />} />
-      ) : null}
+      {file ? <SourceInfoRow label="Check" value={<TrackCheckBadge file={file} />} /> : null}
       {fallbacks.length > 0 ? (
         <SourceInfoRow
           label="Quality gate"
@@ -10367,11 +10366,27 @@ function TrackLifecycleSection({
   );
 }
 
-/** §52.9: chronological search→grab→quality→quarantine→import timeline for
- *  one track (`core.library2.history_feed.scoped_history`, scope='track').
- *  Unlike the download-source list above, this also surfaces attempts that
- *  were quarantined or failed before ever producing a `lib2_track_files`
- *  row — the gap the Info tab left open per §52.9/§52.10. */
+/** Backend sends the exact Check-badge label for a `verification_status_updated`
+ *  event's Status cell (§45) — map it to the same tone class TrackCheckBadge
+ *  uses so a "Mismatch" here is pixel-identical to a "Mismatch" in the Check
+ *  column, not a second visual language for the same word. */
+const CHECK_STATUS_TONE: Record<string, string> = {
+  Verified: styles.verificationVerified,
+  Mismatch: styles.verificationMismatch,
+  Unverified: styles.verificationUnverified,
+  Skipped: styles.verificationForced,
+  'Human verified': styles.verificationHuman,
+  'File missing': styles.verificationUnverified,
+  'Not scanned': styles.verificationUnverified,
+};
+
+/** §52.9/§44: chronological search→grab→quality→quarantine→import→delete
+ *  timeline for one track (`core.library2.history_feed.scoped_history`,
+ *  scope='track'). Unlike the download-source list, this also surfaces
+ *  attempts that were quarantined or failed before ever producing a
+ *  `lib2_track_files` row, and a file this track lost to a delete. Newest
+ *  first, same reading order as the album/artist History and everywhere
+ *  else in the app that lists events. */
 export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   const query = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-history', trackId],
@@ -10391,42 +10406,62 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
     );
   }
   if (rows.length === 0) return null;
-  // Oldest first — a pipeline reads top-to-bottom like the journey it is;
-  // the backend returns newest-first for the flat artist History table.
-  const chronological = [...rows].reverse();
+  // Newest first — the backend already returns events this way. Same table
+  // shape as the album/artist History (Date/Event/Detail), with an extra
+  // Status column for the pass/skip/fail a track-level check can carry that
+  // a plain event category can't — Lidarr's own History reads as one table,
+  // this is that, not a separate visual language for tracks.
   return (
     <div className={styles.trackHistoryWrap}>
       <p className={styles.sourceInfoHistory}>
-        Pipeline — {chronological.length} event
-        {chronological.length === 1 ? '' : 's'}
+        Pipeline — {rows.length} event
+        {rows.length === 1 ? '' : 's'}
       </p>
-      <ul className={styles.pipelineTimeline}>
-        {chronological.map((h, i) => (
-          <li key={i} className={styles.pipelineTimelineItem}>
-            <div className={styles.pipelineTimelineHead}>
-              <span className={styles.sourceBadge} data-tone={h.category}>
-                {h.title ?? h.event_type}
-              </span>
-              {h.status ? (
-                <span className={styles.pipelineStatus} data-status={h.status}>
-                  {h.status.replace('_', ' ')}
-                </span>
-              ) : null}
-              <span className={styles.pipelineTimelineDate}>
+      <table className={styles.trackTable}>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Event</th>
+            <th>Status</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((h, i) => (
+            <tr key={i}>
+              <td className={styles.muted}>
                 {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
-              </span>
-            </div>
-            {h.detail ? <div className={styles.pipelineTimelineDetail}>{h.detail}</div> : null}
-          </li>
-        ))}
-      </ul>
+              </td>
+              <td>
+                <span className={styles.sourceBadge} data-tone={h.category}>
+                  {h.title ?? h.event_type}
+                </span>
+              </td>
+              <td>
+                {h.status && CHECK_STATUS_TONE[h.status] ? (
+                  <span className={`${styles.verificationBadge} ${CHECK_STATUS_TONE[h.status]}`}>
+                    {h.status}
+                  </span>
+                ) : h.status ? (
+                  <span className={styles.pipelineStatus} data-status={h.status}>
+                    {h.status.replace('_', ' ')}
+                  </span>
+                ) : (
+                  <span className={styles.muted}>—</span>
+                )}
+              </td>
+              <td>{h.detail ?? <span className={styles.muted}>—</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-/** Info tab: verification/lifecycle summary + current source (with blacklist)
- *  + the full download history — every past provenance record for this
- *  track, not just the latest. */
+/** Info tab: Check summary + the currently active download source (with
+ *  blacklist). Past provenance and pipeline events live in the History tab
+ *  (`TrackHistoryPanel`) instead — this tab is about what's true right now. */
 export function TrackInfoPanel({
   trackId,
   trackTitle,
@@ -10452,12 +10487,7 @@ export function TrackInfoPanel({
       }),
   });
 
-  const lifecycle = (
-    <>
-      <TrackLifecycleSection file={file} manualSkips={manualSkips} />
-      <TrackPipelineTimeline trackId={trackId} />
-    </>
-  );
+  const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
 
   if (query.isLoading) {
     return (
@@ -10533,9 +10563,36 @@ export function TrackInfoPanel({
           {mutationErrorMessage(blacklist.error, 'Failed to blacklist source')}
         </p>
       ) : null}
-      {rows.length > 1 ? (
+    </div>
+  );
+}
+
+/** History tab: the chronological pipeline (search→grab→quality→quarantine
+ *  →import→delete) plus every past download record for this track, newest
+ *  first throughout — pulled out of Info (§44/LV2-HIST-01) so a track's own
+ *  history reads the same way the album/artist History does, with room to
+ *  actually show it instead of being squeezed under the source snapshot. */
+export function TrackHistoryPanel({ trackId }: { trackId: number }) {
+  const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
+  const rows = query.data?.downloads ?? [];
+  return (
+    <div className={styles.trackHistoryBody}>
+      <TrackPipelineTimeline trackId={trackId} />
+      {query.isLoading ? (
+        <div className={styles.inlineLoading}>Loading download history…</div>
+      ) : query.isError ? (
+        <QueryFailure
+          error={query.error}
+          fallback="Could not load download history."
+          retry={() => void query.refetch()}
+        />
+      ) : rows.length === 0 ? (
+        <p>No download records for this track yet.</p>
+      ) : (
         <div className={styles.trackHistoryWrap}>
-          <p className={styles.sourceInfoHistory}>History — {rows.length} download records</p>
+          <p className={styles.sourceInfoHistory}>
+            Downloads — {rows.length} record{rows.length === 1 ? '' : 's'}
+          </p>
           <table className={styles.trackTable}>
             <thead>
               <tr>
@@ -10571,7 +10628,7 @@ export function TrackInfoPanel({
             </tbody>
           </table>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

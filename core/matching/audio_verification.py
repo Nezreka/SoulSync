@@ -327,11 +327,14 @@ def evaluate(expected_title: str, expected_artist: str,
         ):
             return out(Decision.FAIL,
                        f"Version mismatch: expected ({expected_version}) "
-                       f"but file is ({matched_version})")
+                       f"but file is ({matched_version}) — matched "
+                       f"'{matched_title}' by '{matched_artist}'")
 
     # Clean match.
     if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim >= ARTIST_MATCH_THRESHOLD:
-        return out(Decision.PASS, "Audio verified")
+        return out(Decision.PASS,
+                   f"Audio verified: matches '{matched_title}' by '{matched_artist}' "
+                   f"(title {title_sim:.0%}, artist {artist_sim:.0%})")
 
     # Title matches, artist doesn't — cover/collab vs genuinely wrong.
     if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim < ARTIST_MATCH_THRESHOLD:
@@ -339,12 +342,18 @@ def evaluate(expected_title: str, expected_artist: str,
             if _alias_aware_artist_sim(
                 expected_artist, rec.get('artist', ''), aliases_provider,
             ) >= ARTIST_MATCH_THRESHOLD:
-                return out(Decision.PASS, "Expected artist found in AcoustID results")
+                return out(Decision.PASS,
+                           f"Expected artist found in AcoustID results: "
+                           f"'{rec.get('title', '?') or '?'}' by "
+                           f"'{rec.get('artist', '?') or '?'}'")
         if artist_sim < CLEAR_MISMATCH_THRESHOLD:
             return out(Decision.FAIL,
                        f"Audio mismatch: '{matched_title}' by '{matched_artist}' "
                        f"— expected artist not found")
-        return out(Decision.SKIP, "Title matches but artist ambiguous (cover/collab?)")
+        return out(Decision.SKIP,
+                   f"Title matches but artist ambiguous (cover/collab?): closest "
+                   f"match '{matched_title}' by '{matched_artist}' "
+                   f"(artist {artist_sim:.0%})")
 
     # Title doesn't match — scan all recordings for a version-matched hit.
     def _title_sim(a, b):
@@ -364,7 +373,10 @@ def evaluate(expected_title: str, expected_artist: str,
             candidate = rec
             break
     if candidate is not None:
-        return out(Decision.PASS, "Scan match found in AcoustID results")
+        return out(Decision.PASS,
+                   f"Scan match found in AcoustID results: "
+                   f"'{candidate.get('title', '?') or '?'}' by "
+                   f"'{candidate.get('artist', '?') or '?'}'")
 
     # High-confidence / cross-script skips (don't quarantine a correct file).
     has_non_ascii = (any(ord(c) > 127 for c in (expected_title or ''))
@@ -379,7 +391,10 @@ def evaluate(expected_title: str, expected_artist: str,
                                 and is_cross_script_mismatch(expected_artist, matched_artist))
     if (language_script_skip or high_confidence_strong_match_skip
             or cross_script_artist_skip):
-        return out(Decision.SKIP, "Likely same song in different language/script")
+        return out(Decision.SKIP,
+                   f"Likely same song in different language/script: "
+                   f"matched '{matched_title}' by '{matched_artist}' "
+                   f"(fingerprint {fingerprint_score:.0%})")
 
     return out(Decision.FAIL,
                f"Audio mismatch: file identified as '{matched_title}' by "

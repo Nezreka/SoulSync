@@ -204,9 +204,26 @@ class AcoustIDScannerJob(RepairJob):
         """Fingerprint a single file and check for mismatches."""
         fname = os.path.basename(fpath)
 
-        # Fingerprint the file
+        # Fingerprint the file.
+        #
+        # `lookup_with_status` when the client offers it, because
+        # `fingerprint_and_lookup` collapses "AcoustID has no entry for this
+        # audio" and "the lookup itself failed" into the same None — and those
+        # need opposite answers here. A real no-match is a verdict worth
+        # recording ('skip'); a dead API key or a missing chromaprint is not,
+        # and marking a whole library "checked" off the back of one would be
+        # the worse failure of the two.
+        lookup_status = None
         try:
-            fp_result = acoustid_client.fingerprint_and_lookup(fpath)
+            if hasattr(acoustid_client, 'lookup_with_status'):
+                status_result = acoustid_client.lookup_with_status(fpath) or {}
+                lookup_status = str(status_result.get('status') or 'error')
+                fp_result = {
+                    'recordings': status_result.get('recordings') or [],
+                    'best_score': status_result.get('best_score', 0.0),
+                } if lookup_status == 'ok' else None
+            else:
+                fp_result = acoustid_client.fingerprint_and_lookup(fpath)
         except Exception as e:
             logger.debug("Fingerprint failed for %s: %s", fname, e)
             result.errors += 1
@@ -214,13 +231,30 @@ class AcoustIDScannerJob(RepairJob):
                 context.report_progress(log_line=f'Error: {fname} — {e}', log_type='error')
             return
 
+        # An inconclusive check is still a check. Recording nothing here is
+        # what left files reading "Not scanned" after a completed run: the
+        # scan reached them, learned that AcoustID has no usable answer, and
+        # said so only in a log line nobody keeps. 'skip' is the schema's word
+        # for "checked, no claim" — and it never touches the file's
+        # verification standing, so nothing gets demoted for being obscure.
         if not fp_result or not fp_result.get('recordings'):
             if context.report_progress:
                 context.report_progress(log_line=f'No match: {fname}', log_type='skip')
+            if lookup_status in ('ok', 'no_match'):
+                self._persist_inconclusive(
+                    context, track_id, fpath, expected,
+                    'no AcoustID match for this fingerprint')
+            elif lookup_status:
+                # Broken, not answered. Leave the column alone so the run does
+                # not paint an unchecked library as checked.
+                result.errors += 1
             return
 
         best_score = fp_result.get('best_score', 0)
         if best_score < fp_threshold:
+            self._persist_inconclusive(
+                context, track_id, fpath, expected,
+                f'fingerprint score {best_score:.0%} is below the {fp_threshold:.0%} threshold')
             return
 
         best_recording = fp_result['recordings'][0]
@@ -228,6 +262,9 @@ class AcoustIDScannerJob(RepairJob):
         aid_artist = best_recording.get('artist', '')
 
         if not aid_title:
+            self._persist_inconclusive(
+                context, track_id, fpath, expected,
+                'the matched AcoustID recording has no title to compare against')
             return
 
         # Resolve which artist value to compare against, in priority order:
@@ -475,9 +512,18 @@ class AcoustIDScannerJob(RepairJob):
             else:
                 result.findings_skipped_dedup += 1
 
+    def _persist_inconclusive(self, context, track_id, fpath, expected, reason):
+        """Record "checked, no claim" — the verdict, plus why, and nothing else."""
+        self._persist_status(
+            context, track_id, fpath,
+            (expected.get('file_path') or '').strip() or None,
+            None, write_tag=False, expected=expected,
+            acoustid_status='skip', acoustid_message=reason,
+        )
+
     def _persist_status(
         self, context, track_id, fpath, db_path, status, write_tag, expected=None,
-        acoustid_status=None,
+        acoustid_status=None, acoustid_message=None,
     ):
         """Record what the scan concluded, in both places it belongs.
 
@@ -509,6 +555,14 @@ class AcoustIDScannerJob(RepairJob):
                 if acoustid_status:
                     assignments.append("acoustid_status=?")
                     params.append(acoustid_status)
+                if acoustid_message:
+                    # The badge's tooltip reads this; "Skipped" with no reason
+                    # is only marginally better than "Not scanned".
+                    assignments.append(
+                        "pipeline_result_json=json_set("
+                        "COALESCE(NULLIF(pipeline_result_json,''),'{}'),"
+                        "'$.acoustid_message', ?)")
+                    params.append(acoustid_message)
                 conn.execute(
                     f"UPDATE lib2_track_files SET {', '.join(assignments)}, "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",

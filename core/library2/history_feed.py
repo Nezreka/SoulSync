@@ -24,6 +24,7 @@ convention exists to test against), so resolving it now would be speculative.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -279,8 +280,35 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             if payload.get("quality_profile_id"):
                 parts.append(f"profile {payload['quality_profile_id']}")
             detail = " · ".join(part for part in parts if part)
+        elif r["event_type"] in ("manual_grab_correlated", "scheduled_grab_correlated"):
+            # Reported: this said just "youtube" — no sign that a human
+            # overrode a gate rejection to get here versus the ordinary path.
+            # The rejections/warnings the automatic gates raised are exactly
+            # why the grab needed a human (or a scheduled fallback) at all.
+            parts = [payload.get("source")]
+            rejections = payload.get("rejections") or []
+            if rejections:
+                parts.append(
+                    "overrode: " + ", ".join(str(x).replace("_", " ") for x in rejections)
+                )
+            warnings = payload.get("warnings") or []
+            if warnings:
+                parts.append(", ".join(str(x).replace("_", " ") for x in warnings))
+            detail = " · ".join(p for p in parts if p) or r["message"] or r["reason_code"]
+        elif r["event_type"] == "grab_completed":
+            parts = [payload.get("source")]
+            if payload.get("failure_kind"):
+                parts.append(str(payload["failure_kind"]).replace("_", " "))
+            elif payload.get("has_output_path"):
+                parts.append("file received")
+            detail = " · ".join(p for p in parts if p) or r["message"] or r["reason_code"]
+        elif r["event_type"] == "grab_failed":
+            parts = [payload.get("source"), payload.get("failure_kind")]
+            detail = (
+                " · ".join(str(p).replace("_", " ") for p in parts if p)
+                or r["message"] or r["reason_code"]
+            )
         else:
-            detail = None
             detail = payload.get("reason") or payload.get("source")
             detail = detail or r["message"] or r["reason_code"]
         events.append({
@@ -389,6 +417,56 @@ def _file_delete_events(
     return events
 
 
+def _track_file_delete_events(
+    conn, track_ids: Sequence[int], limit: int,
+) -> List[Dict[str, Any]]:
+    """Delete operations that took one of THESE tracks' files.
+
+    The journal is keyed by artist/album, because that is the scope a user
+    deletes in. A track's own timeline — the one behind the pencil — has to
+    answer "was this deleted, and by whom" too, and the operation's ITEMS name
+    the file ids it removed. Files keep their row after deletion
+    (``file_state='deleted'``), so the join still resolves afterwards.
+    """
+    if not track_ids:
+        return []
+    try:
+        rows = _rows(
+            conn,
+            f"""SELECT o.status, o.created_at, o.completed_at,
+                       COALESCE(o.mode, 'permanent') AS mode,
+                       COALESCE(o.actor, 'user') AS actor,
+                       i.resolved_path, i.status AS item_status
+                  FROM lib2_file_delete_items i
+                  JOIN lib2_file_delete_operations o ON o.id = i.operation_id
+                 WHERE EXISTS (
+                       SELECT 1 FROM json_each(i.file_ids_json) fid
+                        JOIN lib2_track_files tf ON tf.id = CAST(fid.value AS INTEGER)
+                       WHERE tf.track_id IN ({_in_clause(track_ids)}))
+                 ORDER BY COALESCE(o.completed_at, o.created_at) DESC LIMIT ?""",
+            (*track_ids, limit),
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    events = []
+    for r in rows:
+        database_only = r["mode"] == "database_only"
+        gone = r["item_status"] in ("deleted", "removed", "missing")
+        events.append({
+            "date": _iso_utc(r["completed_at"] or r["created_at"]),
+            "event_type": "file_records_removed" if database_only else "files_deleted",
+            "category": "deleted",
+            "title": (
+                "Removed from library database" if database_only
+                else "File deleted" if gone
+                else f"File removal {r['status']}"
+            ),
+            "detail": f"{os.path.basename(r['resolved_path'] or '') or '—'} · actor {r['actor']}",
+            "source": "library" if database_only else "filesystem",
+        })
+    return events
+
+
 def _manual_skip_events(conn, track_ids: Sequence[int], limit: int) -> List[Dict[str, Any]]:
     if not track_ids:
         return []
@@ -445,7 +523,8 @@ def _maintenance_events(
     try:
         rows = _rows(
             conn,
-            """SELECT job_id, finding_type, action, changed_fields_json, occurred_at
+            """SELECT job_id, finding_type, action, changed_fields_json, occurred_at,
+                      lib2_file_id, lib2_track_id
                  FROM lib2_maintenance_events
                 WHERE """ + " OR ".join(clauses) + " ORDER BY id DESC LIMIT ?",
             (*params, limit),
@@ -458,6 +537,15 @@ def _maintenance_events(
             fields = json.loads(row["changed_fields_json"] or "[]")
         except (TypeError, ValueError):
             fields = []
+        detail = (
+            f"{row['job_id']} · {', '.join(str(field) for field in fields)}"
+            if fields else str(row["job_id"])
+        )
+        status = None
+        if row["action"] == "verification_status_updated":
+            verdict = _check_verdict(conn, row["lib2_file_id"], row["lib2_track_id"])
+            if verdict:
+                status, detail = verdict
         events.append({
             "date": _iso_utc(row["occurred_at"]),
             "event_type": row["action"],
@@ -466,13 +554,80 @@ def _maintenance_events(
                 row["action"], str(row["action"] or "Maintenance updated")
                     .replace("_", " ").capitalize(),
             ),
-            "detail": (
-                f"{row['job_id']} · {', '.join(str(field) for field in fields)}"
-                if fields else str(row["job_id"])
-            ),
+            "detail": detail,
             "source": "maintenance",
+            "status": status,
         })
     return events
+
+
+def _check_verdict(
+    conn, file_id: Optional[int], track_id: Optional[int],
+) -> Optional["tuple[str, str]"]:
+    """The same verdict the Check column shows (T-09/T-10's
+    ``TrackCheckBadge``), split into ``(status, reason)`` — for a scan-
+    history row that otherwise only says which columns changed, not to what
+    or why (§44/§45 follow-up: "unverified" on its own tells you nothing you
+    couldn't already see in the table; the reasoning belongs in Detail, the
+    verdict word in Status, matching every other event in this feed).
+    ``status`` is exactly the word the Check column badge shows, so the UI
+    can render one identical-looking badge in both places."""
+    row = None
+    if file_id:
+        row = conn.execute(
+            "SELECT verification_status, acoustid_status, file_state, "
+            "pipeline_result_json FROM lib2_track_files WHERE id=?",
+            (file_id,),
+        ).fetchone()
+    if row is None and track_id:
+        row = conn.execute(
+            "SELECT verification_status, acoustid_status, file_state, "
+            "pipeline_result_json FROM lib2_track_files "
+            "WHERE track_id=? ORDER BY is_primary DESC, id DESC LIMIT 1",
+            (track_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        message = (json.loads(row["pipeline_result_json"] or "{}") or {}).get(
+            "acoustid_message"
+        )
+    except (TypeError, ValueError):
+        message = None
+    verification_status = row["verification_status"]
+    acoustid_status = row["acoustid_status"]
+    if row["file_state"] in ("missing_confirmed", "deleted"):
+        label = "File missing"
+        default_reason = "The file is no longer on disk, so no check can run against it"
+    elif verification_status == "human_verified":
+        label = "Human verified"
+        default_reason = "You approved this file, skipping AcoustID"
+    elif acoustid_status == "fail":
+        label = "Mismatch"
+        default_reason = "The audio fingerprint matches a different recording"
+    elif acoustid_status == "pass":
+        label = "Verified"
+        default_reason = "AcoustID fingerprint check passed"
+    elif verification_status == "force_imported":
+        # Administrative bypass — the check never ran. Kept distinct from
+        # the branch below (ran, but couldn't confirm) for the same reason
+        # TrackCheckBadge does: "Skipped" and "Unverified" answer different
+        # questions.
+        label = "Skipped"
+        default_reason = "Check skipped by force/retry import"
+    elif acoustid_status == "skip":
+        label = "Unverified"
+        default_reason = (
+            "AcoustID ran but found no confident match — a low fingerprint "
+            "score, an ambiguous cover/collab, or no match in its database"
+        )
+    elif verification_status == "verified":
+        label = "Verified"
+        default_reason = "Verified — no separate fingerprint verdict is recorded for this file"
+    else:
+        label = "Not scanned"
+        default_reason = "No completed AcoustID check is recorded for this file"
+    return label, (str(message) if message else default_reason)
 
 
 def _track_downloads_to_events(rows: Sequence[Any]) -> List[Dict[str, Any]]:
@@ -650,11 +805,22 @@ def scoped_history(
         recording_ids = _recording_ids_for_track(conn, entity_id)
         request_ids = _acquisition_request_ids(conn, recording_ids=recording_ids)
         download_events, _matched_ids = _track_download_events(conn, [entity_id], limit)
-        events += _acquisition_events(conn, request_ids, limit)
+        acquisition_events = _acquisition_events(conn, request_ids, limit)
+        events += acquisition_events
         events += _entity_history_events(conn, [entity_id], limit)
+        events += _track_file_delete_events(conn, [entity_id], limit)
         events += _manual_skip_events(conn, [entity_id], limit)
         events += _maintenance_events(conn, track_ids=[entity_id], limit=limit)
-        events += download_events
+        # The legacy track_downloads feed and the richer acquisition pipeline
+        # both journal "a download finished" independently — for a track the
+        # acquisition system tracked, that is the SAME real event twice under
+        # two different names ("Downloaded" / "Download completed"), not two
+        # downloads. Drop the legacy row only where its timestamp lines up
+        # with an acquisition-side completion, so a genuinely separate old
+        # download (from before this track had acquisition coverage) still
+        # shows up on its own.
+        completed_at = {e["date"] for e in acquisition_events if e["category"] == "imported"}
+        events += [e for e in download_events if e["date"] not in completed_at]
 
     events.sort(key=lambda e: e["date"] or "", reverse=True)
     return events[:limit]

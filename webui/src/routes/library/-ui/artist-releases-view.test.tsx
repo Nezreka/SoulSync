@@ -202,6 +202,107 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
+  /** "Missing" is monitored+absent now (§44/LV2-CNT-01) — so a release the
+   *  user unmonitored down to nothing can reach 0 present AND 0 missing at
+   *  once. That is not completion; it means nothing was ever asked for. */
+  it('does not call an empty, nothing-wanted release "complete"', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: {
+            id: 1,
+            name: 'Portishead',
+            image_url: '/api/library/v2/artwork/artist/1',
+            remote_image_url: null,
+            provider_ids: { spotify: 'sp-1' },
+            media_server_sources: [],
+            summary: null,
+            style: null,
+            mood: null,
+            label: null,
+            genres: ['trip hop'],
+            monitored: true,
+            monitor_new_items: 'all',
+            quality_profile: null,
+            albums: [
+              album({
+                id: 1,
+                title: 'Nothing Wanted',
+                origin: 'library',
+                tracks_present: 0,
+                tracks_missing: 0,
+                track_count: 10,
+              }),
+            ],
+            eps: [],
+            singles: [],
+            album_count: 1,
+            single_count: 0,
+            discography_count: 1,
+            total_size_bytes: 0,
+            user_overrides: {},
+          },
+        }),
+      ),
+    );
+
+    renderArtist('/library?artist=1');
+    await screen.findByText('Nothing Wanted');
+
+    expect(screen.getByText('not in library')).toBeInTheDocument();
+    expect(screen.queryByText('complete')).not.toBeInTheDocument();
+  });
+
+  it('still calls a fully-downloaded release "complete"', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: {
+            id: 1,
+            name: 'Portishead',
+            image_url: '/api/library/v2/artwork/artist/1',
+            remote_image_url: null,
+            provider_ids: { spotify: 'sp-1' },
+            media_server_sources: [],
+            summary: null,
+            style: null,
+            mood: null,
+            label: null,
+            genres: ['trip hop'],
+            monitored: true,
+            monitor_new_items: 'all',
+            quality_profile: null,
+            albums: [
+              album({
+                id: 1,
+                title: 'Fully Owned',
+                origin: 'library',
+                tracks_present: 10,
+                tracks_missing: 0,
+                track_count: 10,
+              }),
+            ],
+            eps: [],
+            singles: [],
+            album_count: 1,
+            single_count: 0,
+            discography_count: 1,
+            total_size_bytes: 2048,
+            user_overrides: {},
+          },
+        }),
+      ),
+    );
+
+    renderArtist('/library?artist=1');
+    await screen.findByText('Fully Owned');
+
+    expect(screen.getByText('complete')).toBeInTheDocument();
+    expect(screen.queryByText('not in library')).not.toBeInTheDocument();
+  });
+
   it('opening an artist from inside Library V2 always starts in the V2 shape', async () => {
     server.use(
       http.get('/api/library/v2/artists', () =>
