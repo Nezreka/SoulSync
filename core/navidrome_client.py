@@ -1085,6 +1085,15 @@ class NavidromeClient(MediaServerClient):
                 return playlist
         return None
 
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist by id (subsonic deletePlaylist), same call the
+        backup path has always made inline."""
+        result = self._make_request('deletePlaylist', {'id': playlist_id})
+        if result is not None:
+            logger.info(f"Deleted Navidrome playlist {playlist_id}")
+            return True
+        return False
+
     def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
         """Upload a cover image to a Navidrome playlist from a URL.
 

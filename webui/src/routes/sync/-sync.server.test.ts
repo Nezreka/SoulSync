@@ -24,6 +24,7 @@ import {
   applyPickedTrack,
   applyRemovedTrack,
   removeConfirmOptions,
+  deleteServerPlaylist,
   removeServerTrack,
   replaceServerTrack,
   searchBitrateText,
@@ -755,6 +756,13 @@ describe('the three write calls + the search call', () => {
       track_id: 's1',
       playlist_name: 'Road Trip',
     });
+  });
+
+  it('deleteServerPlaylist posts the name so a stale id can be re-resolved', async () => {
+    const seen = stub();
+    await deleteServerPlaylist('7', 'Road Trip');
+    expect(seen[0].url).toBe('/api/server/playlist/7/delete');
+    expect(JSON.parse(seen[0].init?.body as string)).toEqual({ playlist_name: 'Road Trip' });
   });
 });
 

@@ -22907,6 +22907,70 @@ def server_playlist_remove_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/server/playlist/<playlist_id>/delete', methods=['POST'])
+def server_playlist_delete(playlist_id):
+    """Delete a server playlist outright — SoulSync-made or not.
+
+    Same id-first, name-fallback shape as every other edit in this family:
+    Plex and Jellyfin delete-recreate on edit, so the id the page loaded may
+    already be dead (#1159 taught the Jellyfin lesson). A delete against a
+    stale id must not strand the LIVE playlist under its new id."""
+    try:
+        data = request.get_json() or {}
+        playlist_name = data.get('playlist_name', '')
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
+            try:
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                return jsonify({"success": False, "error": "Playlist not found"}), 404
+            raw_playlist.delete()
+            logger.info(f"[ServerPlaylist] Deleted Plex playlist '{playlist_name}' ({playlist_id})")
+            return jsonify({"success": True, "message": "Playlist deleted"})
+
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            _jf = media_server_engine.client('jellyfin')
+            if _jf.delete_playlist(playlist_id):
+                logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' ({playlist_id})")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            # stale id — the recreate gave the live playlist a new one
+            try:
+                fresh = _jf.get_playlist_by_name(playlist_name)
+            except Exception as e:
+                logger.debug("jellyfin by-name playlist re-resolve failed: %s", e)
+                fresh = None
+            fresh_id = str(getattr(fresh, 'id', '') or '') if fresh else ''
+            if fresh_id and fresh_id != str(playlist_id) and _jf.delete_playlist(fresh_id):
+                logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' via re-resolved id {fresh_id}")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
+
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            _nd = media_server_engine.client('navidrome')
+            if _nd.delete_playlist(playlist_id):
+                logger.info(f"[ServerPlaylist] Deleted Navidrome playlist '{playlist_name}' ({playlist_id})")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
+
+        return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
+    except Exception as e:
+        logger.error(f"Error deleting server playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/search-tracks', methods=['GET'])
 def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""

@@ -50596,6 +50596,14 @@ textarea.enhanced-meta-field-input {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* the compare editor's delete pill goes red on hover so it reads as
+   destructive without shouting at rest (mm-btn-danger's palette) */
+.server-editor-delete:hover:not(:disabled) {
+    background: rgba(239, 83, 80, 0.12);
+    border-color: rgba(239, 83, 80, 0.4);
+    color: #ff6b66;
+}
+
 .discog-select-actions { display: flex; gap: 6px; }
 
 .discog-select-btn {

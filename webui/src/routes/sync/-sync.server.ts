@@ -603,6 +603,23 @@ export async function removeServerTrack(
   return (await response.json()) as ServerMutationResponse;
 }
 
+/**
+ * Delete the whole server playlist — SoulSync-made or not. The name rides
+ * along because the id the page holds can be stale (Plex and Jellyfin
+ * delete-recreate on edit); the backend re-resolves by name when it is.
+ */
+export async function deleteServerPlaylist(
+  playlistId: string,
+  playlistName: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playlist_name: playlistName }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
 /* ── M3U export (632-696) ─────────────────────────────────────────────────── */
 
 export interface M3uTrack {
