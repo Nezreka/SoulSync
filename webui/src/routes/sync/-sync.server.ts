@@ -524,13 +524,23 @@ export async function searchLibraryTracks(
   return (await (await fetch(url)).json()) as LibrarySearchResponse;
 }
 
-/** 896-904. */
+/**
+ * 896-904, plus the source_* fields Find & Add always sent (#1159). Without
+ * them the backend had nothing to persist, so fixing a bad match was only a
+ * playlist edit: the sync's cached auto-match survived, the next compare
+ * re-pinned the wrong track, and the hand-picked one landed in Extras. Same
+ * payload shape as addServerTrack — the confidence-1.0 write this enables also
+ * overwrites the bad cached row.
+ */
 export async function replaceServerTrack(
   playlistId: string,
   playlistName: string,
   oldTrackId: string | undefined,
   newTrackId: string,
+  sourceTrack: NonNullable<CompareTrack['source_track']> | null | undefined,
+  mirroredSource: string | null | undefined,
 ): Promise<ServerMutationResponse> {
+  const src = sourceTrack ?? {};
   const response = await fetch(`/api/server/playlist/${playlistId}/replace-track`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -538,6 +548,10 @@ export async function replaceServerTrack(
       old_track_id: oldTrackId,
       new_track_id: newTrackId,
       playlist_name: playlistName,
+      source_track_id: src.source_track_id || '',
+      source_title: src.name || '',
+      source_artist: src.artist || '',
+      source: src.source || mirroredSource || '',
     }),
   });
   return (await response.json()) as ServerMutationResponse;

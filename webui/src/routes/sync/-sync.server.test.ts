@@ -671,15 +671,45 @@ describe('the three write calls + the search call', () => {
     expect(seen[1].url).toBe('/api/library/search-tracks?q=bad%20guy&limit=20');
   });
 
-  it('replaceServerTrack posts both ids and the name (896-904)', async () => {
+  it('replaceServerTrack carries the durable-match fields too (#1159)', async () => {
+    // Same source_* payload as addServerTrack. Without them the backend had
+    // nothing to persist, so a corrected bad match reverted on the next load —
+    // the sync's cached auto-match kept winning (#1159, AfonsoG6).
     const seen = stub();
-    await replaceServerTrack('7', 'Road Trip', 's1', '42');
+    await replaceServerTrack(
+      '7',
+      'Road Trip',
+      's1',
+      '42',
+      { name: 'Nights', artist: 'Frank Ocean', source_track_id: 'spot123', source: 'spotify' },
+      'tidal',
+    );
     expect(seen[0].url).toBe('/api/server/playlist/7/replace-track');
     expect(seen[0].init?.method).toBe('POST');
     expect(JSON.parse(seen[0].init?.body as string)).toEqual({
       old_track_id: 's1',
       new_track_id: '42',
       playlist_name: 'Road Trip',
+      source_track_id: 'spot123',
+      source_title: 'Nights',
+      source_artist: 'Frank Ocean',
+      source: 'spotify',
+    });
+  });
+
+  it('replaceServerTrack degrades to empty source fields without a source track', async () => {
+    // Non-mirrored compares have no source row — the edit must still post,
+    // with nothing for the backend to persist.
+    const seen = stub();
+    await replaceServerTrack('7', 'Road Trip', 's1', '42', null, undefined);
+    expect(JSON.parse(seen[0].init?.body as string)).toEqual({
+      old_track_id: 's1',
+      new_track_id: '42',
+      playlist_name: 'Road Trip',
+      source_track_id: '',
+      source_title: '',
+      source_artist: '',
+      source: '',
     });
   });
 

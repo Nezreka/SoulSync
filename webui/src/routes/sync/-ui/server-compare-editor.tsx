@@ -407,6 +407,8 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
                 playlist.name,
                 track.server_track?.id,
                 newTrackId,
+                track.source_track,
+                mirrored?.source,
               )
             : await addServerTrack(
                 playlistIdRef.current,

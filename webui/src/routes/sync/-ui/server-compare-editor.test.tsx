@@ -381,6 +381,12 @@ describe('ServerCompareEditor', () => {
       old_track_id: 's1',
       new_track_id: '42',
       playlist_name: 'Road Trip',
+      // #1159: the row's source identity rides along so the backend can
+      // persist the correction; `source` falls back to the mirrored provider.
+      source_track_id: '',
+      source_title: 'Alright',
+      source_artist: 'Kendrick',
+      source: 'tidal',
     });
   });
 

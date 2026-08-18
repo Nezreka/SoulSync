@@ -22181,13 +22181,22 @@ def get_server_playlist_tracks(playlist_id):
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
-            jf_base = media_server_engine.client('jellyfin').base_url or ''
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
-                # Jellyfin image: /Items/{Id}/Images/Primary
+                # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
+                # URL. The raw form handed the BROWSER an unauthenticated
+                # request against whatever address SOULSYNC uses for Jellyfin —
+                # and Jellyfin answers those with 200 and an empty body, which
+                # is #1159's "all requests for the images return a 200 response
+                # but with an empty body", verbatim. The server-activity proxy
+                # already exists for exactly this (its jellyfin fetch even
+                # guards on `r.content` because someone hit the empty-200
+                # before); it attaches the api_key server-side so the token
+                # never reaches the browser, same reason Navidrome thumbs go
+                # through /api/navidrome/cover/.
                 album_id = raw.get('AlbumId', '')
-                thumb = f"{jf_base}/Items/{album_id}/Images/Primary?maxHeight=100" if album_id and jf_base else ''
+                thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
                 server_tracks.append({
                     'id': str(t.ratingKey),
                     'title': t.title,
@@ -22446,6 +22455,52 @@ def server_playlist_align(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _jellyfin_playlist_tracks_fresh(jf, playlist_id, playlist_name):
+    """Playlist tracks by id, falling back to a by-name re-resolve — and which
+    id actually worked.
+
+    Jellyfin edits are delete-and-recreate (update_playlist), so the id a page
+    loaded goes stale the moment ANYTHING edits the playlist — a sync run, or
+    the previous click in this same editor. A fetch against the dead id comes
+    back empty, remove_one_occurrence removes nothing, and the endpoint 404s:
+    "Remove from playlist" looked like it did nothing at all (#1159, AfonsoG6,
+    on Jellyfin). The Plex branches have done ID-first-name-fallback since the
+    beginning, for the same delete-recreate reason — Jellyfin's never did.
+
+    An empty-but-alive playlist resolves to the same id again, which is
+    harmless: there is nothing to remove or replace in it either way.
+    """
+    tracks = jf.get_playlist_tracks(playlist_id) or []
+    if tracks:
+        return tracks, playlist_id
+    try:
+        fresh = jf.get_playlist_by_name(playlist_name) if playlist_name else None
+    except Exception as e:
+        logger.debug("jellyfin by-name playlist re-resolve failed: %s", e)
+        fresh = None
+    fresh_id = str(getattr(fresh, 'id', '') or '') if fresh else ''
+    if fresh_id and fresh_id != str(playlist_id):
+        logger.info("[ServerPlaylist] Stale Jellyfin playlist id %s — re-resolved '%s' to %s",
+                    playlist_id, playlist_name, fresh_id)
+        return (jf.get_playlist_tracks(fresh_id) or []), fresh_id
+    return tracks, playlist_id
+
+
+def _jellyfin_recreated_playlist_id(playlist_name):
+    """The id a Jellyfin playlist got when update_playlist recreated it.
+
+    Best-effort: the edit already succeeded, so failing to learn the new id
+    must not fail the request — the client just keeps the old one and the
+    fallback above rescues the next edit.
+    """
+    try:
+        fresh = media_server_engine.client('jellyfin').get_playlist_by_name(playlist_name)
+        return str(fresh.id) if fresh else None
+    except Exception as e:
+        logger.debug("jellyfin post-edit id re-resolve failed: %s", e)
+        return None
+
+
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
 def server_playlist_replace_track(playlist_id):
     """Replace a track in a server playlist. Rebuilds the playlist with the swap."""
@@ -22461,6 +22516,31 @@ def server_playlist_replace_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+
+        # Persist the correction, exactly as Find & Add does. This endpoint
+        # used to edit the server playlist and store NOTHING, so a fixed bad
+        # match existed only as a playlist edit: the 0.75 auto-match the sync
+        # had cached stayed in sync_match_cache, pass 0 of the next compare
+        # re-pinned it, and the next sync re-added the wrong track to the
+        # server. The user's hand-picked pairing landed in Extras every time
+        # (#1159, AfonsoG6 — "incorrect matches reappear after I have manually
+        # changed them"). save_sync_match_cache is INSERT OR REPLACE, so the
+        # confidence-1.0 write also overwrites that bad cached row.
+        # source_track_id is absent for non-mirrored compares — nothing to key
+        # a pairing by, so there is nothing to persist (the edit still runs).
+        _src_track_id = (data.get('source_track_id') or '').strip()
+        _src_title = data.get('source_title', '')
+        _src_artist = data.get('source_artist', '')
+        _src_source = data.get('source') or 'spotify'
+        _new_track_title = data.get('new_track_title', '')
+
+        def _persist_replacement():
+            if not _src_track_id:
+                logger.debug("[ServerPlaylist] replace-track: no source_track_id in payload — pairing not persisted")
+                return
+            _persist_find_and_add_match(
+                _src_track_id, active_server, new_track_id, _new_track_title,
+                _src_title, _src_artist, source=_src_source)
 
         if active_server == 'plex' and media_server_engine.client('plex'):
             # ID-first, name-fallback (Plex deletes + recreates on edit
@@ -22499,12 +22579,14 @@ def server_playlist_replace_track(playlist_id):
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
                 new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
+                _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+            _jf = media_server_engine.client('jellyfin')
+            current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -22517,8 +22599,12 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-                return jsonify({"success": True, "message": "Track replaced"})
+                _jf.update_playlist(playlist_name, new_track_objs)
+                _persist_replacement()
+                # update_playlist deletes + recreates, so the caller's id just
+                # died — hand back the new one (both editors already apply it).
+                return jsonify({"success": True, "message": "Track replaced",
+                                "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -22536,6 +22622,7 @@ def server_playlist_replace_track(playlist_id):
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
                 media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
@@ -22788,7 +22875,8 @@ def server_playlist_remove_track(playlist_id):
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             from core.sync.playlist_edit import remove_one_occurrence
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
+            _jf = media_server_engine.client('jellyfin')
+            current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy — duplicates are the same
             # track, so deleting one must not wipe them all (#768).
@@ -22796,8 +22884,10 @@ def server_playlist_remove_track(playlist_id):
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-            return jsonify({"success": True, "message": "Track removed"})
+            _jf.update_playlist(playlist_name, new_track_objs)
+            # Same delete-recreate as replace: report the fresh id.
+            return jsonify({"success": True, "message": "Track removed",
+                            "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
             from core.sync.playlist_edit import remove_one_occurrence
