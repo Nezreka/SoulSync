@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from core.discovery.wing_it import is_stub_id, should_wishlist_stub
+
 
 def normalize_wishlist_track(track: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize ONE tracks_json track into the wishlist-add shape: album coerced to
@@ -71,10 +73,11 @@ def reconstruct_sync_track_data(
         return None
 
     sid = str(tr.get('source_track_id') or '')
-    # Wing-it fallback stubs have no real metadata (no album/cover) — the live sync
-    # SKIPS them for the wishlist (services/sync_service.py), so the re-add must too,
-    # rather than store a coverless, mis-classified placeholder.
-    if sid.startswith('wing_it_'):
+    # Wing-it fallback stubs have no catalogue release behind them (so no album or
+    # cover) — the live sync keeps them off the wishlist unless
+    # wishlist.wing_it_guesses is on, and the re-add has to make the SAME call or it
+    # would store a coverless placeholder the sync had deliberately skipped.
+    if is_stub_id(sid) and not should_wishlist_stub(tr.get('artist'), tr.get('name')):
         return None
 
     # Primary: the exact normalized track the auto-add used.
