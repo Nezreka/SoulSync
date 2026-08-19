@@ -199,6 +199,33 @@ def test_dispatch_success_returns_false_so_per_track_can_run() -> None:
     assert state.failed_with == ''
 
 
+def test_dispatch_mirrors_the_search_narration_fields() -> None:
+    """#1156: the plugins' 'searching' emit carried the query from day one but
+    _MIRRORED_KEYS dropped it — the whole prowlarr search phase rendered as
+    dead air. The query and the 'selecting' release count must reach the
+    batch fields the status payload reads."""
+    state = _FakeState()
+    plugin = MagicMock()
+
+    def _run(album, artist, staging, emit, **kwargs):
+        emit({'state': 'searching', 'query': 'Kendrick Lamar GNX'})
+        emit({'state': 'selecting', 'count': 4, 'query': 'Kendrick Lamar GNX'})
+        emit({'state': 'queued', 'release': 'GNX [FLAC]', 'size': 1, 'seeders': 12})
+        return {'success': True, 'files': ['/tmp/a.flac']}
+
+    plugin.download_album_to_staging.side_effect = _run
+    try_dispatch(
+        batch_id='b1', is_album=True,
+        album_context={'name': 'GNX'}, artist_context={'name': 'Kendrick Lamar'},
+        config_get=_config({'download_source.mode': 'torrent'}),
+        plugin_resolver=lambda _name: plugin, state=state,
+    )
+    assert state.fields['album_bundle_query'] == 'Kendrick Lamar GNX'
+    assert state.fields['album_bundle_count'] == 4
+    assert state.fields['album_bundle_release'] == 'GNX [FLAC]'
+    assert state.fields['album_bundle_seeders'] == 12
+
+
 def test_dispatch_uses_configured_private_album_bundle_staging_root() -> None:
     state = _FakeState()
     plugin = MagicMock()

@@ -465,11 +465,23 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 seen.add(query.lower())
 
         search_queries = unique_queries
+        # Where we're about to look, for the live status payload (#1156). The
+        # chain label is what the orchestrator will actually walk; the hybrid
+        # fallback loop below overwrites it with the specific source it tries.
+        _mode = (getattr(deps.download_orchestrator, 'mode', '') or '').lower()
+        if _mode == 'hybrid':
+            _order = list(getattr(deps.download_orchestrator, 'hybrid_order', None) or [])
+            if not _order:
+                _order = [str(getattr(deps.download_orchestrator, 'hybrid_primary', '') or 'soulseek')]
+            _chain_label = ' → '.join(str(s) for s in _order if s) or 'soulseek'
+        else:
+            _chain_label = _mode or 'soulseek'
         # Expose the query count so the quarantine-retry budget (exhaustive mode)
         # can size each source's budget as query_count × retries_per_query.
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['query_count'] = len(search_queries)
+                download_tasks[task_id]['current_source'] = _chain_label
         logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
         logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
@@ -520,6 +532,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
+                download_tasks[task_id]['current_query'] = query
+                # each query gets a fresh live ticker
+                download_tasks[task_id].pop('search_live', None)
 
             # Cached-first: a query already run last generation has its candidates
             # sitting in cache (walked above) — re-searching it is the wasteful
@@ -560,9 +575,35 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                 _exclude_sources = list(_exhausted_sources)
                 if _exclude_for_hybrid_album:
                     _exclude_sources.extend(_exclude_for_hybrid_album)
+                # Live search ticker (#1156): slskd's poller fires this on every
+                # response tick — the hook existed through the whole plugin chain
+                # but the download path never passed one.
+                #
+                # NO tasks_lock in here, and that is load-bearing: this callback
+                # runs ON the shared async-loop thread (utils/async_helpers runs
+                # one loop for the whole process), and other threads hold
+                # tasks_lock while BLOCKING on that loop (candidates.py's
+                # cancel-after-start does run_async inside the lock). The loop
+                # waiting on the lock while the lock-holder waits on the loop
+                # deadlocks every download in the process. Single dict-item
+                # writes are atomic under the GIL; the worst race is a tick
+                # landing on a task that just went terminal, which the status
+                # builder ignores (live_detail is only built for live states).
+                def _search_progress(found_tracks, _found_albums, response_count, _q=query):
+                    try:
+                        _t = download_tasks.get(task_id)
+                        if _t is not None and _t.get('status') == 'searching':
+                            _t['search_live'] = {
+                                'responses': response_count,
+                                'results': len(found_tracks or []),
+                            }
+                    except Exception as _tick_exc:
+                        logger.debug("[Modal Worker] search ticker failed: %s", _tick_exc)
+
                 # Perform search with timeout
                 tracks_result, _ = deps.run_async(deps.download_orchestrator.search(
                     query, timeout=30, exclude_sources=_exclude_sources or None,
+                    progress_callback=_search_progress,
                 ))
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
@@ -581,6 +622,25 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                         _sq = set()
                     _sq.add(query)
                     download_tasks[task_id]['searched_queries'] = _sq
+                    # Final per-source split for this query (#1156) — best-quality
+                    # pools mix every source into one list, and the split is the
+                    # "soulseek 12 · youtube 3" narration the live view shows.
+                    try:
+                        _by_source = {}
+                        for _r in (tracks_result or []):
+                            _bucket = _resolve_worker_source(getattr(_r, 'username', ''))
+                            _by_source[_bucket] = _by_source.get(_bucket, 0) + 1
+                        _live = {'results': len(tracks_result or [])}
+                        # keep the ticker's peer count — the split replaces the
+                        # running totals, not the fact that N peers answered
+                        _prev_live = download_tasks[task_id].get('search_live')
+                        if isinstance(_prev_live, dict) and _prev_live.get('responses') is not None:
+                            _live['responses'] = _prev_live['responses']
+                        if _by_source:
+                            _live['by_source'] = _by_source
+                        download_tasks[task_id]['search_live'] = _live
+                    except Exception as _live_exc:
+                        logger.debug("[Modal Worker] search_live split failed: %s", _live_exc)
                     if download_tasks[task_id]['status'] == 'cancelled':
                         logger.warning(f"[Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
                         # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
@@ -699,6 +759,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     for fb_query in search_queries[:2]:
                         try:
                             logger.warning(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
+                            with tasks_lock:
+                                if task_id in download_tasks:
+                                    download_tasks[task_id]['current_source'] = fallback_source
+                                    download_tasks[task_id]['current_query'] = fb_query
+                                    download_tasks[task_id].pop('search_live', None)
                             fb_results, _ = deps.run_async(fb_client.search(fb_query, timeout=20))
                             if not fb_results:
                                 continue

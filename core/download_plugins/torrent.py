@@ -709,6 +709,10 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             result['fallback'] = True
             return result
 
+        # narrate the selection step (#1156) — the gap between 'searching' and
+        # 'queued' used to be silent for however long scoring took
+        _emit('selecting', count=len(candidates), query=query)
+
         # min_seeders keeps a provably-dead swarm out of the queue entirely
         # (#1139) — picking the "most seeded" of a field where everything is on
         # zero still queues something nobody is serving.

@@ -63,9 +63,11 @@ class BatchStateAccess(Protocol):
 # Fields the album-bundle progress callback may carry. Anything in
 # this set gets mirrored onto the batch row as ``album_bundle_<key>``
 # so the Downloads page can render it without coupling to the
-# specific payload shape.
+# specific payload shape. 'query' rode the plugins' 'searching' emit
+# from day one but wasn't mirrored, which is why the whole prowlarr
+# search phase looked like dead air in the UI (#1156).
 _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
-                  'size', 'seeders', 'grabs', 'count', 'failed')
+                  'size', 'seeders', 'grabs', 'count', 'failed', 'query')
 
 
 def is_eligible(

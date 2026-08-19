@@ -45383,6 +45383,28 @@ div.artist-hero-badge {
    SEARCH CANDIDATES MODAL
    ===================================== */
 
+/* live status pop-in (#1156) — anchored to an in-flight status cell,
+   fed by the same 2s batch frames the table renders from */
+#live-status-popover {
+    position: fixed;
+    display: none;
+    min-width: 240px;
+    max-width: 480px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98), rgba(20, 20, 20, 0.99));
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    line-height: 1.55;
+    text-align: left;
+    word-break: break-all;
+    z-index: 100000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+#live-status-popover.visible { display: block; }
+.live-popover-label { color: rgba(255, 255, 255, 0.4); }
+
 .has-candidates {
     cursor: pointer !important;
     text-decoration: underline dotted !important;

@@ -404,3 +404,73 @@ export function batchEta(batch: AdlBatch, samples: RateSample[], now: number): s
   if (rate <= 0) return '';
   return `~${formatDuration(remaining / rate)} left`;
 }
+
+// ── Live detail (#1156) ───────────────────────────────────────────────────
+
+/**
+ * The expanded row's label/value pairs for an in-flight task.
+ *
+ * Pure so the narration is testable as data. Every field is optional — the
+ * engine attaches what it knows at that moment and this renders what arrived,
+ * so a frame with nothing new collapses to an empty list (row shows no panel).
+ */
+export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
+  const d = dl.live_detail;
+  if (!d) return [];
+  const lines: Array<[string, string]> = [];
+
+  if (d.source && !d.username) lines.push(['Searching', d.source]);
+  if (d.query) {
+    const ladder = d.query_count ? ` (${(d.query_index ?? 0) + 1}/${d.query_count})` : '';
+    lines.push(['Query', `"${d.query}"${ladder}`]);
+  }
+  if (d.results != null) {
+    const peers = d.responses ? ` from ${d.responses} peer${d.responses === 1 ? '' : 's'}` : '';
+    lines.push(['Found', `${d.results} result${d.results === 1 ? '' : 's'}${peers}`]);
+  }
+  if (d.by_source && Object.keys(d.by_source).length > 0) {
+    const split = Object.entries(d.by_source)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => `${name} ${count}`)
+      .join(' · ');
+    lines.push(['By source', split]);
+  }
+  if (d.username) {
+    // Streaming plugins use the source name as the username, so repeating it
+    // says nothing; a Soulseek row names the actual peer.
+    const isPeer = (d.source || '') === 'Soulseek';
+    lines.push(['Source', isPeer ? `Soulseek · peer ${d.username}` : d.source || d.username]);
+  }
+  if (d.filename) lines.push(['File', d.filename]);
+  if (d.candidate_count) {
+    lines.push(['Candidate', `${(d.candidate_index ?? 0) + 1} of ${d.candidate_count}`]);
+  }
+  if (d.picked) {
+    const bits: string[] = [];
+    if (d.picked.quality) bits.push(d.picked.quality.toUpperCase());
+    if (d.picked.bitrate) bits.push(`${d.picked.bitrate} kbps`);
+    if (d.picked.size) bits.push(formatBytes(d.picked.size));
+    if (d.picked.confidence != null) bits.push(`confidence ${d.picked.confidence}`);
+    if (bits.length) lines.push(['Picked', bits.join(' · ')]);
+  }
+  if (d.picked && (d.picked.queue_length != null || d.picked.free_upload_slots != null)) {
+    // why a 'Queued, Remotely' is what it is: the peer's own queue and slots
+    const bits: string[] = [];
+    if (d.picked.free_upload_slots != null) bits.push(`${d.picked.free_upload_slots} free slots`);
+    if (d.picked.queue_length != null) bits.push(`queue ${d.picked.queue_length}`);
+    const avg = formatSpeed(d.picked.upload_speed);
+    if (avg) bits.push(`${avg} avg`);
+    if (bits.length) lines.push(['Peer stats', bits.join(' · ')]);
+  }
+  if (d.slskd_state) lines.push(['Queue state', d.slskd_state]);
+  if (d.queued_seconds != null) lines.push(['Waited', `${d.queued_seconds}s in the remote queue`]);
+  const speed = formatSpeed(d.speed);
+  if (speed) lines.push(['Speed', speed]);
+  if (d.size) {
+    const done = d.bytes ? `${formatBytes(d.bytes)} / ` : '';
+    lines.push(['Size', `${done}${formatBytes(d.size)}`]);
+  }
+  if (d.tried_sources) lines.push(['Tried', `${d.tried_sources} peer/file pairs so far`]);
+  if (d.exhausted_sources?.length) lines.push(['Exhausted', d.exhausted_sources.join(' · ')]);
+  return lines;
+}
