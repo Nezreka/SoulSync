@@ -22189,44 +22189,15 @@ def get_server_playlist_tracks(playlist_id):
             db = get_database()
             raw_tracks = db.get_mirrored_playlist_tracks(int(mirrored_id))
 
-            # Build server art URL prefix for resolving relative thumb paths
-            _art_prefix = ''
-            _art_suffix = ''
-            if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
-                _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
-                _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
-                if not _ab:
-                    _pc = config_manager.get_plex_config()
-                    _ab = (_pc.get('base_url', '') or '').rstrip('/')
-                    _at = _at or _pc.get('token', '')
-                _art_prefix = _ab
-                _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
-
-            def _resolve_thumb(url):
-                """Make relative server thumb URLs absolute."""
-                if not url:
-                    return ''
-                if url.startswith('http'):
-                    return url
-                if url.startswith('/') and _art_prefix:
-                    return f"{_art_prefix}{url}{_art_suffix}"
-                return url
-
-            # Build art lookup from server tracks we already fetched (no extra DB queries)
-            _server_art_map = {}
-            for svr in server_tracks:
-                if svr.get('thumb'):
-                    key = f"{(svr.get('artist') or '').lower().strip()}|{svr['title'].lower().strip()}"
-                    _server_art_map[key] = svr['thumb']
-                    # Also store by title-only as fallback
-                    _server_art_map[svr['title'].lower().strip()] = svr['thumb']
-
+            # No art pre-borrowing here (#1164). This used to fill an art-less
+            # source row from any server track sharing its title — with a
+            # title-ONLY fallback, so an UNMATCHED "XO" by John Mayer wore the
+            # cover of "XO" by Eden Project. The reconcile's own borrow (#766)
+            # keys off the actual pairing and already covers every matched
+            # row; an unmatched source row with no art of its own now shows
+            # none, which is what it has.
             for t in raw_tracks:
                 img = t.get('image_url') or ''
-                if not img:
-                    # Try artist+title first, fall back to title-only
-                    key = f"{(t.get('artist_name') or '').lower().strip()}|{(t.get('track_name') or '').lower().strip()}"
-                    img = _server_art_map.get(key, '') or _server_art_map.get((t.get('track_name') or '').lower().strip(), '')
 
                 source_tracks.append({
                     'name': t.get('track_name', ''),
@@ -22948,7 +22919,15 @@ def library_search_tracks():
         active_server = config_manager.get_active_media_server()
         database = get_database()
 
-        # Build thumb URL resolver for this server
+        # Build thumb URL resolver for this server. Only Plex was ever
+        # handled here — Jellyfin rows store /Items/<id>/Images/Primary and
+        # Navidrome rows /rest/getCoverArt?id=<id>, both server-relative
+        # paths the BROWSER can't use: relative they hit SoulSync's SPA
+        # catch-all (200, index.html), absolutized they hit Jellyfin
+        # unauthenticated (200, EMPTY body — #1159's signature). That's why
+        # the Add Track / Swap Track modals still had no art after the
+        # compare-view fix (#1164). Route both through the same token-safe
+        # proxies the compare view uses.
         _art_prefix = ''
         _art_suffix = ''
         if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
@@ -22961,9 +22940,24 @@ def library_search_tracks():
             _art_prefix = _ab
             _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
 
+        _jf_item_re = re.compile(r'/Items/([^/?#]+)/Images/Primary')
+        _nd_cover_re = re.compile(r'getCoverArt\?(?:[^#]*?[?&])?id=([^&#]+)')
+
         def _resolve_search_thumb(url):
             if not url:
                 return ''
+            if active_server == 'jellyfin':
+                m = _jf_item_re.search(url)
+                if m:
+                    return f"/api/server-activity/image?path=jf:{m.group(1)}"
+                # external art (enrichment CDN) passes through; a relative
+                # path we can't parse renders as no-art, not as index.html
+                return url if url.startswith('http') else ''
+            if active_server == 'navidrome':
+                m = _nd_cover_re.search(url)
+                if m:
+                    return f"/api/navidrome/cover/{m.group(1)}"
+                return url if url.startswith('http') else ''
             if url.startswith('http'):
                 return url
             if url.startswith('/') and _art_prefix:
