@@ -355,9 +355,16 @@ def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_
     repeat-failure signal (javiavid: retry_count stayed 0 forever because the
     only increment path, mark_track_download_result, had no callers; that also
     left the 3.1.1 failing badge/filter dead on the music side). Best-effort:
-    a stamp failure never disturbs wishlist processing."""
+    a stamp failure never disturbs wishlist processing.
+
+    Wing It stubs used to be skipped here because they could never be on the
+    wishlist to stamp. With wishlist.wing_it_guesses they can, and a stub that is
+    NOT stamped keeps retry_count at 0 forever — which means retry_backoff never
+    escalates it and every cycle burns a fresh search on a track that has failed
+    for months, the exact waste that module exists to stop. Stamping is now
+    unconditional; a stub that isn't on the wishlist simply updates no row."""
     sp_id = track_data.get('id') if isinstance(track_data, dict) else None
-    if not sp_id or str(sp_id).startswith('wing_it_'):
+    if not sp_id:
         return False
     try:
         return bool(wishlist_service.mark_track_download_result(

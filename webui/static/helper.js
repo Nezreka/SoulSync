@@ -1804,17 +1804,18 @@ const HELPER_CONTENT = {
     },
     '#youtube-settings-container': {
         title: 'YouTube Settings',
-        description: 'Browser cookies selection for bot detection bypass and download delay between requests.',
+        description: 'Cookies for bot detection bypass and Premium audio: a local browser, or on Docker a pasted Netscape cookies.txt. Download delay and Re-encode to MP3 320 (on by default).',
     },
 
     // Quality Profile
     '#quality-profile-section': {
         title: 'Quality Profile',
-        description: 'Configure which audio formats and bitrates are preferred for Soulseek downloads. Quick presets or custom per-format settings with bitrate ranges.',
+        description: 'Configure which audio formats and bitrates are preferred for downloads, including YouTube. Quick presets or custom per-format settings with bitrate ranges.',
         tips: [
             'Audiophile: FLAC only, strict — fails if no lossless found',
             'Balanced: FLAC preferred, MP3 320 fallback (default)',
             'Space Saver: MP3 preferred, smallest files',
+            'YouTube is Opus or AAC unless you re-encode (default MP3 320)',
             'FLAC bit depth: choose 16-bit, 24-bit, or any',
             'Fallback toggle: when off, only downloads at preferred quality'
         ],
@@ -3450,14 +3451,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '3.2.1': [
-        { date: 'August 2026 · 3.2.1' },
-        { title: 'A cover you pick by hand now stays picked', desc: 'set a custom cover in the art picker, then re-sync that artist, and the cover reverted to whatever your media server had — for navidrome users, usually its blue-vinyl placeholder. nothing in the database recorded that a person had chosen the art, so a library sync overwrote it like any other field. it is marked now, and every automatic writer leaves it alone: both sync paths, both of the paths that rebuild an item after your server changes its id, and the Missing Cover Art repair job. if you ever want the server\'s art back, "Use server art" in the picker hands it over.' },
-        { title: 'The artwork cache can finally give disk back', desc: 'soulsync has cached cover and poster art for a while, but nothing ever removed anything: the expiry date was recorded and never acted on, and there was no size limit at all, so on a large library the cache grew forever. there is a size limit now (2 GB by default), expired art is actually deleted, and least-recently-seen art is evicted first — so the art you are actually looking at is what survives. Settings → Advanced shows what it is holding, with Reclaim and Clear.' },
-        { title: 'Optional resized thumbnails', desc: 'off by default, under Settings → Advanced. with it on, soulsync resizes art server-side so a grid of small tiles stops pulling full-size originals from a CDN — the thing that made large libraries slow to open. reported against a 5,567-album library that had put a caching proxy in front of soulsync to get the same effect.' },
-        { title: 'Video posters are cached too', desc: 'the video side re-fetched every poster from tmdb on every single request and relied entirely on your browser to remember them, so a hard refresh or a second device paid for the whole grid again. both sides share one cache now, with one size limit and one clear button.' },
-        { title: 'Settings would not save on some installs', desc: 'saving settings failed with "\'ConfigManager\' object has no attribute \'batch\'" (TheHomeGuy, 3.2.0). settings.py lived inside the config folder you mount, so upgrading the app kept your months-old copy of it while everything else moved on. it lives in the application folder now, outside every mount, and the stale copy is cleaned up on start.' },
-        { title: 'Earlier versions', desc: '3.2.0 moved sixteen music pages to React, including sync and discover. 3.1.9 added the Arcade — chess, Connect 4, Battleship and slots played over Soulseek with no server. 3.1.8 rebuilt chat into a Discord-style app and made Quality Profiles govern every download. 3.1.7 turned chat into a hangout with a shared jukebox.' },
+    '3.2.2': [
+        { date: 'August 2026 · 3.2.2' },
+        { title: 'Reassign an album to a different artist', desc: 'an album filed under the wrong artist, usually because a featured artist got picked up as the album artist, had no way to move. there is a Reassign button in the album action row now, next to Reorganize and Redownload. you search for the artist it should belong to, pick one of their releases, and review how your tracks line up before anything happens. it does not retag or move files itself: each track goes back through the import pipeline, so tags, folders and database rows come from the same code that handles a fresh download.', page: 'artists' },
+        { title: 'A slow indexer no longer throws away the rest', desc: 'soulsync sent prowlarr one search listing every indexer, so a single slow or unreachable one held the reply past the timeout, and a timed-out request comes back with nothing. every healthy indexer\'s results died with it. it is one request per indexer now, run together, and you keep whatever comes back. the error also names the indexer that failed. (#1151, Zombiehamser)' },
+        { title: 'Folders that differ only in capitalization', desc: 'every destination folder was rebuilt from metadata with no check for one already on disk in a different case. on linux that means two real folders and the album showing twice in jellyfin; on windows and mac the file lands in the first folder but the path soulsync recorded is not how it is spelled. it reuses the casing already there now, and running a Reorganize pulls a split album back together. (#1091, TomOdellSheetMusic)' },
+        { title: 'Quality Check upgrades always failed', desc: '"no matched track in finding" on every upgrade you tried to apply. the scanner records no entity id for a file it cannot match to a library track, and the fix handler was gated on that id, so it never read the finding\'s own details even though they hold the title and artist. every time, not occasionally. (Lil-Uzi-Chimp)', page: 'tools' },
+        { title: '"Replace the original file" on a manual import', desc: 're-identify staged the copy correctly, but only the auto-import worker read the hint telling it to remove the old file. import the staged file yourself from the import page and nothing looked for it, so the checkbox quietly did nothing. both paths honour it now, and it refuses to delete anything if it cannot tell where the new file landed. (Urethra Franklin)', page: 'import' },
+        { title: 'Dashboard rails keep up on their own', desc: 'recently played shows 25 tracks instead of 12, and both rails refresh without a page reload. recently added never refreshed at all before; recently played did, but skipped it while the tab was hidden and never caught up when you came back. worth knowing a play made in plex or jellyfin still only reaches soulsync when the listening stats worker polls, every 30 minutes by default.', page: 'dashboard' },
+        { title: 'Earlier versions', desc: '3.2.1 gave the stats page a Year in Listening, made a lossless-only profile actually veto lossy torrents, and stopped automations running while paused. 3.2.0 moved sixteen music pages to React. 3.1.9 added the Arcade. 3.1.8 rebuilt chat into a Discord-style app and made Quality Profiles govern every download.' },
     ],
 };
 
@@ -3487,6 +3489,19 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "3.2.2: put an album back where it belongs",
+        description: "a small release, one new thing and five fixes, four of them straight from reports. the new thing is a way to move an album to the right artist, which had no answer at all before now. the fixes are mostly cases where something quietly did nothing rather than telling you it had failed.",
+        features: [
+            "reassign an album to a different artist, in the album action row next to Reorganize and Redownload. usually you need it because a featured artist got picked up as the album artist. you search for the artist it should belong to, pick one of their releases, and see how your tracks line up before anything happens — an album is a lot of files, so a wrong guess would be a lot of misfiled tracks. it does not retag or move anything itself: each track goes back through the import pipeline, so tags, folders and database rows come from the same code that handles a fresh download",
+            "a slow prowlarr indexer no longer throws away everyone else's results (#1151). soulsync sent one search listing every indexer, so a single slow or unreachable one held the whole reply past the timeout — and a timed-out request comes back empty, taking the healthy indexers' results with it. one request per indexer now, run together, keeping whatever arrives. the error also names which indexer failed",
+            "folders that differ only in capitalization made two albums (#1091). destinations were rebuilt from metadata with no check for a folder already on disk in a different case. on linux that is two real folders and the album showing twice in jellyfin; on windows and mac the file lands in the first folder but the path recorded is not how it is spelled. it reuses the casing already there, and a Reorganize pulls a split album back together",
+            "Quality Check upgrades failed every single time with \"no matched track in finding\". the scanner records no entity id for a file it cannot match to a library track, and the fix was gated on that id, so it never read the finding's own details even though they hold the title and artist",
+            "\"replace the original file\" did nothing on a manual import. only the auto-import worker read the hint telling it to remove the old file, so importing the staged file yourself left the original sitting there. both paths honour it now, and it refuses to delete anything if it cannot tell where the new file landed",
+            "recently played shows 25 tracks instead of 12, and both dashboard rails refresh on their own. recently added never refreshed at all before, and recently played paused while the tab was hidden and never caught up when you came back",
+        ],
+        usage_note: "reassign lives on artist detail — open an artist, switch to the enhanced view, expand an album, and it is in the button row. a play made in plex or jellyfin still only reaches the dashboard when the listening stats worker polls, every 30 minutes by default.",
+    },
     {
         title: "3.2.1: artwork that stays put, and a cache that gives disk back",
         description: "a maintenance release built from reports. the headline is that art you choose by hand is now genuinely yours — it survives a sync instead of quietly reverting — and the artwork cache, which had been growing without limit on every install since it shipped, now has a ceiling and a way to reclaim.",

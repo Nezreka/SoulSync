@@ -167,3 +167,126 @@ def test_keeps_torrent_title_match_when_artist_is_indexer_fallback(monkeypatch):
     result = get_valid_candidates([candidate], expected, 'Olivia Dean The Man I Need')
 
     assert result == [candidate]
+
+
+class _DispatchEngine:
+    """Records which rows hit the streaming scorer vs the Soulseek filename matcher."""
+
+    def __init__(self):
+        self.slskd_usernames = []
+
+    def score_track_match(self, **kwargs):
+        return 0.99, 'core_title_match'
+
+    def normalize_string(self, text):
+        return (text or '').lower()
+
+    def find_best_slskd_matches_enhanced(self, spotify_track, results, max_peer_queue=0):
+        self.slskd_usernames.append([getattr(r, 'username', None) for r in results])
+        return list(results)
+
+
+class _SoulseekQuality:
+    def __init__(self):
+        self.batches = []
+
+    def filter_results_by_quality_preference(self, cands, profile_id=None):
+        self.batches.append([getattr(c, 'username', None) for c in cands])
+        return list(cands)
+
+
+def _peer_and_stream_hits():
+    from core.download_plugins.types import TrackResult
+
+    def _tr(**over):
+        base = dict(
+            username='alice',
+            filename='Artist/Album/01 - Song.flac',
+            size=1,
+            bitrate=1411,
+            duration=180_000,
+            quality='flac',
+            free_upload_slots=1,
+            upload_speed=1,
+            queue_length=0,
+            artist='Artist',
+            title='Song',
+        )
+        base.update(over)
+        return TrackResult(**base)
+
+    peer = _tr()
+    youtube = _tr(
+        username='youtube', filename='aaaaaaaaaaa||Song', quality='opus', bitrate=160,
+    )
+    tidal = _tr(
+        username='tidal', filename='tid||Artist - Song', quality='flac', bitrate=1411,
+    )
+    return peer, youtube, tidal
+
+
+def test_soulseek_first_pool_does_not_run_p2p_matcher_on_streaming(monkeypatch):
+    """Best-quality hybrid: a Soulseek peer first must not score Tidal/YouTube as paths."""
+    engine = _DispatchEngine()
+    slsk = _SoulseekQuality()
+
+    class _Orch:
+        def client(self, name):
+            return slsk if name == 'soulseek' else None
+
+    monkeypatch.setattr(validation, 'matching_engine', engine)
+    monkeypatch.setattr(validation, 'download_orchestrator', _Orch())
+    monkeypatch.setattr(
+        'core.quality.selection.load_profile_targets',
+        lambda: ([], True),
+    )
+    peer, youtube, tidal = _peer_and_stream_hits()
+    result = get_valid_candidates(
+        [peer, youtube, tidal], _Track(duration_ms=180_000), 'Artist Song',
+    )
+    assert peer in result
+    assert youtube in result
+    assert tidal in result
+    assert engine.slskd_usernames == [['alice']]
+    assert slsk.batches == [['alice']]
+
+
+def test_soulseek_first_pool_still_duration_gates_tidal(monkeypatch):
+    engine = _DispatchEngine()
+    slsk = _SoulseekQuality()
+
+    class _Orch:
+        def client(self, name):
+            return slsk if name == 'soulseek' else None
+
+    monkeypatch.setattr(validation, 'matching_engine', engine)
+    monkeypatch.setattr(validation, 'download_orchestrator', _Orch())
+    expected = _Track(duration_ms=338_000)
+    peer, _, tidal = _peer_and_stream_hits()
+    peer.duration = 338_000
+    tidal.duration = 30_000
+    result = get_valid_candidates([peer, tidal], expected, 'Artist Song')
+    assert peer in result
+    assert tidal not in result
+    assert engine.slskd_usernames == [['alice']]
+
+
+def test_failed_streaming_does_not_drop_soulseek_rows(monkeypatch):
+    """Tidal-first + all streaming rejected must still score the Soulseek hit."""
+    engine = _DispatchEngine()
+    slsk = _SoulseekQuality()
+
+    class _Orch:
+        def client(self, name):
+            return slsk if name == 'soulseek' else None
+
+    monkeypatch.setattr(validation, 'matching_engine', engine)
+    monkeypatch.setattr(validation, 'download_orchestrator', _Orch())
+    expected = _Track(duration_ms=338_000)
+    peer, _, tidal = _peer_and_stream_hits()
+    peer.duration = 338_000
+    tidal.duration = 30_000
+    result = get_valid_candidates([tidal, peer], expected, 'Artist Song')
+    assert peer in result
+    assert tidal not in result
+    assert engine.slskd_usernames == [['alice']]

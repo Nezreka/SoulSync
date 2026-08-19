@@ -148,8 +148,9 @@ def test_quality_quarantine_does_not_mark_completed(_isolate_state):
     """When the inner pipeline quality-quarantines the file (``_bitdepth_rejected``),
     the wrapper must NOT fall through to "assume success" and mark the task
     Completed — that made the quarantined file appear in BOTH Completed and
-    Quarantine. The inner pipeline already owns the retry/fail for quality, so
-    the wrapper just returns."""
+    Quarantine. (The wrapper now also owns the retry/fail for this marker —
+    the inner ran with task_id popped and could never do it; see
+    test_quality_quarantine_wedged_processing.py.)"""
     completion_calls = []
     runtime = _build_runtime(completion_calls)
 

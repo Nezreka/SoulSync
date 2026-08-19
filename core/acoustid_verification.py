@@ -333,10 +333,20 @@ class AcoustIDVerification:
             # Steps 4-5: delegate the PASS/SKIP/FAIL decision to the shared core
             # (core/matching/audio_verification.evaluate) so import verification
             # and the library scan apply identical logic.
+            # A version we went after on purpose (Settings → prefer a version)
+            # is stamped on the context by the download walk. Without it the
+            # version gate compares the source's "Song" against the
+            # fingerprinted "Song (Extended Mix)" and quarantines the file the
+            # setting just spent a search finding.
+            _accept_version = None
+            if isinstance(context, dict):
+                _accept_version = str(context.get('_preferred_version_taken') or '') or None
+
             outcome = _core_evaluate(
                 expected_track_name, expected_artist_name, recordings,
                 fingerprint_score=best_score,
                 aliases_provider=_aliases_provider,
+                accept_version=_accept_version,
             )
             logger.info(
                 "Best match: '%s' by '%s' (title_sim=%.2f, artist_sim=%.2f) -> %s",

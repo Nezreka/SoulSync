@@ -722,11 +722,104 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             final_artist,
             resolved.get("source") or "local",
         )
+        # A re-identified file staged with "replace the original" ticked can be
+        # imported EITHER by the auto-import worker or by hand from this page.
+        # Only the worker honoured the hint, so importing manually left the old
+        # file and its library row in place — the checkbox silently did nothing
+        # (reported by Urethra Franklin). The identification half of the hint is
+        # redundant here (the user picked the release themselves in this UI);
+        # the replace half is the promise that was being broken.
+        finalize_manual_rematch_replace(runtime, file_path, context)
         return ("ok", final_title)
     except Exception as proc_err:
         err_msg = f"{title}: {str(proc_err)}"
         runtime.logger.error("Import single processing error: %s", err_msg)
         return ("error", err_msg)
+
+
+def finalize_manual_rematch_replace(runtime, staged_path: str, context: Dict[str, Any]) -> None:
+    """Honour a re-identify hint's "replace the original" after a MANUAL import.
+
+    Best-effort in every direction: the import has already succeeded, so a
+    cleanup problem must be logged and swallowed rather than turned into a
+    failed import. No hint (the overwhelmingly common case: an ordinary
+    staging file) is a silent no-op.
+    """
+    try:
+        from core.imports.rematch_hints import (
+            consume_hint,
+            delete_replaced_track,
+            find_hint_for_file,
+            quick_file_signature,
+        )
+    except Exception:                                   # pragma: no cover - defensive
+        return
+
+    try:
+        signature = quick_file_signature(staged_path)
+    except Exception:
+        signature = None
+
+    try:
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+    except Exception as exc:                            # pragma: no cover - defensive
+        runtime.logger.debug("manual re-identify cleanup skipped (no db): %s", exc)
+        return
+
+    try:
+        cursor = conn.cursor()
+        hint = find_hint_for_file(cursor, staged_path, signature)
+        if hint is None:
+            return
+        if hint.replace_track_id:
+            # Where the re-import actually landed. `_final_processed_path` is
+            # the canonical key and takes precedence — side_effects.py and
+            # auto_import_worker.py both read it first, and post-processing can
+            # move a file after `_final_path` was recorded.
+            new_paths = (context.get('_final_processed_path')
+                         or context.get('_final_path')
+                         or context.get('_reid_final_paths'))
+            if isinstance(new_paths, str):
+                new_paths = [new_paths]
+
+            if not new_paths:
+                # The same-home guard needs to know where the import landed. A
+                # re-identify onto a release that resolves to the SAME path
+                # would otherwise delete the file that IS the re-imported
+                # track. Without that knowledge, refuse: leaving a duplicate is
+                # recoverable, deleting the only copy is not. The hint is still
+                # consumed so it cannot fire again later against a stale path.
+                runtime.logger.warning(
+                    "Manual import could not determine where track %s landed — "
+                    "keeping the original rather than risking the only copy",
+                    hint.replace_track_id)
+            else:
+                # resolve_fn maps the STORED path (a Docker/media-server view
+                # this process may not be able to open literally) to the real
+                # on-disk file. The auto-import worker passes the same thing;
+                # without it the row is deleted and the FILE is orphaned.
+                def _resolve_old(stored):
+                    try:
+                        from core.library.path_resolver import resolve_library_file_path
+                        return resolve_library_file_path(stored)
+                    except Exception:
+                        return None
+
+                delete_replaced_track(cursor, hint.replace_track_id,
+                                      resolve_fn=_resolve_old, new_paths=new_paths)
+                runtime.logger.info(
+                    "Manual import honoured a re-identify replace for library track %s",
+                    hint.replace_track_id)
+        consume_hint(cursor, hint.id)
+        conn.commit()
+    except Exception as exc:
+        runtime.logger.warning("Manual re-identify cleanup failed (import still succeeded): %s", exc)
+    finally:
+        try:
+            conn.close()
+        except Exception as exc:                        # noqa: BLE001 - close is best-effort
+            runtime.logger.debug("re-identify cleanup: connection close failed: %s", exc)
 
 
 def singles_process(runtime: ImportRouteRuntime, files: list[Dict[str, Any]]) -> tuple[Dict[str, Any], int]:

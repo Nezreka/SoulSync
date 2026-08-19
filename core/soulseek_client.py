@@ -1763,6 +1763,26 @@ class SoulseekClient(DownloadSourcePlugin):
                 )
                 for k in stall_pending:
                     failed_states[k] = 'Stalled'
+                    # Cancel the transfer IN SLSKD too, not just in our books.
+                    # Marking it failed here only resolves the bundle — slskd
+                    # kept the enqueue alive, so the file sat at "Queued,
+                    # Remotely" forever (sassmastawillis, hours after the guard
+                    # claimed it was handled), and a per-track retry that picks
+                    # the same peer+file collides with the zombie enqueue
+                    # instead of issuing a fresh request. remove=True, same as
+                    # the monitor's retry path.
+                    dl = by_key.get(k) or by_key.get((
+                        k[0], os.path.basename((k[1] or '').replace('\\', '/')),
+                    ))
+                    dl_id = getattr(dl, 'id', None) if dl else None
+                    if dl_id:
+                        try:
+                            run_async(self.cancel_download(dl_id, k[0], remove=True))
+                        except Exception as exc:
+                            logger.debug(
+                                "[Soulseek album] Could not cancel stalled transfer %s: %s",
+                                dl_id, exc,
+                            )
 
             if completed_paths and len(completed_paths) + len(failed_states) == len(transfer_keys):
                 logger.warning(
@@ -1943,16 +1963,32 @@ class SoulseekClient(DownloadSourcePlugin):
             )
         return kept
 
-    def filter_results_by_quality_preference(self, results: List[TrackResult]) -> List[TrackResult]:
-        """Filter and rank candidates using the global quality target list.
+    def filter_results_by_quality_preference(
+        self, results: List[TrackResult], profile_id=None,
+    ) -> List[TrackResult]:
+        """Filter and rank candidates using a quality profile's target list.
 
         Replaces the old bucket+heuristic approach with ``core.quality.model``
         so every download source shares the same ranking logic.
 
+        ``profile_id`` is the item's own quality profile (a wishlist row — see
+        ``add_to_wishlist``). Pass it and the item's profile decides; omit it and
+        ``load_profile_by_id`` falls back to the app-wide default, which is what
+        every caller got before and what manual downloads still want.
+
+        This used to read the default profile unconditionally, and it was the
+        one stage in the chain that did — candidate ordering, the import guard,
+        the import pipeline and the album-bundle veto all resolve the item's own
+        profile. So assigning a profile to an item changed what was ACCEPTED at
+        import but not what was CONSIDERED here: a strict item under a loose
+        default downloaded lossy files and only failed at the guard, and a loose
+        item under a strict default was filtered harder than the user set it
+        (#1150, Zombiehamser — 10 wishlist rows on a second profile).
+
         Issue #652: also drops candidates whose ``(username, filename)``
         matches a previously-quarantined download to break infinite retry loops.
         """
-        from database.music_database import MusicDatabase
+        from core.quality.selection import load_profile_by_id
 
         if not results:
             return []
@@ -1964,8 +2000,9 @@ class SoulseekClient(DownloadSourcePlugin):
         if not results:
             return []
 
-        db = MusicDatabase()
-        profile = db.get_quality_profile()
+        # load_profile_by_id(None) resolves to the app-wide default, so the
+        # no-id call is byte-for-byte what get_quality_profile() gave us.
+        profile = load_profile_by_id(profile_id)
 
         # Build ranked target list — v3 profiles carry it directly;
         # v2 profiles are converted on the fly (no DB write needed here).
@@ -1980,9 +2017,14 @@ class SoulseekClient(DownloadSourcePlugin):
         # candidate passes only if it matches a ranked target; if nothing
         # matches, the fallback toggle decides. No per-format special-casing.
 
+        # Name the profile AND where it came from. "reading a different profile
+        # than you think" is the whole shape of #1150, and the old line couldn't
+        # tell a per-item profile from the default.
         logger.debug(
-            "Quality Filter: profile='%s', %d targets, %d candidates",
-            profile.get('preset', 'custom'), len(targets), len(results),
+            "Quality Filter: profile='%s' (%s), %d targets, fallback=%s, %d candidates",
+            profile.get('preset', 'custom'),
+            f"item profile {profile_id}" if profile_id else "app default",
+            len(targets), fallback_enabled, len(results),
         )
 
         ranked = filter_and_rank(results, targets, fallback_enabled=fallback_enabled)

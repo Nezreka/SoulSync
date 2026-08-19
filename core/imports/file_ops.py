@@ -314,8 +314,148 @@ def cleanup_empty_directories(download_path, moved_file_path):
         logger.error(f"An error occurred during directory cleanup: {e}")
 
 
-def get_audio_quality_string(file_path):
-    """Return a compact audio quality string for the given file."""
+def estimate_bitrate_kbps(*, size_bytes=None, duration_seconds=None, duration_ms=None, file_path=None):
+    """Effective kbps from file size and duration.
+
+    Used when the container has no bitrate header (Ogg Opus) and for
+    already-imported library rows stored as 0.
+    """
+    size = size_bytes
+    if not size and file_path:
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            size = 0
+    try:
+        size = int(size or 0)
+    except (TypeError, ValueError):
+        size = 0
+    length = duration_seconds
+    if not length and duration_ms:
+        try:
+            length = float(duration_ms) / 1000.0
+        except (TypeError, ValueError):
+            length = 0
+    try:
+        length = float(length or 0)
+    except (TypeError, ValueError):
+        length = 0
+    if length > 0.05 and size > 0:
+        return max(1, int(size * 8 / length / 1000))
+    return None
+
+
+def stream_uses_vbr_display(file_path, info=None) -> bool:
+    """True when the library bitrate cell should show an average (``~N kbps``).
+
+    Opus/Vorbis are always VBR. AAC/WMA store mutagen's average (MP4 esds
+    ``avgBitrate``), not a CBR constant. MP3 is VBR only when mutagen says so.
+    """
+    ext = os.path.splitext(file_path or "")[1].lower()
+    if ext in {".opus", ".ogg", ".m4a", ".aac", ".wma"}:
+        return True
+    if ext == ".mp3" and info is not None:
+        try:
+            from mutagen.mp3 import BitrateMode
+            return getattr(info, "bitrate_mode", None) == BitrateMode.VBR
+        except Exception:
+            return False
+    return False
+
+
+def fill_missing_track_bitrate(track: dict) -> dict:
+    """If the DB row has no bitrate, fill an average from size and duration.
+
+    The enhanced library table reads ``tracks.bitrate``. Opus import used
+    to store 0 because mutagen.oggopus has no bitrate attribute.
+    """
+    try:
+        existing = int(track.get("bitrate") or 0)
+    except (TypeError, ValueError):
+        existing = 0
+    if existing <= 0:
+        kbps = estimate_bitrate_kbps(
+            size_bytes=track.get("file_size"),
+            duration_ms=track.get("duration"),
+            file_path=track.get("file_path"),
+        )
+        if kbps:
+            track["bitrate"] = kbps
+    if stream_uses_vbr_display(track.get("file_path")):
+        track["bitrate_vbr"] = 1
+    return track
+
+
+def _kbps_from_stream_info(info, file_path: str, *, estimate: bool = True):
+    """Bitrate in kbps from mutagen, optionally a size/duration estimate.
+
+    Ogg Opus headers have no bitrate field (mutagen.oggopus only exposes
+    length + channels). YouTube remux writes ``.opus``.
+    """
+    if info is not None:
+        raw = getattr(info, "bitrate", None)
+        try:
+            if raw:
+                return max(1, int(raw) // 1000)
+        except (TypeError, ValueError):
+            pass
+    if not estimate:
+        return None
+    length = None
+    if info is not None:
+        length = getattr(info, "length", None) or getattr(info, "duration", None)
+    return estimate_bitrate_kbps(file_path=file_path, duration_seconds=length)
+
+
+def _claim_kbps(on_disk_format: str, claimed_format, claimed_bitrate):
+    """YouTube (and other streaming) itag/API bitrate, if the file codec matches.
+
+    Mutagen cannot read Opus bitrate; the player-response probe already has it.
+    Never copy an Opus/AAC claim onto an MP3 — that is the transcode case.
+    """
+    disk = (on_disk_format or "").lower()
+    claim = (claimed_format or "").lower()
+    if not claim or not disk:
+        return None
+    aliases = {
+        "opus": {"opus", "ogg", "webm"},
+        "ogg": {"opus", "ogg"},
+        "aac": {"aac", "m4a", "mp4"},
+        "m4a": {"aac", "m4a", "mp4"},
+        "mp3": {"mp3"},
+    }
+    if disk not in aliases.get(claim, {claim}):
+        return None
+    try:
+        kbps = int(claimed_bitrate)
+    except (TypeError, ValueError):
+        return None
+    return kbps if kbps > 0 else None
+
+
+def _lossy_kbps(info, file_path, on_disk_format, claimed_format, claimed_bitrate):
+    """Prefer mutagen, then the source's probed claim, then a size estimate."""
+    kbps = _kbps_from_stream_info(info, file_path, estimate=False)
+    if kbps:
+        return kbps
+    claimed = _claim_kbps(on_disk_format, claimed_format, claimed_bitrate)
+    if claimed:
+        return claimed
+    return _kbps_from_stream_info(info, file_path, estimate=True)
+
+
+def _chip_lossy(fmt: str, kbps) -> str:
+    if kbps:
+        return f"{fmt}-{kbps}"
+    return fmt
+
+
+def get_audio_quality_string(file_path, *, claimed_format=None, claimed_bitrate=None):
+    """Return a compact audio quality string for the given file.
+
+    ``claimed_*`` is the pre-download probe (YouTube itags, Tidal tier, …).
+    Used only when the file itself has no bitrate (Opus) and the codec matches.
+    """
     try:
         ext = os.path.splitext(file_path)[1].lower()
 
@@ -331,26 +471,56 @@ def get_audio_quality_string(file_path):
             from mutagen.mp3 import MP3, BitrateMode
 
             audio = MP3(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            if audio.info.bitrate_mode == BitrateMode.VBR:
+            bitrate_kbps = _lossy_kbps(
+                audio.info, file_path, "mp3", claimed_format, claimed_bitrate,
+            )
+            if getattr(audio.info, "bitrate_mode", None) == BitrateMode.VBR:
                 return "MP3-VBR"
-            return f"MP3-{bitrate_kbps}"
+            return _chip_lossy("MP3", bitrate_kbps)
 
         if ext in (".m4a", ".aac", ".mp4"):
             from mutagen.mp4 import MP4
             audio = MP4(file_path)
-            return f"M4A-{audio.info.bitrate // 1000}"
+            return _chip_lossy(
+                "M4A",
+                _lossy_kbps(audio.info, file_path, "aac", claimed_format, claimed_bitrate),
+            )
 
         if ext == ".ogg":
-            from mutagen.oggvorbis import OggVorbis
-            audio = OggVorbis(file_path)
-            return f"OGG-{audio.info.bitrate // 1000}"
+            try:
+                from mutagen.oggvorbis import OggVorbis
+                audio = OggVorbis(file_path)
+                return _chip_lossy(
+                    "OGG",
+                    _lossy_kbps(audio.info, file_path, "ogg", claimed_format, claimed_bitrate),
+                )
+            except Exception:
+                from mutagen.oggopus import OggOpus
+                audio = OggOpus(file_path)
+                return _chip_lossy(
+                    "OPUS",
+                    _lossy_kbps(audio.info, file_path, "opus", claimed_format, claimed_bitrate),
+                )
 
         if ext == ".opus":
             from mutagen.oggopus import OggOpus
 
             audio = OggOpus(file_path)
-            return f"OPUS-{audio.info.bitrate // 1000}"
+            return _chip_lossy(
+                "OPUS",
+                _lossy_kbps(audio.info, file_path, "opus", claimed_format, claimed_bitrate),
+            )
+
+        if ext in (".webm", ".weba"):
+            aq = probe_audio_quality(file_path)
+            kbps = (aq.bitrate if aq else None) or _claim_kbps(
+                "opus", claimed_format, claimed_bitrate,
+            )
+            if kbps:
+                return _chip_lossy("OPUS", kbps)
+            if aq is None:
+                return ""
+            return _chip_lossy(aq.format.upper(), aq.bitrate)
 
         return ""
     except Exception as e:
@@ -409,21 +579,38 @@ def probe_audio_quality(file_path: str):
             )
 
         if ext == 'ogg':
-            from mutagen.oggvorbis import OggVorbis
-            audio = OggVorbis(file_path)
-            return AudioQuality(
-                format='ogg',
-                bitrate=audio.info.bitrate // 1000,
-                sample_rate=audio.info.sample_rate,
-            )
+            try:
+                from mutagen.oggvorbis import OggVorbis
+                audio = OggVorbis(file_path)
+                return AudioQuality(
+                    format='ogg',
+                    bitrate=_kbps_from_stream_info(audio.info, file_path),
+                    sample_rate=getattr(audio.info, 'sample_rate', None),
+                )
+            except Exception:
+                from mutagen.oggopus import OggOpus
+                audio = OggOpus(file_path)
+                return AudioQuality(
+                    format='opus',
+                    bitrate=_kbps_from_stream_info(audio.info, file_path),
+                    sample_rate=getattr(audio.info, 'sample_rate', None) or 48000,
+                )
 
-        if ext == 'opus':
-            from mutagen.oggopus import OggOpus
-            audio = OggOpus(file_path)
+        if ext in ('opus', 'webm', 'weba'):
+            # .opus: FFmpegExtractAudio remux of YouTube itag 251/774.
+            # mutagen.oggopus has no bitrate/sample_rate attributes.
+            # .webm leftover is Matroska, not Ogg — don't fake a probe.
+            info = None
+            try:
+                from mutagen.oggopus import OggOpus
+                info = OggOpus(file_path).info
+            except Exception:
+                if ext != 'opus':
+                    return None
             return AudioQuality(
                 format='opus',
-                bitrate=audio.info.bitrate // 1000,
-                sample_rate=audio.info.sample_rate,
+                bitrate=_kbps_from_stream_info(info, file_path),
+                sample_rate=(getattr(info, 'sample_rate', None) or 48000) if info is not None else 48000,
             )
 
         if ext in ('wav', 'aiff', 'aif'):

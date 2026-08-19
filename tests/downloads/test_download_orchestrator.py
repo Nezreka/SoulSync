@@ -229,6 +229,286 @@ def test_reload_settings_refreshes_registry_plugins(monkeypatch):
     assert usenet.reload_calls == 1
 
 
+def test_search_and_download_best_does_not_fetch_when_profile_rejects_youtube(monkeypatch):
+    """Fallback off + no matching target must not fall through to `or scored`."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.download_plugins.types import TrackResult
+    from core.quality.model import AudioQuality
+
+    hit = TrackResult(
+        username='youtube',
+        filename='vid1||Song',
+        size=0,
+        bitrate=160,
+        duration=180_000,
+        quality='opus',
+        free_upload_slots=1,
+        upload_speed=1,
+        queue_length=0,
+        artist='Artist',
+        title='Song',
+    )
+    hit.set_quality(AudioQuality(format='opus', bitrate=160))
+
+    class _YT(_FakeClient):
+        def refresh_claimed_quality(self, candidates, **kwargs):
+            return None
+
+    youtube = _YT()
+    orch = _build_orchestrator(youtube=youtube)
+    orch.mode = 'youtube'
+
+    async def _search(*_a, **_k):
+        return [hit], []
+
+    downloaded = []
+
+    async def _download(*a, **_k):
+        downloaded.append(a)
+        return 'dl-id'
+
+    orch.search = _search
+    orch.download = _download
+    monkeypatch.setattr(
+        'core.quality.selection.rank_for_profile',
+        lambda _cands: ([], False),
+    )
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine.score_track_match',
+        lambda self, **_kw: (0.99, 'ok'),
+    )
+
+    expected = SimpleNamespace(name='Song', artists=['Artist'], duration_ms=180_000)
+    result = asyncio.run(orch.search_and_download_best('Artist Song', expected))
+    assert result is None
+    assert downloaded == []
+
+
+def test_search_and_download_best_ranks_only_close_youtube_matches(monkeypatch):
+    """Distant YouTube hits must not enter rank_for_profile."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.download_plugins.types import TrackResult
+    from core.quality.model import AudioQuality
+
+    def _hit(filename, title, bitrate):
+        row = TrackResult(
+            username='youtube',
+            filename=filename,
+            size=0,
+            bitrate=bitrate,
+            duration=180_000,
+            quality='opus',
+            free_upload_slots=1,
+            upload_speed=1,
+            queue_length=0,
+            artist='Artist',
+            title=title,
+        )
+        row.set_quality(AudioQuality(format='opus', bitrate=bitrate))
+        return row
+
+    top = _hit('aaaaaaaaaaa||Song', 'Song', 160)
+    far = _hit('bbbbbbbbbbb||Other', 'Other', 256)
+    probed = []
+
+    class _YT(_FakeClient):
+        def refresh_claimed_quality(self, candidates, **kwargs):
+            probed.extend(candidates)
+
+    youtube = _YT()
+    orch = _build_orchestrator(youtube=youtube)
+    orch.mode = 'youtube'
+
+    async def _search(*_a, **_k):
+        return [top, far], []
+
+    downloaded = []
+
+    async def _download(*a, **_k):
+        downloaded.append(a)
+        return 'dl-id'
+
+    orch.search = _search
+    orch.download = _download
+    ranked_args = []
+    monkeypatch.setattr(
+        'core.quality.selection.rank_for_profile',
+        lambda cands: (ranked_args.append(list(cands)) or cands, True),
+    )
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine.score_track_match',
+        lambda self, **kw: (0.62, 'ok') if kw.get('candidate_title') == 'Other' else (0.92, 'ok'),
+    )
+    monkeypatch.setattr(
+        'core.quality.selection.load_profile_targets',
+        lambda: ([], True),
+    )
+
+    expected = SimpleNamespace(name='Song', artists=['Artist'], duration_ms=180_000)
+    result = asyncio.run(orch.search_and_download_best('Artist Song', expected))
+    assert result == 'dl-id'
+    assert ranked_args and ranked_args[0] == [top]
+    assert probed == [top]
+    assert downloaded and downloaded[0][1] == top.filename
+
+
+def test_search_and_download_best_does_not_band_non_youtube_in_hybrid(monkeypatch):
+    """A closer YouTube hit must not drop a Tidal match in best-quality hybrid."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.download_plugins.types import TrackResult
+    from core.quality.model import AudioQuality
+
+    def _hit(username, filename, title, quality, bitrate, duration=180_000):
+        row = TrackResult(
+            username=username,
+            filename=filename,
+            size=0,
+            bitrate=bitrate,
+            duration=duration,
+            quality=quality,
+            free_upload_slots=1,
+            upload_speed=1,
+            queue_length=0,
+            artist='Artist',
+            title=title,
+        )
+        row.set_quality(AudioQuality(format=quality, bitrate=bitrate))
+        return row
+
+    yt_top = _hit('youtube', 'aaaaaaaaaaa||Song', 'Song', 'opus', 160)
+    yt_far = _hit('youtube', 'bbbbbbbbbbb||Other', 'Other', 'opus', 256)
+    tidal = _hit('tidal', 'tid||Song', 'Song', 'flac', 1411, duration=181_000)
+    probed = []
+
+    class _YT(_FakeClient):
+        def refresh_claimed_quality(self, candidates, **kwargs):
+            probed.extend(candidates)
+
+    youtube = _YT()
+    orch = _build_orchestrator(youtube=youtube, tidal=_FakeClient())
+    orch.mode = 'hybrid'
+
+    async def _search(*_a, **_k):
+        return [yt_top, yt_far, tidal], []
+
+    async def _download(*a, **_k):
+        return 'dl-id'
+
+    orch.search = _search
+    orch.download = _download
+    ranked_args = []
+    monkeypatch.setattr(
+        'core.quality.selection.rank_for_profile',
+        lambda cands: (ranked_args.append(list(cands)) or cands, True),
+    )
+
+    def _score(self, **kw):
+        if kw.get('candidate_title') == 'Other':
+            return (0.62, 'ok')
+        if kw.get('candidate_duration_ms') == 181_000:
+            return (0.70, 'ok')
+        return (0.92, 'ok')
+
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine.score_track_match',
+        _score,
+    )
+    monkeypatch.setattr(
+        'core.quality.selection.load_profile_targets',
+        lambda: ([], True),
+    )
+
+    expected = SimpleNamespace(name='Song', artists=['Artist'], duration_ms=180_000)
+    result = asyncio.run(orch.search_and_download_best('Artist Song', expected))
+    assert result == 'dl-id'
+    ranked = ranked_args[0]
+    assert tidal in ranked
+    assert yt_top in ranked
+    assert yt_far not in ranked
+    assert probed == [yt_top]
+
+
+def test_search_and_download_best_scores_each_source_when_soulseek_is_first(monkeypatch):
+    """A Soulseek peer first must not send Tidal/YouTube through the P2P quality filter."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from core.download_plugins.types import TrackResult
+    from core.quality.model import AudioQuality
+
+    def _hit(username, filename, title, quality, bitrate):
+        row = TrackResult(
+            username=username,
+            filename=filename,
+            size=0,
+            bitrate=bitrate,
+            duration=180_000,
+            quality=quality,
+            free_upload_slots=1,
+            upload_speed=1,
+            queue_length=0,
+            artist='Artist',
+            title=title,
+        )
+        row.set_quality(AudioQuality(format=quality, bitrate=bitrate))
+        return row
+
+    peer = _hit('alice', 'Artist/Album/01 - Song.flac', 'Song', 'flac', 1411)
+    yt = _hit('youtube', 'aaaaaaaaaaa||Song', 'Song', 'opus', 160)
+    tidal = _hit('tidal', 'tid||Song', 'Song', 'flac', 1411)
+    slsk_filtered = []
+    probed = []
+
+    class _Slsk(_FakeClient):
+        def filter_results_by_quality_preference(self, tracks):
+            slsk_filtered.extend(tracks)
+            return list(tracks)
+
+    class _YT(_FakeClient):
+        def refresh_claimed_quality(self, candidates, **kwargs):
+            probed.extend(candidates)
+
+    orch = _build_orchestrator(soulseek=_Slsk(), youtube=_YT(), tidal=_FakeClient())
+    orch.mode = 'hybrid'
+
+    async def _search(*_a, **_k):
+        return [peer, yt, tidal], []
+
+    async def _download(*a, **_k):
+        return 'dl-id'
+
+    orch.search = _search
+    orch.download = _download
+    ranked_args = []
+    monkeypatch.setattr(
+        'core.quality.selection.rank_for_profile',
+        lambda cands: (ranked_args.append(list(cands)) or cands, True),
+    )
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine.score_track_match',
+        lambda self, **_kw: (0.92, 'ok'),
+    )
+    monkeypatch.setattr(
+        'core.quality.selection.load_profile_targets',
+        lambda: ([], True),
+    )
+
+    expected = SimpleNamespace(name='Song', artists=['Artist'], duration_ms=180_000)
+    result = asyncio.run(orch.search_and_download_best('Artist Song', expected))
+    assert result == 'dl-id'
+    assert slsk_filtered == [peer]
+    assert yt in (ranked_args[0] if ranked_args else [])
+    assert tidal in (ranked_args[0] if ranked_args else [])
+    assert peer in (ranked_args[0] if ranked_args else [])
+    assert probed == [yt]
+
+
 # ---------------------------------------------------------------------------
 # Singleton factory (matches Cin's get_metadata_engine pattern)
 # ---------------------------------------------------------------------------

@@ -192,6 +192,9 @@ def _search_service(service, entity_type, query):
         type_map = {'artist': 'artist', 'album': 'album', 'track': 'track'}
         deezer_type = type_map.get(entity_type, 'track')
         try:
+            # shared deezer budget — this call used to bypass it entirely
+            from core.deezer_throttle import wait_for_slot
+            wait_for_slot()
             resp = req_lib.get(f'https://api.deezer.com/search/{deezer_type}', params={'q': query, 'limit': 8}, timeout=10)
             data = resp.json().get('data', [])
         except Exception:

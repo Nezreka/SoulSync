@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.2.1"
+_SOULSYNC_BASE_VERSION = "3.2.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1230,7 +1230,32 @@ duplicate_cleaner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefi
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
 # Shared task/batch state now lives in core.runtime_state.
-missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
+def _download_pool_size():
+    """Worker threads for the search/download flow.
+
+    Sized from the user's "Concurrent Downloads" setting, which is a PER BATCH
+    limit. With the pool hardwired to 3 the setting silently stopped meaning
+    anything above 3: a batch would start 10 workers and 7 of them just sat in
+    the executor queue, while the help text promised "higher values speed up
+    large playlists and wishlists".
+
+    A search holds its thread for the whole search (``run_async`` blocks the
+    caller), so threads are the real currency here.
+
+    Floor of 3 so a setting of 1 or 2 doesn't shrink the pool and serialize
+    every OTHER batch too — the per-batch limit already handles that. Ceiling
+    because the pool is a process-wide resource and a hand-edited config
+    shouldn't be able to spawn hundreds. Built at import, so a change needs a
+    restart.
+    """
+    try:
+        wanted = int(config_manager.get('download_source.max_concurrent', 3) or 3)
+    except (TypeError, ValueError):
+        wanted = 3
+    return max(3, min(wanted, 16))
+
+
+missing_download_executor = ThreadPoolExecutor(max_workers=_download_pool_size(), thread_name_prefix="MissingTrackWorker")
 
 # Dedicated pool for per-album bundle downloads (#740). An album-bundle batch
 # blocks its worker thread for the entire search+download; if these run on the
@@ -1241,6 +1266,19 @@ missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 # own bounded pool decouples that: hung/slow album downloads can only delay
 # other album downloads, never the user-facing path.
 album_bundle_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlbumBundleWorker")
+
+# Dedicated pool for post-processing a finished download, for the same reason
+# #740 gave album bundles their own. A search worker holds its thread for the
+# whole search — 25-60s per query, several queries, and usually nothing found
+# for anything obscure. Post-processing shared those 3 workers, so a completed
+# download queued behind the searches: one user's log has a track submitted at
+# 13:28:32 whose worker only started at 13:29:24. 52s in line, 3s of work.
+# The task is marked 'post_processing' the moment the transfer ends, so it read
+# "Processing" for all 52s AND counted as active, which stops its batch
+# starting the next song — "stuck on processing, blocks other downloads".
+# Still 3 workers: that is what post-processing could already reach on the
+# shared pool, so this decouples the queue without raising concurrency.
+post_processing_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="PostProcessWorker")
 
 # Parallelizes the per-file metadata-lookup + post-processing in
 # /api/import/singles/process. Single-file work is dominated by
@@ -1807,6 +1845,9 @@ from core.downloads.monitor import (
     init as _init_download_monitor,
 )
 import core.downloads.monitor as _download_monitor_module
+# the post_processing stuck window, defined once in lifecycle where the rescue
+# itself lives. healing only decides WHEN to ask; lifecycle decides what to do.
+from core.downloads.lifecycle import _POST_PROCESSING_STUCK_TIMEOUT
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
@@ -1855,6 +1896,7 @@ def validate_and_heal_batch_states():
                 # Count actually active tasks
                 actually_active = 0
                 orphaned_tasks = []
+                stuck_post_processing = []
                 # Respect _on_download_completed dedup set — don't re-inflate active_count
                 completed_task_ids = batch_data.get('_completed_task_ids', set())
 
@@ -1864,6 +1906,20 @@ def validate_and_heal_batch_states():
                         if task_status in ['searching', 'downloading', 'queued', 'post_processing']:
                             if task_id not in completed_task_ids:
                                 actually_active += 1
+                            # post_processing is the one active state nothing else
+                            # rescues: the Safety Valve only covers searching /
+                            # queued / downloading, and the 30-minute timeout lives
+                            # inside the completion check, which only ran when the
+                            # batch had ORPHANS. A batch whose remaining tasks are
+                            # all post_processing produces none, so it held its
+                            # slots forever. Flag it here and let the existing
+                            # rescue below do the work — the timeout itself stays
+                            # defined once, in lifecycle.
+                            if task_status == 'post_processing':
+                                _pp_age = current_time - download_tasks[task_id].get(
+                                    'status_change_time', current_time)
+                                if _pp_age > _POST_PROCESSING_STUCK_TIMEOUT:
+                                    stuck_post_processing.append(task_id)
                         elif task_status in ['failed', 'completed', 'cancelled', 'not_found']:
                             orphaned_tasks.append(task_id)
                     else:
@@ -1882,10 +1938,31 @@ def validate_and_heal_batch_states():
                         if queue_index < len(queue):
                             batches_needing_workers.append(batch_id)
 
-                # Clean up orphaned tasks that are blocking progress
-                if orphaned_tasks and phase == 'downloading':
-                    logger.warning(f"[Batch Healing] Found {len(orphaned_tasks)} orphaned tasks in active batch {batch_id}")
-                    batches_needing_completion_check.append(batch_id)
+                # Finished tasks left sitting in the queue, plus anything wedged
+                # in post_processing past the timeout. Both want the completion
+                # check; neither is removed from the queue, because queue_index
+                # is a POSITION into it and shrinking the list underneath would
+                # make the batch skip or repeat tasks.
+                #
+                # Only NEW orphans are worth reporting. This used to fire on the
+                # same finished tasks on every 30s pass forever — one user's log
+                # has the identical 13 re-reported all the way through — which
+                # buried the real events and re-ran the check for nothing.
+                if phase == 'downloading':
+                    _seen_orphans = batch_data.setdefault('_reported_orphans', set())
+                    _new_orphans = [t for t in orphaned_tasks if t not in _seen_orphans]
+                    if _new_orphans:
+                        _seen_orphans.update(_new_orphans)
+                        logger.warning(
+                            f"[Batch Healing] Found {len(_new_orphans)} newly orphaned tasks "
+                            f"in active batch {batch_id} ({len(orphaned_tasks)} total)")
+                    if stuck_post_processing:
+                        logger.warning(
+                            f"[Batch Healing] {len(stuck_post_processing)} task(s) wedged in "
+                            f"post_processing past {_POST_PROCESSING_STUCK_TIMEOUT}s in batch "
+                            f"{batch_id} — forcing a completion check")
+                    if _new_orphans or stuck_post_processing:
+                        batches_needing_completion_check.append(batch_id)
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
             for batch_id in batches_to_cleanup:
@@ -2103,6 +2180,7 @@ def _shutdown_runtime_components():
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
+        (post_processing_executor, "post processing executor"),
         (album_bundle_executor, "album bundle executor"),
         (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
@@ -13918,6 +13996,21 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
+    # --- Last resort: wrong INTERIOR segment (#1127) ---
+    # Everything above can only repair a wrong PREFIX. Navidrome synthesizes the
+    # Subsonic path from tags, so the album folder AND the filename can both be
+    # wrong. Shared with core/library/path_resolver so the repair jobs and this
+    # resolver can't drift — this copy never had the sibling-album step at all,
+    # which is why the same library resolved from a repair job and failed here.
+    try:
+        from core.library.path_resolver import resolve_via_last_resort_fallbacks
+        interior = resolve_via_last_resort_fallbacks(clean_rel, abs_bases)
+        if interior:
+            logger.debug("[PathResolve] interior-segment fallback: %r → %r", file_path, interior)
+            return interior
+    except Exception as e:
+        logger.debug("[PathResolve] interior-segment fallback failed: %s", e)
+
     # Couldn't resolve — log the bases we searched, throttled to once per 10
     # minutes. The old once-per-PROCESS guard self-silenced forever, which hid
     # intermittent failures completely (TheHomeGuy: an NFS mount that drops and
@@ -17298,48 +17391,9 @@ def _probe_audio_quality(file_path):
 
 
 def _get_audio_quality_string(file_path):
-    """
-    Read audio file and return a quality descriptor string.
-
-    Returns strings like 'FLAC 16bit', 'MP3-320', 'M4A-256', 'OGG-192'.
-    Returns empty string on any error.
-    """
-    try:
-        ext = os.path.splitext(file_path)[1].lower()
-
-        if ext == '.flac':
-            audio = FLAC(file_path)
-            bits = audio.info.bits_per_sample
-            return f"FLAC {bits}bit"
-
-        elif ext == '.mp3':
-            from mutagen.mp3 import MP3, BitrateMode
-            audio = MP3(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            if audio.info.bitrate_mode == BitrateMode.VBR:
-                return "MP3-VBR"
-            return f"MP3-{bitrate_kbps}"
-
-        elif ext in ('.m4a', '.aac', '.mp4'):
-            audio = MP4(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"M4A-{bitrate_kbps}"
-
-        elif ext == '.ogg':
-            audio = OggVorbis(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"OGG-{bitrate_kbps}"
-
-        elif ext == '.opus':
-            from mutagen.oggopus import OggOpus
-            audio = OggOpus(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"OPUS-{bitrate_kbps}"
-
-        return ''
-    except Exception as e:
-        logger.debug(f"Could not determine audio quality for {file_path}: {e}")
-        return ''
+    """Read audio file and return a quality descriptor string."""
+    from core.imports.file_ops import get_audio_quality_string
+    return get_audio_quality_string(file_path)
 
 
 def _get_album_type_display(raw_type, track_count) -> str:
@@ -21106,7 +21160,7 @@ def _build_status_deps():
         docker_resolve_path=docker_resolve_path,
         find_completed_file=_find_completed_file_robust,
         make_context_key=_make_context_key,
-        submit_post_processing=lambda task_id, batch_id: missing_download_executor.submit(
+        submit_post_processing=lambda task_id, batch_id: post_processing_executor.submit(
             _run_post_processing_worker, task_id, batch_id
         ),
         get_cached_transfer_data=get_cached_transfer_data,
@@ -22088,13 +22142,22 @@ def get_server_playlist_tracks(playlist_id):
                 logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
-            jf_base = media_server_engine.client('jellyfin').base_url or ''
             for t in (tracks or []):
                 raw = t._data if hasattr(t, '_data') else {}
                 artists = raw.get('Artists', [])
-                # Jellyfin image: /Items/{Id}/Images/Primary
+                # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
+                # URL. The raw form handed the BROWSER an unauthenticated
+                # request against whatever address SOULSYNC uses for Jellyfin —
+                # and Jellyfin answers those with 200 and an empty body, which
+                # is #1159's "all requests for the images return a 200 response
+                # but with an empty body", verbatim. The server-activity proxy
+                # already exists for exactly this (its jellyfin fetch even
+                # guards on `r.content` because someone hit the empty-200
+                # before); it attaches the api_key server-side so the token
+                # never reaches the browser, same reason Navidrome thumbs go
+                # through /api/navidrome/cover/.
                 album_id = raw.get('AlbumId', '')
-                thumb = f"{jf_base}/Items/{album_id}/Images/Primary?maxHeight=100" if album_id and jf_base else ''
+                thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
                 server_tracks.append({
                     'id': str(t.ratingKey),
                     'title': t.title,
@@ -22353,6 +22416,52 @@ def server_playlist_align(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _jellyfin_playlist_tracks_fresh(jf, playlist_id, playlist_name):
+    """Playlist tracks by id, falling back to a by-name re-resolve — and which
+    id actually worked.
+
+    Jellyfin edits are delete-and-recreate (update_playlist), so the id a page
+    loaded goes stale the moment ANYTHING edits the playlist — a sync run, or
+    the previous click in this same editor. A fetch against the dead id comes
+    back empty, remove_one_occurrence removes nothing, and the endpoint 404s:
+    "Remove from playlist" looked like it did nothing at all (#1159, AfonsoG6,
+    on Jellyfin). The Plex branches have done ID-first-name-fallback since the
+    beginning, for the same delete-recreate reason — Jellyfin's never did.
+
+    An empty-but-alive playlist resolves to the same id again, which is
+    harmless: there is nothing to remove or replace in it either way.
+    """
+    tracks = jf.get_playlist_tracks(playlist_id) or []
+    if tracks:
+        return tracks, playlist_id
+    try:
+        fresh = jf.get_playlist_by_name(playlist_name) if playlist_name else None
+    except Exception as e:
+        logger.debug("jellyfin by-name playlist re-resolve failed: %s", e)
+        fresh = None
+    fresh_id = str(getattr(fresh, 'id', '') or '') if fresh else ''
+    if fresh_id and fresh_id != str(playlist_id):
+        logger.info("[ServerPlaylist] Stale Jellyfin playlist id %s — re-resolved '%s' to %s",
+                    playlist_id, playlist_name, fresh_id)
+        return (jf.get_playlist_tracks(fresh_id) or []), fresh_id
+    return tracks, playlist_id
+
+
+def _jellyfin_recreated_playlist_id(playlist_name):
+    """The id a Jellyfin playlist got when update_playlist recreated it.
+
+    Best-effort: the edit already succeeded, so failing to learn the new id
+    must not fail the request — the client just keeps the old one and the
+    fallback above rescues the next edit.
+    """
+    try:
+        fresh = media_server_engine.client('jellyfin').get_playlist_by_name(playlist_name)
+        return str(fresh.id) if fresh else None
+    except Exception as e:
+        logger.debug("jellyfin post-edit id re-resolve failed: %s", e)
+        return None
+
+
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
 def server_playlist_replace_track(playlist_id):
     """Replace a track in a server playlist. Rebuilds the playlist with the swap."""
@@ -22368,6 +22477,31 @@ def server_playlist_replace_track(playlist_id):
             return jsonify({"success": False, "error": "playlist_name required"}), 400
 
         active_server = config_manager.get_active_media_server()
+
+        # Persist the correction, exactly as Find & Add does. This endpoint
+        # used to edit the server playlist and store NOTHING, so a fixed bad
+        # match existed only as a playlist edit: the 0.75 auto-match the sync
+        # had cached stayed in sync_match_cache, pass 0 of the next compare
+        # re-pinned it, and the next sync re-added the wrong track to the
+        # server. The user's hand-picked pairing landed in Extras every time
+        # (#1159, AfonsoG6 — "incorrect matches reappear after I have manually
+        # changed them"). save_sync_match_cache is INSERT OR REPLACE, so the
+        # confidence-1.0 write also overwrites that bad cached row.
+        # source_track_id is absent for non-mirrored compares — nothing to key
+        # a pairing by, so there is nothing to persist (the edit still runs).
+        _src_track_id = (data.get('source_track_id') or '').strip()
+        _src_title = data.get('source_title', '')
+        _src_artist = data.get('source_artist', '')
+        _src_source = data.get('source') or 'spotify'
+        _new_track_title = data.get('new_track_title', '')
+
+        def _persist_replacement():
+            if not _src_track_id:
+                logger.debug("[ServerPlaylist] replace-track: no source_track_id in payload — pairing not persisted")
+                return
+            _persist_find_and_add_match(
+                _src_track_id, active_server, new_track_id, _new_track_title,
+                _src_title, _src_artist, source=_src_source)
 
         if active_server == 'plex' and media_server_engine.client('plex'):
             # ID-first, name-fallback (Plex deletes + recreates on edit
@@ -22406,12 +22540,14 @@ def server_playlist_replace_track(playlist_id):
                 raw_playlist.delete()
                 from plexapi.playlist import Playlist
                 new_pl = Playlist.create(media_server_engine.client('plex').server, playlist_name, items=new_tracks)
+                _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
             else:
                 return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id)
+            _jf = media_server_engine.client('jellyfin')
+            current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             new_track_ids = []
             replaced = False
             for t in (current_tracks or []):
@@ -22424,8 +22560,12 @@ def server_playlist_replace_track(playlist_id):
 
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
-                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-                return jsonify({"success": True, "message": "Track replaced"})
+                _jf.update_playlist(playlist_name, new_track_objs)
+                _persist_replacement()
+                # update_playlist deletes + recreates, so the caller's id just
+                # died — hand back the new one (both editors already apply it).
+                return jsonify({"success": True, "message": "Track replaced",
+                                "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
@@ -22443,6 +22583,7 @@ def server_playlist_replace_track(playlist_id):
             if replaced:
                 new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
                 media_server_engine.client('navidrome').create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                _persist_replacement()
                 return jsonify({"success": True, "message": "Track replaced"})
             return jsonify({"success": False, "error": "Old track not found"}), 404
 
@@ -22695,7 +22836,8 @@ def server_playlist_remove_track(playlist_id):
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             from core.sync.playlist_edit import remove_one_occurrence
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
+            _jf = media_server_engine.client('jellyfin')
+            current_tracks, _effective_id = _jellyfin_playlist_tracks_fresh(_jf, playlist_id, playlist_name)
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Remove ONE occurrence, not every copy — duplicates are the same
             # track, so deleting one must not wipe them all (#768).
@@ -22703,8 +22845,10 @@ def server_playlist_remove_track(playlist_id):
             if not removed:
                 return jsonify({"success": False, "error": "Track not found in playlist"}), 404
             new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
-            media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
-            return jsonify({"success": True, "message": "Track removed"})
+            _jf.update_playlist(playlist_name, new_track_objs)
+            # Same delete-recreate as replace: report the fresh id.
+            return jsonify({"success": True, "message": "Track removed",
+                            "new_playlist_id": _jellyfin_recreated_playlist_id(playlist_name)})
 
         elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
             from core.sync.playlist_edit import remove_one_occurrence
@@ -22721,6 +22865,70 @@ def server_playlist_remove_track(playlist_id):
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
     except Exception as e:
         logger.error(f"Error removing track from server playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/delete', methods=['POST'])
+def server_playlist_delete(playlist_id):
+    """Delete a server playlist outright — SoulSync-made or not.
+
+    Same id-first, name-fallback shape as every other edit in this family:
+    Plex and Jellyfin delete-recreate on edit, so the id the page loaded may
+    already be dead (#1159 taught the Jellyfin lesson). A delete against a
+    stale id must not strand the LIVE playlist under its new id."""
+    try:
+        data = request.get_json() or {}
+        playlist_name = data.get('playlist_name', '')
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+
+        if active_server == 'plex' and media_server_engine.client('plex'):
+            plex_server = media_server_engine.client('plex').server
+            raw_playlist = None
+            try:
+                raw_playlist = plex_server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist:
+                try:
+                    raw_playlist = plex_server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                return jsonify({"success": False, "error": "Playlist not found"}), 404
+            raw_playlist.delete()
+            logger.info(f"[ServerPlaylist] Deleted Plex playlist '{playlist_name}' ({playlist_id})")
+            return jsonify({"success": True, "message": "Playlist deleted"})
+
+        elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
+            _jf = media_server_engine.client('jellyfin')
+            if _jf.delete_playlist(playlist_id):
+                logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' ({playlist_id})")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            # stale id — the recreate gave the live playlist a new one
+            try:
+                fresh = _jf.get_playlist_by_name(playlist_name)
+            except Exception as e:
+                logger.debug("jellyfin by-name playlist re-resolve failed: %s", e)
+                fresh = None
+            fresh_id = str(getattr(fresh, 'id', '') or '') if fresh else ''
+            if fresh_id and fresh_id != str(playlist_id) and _jf.delete_playlist(fresh_id):
+                logger.info(f"[ServerPlaylist] Deleted Jellyfin playlist '{playlist_name}' via re-resolved id {fresh_id}")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
+
+        elif active_server == 'navidrome' and media_server_engine.client('navidrome'):
+            _nd = media_server_engine.client('navidrome')
+            if _nd.delete_playlist(playlist_id):
+                logger.info(f"[ServerPlaylist] Deleted Navidrome playlist '{playlist_name}' ({playlist_id})")
+                return jsonify({"success": True, "message": "Playlist deleted"})
+            return jsonify({"success": False, "error": "Playlist not found"}), 404
+
+        return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
+    except Exception as e:
+        logger.error(f"Error deleting server playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -25478,6 +25686,23 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
 from core.discovery import playlist as _discovery_playlist
 
 
+def _lookup_artist_aliases(artist_name):
+    """Alternate spellings for an artist name, or [] if none can be resolved.
+
+    Thin wrapper over MusicBrainzService.lookup_artist_aliases, which already
+    does the caching (library row -> musicbrainz_cache -> live MB) and applies
+    the trust gate that keeps a fuzzy near-miss from renaming an artist.
+    Best-effort by contract: any failure returns [] so discovery falls back to
+    exactly its prior behaviour.
+    """
+    try:
+        from core.musicbrainz_service import get_musicbrainz_service
+        return get_musicbrainz_service().lookup_artist_aliases(artist_name) or []
+    except Exception as e:
+        logger.debug("artist alias lookup unavailable for %r: %s", artist_name, e)
+        return []
+
+
 def _build_playlist_discovery_deps():
     """Build the PlaylistDiscoveryDeps bundle from web_server.py globals on each call."""
     return _discovery_playlist.PlaylistDiscoveryDeps(
@@ -25497,6 +25722,7 @@ def _build_playlist_discovery_deps():
         discovery_score_candidates=_discovery_score_candidates,
         get_metadata_cache=get_metadata_cache,
         build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        lookup_artist_aliases=_lookup_artist_aliases,
     )
 
 
@@ -25878,16 +26104,38 @@ def get_deezer_arl_playlists():
 
         playlists = deezer_dl.get_user_playlists()
 
-        # Add sync_status field to match Spotify format
+        # Real sync status, same file every other source reads. This was a
+        # hardcoded 'Never Synced' literal — the field was added "to match
+        # Spotify format" but only ever carried the shape, never the value, so a
+        # Deezer playlist read as never synced no matter how many times it had
+        # been (TheHomeGuy: sync ran, tracks downloaded, playlist appeared on the
+        # server, card still said NEVER SYNCED).
+        #
+        # The write side was always fine. These cards are shimmed into
+        # spotifyPlaylists with id = `deezer_arl_<id>` (-sync.accounts.ts), and
+        # startPlaylistSync posts that card id straight to /api/sync/start — so
+        # the status lands under the PREFIXED id. The bare `deezer_<id>` belongs
+        # to the other engine, the per-source discovery flow behind
+        # /api/deezer/sync/start; check it second so a playlist synced that way
+        # still reads as synced.
+        #
+        # No snapshot passed: Deezer has no snapshot/etag equivalent, so there is
+        # nothing to compare a stored one against. That leaves the two states the
+        # Deezer card actually renders — deezerArlStatusClass only distinguishes
+        # 'Synced' from never, with no 'Needs Sync' arm.
+        sync_statuses = _load_sync_status_file()
         playlist_data = []
         for p in playlists:
+            status_info = (sync_statuses.get(f"deezer_arl_{p['id']}")
+                           or sync_statuses.get(f"deezer_{p['id']}")
+                           or {})
             playlist_data.append({
                 'id': p['id'],
                 'name': p['name'],
                 'owner': p.get('owner', ''),
                 'track_count': p.get('track_count', 0),
                 'image_url': p.get('image_url', ''),
-                'sync_status': 'Never Synced',
+                'sync_status': _format_playlist_sync_status(status_info, None),
             })
 
         logger.info(f"Loaded {len(playlist_data)} Deezer user playlists via ARL")
@@ -25904,7 +26152,25 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         if not deezer_dl or not deezer_dl.is_authenticated():
             return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
 
-        playlist = deezer_dl.get_playlist_tracks(playlist_id)
+        # Narrate the wait. Resolving a 1200-track playlist means ~1,750
+        # rate-limited requests, so this GET legitimately runs for minutes and a
+        # bare spinner cannot tell working from hung — which is how it was
+        # reported ("seems to hang", "sit here for several minutes doing
+        # nothing"). Emitted on the socket the shell already owns; core.js
+        # re-broadcasts it as an ss: CustomEvent for the React card, the same
+        # seam repair:progress and the scan frames use.
+        def _emit_progress(done, total, phase):
+            try:
+                socketio.emit('deezer:playlist_progress', {
+                    'playlist_id': str(playlist_id),
+                    'done': done,
+                    'total': total,
+                    'phase': phase,
+                })
+            except Exception as emit_err:   # noqa: BLE001 - never let narration break the fetch
+                logger.debug("deezer playlist progress emit failed: %s", emit_err)
+
+        playlist = deezer_dl.get_playlist_tracks(playlist_id, progress_cb=_emit_progress)
         if not playlist:
             return jsonify({'error': 'Playlist not found or unable to access.'}), 404
 
@@ -30543,6 +30809,9 @@ def add_to_watchlist():
                                 logger.info(f"Discogs artist image: {image_url[:60] if image_url else 'None'}")
                         elif source == 'deezer' or fallback_source == 'deezer':
                             # Deezer: fetch artist image directly from API
+                            # shared deezer budget — this call used to bypass it entirely
+                            from core.deezer_throttle import wait_for_slot
+                            wait_for_slot()
                             dz_resp = requests.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
                             if dz_resp.ok:
                                 dz_data = dz_resp.json()
@@ -40083,6 +40352,7 @@ _init_download_monitor(
     start_next_batch_of_downloads=_start_next_batch_of_downloads,
     orphaned_download_keys=_orphaned_download_keys,
     missing_download_executor_obj=missing_download_executor,
+    post_processing_executor_obj=post_processing_executor,
     download_orchestrator_obj=download_orchestrator,
 )
 
@@ -41072,6 +41342,97 @@ def import_staging_groups():
 def import_staging_scan_status():
     payload, status = _import_staging_scan_status(_build_import_route_runtime())
     return jsonify(payload), status
+
+
+def _reassign_missing_fields(data):
+    """Which required identifiers a reassign request left out.
+
+    Named explicitly rather than left to degrade: without them the service
+    would answer "Nothing to reassign", which reads like the album is empty
+    instead of like the request was malformed.
+    """
+    return [field for field in ('source', 'local_album_id', 'album_id')
+            if not str(data.get(field) or '').strip()]
+
+
+@app.route('/api/reassign/artists', methods=['GET'])
+@admin_only
+def reassign_search_artists():
+    """Step 1 of an album reassign: find the artist it SHOULD belong to.
+
+    Admin-only, like re-identify: it restages library files."""
+    try:
+        from core.imports.reassign_service import search_artists
+        return jsonify({'success': True, 'artists': search_artists(
+            request.args.get('source', ''), request.args.get('q', ''))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/albums', methods=['GET'])
+@admin_only
+def reassign_artist_albums():
+    """Step 2: that artist's releases. Picking from THIS list is what
+    guarantees the target is one the source can answer for."""
+    try:
+        from core.imports.reassign_service import artist_albums
+        return jsonify({'success': True, 'albums': artist_albums(
+            request.args.get('source', ''), request.args.get('artist_id', ''))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/preview', methods=['POST'])
+@admin_only
+def reassign_preview():
+    """Step 3: how the local files line up, BEFORE anything is staged."""
+    try:
+        from core.imports.reassign_service import preview_reassign
+        data = request.get_json() or {}
+        missing = _reassign_missing_fields(data)
+        if missing:
+            return jsonify({'success': False,
+                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
+        payload = preview_reassign(
+            get_database(), data.get('source', ''),
+            data.get('local_album_id'), data.get('album_id', ''))
+        return jsonify(payload), (200 if payload.get('success') else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reassign/apply', methods=['POST'])
+@admin_only
+def reassign_apply():
+    """Step 4: stage each file with its hint. The import pipeline re-files
+    them — tags, folder and database rows all come from the same code that
+    handles a fresh download."""
+    try:
+        from core.imports.reassign_service import apply_reassign
+        from core.imports.staging import get_staging_path
+        data = request.get_json() or {}
+        missing = _reassign_missing_fields(data)
+        if missing:
+            return jsonify({'success': False,
+                            'error': f"Missing required field(s): {', '.join(missing)}"}), 400
+        payload = apply_reassign(
+            get_database(),
+            source=data.get('source', ''),
+            local_album_id=data.get('local_album_id'),
+            album_id=data.get('album_id', ''),
+            album_name=data.get('album_name', ''),
+            artist_id=data.get('artist_id'),
+            artist_name=data.get('artist_name', ''),
+            album_type=data.get('album_type'),
+            staging_dir=get_staging_path(),
+            replace=bool(data.get('replace', True)),
+            # Only ever true when the client has shown the user the preview and
+            # they accepted an incomplete mapping.
+            allow_partial=bool(data.get('allow_partial', False)),
+        )
+        return jsonify(payload), (200 if payload.get('success') else 400)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/import/staging/hints', methods=['GET'])

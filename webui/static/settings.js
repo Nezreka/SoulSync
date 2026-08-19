@@ -1308,6 +1308,19 @@ function updateLossyBitrateOptions() {
     }
 }
 
+function updateYoutubeTranscodeBitrateOptions() {
+    const codec = document.getElementById('youtube-transcode-codec')?.value || 'mp3';
+    const bitrateSelect = document.getElementById('youtube-transcode-bitrate');
+    if (!bitrateSelect) return;
+    const opt320 = bitrateSelect.querySelector('option[value="320"]');
+    if (codec === 'opus') {
+        if (opt320) opt320.disabled = true;
+        if (bitrateSelect.value === '320') bitrateSelect.value = '256';
+    } else {
+        if (opt320) opt320.disabled = false;
+    }
+}
+
 function updatePlexConfigurationButtons() {
     const plexUrl = document.getElementById('plex-url');
     const plexToken = document.getElementById('plex-token');
@@ -1609,6 +1622,21 @@ async function loadSettingsData() {
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        const _ytTranscode = document.getElementById('youtube-transcode');
+        const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
+        if (_ytTranscode) {
+            _ytTranscode.checked = settings.youtube?.transcode !== false;
+            if (_ytTranscodeOpts) {
+                _ytTranscodeOpts.style.display = _ytTranscode.checked ? 'block' : 'none';
+            }
+        }
+        const _ytCodec = document.getElementById('youtube-transcode-codec');
+        if (_ytCodec) _ytCodec.value = settings.youtube?.transcode_codec || 'mp3';
+        const _ytBitrate = document.getElementById('youtube-transcode-bitrate');
+        if (_ytBitrate) _ytBitrate.value = settings.youtube?.transcode_bitrate || '320';
+        if (typeof updateYoutubeTranscodeBitrateOptions === 'function') {
+            updateYoutubeTranscodeBitrateOptions();
+        }
         // Show the cookies.txt paste box only in "custom" mode. We never echo the
         // stored cookie back to the UI (it's secret + lives in a file, not config);
         // if one is already saved, say so via placeholder so a blank save won't wipe it.
@@ -1743,6 +1771,10 @@ async function loadSettingsData() {
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
         syncPreferExplicitState();
+
+        // Prefer a version (off = ''), lives under soulseek with the other match settings
+        const _pvEl = document.getElementById('preferred-version');
+        if (_pvEl) _pvEl.value = settings.soulseek?.preferred_version || '';
 
         // Populate Genre Whitelist
         const gwEnabled = settings.genre_whitelist?.enabled === true;
@@ -4429,6 +4461,7 @@ async function saveSettings(quiet = false) {
             search_min_delay_seconds: parseInt(document.getElementById('soulseek-search-min-delay-seconds').value) || 0,
             min_peer_upload_speed: parseInt(document.getElementById('soulseek-min-peer-speed').value) || 0,
             max_peer_queue: parseInt(document.getElementById('soulseek-max-peer-queue').value) || 0,
+            preferred_version: document.getElementById('preferred-version')?.value || '',
             download_timeout: (parseInt(document.getElementById('soulseek-download-timeout').value) || 10) * 60,
             auto_clear_searches: document.getElementById('soulseek-auto-clear-searches').checked
         },
@@ -4702,6 +4735,9 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+            transcode: document.getElementById('youtube-transcode')?.checked || false,
+            transcode_codec: document.getElementById('youtube-transcode-codec')?.value || 'mp3',
+            transcode_bitrate: document.getElementById('youtube-transcode-bitrate')?.value || '320',
             // Raw cookies.txt blob — backend validates, writes it to a file, and stores
             // only the path (never echoed back). Blank = keep any already-saved file.
             cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',

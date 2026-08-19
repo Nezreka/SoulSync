@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { ReassignModal } from './reassign-modal';
+
 import type { EnhancedAlbum, EnhancedTrack } from '../-artist-detail.enhanced';
 
 import {
@@ -269,6 +271,7 @@ function AdminAlbumActions({
   }) => void;
 }) {
   const [enrichOpen, setEnrichOpen] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
   const [taggingTracks, setTaggingTracks] = useState<unknown[] | null>(null);
   const [rgBusy, setRgBusy] = useState(false);
   const [reorganizing, setReorganizing] = useState(false);
@@ -384,6 +387,19 @@ function AdminAlbumActions({
 
       <button
         type="button"
+        className="enhanced-reassign-album-btn"
+        title="Move this album to a different artist"
+        data-album-id={String(album.id)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setReassigning(true);
+        }}
+      >
+        ⇄ Reassign
+      </button>
+
+      <button
+        type="button"
         className="enhanced-redownload-album-btn"
         title="Redownload this album (opens Download Missing modal with force-download)"
         disabled={redownloadBusy}
@@ -414,6 +430,19 @@ function AdminAlbumActions({
       >
         Delete Album
       </button>
+
+      {reassigning ? (
+        <ReassignModal
+          albumId={album.id}
+          albumTitle={String(album.title || '')}
+          currentArtist={artistName}
+          imageUrl={String(album.thumb_url || '')}
+          onClose={() => setReassigning(false)}
+          // The album's files are on their way to a different artist, so this
+          // artist's view of it is now stale — let the page refetch.
+          onApplied={onDelete}
+        />
+      ) : null}
     </>
   );
 }

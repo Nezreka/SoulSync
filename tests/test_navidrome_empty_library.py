@@ -6,6 +6,15 @@ the deep scan kept aborting instead of removing stale artists.
 The fix is a two-key turn: that error is believed as 'empty' ONLY when the
 selected folder provably exists (getMusicFolders) — a wrong folder id stays
 a failure and can never wipe a library.
+
+Round 5 (the one that made him leave): the folder-exists leg read f['id'] but
+_fetch_music_folders emits {'title', 'key'} — so with a folder SELECTED,
+`known` was always {'None'} and the leg could never verify. These fixtures
+used to stub id-shaped folders — the same wrong key as the reader — which is
+how three rounds of green tests coexisted with a user who could reproduce it
+on every click. They now use the REAL producer shape, and
+test_verification_through_the_real_folder_parser drives the actual
+_fetch_music_folders so the two sides can never silently disagree again.
 """
 
 from __future__ import annotations
@@ -37,21 +46,21 @@ def _client(*, folders, api_error=None, artists_response=None):
 
 
 def test_empty_library_error_with_real_folder_is_verified_empty():
-    c = _client(folders=[{"id": 1, "name": "Music"}, {"id": 2, "name": "Empty"}],
+    c = _client(folders=[{"title": "Music", "key": "1"}, {"title": "Empty", "key": "2"}],
                 api_error="Library not found or empty")
     assert c.get_all_artists() == []
     assert c.last_fetch_failed is False        # verified empty → stale removal may run
 
 
 def test_same_error_with_unknown_folder_stays_a_failure():
-    c = _client(folders=[{"id": 1, "name": "Music"}],   # folder 2 doesn't exist
+    c = _client(folders=[{"title": "Music", "key": "1"}],   # folder 2 doesn't exist
                 api_error="Library not found or empty")
     assert c.get_all_artists() == []
     assert c.last_fetch_failed is True         # never wipe on a misconfig
 
 
 def test_other_api_errors_stay_failures():
-    c = _client(folders=[{"id": 2, "name": "Empty"}],
+    c = _client(folders=[{"title": "Empty", "key": "2"}],
                 api_error="Wrong username or password")
     assert c.get_all_artists() == []
     assert c.last_fetch_failed is True
@@ -63,7 +72,7 @@ def test_no_folder_selected_empty_error_is_verified_when_server_answers():
     server erred forever. A server-wide 'empty' answer plus a LIVE
     getMusicFolders response is a verified empty server: there is no
     misconfigured folder id to protect against when none is selected."""
-    c = _client(folders=[{"id": 2, "name": "x"}], api_error="Library not found or empty")
+    c = _client(folders=[{"title": "x", "key": "2"}], api_error="Library not found or empty")
     c.music_folder_id = None
     assert c.get_all_artists() == []
     assert c.last_fetch_failed is False        # verified empty → stale removal may run
@@ -184,3 +193,93 @@ def test_a_complete_album_read_clears_the_flag():
                     albums_pages={0: [{'id': 'b1'}, {'id': 'b2'}]})
     assert c.get_all_album_ids() == {'b1', 'b2'}
     assert c.last_fetch_failed is False
+
+
+# ── round 5: the two sides of the folder seam must agree ────────────────────
+
+def test_verification_through_the_real_folder_parser():
+    """5BILLION round 5 — the bug that outlived three fixes. The folder-exists
+    leg read f['id'], but the REAL _fetch_music_folders emits {'title','key'}.
+    Every earlier test stubbed _fetch_music_folders with id-shaped dicts, so
+    the wrong reader looked right. This one stubs only the HTTP layer and lets
+    the real parser produce the folder dicts: with a folder selected and the
+    server answering 'Library not found or empty', the empty answer MUST
+    verify — that is precisely the click that aborted for him every time."""
+    c = NavidromeClient()
+    c.base_url = "http://navidrome"
+    c.username = "u"
+    c.password = "p"
+    c.music_folder_id = "2"
+    c._connection_attempted = True
+    c.ensure_connection = lambda: True
+
+    def fake_request(endpoint, params=None):
+        if endpoint == 'getArtists':
+            c.last_api_error = "Library not found or empty"
+            return None
+        if endpoint == 'getMusicFolders':
+            # a real subsonic getMusicFolders envelope, id as an INTEGER as
+            # navidrome sends it
+            return {"status": "ok",
+                    "musicFolders": {"musicFolder": [{"id": 1, "name": "Music"},
+                                                     {"id": 2, "name": "Empty"}]}}
+        raise AssertionError("unexpected endpoint " + endpoint)
+
+    c._make_request = fake_request
+    assert c.get_all_artists() == []
+    assert c.last_fetch_failed is False, (
+        "a selected folder that getMusicFolders confirms must verify empty — "
+        "this is the exact abort 5BILLION hit through three rounds of fixes")
+
+
+def test_wrong_selected_folder_still_fails_through_the_real_parser():
+    """The safety the folder leg exists for, exercised through the same real
+    parser: an id the server does not know stays a FAILURE."""
+    c = NavidromeClient()
+    c.base_url = "http://navidrome"
+    c.username = "u"
+    c.password = "p"
+    c.music_folder_id = "9"
+    c._connection_attempted = True
+    c.ensure_connection = lambda: True
+
+    def fake_request(endpoint, params=None):
+        if endpoint == 'getArtists':
+            c.last_api_error = "Library not found or empty"
+            return None
+        if endpoint == 'getMusicFolders':
+            return {"status": "ok",
+                    "musicFolders": {"musicFolder": [{"id": 1, "name": "Music"}]}}
+        raise AssertionError("unexpected endpoint " + endpoint)
+
+    c._make_request = fake_request
+    assert c.get_all_artists() == []
+    assert c.last_fetch_failed is True
+
+
+def test_a_failed_request_cannot_leave_a_stale_empty_message(monkeypatch):
+    """_make_request's exception paths used to leave last_api_error untouched,
+    so a dropped connection could inherit a previous call's 'empty' and read
+    as a verified-empty candidate. Any failure now overwrites the message.
+
+    Patches MODULE-LEVEL requests.get/post — _make_request does not use a
+    session. A first draft of this test stubbed ``c.session`` and passed
+    anyway, by making a real connection attempt to an unresolvable hostname:
+    same assertion, wrong seam, live network."""
+    import requests as _rq
+
+    c = NavidromeClient()
+    c.base_url = "http://navidrome"
+    c.username = "u"
+    c.password = "p"
+    c._connection_attempted = True
+    c.last_api_error = "Library not found or empty"      # stale, from earlier
+
+    def boom(*a, **kw):
+        raise _rq.exceptions.ConnectionError("connection dropped")
+
+    monkeypatch.setattr(_rq, 'get', boom)
+    monkeypatch.setattr(_rq, 'post', boom)
+    assert c._make_request('getArtists') is None
+    assert 'empty' not in (c.last_api_error or '').lower()
+    assert 'request failed' in (c.last_api_error or '').lower()

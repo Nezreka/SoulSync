@@ -198,6 +198,23 @@ def ytmusic_auth_from_cookiefile(path: Any) -> Optional[Dict[str, str]]:
     return ytmusic_auth_headers(parse_netscape_cookies(content))
 
 
+def ytmusic_auth_from_config() -> Optional[Dict[str, str]]:
+    """ytmusicapi headers from Settings → YouTube cookies, or ``None`` (anonymous).
+
+    Same PASTE_MODE + cookies_file rule as the playlist import path: only a
+    pasted cookies.txt can be projected into headers. ``cookiesfrombrowser`` is
+    yt-dlp's reader and leaves no file for us to hash. Public catalog search
+    still works with ``None``.
+    """
+    try:
+        from core.settings import config_manager
+        if str(config_manager.get("youtube.cookies_browser", "") or "").strip() != PASTE_MODE:
+            return None
+        return ytmusic_auth_from_cookiefile(config_manager.get("youtube.cookies_file", ""))
+    except Exception:  # noqa: BLE001 - auth is best-effort; anonymous still works
+        return None
+
+
 __all__ = [
     "PASTE_MODE",
     "build_youtube_cookie_opts",
@@ -206,4 +223,5 @@ __all__ = [
     "parse_netscape_cookies",
     "ytmusic_auth_headers",
     "ytmusic_auth_from_cookiefile",
+    "ytmusic_auth_from_config",
 ]

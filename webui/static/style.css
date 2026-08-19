@@ -5,6 +5,18 @@
     --accent-rgb: 29, 185, 84;
     --accent-light-rgb: 30, 215, 96;
     --accent-neon-rgb: 34, 255, 107;
+
+    /* Sidebar width (#1155). One definition, because three other things line
+       themselves up against it and two of them live OUTSIDE the sidebar: the
+       audio visualiser is position:fixed at its right edge (deliberately, to
+       escape the overflow clip) and the page particles canvas offsets from it.
+       Hardcode the width in any of them again and they detach. */
+    --sidebar-w: 240px;
+}
+
+/* Collapsed: icons only. */
+html[data-sidebar="collapsed"] {
+    --sidebar-w: 68px;
 }
 
 .modal-track-play-btn {
@@ -70,7 +82,7 @@ body {
    ====================================== */
 
 .sidebar {
-    width: 240px;
+    width: var(--sidebar-w);
 
     /* Opaque dark foundation (GPU-optimized: no backdrop-filter needed on solid dark body) */
     background: linear-gradient(135deg,
@@ -171,7 +183,7 @@ body.max-performance .sidebar::after {
 /* Sidebar Audio Visualizer — fixed strip on right edge of sidebar */
 .sidebar-visualizer {
     position: fixed;
-    left: 240px;
+    left: var(--sidebar-w);
     top: 0;
     bottom: 0;
     width: 10px;
@@ -3112,10 +3124,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 #page-particles-canvas {
     position: fixed;
     top: 0;
-    left: 240px; /* sidebar width */
+    left: var(--sidebar-w); /* sidebar width */
     right: 0;
     bottom: 0;
-    width: calc(100vw - 240px);
+    width: calc(100vw - var(--sidebar-w));
     height: 100vh;
     pointer-events: none;
     z-index: 0;
@@ -7205,9 +7217,12 @@ body:has(.download-missing-modal[style*="display: flex"]) #helper-float-btn {
         min-width: 1200px;
     }
 
+    /* These have to track --sidebar-w, not restate it. min-width pins a flex
+       item regardless of what `width` says, so leaving 240px here made the
+       collapse toggle do visibly nothing on desktop (#1155). */
     .sidebar {
-        min-width: 240px;
-        max-width: 240px;
+        min-width: var(--sidebar-w);
+        max-width: var(--sidebar-w);
     }
 
     .main-content {
@@ -49731,7 +49746,7 @@ textarea.enhanced-meta-field-input {
 .enhanced-track-table .col-title { width: auto; }
 .enhanced-track-table .col-duration { width: 70px; text-align: right; }
 .enhanced-track-table .col-format { width: 80px; }
-.enhanced-track-table .col-bitrate { width: 75px; text-align: right; }
+.enhanced-track-table .col-bitrate { width: 100px; text-align: right; }
 .enhanced-track-table .col-path { width: 25%; }
 .enhanced-track-table .col-bpm { width: 60px; text-align: right; }
 .enhanced-track-table .col-actions { width: 50px; text-align: center; }
@@ -49968,7 +49983,7 @@ textarea.enhanced-meta-field-input {
 .enhanced-bulk-bar {
     position: fixed;
     bottom: -80px;
-    left: 240px;
+    left: var(--sidebar-w);
     right: 0;
     height: 60px;
     background: linear-gradient(135deg, rgba(30,30,30,0.98), rgba(20,20,20,0.98));
@@ -50579,6 +50594,14 @@ textarea.enhanced-meta-field-input {
     background: rgba(var(--accent-rgb), 0.12);
     border-color: rgba(var(--accent-rgb), 0.25);
     color: rgb(var(--accent-light-rgb));
+}
+
+/* the compare editor's delete pill goes red on hover so it reads as
+   destructive without shouting at rest (mm-btn-danger's palette) */
+.server-editor-delete:hover:not(:disabled) {
+    background: rgba(239, 83, 80, 0.12);
+    border-color: rgba(239, 83, 80, 0.4);
+    color: #ff6b66;
 }
 
 .discog-select-actions { display: flex; gap: 6px; }
@@ -52557,6 +52580,8 @@ textarea.enhanced-meta-field-input {
     color: rgba(100, 149, 237, 0.6);
     transition: all 0.15s ease;
 }
+
+
 .enhanced-reorganize-album-btn:hover {
     background: rgba(100, 149, 237, 0.12);
     color: rgba(100, 149, 237, 0.9);
@@ -52589,6 +52614,27 @@ textarea.enhanced-meta-field-input {
     vertical-align: -1px;
 }
 
+/* Reassign — the album action row's pattern is identical geometry with a
+   DISTINCT accent per action, so the buttons are scannable by colour. Teal:
+   the two blues and two greens are taken by Reorganize, Redownload and Write
+   Tags, and reusing Reorganize's blue put two same-coloured buttons next to
+   each other. */
+.enhanced-reassign-album-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(45, 212, 191, 0.06);
+    border: 1px solid rgba(45, 212, 191, 0.15);
+    color: rgba(45, 212, 191, 0.6);
+    transition: all 0.15s ease;
+}
+.enhanced-reassign-album-btn:hover {
+    background: rgba(45, 212, 191, 0.12);
+    color: rgba(45, 212, 191, 0.9);
+    border-color: rgba(45, 212, 191, 0.35);
+}
 .enhanced-redownload-album-btn {
     padding: 6px 14px;
     border-radius: 8px;
@@ -74027,6 +74073,142 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }
 
+/* ══ Collapsible sidebar (#1155, wishx) ═══════════════════════════════════
+   One toggle, two states: full width, or just wide enough for the icons.
+   The state is an attribute on <html> so --sidebar-w resolves before first
+   paint — see the inline script in index.html, which has to run in <head> or
+   the whole page visibly jumps on every navigation.
+
+   Items size themselves off the sidebar rather than repeating its number,
+   which is what let .nav-button and .nav-section-label sit on a hardcoded
+   216px that nobody would have thought to update. */
+html[data-sidebar] .nav-button,
+html[data-sidebar] .nav-section-label {
+    width: calc(var(--sidebar-w) - 24px);
+}
+
+/* ── Collapsed: icons only ── */
+html[data-sidebar="collapsed"] .nav-text,
+html[data-sidebar="collapsed"] .sidebar-brand-text,
+html[data-sidebar="collapsed"] .nav-section-title,
+html[data-sidebar="collapsed"] .nav-section-chevron,
+html[data-sidebar="collapsed"] .side-toggle-btn span,
+html[data-sidebar="collapsed"] .profile-indicator-name {
+    display: none;
+}
+
+/* The footer blocks are all prose — "Support SoulSync", a version string, and
+   three service rows with names and test buttons. None of it survives being
+   68px wide, and there is no icon that would stand in for it. They come back
+   the moment you expand. The status JS keeps updating them regardless; hiding
+   is presentational only, so nothing downstream needs to know. */
+html[data-sidebar="collapsed"] .support-section,
+html[data-sidebar="collapsed"] .version-section,
+html[data-sidebar="collapsed"] .status-section {
+    display: none;
+}
+
+html[data-sidebar="collapsed"] .nav-button {
+    width: 44px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+}
+
+/* A section header with no readable text is a dead control — you would be
+   clicking a nameless chevron and items would vanish with no way to tell what
+   you hid or how to get it back. So the label becomes a plain divider and
+   every item under it is forced visible, whatever the saved per-section state
+   says. That state stays in localStorage untouched and comes back on expand. */
+html[data-sidebar="collapsed"] .nav-section-label {
+    width: 28px;
+    height: 1px;
+    min-height: 1px;
+    margin: 12px auto;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 1px;
+    pointer-events: none;
+    overflow: hidden;
+}
+html[data-sidebar="collapsed"] .nav-item-hidden { display: flex !important; }
+
+/* The header's 24px side padding eats 48px of a 68px sidebar, leaving a 20px
+   content box — everything inside it overflowed right and got clipped by the
+   header's own overflow:hidden, which is why nothing looked centred. */
+html[data-sidebar="collapsed"] .sidebar-header {
+    padding: 16px 6px;
+    align-items: center;
+}
+
+/* Logo and toggle stack rather than share a line: 38px logo + 12px gap + 26px
+   button is 76px, wider than the collapsed sidebar itself, so side by side they
+   just squash each other. */
+html[data-sidebar="collapsed"] .sidebar-brand {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+/* the Music/Video pill's collapsed geometry lives with the rest of it, in
+   video/video-side.css — the sliding thumb has to be reasoned about as one
+   piece or it ends up a stray bar. */
+html[data-sidebar="collapsed"] .profile-indicator { justify-content: center; flex-wrap: wrap; }
+
+/* The toggle itself. Sits in the sidebar header because this is a spatial
+   preference you change while looking at the thing, not configuration. */
+.sidebar-collapse-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.sidebar-collapse-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+.sidebar-collapse-toggle svg { width: 14px; height: 14px; }
+/* Chevrons point the way the click will take you: inward to shrink, outward
+   to grow back. Collapsed is the only state where expanding is the only move. */
+html[data-sidebar="collapsed"] .sidebar-collapse-toggle svg { transform: rotate(180deg); }
+
+/* Mobile owns the sidebar below its breakpoint (mobile.css) — the density
+   modes are a desktop concern and must not fight it. */
+@media (max-width: 768px) {
+    html[data-sidebar="collapsed"] {
+        --sidebar-w: 240px;
+    }
+    .sidebar-collapse-toggle { display: none; }
+    html[data-sidebar="collapsed"] .nav-text,
+    html[data-sidebar="collapsed"] .sidebar-brand-text,
+    html[data-sidebar="collapsed"] .nav-section-title,
+    html[data-sidebar="collapsed"] .nav-section-chevron,
+    html[data-sidebar="collapsed"] .side-toggle-btn span,
+    html[data-sidebar="collapsed"] .profile-indicator-name,
+    html[data-sidebar="collapsed"] .support-section,
+    html[data-sidebar="collapsed"] .version-section,
+    html[data-sidebar="collapsed"] .status-section {
+        display: revert;
+    }
+    html[data-sidebar="collapsed"] .nav-button {
+        width: calc(var(--sidebar-w) - 24px);
+        padding: 0 16px;
+        gap: 14px;
+        justify-content: flex-start;
+    }
+}
+
 /* ══ Live Server Activity (app-wide Tautulli-style view) ══════════════════ */
 .activity-float-btn {
     position: fixed; bottom: 24px; right: 136px; width: 44px; height: 44px; border-radius: 50%;
@@ -76849,4 +77031,146 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 .artmap-explore-result {
     background: transparent; border: none; width: 100%;
     font: inherit; color: inherit; text-align: left;
+}
+
+/* ── Album reassign modal ──────────────────────────────────────────────────
+   Rides the .reid-* chassis (hero / tabs / search / results / footer). Only
+   the two things re-identify has no equivalent for live here: the step rail,
+   and the track mapping rows. */
+
+.reassign-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 28px 2px;
+}
+
+.reassign-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 6px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7390;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    transition: all 0.18s ease;
+}
+
+.reassign-step-num {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.reassign-step.active {
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.reassign-step.active .reassign-step-num {
+    background: rgb(var(--accent-rgb));
+    color: #0b0d12;
+}
+
+.reassign-step.done {
+    color: rgba(45, 212, 191, 0.85);
+}
+
+.reassign-step.done .reassign-step-num {
+    background: rgba(45, 212, 191, 0.18);
+    color: rgba(45, 212, 191, 0.95);
+}
+
+/* The verdict line above the mapping. Amber when tracks would be left behind:
+   proceeding then SPLITS the album, which is the problem the feature fixes. */
+.reassign-summary {
+    padding: 10px 14px;
+    margin: 4px 0 10px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(45, 212, 191, 0.9);
+    background: rgba(45, 212, 191, 0.08);
+    border: 1px solid rgba(45, 212, 191, 0.2);
+}
+
+.reassign-summary.warn {
+    color: rgba(245, 158, 11, 0.95);
+    background: rgba(245, 158, 11, 0.08);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
+.reassign-row {
+    display: grid;
+    /* minmax(0,…) on the text columns — without it a long title refuses to
+       shrink and pushes the reason column out of the modal. */
+    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    margin: 4px 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid transparent;
+    font-size: 13px;
+    color: #cfd3e2;
+}
+
+.reassign-row.unmapped {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.18);
+    color: #8b8fa3;
+}
+
+.reassign-row-local,
+.reassign-row-target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reassign-row-target {
+    color: #fff;
+}
+
+.reassign-row.unmapped .reassign-row-target {
+    color: rgba(245, 158, 11, 0.8);
+    font-style: italic;
+}
+
+.reassign-row-arrow {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.reassign-row-why {
+    font: 600 10px/1 'JetBrains Mono', ui-monospace, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+    .reassign-row {
+        grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+    }
+
+    .reassign-row-why {
+        display: none;
+    }
+
+    .reassign-steps {
+        padding: 12px 16px 0;
+    }
 }

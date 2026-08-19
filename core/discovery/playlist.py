@@ -37,6 +37,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.canonical import canonical_best_score
 from core.discovery.manual_match import should_rediscover
 
 logger = logging.getLogger(__name__)
@@ -55,28 +56,10 @@ def _matched_primary_artist(matched_data) -> str:
         return ''
 
 
-def _canonical_best_score(deps, title, artist, duration_ms, results):
-    """Score search results against the source track, trying the canonicalized
-    title/artist too and keeping the better confidence (#785).
-
-    YouTube playlists have their "Artist - Title" / channel decoration stripped
-    at ingest, but file/CSV-imported playlists keep raw titles — so a track
-    titled "Arctic Monkeys - Do I Wanna Know?" scored verbatim against the
-    library's "Do I Wanna Know?" never matched. canonical_source_track is
-    conservative (only strips an "<artist> - " prefix when it equals the
-    artist), so this can only ADD a better candidate, never weaken a match.
-    Returns (match, confidence)."""
-    match, confidence, _ = deps.discovery_score_candidates(title, artist, duration_ms, results)
-    try:
-        from core.text.source_title import canonical_source_track
-        canon_title, canon_artist = canonical_source_track(title or '', artist or '')
-    except Exception:
-        return match, confidence
-    if (canon_title, canon_artist) != (title, artist):
-        alt_match, alt_conf, _ = deps.discovery_score_candidates(canon_title, canon_artist, duration_ms, results)
-        if alt_match and alt_conf > confidence:
-            return alt_match, alt_conf
-    return match, confidence
+# Moved to core.discovery.canonical so the YouTube worker can share it rather
+# than grow a second copy (#785 introduced it here). Kept under the old private
+# name because this module's callers and tests reference it.
+_canonical_best_score = canonical_best_score
 
 
 @dataclass
@@ -98,6 +81,10 @@ class PlaylistDiscoveryDeps:
     discovery_score_candidates: Callable
     get_metadata_cache: Callable[[], Any]
     build_discovery_wing_it_stub: Callable
+    # Resolve alternate spellings of an artist name (see
+    # MusicBrainzService.lookup_artist_aliases). Optional — discovery works
+    # without it, it just can't rescue an aliased artist.
+    lookup_artist_aliases: Callable[[str], list] = None
 
 
 def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistDiscoveryDeps = None):
@@ -297,6 +284,68 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                                 best_match = match
                     except Exception as e:
                         logger.debug("extended discovery search failed: %s", e)
+
+                # Alias fallback: the source's artist name and the provider's
+                # can be different names for the same person, not variations of
+                # one string — "mgk" vs "Machine Gun Kelly", "Yorushika" vs
+                # "ヨルシカ". No amount of cleaning bridges those, and
+                # _discovery_score_candidates enforces a 0.5 artist floor
+                # BEFORE it looks at the title, so a perfect title match is
+                # discarded and the track becomes a Wing It stub.
+                #
+                # Runs only after everything else missed, so the common path
+                # pays nothing. lookup_artist_aliases is itself cached
+                # (library row → musicbrainz_cache → live MB) and caches its
+                # misses, so a given artist costs one MB call ever.
+                if (not best_match or best_confidence < min_confidence) and deps.lookup_artist_aliases:
+                    # File/CSV-imported titles can still carry a raw "Artist -
+                    # Title" prefix (see the canonical search-query block
+                    # above, #785) — canonicalize once, against the ORIGINAL
+                    # artist_name, so an alias query for "mgk - sun to me"
+                    # becomes "Machine Gun Kelly sun to me", not
+                    # "Machine Gun Kelly mgk - sun to me".
+                    alias_track_name = track_name
+                    try:
+                        from core.text.source_title import canonical_source_track
+                        alias_track_name, _ = canonical_source_track(track_name, artist_name)
+                    except Exception as e:
+                        logger.debug("alias-query canonicalization failed for %r: %s", track_name, e)
+                    try:
+                        aliases = deps.lookup_artist_aliases(artist_name) or []
+                    except Exception as e:
+                        logger.debug("artist alias lookup failed for %r: %s", artist_name, e)
+                        aliases = []
+                    seen_alias = {(artist_name or '').casefold()}
+                    for alias in aliases:
+                        alias = (alias or '').strip()
+                        if not alias or alias.casefold() in seen_alias:
+                            continue
+                        seen_alias.add(alias.casefold())
+                        try:
+                            alias_query = f"{alias} {alias_track_name}"
+                            if use_spotify:
+                                alias_results = deps.spotify_client.search_tracks(alias_query, limit=10)
+                            else:
+                                alias_results = itunes_client_instance.search_tracks(alias_query, limit=10)
+                            if not alias_results:
+                                continue
+                            # Score with the ALIAS as the source artist — scoring
+                            # against the original would re-fail the same floor
+                            # that sent us here.
+                            match, confidence, _ = deps.discovery_score_candidates(
+                                alias_track_name, alias, duration_ms, alias_results
+                            )
+                            if match and confidence > best_confidence:
+                                best_confidence = confidence
+                                best_match = match
+                                logger.info(
+                                    "Alias match: %r resolved via %r (confidence %.2f)",
+                                    artist_name, alias, confidence,
+                                )
+                            if best_confidence >= 0.9:
+                                break
+                        except Exception as e:
+                            logger.debug("alias search failed for %r: %s", alias, e)
 
                 # Step 4: Store results
                 if best_match and best_confidence >= min_confidence:

@@ -6,9 +6,10 @@ core.runtime_state; automation_engine, download_orchestrator, and the
 sweep helper are injected via init() because they are constructed
 in web_server.py.
 """
-import logging
+from utils.logging_config import get_logger
 import time
 
+from core.discovery.wing_it import is_stub_id, should_wishlist_stub
 from core.runtime_state import (
     download_batches,
     download_tasks,
@@ -27,7 +28,7 @@ from core.wishlist.resolution import (
 )
 from utils.async_helpers import run_async
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.wishlist_failed")
 
 # Injected at runtime via init().
 automation_engine = None
@@ -60,11 +61,10 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
 
         batch = download_batches[batch_id]
 
-        # Wing It mode — skip wishlist entirely for failed tracks
-        if batch.get('wing_it'):
-            failed_count = len(batch.get('permanently_failed_tracks', []))
-            logger.error(f"[Wing It] Skipping wishlist for {failed_count} failed tracks (wing it mode)")
-            return {'tracks_added': 0, 'errors': 0}
+        # Wing It mode used to skip wishlist entirely here. Now the per-track
+        # is_stub_id()/should_wishlist_stub() gate below decides: a searchable
+        # stub is wishlisted when wishlist.wing_it_guesses is on, everything
+        # else (non-stub failures, non-searchable stubs) behaves as before.
         permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
         cancelled_tracks = batch.get('cancelled_tracks', set())
         
@@ -121,12 +121,22 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                     try:
                         track_name = failed_track_info.get('track_name', f'Track {i+1}')
 
-                        # Skip wing-it fallback tracks — they had no real metadata match,
-                        # so adding them to wishlist would just retry with the same raw data.
+                        # Wing-it stubs had no catalogue match, so re-adding them just
+                        # retries the same raw data — unless wishlist.wing_it_guesses is
+                        # on, which is exactly the choice to search the guess anyway.
                         # Check the track ID prefix since the wishlist payload helper overwrites source.
                         track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
                         sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
-                        if str(sp_id).startswith('wing_it_'):
+                        _artists = track_data.get('artists') if isinstance(track_data, dict) else None
+                        _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
+                        if isinstance(_artist, dict):
+                            _artist = _artist.get('name')
+                        # Use the source's own title for the predicate, not track_name's
+                        # "Track {i+1}" logging fallback — that placeholder isn't a
+                        # placeholder should_wishlist_stub recognizes, so it would read
+                        # as a real title and let a nameless stub through.
+                        _source_title = track_data.get('name', '') if isinstance(track_data, dict) else ''
+                        if is_stub_id(sp_id) and not should_wishlist_stub(_artist, _source_title):
                             wing_it_skipped += 1
                             logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                             continue

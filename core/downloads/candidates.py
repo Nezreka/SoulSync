@@ -31,7 +31,7 @@ status updater, DB) all injected via `CandidatesDeps`.
 
 from __future__ import annotations
 
-import logging
+from utils.logging_config import get_logger
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -44,7 +44,99 @@ from core.runtime_state import (
     tasks_lock,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger("downloads.candidates")
+
+
+def preferred_version_stamp(candidate, preferred_version):
+    """Whether this pick is a version we went after on purpose, and what to
+    measure its length against.
+
+    Returns ``(version, duration_ms)``. ``version`` is ``''`` for every ordinary
+    download, so nothing is written to the context and the import gates run
+    exactly as they always have.
+
+    It fills in only when the user asked for a version (Settings → prefer a
+    version) AND the matching engine confirmed this file is that version OF
+    THIS SONG. Carrying the label is not enough — "Song Two (Extended Mix)" can
+    still be walked to as a fallback candidate, and loosening the import gates
+    for a file the preference never chose is exactly the wrong trade.
+
+    Downstream it does two jobs, both because the file is deliberately a
+    different recording than the source describes:
+      - the source's duration belongs to the other cut (an extended mix runs
+        minutes past the radio edit Spotify listed), so integrity would
+        quarantine a file we went looking for;
+      - AcoustID's version gate compares the source title's version against the
+        fingerprinted recording's, and would call the difference a wrong song.
+
+    ``duration_ms`` is the length the peer advertised, which still catches a
+    truncated transfer. None means the peer advertised nothing, so there's no
+    honest reference and the duration leg gets skipped rather than guessed at.
+
+    Pure helper. No I/O, no config reads — the caller passes the preference in.
+    """
+    if not preferred_version:
+        return '', None
+    picked = getattr(candidate, 'version_type', 'original')
+    if picked != preferred_version or picked == 'original':
+        return '', None
+    if not getattr(candidate, 'preferred_version_hit', False):
+        return '', None
+    advertised = getattr(candidate, 'duration', None)
+    try:
+        advertised = int(advertised) if advertised else None
+    except (TypeError, ValueError):
+        advertised = None
+    return picked, (advertised if advertised and advertised > 0 else None)
+
+
+def _preferred_version_hit(r):
+    """1 when the matching engine stamped this file as the version the user
+    asked for, 0 otherwise.
+
+    Nothing stamps it on any other flow, so the term is 0 for every candidate
+    and the orders below are byte-for-byte what they were.
+    """
+    return 1 if getattr(r, 'preferred_version_hit', False) else 0
+
+
+# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
+# peers use the sharing username, so they are everything else. Keep this list
+# in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
+# lazily would cycle (validation → candidates).
+_STREAMING_USERNAMES = frozenset({
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
+    'amazon', 'torrent', 'usenet', 'lidarr',
+})
+
+
+def _candidate_source_name(r) -> str:
+    """Map a search hit onto a hybrid-chain source id."""
+    name = (getattr(r, 'username', None) or '').lower()
+    if name in _STREAMING_USERNAMES:
+        return name
+    return 'soulseek'
+
+
+def _is_mixed_source_pool(candidates) -> bool:
+    """True when the walk contains more than one download source."""
+    sources = {
+        _candidate_source_name(c)
+        for c in candidates
+        if getattr(c, 'username', None)
+    }
+    return len(sources) > 1
+
+
+def _source_order_index(r, source_order) -> int:
+    """Position in the user's hybrid chain. Unknown sources sort last."""
+    if not source_order:
+        return 0
+    name = _candidate_source_name(r)
+    try:
+        return list(source_order).index(name)
+    except ValueError:
+        return len(source_order)
 
 
 def _priority_sort_key(r):
@@ -59,7 +151,7 @@ def _priority_sort_key(r):
     )
 
 
-def _quality_first_sort_key(r, targets):
+def _quality_first_sort_key(r, targets, source_order=None):
     """Best-quality key: the user's profile quality rank dominates; all the
     priority-mode signals (confidence, speed, …) become tiebreakers.
 
@@ -68,6 +160,11 @@ def _quality_first_sort_key(r, targets):
     Candidates with no usable quality info, or that match no target, sort last
     (never dropped). Lower target index = better target, so it's negated to fit
     the descending (reverse=True) sort.
+
+    After target index, the hybrid chain order breaks ties so "YouTube first"
+    actually prefers YouTube when two hits satisfy the same rung (Opus 256 vs
+    Opus 256), without letting a later-source FLAC outrank a first-source hit
+    that matches a higher-priority target.
     """
     from core.quality.model import rank_candidate
 
@@ -79,21 +176,44 @@ def _quality_first_sort_key(r, targets):
             target_idx, tier = rank_candidate(aq, targets)
         except Exception:
             target_idx, tier = len(targets), 0.0
-    return (-target_idx, tier) + _priority_sort_key(r)
+    src = _source_order_index(r, source_order)
+    return (-target_idx, -src, tier) + _priority_sort_key(r)
 
 
-def order_candidates(candidates, *, quality_first=False, targets=None):
+def order_candidates(candidates, *, quality_first=False, targets=None,
+                     source_order=None):
     """Return *candidates* ordered best-first for the download walk.
 
     ``quality_first=False`` (priority mode) → confidence-first, byte-for-byte
     today's behaviour. ``quality_first=True`` (best-quality mode) → the user's
     profile quality rank dominates, confidence/peer signals break ties.
+
+    Mixed-source pools (YouTube + Soulseek from best-quality search) always
+    use the profile rank. The legacy ``quality_score`` puts FLAC at 1.0 and
+    Opus at 0.3, so a confidence-first walk would download Soulseek even when
+    YouTube itag 774 matches the top target.
+
+    The asked-for version leads BOTH keys. A preference picks the RECORDING,
+    and a different recording is a different song, while confidence and quality
+    both rank files OF THE SAME song — so neither gets to outvote it. This is
+    also the sort that decides what actually downloads: the matching engine
+    ranks the preferred version first and this used to re-sort it straight back
+    down, so the setting looked applied and changed nothing.
+
+    Ordering only. The quality profile filters upstream, so a preferred version
+    that fails the user's quality ladder never arrives here to be ordered — the
+    preference chooses between candidates the profile already accepted.
     """
-    if quality_first:
-        key = lambda r: _quality_first_sort_key(r, targets or [])
+    rows = list(candidates)
+    use_quality = quality_first or _is_mixed_source_pool(rows)
+    if use_quality:
+        key = lambda r: (
+            (_preferred_version_hit(r),)
+            + _quality_first_sort_key(r, targets or [], source_order)
+        )
     else:
-        key = _priority_sort_key
-    return sorted(candidates, key=key, reverse=True)
+        key = lambda r: (_preferred_version_hit(r),) + _priority_sort_key(r)
+    return sorted(rows, key=key, reverse=True)
 
 
 @dataclass
@@ -125,8 +245,22 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     # scores are close; preserve that signal instead of flattening ties back to
     # arbitrary slskd response order. Best-quality mode: profile quality rank
     # dominates (all candidates here already passed match filtering).
+    source_order = None
+    orch = getattr(deps, 'download_orchestrator', None) if deps else None
+    if orch is not None:
+        source_order = list(getattr(orch, 'hybrid_order', None) or [])
+    if not source_order:
+        try:
+            from core.settings import config_manager
+            source_order = list(
+                config_manager.get('download_source.hybrid_order') or []
+            )
+        except Exception:  # noqa: BLE001 - ranking still works without chain order
+            source_order = None
+
     candidates = order_candidates(
         candidates, quality_first=quality_first, targets=quality_targets,
+        source_order=source_order,
     )
     
     with tasks_lock:
@@ -376,6 +510,23 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         "track_info": track_info,  # Add track_info for playlist folder mode
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
+                    try:
+                        from core.matching_engine import MusicMatchingEngine
+                        _took, _adv_ms = preferred_version_stamp(
+                            candidate, MusicMatchingEngine._preferred_version())
+                        if _took:
+                            matched_downloads_context[context_key]['_preferred_version_taken'] = _took
+                            matched_downloads_context[context_key]['_preferred_version_duration_ms'] = _adv_ms
+                            logger.info(
+                                "[Context] Took preferred version '%s' on purpose — length checked "
+                                "against the peer's %s, and AcoustID may report it as '%s'",
+                                _took,
+                                f"{_adv_ms}ms" if _adv_ms else "(none advertised)",
+                                _took,
+                            )
+                    except Exception as _pref_err:
+                        logger.debug("[Context] preferred-version stamp skipped: %s", _pref_err)
+
                     if user_manual_pick:
                         # The user explicitly picked this candidate via the
                         # candidates modal — trust their metadata judgement

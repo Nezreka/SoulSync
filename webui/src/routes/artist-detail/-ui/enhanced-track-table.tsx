@@ -7,7 +7,9 @@ import type { EnhancedAlbum, EnhancedTrack } from '../-artist-detail.enhanced';
 import { extractFormat, formatDurationMs } from '../-artist-detail.enhanced';
 import {
   bitrateClass,
+  formatTrackBitrate,
   getAlbumTrackRows,
+  trackBitrateTitle,
   queueTrackPayload,
   sortedTrackRows,
   sortIndicator,
@@ -436,8 +438,11 @@ function TrackRow({
       </td>
 
       <td className="col-bitrate">
-        <span className={`enhanced-bitrate ${bitrateClass(track.bitrate)}`}>
-          {track.bitrate ? `${track.bitrate} kbps` : '-'}
+        <span
+          className={`enhanced-bitrate ${bitrateClass(track.bitrate)}`}
+          title={trackBitrateTitle(track)}
+        >
+          {formatTrackBitrate(track)}
         </span>
       </td>
 

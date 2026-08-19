@@ -691,6 +691,35 @@ export function bitrateClass(bitrate: unknown): string {
   return value >= 320 ? 'high' : value >= 192 ? 'medium' : 'low';
 }
 
+const VBR_FORMATS = new Set(['OPUS', 'OGG', 'AAC', 'WMA']);
+
+type BitrateTrack = {
+  bitrate?: unknown;
+  file_path?: unknown;
+  bitrate_vbr?: unknown;
+};
+
+/** Opus/Vorbis are always VBR; AAC/WMA store an average; MP3 only when flagged. */
+export function trackIsVbr(track: BitrateTrack): boolean {
+  if (track.bitrate_vbr === true || track.bitrate_vbr === 1) return true;
+  return VBR_FORMATS.has(extractFormat(track.file_path));
+}
+
+/** Library bitrate cell. VBR rows show a size/header average, not a CBR constant. */
+export function formatTrackBitrate(track: BitrateTrack): string {
+  const value = Number(track.bitrate) || 0;
+  if (value <= 0) return '-';
+  if (trackIsVbr(track)) return `~${value} kbps`;
+  return `${value} kbps`;
+}
+
+export function trackBitrateTitle(track: BitrateTrack): string | undefined {
+  const value = Number(track.bitrate) || 0;
+  if (value <= 0) return undefined;
+  if (trackIsVbr(track)) return 'Average bitrate (VBR)';
+  return undefined;
+}
+
 /** The base name of the file, or a "missing" note for an unowned row. */
 export function trackFileName(track: EnhancedTrack): string {
   const path = track.file_path || '-';

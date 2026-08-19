@@ -7,6 +7,7 @@ is independently configurable and can be enabled/disabled by the user.
 The worker is deactivated by default — the user must explicitly enable it.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -1880,13 +1881,31 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _track_identity_for_redownload(self, entity_id, details: dict) -> Optional[dict]:
-        """Resolve a library track's own identity into wishlist-ready spotify-
-        shaped track data, for findings that never pre-searched a replacement
-        (e.g. the Quality Check scanner — unlike the active Quality Upgrade
-        Finder, it only flags, it doesn't match). Mirrors the DB lookup
-        `_fix_dead_file`'s redownload flow uses, minus the DB-row deletion
-        (a quality-upgrade redownload keeps the low-quality file/row in place
-        until the replacement actually imports)."""
+        """Resolve a track's identity into wishlist-ready spotify-shaped track
+        data, for findings that never pre-searched a replacement (the Quality
+        Check scanner only flags, it doesn't match). Mirrors the DB lookup
+        `_fix_dead_file`'s redownload flow uses, minus the DB-row deletion (a
+        quality-upgrade redownload keeps the low-quality file/row in place
+        until the replacement actually imports).
+
+        THE FINDING'S OWN DETAILS ARE A VALID SOURCE, not just a per-field
+        fallback. A full database refresh calls `clear_server_data`, which
+        DELETEs every track for the server and re-inserts it — so each row
+        comes back with a new autoincrement id and every finding written
+        before that refresh points at an id that no longer exists. This used
+        to `return None` on the missing row, which surfaced as "No matched
+        track in finding" for EVERY upgrade a user tried to apply after a
+        refresh. The details carry the title, artist and album, so the
+        redownload can still be built without the row.
+
+        Accepts BOTH detail vocabularies, because the two producers disagree:
+        the Quality Check scanner writes `expected_title`/`expected_artist`,
+        and the Quality Upgrade job writes `track_title`/`artist`. Reading
+        only one set left the other's findings unresolvable.
+
+        `entity_id` may legitimately be None — the scanner records that for a
+        file it could not match to a library track row (entity_type='file').
+        That is not an error, it just means the details are the only source."""
         conn = None
         try:
             conn = self.db._get_connection()
@@ -1903,16 +1922,47 @@ class RepairWorker:
                 WHERE t.id = ?
             """, (entity_id,))
             row = cursor.fetchone()
-            if not row:
+
+            def _from(column, *detail_keys, default=None):
+                """Row value first, then the finding's details. Works with no
+                row at all, which is the orphaned-finding case."""
+                if row is not None:
+                    value = row[column]
+                    if value not in (None, ''):
+                        return value
+                for key in detail_keys:
+                    value = details.get(key)
+                    if value not in (None, ''):
+                        return value
+                return default
+
+            # `track_title`/`artist` are what the quality_upgrade job writes;
+            # `expected_*` are kept because other producers use those names.
+            track_name = _from('title', 'track_title', 'expected_title')
+            artist_name = _from('artist_name', 'artist', 'expected_artist')
+            album_title = _from('album_title', 'album_title', default='')
+
+            if not track_name or not artist_name:
+                # Nothing identifiable from either source — a wishlist entry
+                # built from "Unknown - Unknown" would search for nothing and
+                # sit there forever, so refuse rather than queue garbage.
+                logger.warning(
+                    "Track identity for %s has neither a DB row nor usable details", entity_id)
                 return None
 
-            track_name = row['title'] or details.get('expected_title', 'Unknown')
-            artist_name = row['artist_name'] or details.get('expected_artist', 'Unknown Artist')
-            album_title = row['album_title'] or details.get('album_title', '')
-            wishlist_id = (row['spotify_track_id'] or row['itunes_track_id']
-                           or row['deezer_id'] or f"redownload_{entity_id}")
+            # A stable, UNIQUE id. entity_id is None for an unmatched file, and
+            # a literal "redownload_None" would make every such finding share
+            # one wishlist row — the second would be deduped away and silently
+            # never downloaded.
+            if entity_id:
+                fallback_id = f"redownload_{entity_id}"
+            else:
+                seed = f"{artist_name}|{track_name}|{details.get('file_path') or ''}"
+                fallback_id = f"redownload_{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
+            wishlist_id = (_from('spotify_track_id') or _from('itunes_track_id')
+                           or _from('deezer_id') or fallback_id)
             album_images = []
-            album_thumb = row['album_thumb'] or details.get('album_thumb_url')
+            album_thumb = _from('album_thumb', 'album_thumb_url')
             if album_thumb:
                 album_images = [{'url': album_thumb}]
 
@@ -1922,21 +1972,22 @@ class RepairWorker:
                 'artists': [{'name': artist_name}],
                 'album': {
                     'name': album_title or track_name,
-                    'id': row['spotify_album_id'] or '',
-                    'release_date': str(row['year']) if row['year'] else '',
+                    'id': _from('spotify_album_id', 'spotify_album_id', default='') or '',
+                    'release_date': str(_from('year', 'year', default='') or ''),
                     'images': album_images,
-                    'album_type': row['record_type'] or 'album',
-                    'total_tracks': row['track_count'] or 0,
+                    'album_type': _from('record_type', default='album') or 'album',
+                    'total_tracks': _from('track_count', default=0) or 0,
                     'artists': [{'name': artist_name}],
                 },
-                'duration_ms': row['duration'] or 0,
-                'track_number': row['track_number'] or 1,
+                'duration_ms': _from('duration', 'duration_ms', default=0) or 0,
+                'track_number': _from('track_number', 'track_number', default=1) or 1,
                 'disc_number': 1,
                 'explicit': False,
                 'external_urls': {},
                 'popularity': 0,
                 'preview_url': None,
-                'uri': f"spotify:track:{row['spotify_track_id']}" if row['spotify_track_id'] else '',
+                'uri': (f"spotify:track:{_from('spotify_track_id')}"
+                        if _from('spotify_track_id') else ''),
                 'is_local': False,
             }
         except Exception as e:
@@ -1989,7 +2040,14 @@ class RepairWorker:
                                f'{os.path.basename(file_path or "")}'}
 
         track_data = details.get('matched_track_data')
-        if not track_data and entity_id:
+        if not track_data:
+            # NOT gated on entity_id. The Quality Check scanner records
+            # `entity_id=None` for any file it could not match to a library
+            # track row (entity_type='file'), and gating here meant the
+            # resolver was never reached for those findings — so applying one
+            # failed with "No matched track in finding" even though the
+            # finding's own details carry the title and artist. That is the
+            # every-single-time failure two users reported.
             track_data = self._track_identity_for_redownload(entity_id, details)
         if not track_data:
             return {'success': False, 'error': 'No matched track in finding'}

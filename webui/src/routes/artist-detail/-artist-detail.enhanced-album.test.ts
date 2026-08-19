@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  bitrateClass,
+  formatTrackBitrate,
   albumEnrichServices,
   sortedTrackRows,
   inlineEditDisplay,
@@ -642,5 +644,43 @@ describe('sortedTrackRows', () => {
     const rows = [owned(1, 'B'), owned(2, 'A')];
     sortedTrackRows(rows, { field: 'title', ascending: true });
     expect(rows.map((r) => r.title)).toEqual(['B', 'A']);
+  });
+});
+
+describe('formatTrackBitrate', () => {
+  it('is a dash when the library row has no bitrate', () => {
+    expect(formatTrackBitrate({ file_path: 'a.opus' })).toBe('-');
+    expect(formatTrackBitrate({ bitrate: 0, file_path: 'a.mp3' })).toBe('-');
+  });
+
+  it('shows a CBR mp3 as an exact kbps figure', () => {
+    expect(formatTrackBitrate({ bitrate: 320, file_path: 'a.mp3' })).toBe('320 kbps');
+  });
+
+  it('marks opus and ogg as a VBR average', () => {
+    expect(formatTrackBitrate({ bitrate: 160, file_path: 'a.opus' })).toBe('~160 kbps');
+    expect(formatTrackBitrate({ bitrate: 192, file_path: 'a.ogg' })).toBe('~192 kbps');
+  });
+
+  it('marks aac and wma the same way — stored kbps is an average', () => {
+    expect(formatTrackBitrate({ bitrate: 256, file_path: 'a.m4a' })).toBe('~256 kbps');
+    expect(formatTrackBitrate({ bitrate: 256, file_path: 'a.aac' })).toBe('~256 kbps');
+    expect(formatTrackBitrate({ bitrate: 192, file_path: 'a.wma' })).toBe('~192 kbps');
+  });
+
+  it('marks an mp3 as VBR only when the row says so', () => {
+    expect(formatTrackBitrate({ bitrate: 192, file_path: 'a.mp3' })).toBe('192 kbps');
+    expect(formatTrackBitrate({ bitrate: 192, file_path: 'a.mp3', bitrate_vbr: 1 })).toBe(
+      '~192 kbps',
+    );
+  });
+});
+
+describe('bitrateClass', () => {
+  it('bands 320+ high, 192+ medium, else low', () => {
+    expect(bitrateClass(1000)).toBe('high');
+    expect(bitrateClass(192)).toBe('medium');
+    expect(bitrateClass(160)).toBe('low');
+    expect(bitrateClass(0)).toBe('low');
   });
 });

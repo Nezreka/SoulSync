@@ -1075,15 +1075,54 @@ async def prowlarr_search_with_variants(
     indexer_ids = prowlarr.indexer_ids_for_protocol(
         _parse_indexer_id_filter(), protocol,
     )
+    # #1151: fan the search out per indexer. Prowlarr answers ONE aggregated
+    # request for every indexer at once, so a single slow or unreachable one
+    # holds the response past the read timeout — and a timed-out request
+    # returns nothing, throwing away results the responsive indexers had
+    # already produced. Resolving the concrete ids lets each be its own
+    # request, so a failure costs only its own slot.
+    #
+    # An empty list means the ids could not be resolved (Prowlarr unreachable,
+    # or an older version); that falls through to the single aggregated
+    # request, which is exactly today's behaviour.
+    try:
+        fan_out_ids = await prowlarr.resolve_search_indexers(indexer_ids, protocol)
+    except Exception as exc:                            # noqa: BLE001
+        # Resolving the ids is an optimisation, never a precondition. A failure
+        # here must not become a failure to search at all.
+        logger.debug("Prowlarr indexer resolution failed, using one request: %s", exc)
+        fan_out_ids = []
+
     first_error: Optional[Exception] = None
     for attempt, variant in enumerate(variants):
         try:
-            results = await prowlarr.search(
-                variant,
-                categories=categories,
-                indexer_ids=indexer_ids,
-                timeout=timeout,
-            )
+            if fan_out_ids:
+                results, failures = await prowlarr.search_each_indexer(
+                    variant,
+                    fan_out_ids,
+                    categories=categories,
+                    timeout=timeout,
+                )
+                if failures and not results:
+                    # EVERY indexer failed. Raising preserves dd28-02: a
+                    # transport failure must not masquerade as zero hits.
+                    raise ProwlarrSearchError('; '.join(failures))
+                if failures:
+                    # Some worked. Name the ones that did not — the aggregated
+                    # request could never tell you which indexer was the
+                    # problem, which the report asks for.
+                    logger.warning(
+                        "Prowlarr %s search: %d indexer(s) failed but %d result(s) "
+                        "came back from the rest — %s",
+                        protocol, len(failures), len(results), '; '.join(failures),
+                    )
+            else:
+                results = await prowlarr.search(
+                    variant,
+                    categories=categories,
+                    indexer_ids=indexer_ids,
+                    timeout=timeout,
+                )
         except ProwlarrSearchError as e:
             # A transport failure is not evidence that the relaxed variants
             # would fail too, but it IS the thing the user needs told if

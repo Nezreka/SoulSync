@@ -12,6 +12,7 @@ from typing import Any
 # Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
+from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_title,
@@ -786,25 +787,34 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             return final_path, True
 
         if folder_path and filename_base:
+            # #1091: steer into the folder that already exists when it differs
+            # only in case. Without this, metadata casing that disagrees with
+            # disk makes a SECOND folder on case-sensitive filesystems (the
+            # album splits in Jellyfin) and, on case-insensitive ones, records
+            # a path that is not how the directory is actually spelled.
+            # Resolved once and used for BOTH the created directory and the
+            # returned path, so the two can never disagree.
             if total_discs > 1 and not user_controls_disc:
                 disc_folder = f"{disc_label} {disc_number}"
-                final_path = os.path.join(transfer_dir, folder_path, disc_folder, filename_base + file_ext)
-                _ensure_dir(os.path.join(transfer_dir, folder_path, disc_folder), exist_ok=True)
+                album_dir = resolve_existing_case_dir(
+                    transfer_dir, os.path.join(folder_path, disc_folder))
             else:
-                final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-                _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
+                album_dir = resolve_existing_case_dir(transfer_dir, folder_path)
+            final_path = os.path.join(album_dir, filename_base + file_ext)
+            _ensure_dir(album_dir, exist_ok=True)
             return final_path, True
 
         album_name_sanitized = sanitize_filename(album_info["album_name"])
         if raw_album_type in ("compilation", "compile"):
-            album_dir = os.path.join(transfer_dir, "Compilations", album_name_sanitized)
+            album_relative = os.path.join("Compilations", album_name_sanitized)
         else:
             artist_name_sanitized = sanitize_filename(template_context["albumartist"])
-            artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
-            album_dir = os.path.join(artist_dir, album_folder_name)
+            album_relative = os.path.join(artist_name_sanitized, album_folder_name)
         if total_discs > 1:
-            album_dir = os.path.join(album_dir, f"{disc_label} {disc_number}")
+            album_relative = os.path.join(album_relative, f"{disc_label} {disc_number}")
+        # #1091, same rule on the no-template path.
+        album_dir = resolve_existing_case_dir(transfer_dir, album_relative)
         _ensure_dir(album_dir, exist_ok=True)
         final_track_name_sanitized = sanitize_filename(clean_track_name)
         new_filename = f"{track_number:02d} - {final_track_name_sanitized}{file_ext}"
