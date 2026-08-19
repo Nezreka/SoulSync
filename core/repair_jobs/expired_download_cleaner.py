@@ -18,7 +18,13 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from core.library.expired_cleanup import RETENTION_OPTIONS, parse_ts, select_expired
+from core.library.expired_cleanup import (
+    RETENTION_OPTIONS,
+    is_curated,
+    parse_ts,
+    path_suffix_key,
+    select_expired,
+)
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -66,16 +72,21 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'per origin.\n\n'
         'A download is only ever proposed for deletion when ALL are true: it is '
         'older than its origin\'s retention, it is NOT still in a playlist you '
-        'actively mirror (or an artist you still watch), and you have played it '
-        'fewer than the keep-threshold (default: played more than once is kept). '
+        'actively mirror (or an artist you still watch), NOBODY on your media '
+        'server has favourited it, rated it, or put it in a playlist, and you '
+        'have played it fewer than the keep-threshold (default: played more '
+        'than once is kept). '
         'It only touches downloads recorded from the Download Origins feature '
-        'forward — never your pre-existing or manually-added library.\n\n'
+        'forward — never your pre-existing or manually-added library, and never '
+        'anything downloaded before your library was last rebuilt.\n\n'
         'Dry run is ON by default: it only creates findings for you to review '
         'and delete — nothing is deleted automatically. Turn Dry run OFF for '
         'hands-off auto-cleanup.\n\n'
         'Settings:\n'
         '- Watchlist retention / Playlist retention: off, or a window\n'
         '- Keep if played at least: play count that protects a track (default 2)\n'
+        '- Use curation signals: keep anything favourited/rated/in a playlist\n'
+        '- Curation min rating: stars that count as "keep this" (default 3)\n'
         '- Dry run: ON = findings only (default); OFF = delete automatically'
     )
     icon = 'repair-icon-cleanup'
@@ -86,17 +97,89 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'playlist_retention': 'off',
         'keep_if_played_at_least': 2,
         'dry_run': True,
+        # Keep anything a user favourited, rated, or put in a playlist.
+        'use_curation_signals': True,
+        'curation_min_rating': 3,
+        # Older than this and the signals are treated as unknown, which keeps
+        # everything. Two days covers a normal sweep cadence plus a server
+        # being down overnight.
+        'curation_max_age_hours': 48,
     }
     setting_options = {
         'watchlist_retention': RETENTION_OPTIONS,
         'playlist_retention': RETENTION_OPTIONS,
         'dry_run': [True, False],
+        'use_curation_signals': [True, False],
+        'curation_min_rating': [1, 2, 3, 4, 5],
     }
     # Has an auto mode (dry_run off → deletes in-scan). auto_fix is a UI/metadata
     # flag only — the worker never auto-applies from it; scan() self-manages the
     # dry_run vs delete decision. Setting True surfaces the Scan → Dry Run /
     # Auto-fix flow badge (without it the job mislabels as "Scan Only").
     auto_fix = True
+
+    def _curation_lookup(self, context: JobContext, settings: dict):
+        """``(curated_track_keys, stale)`` from the stored media-server signals.
+
+        Returns ``(None, False)`` when curation is switched off — the job then
+        behaves exactly as it did before the feature existed.
+
+        ``stale`` is the safety valve. If the signal sweep has never run, or
+        last succeeded longer ago than ``curation_max_age_hours``, we have no
+        current picture of what anyone favourited, and a sweep that quietly
+        broke (server down, credentials rotated, worker crashed) would
+        otherwise look identical to "nobody likes any of these". Deleting on
+        that basis is the failure this whole job has to avoid, so a stale
+        sweep keeps everything.
+        """
+        if not bool(settings.get('use_curation_signals', True)):
+            return None, False
+        try:
+            max_age = float(settings.get('curation_max_age_hours', 48) or 48)
+        except (TypeError, ValueError):
+            max_age = 48.0
+
+        synced_at = None
+        reader = getattr(context.db, 'get_curation_sync_at', None)
+        if not callable(reader):
+            # Database predates the feature — no signals to consult, and no
+            # claim to make about staleness.
+            return None, False
+        try:
+            synced_at = parse_ts(reader())
+        except Exception as e:
+            logger.warning("expired cleanup: curation sync stamp unreadable (%s) "
+                           "— keeping everything this run", e)
+            return set(), True
+
+        if synced_at is None:
+            # NEVER synced is different from "went stale". A sweep that has
+            # never run means curation simply isn't in use on this install, so
+            # the job behaves as it always did (retention + play count). Only a
+            # sweep that WAS working and then stopped is evidence that
+            # something broke, and that is what must block deletion — treating
+            # "not set up" as "broken" would silently make the job useless for
+            # everyone who never turns curation on.
+            return None, False
+        age_hours = (datetime.now(timezone.utc) - synced_at).total_seconds() / 3600.0
+        if age_hours > max_age:
+            logger.warning("[Expired Cleaner] curation signals are %.1fh old (max %.1fh) "
+                           "— keeping everything this run", age_hours, max_age)
+            return set(), True
+
+        try:
+            grouped = context.db.get_curation_signals_by_track_key() or {}
+        except Exception as e:
+            logger.warning("expired cleanup: curation signals unreadable (%s) "
+                           "— keeping everything this run", e)
+            return set(), True
+
+        min_rating = settings.get('curation_min_rating', 3)
+        return (
+            {key for key, signals in grouped.items()
+             if is_curated(signals, min_rating=min_rating)},
+            False,
+        )
 
     def _get_settings(self, context: JobContext) -> dict:
         merged = dict(self.default_settings)
@@ -161,12 +244,23 @@ class ExpiredDownloadCleanerJob(RepairJob):
                     "(%s) — treating every download as pre-rebuild and keeping it", e)
                 rebuilt_at = datetime.now(timezone.utc)
 
+        # Per-user curation signals off the media server: what people
+        # deliberately CHOSE about a track. `stale` means we have no fresh
+        # picture of those choices, so nothing may be deleted this run — a
+        # sweep that silently stopped working must not quietly turn into
+        # "nobody likes anything".
+        curated_keys, signals_stale = self._curation_lookup(context, settings)
+
         for c in candidates:
             ctx = (c.get('origin_context') or '').strip().casefold()
             origin = (c.get('origin') or '').strip().lower()
             c['protected'] = bool(
                 (origin == 'playlist' and ctx and ctx in mirrored_names) or
                 (origin == 'watchlist' and ctx and ctx in watched_names))
+            if signals_stale:
+                c['curated'] = True
+            elif curated_keys is not None:
+                c['curated'] = path_suffix_key(c.get('file_path')) in curated_keys
             if rebuilt_at is not None:
                 created = parse_ts(c.get('created_at'))
                 # An unparseable date is already kept by the pure core; treat

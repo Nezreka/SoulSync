@@ -401,6 +401,35 @@ class MusicDatabase:
                 )
             """)
 
+            # Per-user curation signals read back off the media server —
+            # what people deliberately CHOSE about a track (favourited,
+            # rated, added to a playlist), as opposed to play_count which
+            # only records what happened. Feeds the Expired Download
+            # Cleaner's keep decision.
+            #
+            # Keyed by ``track_key`` (normalised trailing path segments, see
+            # _path_suffix_key) rather than the media server's item id on
+            # purpose: item ids change when the library is rebuilt, and
+            # SoulSync's stored path and the server's differ on Docker/NAS.
+            # The path suffix survives both.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS curation_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    server TEXT NOT NULL,
+                    user_key TEXT NOT NULL,
+                    track_key TEXT NOT NULL,
+                    favorite INTEGER DEFAULT 0,
+                    rating REAL,
+                    in_playlist INTEGER DEFAULT 0,
+                    source_path TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(server, user_key, track_key)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_curation_track_key "
+                "ON curation_signals (track_key)")
+
             # Migration ledger — a single, readable record of which one-time
             # migrations have run. ADDITIVE backstop only: existing migrations
             # keep their own idempotency gates (PRAGMA checks, marker tables,
@@ -17195,16 +17224,87 @@ class MusicDatabase:
 
     @staticmethod
     def _path_suffix_key(path, segments: int = 2):
-        """Normalised trailing path segments, for matching the SAME file across
-        two path namespaces: ``library_history.file_path`` is where SoulSync put
-        the file, ``tracks.file_path`` is what the media server reported after
-        scanning it. On Docker/NAS installs those share no prefix, but the
-        album folder and filename survive intact."""
-        text = str(path or '').replace('\\', '/').strip().rstrip('/')
-        if not text:
-            return ''
-        parts = [p for p in text.split('/') if p]
-        return '/'.join(parts[-segments:]).casefold()
+        """Normalised trailing path segments — see
+        ``core.library.expired_cleanup.path_suffix_key``. Imported lazily so
+        the pure module stays the single definition without this module
+        gaining an import-time dependency on it."""
+        from core.library.expired_cleanup import path_suffix_key
+        return path_suffix_key(path, segments)
+
+    # ── Curation signals (media-server favourites / ratings / playlists) ──
+
+    CURATION_SYNC_KEY = 'curation_signals_synced_at'
+
+    def replace_curation_signals(self, server: str, user_key: str, signals) -> int:
+        """Replace one user's curation signals for one server, atomically.
+
+        Replace rather than merge: an unstarred track must actually lose its
+        protection, and a merge would keep it protected forever. The delete and
+        the insert share a transaction so a crash can never leave the user with
+        no signals — which would read as "nobody wants any of this".
+
+        ``signals`` items need ``track_key``; ``favorite``, ``rating``,
+        ``in_playlist`` and ``source_path`` are optional.
+        """
+        rows = [s for s in (signals or []) if isinstance(s, dict) and s.get('track_key')]
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM curation_signals WHERE server = ? AND user_key = ?",
+                    (str(server), str(user_key)))
+                cursor.executemany(
+                    "INSERT OR REPLACE INTO curation_signals "
+                    "(server, user_key, track_key, favorite, rating, in_playlist, "
+                    " source_path, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)",
+                    [(str(server), str(user_key), s['track_key'],
+                      1 if s.get('favorite') else 0,
+                      s.get('rating'),
+                      1 if s.get('in_playlist') else 0,
+                      s.get('source_path'))
+                     for s in rows])
+                conn.commit()
+            return len(rows)
+        except Exception as e:
+            logger.error(f"Error storing curation signals for {server}/{user_key}: {e}")
+            return 0
+
+    def get_curation_signals_by_track_key(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Every stored signal, grouped by track_key, for the cleanup decision."""
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT track_key, server, user_key, favorite, rating, in_playlist "
+                "FROM curation_signals")
+            for track_key, server, user_key, favorite, rating, in_playlist in cursor.fetchall():
+                grouped.setdefault(track_key, []).append({
+                    'server': server,
+                    'user': user_key,
+                    'favorite': bool(favorite),
+                    'rating': rating,
+                    'in_playlist': bool(in_playlist),
+                })
+        except Exception as e:
+            logger.debug(f"Error reading curation signals: {e}")
+        return grouped
+
+    def mark_curation_sync(self) -> None:
+        """Record that a curation sweep completed successfully."""
+        try:
+            self.set_preference(self.CURATION_SYNC_KEY, datetime.now().isoformat())
+        except Exception as e:
+            logger.debug(f"Error stamping curation sync: {e}")
+
+    def get_curation_sync_at(self):
+        """When the last successful curation sweep finished, or None."""
+        try:
+            return self.get_preference(self.CURATION_SYNC_KEY)
+        except Exception as e:
+            logger.debug(f"Error reading curation sync stamp: {e}")
+            return None
 
     def get_origin_cleanup_candidates(self):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
