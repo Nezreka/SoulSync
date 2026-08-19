@@ -1214,7 +1214,25 @@ class JellyfinClient(MediaServerClient):
             if playlist.title.lower() == name.lower():
                 return playlist
         return None
-    
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist by id. Same DELETE /Items/{id} call update_playlist
+        has always made inline for its overwrite step."""
+        if not self.ensure_connection():
+            return False
+        try:
+            import requests
+            url = f"{self.base_url}/Items/{playlist_id}"
+            response = requests.delete(url, headers={'X-Emby-Token': self.api_key}, timeout=10)
+            if response.status_code in [200, 204]:
+                logger.info(f"Deleted Jellyfin playlist {playlist_id}")
+                return True
+            logger.warning(f"Could not delete Jellyfin playlist {playlist_id} (status: {response.status_code})")
+            return False
+        except Exception as e:
+            logger.error(f"Error deleting Jellyfin playlist {playlist_id}: {e}")
+            return False
+
     def create_playlist(self, name: str, tracks) -> bool:
         """Create a new playlist with given tracks"""
         if not self.ensure_connection():

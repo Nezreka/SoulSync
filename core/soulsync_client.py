@@ -59,12 +59,15 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
                 except (ValueError, TypeError):
                     pass
 
-            # Duration and bitrate from audio info
+            # Duration from audio info. Bitrate: mutagen header when present,
+            # else a size/duration average (Ogg Opus has no bitrate field).
             if hasattr(audio, 'info') and audio.info:
                 if hasattr(audio.info, 'length'):
                     result['duration_ms'] = int(audio.info.length * 1000)
-                if hasattr(audio.info, 'bitrate'):
-                    result['bitrate'] = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
+                from core.imports.file_ops import _kbps_from_stream_info
+                kbps = _kbps_from_stream_info(audio.info, file_path)
+                if kbps:
+                    result['bitrate'] = int(kbps)
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
 

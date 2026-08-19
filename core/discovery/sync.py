@@ -476,10 +476,13 @@ def run_sync_task(
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
 
-        # Wing It mode — skip wishlist for unmatched tracks
+        # Organize-by-playlist still skips wishlisting entirely (batch failure
+        # handling covers it separately). Wing It mode no longer forces a
+        # blanket skip — the per-track is_stub_id()/should_wishlist_stub()
+        # gate in sync_service now decides per track instead.
         with sync_lock:
             is_wing_it = sync_states.get(playlist_id, {}).get('wing_it', False)
-        sync_service._skip_unmatched_wishlist = is_wing_it or skip_wishlist_add
+        sync_service._skip_unmatched_wishlist = skip_wishlist_add
         sync_service._skip_wishlist = is_wing_it
         if skip_wishlist_add:
             logger.info(

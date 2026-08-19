@@ -17,12 +17,94 @@ logger = get_logger("downloads.validation")
 matching_engine = None
 download_orchestrator = None
 
+# Structured-metadata sources. Soulseek peers use the sharing username, so they
+# are everything else. A mixed best-quality pool must score each family with
+# its own checker — not whoever happens to be results[0].
+_STREAMING_USERNAMES = frozenset({
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
+    'amazon', 'torrent', 'usenet',
+})
+
 
 def init(matching_engine_obj, download_orchestrator_obj):
     """Bind the matching engine and download orchestrator from web_server."""
     global matching_engine, download_orchestrator
     matching_engine = matching_engine_obj
     download_orchestrator = download_orchestrator_obj
+
+
+def _youtube_probe_targets(profile_id=None):
+    """Profile targets for YouTube itag probing. None if the DB is unavailable."""
+    try:
+        from core.quality.selection import load_profile_by_id, targets_from_profile
+        if profile_id:
+            targets, _ = targets_from_profile(load_profile_by_id(profile_id))
+            return targets
+        from core.quality.selection import load_profile_targets
+        targets, _ = load_profile_targets()
+        return targets
+    except Exception:  # noqa: BLE001 - probe still works with search claims
+        return None
+
+
+def _filter_youtube_by_quality(candidates, profile_id=None):
+    """Pre-download: keep YouTube hits the quality profile would accept.
+
+    Called from ``get_valid_candidates`` after match scoring (and on the
+    YouTube filename-matching fallback). There is no file yet — ranking
+    uses ``youtube_claimed_quality`` (re-encode on → converted output such
+    as MP3 320; re-encode off → original Opus/AAC). Only hits within 0.05
+    confidence of the top match are probed and ranked, so a distant cover
+    cannot beat a better title match on itags. The import quality guard
+    later verifies the real file on disk.
+
+    Empty result means the profile rejected them (fallback off). Test stubs
+    without ``audio_quality`` pass through unchanged so match-only tests
+    stay isolated. Non-YouTube rows in a mixed best-quality pool are kept
+    and never enter the YouTube confidence band.
+    """
+    if not candidates:
+        return []
+    if not all(hasattr(c, 'audio_quality') for c in candidates):
+        return list(candidates)
+    yt = [c for c in candidates if getattr(c, 'username', None) == 'youtube']
+    other = [c for c in candidates if getattr(c, 'username', None) != 'youtube']
+    if not yt:
+        return list(other)
+    youtube = None
+    if download_orchestrator is not None:
+        try:
+            youtube = download_orchestrator.client('youtube')
+        except Exception:  # noqa: BLE001 - probe is optional
+            youtube = None
+    from core.youtube_client import youtube_quality_rank_band
+    band = youtube_quality_rank_band(yt)
+    if youtube is not None and hasattr(youtube, 'refresh_claimed_quality'):
+        try:
+            youtube.refresh_claimed_quality(band, targets=_youtube_probe_targets(profile_id))
+        except Exception as e:  # noqa: BLE001 - ranking still uses the search claim
+            logger.info("YouTube format probe skipped (%s: %s)", type(e).__name__, e)
+    if profile_id:
+        from core.quality.selection import (
+            load_profile_by_id, rank_with_targets, targets_from_profile,
+        )
+        targets, fallback_enabled = targets_from_profile(load_profile_by_id(profile_id))
+        ranked, _ = rank_with_targets(band, targets, fallback_enabled=fallback_enabled)
+    else:
+        from core.quality.selection import rank_for_profile
+        ranked, _ = rank_for_profile(band)
+    if not ranked:
+        if other:
+            return list(other)
+        logger.error(
+            "[Youtube] No candidates match quality profile - download will fail per user preferences"
+        )
+        return []
+    logger.info(
+        "[Youtube] Quality filter: %d/%d candidates remain (best: %s)",
+        len(ranked), len(yt), ranked[0].audio_quality.label(),
+    )
+    return list(other) + list(ranked)
 
 
 def _torrent_usenet_artist_is_fallback(result):
@@ -147,10 +229,11 @@ def _title_words_are_expected(candidate_title, expected_title, expected_artists)
 
 
 def get_valid_candidates(results, spotify_track, query, profile_id=None):
-    """
-    This function is a direct port from sync.py. It scores and filters
-    Soulseek search results against a Spotify track to find the best, most
-    accurate download candidates.
+    """Score each source with its own checker, then return match-passing hits.
+
+    Streaming/torrent rows use title/artist/duration. Soulseek peers use the
+    file-path matcher. A mixed best-quality pool must not pick one recipe from
+    ``results[0]`` and apply it to every source.
 
     ``profile_id`` is the item's own quality profile, taken from the wishlist
     row's ``quality_profile_id``. It reaches the Soulseek quality filter so a
@@ -168,201 +251,220 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
     if not results:
         return []
 
-    # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer, SoundCloud) return structured API results
-    # with proper artist/title metadata — score using the same matching engine as Soulseek.
-    # Torrent / usenet results also belong here: their filename field is a download URL, not
-    # a slskd-style ``Artist/Album/Track.flac`` path, so the Soulseek matcher would extract
-    # garbage segments from it. Routing them through the streaming path means score_track_match
-    # reads ``r.title`` and ``r.artist`` directly (which the torrent/usenet projections pre-fill).
-    _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl", "soundcloud", "amazon", "torrent", "usenet")
-    if results[0].username in _streaming_sources:
-        source_label = results[0].username.replace('_dl', '').title()
-        expected_artists = spotify_track.artists if spotify_track else []
-        expected_title = spotify_track.name if spotify_track else ''
-        expected_duration = spotify_track.duration_ms if spotify_track else 0
+    streaming = [r for r in results if getattr(r, 'username', None) in _STREAMING_USERNAMES]
+    p2p = [r for r in results if getattr(r, 'username', None) not in _STREAMING_USERNAMES]
 
-        # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
-        expected_title_lower = (expected_title or '').lower()
-        _version_keywords = _VERSION_KEYWORDS
-        expected_is_version = any(_has_version_kw(expected_title_lower, kw)
-                                  for kw in _version_keywords)
-
-        scored = []
-        _strict_duration_sources = {'tidal', 'qobuz', 'hifi', 'deezer_dl', 'amazon'}
-        for r in results:
-            if (
-                r.username in _strict_duration_sources
-                and _duration_mismatch_exceeds_integrity_tolerance(expected_duration, r.duration or 0)
-            ):
-                logger.info(
-                    "[%s] Rejecting candidate due to duration mismatch before download: "
-                    "expected %.1fs, candidate %.1fs",
-                    source_label,
-                    expected_duration / 1000.0,
-                    (r.duration or 0) / 1000.0,
-                )
-                continue
-
-            # Score using matching engine's generic scorer (same weights as Soulseek).
-            # Torrent/usenet release projections sometimes only have the indexer name
-            # in the artist field when a title did not parse as "Artist - Release".
-            # Treat that as unknown artist, not as a real mismatch.
-            has_only_fallback_artist = _torrent_usenet_artist_is_fallback(r)
-            candidate_artists = [] if has_only_fallback_artist else ([r.artist] if r.artist else [])
-            confidence, match_type = matching_engine.score_track_match(
-                source_title=expected_title,
-                source_artists=expected_artists,
-                source_duration_ms=expected_duration,
-                candidate_title=r.title or '',
-                candidate_artists=candidate_artists,
-                candidate_duration_ms=r.duration or 0,
+    accepted = []
+    if streaming:
+        scored = _score_streaming_candidates(streaming, spotify_track)
+        if scored:
+            if any(getattr(r, 'username', None) == 'youtube' for r in scored):
+                scored = _filter_youtube_by_quality(scored, profile_id)
+            accepted.extend(scored)
+        elif any(getattr(r, 'username', None) == 'youtube' for r in streaming):
+            # YouTube artist data is unreliable; Tidal/Qobuz/etc. do not fall through.
+            yt = [r for r in streaming if getattr(r, 'username', None) == 'youtube']
+            logger.warning(
+                "[Youtube] No streaming results passed validation — falling through to filename matching"
+            )
+            accepted.extend(_match_filename_candidates(yt, spotify_track, profile_id))
+        else:
+            logger.warning(
+                "[Streaming] No streaming results passed validation "
+                "(threshold: 0.60, artist gate: 0.50) — rejecting streaming candidates"
             )
 
-            # Album-name fallback for torrent / usenet per-track results.
-            #
-            # When this fallback runs: hybrid mode + non-album batch (single
-            # track wishlist / playlist of singles). Album-context batches
-            # never reach here — the album-bundle gate in
-            # core/downloads/album_bundle_dispatch.py engages the bulk-
-            # download flow in single-source mode, and the hybrid chain
-            # filter in core/downloads/task_worker.py strips torrent /
-            # usenet from album batches in hybrid mode. What's left is the
-            # single-track-in-hybrid case where a user is searching for one
-            # track and the only torrent / usenet result is the album that
-            # contains it.
-            #
-            # Without this fallback, "Luther (with SZA)" against a
-            # candidate titled "GNX (2024) [FLAC]" scores ~0 on track-title
-            # alone — even though the album torrent does in fact contain
-            # the wanted track. Scoring the candidate title against the
-            # wanted track's ALBUM name and taking the max gives album-
-            # level releases a fair shot. The Auto-Import sweep then picks
-            # the right file out of the downloaded album folder.
-            expected_album = getattr(spotify_track, 'album', None) if spotify_track else None
-            if r.username in ('torrent', 'usenet') and expected_album:
-                album_conf, _ = matching_engine.score_track_match(
-                    source_title=expected_album,
-                    source_artists=expected_artists,
-                    source_duration_ms=0,            # albums don't have one duration
-                    candidate_title=r.title or '',
-                    candidate_artists=candidate_artists,
-                    candidate_duration_ms=0,
-                )
-                if album_conf > confidence:
-                    confidence = album_conf
-                    match_type = 'album_release'
+    if p2p:
+        accepted.extend(_match_filename_candidates(p2p, spotify_track, profile_id))
+    return accepted
 
-            # Version detection penalty — reject live/remix/acoustic when expecting original
-            r_title_lower = (r.title or '').lower()
-            is_wrong_version = False
-            if not expected_is_version:
-                # Expecting original — penalize versions
-                for kw in _version_keywords:
-                    if _has_version_kw(r_title_lower, kw) and not _has_version_kw(expected_title_lower, kw):
-                        confidence *= 0.4  # Heavy penalty
-                        is_wrong_version = True
-                        break
-            else:
-                # Expecting specific version — penalize results that don't have it
-                for kw in _version_keywords:
-                    if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
-                        confidence *= 0.5
-                        is_wrong_version = True
-                        break
 
-            # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
-            # so "My Will" by "B. Starr" should never match expected "B小町".
-            # Torrent/usenet must also pass this gate so title-only matches
-            # from the wrong artist do not get downloaded. YouTube gets a SOFT
-            # version below: its artist field (title-parse or channel) is
-            # unreliable, but "no artist evidence at all" now raises the bar
-            # instead of waiving it — the old full exemption downloaded
-            # "We Were Shameless" by the wrong band for "We're Shameless"
-            # (apostrophe folding made the titles near-identical, and nothing
-            # else was checked).
-            if not has_only_fallback_artist:
-                from difflib import SequenceMatcher
-                import re as _re
-                _cand_artist_raw = r.artist or ''
-                _cand_artist = matching_engine.normalize_string(_cand_artist_raw)
-                _best_artist = 0.0
-                for _ea in expected_artists:
-                    _ea_norm = matching_engine.normalize_string(_ea)
-                    if not _ea_norm:
-                        continue
-                    # For short normalized names (e.g. "B小町"→"b"), containment is useless.
-                    # Compare original Unicode strings directly via similarity instead.
-                    if len(_ea_norm) <= 2:
-                        _best_artist = max(_best_artist, SequenceMatcher(None, _ea.lower(), _cand_artist_raw.lower()).ratio())
-                    elif _re.search(r'\b' + _re.escape(_ea_norm) + r'\b', _cand_artist):
-                        _best_artist = 1.0
-                        break
-                    elif _ea_norm == _cand_artist:
-                        _best_artist = 1.0
-                        break
-                    else:
-                        _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
-                # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
-                # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
-                # 10 chars with 2 coincidental char matches), which bypassed the
-                # strict `< 0.4` check and let Tom Walker through as a candidate
-                # for a Maduk track. The word-boundary containment check above
-                # already short-circuits legitimate formatting variations
-                # ("Beatles"/"The Beatles", "Maduk"/"Maduk feat. X") to sim=1.0,
-                # so falling to SequenceMatcher means the strings are genuinely
-                # different. 0.5 gives a safer buffer without blocking real
-                # matches that would have scored above 0.85 anyway.
-                if r.username == 'youtube':
-                    if _best_artist < 0.5:
-                        # No artist evidence (random channel, unparsable video
-                        # title). The title must then carry the WHOLE identity:
-                        # near-exact confidence AND no significant words beyond
-                        # the wanted title/artist + upload noise. This is what
-                        # rejects "We Were Shameless" (the extra 'we'), reaction
-                        # videos and mislabeled uploads while keeping legit
-                        # "Song by Artist (lyrics)"-style uploads alive.
-                        if confidence < 0.75 or not _title_words_are_expected(
-                                r.title, expected_title, expected_artists):
-                            logger.info(
-                                "[%s] Rejecting candidate without artist evidence: "
-                                "expected=%s candidate_artist=%r title=%r conf=%.2f",
-                                source_label, list(expected_artists),
-                                _cand_artist_raw, r.title or '', confidence,
-                            )
-                            continue
-                elif r.username in ('torrent', 'usenet') and _best_artist < 0.5:
-                    logger.info(
-                        "[%s] Rejecting candidate due to artist mismatch: "
-                        "expected=%s candidate=%r title=%r",
-                        source_label,
-                        list(expected_artists),
-                        _cand_artist_raw,
-                        r.title or '',
-                    )
-                    continue
-                elif _best_artist < 0.5 and confidence < 0.85:
-                    continue
+def _score_streaming_candidates(results, spotify_track):
+    """Match-filter structured-metadata hits (YouTube, Tidal, torrent, …)."""
+    source_label = results[0].username.replace('_dl', '').title()
+    expected_artists = spotify_track.artists if spotify_track else []
+    expected_title = spotify_track.name if spotify_track else ''
+    expected_duration = spotify_track.duration_ms if spotify_track else 0
 
-            r.confidence = confidence
-            r.version_type = 'wrong_version' if is_wrong_version else match_type
-            if confidence >= 0.60:
-                scored.append(r)
+    # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
+    expected_title_lower = (expected_title or '').lower()
+    _version_keywords = _VERSION_KEYWORDS
+    expected_is_version = any(_has_version_kw(expected_title_lower, kw)
+                              for kw in _version_keywords)
 
-        if scored:
-            # Sort by confidence (best match first)
-            scored.sort(key=lambda x: x.confidence, reverse=True)
-            best = scored[0]
-            logger.info(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
-                  f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")
-            return scored
+    scored = []
+    _strict_duration_sources = {'tidal', 'qobuz', 'hifi', 'deezer_dl', 'amazon'}
+    for r in results:
+        if (
+            r.username in _strict_duration_sources
+            and _duration_mismatch_exceeds_integrity_tolerance(expected_duration, r.duration or 0)
+        ):
+            logger.info(
+                "[%s] Rejecting candidate due to duration mismatch before download: "
+                "expected %.1fs, candidate %.1fs",
+                source_label,
+                expected_duration / 1000.0,
+                (r.duration or 0) / 1000.0,
+            )
+            continue
+
+        # Score using matching engine's generic scorer (same weights as Soulseek).
+        # Torrent/usenet release projections sometimes only have the indexer name
+        # in the artist field when a title did not parse as "Artist - Release".
+        # Treat that as unknown artist, not as a real mismatch.
+        has_only_fallback_artist = _torrent_usenet_artist_is_fallback(r)
+        candidate_artists = [] if has_only_fallback_artist else ([r.artist] if r.artist else [])
+        confidence, match_type = matching_engine.score_track_match(
+            source_title=expected_title,
+            source_artists=expected_artists,
+            source_duration_ms=expected_duration,
+            candidate_title=r.title or '',
+            candidate_artists=candidate_artists,
+            candidate_duration_ms=r.duration or 0,
+        )
+
+        # Album-name fallback for torrent / usenet per-track results.
+        #
+        # When this fallback runs: hybrid mode + non-album batch (single
+        # track wishlist / playlist of singles). Album-context batches
+        # never reach here — the album-bundle gate in
+        # core/downloads/album_bundle_dispatch.py engages the bulk-
+        # download flow in single-source mode, and the hybrid chain
+        # filter in core/downloads/task_worker.py strips torrent /
+        # usenet from album batches in hybrid mode. What's left is the
+        # single-track-in-hybrid case where a user is searching for one
+        # track and the only torrent / usenet result is the album that
+        # contains it.
+        #
+        # Without this fallback, "Luther (with SZA)" against a
+        # candidate titled "GNX (2024) [FLAC]" scores ~0 on track-title
+        # alone — even though the album torrent does in fact contain
+        # the wanted track. Scoring the candidate title against the
+        # wanted track's ALBUM name and taking the max gives album-
+        # level releases a fair shot. The Auto-Import sweep then picks
+        # the right file out of the downloaded album folder.
+        expected_album = getattr(spotify_track, 'album', None) if spotify_track else None
+        if r.username in ('torrent', 'usenet') and expected_album:
+            album_conf, _ = matching_engine.score_track_match(
+                source_title=expected_album,
+                source_artists=expected_artists,
+                source_duration_ms=0,            # albums don't have one duration
+                candidate_title=r.title or '',
+                candidate_artists=candidate_artists,
+                candidate_duration_ms=0,
+            )
+            if album_conf > confidence:
+                confidence = album_conf
+                match_type = 'album_release'
+
+        # Version detection penalty — reject live/remix/acoustic when expecting original
+        r_title_lower = (r.title or '').lower()
+        is_wrong_version = False
+        if not expected_is_version:
+            # Expecting original — penalize versions
+            for kw in _version_keywords:
+                if _has_version_kw(r_title_lower, kw) and not _has_version_kw(expected_title_lower, kw):
+                    confidence *= 0.4  # Heavy penalty
+                    is_wrong_version = True
+                    break
         else:
-            if results[0].username == 'youtube':
-                logger.warning(f"[{source_label}] No streaming results passed validation — falling through to filename matching")
-                # YouTube artist data is unreliable, allow fallback to filename-based matching
-            else:
-                logger.warning(f"[{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.50) — rejecting all candidates")
-                return []  # Tidal/Qobuz/HiFi/Deezer have structured metadata; don't fall back to filename matching
+            # Expecting specific version — penalize results that don't have it
+            for kw in _version_keywords:
+                if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
+                    confidence *= 0.5
+                    is_wrong_version = True
+                    break
 
+        # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
+        # so "My Will" by "B. Starr" should never match expected "B小町".
+        # Torrent/usenet must also pass this gate so title-only matches
+        # from the wrong artist do not get downloaded. YouTube gets a SOFT
+        # version below: its artist field (title-parse or channel) is
+        # unreliable, but "no artist evidence at all" now raises the bar
+        # instead of waiving it — the old full exemption downloaded
+        # "We Were Shameless" by the wrong band for "We're Shameless"
+        # (apostrophe folding made the titles near-identical, and nothing
+        # else was checked).
+        if not has_only_fallback_artist:
+            from difflib import SequenceMatcher
+            import re as _re
+            _cand_artist_raw = r.artist or ''
+            _cand_artist = matching_engine.normalize_string(_cand_artist_raw)
+            _best_artist = 0.0
+            for _ea in expected_artists:
+                _ea_norm = matching_engine.normalize_string(_ea)
+                if not _ea_norm:
+                    continue
+                # For short normalized names (e.g. "B小町"→"b"), containment is useless.
+                # Compare original Unicode strings directly via similarity instead.
+                if len(_ea_norm) <= 2:
+                    _best_artist = max(_best_artist, SequenceMatcher(None, _ea.lower(), _cand_artist_raw.lower()).ratio())
+                elif _re.search(r'\b' + _re.escape(_ea_norm) + r'\b', _cand_artist):
+                    _best_artist = 1.0
+                    break
+                elif _ea_norm == _cand_artist:
+                    _best_artist = 1.0
+                    break
+                else:
+                    _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
+            # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
+            # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
+            # 10 chars with 2 coincidental char matches), which bypassed the
+            # strict `< 0.4` check and let Tom Walker through as a candidate
+            # for a Maduk track. The word-boundary containment check above
+            # already short-circuits legitimate formatting variations
+            # ("Beatles"/"The Beatles", "Maduk"/"Maduk feat. X") to sim=1.0,
+            # so falling to SequenceMatcher means the strings are genuinely
+            # different. 0.5 gives a safer buffer without blocking real
+            # matches that would have scored above 0.85 anyway.
+            if r.username == 'youtube':
+                if _best_artist < 0.5:
+                    # No artist evidence (random channel, unparsable video
+                    # title). The title must then carry the WHOLE identity:
+                    # near-exact confidence AND no significant words beyond
+                    # the wanted title/artist + upload noise. This is what
+                    # rejects "We Were Shameless" (the extra 'we'), reaction
+                    # videos and mislabeled uploads while keeping legit
+                    # "Song by Artist (lyrics)"-style uploads alive.
+                    if confidence < 0.75 or not _title_words_are_expected(
+                            r.title, expected_title, expected_artists):
+                        logger.info(
+                            "[%s] Rejecting candidate without artist evidence: "
+                            "expected=%s candidate_artist=%r title=%r conf=%.2f",
+                            source_label, list(expected_artists),
+                            _cand_artist_raw, r.title or '', confidence,
+                        )
+                        continue
+            elif r.username in ('torrent', 'usenet') and _best_artist < 0.5:
+                logger.info(
+                    "[%s] Rejecting candidate due to artist mismatch: "
+                    "expected=%s candidate=%r title=%r",
+                    source_label,
+                    list(expected_artists),
+                    _cand_artist_raw,
+                    r.title or '',
+                )
+                continue
+            elif _best_artist < 0.5 and confidence < 0.85:
+                continue
+
+        r.confidence = confidence
+        r.version_type = 'wrong_version' if is_wrong_version else match_type
+        if confidence >= 0.60:
+            scored.append(r)
+
+    if scored:
+        # Sort by confidence (best match first)
+        scored.sort(key=lambda x: x.confidence, reverse=True)
+        best = scored[0]
+        logger.info(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
+              f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")
+        return scored
+    return []
+
+
+def _match_filename_candidates(results, spotify_track, profile_id=None):
+    """Soulseek path matcher, or YouTube structured-score fallthrough."""
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
     initial_candidates = matching_engine.find_best_slskd_matches_enhanced(spotify_track, results, max_peer_queue=_max_q)
@@ -370,12 +472,20 @@ def get_valid_candidates(results, spotify_track, query, profile_id=None):
         return []
 
     # Skip quality filtering for streaming source results that somehow got here
-    is_streaming_source = initial_candidates[0].username in _streaming_sources if initial_candidates else False
+    is_streaming_source = initial_candidates[0].username in _STREAMING_USERNAMES if initial_candidates else False
 
     if is_streaming_source:
         source_label = initial_candidates[0].username.title()
-        logger.info(f"[{source_label}] Skipping quality filter - streaming source handles quality internally")
-        quality_filtered_candidates = initial_candidates
+        if any(getattr(c, 'username', None) == 'youtube' for c in initial_candidates):
+            quality_filtered_candidates = _filter_youtube_by_quality(
+                initial_candidates, profile_id,
+            )
+            if not quality_filtered_candidates:
+                logger.error("[Quality Filter] No YouTube candidates match quality profile - download will fail per user preferences")
+                return []
+        else:
+            logger.info(f"[{source_label}] Skipping quality filter - streaming source handles quality internally")
+            quality_filtered_candidates = initial_candidates
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)

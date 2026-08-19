@@ -138,6 +138,41 @@ class DeezerDownloadClient(DownloadSourcePlugin):
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
 
+    def _api_get(self, url: str, **kwargs):
+        """GET a PUBLIC Deezer API url against the shared budget.
+
+        Every api.deezer.com call in this client goes through here so the quota
+        is spent in one place — the alternative is the same throttle dance
+        copy-pasted at six sites, which is how these calls came to bypass it in
+        the first place (each had its own ``time.sleep`` or none at all, and the
+        call tracker saw none of them).
+
+        NOT for ``_GW_API``, ``_MEDIA_API`` or the CDN media stream — those are
+        different infrastructure with their own limits, not this quota.
+
+        Returns the response, or None when the shared budget declined the slot.
+        A quota error is reported so every other Deezer caller backs off too;
+        Deezer answers HTTP 200 with the failure in the body, so checking
+        ``resp.ok`` alone sails straight past it.
+        """
+        from core.deezer_throttle import wait_for_slot, is_quota_error, note_quota_exceeded
+        if not wait_for_slot():
+            logger.warning("Deezer budget declined a slot for %s", url)
+            return None
+        try:
+            from core.api_call_tracker import api_call_tracker
+            api_call_tracker.record_call('deezer')
+        except Exception as e:   # noqa: BLE001 - accounting must never break a fetch
+            logger.debug("deezer call tracking skipped: %s", e)
+        resp = self._session.get(url, **kwargs)
+        try:
+            if getattr(resp, 'ok', False) and is_quota_error(resp.json()):
+                note_quota_exceeded()
+                logger.warning("Deezer quota exceeded on %s — every caller backing off", url)
+        except Exception as e:   # noqa: BLE001 - a non-json body is the caller's problem, not ours
+            logger.debug("deezer quota probe skipped for %s: %s", url, e)
+        return resp
+
     def set_engine(self, engine):
         """Engine callback — wires the central thread worker + state store."""
         self._engine = engine
@@ -324,7 +359,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         index = 0
         while True:
             try:
-                resp = self._session.get(
+                resp = self._api_get(
                     f'https://api.deezer.com/user/{user_id}/playlists',
                     params={'index': index, 'limit': 100},
                     timeout=15
@@ -368,7 +403,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         index = 0
         while len(artists) < limit:
             try:
-                resp = self._session.get(
+                resp = self._api_get(
                     f'https://api.deezer.com/user/{user_id}/artists',
                     params={'index': index, 'limit': min(100, limit - len(artists))},
                     timeout=15
@@ -409,7 +444,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         index = 0
         while len(albums) < limit:
             try:
-                resp = self._session.get(
+                resp = self._api_get(
                     f'https://api.deezer.com/user/{user_id}/albums',
                     params={'index': index, 'limit': min(100, limit - len(albums))},
                     timeout=15
@@ -444,10 +479,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         logger.info(f"Fetched {len(albums)} favorite albums from Deezer (ARL)")
         return albums
 
-    def get_playlist_tracks(self, playlist_id: str) -> Optional[dict]:
+    def get_playlist_tracks(self, playlist_id: str, progress_cb=None) -> Optional[dict]:
         """Fetch full playlist details with tracks via public API (ARL cookies grant private access)."""
         try:
-            resp = self._session.get(
+            resp = self._api_get(
                 f'https://api.deezer.com/playlist/{playlist_id}',
                 timeout=15
             )
@@ -463,7 +498,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # Paginate if needed
             while len(raw_tracks) < total_tracks:
                 idx = len(raw_tracks)
-                page_resp = self._session.get(
+                page_resp = self._api_get(
                     f'https://api.deezer.com/playlist/{playlist_id}/tracks',
                     params={'index': idx, 'limit': 400},
                     timeout=15
@@ -495,7 +530,26 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 cache = get_metadata_cache()
             except Exception:
                 cache = None
-            for aid in album_ids:
+            # A 1200-track playlist resolves ~900 unique albums here, and every
+            # one of them is a rate-limited request. Without narration the user
+            # sees a spinner for minutes and cannot tell working from hung —
+            # which is exactly how this was reported ("seems to hang", "sit here
+            # for several minutes doing nothing"). Best-effort: a progress
+            # callback must never be able to break the fetch.
+            def _say(done, total, phase):
+                if not progress_cb:
+                    return
+                try:
+                    progress_cb(done, total, phase)
+                except Exception as _cb_err:   # noqa: BLE001
+                    logger.debug("playlist progress callback failed: %s", _cb_err)
+
+            _total_albums = len(album_ids)
+            _say(0, _total_albums, 'release dates')
+            for _done, aid in enumerate(album_ids, start=1):
+                # every 5th keeps the socket quiet without the count looking stuck
+                if _done % 5 == 0 or _done == _total_albums:
+                    _say(_done, _total_albums, 'release dates')
                 # Check metadata cache first
                 if cache:
                     try:
@@ -507,9 +561,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 # Cache miss — fetch from API
                 if aid not in album_release_dates:
                     try:
-                        time.sleep(0.3)  # Respect rate limits
-                        a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
-                        if a_resp.ok:
+                        # Shared budget (was a private 0.3s sleep that nothing
+                        # else could see or account for) — _api_get owns the
+                        # throttle, the tracking and the quota check.
+                        a_resp = self._api_get(f'https://api.deezer.com/album/{aid}', timeout=10)
+                        if a_resp is not None and a_resp.ok:
                             a_data = a_resp.json()
                             album_release_dates[aid] = a_data.get('release_date', '')
                             # Store in metadata cache for future use
@@ -524,8 +580,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             # album object's embedded tracks both omit track_position). Cache-first.
             try:
                 from core.deezer_client import resolve_album_track_positions
+                _say(0, _total_albums, 'track numbers')
                 track_positions = resolve_album_track_positions(
-                    self._session, 'https://api.deezer.com', album_ids, cache)
+                    self._session, 'https://api.deezer.com', album_ids, cache,
+                    progress_cb=lambda d, t: _say(d, t, 'track numbers'))
             except Exception as e:
                 logger.debug("resolve deezer album track positions: %s", e)
 
@@ -630,7 +688,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             return [], []
 
         try:
-            resp = self._session.get(
+            resp = self._api_get(
                 'https://api.deezer.com/search',
                 params={'q': query, 'limit': 30},
                 # #1056: user override from Settings → Downloads; unset = the

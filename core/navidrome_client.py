@@ -480,9 +480,13 @@ class NavidromeClient(MediaServerClient):
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Navidrome API request failed for {url}: {e}")
+            # never leave a STALE message (a previous call's 'empty') for the
+            # verified-empty check to misread as this call's answer
+            self.last_api_error = f"request failed: {e}"
             return None
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Navidrome response: {e}")
+            self.last_api_error = f"unparseable response: {e}"
             return None
 
     def is_connected(self) -> bool:
@@ -519,7 +523,16 @@ class NavidromeClient(MediaServerClient):
             return False
 
         folders = self._fetch_music_folders()
-        known = {str(f.get('id')) for f in folders if isinstance(f, dict)}
+        # _fetch_music_folders normalizes to {'title', 'key'} (the settings
+        # UI's shape) — NOT the raw subsonic {'id', 'name'}. Rounds 2-3 read
+        # f['id'] here, so with a folder SELECTED `known` was always {'None'}
+        # and this leg could never verify: 5BILLION kept getting the abort
+        # toast through three "fixed" rounds, on exactly the config a user who
+        # once had a library will have. The tests stayed green because their
+        # fixtures stubbed id-shaped folders — the same wrong key as the
+        # reader. 'id' is still read second in case another producer appears.
+        known = {str(f.get('key') if f.get('key') is not None else f.get('id'))
+                 for f in folders if isinstance(f, dict)}
         if self.music_folder_id and str(self.music_folder_id) in known:
             logger.info(
                 "Navidrome: selected library %s exists but is empty (%s said %r) "
@@ -1071,6 +1084,15 @@ class NavidromeClient(MediaServerClient):
             if playlist.title.lower() == name.lower():
                 return playlist
         return None
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist by id (subsonic deletePlaylist), same call the
+        backup path has always made inline."""
+        result = self._make_request('deletePlaylist', {'id': playlist_id})
+        if result is not None:
+            logger.info(f"Deleted Navidrome playlist {playlist_id}")
+            return True
+        return False
 
     def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
         """Upload a cover image to a Navidrome playlist from a URL.

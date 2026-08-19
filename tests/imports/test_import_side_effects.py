@@ -131,6 +131,59 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["quality_profile_explicit"] == 0
 
 
+def test_record_soulsync_library_entry_estimates_opus_bitrate(tmp_path, monkeypatch):
+    """mutagen.oggopus has no bitrate field. The library enhanced table was
+    storing 0 and rendering a red dash, while completed-download chips
+    already estimated from size/duration."""
+    conn = _make_soulsync_db()
+    fake_db = _FakeDB(conn)
+    final_path = tmp_path / "Autumnal Embrace.opus"
+    final_path.write_bytes(b"x" * 40_000)
+
+    class _Info:
+        length = 2.0
+        channels = 2
+
+    class _Opus:
+        def __init__(self, _p, easy=False):
+            self.info = _Info()
+            self.tags = None
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: fake_db)
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
+    )
+    monkeypatch.setattr("mutagen.File", _Opus)
+
+    import core.genre_filter as genre_filter
+
+    monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: genres)
+
+    context = {
+        "source": "spotify",
+        "artist": {"id": "sp-artist", "name": "Skyforest"},
+        "album": {"id": "sp-album", "name": "Autumn's Dawn"},
+        "track_info": {
+            "id": "sp-track",
+            "name": "Autumnal Embrace",
+            "track_number": 3,
+            "duration_ms": 2000,
+            "_source": "spotify",
+        },
+        "original_search_result": {"title": "Autumnal Embrace", "_source": "spotify"},
+        "_final_processed_path": str(final_path),
+    }
+
+    side_effects.record_soulsync_library_entry(
+        context, {"name": "Skyforest", "genres": []}, {"is_album": True, "album_name": "Autumn's Dawn"},
+    )
+
+    track_row = _track_row(conn)
+    assert track_row["bitrate"] == 160
+
+
 def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, monkeypatch):
     """Whatever the pipeline resolved for this item (a wishlist row's or
     Auto-Import's own profile override) must land on the library track row —

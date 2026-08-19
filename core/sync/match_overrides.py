@@ -127,6 +127,33 @@ def record_manual_match(
         return False
 
 
+def _cache_row_is_user_confirmed(cached: Dict[str, Any]) -> bool:
+    """Is this ``sync_match_cache`` row a USER-CONFIRMED pairing, or one the
+    sync's auto-matcher wrote for its own reuse?
+
+    The table holds both. ``record_manual_match`` writes confidence=1.0; the
+    sync fast-path stores every auto-match it makes at its real score (>=0.7,
+    ``services/sync_service.py``) so the next run can skip re-matching. The
+    compare view's pass 0 documented itself as applying "user-confirmed match
+    overrides ... persisted at confidence=1.0" but never actually checked, so a
+    0.75 auto-match was pinned as if the user had confirmed it (#1159,
+    AfonsoG6): the bad pairing came back on every load, and — because a cache
+    hit that points into the playlist short-circuits the durable path — the
+    user's SAVED manual match was never even consulted. His words: "almost as
+    if the 'saved matches list' is not being consulted."
+
+    A row with no readable confidence is trusted: only a numeric score below
+    1.0 proves the row came from the auto-matcher, and the sync always writes
+    one. (Stub DBs in tests return rows without the key.)"""
+    raw = cached.get("confidence")
+    if raw is None:
+        return True
+    try:
+        return float(raw) >= 1.0
+    except (TypeError, ValueError):
+        return True
+
+
 def resolve_override_server_id(
     db: Any,
     profile_id: int,
@@ -153,6 +180,10 @@ def resolve_override_server_id(
     except Exception:
         cached = {}
     cached_id = cached.get("server_track_id")
+    if cached_id is not None and not _cache_row_is_user_confirmed(cached):
+        # An auto-match the sync cached for its own reuse — not a user
+        # confirmation, so it must not pin the pairing here (#1159).
+        cached_id = None
     if cached_id is not None:
         if str(cached_id) in valid_server_ids:
             return cached_id
@@ -240,6 +271,10 @@ def build_bulk_override_lookup(
         sid = str(source_track_id)
         cached = cache_map.get(sid) or {}
         cached_id = cached.get("server_track_id")
+        if cached_id is not None and not _cache_row_is_user_confirmed(cached):
+            # Auto-match reuse row, not a user confirmation (#1159) — fall
+            # through to the durable manual match / normal matching.
+            cached_id = None
         if cached_id is not None:
             if str(cached_id) in valid_server_ids:
                 return cached_id

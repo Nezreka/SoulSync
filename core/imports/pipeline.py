@@ -1071,6 +1071,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 reason_code='blocked_by_audio_guard',
                 message=f"Not run because the audio guard failed: {audio_reason}",
             )
+            # Stashed for the verification wrapper, which runs this pipeline
+            # with task_id popped out of the context (see _mark_task_quarantined)
+            # and so must do the retry/fail marking itself afterward.
+            context['_quarantine_reject_reason'] = f"Audio guard: {audio_reason}"
             try:
                 quarantine_path = move_to_quarantine(
                     file_path, context, audio_reason, automation_engine,
@@ -1113,7 +1117,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # audio quality is recorded on the context (→ quarantine sidecar) for
         # EVERY trigger, so it's known when reviewing/approving any quarantined
         # file. force_import still never fires on a quality mismatch.
-        context['_audio_quality'] = get_audio_quality_string(file_path)
+        context['_audio_quality'] = get_audio_quality_string(
+            file_path,
+            claimed_format=(get_import_original_search(context) or {}).get('quality'),
+            claimed_bitrate=(get_import_original_search(context) or {}).get('bitrate'),
+        )
         if context['_audio_quality']:
             logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
@@ -1210,6 +1218,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     )
 
                 context['_bitdepth_rejected'] = True
+                # Same wrapper stash as the audio guard above.
+                context['_quarantine_reject_reason'] = f"Quality filter: {rejection_reason}"
                 task_id = context.get('task_id')
                 batch_id = context.get('batch_id')
                 with matched_context_lock:
@@ -2292,20 +2302,46 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             _notify_download_completed(batch_id, task_id, success=False)
             return
 
-        # Quality / audio-guard quarantine. Unlike acoustid/integrity (whose
-        # retry+fail is driven by THIS wrapper below), the inner pipeline fully
-        # owns the quality and audio-guard outcome: it quarantines the file and
-        # then either re-queues the next-best candidate or marks the task failed
-        # and notifies. The wrapper must NOT continue to the "assume success"
-        # fall-through — that marked the quarantined file Completed, so the same
-        # track showed in BOTH Completed and Quarantine (e.g. an MP3-VBR rejected
-        # by a FLAC-only profile). It must also NOT mark it failed here, which
-        # would clobber a successful next-candidate retry. Just return.
+        # Quality / audio-guard quarantine. The wrapper must NOT continue to the
+        # "assume success" fall-through — that marked the quarantined file
+        # Completed, so the same track showed in BOTH Completed and Quarantine
+        # (e.g. an MP3-VBR rejected by a FLAC-only profile).
+        #
+        # And the retry/fail marking has to happen HERE, not in the inner
+        # pipeline: this wrapper pops task_id/batch_id out of the context before
+        # the inner run (line ~1434), so the inner branch's own
+        # ``context.get('task_id')`` was None — its requeue returned False
+        # unfired and its failed-marking no-op'd. This code used to just return
+        # on the claim that "the inner pipeline already handled retry/fail",
+        # which is only ever true for DIRECT callers; through the wrapper the
+        # task stayed in post_processing until Stuck Detection V2 reaped it at
+        # 1800s, wedging a download slot for half an hour per quarantine
+        # (Sokhi's "stuck on Processing" report, Aug 16). Same stash-and-apply
+        # pattern _mark_task_quarantined already uses for the entry id.
         if context.get('_bitdepth_rejected') or context.get('_silence_rejected'):
+            trigger = 'quality' if context.get('_bitdepth_rejected') else 'silence'
+            reason = context.get('_quarantine_reject_reason') or \
+                f"{'Quality' if trigger == 'quality' else 'Audio'} guard rejected the file"
+            # Requeue-first, fail-second — the same order the direct path uses.
+            # A successful requeue means the task is live again on its next-best
+            # candidate, so it must not be marked failed.
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
+                logger.info(
+                    f"Task {task_id} quarantined by the {trigger} guard — "
+                    f"retrying next-best candidate"
+                )
+                return
             logger.info(
-                f"Task {task_id} quarantined by the quality/audio guard — inner "
-                f"pipeline already handled retry/fail; wrapper not marking completed"
+                f"Task {task_id} quarantined by the {trigger} guard with no "
+                f"retry candidate — marking failed: {reason}"
             )
+            if task_id:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = reason
+            if task_id and batch_id:
+                _notify_download_completed(batch_id, task_id, success=False)
             return
 
         if context.get('_race_guard_failed'):

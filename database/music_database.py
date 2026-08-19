@@ -2,6 +2,7 @@
 
 import sqlite3
 import json
+import string
 import logging
 import os
 import re
@@ -8247,8 +8248,17 @@ class MusicDatabase:
                     file_path = track_obj.path
                 if bitrate is None and getattr(track_obj, 'bitRate', None):
                     bitrate = track_obj.bitRate
-                if file_path is None and getattr(track_obj, 'suffix', None):
-                    file_path = f"{track_obj.title}.{track_obj.suffix}"
+                # Do NOT fabricate a bare filename when path is missing —
+                # the Subsonic API can omit 'path' transiently (e.g. during
+                # a Navidrome library rescan).  A bogus relative name like
+                # "My Song.flac" would overwrite the correct value on the
+                # next UPDATE.  Leave file_path as None instead; the
+                # COALESCE guard in the UPDATE statement protects the
+                # existing row.
+                # File size: Jellyfin / Navidrome / SoulSync-standalone
+                # all set track_obj.file_size on their wrapper class.
+                # Plex came in via the media.parts[0].size path above —
+                # don't clobber that.
                 if file_size is None and hasattr(track_obj, 'file_size'):
                     _wrapper_size = getattr(track_obj, 'file_size', None)
                     if isinstance(_wrapper_size, int) and _wrapper_size > 0:
@@ -8780,17 +8790,44 @@ class MusicDatabase:
         rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
         return self._rows_to_tracks(rows, server_source=server_source)
 
+    @staticmethod
+    def _fuzzy_terms(text: str) -> List[str]:
+        """Words to fuzzy-match on, with punctuation trimmed off each END.
+
+        Splitting on whitespace alone leaves punctuation glued to the token, so
+        "Would've, Could've, Should've" asked the database for ``%would've,%``
+        — a title only matches if the comma is there too. The LAST word is the
+        only one without trailing punctuation, so it was the only one matching
+        broadly, and the scoring below then couldn't tell the real track from
+        anything else sharing that one word. That is #1159: searching for
+        "Would've, Could've, Should've" returned other "Should've" songs and
+        buried the real one at rank 3, because a library file tagged without
+        the commas matched one term where it should have matched three.
+
+        Trimming ENDS only, so internal punctuation survives — N.W.A, P!nk and
+        "pepper's" have to stay intact. Strictly broader than before: the column
+        side keeps its punctuation (unidecode_lower only lowercases), so a
+        trimmed term matches everything the untrimmed one did and more. It can
+        raise a row's score, never lower it.
+        """
+        terms = []
+        for word in (text or '').split():
+            trimmed = word.strip().strip(string.punctuation)
+            if len(trimmed) >= 3:
+                terms.append(trimmed)
+        return terms
+
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
                                   server_source: Optional[str] = None):
         """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
         # Get broader results by searching for individual words
         search_terms = []
         if title:
-            title_words = [w.strip() for w in self._normalize_for_comparison(title).split() if len(w.strip()) >= 3]
+            title_words = self._fuzzy_terms(self._normalize_for_comparison(title))
             search_terms.extend(title_words)
 
         if artist:
-            artist_words = [w.strip() for w in self._normalize_for_comparison(artist).split() if len(w.strip()) >= 3]
+            artist_words = self._fuzzy_terms(self._normalize_for_comparison(artist))
             search_terms.extend(artist_words)
 
         if not search_terms:
@@ -14971,7 +15008,7 @@ class MusicDatabase:
                     cursor.execute(f"""
                         SELECT t.*, t.spotify_id AS spotify_track_id,
                                f.path AS file_path, f.bitrate AS bitrate,
-                               t.added_at AS created_at
+                               f.size AS file_size, t.added_at AS created_at
                         FROM lib2_tracks t
                         LEFT JOIN lib2_track_files f
                                ON f.track_id = t.id AND f.is_primary = 1
@@ -14980,7 +15017,8 @@ class MusicDatabase:
                         ORDER BY t.track_number, t.title
                     """, (album_data['id'],))
                     track_rows = cursor.fetchall()
-                    album_data['tracks'] = [dict(tr) for tr in track_rows]
+                    from core.imports.file_ops import fill_missing_track_bitrate
+                    album_data['tracks'] = [fill_missing_track_bitrate(dict(tr)) for tr in track_rows]
 
                     # No record-type guess from the title any more: legacy left
                     # the column empty and fell back to substring-sniffing,
@@ -16495,13 +16533,41 @@ class MusicDatabase:
     # Wing It Pool: two states on a mirrored track's extra_data. Both key off wing_it_fallback,
     # which is set by the wing-it stub and SURVIVES a manual fix (update_mirrored_track_extra_data
     # merges rather than replaces), so the only difference is the manual_match flag:
-    #   needs attention : wing_it_fallback=true AND NOT manual_match  (unverified guess)
+    #   needs attention : still a stub AND NOT manual_match  (unverified guess)
     #   resolved        : wing_it_fallback=true AND manual_match=true (user fixed it — incl. fixes
     #                     made before this feature existed, since the flag was never wiped)
-    _WING_IT_ATTENTION = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
-                          "AND mpt.extra_data NOT LIKE '%\"manual_match\": true%'")
-    _WING_IT_RESOLVED = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
-                         "AND mpt.extra_data LIKE '%\"manual_match\": true%'")
+    #
+    # That the flag survives is what makes "resolved" work, but it also means the
+    # flag alone cannot answer "is this STILL a guess?". Discovery re-runs every
+    # sync, and a track that wing-it'd once and matched at 0.99 on a later pass
+    # keeps the flag — the writer only ever sets it, and the merge preserves what
+    # it omits. So "needs attention" tests the thing that actually regenerates
+    # each pass: whether matched_data is still a stub. Stub ids carry the
+    # ``wing_it_`` prefix (see core.discovery.wing_it.stub_track_id); a real
+    # match overwrites matched_data wholesale, prefix and all.
+    #
+    # json_extract, not a raw substring LIKE. Scoping to $.matched_data.id —
+    # rather than matching `"id": "wing_it_..."` anywhere in the blob — is what
+    # rules out a same-shaped key elsewhere in the document ever being mistaken
+    # for the stub id. json_extract yields SQL NULL for a missing path/row,
+    # which the comparisons below treat as "not a match" rather than erroring —
+    # but for a MALFORMED value (not just an absent key) it raises instead,
+    # and SQLite evaluates that error for the whole statement, not just the
+    # offending row: one corrupt extra_data would blank the entire pool through
+    # the try/except below, where the LIKE version it replaced would have just
+    # silently not matched that row's garbage text. json_valid() as the first
+    # AND-clause is what keeps a single bad row's failure scoped to that row.
+    _WING_IT_ATTENTION = (
+        "json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.wing_it_fallback') = 1 "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') LIKE 'wing\\_it\\_%' ESCAPE '\\' "
+        "AND IFNULL(json_extract(mpt.extra_data, '$.manual_match'), 0) != 1"
+    )
+    _WING_IT_RESOLVED = (
+        "json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.wing_it_fallback') = 1 "
+        "AND json_extract(mpt.extra_data, '$.manual_match') = 1"
+    )
 
     def get_wing_it_pool(self, profile_id: int = None, playlist_id: int = None,
                          resolved: bool = False) -> list:

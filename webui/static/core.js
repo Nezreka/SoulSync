@@ -933,6 +933,14 @@ function initializeWebSocket() {
         // Purely additive; the vanilla handling above is untouched.
         window.dispatchEvent(new CustomEvent('ss:discovery-progress', { detail: data }));
     });
+    // Loading a big Deezer playlist resolves ~900 albums over rate-limited
+    // requests and legitimately takes minutes. Re-broadcast so the sync page's
+    // React card can say WHICH album it is on instead of showing a bare
+    // spinner — same ss: seam as the frames above, `socket` being module-scoped
+    // here and unreachable from a route.
+    socket.on('deezer:playlist_progress', (data) => {
+        window.dispatchEvent(new CustomEvent('ss:deezer-playlist-progress', { detail: data }));
+    });
     // Unscoped heartbeat for the Auto-Sync tile: sync:progress above is
     // room-scoped (only playlist watchers receive it), so the dashboard
     // relies on this 1s pulse that fires while ANY pipeline work runs —

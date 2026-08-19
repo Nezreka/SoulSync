@@ -30,6 +30,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.discovery.canonical import canonical_best_score
+
 logger = logging.getLogger(__name__)
 
 _UNKNOWN_ARTIST = 'Unknown Artist'
@@ -179,6 +181,33 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                 min_confidence = 0.9
                 source_duration = track.get('duration_ms', 0) or 0
 
+                # YouTube Music restates a localized title in Latin next to the
+                # original ("晴る - Sunny"), and plain YouTube prepends the channel
+                # ("Nicholas Shaw - Castaway"). Providers index only the plain
+                # form. The canonical pair is needed here (not just inside
+                # canonical_best_score) because Strategy 5 SEARCHES with it.
+                try:
+                    from core.text.source_title import canonical_source_track
+                    canon_title, canon_artist = canonical_source_track(cleaned_title, cleaned_artist)
+                except Exception as e:
+                    logger.debug(f"Canonicalization failed for '{cleaned_title}': {e}")
+                    canon_title, canon_artist = cleaned_title, cleaned_artist
+                has_canon = (canon_title, canon_artist) != (cleaned_title, cleaned_artist)
+
+                def _score_best(
+                    results,
+                    title=cleaned_title,
+                    artist=cleaned_artist,
+                    duration_ms=source_duration,
+                ):
+                    """Score `results` both ways, keeping the better confidence.
+
+                    title/artist/duration_ms are bound as defaults, not read from
+                    the enclosing scope — this closure is (re)defined on every
+                    loop iteration and a late-binding read would see whichever
+                    track happened to be current when it was finally called."""
+                    return canonical_best_score(deps, title, artist, duration_ms, results)
+
                 # Strategy 1: Use matching_engine search queries
                 try:
                     temp_track = type('TempTrack', (), {
@@ -207,9 +236,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                             continue
 
                         # Score all results using the matching engine
-                        match, confidence, match_idx = deps.discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, search_results
-                        )
+                        match, confidence = _score_best(search_results)
 
                         if match and confidence > best_confidence and confidence >= min_confidence:
                             best_confidence = confidence
@@ -242,9 +269,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                         query = f"{cleaned_title} {cleaned_artist}"
                         fallback_results = itunes_client.search_tracks(query, limit=5)
                     if fallback_results:
-                        match, confidence, _ = deps.discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, fallback_results
-                        )
+                        match, confidence = _score_best(fallback_results)
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
@@ -261,9 +286,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                     else:
                         fallback_results = itunes_client.search_tracks(query, limit=5)
                     if fallback_results:
-                        match, confidence, _ = deps.discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, fallback_results
-                        )
+                        match, confidence = _score_best(fallback_results)
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
@@ -278,13 +301,32 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                     else:
                         extended_results = itunes_client.search_tracks(query, limit=50)
                     if extended_results:
-                        match, confidence, _ = deps.discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, extended_results
-                        )
+                        match, confidence = _score_best(extended_results)
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
                             logger.info(f"Strategy 4 YouTube match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+
+                # Strategy 5: query with the canonical title/artist. Strategies 1-4
+                # all *search* with the raw pair — scoring the canonical form only
+                # helps when the provider already returned the right release, and
+                # "晴る - Sunny" as a query returns nothing to score. Asking for
+                # "Sunny" is what actually surfaces the track.
+                if not matched_track and has_canon:
+                    logger.info(f"YouTube Strategy 5: Canonical retry: '{canon_artist}' - '{canon_title}'")
+                    query = f"{canon_artist} {canon_title}"
+                    if use_spotify:
+                        canon_results = deps.spotify_client.search_tracks(query, limit=10)
+                    else:
+                        canon_results = itunes_client.search_tracks(query, limit=10)
+                    if canon_results:
+                        match, confidence = _score_best(canon_results)
+                        if match and confidence >= min_confidence:
+                            matched_track = match
+                            best_confidence = confidence
+                            if use_spotify and match.id:
+                                best_raw_track = deps.get_metadata_cache().get_entity('spotify', 'track', match.id)
+                            logger.info(f"Strategy 5 YouTube match (canonical): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Create result entry. yt_artist falls back to the matched artist when
                 # YouTube/recovery left it "Unknown Artist" but we matched confidently (#909).

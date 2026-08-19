@@ -47,6 +47,7 @@ import {
   compareSourceIcon,
   compareSourceLabel,
   compareStats,
+  deleteServerPlaylist,
   exportServerM3u,
   fetchComparePlaylist,
   formatDurationMs,
@@ -305,6 +306,7 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
   const [search, setSearch] = useState<{ index: number; mode: ServerSearchMode } | null>(null);
   const [showOrder, setShowOrder] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const sourceScroll = useRef<HTMLDivElement>(null);
   const serverScroll = useRef<HTMLDivElement>(null);
@@ -410,6 +412,8 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
                 playlist.name,
                 track.server_track?.id,
                 newTrackId,
+                track.source_track,
+                mirrored?.source,
               )
             : await addServerTrack(
                 playlistIdRef.current,
@@ -554,6 +558,41 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
     }
   }, [playlist.name, tracks]);
 
+  /**
+   * Delete the whole server playlist. The id sent is playlistIdRef.current,
+   * not playlist.id — every edit in this session may have recreated the
+   * playlist under a new id, and the ref is where those land. On success the
+   * editor closes via onBack(); the list view remounts and re-fetches on
+   * mount, so the deleted playlist is gone from it with no extra wiring.
+   */
+  const deletePlaylist = useCallback(async () => {
+    // The SoulSync confirm dialog, never window.confirm.
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Remove from Server',
+      message: `Delete the playlist "${playlist.name}" from the server? This does not touch the music files, or any mirrored source playlist.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      const response = await deleteServerPlaylist(playlistIdRef.current, playlist.name);
+      if (!response.success) {
+        window.showToast?.(response.error || 'Failed to delete playlist', 'error');
+        return;
+      }
+      window.showToast?.(`Deleted from server: ${playlist.name}`, 'success');
+      onBack();
+    } catch (error) {
+      window.showToast?.(
+        `Delete failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }, [playlist.name, onBack]);
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -658,6 +697,18 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
           onClick={() => void exportM3u()}
         >
           {exporting ? '⏳ Exporting…' : '📋 Export M3U'}
+        </button>
+        {/* Sits beside export, same pill styling. Works on any server
+            playlist, SoulSync-made or not. */}
+        <button
+          type="button"
+          className="discog-filter server-editor-delete"
+          id="server-editor-delete-btn"
+          disabled={deleting}
+          title="Delete this playlist from the media server"
+          onClick={() => void deletePlaylist()}
+        >
+          {deleting ? '⏳ Removing…' : '🗑️ Remove from Server'}
         </button>
       </div>
 

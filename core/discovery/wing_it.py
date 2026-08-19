@@ -19,6 +19,22 @@ from typing import Any
 
 STUB_ID_PREFIX = "wing_it_"
 
+# Names that carry no signal — searching for them finds noise, not the track.
+# Compared case- and whitespace-insensitively against artist AND title.
+_PLACEHOLDER_NAMES = frozenset({
+    "",
+    "-",
+    "n/a",
+    "none",
+    "null",
+    "unknown",
+    "unknown artist",
+    "unknown title",
+    "unknown track",
+    "va",
+    "various artists",
+})
+
 
 def stub_track_id(artist_name: Any, track_name: Any) -> str:
     """Deterministic id for the Wing It stub of ``artist_name`` / ``track_name``.
@@ -39,8 +55,45 @@ def is_stub_id(value: Any) -> bool:
     return str(value or "").startswith(STUB_ID_PREFIX)
 
 
+def _is_placeholder(value: Any) -> bool:
+    return " ".join(str(value or "").split()).casefold() in _PLACEHOLDER_NAMES
+
+
+def stub_is_searchable(artist_name: Any, track_name: Any) -> bool:
+    """Is there enough here to search a source with?
+
+    "No catalogue match" is not the same as "no metadata". A stub built from a
+    YouTube Music catalog response carries the real artist, title and duration —
+    it just has no provider *release* behind it. A stub built from a nameless
+    entry carries nothing. Only the latter is unsearchable."""
+    return not _is_placeholder(artist_name) and not _is_placeholder(track_name)
+
+
+def wishlist_guesses_enabled() -> bool:
+    """Whether unverified Wing It guesses may be auto-added to the wishlist.
+
+    Off by default: a stub is a guess, and the Wing It Pool
+    (``MusicDatabase.get_wing_it_pool``) is the surface for resolving guesses by
+    hand. Turning it on suits libraries where the pool is too large to work
+    through — the guesses are then searched like any other wishlist track.
+    Isolated so tests can monkeypatch without a config manager."""
+    try:
+        from core.settings import config_manager
+        return config_manager.get("wishlist.wing_it_guesses", False) is True
+    except Exception:
+        return False
+
+
+def should_wishlist_stub(artist_name: Any, track_name: Any) -> bool:
+    """The single gate every "skip wing-it tracks" site shares, so they agree."""
+    return wishlist_guesses_enabled() and stub_is_searchable(artist_name, track_name)
+
+
 __all__ = [
     "STUB_ID_PREFIX",
     "is_stub_id",
+    "should_wishlist_stub",
+    "stub_is_searchable",
     "stub_track_id",
+    "wishlist_guesses_enabled",
 ]

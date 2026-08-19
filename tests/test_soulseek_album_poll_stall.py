@@ -35,10 +35,10 @@ class _Clock:
         self.now += seconds
 
 
-def _dl(username, filename, state, *, size=100, transferred=100):
+def _dl(username, filename, state, *, size=100, transferred=100, dl_id=None):
     return SimpleNamespace(
         username=username, filename=filename, state=state,
-        size=size, transferred=transferred,
+        size=size, transferred=transferred, id=dl_id,
     )
 
 
@@ -49,6 +49,11 @@ class _StubClient:
         self._states = states          # list of download-lists, one per poll; last repeats
         self._call = 0
         self._resolvable = set(resolvable)
+        self.cancelled = []            # (download_id, username, remove) per cancel
+
+    def cancel_download(self, download_id, username=None, remove=False):
+        self.cancelled.append((download_id, username, remove))
+        return True
 
     def get_all_downloads(self):
         i = min(self._call, len(self._states) - 1)
@@ -160,3 +165,42 @@ def test_clean_finish_unaffected():
     result, clock, _ = _run_poll(stub, tk)
     assert set(result) == {Path("/staged/01.flac"), Path("/staged/02.flac")}
     assert clock.now < 10.0      # resolves on the first couple polls
+
+
+def test_stalled_transfers_are_cancelled_in_slskd():
+    """Marking a stalled transfer failed only fixed OUR books. slskd kept the
+    enqueue alive, so the file sat at "Queued, Remotely" for hours after the
+    guard logged that it was handled (sassmastawillis, slskd 0.26) — and a
+    per-track retry that picks the same peer+file collides with the zombie
+    enqueue instead of issuing a fresh request. The guard must cancel+remove
+    each stalled transfer it fails, same as the monitor's retry path."""
+    tk = _keys("01.flac", "02.flac", "03.flac")
+    frozen = [
+        _dl("peer", "01.flac", "Completed", transferred=100, size=100, dl_id="id-1"),
+        _dl("peer", "02.flac", "Queued, Remotely", transferred=0, size=100, dl_id="id-2"),
+        _dl("peer", "03.flac", "Queued, Remotely", transferred=0, size=100, dl_id="id-3"),
+    ]
+    stub = _StubClient([frozen], resolvable={"01.flac"})
+    result, _, _ = _run_poll(stub, tk)
+
+    assert [os.path.basename(str(p)) for p in result] == ["01.flac"]
+    assert sorted(stub.cancelled) == [
+        ("id-2", "peer", True),
+        ("id-3", "peer", True),
+    ], "stalled transfers were not cancelled in slskd"
+
+
+def test_stalled_transfer_missing_from_slskd_list_skips_cancel():
+    """A transfer slskd DROPPED (absent from the downloads list) has no id to
+    cancel — the guard must still fail it locally without attempting (or
+    crashing on) a cancel."""
+    tk = _keys("01.flac", "02.flac")
+    # 01 completes; 02 never appears in slskd's list at all.
+    frozen = [
+        _dl("peer", "01.flac", "Completed", transferred=100, size=100, dl_id="id-1"),
+    ]
+    stub = _StubClient([frozen], resolvable={"01.flac"})
+    result, _, _ = _run_poll(stub, tk)
+
+    assert [os.path.basename(str(p)) for p in result] == ["01.flac"]
+    assert stub.cancelled == []

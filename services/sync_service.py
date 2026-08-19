@@ -7,6 +7,7 @@ from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Trac
 from core.media_server.types import TrackInfo
 from core.download_orchestrator import DownloadOrchestrator
 from core.matching_engine import MusicMatchingEngine, MatchResult
+from core.discovery.wing_it import is_stub_id, should_wishlist_stub
 
 logger = get_logger("sync_service")
 
@@ -549,9 +550,16 @@ class PlaylistSyncService:
                     for match_result in unmatched_tracks:
                         spotify_track = match_result.spotify_track
 
-                        # Skip wing-it fallback tracks — they have no real metadata
-                        # and should never be added to wishlist
-                        if str(spotify_track.id).startswith('wing_it_'):
+                        # Wing-it stubs are unverified guesses, so they stay off the
+                        # wishlist unless wishlist.wing_it_guesses says otherwise —
+                        # and then only when the source gave a real artist + title.
+                        # Normalize the artist first — should_wishlist_stub does a
+                        # placeholder-name check and a raw {"name": ...} dict would
+                        # stringify past it instead of matching "unknown artist".
+                        stub_artist = _artist_name((spotify_track.artists or [None])[0])
+                        if is_stub_id(spotify_track.id) and not should_wishlist_stub(
+                            stub_artist, spotify_track.name,
+                        ):
                             logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
                             continue
 

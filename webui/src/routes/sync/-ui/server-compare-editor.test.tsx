@@ -381,6 +381,12 @@ describe('ServerCompareEditor', () => {
       old_track_id: 's1',
       new_track_id: '42',
       playlist_name: 'Road Trip',
+      // #1159: the row's source identity rides along so the backend can
+      // persist the correction; `source` falls back to the mirrored provider.
+      source_track_id: '',
+      source_title: 'Alright',
+      source_artist: 'Kendrick',
+      source: 'tidal',
     });
   });
 
@@ -814,5 +820,62 @@ describe('#1128 manual-match note on missing rows', () => {
     payload = { success: true, tracks: [row({ has_manual_match: true })] };
     renderEditor();
     await waitFor(() => expect(screen.getByText('Find & add')).toBeInTheDocument());
+  });
+});
+
+describe('Remove from Server (whole-playlist delete)', () => {
+  it('confirms destructively, POSTs the delete, toasts, and closes via onBack', async () => {
+    const confirm = vi.fn(async () => true);
+    const toast = vi.fn();
+    const onBack = vi.fn();
+    vi.stubGlobal('showConfirmDialog', confirm);
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: true, message: 'Playlist deleted' };
+
+    renderEditor({ onBack });
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelector('#server-editor-delete-btn') as Element);
+
+    await waitFor(() => expect(onBack).toHaveBeenCalled());
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Remove from Server', destructive: true }),
+    );
+    const del = calls.find((c) => c.url.includes('/delete'));
+    expect(del?.url).toBe('/api/server/playlist/7/delete');
+    // the name rides along so a stale id can be re-resolved server-side
+    expect(del?.body).toEqual({ playlist_name: 'Road Trip' });
+    expect(toast).toHaveBeenCalledWith('Deleted from server: Road Trip', 'success');
+  });
+
+  it('a declined confirm writes nothing and stays open', async () => {
+    const onBack = vi.fn();
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => false),
+    );
+    renderEditor({ onBack });
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelector('#server-editor-delete-btn') as Element);
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.some((c) => c.url.includes('/delete'))).toBe(false);
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it('a failed delete toasts the error and does NOT close the editor', async () => {
+    const toast = vi.fn();
+    const onBack = vi.fn();
+    vi.stubGlobal(
+      'showConfirmDialog',
+      vi.fn(async () => true),
+    );
+    vi.stubGlobal('showToast', toast);
+    writePayload = { success: false, error: 'Playlist not found' };
+
+    renderEditor({ onBack });
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelector('#server-editor-delete-btn') as Element);
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Playlist not found', 'error'));
+    expect(onBack).not.toHaveBeenCalled();
   });
 });

@@ -212,9 +212,10 @@ def test_get_valid_candidates_defaults_to_no_profile(monkeypatch):
 
 
 def test_the_worker_reads_the_id_off_the_wishlist_row():
-    """task_worker pulls quality_profile_id off track_data and hands it to both
-    get_valid_candidates call sites (primary query loop + hybrid fallback)."""
+    """task_worker pulls quality_profile_id off track_data and hands it to
+    get_valid_candidates (primary query loop, YouTube catalog ytsearch
+    fallback, and hybrid fallback)."""
     source = Path('core/downloads/task_worker.py').read_text(encoding='utf-8')
     assert "_profile_id = track_data.get('quality_profile_id')" in source
-    assert source.count('deps.get_valid_candidates(') == 2
-    assert source.count('_profile_id)') >= 2
+    assert source.count('deps.get_valid_candidates(') == 3
+    assert source.count('_profile_id)') >= 4

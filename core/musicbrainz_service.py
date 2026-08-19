@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 import json
 import re
+import threading
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
@@ -781,3 +782,26 @@ class MusicBrainzService:
         """Update track with MusicBrainz recording ID"""
         self._record_mbid('track', track_id, mbid, status)
 
+
+
+# ── Shared instance ─────────────────────────────────────────────────────────
+# The service is stateless apart from its HTTP session and the rate limiter,
+# and the rate limiter is what makes sharing matter: MusicBrainz allows one
+# request per second per client, so every extra instance is another way to
+# exceed it. Callers that only need a lookup should use this rather than
+# constructing their own (core.acoustid_verification and
+# core.exports.export_sources each grew a private singleton before this
+# existed).
+_shared_service = None
+_shared_service_lock = threading.Lock()
+
+
+def get_musicbrainz_service():
+    """The process-wide MusicBrainzService, created on first use."""
+    global _shared_service
+    if _shared_service is None:
+        with _shared_service_lock:
+            if _shared_service is None:
+                from database.music_database import get_database
+                _shared_service = MusicBrainzService(get_database())
+    return _shared_service

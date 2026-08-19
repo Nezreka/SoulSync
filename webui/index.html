@@ -5,6 +5,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
+    <!-- Collapsed sidebar (#1155). Has to run HERE, before the stylesheet
+         resolves --sidebar-w, or the sidebar renders full width and snaps to the
+         icon width after paint — a visible jump of the whole page on every
+         navigation. Same reason the nav-section restore is inlined rather than
+         left to init.js. Kept tiny and dependency-free; nothing is loaded yet. -->
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('sidebarCollapsed') === '1') {
+                    document.documentElement.setAttribute('data-sidebar', 'collapsed');
+                }
+            } catch (e) { /* localStorage blocked — full width, no harm */ }
+        })();
+    </script>
     <!-- On-screen error console for devices with no devtools (phones/tablets).
          OFF unless the URL carries ?debug=1, so users never see it. Must stay the
          FIRST script in <head> — anything loaded before it can fail unseen. -->
@@ -308,6 +322,14 @@
                         <h1 class="app-name">SoulSync</h1>
                         <p class="app-subtitle">Music Sync & Manager</p>
                     </div>
+                    <!-- #1155: collapses the sidebar to icon width. Lives here, not in
+                         Settings, because it's a spatial preference you change while
+                         looking at the thing you're changing. -->
+                    <button type="button" class="sidebar-collapse-toggle" id="sidebar-collapse-toggle"
+                            onclick="toggleSidebarCollapsed()" title="Collapse sidebar"
+                            aria-label="Collapse sidebar" aria-expanded="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/><line x1="4" y1="4" x2="4" y2="20"/></svg>
+                    </button>
                 </div>
                 <!-- Music ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
                 <div class="side-toggle" role="group" aria-label="Switch between Music and Video">
@@ -4205,9 +4227,10 @@
                                         </select>
                                         <div class="setting-help-text">
                                             If YouTube shows "Sign in to confirm you're not a bot", select your browser here.
-                                            SoulSync will use your browser's YouTube cookies to authenticate. Reading a browser
-                                            only works when that browser is on the same machine as SoulSync &mdash; on a
-                                            server/Docker box, choose <strong>Paste cookies.txt</strong> instead.
+                                            SoulSync will use your browser's YouTube cookies to authenticate. Cookies are also
+                                            used for Premium audio qualities. Reading a browser only works when that browser is
+                                            on the same machine as SoulSync &mdash; on a server/Docker box, choose
+                                            <strong>Paste cookies.txt</strong> instead.
                                         </div>
                                     </div>
                                     <div class="form-group" id="youtube-cookies-paste-group" style="display:none;">
@@ -4215,10 +4238,12 @@
                                         <textarea id="youtube-cookies-paste" class="form-input" rows="6"
                                                   placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
                                         <div class="setting-help-text">
-                                            For server/Docker installs with no local browser. Export your YouTube cookies
-                                            with a "Get cookies.txt LOCALLY" browser extension and paste the whole file.
-                                            Required for private playlists like your <strong>Liked Music</strong>.
-                                            Stored on the server and they expire periodically &mdash; re-paste if YouTube stops working.
+                                            For server/Docker installs with no local browser. Paste a Netscape/Mozilla
+                                            <code>cookies.txt</code>. Export with a
+                                            "Get cookies.txt LOCALLY" extension and paste the whole file &mdash; the
+                                            <code># Netscape HTTP Cookie File</code> header alone is not enough.
+                                            Required for private playlists like your <strong>Liked Music</strong>, and for
+                                            Premium audio itags. Cookies expire periodically &mdash; re-paste if YouTube stops working.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4227,6 +4252,42 @@
                                             value="3" placeholder="3">
                                         <div class="setting-help-text">
                                             Seconds between YouTube downloads to avoid bot detection. Default: 3
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <div class="setting-row">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="youtube-transcode" checked
+                                                    onchange="document.getElementById('youtube-transcode-options').style.display = this.checked ? 'block' : 'none'">
+                                                Re-encode YouTube audio
+                                            </label>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                        </div>
+                                        <div class="setting-help-body" hidden>
+                                            YouTube serves Opus or AAC, not FLAC or MP3.
+                                            With this on, the quality list must include the converted format
+                                            (default MP3 320). With it off, add Opus or AAC to the list,
+                                            or turn Fallback on.
+                                        </div>
+                                    </div>
+                                    <div id="youtube-transcode-options">
+                                        <div class="form-group">
+                                            <label>Codec:</label>
+                                            <select id="youtube-transcode-codec" onchange="updateYoutubeTranscodeBitrateOptions()">
+                                                <option value="mp3">MP3</option>
+                                                <option value="opus">Opus</option>
+                                                <option value="aac">AAC (M4A)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Bitrate:</label>
+                                            <select id="youtube-transcode-bitrate">
+                                                <option value="320">320 kbps</option>
+                                                <option value="256">256 kbps</option>
+                                                <option value="192">192 kbps</option>
+                                                <option value="128">128 kbps</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </div>

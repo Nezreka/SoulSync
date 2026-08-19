@@ -22,7 +22,7 @@ genuinely nothing new. Only the first should fall through.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -30,7 +30,13 @@ import core.watchlist_scanner as ws
 from database.music_database import WatchlistArtist
 
 OLD = {'id': 'old', 'name': 'Old Album', 'release_date': '2001-01-01'}
-NEW = {'id': 'new', 'name': 'New Album', 'release_date': '2026-07-20'}
+# "New" has to STAY new: the scanner's cutoff is now-relative (30-day
+# lookback), so a hardcoded date here is a time bomb — the original
+# '2026-07-20' aged out of the window a month after it was written and both
+# blind-provider tests went red on a day nothing changed. Yesterday is inside
+# any lookback this test will ever configure.
+NEW = {'id': 'new', 'name': 'New Album',
+       'release_date': (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y-%m-%d')}
 
 
 class _Client:

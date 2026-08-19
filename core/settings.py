@@ -794,6 +794,19 @@ class ConfigManager:
                 # Turn off to canonicalize casing to the metadata source.
                 "reorganize_preserve_casing": True,
             },
+            "wishlist": {
+                # When discovery finds no catalogue match for a track it stores a
+                # Wing It stub built from the source's own artist/title, and the
+                # sync deliberately keeps those OFF the wishlist — a stub is an
+                # unverified guess, and the Wing It Pool is where you resolve
+                # guesses by hand. On a large mirrored library that pool can hold
+                # hundreds of tracks, which is more than anyone will work through.
+                # Turn this on to let guesses be searched like any other wishlist
+                # track. Only stubs with a real artist AND title qualify; ones the
+                # source left nameless stay out either way. OFF by default —
+                # behavior is byte-for-byte today's.
+                "wing_it_guesses": False,
+            },
             "scripts": {
                 "path": "./scripts",
                 "timeout": 60
@@ -834,6 +847,12 @@ class ConfigManager:
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"
                 "download_delay": 3,        # seconds between sequential downloads
+                # Default: convert to MP3 320 after download. YouTube audio is
+                # Opus/AAC; re-encode does not add quality but matches common
+                # players. The quality profile ranks the file on disk.
+                "transcode": True,
+                "transcode_codec": "mp3",
+                "transcode_bitrate": "320",
             },
             "hydrabase": {
                 "url": "",

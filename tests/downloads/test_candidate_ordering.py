@@ -67,3 +67,60 @@ def test_quality_first_ranks_unmatched_quality_last():
     ordered = order_candidates([off_list, matched], quality_first=True, targets=TARGETS)
 
     assert [c.name for c in ordered] == ['matched', 'off']  # off-list sorts last despite high confidence
+
+
+# User Audiophile ladder: Opus ≥192 is the top target. YouTube itag 774 is
+# Opus 256. Soulseek FLAC matches a later rung and must not win the walk.
+AUDIOPHILE = [
+    QualityTarget(label='OPUS ≥ 192', format='opus', min_bitrate=192),
+    QualityTarget(label='AAC ≥ 192', format='aac', min_bitrate=192),
+    QualityTarget(label='MP3 ≥ 256', format='mp3', min_bitrate=256),
+    QualityTarget(label='MP3 ≥ 320', format='mp3', min_bitrate=320),
+    QualityTarget(label='FLAC 16', format='flac', bit_depth=16),
+    QualityTarget(label='FLAC 24', format='flac', bit_depth=24, min_sample_rate=44100),
+]
+
+
+class _NamedCand(_Cand):
+    def __init__(self, name, aq, confidence, username, **kw):
+        super().__init__(name, aq, confidence, **kw)
+        self.username = username
+
+
+def test_quality_first_youtube_774_beats_soulseek_flac():
+    yt = _NamedCand('yt', AudioQuality('opus', bitrate=256), 0.80, 'youtube')
+    peer = _NamedCand(
+        'flac', AudioQuality('flac', sample_rate=44100, bit_depth=16), 0.99, 'alice',
+        quality_score=1.0,
+    )
+
+    ordered = order_candidates([peer, yt], quality_first=True, targets=AUDIOPHILE)
+
+    assert [c.name for c in ordered] == ['yt', 'flac']
+
+
+def test_mixed_pool_ranks_by_profile_even_in_priority_mode():
+    """Best-quality search concatenates YouTube + Soulseek. A confidence-first
+    walk uses quality_score (FLAC 1.0, Opus 0.3) and would always pick the
+    peer — even when itag 774 matches the top target."""
+    yt = _NamedCand('yt', AudioQuality('opus', bitrate=256), 0.80, 'youtube')
+    peer = _NamedCand(
+        'flac', AudioQuality('flac', sample_rate=44100, bit_depth=16), 0.99, 'alice',
+        quality_score=1.0,
+    )
+
+    ordered = order_candidates([peer, yt], quality_first=False, targets=AUDIOPHILE)
+
+    assert [c.name for c in ordered] == ['yt', 'flac']
+
+
+def test_same_target_prefers_earlier_hybrid_source():
+    yt = _NamedCand('yt', AudioQuality('mp3', bitrate=320), 0.70, 'youtube')
+    peer = _NamedCand('slsk', AudioQuality('mp3', bitrate=320), 0.95, 'alice')
+
+    ordered = order_candidates(
+        [peer, yt], quality_first=True, targets=AUDIOPHILE,
+        source_order=['youtube', 'soulseek'],
+    )
+
+    assert [c.name for c in ordered] == ['yt', 'slsk']

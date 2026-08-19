@@ -31,8 +31,9 @@ Scope, deliberately narrow:
   comes back with the uploader's channel as the artist and no album — exactly
   what the yt-dlp path would have produced, so those entries are no worse.
 
-The projection (``ytmusic_playlist_to_payload``) is a pure function over the
-API's response so the field mapping is unit-testable without network.
+The projection (``ytmusic_playlist_to_payload``, ``ytmusic_search_hit_to_track``)
+is a pure function over the API's response so the field mapping is
+unit-testable without network.
 """
 
 from __future__ import annotations
@@ -92,6 +93,114 @@ def _album_name(track: Mapping[str, Any]) -> str:
     if isinstance(album, Mapping):
         return str(album.get("name") or "").strip()
     return str(album or "").strip()
+
+
+def _parse_duration_string(text: str) -> Optional[int]:
+    """``"M:SS"`` / ``"H:MM:SS"`` → milliseconds, or ``None`` if unparseable."""
+    parts = text.split(":")
+    if not parts or not all(p.isdigit() for p in parts):
+        return None
+    nums = [int(p) for p in parts]
+    if len(nums) == 2:
+        minutes, seconds = nums
+        return (minutes * 60 + seconds) * 1000
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+        return (hours * 3600 + minutes * 60 + seconds) * 1000
+    return None
+
+
+def _duration_ms(track: Mapping[str, Any]) -> int:
+    """Milliseconds from ``duration_seconds``, else a ``duration`` timestamp."""
+    seconds = track.get("duration_seconds")
+    try:
+        if seconds:
+            return int(seconds) * 1000
+    except (TypeError, ValueError):
+        pass
+    duration = track.get("duration")
+    if isinstance(duration, str) and duration.strip():
+        parsed = _parse_duration_string(duration.strip())
+        if parsed is not None:
+            return parsed
+    return 0
+
+
+def _thumbnail_url(hit: Mapping[str, Any]) -> str:
+    thumbnails = hit.get("thumbnails") or []
+    if thumbnails and isinstance(thumbnails[-1], Mapping):
+        return str(thumbnails[-1].get("url") or "")
+    return ""
+
+
+def ytmusic_search_hit_to_track(hit: Any) -> Optional[Dict[str, Any]]:
+    """Project one ytmusicapi ``search(filter='songs')`` hit, or ``None``.
+
+    Pure. Requires a ``videoId`` and a title — a song without an id cannot be
+    downloaded, and a nameless row is not a match. Duration prefers
+    ``duration_seconds`` and otherwise parses ``"M:SS"`` / ``"H:MM:SS"``.
+    """
+    if not isinstance(hit, Mapping):
+        return None
+    video_id = str(hit.get("videoId") or "").strip()
+    title = str(hit.get("title") or "").strip()
+    if not video_id or not title:
+        return None
+
+    names = _artist_names(hit)
+    return {
+        "id": video_id,
+        "name": title,
+        "artists": names or ["Unknown Artist"],
+        "album": _album_name(hit),
+        "duration_ms": _duration_ms(hit),
+        "video_type": str(hit.get("videoType") or ""),
+        "thumbnail": _thumbnail_url(hit),
+        "url": f"https://www.youtube.com/watch?v={video_id}",
+    }
+
+
+def search_ytmusic_songs(
+    query: str, auth: Optional[Dict[str, str]] = None, limit: int = 50
+) -> Optional[List[Dict[str, Any]]]:
+    """Search the YouTube Music catalog for songs, or ``None`` on any failure.
+
+    Never raises. A missing ytmusicapi, a network blip, an empty result, and an
+    upstream shape change all mean the same thing to the caller — use yt-dlp
+    ``ytsearch``. A non-empty list means catalog search worked; do not also
+    call ytsearch. Official audio (``MUSIC_VIDEO_TYPE_ATV``) is sorted first.
+    """
+    if not isinstance(query, str) or not query.strip():
+        return None
+
+    try:
+        from ytmusicapi import YTMusic
+    except ImportError:
+        logger.debug("ytmusicapi not installed — using yt-dlp search for %r", query)
+        return None
+
+    try:
+        client = YTMusic(auth) if auth else YTMusic()
+        raw = client.search(query.strip(), filter="songs", limit=limit)
+    except Exception as e:  # noqa: BLE001 - see docstring: all failures fall back
+        logger.info(
+            "YouTube Music song search failed (%s: %s) — falling back to ytsearch",
+            type(e).__name__, e,
+        )
+        return None
+
+    tracks: List[Dict[str, Any]] = []
+    for hit in raw or []:
+        projected = ytmusic_search_hit_to_track(hit)
+        if projected:
+            tracks.append(projected)
+
+    if not tracks:
+        return None
+
+    tracks.sort(key=lambda t: 0 if t.get("video_type") == "MUSIC_VIDEO_TYPE_ATV" else 1)
+    logger.info("YouTube Music search: %d songs for %r", len(tracks), query)
+    return tracks
 
 
 def ytmusic_playlist_to_payload(
@@ -215,4 +324,6 @@ __all__ = [
     "playlist_id_from_url",
     "ytmusic_playlist_to_payload",
     "fetch_ytmusic_playlist",
+    "ytmusic_search_hit_to_track",
+    "search_ytmusic_songs",
 ]

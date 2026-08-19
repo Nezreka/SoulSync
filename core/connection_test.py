@@ -438,6 +438,14 @@ def run_service_test(service, test_config):
         elif service == "deezer":
             # Public API — anon search works without credentials
             try:
+                # shared deezer budget. a connection test is user-initiated, so
+                # it declines rather than sit behind a background scan draining
+                # the window — and HONOURS the decline. Reserving nothing and
+                # then calling anyway would be an unbudgeted request wearing a
+                # safeguard's clothes.
+                from core.deezer_throttle import wait_for_slot
+                if not wait_for_slot(max_wait_seconds=3.0):
+                    return False, "Deezer is rate limited right now — try again shortly"
                 resp = requests.get(
                     'https://api.deezer.com/search/artist',
                     params={'q': 'beatles', 'limit': 1},

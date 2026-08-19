@@ -1804,17 +1804,18 @@ const HELPER_CONTENT = {
     },
     '#youtube-settings-container': {
         title: 'YouTube Settings',
-        description: 'Browser cookies selection for bot detection bypass and download delay between requests.',
+        description: 'Cookies for bot detection bypass and Premium audio: a local browser, or on Docker a pasted Netscape cookies.txt. Download delay and Re-encode to MP3 320 (on by default).',
     },
 
     // Quality Profile
     '#quality-profile-section': {
         title: 'Quality Profile',
-        description: 'Configure which audio formats and bitrates are preferred for Soulseek downloads. Quick presets or custom per-format settings with bitrate ranges.',
+        description: 'Configure which audio formats and bitrates are preferred for downloads, including YouTube. Quick presets or custom per-format settings with bitrate ranges.',
         tips: [
             'Audiophile: FLAC only, strict — fails if no lossless found',
             'Balanced: FLAC preferred, MP3 320 fallback (default)',
             'Space Saver: MP3 preferred, smallest files',
+            'YouTube is Opus or AAC unless you re-encode (default MP3 320)',
             'FLAC bit depth: choose 16-bit, 24-bit, or any',
             'Fallback toggle: when off, only downloads at preferred quality'
         ],

@@ -653,6 +653,34 @@ def test_post_sync_starts_organize_download_when_skip_wishlist_add(patched_db):
     assert org_calls[0]['automation_id'] == 'auto-2'
 
 
+def test_wing_it_mode_no_longer_blanket_skips_wishlist(patched_db):
+    """Wing It Sync used to force _skip_unmatched_wishlist=True, which cleared
+    unmatched_tracks before the per-track is_stub_id()/should_wishlist_stub()
+    gate in sync_service ever ran — so wishlist.wing_it_guesses had no effect
+    for this mode. The blanket skip should be gone; the per-track gate now
+    decides. _skip_wishlist is left alone (unrelated, unread elsewhere)."""
+    svc = _FakeSyncService(media_client=_FakeMediaClient())
+    states = {'wing_pl': {'wing_it': True}}
+    deps = _build_deps(sync_service=svc, sync_states=states)
+
+    ds.run_sync_task('wing_pl', 'Wing It', [_track()], deps=deps)
+
+    assert svc._skip_unmatched_wishlist is False
+    assert svc._skip_wishlist is True
+
+
+def test_organize_by_playlist_still_blanket_skips_wishlist(patched_db):
+    """skip_wishlist_add (organize-by-playlist) is a separate reason from Wing
+    It mode and must keep skipping the sync-time wishlist add entirely —
+    batch failure handling covers it instead."""
+    svc = _FakeSyncService(media_client=_FakeMediaClient())
+    deps = _build_deps(sync_service=svc)
+
+    ds.run_sync_task('org_pl', 'Organized', [_track()], deps=deps, skip_wishlist_add=True)
+
+    assert svc._skip_unmatched_wishlist is True
+
+
 # ---------------------------------------------------------------------------
 # Cleanup (finally)
 # ---------------------------------------------------------------------------

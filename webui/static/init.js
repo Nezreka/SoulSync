@@ -3157,6 +3157,7 @@ function initializeMobileNavigation() {
     });
 
     restoreNavSections();
+    initSidebarCollapse();
 }
 
 // --- Collapsible sidebar sections (persisted per section in localStorage) ---
@@ -3193,6 +3194,60 @@ function restoreNavSections() {
         if (_navSectionItems(label).some(it => it.getAttribute('href') === path)) collapsed = false;
         _setNavSectionCollapsed(label, collapsed);
     });
+}
+
+// --- Collapsible sidebar (#1155, wishx) ---
+// Two states: full width, or icons only. The width itself is CSS
+// (--sidebar-w keyed off html[data-sidebar="collapsed"]); this only decides
+// which state is on and remembers it. The attribute is applied before paint by
+// the inline script in index.html's <head> — this runs later and just keeps the
+// button label and the icon tooltips in sync, so the two must agree on the key.
+const SIDEBAR_COLLAPSE_KEY = 'sidebarCollapsed';
+
+function isSidebarCollapsed() {
+    return document.documentElement.getAttribute('data-sidebar') === 'collapsed';
+}
+
+function setSidebarCollapsed(collapsed) {
+    // Expanded carries no attribute so the plain :root width applies — one less
+    // state for the CSS to special-case.
+    if (collapsed) document.documentElement.setAttribute('data-sidebar', 'collapsed');
+    else document.documentElement.removeAttribute('data-sidebar');
+    try {
+        if (collapsed) localStorage.setItem(SIDEBAR_COLLAPSE_KEY, '1');
+        else localStorage.removeItem(SIDEBAR_COLLAPSE_KEY);
+    } catch (e) { /* localStorage blocked — works for the session */ }
+    const btn = document.getElementById('sidebar-collapse-toggle');
+    if (btn) {
+        const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+    syncSidebarNavTitles(collapsed);
+    return collapsed;
+}
+
+function toggleSidebarCollapsed() {
+    return setSidebarCollapsed(!isSidebarCollapsed());
+}
+
+// Collapsed hides .nav-text, so the icon is all that's left to go on. Native
+// title rather than a styled tooltip: .nav-button is overflow:hidden and the
+// sidebar's stacking context is already delicate (see the visualiser's z-index
+// note in style.css), so a ::after bubble would be clipped or fight for layer.
+function syncSidebarNavTitles(collapsed) {
+    document.querySelectorAll('.sidebar-nav .nav-button').forEach(btn => {
+        if (!collapsed) { btn.removeAttribute('title'); return; }
+        const label = (btn.querySelector('.nav-text')?.textContent || '').trim();
+        if (label) btn.title = label;
+    });
+}
+
+function initSidebarCollapse() {
+    // Re-apply what the <head> script already read, so the button label and the
+    // icon tooltips match the state on first load too.
+    setSidebarCollapsed(isSidebarCollapsed());
 }
 
 /**
