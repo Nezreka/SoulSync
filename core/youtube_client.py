@@ -431,8 +431,10 @@ def resolve_downloaded_audio_path(ydl, info) -> Optional[str]:
         candidates.append(prepared)
         for ext in _DOWNLOADED_AUDIO_EXTS:
             candidates.append(prepared.with_suffix(ext))
-    except Exception:
-        pass
+    except Exception as e:
+        # best-effort candidate discovery — the explicit filepath keys above
+        # usually already found the file
+        logger.debug("prepare_filename fallback skipped: %s", e)
     seen = set()
     existing = []
     for path in candidates:
