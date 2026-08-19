@@ -390,7 +390,7 @@ def test_refresh_stops_when_youtube_cannot_meet_profile(monkeypatch):
 def test_reload_settings_clears_stale_probe_claims(monkeypatch, tmp_path):
     monkeypatch.setattr(youtube_client, '_resolve_cookie_opts', lambda: {})
     monkeypatch.setattr(
-        'config.settings.config_manager.get',
+        'core.settings.config_manager.get',
         lambda key, default=None: default,
     )
     client = _bare_client()
@@ -1340,7 +1340,7 @@ def test_postprocessor_ignores_codec_when_transcode_off(codec, bitrate):
 
 def test_postprocessor_from_config_defaults_to_mp3_320_when_keys_missing(monkeypatch):
     monkeypatch.setattr(
-        'config.settings.config_manager.get',
+        'core.settings.config_manager.get',
         lambda key, default=None: default,
     )
     monkeypatch.setattr(
@@ -2095,10 +2095,12 @@ def test_download_sync_third_retry_uses_muxed_best(tmp_path, monkeypatch):
     audio = tmp_path / 'Song.opus'
     audio.write_bytes(b'x')
     seen = []
+    cookie_keys = []
 
     class _FakeYDL:
         def __init__(self, opts):
             seen.append(opts.get('format'))
+            cookie_keys.append(('cookiefile' in opts, 'cookiesfrombrowser' in opts))
             self.opts = opts
 
         def __enter__(self):
@@ -2133,6 +2135,9 @@ def test_download_sync_third_retry_uses_muxed_best(tmp_path, monkeypatch):
     assert 'opus' in seen[0]
     assert 'opus' in seen[1]  # retry 2 still prefers opus; keeps cookies
     assert seen[2] == 'best'
+    assert cookie_keys[0] == (True, False)
+    assert cookie_keys[1] == (True, False)
+    assert cookie_keys[2] == (False, False)  # last ditch: expired cookies must not poison 'best'
 
 
 def test_download_sync_retry_keeps_cookies_and_tries_web_music_only(tmp_path, monkeypatch):
@@ -2259,7 +2264,7 @@ def test_download_sync_selector_follows_requested_tier(tmp_path, monkeypatch):
 
 
 def test_default_youtube_config_has_no_preferred_audio_format():
-    from config.settings import ConfigManager
+    from core.settings import ConfigManager
     youtube = ConfigManager._get_default_config(None)['youtube']
     assert 'audio_format' not in youtube
     assert youtube['transcode'] is True

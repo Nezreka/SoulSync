@@ -137,6 +137,7 @@ def test_search_catalog_hits_skip_yt_dlp_and_set_album(monkeypatch):
     assert track.duration == 225_000
     assert track.quality == "opus"
     assert track.bitrate == 160
+    assert track._source_metadata == {"source": "youtube", "catalog": True}
 
 
 def test_search_catalog_with_cookies_still_claims_opus_160(monkeypatch):
@@ -225,4 +226,39 @@ def test_search_catalog_none_falls_through_to_ytsearch(monkeypatch):
     tracks, albums = asyncio.run(client.search("Artist - Title"))
     assert captured == ["ytsearch50:Artist - Title"]
     assert len(tracks) == 1
+    assert albums == []
+
+
+def test_search_use_catalog_false_ignores_catalog_hits(monkeypatch):
+    captured = []
+
+    class _FakeYoutubeDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract_info(self, search_query, download=False):
+            captured.append(search_query)
+            return {"entries": [{"id": "yt1", "title": "Remix Video"}]}
+
+    _stub_catalog(monkeypatch, [_CATALOG_HIT])
+    monkeypatch.setattr(youtube_client.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+    client = YouTubeClient.__new__(YouTubeClient)
+    monkeypatch.setattr(client, "_get_best_audio_format", lambda formats: None)
+    monkeypatch.setattr(
+        client,
+        "_youtube_to_track_result",
+        lambda entry, best_audio: SimpleNamespace(filename=entry["title"]),
+    )
+
+    tracks, albums = asyncio.run(
+        client.search("Artist - Remix", use_catalog=False),
+    )
+    assert captured == ["ytsearch50:Artist - Remix"]
+    assert [t.filename for t in tracks] == ["Remix Video"]
     assert albums == []

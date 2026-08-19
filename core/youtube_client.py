@@ -204,7 +204,7 @@ _YOUTUBE_TIER_SELECTORS = {
 def _youtube_transcode_settings() -> tuple:
     """Live YouTube re-encode settings. Never raises — missing config is MP3 320."""
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         transcode = bool(config_manager.get('youtube.transcode', True))
         codec = str(config_manager.get('youtube.transcode_codec', 'mp3') or 'mp3')
         bitrate = str(config_manager.get('youtube.transcode_bitrate', '320') or '320')
@@ -1203,6 +1203,7 @@ class YouTubeClient(DownloadSourcePlugin):
             title=title,
             album=album,
             track_number=None,
+            _source_metadata={"source": "youtube", "catalog": True},
         )
         track_result.set_quality(claimed)
         thumbnail = str(hit.get("thumbnail") or "").strip() or None
@@ -1276,7 +1277,8 @@ class YouTubeClient(DownloadSourcePlugin):
             logger.error(f"YouTube video search failed: {e}")
             return []
 
-    async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
+    async def search(self, query: str, timeout: int = None, progress_callback=None,
+                     *, use_catalog: bool = True) -> tuple[List[TrackResult], List[AlbumResult]]:
         """
         Search YouTube for tracks matching the query (async, Soulseek-compatible interface).
 
@@ -1284,6 +1286,10 @@ class YouTubeClient(DownloadSourcePlugin):
             query: Search query (e.g., "Artist Name - Song Title")
             timeout: Ignored for YouTube (kept for interface compatibility)
             progress_callback: Optional callback for progress updates
+            use_catalog: When True (default), prefer YouTube Music catalog hits
+                and skip ytsearch. Pass False after a catalog batch that the
+                matcher rejected — remixes that exist as videos but not in the
+                Music catalog only show up on ytsearch.
 
         Returns:
             Tuple of (track_results, album_results). Album results will always be empty for YouTube.
@@ -1291,16 +1297,17 @@ class YouTubeClient(DownloadSourcePlugin):
         logger.info(f"Searching YouTube for: {query}")
 
         try:
-            def _catalog_search():
-                from core.youtube_cookies import ytmusic_auth_from_config
-                from core.youtube_music_meta import search_ytmusic_songs
-                return search_ytmusic_songs(query, auth=ytmusic_auth_from_config())
+            if use_catalog:
+                def _catalog_search():
+                    from core.youtube_cookies import ytmusic_auth_from_config
+                    from core.youtube_music_meta import search_ytmusic_songs
+                    return search_ytmusic_songs(query, auth=ytmusic_auth_from_config())
 
-            hits = await run_blocking(_catalog_search)
-            if hits:
-                track_results = [self._ytmusic_hit_to_track_result(hit) for hit in hits]
-                logger.info("Found %d YouTube Music catalog tracks", len(track_results))
-                return (track_results, [])
+                hits = await run_blocking(_catalog_search)
+                if hits:
+                    track_results = [self._ytmusic_hit_to_track_result(hit) for hit in hits]
+                    logger.info("Found %d YouTube Music catalog tracks", len(track_results))
+                    return (track_results, [])
 
             # Run yt-dlp in executor to avoid blocking event loop
             def _search():
@@ -1764,10 +1771,13 @@ class YouTubeClient(DownloadSourcePlugin):
                     # without failing the whole download.
                     download_opts['check_formats'] = 'selected'
 
-                    # Keep cookies on every attempt. Stripping them made
-                    # itag 774/141 disappear, so a probe that ranked Opus 256
-                    # then downloaded anonymous Opus 160 (or failed) and
-                    # Soulseek won the walk.
+                    # Keep cookies on attempts 1–2 so Premium itags stay in
+                    # the player response. The old cookie-strip on first 403
+                    # made 774/141 vanish and ranked Opus 256 as Opus 160.
+                    # Last attempt drops cookies: expired / bot-flagged
+                    # cookies otherwise poison every retry. Import still
+                    # probes the file on disk, so a last-ditch 160 cannot
+                    # keep an Opus-256 chip.
                     extra = youtube_authenticated_extractor_args(download_opts)
                     if attempt == 0:
                         if extra:
@@ -1790,13 +1800,20 @@ class YouTubeClient(DownloadSourcePlugin):
                                 'youtube': {'player_client': ['web_creator']},
                             }
                     elif attempt >= 2:
-                        logger.info(
-                            "Retry %s/%s with 'best' format (keeping cookies)",
-                            attempt + 1, max_retries,
-                        )
                         download_opts['format'] = 'best'
                         if extra:
-                            download_opts['extractor_args'] = extra
+                            logger.info(
+                                "Retry %s/%s with 'best' format (dropping cookies)",
+                                attempt + 1, max_retries,
+                            )
+                            download_opts.pop('cookiefile', None)
+                            download_opts.pop('cookiesfrombrowser', None)
+                            download_opts.pop('extractor_args', None)
+                        else:
+                            logger.info(
+                                "Retry %s/%s with 'best' format",
+                                attempt + 1, max_retries,
+                            )
 
 
                     # Perform download. Ranking already probed itags; fetch

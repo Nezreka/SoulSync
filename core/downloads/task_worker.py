@@ -54,6 +54,44 @@ def _cand_user_file(candidate):
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
 
 
+def _youtube_ytsearch_fallback(deps, query, track, tracks_result):
+    """ytsearch after a YouTube Music catalog batch that the matcher rejected.
+
+    Catalog ``filter=songs`` misses remixes/lives that only exist as videos.
+    One extra YouTube search. Skipped when this result set was not a catalog
+    batch (empty catalog already fell through to ytsearch inside search()).
+    """
+    if not any(
+        getattr(t, 'username', None) == 'youtube'
+        and (getattr(t, '_source_metadata', None) or {}).get('catalog')
+        for t in (tracks_result or [])
+    ):
+        return None
+    orch = getattr(deps, 'download_orchestrator', None)
+    if orch is None or not hasattr(orch, 'client'):
+        return None
+    try:
+        youtube = orch.client('youtube')
+    except Exception:
+        return None
+    if youtube is None or not hasattr(youtube, 'search'):
+        return None
+    try:
+        extra, _ = deps.run_async(youtube.search(query, timeout=30, use_catalog=False))
+    except TypeError:
+        extra, _ = deps.run_async(youtube.search(query, timeout=30))
+    except Exception as e:
+        logger.debug("YouTube ytsearch fallback skipped: %s", e)
+        return None
+    if not extra:
+        return None
+    logger.info(
+        "YouTube catalog missed the matcher; ytsearch returned %d rows",
+        len(extra),
+    )
+    return deps.get_valid_candidates(extra, track, query) or None
+
+
 def _candidate_ordering(track_info: Optional[dict] = None):
     """Return ``(quality_first, targets)`` for the active search mode + toggle.
 
@@ -548,6 +586,15 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     result_count = len(tracks_result)
                     # Validate candidates using GUI's get_valid_candidates logic
                     candidates = deps.get_valid_candidates(tracks_result, track, query)
+                    if not candidates:
+                        # Catalog-first YouTube can return official songs that
+                        # all fail the matcher (obscure remix, live, etc.).
+                        # ytsearch still finds those as videos.
+                        extra = _youtube_ytsearch_fallback(
+                            deps, query, track, tracks_result,
+                        )
+                        if extra:
+                            candidates = extra
                     if candidates:
                         logger.debug(f"[Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
 

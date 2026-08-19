@@ -184,7 +184,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         source_order = list(getattr(orch, 'hybrid_order', None) or [])
     if not source_order:
         try:
-            from config.settings import config_manager
+            from core.settings import config_manager
             source_order = list(
                 config_manager.get('download_source.hybrid_order') or []
             )

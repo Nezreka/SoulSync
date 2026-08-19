@@ -207,7 +207,7 @@ def ytmusic_auth_from_config() -> Optional[Dict[str, str]]:
     still works with ``None``.
     """
     try:
-        from config.settings import config_manager
+        from core.settings import config_manager
         if str(config_manager.get("youtube.cookies_browser", "") or "").strip() != PASTE_MODE:
             return None
         return ytmusic_auth_from_cookiefile(config_manager.get("youtube.cookies_file", ""))

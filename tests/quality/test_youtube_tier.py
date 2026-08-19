@@ -226,7 +226,7 @@ def _patch_get_defaults(monkeypatch, values=None):
             return stored[key]
         return default
 
-    monkeypatch.setattr('config.settings.config_manager.get', _get)
+    monkeypatch.setattr('core.settings.config_manager.get', _get)
 
 
 def test_real_transcode_settings_missing_keys_are_mp3_320(monkeypatch):
@@ -264,7 +264,7 @@ def test_real_transcode_settings_never_raise(monkeypatch):
     def _boom(*_a, **_k):
         raise RuntimeError('settings locked')
 
-    monkeypatch.setattr('config.settings.config_manager.get', _boom)
+    monkeypatch.setattr('core.settings.config_manager.get', _boom)
     assert _real_youtube_transcode_settings() == (True, 'mp3', '320')
 
 
