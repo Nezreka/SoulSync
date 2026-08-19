@@ -1763,6 +1763,26 @@ class SoulseekClient(DownloadSourcePlugin):
                 )
                 for k in stall_pending:
                     failed_states[k] = 'Stalled'
+                    # Cancel the transfer IN SLSKD too, not just in our books.
+                    # Marking it failed here only resolves the bundle — slskd
+                    # kept the enqueue alive, so the file sat at "Queued,
+                    # Remotely" forever (sassmastawillis, hours after the guard
+                    # claimed it was handled), and a per-track retry that picks
+                    # the same peer+file collides with the zombie enqueue
+                    # instead of issuing a fresh request. remove=True, same as
+                    # the monitor's retry path.
+                    dl = by_key.get(k) or by_key.get((
+                        k[0], os.path.basename((k[1] or '').replace('\\', '/')),
+                    ))
+                    dl_id = getattr(dl, 'id', None) if dl else None
+                    if dl_id:
+                        try:
+                            run_async(self.cancel_download(dl_id, k[0], remove=True))
+                        except Exception as exc:
+                            logger.debug(
+                                "[Soulseek album] Could not cancel stalled transfer %s: %s",
+                                dl_id, exc,
+                            )
 
             if completed_paths and len(completed_paths) + len(failed_states) == len(transfer_keys):
                 logger.warning(
