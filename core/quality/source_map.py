@@ -3,9 +3,9 @@ API values into a unified :class:`~core.quality.model.AudioQuality`.
 
 Every streaming source describes quality differently (Tidal/HiFi use tier
 strings, Qobuz reports real kHz + bit depth, Deezer uses config codes,
-Amazon mixes real values with HD/UHD tiers). Centralising the knowledge
-here keeps the per-client code to a single call and keeps the tier tables
-in one auditable place.
+Amazon mixes real values with HD/UHD tiers, YouTube reports Opus/AAC
+bestaudio). Centralising the knowledge here keeps the per-client code to
+a single call and keeps the tier tables in one auditable place.
 
 Each value is a *claim*: the download client populates its ``TrackResult``
 from it so the global ranker can choose a source, and the post-download
@@ -143,6 +143,70 @@ def quality_from_amazon(
     )
 
 
+# ── YouTube (lossy bestaudio; never MP3 320) ────────────────────────────────
+#
+# YouTube does not offer 320 kbps MP3. There is no MP3 DASH itag; streams are
+# Opus (webm) or AAC (m4a). Audio-only DASH itags:
+#   139  m4a  AAC HE   ~48 kbps
+#   140  m4a  AAC LC   128 kbps     (free, ubiquitous)
+#   141  m4a  AAC LC   256 kbps     (YouTube / Music Premium cookies)
+#   171/172 webm Vorbis ~128/192    (legacy; retired ~2018, rare on old videos)
+#   249  webm Opus     ~50 kbps
+#   250  webm Opus     ~70 kbps
+#   251  webm Opus     ~160 kbps    (typical bestaudio without Premium)
+#   599  m4a  AAC      ~30 kbps     (ultra-low)
+#   600  webm Opus     ~35 kbps     (ultra-low)
+#   774  webm Opus     ~256 kbps    (Music Premium, not always present)
+# Muxed fallback (format=best): itag 18 (360p AAC ~96) / 22 (720p AAC ~192).
+# Search uses extract_flat, so format metadata is usually missing — claim the
+# typical Opus 160 (itag 251) rather than pretending the stream is MP3.
+# Premium itags (141 / 774) are stamped only when a real format dict has them.
+
+_YOUTUBE_TYPICAL = AudioQuality(format='opus', bitrate=160)
+_YOUTUBE_AAC_TYPICAL = AudioQuality(format='aac', bitrate=128)
+
+
+def _youtube_abr(audio_format: dict) -> Optional[int]:
+    for key in ('abr', 'tbr'):
+        raw = audio_format.get(key)
+        if raw is None or raw == '':
+            continue
+        try:
+            bitrate = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if bitrate:
+            return bitrate
+    return None
+
+
+def quality_from_youtube(audio_format: Optional[dict] = None) -> AudioQuality:
+    """Map a yt-dlp audio format dict to the stream's real AudioQuality.
+
+    Missing format metadata (extract_flat / Music catalog search) claims
+    typical Opus 160 kbps (itag 251) — never invented MP3 320, never assumed
+    Premium from cookies. YouTube does not serve 320 kbps MP3.
+    """
+    if not audio_format:
+        return AudioQuality(format='opus', bitrate=160)
+
+    acodec = str(audio_format.get('acodec') or '').lower()
+    ext = str(audio_format.get('ext') or '').lower()
+    bitrate = _youtube_abr(audio_format)
+
+    if 'vorbis' in acodec:
+        # Legacy itags 171/172 (Vorbis in webm). Check before ext=webm so
+        # they are not misread as Opus.
+        return AudioQuality(format='ogg', bitrate=bitrate)
+    if 'opus' in acodec or ext in ('webm', 'opus'):
+        return AudioQuality(format='opus', bitrate=bitrate or _YOUTUBE_TYPICAL.bitrate)
+    if 'mp4a' in acodec or 'aac' in acodec or ext in ('m4a', 'aac'):
+        return AudioQuality(format='aac', bitrate=bitrate or _YOUTUBE_AAC_TYPICAL.bitrate)
+
+    # Unknown codec: still don't claim MP3 320.
+    return AudioQuality(format='opus', bitrate=bitrate or _YOUTUBE_TYPICAL.bitrate)
+
+
 # ── Profile-driven download tier (replaces per-source quality settings) ─────
 #
 # Each source's selectable download tiers, ordered best → worst, with the
@@ -178,6 +242,12 @@ _SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
     'amazon': [
         ('flac', AudioQuality('flac', sample_rate=48000, bit_depth=24)),
         ('opus', AudioQuality('aac', bitrate=320)),
+    ],
+    'youtube': [
+        ('opus_256', AudioQuality('opus', bitrate=256)),
+        ('aac_256', AudioQuality('aac', bitrate=256)),
+        ('opus_160', AudioQuality('opus', bitrate=160)),
+        ('aac_128', AudioQuality('aac', bitrate=128)),
     ],
 }
 

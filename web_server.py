@@ -17391,48 +17391,9 @@ def _probe_audio_quality(file_path):
 
 
 def _get_audio_quality_string(file_path):
-    """
-    Read audio file and return a quality descriptor string.
-
-    Returns strings like 'FLAC 16bit', 'MP3-320', 'M4A-256', 'OGG-192'.
-    Returns empty string on any error.
-    """
-    try:
-        ext = os.path.splitext(file_path)[1].lower()
-
-        if ext == '.flac':
-            audio = FLAC(file_path)
-            bits = audio.info.bits_per_sample
-            return f"FLAC {bits}bit"
-
-        elif ext == '.mp3':
-            from mutagen.mp3 import MP3, BitrateMode
-            audio = MP3(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            if audio.info.bitrate_mode == BitrateMode.VBR:
-                return "MP3-VBR"
-            return f"MP3-{bitrate_kbps}"
-
-        elif ext in ('.m4a', '.aac', '.mp4'):
-            audio = MP4(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"M4A-{bitrate_kbps}"
-
-        elif ext == '.ogg':
-            audio = OggVorbis(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"OGG-{bitrate_kbps}"
-
-        elif ext == '.opus':
-            from mutagen.oggopus import OggOpus
-            audio = OggOpus(file_path)
-            bitrate_kbps = audio.info.bitrate // 1000
-            return f"OPUS-{bitrate_kbps}"
-
-        return ''
-    except Exception as e:
-        logger.debug(f"Could not determine audio quality for {file_path}: {e}")
-        return ''
+    """Read audio file and return a quality descriptor string."""
+    from core.imports.file_ops import get_audio_quality_string
+    return get_audio_quality_string(file_path)
 
 
 def _get_album_type_display(raw_type, track_count) -> str:

@@ -13,6 +13,7 @@ from core.quality.source_map import (
     quality_from_qobuz,
     quality_from_deezer,
     quality_from_amazon,
+    quality_from_youtube,
     format_from_extension,
     AUDIO_EXTENSIONS,
 )
@@ -146,3 +147,86 @@ def test_amazon_uhd_tier_fallback():
     assert aq.format == "flac"
     assert aq.bit_depth == 24
     assert aq.sample_rate == 96000
+
+
+@pytest.mark.parametrize("fmt,expected_format,expected_br", [
+    (None, "opus", 160),
+    ({}, "opus", 160),
+    ({"acodec": "opus", "abr": 50, "ext": "webm", "format_id": "249"}, "opus", 50),
+    ({"acodec": "opus", "abr": 70, "ext": "webm", "format_id": "250"}, "opus", 70),
+    ({"acodec": "opus", "abr": 160, "ext": "webm", "format_id": "251"}, "opus", 160),
+    ({"acodec": "opus", "abr": 256, "ext": "webm", "format_id": "774"}, "opus", 256),
+    ({"acodec": "mp4a.40.2", "abr": 48, "ext": "m4a", "format_id": "139"}, "aac", 48),
+    ({"acodec": "mp4a.40.2", "abr": 128, "ext": "m4a", "format_id": "140"}, "aac", 128),
+    ({"acodec": "mp4a.40.2", "abr": 256, "ext": "m4a", "format_id": "141"}, "aac", 256),
+    ({"acodec": "mp4a.40.5", "abr": 48, "ext": "m4a"}, "aac", 48),  # HE-AAC
+    ({"acodec": "aac", "ext": "m4a"}, "aac", 128),  # typical when abr missing
+    ({"acodec": "opus", "ext": "webm"}, "opus", 160),
+    ({"ext": "webm", "tbr": 160}, "opus", 160),
+    ({"ext": "m4a", "tbr": 128}, "aac", 128),
+    ({"ext": "opus", "abr": 160}, "opus", 160),
+    ({"ext": "aac"}, "aac", 128),
+    ({"acodec": "vorbis", "abr": 128}, "ogg", 128),  # legacy itag 171/172
+    ({"acodec": "mp3", "abr": 128, "ext": "mp3"}, "opus", 128),  # not a YouTube itag
+    ({"acodec": "unknown", "abr": 96}, "opus", 96),  # don't invent mp3
+    ({"acodec": "none"}, "opus", 160),
+    ({"abr": "not-a-number", "ext": "webm"}, "opus", 160),
+    ({"abr": 0, "tbr": 160, "acodec": "opus"}, "opus", 160),  # abr 0 → tbr
+    ({"abr": None, "tbr": 70, "acodec": "opus"}, "opus", 70),
+    ({"abr": 160.7, "acodec": "opus", "ext": "webm"}, "opus", 160),
+])
+def test_youtube_format_matrix(fmt, expected_format, expected_br):
+    aq = quality_from_youtube(fmt)
+    assert aq.format == expected_format
+    assert aq.bitrate == expected_br
+    assert aq.bit_depth is None  # YouTube is always lossy
+
+
+def test_youtube_abr_wins_over_tbr():
+    aq = quality_from_youtube({"acodec": "opus", "abr": 160, "tbr": 999, "ext": "webm"})
+    assert aq.bitrate == 160
+
+
+def test_youtube_missing_format_claims_opus_160():
+    aq = quality_from_youtube(None)
+    assert aq.format == "opus"
+    assert aq.bitrate == 160
+
+
+def test_youtube_never_invents_mp3_320():
+    for fmt in (None, {}, {"acodec": "opus"}, {"ext": "webm"}, {"acodec": "mystery"}):
+        aq = quality_from_youtube(fmt)
+        assert not (aq.format == "mp3" and aq.bitrate == 320)
+
+
+def test_youtube_string_abr_parses_int():
+    aq = quality_from_youtube({"acodec": "opus", "abr": "160", "ext": "webm"})
+    assert aq.bitrate == 160
+
+
+def test_youtube_string_float_abr_falls_back_to_typical():
+    """yt-dlp usually gives numeric abr; a '160.7' string is not int()-able."""
+    aq = quality_from_youtube({"acodec": "opus", "abr": "160.7", "ext": "webm"})
+    assert aq.format == "opus"
+    assert aq.bitrate == 160
+
+
+def test_youtube_empty_acodec_uses_ext():
+    assert quality_from_youtube({"acodec": "", "ext": "m4a", "abr": 128}).format == "aac"
+    assert quality_from_youtube({"acodec": None, "ext": "webm", "abr": 70}).format == "opus"
+
+
+def test_youtube_whitespace_acodec():
+    aq = quality_from_youtube({"acodec": "  OPUS  ", "abr": 160, "ext": "WEBM"})
+    assert aq.format == "opus"
+    assert aq.bitrate == 160
+
+
+def test_youtube_mapper_has_no_premium_or_cookies_knob():
+    import inspect
+    sig = inspect.signature(quality_from_youtube)
+    assert list(sig.parameters) == ["audio_format"]
+    with pytest.raises(TypeError):
+        quality_from_youtube(None, premium=True)
+    with pytest.raises(TypeError):
+        quality_from_youtube(None, cookies=True)

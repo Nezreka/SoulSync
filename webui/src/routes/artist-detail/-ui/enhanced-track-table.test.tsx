@@ -252,6 +252,42 @@ describe('an owned row', () => {
     expect(rows()[1].querySelector('.enhanced-bitrate')?.className).toContain('medium');
   });
 
+  it('shows an opus average with a VBR tilde', () => {
+    renderTable({
+      id: 7,
+      tracks: [
+        {
+          id: 3,
+          track_number: 3,
+          title: 'Autumnal Embrace',
+          bitrate: 160,
+          file_path: '/music/Skyforest/Autumnal Embrace.opus',
+        },
+      ],
+    });
+    const cell = rows()[0].querySelector('.enhanced-bitrate');
+    expect(cell?.textContent).toBe('~160 kbps');
+    expect(cell?.getAttribute('title')).toBe('Average bitrate (VBR)');
+  });
+
+  it('shows an aac average with a VBR tilde', () => {
+    renderTable({
+      id: 7,
+      tracks: [
+        {
+          id: 4,
+          track_number: 4,
+          title: 'Voice of the Sea',
+          bitrate: 256,
+          file_path: '/music/Skyforest/Voice of the Sea.m4a',
+        },
+      ],
+    });
+    const cell = rows()[0].querySelector('.enhanced-bitrate');
+    expect(cell?.textContent).toBe('~256 kbps');
+    expect(cell?.getAttribute('title')).toBe('Average bitrate (VBR)');
+  });
+
   it('chips every match service, matched or not', () => {
     renderTable();
     const chips = [...rows()[0].querySelectorAll('.enhanced-track-match-chip')];

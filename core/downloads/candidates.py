@@ -100,6 +100,45 @@ def _preferred_version_hit(r):
     return 1 if getattr(r, 'preferred_version_hit', False) else 0
 
 
+# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
+# peers use the sharing username, so they are everything else. Keep this list
+# in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
+# lazily would cycle (validation → candidates).
+_STREAMING_USERNAMES = frozenset({
+    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
+    'amazon', 'torrent', 'usenet', 'lidarr',
+})
+
+
+def _candidate_source_name(r) -> str:
+    """Map a search hit onto a hybrid-chain source id."""
+    name = (getattr(r, 'username', None) or '').lower()
+    if name in _STREAMING_USERNAMES:
+        return name
+    return 'soulseek'
+
+
+def _is_mixed_source_pool(candidates) -> bool:
+    """True when the walk contains more than one download source."""
+    sources = {
+        _candidate_source_name(c)
+        for c in candidates
+        if getattr(c, 'username', None)
+    }
+    return len(sources) > 1
+
+
+def _source_order_index(r, source_order) -> int:
+    """Position in the user's hybrid chain. Unknown sources sort last."""
+    if not source_order:
+        return 0
+    name = _candidate_source_name(r)
+    try:
+        return list(source_order).index(name)
+    except ValueError:
+        return len(source_order)
+
+
 def _priority_sort_key(r):
     """Today's confidence-first key: never download a high-quality WRONG file."""
     return (
@@ -112,7 +151,7 @@ def _priority_sort_key(r):
     )
 
 
-def _quality_first_sort_key(r, targets):
+def _quality_first_sort_key(r, targets, source_order=None):
     """Best-quality key: the user's profile quality rank dominates; all the
     priority-mode signals (confidence, speed, …) become tiebreakers.
 
@@ -121,6 +160,11 @@ def _quality_first_sort_key(r, targets):
     Candidates with no usable quality info, or that match no target, sort last
     (never dropped). Lower target index = better target, so it's negated to fit
     the descending (reverse=True) sort.
+
+    After target index, the hybrid chain order breaks ties so "YouTube first"
+    actually prefers YouTube when two hits satisfy the same rung (Opus 256 vs
+    Opus 256), without letting a later-source FLAC outrank a first-source hit
+    that matches a higher-priority target.
     """
     from core.quality.model import rank_candidate
 
@@ -132,15 +176,22 @@ def _quality_first_sort_key(r, targets):
             target_idx, tier = rank_candidate(aq, targets)
         except Exception:
             target_idx, tier = len(targets), 0.0
-    return (-target_idx, tier) + _priority_sort_key(r)
+    src = _source_order_index(r, source_order)
+    return (-target_idx, -src, tier) + _priority_sort_key(r)
 
 
-def order_candidates(candidates, *, quality_first=False, targets=None):
+def order_candidates(candidates, *, quality_first=False, targets=None,
+                     source_order=None):
     """Return *candidates* ordered best-first for the download walk.
 
     ``quality_first=False`` (priority mode) → confidence-first, byte-for-byte
     today's behaviour. ``quality_first=True`` (best-quality mode) → the user's
     profile quality rank dominates, confidence/peer signals break ties.
+
+    Mixed-source pools (YouTube + Soulseek from best-quality search) always
+    use the profile rank. The legacy ``quality_score`` puts FLAC at 1.0 and
+    Opus at 0.3, so a confidence-first walk would download Soulseek even when
+    YouTube itag 774 matches the top target.
 
     The asked-for version leads BOTH keys. A preference picks the RECORDING,
     and a different recording is a different song, while confidence and quality
@@ -153,11 +204,16 @@ def order_candidates(candidates, *, quality_first=False, targets=None):
     that fails the user's quality ladder never arrives here to be ordered — the
     preference chooses between candidates the profile already accepted.
     """
-    if quality_first:
-        key = lambda r: (_preferred_version_hit(r),) + _quality_first_sort_key(r, targets or [])
+    rows = list(candidates)
+    use_quality = quality_first or _is_mixed_source_pool(rows)
+    if use_quality:
+        key = lambda r: (
+            (_preferred_version_hit(r),)
+            + _quality_first_sort_key(r, targets or [], source_order)
+        )
     else:
         key = lambda r: (_preferred_version_hit(r),) + _priority_sort_key(r)
-    return sorted(candidates, key=key, reverse=True)
+    return sorted(rows, key=key, reverse=True)
 
 
 @dataclass
@@ -189,8 +245,22 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     # scores are close; preserve that signal instead of flattening ties back to
     # arbitrary slskd response order. Best-quality mode: profile quality rank
     # dominates (all candidates here already passed match filtering).
+    source_order = None
+    orch = getattr(deps, 'download_orchestrator', None) if deps else None
+    if orch is not None:
+        source_order = list(getattr(orch, 'hybrid_order', None) or [])
+    if not source_order:
+        try:
+            from core.settings import config_manager
+            source_order = list(
+                config_manager.get('download_source.hybrid_order') or []
+            )
+        except Exception:  # noqa: BLE001 - ranking still works without chain order
+            source_order = None
+
     candidates = order_candidates(
         candidates, quality_first=quality_first, targets=quality_targets,
+        source_order=source_order,
     )
     
     with tasks_lock:

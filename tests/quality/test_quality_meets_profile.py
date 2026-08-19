@@ -58,3 +58,19 @@ def test_targets_from_profile_migrates_v2_qualities():
     profile = {'qualities': {'flac': {'enabled': True, 'priority': 1}}}
     targets, _ = targets_from_profile(profile)
     assert any(t.format == 'flac' for t in targets)
+
+
+def test_targets_from_profile_empty_or_missing_is_no_constraint():
+    for profile in ({}, {'ranked_targets': []}, {'ranked_targets': None}):
+        targets, fallback = targets_from_profile(profile)
+        assert targets == []
+        assert fallback is True
+        assert quality_meets_profile(MP3, targets) is True
+
+
+def test_targets_from_profile_missing_fallback_defaults_on():
+    targets, fallback = targets_from_profile({
+        'ranked_targets': [{'format': 'flac', 'bit_depth': 16}],
+    })
+    assert [t.format for t in targets] == ['flac']
+    assert fallback is True

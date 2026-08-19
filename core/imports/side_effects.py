@@ -492,26 +492,27 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             genres = _filter_genres(genres, _get_config_manager())
         genres_json = json.dumps(genres) if genres else ""
 
-        bitrate = 0
-        try:
-            from mutagen import File as MutagenFile
-
-            audio = MutagenFile(final_path)
-            if audio and hasattr(audio, "info") and audio.info and hasattr(audio.info, "bitrate"):
-                bitrate = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
-        except Exception as e:
-            logger.debug("bitrate read failed: %s", e)
-
         # File size on disk (powers Library Disk Usage card on Stats).
-        # SoulSync standalone is the only path where the file is local
-        # at insert time, so we read it directly via os.path.getsize.
-        # Mirrors what JellyfinTrack/NavidromeTrack pull from API
-        # responses for the media-server flows.
         file_size = None
         try:
             file_size = os.path.getsize(final_path) or None
         except OSError:
             pass
+
+        bitrate = 0
+        try:
+            from mutagen import File as MutagenFile
+            from core.imports.file_ops import _kbps_from_stream_info, estimate_bitrate_kbps
+
+            audio = MutagenFile(final_path)
+            info = audio.info if audio is not None and getattr(audio, "info", None) else None
+            kbps = _kbps_from_stream_info(info, final_path)
+            if not kbps:
+                kbps = estimate_bitrate_kbps(size_bytes=file_size, duration_ms=duration_ms)
+            if kbps:
+                bitrate = int(kbps)
+        except Exception as e:
+            logger.debug("bitrate read failed: %s", e)
 
         artist_id = _stable_soulsync_id(artist_name.lower().strip())
         album_id = _stable_soulsync_id(f"{artist_name}::{album_name}".lower().strip())

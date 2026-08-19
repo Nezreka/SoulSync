@@ -232,6 +232,17 @@ def _stub_engine(monkeypatch):
     )
 
 
+def test_scan_does_not_import_missing_reencode_module(monkeypatch):
+    """Quality Upgrade must not depend on core.quality.reencode."""
+    db = _FakeDB([_row(bitrate=128)], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (None, None, None, False))
+    qu.QualityUpgradeJob().scan(_ctx(db, []))
+
+
 def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     db = _FakeDB([_row(bitrate=128)], BALANCED)
     _stub_engine(monkeypatch)

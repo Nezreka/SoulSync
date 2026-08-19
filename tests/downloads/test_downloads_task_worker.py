@@ -824,3 +824,80 @@ def test_duplicate_queries_deduplicated_case_insensitive():
     # 'x' and 'X' dedupe to one search per case-insensitive match
     queries_lower = [q.lower() for q, _ in sk.search_calls]
     assert queries_lower.count('x') == 1
+
+
+class _CatalogHit:
+    username = 'youtube'
+    _source_metadata = {'source': 'youtube', 'catalog': True}
+
+
+class _YtsearchHit:
+    username = 'youtube'
+    _source_metadata = {'source': 'youtube'}
+
+
+class _FakeYouTubeSearch:
+    def __init__(self, extra):
+        self.extra = extra
+        self.calls = []
+
+    async def search(self, query, timeout=30, use_catalog=True):
+        self.calls.append((query, timeout, use_catalog))
+        return (self.extra, [])
+
+
+def test_ytsearch_fallback_after_catalog_matcher_miss():
+    extra = [_YtsearchHit()]
+    yt = _FakeYouTubeSearch(extra)
+    orch = _FakeClient(subclients={'youtube': yt})
+    seen = []
+
+    def _valid(results, track, query, profile_id=None):
+        seen.append(results)
+        if results is extra:
+            return [{'username': 'youtube', 'filename': 'remix'}]
+        return []
+
+    deps, _ = _build_deps(soulseek=orch, get_valid_candidates=_valid)
+    got = tw._youtube_ytsearch_fallback(deps, 'Artist Remix', object(), [_CatalogHit()])
+    assert got == [{'username': 'youtube', 'filename': 'remix'}]
+    assert yt.calls == [('Artist Remix', 30, False)]
+    assert seen == [extra]
+
+
+def test_ytsearch_fallback_skips_when_results_were_already_ytsearch():
+    yt = _FakeYouTubeSearch([_YtsearchHit()])
+    orch = _FakeClient(subclients={'youtube': yt})
+    deps, _ = _build_deps(soulseek=orch)
+    assert tw._youtube_ytsearch_fallback(deps, 'q', object(), [_YtsearchHit()]) is None
+    assert yt.calls == []
+
+
+def test_worker_catalog_miss_falls_through_to_ytsearch():
+    extra = [_YtsearchHit()]
+    yt = _FakeYouTubeSearch(extra)
+    orch = _FakeClient(
+        results=[_CatalogHit()],
+        subclients={'youtube': yt},
+    )
+    attempted = []
+
+    def _valid(results, track, query, profile_id=None):
+        if results is extra:
+            return [{'username': 'youtube', 'filename': 'remix'}]
+        return []
+
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
+        attempted.append(candidates)
+        return True
+
+    _seed_task()
+    deps, _ = _build_deps(
+        soulseek=orch,
+        matching=_FakeMatchEngine(queries=['Artist Remix']),
+        get_valid_candidates=_valid,
+        attempt_download_with_candidates=_attempt,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert attempted == [[{'username': 'youtube', 'filename': 'remix'}]]
+    assert yt.calls == [('Artist Remix', 30, False)]
